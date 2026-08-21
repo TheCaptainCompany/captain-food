@@ -3,6 +3,28 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 📮 **2026-08-21 — DECISION-ASK-UNREGISTERED + THE CITATION RATCHET: every decision question
+> names its open row, every citation resolves**
+> ([ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md),
+> the day's third founder directive, 15 requirements; whole roster consulted). The **envelope**:
+> a decision question carries `Decision row: <KEY>` — exactly one declared OPEN row; non-open,
+> unknown, and **legacy** keys are refused with the controlling record and the next action
+> (legacy = migrate in the SAME change; the gate re-reads live — never a permanent bypass); a
+> genuinely new question declares its row first (worked example in `docs/decisions/README.md`);
+> a reversal is a NEW row with `reconsiders: <OLD-KEY>`, whose closure IS the two-file
+> supersession (validator-coupled). The negative trail is **reclassified** (dated shift at the
+> canonical site): it now asserts "this is not a decision question" (tiebreaker: would the answer
+> bind future work?). §22d validates `Decision row:` on dispatch cards (resolution-only — status
+> stays an ask-time concern, pinned green so history never reddens); the form template requires
+> a per-question `row:` anchor, rendered key-first and carried into the pasted answers. **§23
+> citation ratchet**: all 5,130 full-form ADR/PROP citations across docs/** + CLAUDE.md resolve;
+> the 4 dangling ids ride `docs/decisions/_exempt.yaml` (id + reason + retires_when; unused
+> exemptions error) — **zero historical rewriting**; a REAL §22 resolver bug fixed (104
+> prefixless middle-era ADR filenames — pre-fix a naive ratchet saw 90+ dangling); record stamps
+> gated unique. Planted red first: 9 hook flips/cases against the old hook, 20+ validator
+> mutants, index↔source disagreement. Enforcement boundary recorded honestly in the ADR; legacy
+> count **103**, burn-down triggers: referenced-in-a-question / amended / reopened / dispatched.
+
 > 🗝️ **2026-08-21 — THE REGISTER ROW GETS MACHINE IDENTITY: REG-2/REG-4 land, the index is
 > generated, and the ask gate reads the rows**
 > ([ADR-20260821-095957](../adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md),

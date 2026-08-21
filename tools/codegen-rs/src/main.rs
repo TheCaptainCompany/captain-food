@@ -89,10 +89,32 @@ fn main() {
         let root = repo_root(&specs);
         let mut dec_issues = Vec::new();
         let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut dec_issues);
-        let record_files = load_record_filenames(&root);
-        dec_issues.extend(validate_decision_rows(&dec_rows, &load_legacy_keys(&root), &|id| {
-            record_resolves(id, &record_files)
+        let corpus = load_record_corpus(&root);
+        let legacy_keys = load_legacy_keys(&root);
+        dec_issues.extend(validate_decision_rows(&dec_rows, &legacy_keys, &|id| {
+            record_resolves(id, &corpus)
         }));
+        // §22b — the committed index region must equal the fold over the source rows (founder
+        // requirement 12): caught at VALIDATE time with the clearer message; check-drift stays
+        // the outer net and compares the same bytes via the same emit function.
+        let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
+        dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
+        // §22c — the decision-form template anchors questions to rows (requirement 6; published
+        // form copies are uncommitted and NOT mechanically validated — recorded in the ADR).
+        if let Ok(tpl) = fs::read_to_string(root.join("docs/templates/decision-form.html")) {
+            dec_issues.extend(validate_decision_form_template("docs/templates/decision-form.html", &tpl));
+        }
+        // §22d — dispatch-card `Decision row:` references resolve to declared, non-legacy keys
+        // (declare-before-ask on the card surface; status stays an ask-time concern).
+        let declared_keys: BTreeSet<String> = dec_rows.iter().map(|r| r.stem.clone()).collect();
+        dec_issues.extend(validate_dispatch_card_rows(&load_dispatch_files(&root), &declared_keys, &legacy_keys));
+        // §23 — the record-citation ratchet over docs/** + CLAUDE.md (requirements 7-9): every
+        // full-form ADR/PROP citation resolves, dangling ids need a declared exemption with a
+        // retirement event, unused exemptions are errors, and record stamps stay unique per kind.
+        let (exemptions, mut ex_issues) = load_citation_exemptions(&root);
+        dec_issues.append(&mut ex_issues);
+        dec_issues.extend(validate_citations(&load_governed_doc_files(&root), &corpus, &exemptions));
+        dec_issues.extend(validate_record_stamps(&corpus));
         issues.extend(dec_issues);
     }
     // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
@@ -181,9 +203,13 @@ fn main() {
         declared_metrics(&model).len()
     );
     eprintln!(
-        "    - decisions: {} docs/decisions/*.yaml rows — closed status vocabulary, decided_by resolves, supersession DAG, {} legacy keys allowlisted (§22)",
+        "    - decisions: {} docs/decisions/*.yaml rows — closed status vocabulary, decided_by resolves, supersession DAG, {} legacy keys allowlisted, index region in sync (§22)",
         load_decision_files(&repo_root(&specs)).len(),
         load_legacy_keys(&repo_root(&specs)).len()
+    );
+    eprintln!(
+        "    - citations: full-form ADR/PROP citations across docs/** + CLAUDE.md resolve to record files; {} declared exemption(s); record stamps unique (§23)",
+        load_citation_exemptions(&repo_root(&specs)).0.len()
     );
     eprintln!(
         "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",

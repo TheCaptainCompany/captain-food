@@ -4,10 +4,12 @@
   [ADR-20260821-010543](../adr/ADR-20260821-010543-agents-never-ask-an-answered-question-the-register-check-binds-every-agent.md));
   REG-2/REG-3/REG-4 (vocabulary half) + REG-SEQ decided by founder directive the same day, landed
   by [ADR-20260821-095957](../adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md)
-  as the bounded slice (19 rows migrated, 103 keys on the `_legacy.yaml` allowlist). Still open:
-  D5 namespacing (`KEY-NAMESPACE`), slice 1 (citation ratchet), slice 5 (backfill +
-  `decision-ask-unregistered`) — the founder's own bound: no historical backfill in this slice
-- **Realized by**: [ADR-20260821-095957](../adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md) + `docs/decisions/` + validator §22 (bounded slice; slices 1/5 outstanding)
+  as the bounded slice (19 rows migrated, 103 keys on the `_legacy.yaml` allowlist); slices 1 and
+  3 (the citation ratchet + decision-ask-unregistered, in envelope form) landed the same evening
+  by [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md).
+  Still open: D5 namespacing (`KEY-NAMESPACE`) and slice 5 (the remaining backfill) — the
+  founder's own bound: no historical backfill
+- **Realized by**: [ADR-20260821-095957](../adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md) + [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md) + `docs/decisions/` + validator §22/§23 (slice 5 outstanding)
 - **Date**: 2026-08-19
 - **Tracking issue**: [#658 "The decision register cannot say what is still open: 62 of 148 rows carry no status token, 22 keys are ambiguous, and nothing confronts a question with the register before it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658)
 - **Base**: `main` @ `bfe6694`. Every figure below was derived at that SHA and each names the

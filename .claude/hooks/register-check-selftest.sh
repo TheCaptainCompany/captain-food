@@ -90,21 +90,47 @@ expect R2-open-key 0 "$FIX" "{\"questions\":[{\"question\":\"OPEN-ROW options A/
 expect R3-legacy-key 0 "$FIX" "{\"questions\":[{\"question\":\"About OLD-ROW: which change carries it? $TRAIL\"}]}"
 # R4 BLOCK: a DEFERRED row is un-askable until its wake condition; the refusal cites `until`.
 expect R4-deferred-key 2 "$FIX" "{\"questions\":[{\"question\":\"Can we do DEFER-ROW now? $TRAIL\"}]}"
-# R5 BLOCK: an open but counsel-owned row -- a founder question may only ask for the external action.
-expect R5-counsel-key 2 "$FIX" "{\"questions\":[{\"question\":\"What is the answer to LAW-ROW? $TRAIL\"}]}"
-# R6 ALLOW: the documented escape -- the question is about the external action itself.
-expect R6-counsel-action 0 "$FIX" "{\"questions\":[{\"question\":\"External action on LAW-ROW: engage counsel this week? $TRAIL\"}]}"
-# R7 ALLOW: key-shaped tokens that are declared nowhere are not register references (typo bound
-#    recorded in the hook header; closed by decision-ask-unregistered after full migration).
+# R5 ALLOW (FLIPPED 2026-08-21, ADR-20260821-103403): a PASSIVE mention of an open counsel-owned
+#    row is context, not the ask -- the counsel routing now binds the ENVELOPE lane (E7/E8).
+expect R5-counsel-passive 0 "$FIX" "{\"questions\":[{\"question\":\"Context: LAW-ROW is still open. $TRAIL\"}]}"
+# R7 ALLOW: key-shaped tokens declared nowhere are not register references in PROSE (the envelope
+#    lane rejects them as E4; free-text enforcement stays un-mechanical, recorded in the ADR).
 expect R7-unknown-key 0 "$FIX" "{\"questions\":[{\"question\":\"NOT-A-ROW and GONE-ROWBOAT are not references. $TRAIL\"}]}"
 # R8 BLOCK: a broken REGISTER_CHECK_DECISIONS override fails closed, never silently skips.
 expect R8-override-broken 2 "$FIX/absent" "{\"questions\":[{\"question\":\"Anything. $TRAIL\"}]}"
+
+# ── The envelope lane (decision-ask-unregistered, ADR-20260821-103403) ──────────────────────────
+# E1 ALLOW: a decision question = one `Decision row:` naming a declared OPEN row; the envelope IS
+#    the register check, so no trail line is required. (Old hook: BLOCK trail-missing -- flipped.)
+expect E1-envelope-open 0 "$FIX" '{"questions":[{"question":"Decision row: OPEN-ROW -- option A or B?"}]}'
+# E2 BLOCK: the envelope on a DECIDED row -- the reversal path is a NEW row with reconsiders.
+expect E2-envelope-decided 2 "$FIX" '{"questions":[{"question":"Decision row: GONE-ROW -- revisit?"}]}'
+# E3 BLOCK: the envelope on a LEGACY key -- legacy is not a bypass; migrate in the same change,
+#    then the SAME question passes live. (Old hook with a trail: ALLOW key-legacy -- flipped.)
+expect E3-envelope-legacy 2 "$FIX" "{\"questions\":[{\"question\":\"Decision row: OLD-ROW -- decide it? $TRAIL\"}]}"
+# E4 BLOCK: the envelope on an UNKNOWN key -- typo or undeclared; the refusal lists open rows and
+#    the create-row path. (Old hook with a trail: ALLOW as a non-reference -- flipped.)
+expect E4-envelope-unknown 2 "$FIX" "{\"questions\":[{\"question\":\"Decision row: NO-SUCH-ROW -- decide it? $TRAIL\"}]}"
+# E5 BLOCK: two envelope lines -- a decision question references EXACTLY ONE declared row.
+expect E5-envelope-multiple 2 "$FIX" '{"questions":[{"question":"Decision row: OPEN-ROW and also Decision row: GONE-ROW"}]}'
+# E6 BLOCK: a garbled envelope (no valid key token) fails loudly, echoing the rejected line.
+expect E6-envelope-garbled 2 "$FIX" '{"questions":[{"question":"Decision row: bad-key please?"}]}'
+# E7 BLOCK: the envelope on an open counsel-owned row without the external-action framing.
+expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- what is the answer?"}]}'
+# E8 ALLOW: the documented escape -- the question asks for the external action itself.
+expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
 # ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────
 # L1: the live dir parses and gates -- REG-2 is decided forever (a reversal opens a NEW row).
 printf '%s' "{\"questions\":[{\"question\":\"Reopen REG-2? $TRAIL\"}]}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
 if [ $? -ne 2 ]; then
   echo "register-check selftest: case L1 FAILED -- the LIVE docs/decisions corpus did not gate a question referencing decided row REG-2" >&2
+  fail=1
+fi
+# L3: the live envelope lane rejects an unknown key (proves the live wiring of the new lane).
+printf '%s' '{"questions":[{"question":"Decision row: ZZZZ-NOT-DECLARED -- decide?"}]}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 2 ]; then
+  echo "register-check selftest: case L3 FAILED -- the LIVE corpus did not reject an unknown envelope key" >&2
   fail=1
 fi
 # L2: the live legacy allowlist exists and is non-empty (legacy is a declaration, not a default).

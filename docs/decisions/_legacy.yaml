@@ -6,8 +6,12 @@
 # proposal): its CURRENT status is whatever the prose says, nothing mechanical reads it, and the
 # ask gate lets a question referencing it pass (logged as key-legacy). Legacy is a DECLARATION,
 # not a default: a key in neither this list nor docs/decisions/*.yaml is not a register reference
-# at all. A key leaves this list in the SAME change that creates its docs/decisions/<KEY>.yaml —
-# next-touch migration, decided at dispatch time (merely citing a legacy row is not a touch).
+# at all. A key leaves this list in the SAME change that creates its docs/decisions/<KEY>.yaml.
+# BURN-DOWN TRIGGERS (ADR-20260821-103403) — migration is REQUIRED, same change, when a key is:
+#   (a) named in a founder-facing decision question (the ask gate refuses until the file exists),
+#   (b) amended, (c) reopened/challenged (reconsiders targets must be declared), or
+#   (d) explicitly included in a dispatch.
+# Merely citing a legacy key as context stays legal; legacy is never a bypass for a new question.
 # Extracted mechanically at migration time: grep -oP '^\|\s*\*\*\K[A-Z][A-Z0-9-]{2,40}(?=\*\*)'
 # over DECISIONS.md, minus the migrated set.
 legacy:

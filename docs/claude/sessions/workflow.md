@@ -466,6 +466,31 @@ Register check: <record id> (<date>, <status>) -- covers <X>, silent on <Y>
 Register check: no controlling record -- terms: <terms searched>; nearest: <record id or none>
 ```
 
+**The ENVELOPE, and the dated meaning-shift (2026-08-21 evening, ADR-20260821-103403 —
+decision-ask-unregistered).** A **decision question** — the published tiebreaker: *would the
+answer bind future work? then it is one* — carries the envelope line instead of a trail:
+
+```
+Decision row: <KEY>
+```
+
+meaning exactly: *this question asks (or, freshly declared, creates) register row
+`docs/decisions/<KEY>.yaml`*. Exactly one line, one key; the row must be declared and **open**
+(the hook refuses non-open, unknown, and legacy keys, each with its next action; an open
+counsel-owned row takes only the external-action question). The envelope IS the register check —
+no trail line rides with it, because the declared row carries the provenance. A genuinely new
+decision question **declares its open row first** (one cheap act — worked example in
+`docs/decisions/README.md`), and a challenge to a decided row is a NEW row with
+`reconsiders: <OLD-KEY>`, never a re-ask. **Since this shift, the negative trail asserts "this is
+not a decision question"** — legitimate only for clarifying an in-flight directive, an
+external-clock relay (never delayed by row ceremony, ADR-20260812-143619), or a mechanical
+choice; trails written BEFORE 2026-08-21 were authored under the earlier grammar and make no such
+classification claim. On dispatch cards, a `Decision row:` line must name a declared, non-legacy
+key (`make validate`, §22d); the same `row:` anchor is required per question on the decision-form
+template. A docs push touching any citation-governed surface (all of `docs/**` + `CLAUDE.md`,
+§23) runs `make validate` first — the docs-only carve-out predates the ratchet; skipping it
+leaves a dangling citation for CI to report asynchronously.
+
 What the format encodes, each clause earned by a lens at the 2026-08-21 briefing:
 
 - **A record id, or the explicit negative — never a bare "done".** A trail must name a verifiable

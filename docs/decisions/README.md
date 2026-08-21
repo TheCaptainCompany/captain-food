@@ -43,13 +43,50 @@ field keeps visible in what capacity it was taken, and a counsel-gated row stays
 - **Partial closure = split at close time.** The closed vocabulary cannot say "half decided" on
   purpose: close the row and open a NEW key for the residue in the same change (the pattern:
   REFUND-BEARER's residue → CAPTAINNET-ZERO; REG-4's namespacing half → KEY-NAMESPACE).
-- **Reversal, never re-ask**: a decided row whose answer's premise has changed is reopened by a
-  NEW row citing the old key — the old file is never flipped back to `open`.
+- **Reversal, never re-ask** (`reconsiders`, ADR-20260821-103403): a decided row whose answer's
+  premise has changed is challenged by a NEW open row carrying `reconsiders: "<OLD-KEY>"` and the
+  changed premise in its evidence — the old file is never flipped back to `open`. The target must
+  be declared and closed (`decided`/`withdrawn`; a superseded target means challenge the chain
+  HEAD). **Closing the challenge IS the supersession move**: when the reconsidering row becomes
+  `decided`, the old row flips to `superseded` + `superseded_by: <challenge-key>` in the same
+  commit — the validator rejects either half alone. `superseded_by` set by that coupling is the
+  ONE legal edit to a decided row. On legal-exposed rows the changed premise is VERIFY-FIRST
+  material, and a counsel-confirmed posture is never downgraded without counsel re-entry.
 - **Supersession is a two-file change**: the old row flips to `superseded` + `superseded_by`, the
   successor file is created, both in one commit (the validator checks resolvability per commit).
-- **Legacy** ([`_legacy.yaml`](_legacy.yaml)) is the closed allowlist of prose-only rows. A key
-  migrates when a dispatch explicitly includes it ("touch" is decided at dispatch time — citing a
-  legacy row is not a touch), leaving the allowlist in the same change.
+- **Legacy** ([`_legacy.yaml`](_legacy.yaml)) is the closed allowlist of prose-only rows, and it
+  only shrinks. **The burn-down triggers** (ADR-20260821-103403) — a legacy key MUST be migrated,
+  in the same change, when it is: (a) named in a founder-facing decision question (the ask gate
+  refuses until the file exists — and re-reads live, so same-change migration unblocks the same
+  question immediately); (b) amended; (c) reopened or challenged (`reconsiders` targets must be
+  declared); or (d) explicitly included in a dispatch. Merely citing a legacy key as context stays
+  legal. Legacy is never a bypass for a new question.
+
+## Asking the founder — the envelope (decision-ask-unregistered, ADR-20260821-103403)
+
+A **decision question** (tiebreaker: *would the answer bind future work?*) carries exactly one
+line in its text — `Decision row: <KEY>` — naming a declared, **open** row. The envelope IS the
+register check; non-decision interactions (clarifying an in-flight directive, an external-clock
+relay — never delayed by row ceremony — or a mechanical choice) carry the workflow.md trail
+instead. **The genuinely-new-question path is one cheap act**, worked example:
+
+```
+$ cat > docs/decisions/RIDER-BONUS.yaml <<'Y'
+key: "RIDER-BONUS"
+status: "open"
+question: "Do launch-week rider bonuses come from captainNet or a founder top-up?"
+owner: "founder"
+opened: "2026-08-21"
+register: "raised in <where>; no prior row"
+evidence: "no controlling record -- terms: bonus, prime, rider pay; nearest: CAPTAINNET-ZERO"
+Y
+$ make generate     # the index region regenerates; commit both together
+# then ask, with the line:  Decision row: RIDER-BONUS
+```
+
+When the question originates mid-run in a scoped executor branch, the **executor reports the
+proposed key in its hand-back and the coordinator declares the row** — an executor never files an
+out-of-dispatch decision file.
 
 ## Editing discipline
 

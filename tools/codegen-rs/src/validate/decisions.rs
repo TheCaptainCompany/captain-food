@@ -27,9 +27,9 @@ pub(crate) const DECISION_OWNERS: [&str; 4] = ["founder", "team", "counsel", "ex
 /// capacity keeps that visible.
 pub(crate) const DECISION_CAPACITIES: [&str; 4] = ["founder", "team", "counsel", "architect"];
 
-const KNOWN_FIELDS: [&str; 12] = [
+const KNOWN_FIELDS: [&str; 13] = [
     "key", "status", "question", "owner", "opened", "register", "evidence", "decided", "decided_by",
-    "superseded_by", "until", "note",
+    "superseded_by", "until", "note", "reconsiders",
 ];
 const KNOWN_OPTIONAL_EXTRA: [&str; 1] = ["capacity"];
 
@@ -88,11 +88,18 @@ pub(crate) fn parse_legacy_keys(content: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Filenames that can close a decision: everything under docs/adr/ and docs/proposals/. The
-/// resolver over this list is what "resolvable decided_by" means.
-pub(crate) fn load_record_filenames(root: &std::path::Path) -> Vec<String> {
-    let mut out = Vec::new();
-    for dir in ["docs/adr", "docs/proposals"] {
+/// The record corpus, kind-separated: what "resolvable" resolves against. Kept apart because the
+/// stamp-uniqueness guarantee of the id scheme (ADR-20260718-135417) is per RECORD, not per kind —
+/// a mistyped kind prefix must never silently resolve against the other kind's stamp.
+pub(crate) struct RecordCorpus {
+    pub(crate) adr_files: Vec<String>,
+    pub(crate) proposal_files: Vec<String>,
+}
+
+/// Filenames that can close a decision or be cited as a record.
+pub(crate) fn load_record_corpus(root: &std::path::Path) -> RecordCorpus {
+    let list = |dir: &str| -> Vec<String> {
+        let mut out = Vec::new();
         if let Ok(rd) = fs::read_dir(root.join(dir)) {
             for e in rd.flatten() {
                 if let Some(n) = e.file_name().to_str() {
@@ -102,21 +109,42 @@ pub(crate) fn load_record_filenames(root: &std::path::Path) -> Vec<String> {
                 }
             }
         }
-    }
-    out.sort();
-    out
+        out.sort();
+        out
+    };
+    RecordCorpus { adr_files: list("docs/adr"), proposal_files: list("docs/proposals") }
 }
 
-/// True when `id` names a real record file: a full-form `ADR-YYYYMMDD-HHMMSS` / `PROP-…` id is a
-/// substring of some filename; a legacy `ADR-00NN` resolves to a file starting with its digits
-/// (legacy ADRs are named `0032-….md`, without the prefix).
-pub(crate) fn record_resolves(id: &str, record_filenames: &[String]) -> bool {
-    if let Some(num) = id.strip_prefix("ADR-") {
-        if num.len() == 4 && num.chars().all(|c| c.is_ascii_digit()) {
-            return record_filenames.iter().any(|f| f.starts_with(num));
+fn is_stamp(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 15 && b[8] == b'-' && s.chars().enumerate().all(|(i, c)| i == 8 || c.is_ascii_digit())
+}
+
+/// True when `id` names a real record file. Three shapes, resolved KIND-AWARE:
+///   * `ADR-YYYYMMDD-HHMMSS` — a docs/adr file starting with the full id OR with the bare stamp
+///     (104 of the middle-era ADRs are named `20260720-233000-….md`, WITHOUT the prefix — matching
+///     on `contains(id)` missed every one of them, the bug this replaces);
+///   * legacy `ADR-00NN` — a docs/adr file starting with the four digits (`0032-….md`);
+///   * `PROP-YYYYMMDD-HHMMSS` — a docs/proposals file starting with the full id.
+/// Resolution proves EXISTENCE, never authority: a resolving PROP is still an option space, a
+/// resolving legal brief is still not clearance, and a held record is citable as existing, not as
+/// controlling (founder requirement 9, 2026-08-21).
+pub(crate) fn record_resolves(id: &str, corpus: &RecordCorpus) -> bool {
+    if let Some(rest) = id.strip_prefix("ADR-") {
+        if rest.len() == 4 && rest.chars().all(|c| c.is_ascii_digit()) {
+            return corpus.adr_files.iter().any(|f| f.starts_with(rest));
+        }
+        if is_stamp(rest) {
+            return corpus.adr_files.iter().any(|f| f.starts_with(id) || f.starts_with(rest));
+        }
+        return false;
+    }
+    if let Some(rest) = id.strip_prefix("PROP-") {
+        if is_stamp(rest) {
+            return corpus.proposal_files.iter().any(|f| f.starts_with(id));
         }
     }
-    record_filenames.iter().any(|f| f.contains(id))
+    false
 }
 
 /// Parse one file into a row; scalar-typed fields only. Errors land in `issues`.
@@ -446,7 +474,142 @@ pub(crate) fn validate_decision_rows(
             }
         }
     }
+
+    // ── `reconsiders` — the challenge edge (founder requirement 5, 2026-08-21) ──────────────────
+    // A reopening of a decided matter is never a re-ask of the old row: a NEW row carries
+    // `reconsiders: <OLD-KEY>`. The edge points backwards (challenge → challenged), distinct from
+    // `superseded_by` (closed row → successor, set at close time). The field is retained after the
+    // challenge closes (history is additive, never stripped).
+    let chain_head = |start: &str| -> String {
+        let mut cur = start.to_string();
+        let mut seen = BTreeSet::new();
+        while seen.insert(cur.clone()) {
+            match declared.get(&cur).and_then(|row| row.get("superseded_by")) {
+                Some(next) => cur = next.to_string(),
+                None => break,
+            }
+        }
+        cur
+    };
+    for r in rows {
+        let Some(target_key) = r.get("reconsiders") else { continue };
+        let rule = "decision-reconsiders-shape";
+        if target_key == r.stem {
+            issues.push(err(rule, r.path.clone(), "a row cannot reconsider itself.".into()));
+            continue;
+        }
+        let Some(target) = declared.get(target_key) else {
+            issues.push(err(
+                rule,
+                r.path.clone(),
+                format!(
+                    "`reconsiders: {}` names no declared row — a challenge targets a declared closed decision; a legacy prose row is migrated first (docs/decisions/README.md), in the same change.",
+                    target_key
+                ),
+            ));
+            continue;
+        };
+        let tstatus = target.get("status").unwrap_or("");
+        let coupled = tstatus == "superseded" && target.get("superseded_by") == Some(&r.stem);
+        match tstatus {
+            "decided" | "withdrawn" => {}
+            "superseded" if coupled => {}
+            "superseded" => issues.push(err(
+                rule,
+                r.path.clone(),
+                format!(
+                    "`reconsiders: {}` targets a superseded row — challenge the HEAD of its supersession chain (`{}`), not a record that is no longer the authority.",
+                    target_key,
+                    chain_head(target_key)
+                ),
+            )),
+            _ => issues.push(err(
+                rule,
+                r.path.clone(),
+                format!(
+                    "`reconsiders: {}` targets a row whose status is `{}` — a challenge targets a CLOSED decision (decided/withdrawn); an open or deferred row is simply asked.",
+                    target_key, tstatus
+                ),
+            )),
+        }
+        // Closure coupling (one controlling record per key): a DECIDED challenge and its target
+        // must have executed the two-file supersession move in the same commit, or two rows each
+        // believe they are controlling.
+        if r.get("status") == Some("decided") && !coupled {
+            issues.push(err(
+                rule,
+                r.path.clone(),
+                format!(
+                    "this reconsidering row is `decided` but `{}` is not superseded by it — closing a challenge IS the supersession move: flip `{}` to `superseded` with `superseded_by: {}` in the same commit (docs/decisions/README.md).",
+                    target_key, target_key, r.stem
+                ),
+            ));
+        }
+    }
     issues
+}
+
+// ─── The index↔source sync gate (founder requirement 12, 2026-08-21) ────────────────────────────
+
+/// The committed `GENERATED:decisions` region's inner body, if the marker pair exists.
+pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String> {
+    let start_pat = "<!-- GENERATED:decisions START";
+    let end_pat = "<!-- GENERATED:decisions END -->";
+    let start_idx = register_content.find(start_pat)?;
+    let after_marker = start_idx + register_content[start_idx..].find("-->")? + 3;
+    let end_idx = register_content.find(end_pat)?;
+    if end_idx < after_marker {
+        return None;
+    }
+    Some(register_content[after_marker..end_idx].trim().to_string())
+}
+
+/// §22b: the committed index region must equal the fold over the source rows — at VALIDATE time,
+/// before check-drift, with the clearer message. Same emit function as generation, same
+/// `legacy_count` source, trimmed identically to the injector's `\n\n` framing, so the two gates
+/// can never disagree. The validator reads the ROW FILES as truth and treats the region purely as
+/// the projection under test (founder requirement 11).
+pub(crate) fn validate_decisions_index_sync(
+    rows: &[DecisionRow],
+    legacy_count: usize,
+    register_content: &str,
+) -> Vec<Issue> {
+    let loc = "docs/proposals/DECISIONS.md".to_string();
+    match extract_decisions_region(register_content) {
+        None => vec![err(
+            "decision-index-stale",
+            loc,
+            "the GENERATED:decisions marker pair is missing — the register index cannot be silently absent; restore the markers and run `make generate`.".into(),
+        )],
+        Some(region) if region != emit_decisions_index(rows, legacy_count).trim() => vec![err(
+            "decision-index-stale",
+            loc,
+            "the committed GENERATED:decisions region disagrees with docs/decisions/*.yaml — the projection may never disagree with its source rows: run `make generate` and commit the regenerated region in the same change.".into(),
+        )],
+        Some(_) => Vec::new(),
+    }
+}
+
+// ─── The decision-form template contract (founder requirement 6, 2026-08-21) ────────────────────
+
+/// The committed form template's example FORM must anchor each option-question to a register row
+/// via a `row:` field, so a form authored from the template starts from the contract. Published
+/// form COPIES are uncommitted artifacts and are NOT mechanically validated — that boundary is
+/// recorded in the ADR, not papered over here.
+pub(crate) fn validate_decision_form_template(path: &str, content: &str) -> Vec<Issue> {
+    let form_region = content
+        .find("const FORM")
+        .and_then(|s| content[s..].find("DO NOT EDIT BELOW").map(|e| &content[s..s + e]))
+        .unwrap_or("");
+    if form_region.contains("row:") {
+        Vec::new()
+    } else {
+        vec![err(
+            "decision-form-template-row",
+            path.to_string(),
+            "the template's example FORM declares no `row:` field — every option-question on a decision form anchors to its register row key (`row: \"<KEY>\"`), so a form authored from this template starts from the contract.".into(),
+        )]
+    }
 }
 
 // ─── The generated index (REG-3(a): only the index; the prose stays authored) ───────────────────
@@ -550,4 +713,88 @@ closed allowlist) — each gets its file when next touched, in the same change."
         legacy_count
     ));
     lines.join("\n")
+}
+
+// ─── §22d — dispatch-card decision references (founder requirement 6, ADR-20260821-103403) ──────
+
+/// Every `docs/dispatch/*.md`, sorted; the structured card surface the coordinator authors.
+pub(crate) fn load_dispatch_files(root: &std::path::Path) -> Vec<(String, String)> {
+    let dir = root.join("docs/dispatch");
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(&dir) {
+        let mut paths: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("md"))
+            .collect();
+        paths.sort();
+        for p in paths {
+            if let (Some(name), Ok(content)) = (p.file_name().and_then(|n| n.to_str()), fs::read_to_string(&p)) {
+                out.push((format!("docs/dispatch/{}", name), content));
+            }
+        }
+    }
+    out
+}
+
+/// A `Decision row:` line on a committed dispatch card must name a DECLARED, non-legacy key —
+/// declare-before-ask on the card surface. Deliberately RESOLUTION-ONLY: the row's status is
+/// enforced at ask time by the hook, never here, because a committed card is a fact at its
+/// timestamp and a rule that reddens history when the row later closes would be the
+/// projection-rebuild sin in gate form (2026-08-21 briefing, unanimous). Fenced blocks are quoted
+/// output and are not scanned.
+pub(crate) fn validate_dispatch_card_rows(
+    files: &[(String, String)],
+    declared: &BTreeSet<String>,
+    legacy: &[String],
+) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        let mut fence: Option<(char, usize)> = None;
+        for (li, line) in content.lines().enumerate() {
+            let t = line.trim_start();
+            let ind = line.len() - t.len();
+            if let Some((c, n)) = fence {
+                let run = t.chars().take_while(|&x| x == c).count();
+                if ind < 4 && run >= n && t.chars().all(|x| x == c || x.is_whitespace()) {
+                    fence = None;
+                }
+                continue;
+            }
+            let c0 = t.chars().next().unwrap_or(' ');
+            let run0 = t.chars().take_while(|&x| x == c0).count();
+            if ind < 4 && (c0 == '`' || c0 == '~') && run0 >= 3 {
+                fence = Some((c0, run0));
+                continue;
+            }
+            let Some(pos) = line.find("Decision row:") else { continue };
+            let after = line[pos + "Decision row:".len()..].trim_start();
+            let token: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '-')
+                .collect();
+            let loc = format!("{}:{}", path, li + 1);
+            if token.len() < 3 || !token.chars().next().unwrap().is_ascii_uppercase() {
+                issues.push(err(
+                    "decision-card-row",
+                    loc,
+                    format!("`Decision row:` carries no valid row key (line: `{}`).", line.trim()),
+                ));
+            } else if declared.contains(&token) {
+                // status deliberately NOT checked — see the doc comment.
+            } else if legacy.iter().any(|l| l == &token) {
+                issues.push(err(
+                    "decision-card-row",
+                    loc,
+                    format!("`Decision row: {}` names a LEGACY prose-only row — a card that escalates it migrates it in the same change (docs/decisions/README.md burn-down triggers); legacy is never a bypass.", token),
+                ));
+            } else {
+                issues.push(err(
+                    "decision-card-row",
+                    loc,
+                    format!("`Decision row: {}` names no declared row — declare docs/decisions/{}.yaml first (declare-before-ask), or fix the spelling.", token, token),
+                ));
+            }
+        }
+    }
+    issues
 }
