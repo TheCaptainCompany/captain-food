@@ -26,7 +26,7 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
+.PHONY: hooks-test typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
@@ -184,6 +184,12 @@ review: validate generate
 # The same gate the Stop hook runs.
 gate:
 	bash .claude/hooks/stop-gate.sh
+
+# Guard tests for the register-check gate (ADR-20260821-010543): hook verdicts on fixture
+# payloads, the settings.json wiring, and the agent files' citation blocks. Also run by the
+# Stop hook on every turn; this target is the direct entrypoint.
+hooks-test:
+	bash .claude/hooks/register-check-selftest.sh
 
 # Night loop: validate the frozen DSL, regenerate, re-validate. NEVER edits specs/**.
 night-loop: validate generate

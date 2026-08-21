@@ -1,6 +1,9 @@
 # PROP-20260819-110442 — The decision register is the unit of decision, and it has no machine identity
 
-- **Status**: Proposed
+- **Status**: Proposed — **REG-1's direction decided in principle 2026-08-21** (enforcement on the
+  ask; [ADR-20260821-010543](../adr/ADR-20260821-010543-agents-never-ask-an-answered-question-the-register-check-binds-every-agent.md)
+  lands the pre-machinery form). REG-2–REG-4 remain open; the validator form proposed here still
+  awaits them
 - **Date**: 2026-08-19
 - **Tracking issue**: [#658 "The decision register cannot say what is still open: 62 of 148 rows carry no status token, 22 keys are ambiguous, and nothing confronts a question with the register before it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658)
 - **Realized by**: _(filled at completion)_

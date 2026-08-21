@@ -452,6 +452,62 @@ Scale the search to the question — one well-aimed grep plus reading its record
 sweep of every surface. This is cheap insurance against answering from a stale context or missing a
 supersession, not a guarantee that a repeated question can never recur.
 
+### The trail rides the question — canonical format, declared once, HERE
+
+**Founder directive 2026-08-21** (verbatim: *"I want to ensure that the agents will no longer ask
+questions already answered. Use the best practices known for that."* —
+ADR-20260821-010543, deciding DECISIONS §48 REG-1's direction: enforcement goes on the ASK). Every
+question that survives the check carries ONE trail line in its own text, in exactly one of two
+shapes — this section is the only place the format is defined; the hook, the agent blocks and the
+selftest cite it, never re-spell it:
+
+```
+Register check: <record id> (<date>, <status>) -- covers <X>, silent on <Y>
+Register check: no controlling record -- terms: <terms searched>; nearest: <record id or none>
+```
+
+What the format encodes, each clause earned by a lens at the 2026-08-21 briefing:
+
+- **A record id, or the explicit negative — never a bare "done".** A trail must name a verifiable
+  artifact (`ADR-YYYYMMDD-HHMMSS`, legacy `ADR-00NN`, `PROP-YYYYMMDD-HHMMSS`, a `DECISIONS` section,
+  a `journal-YYYY-Www` entry) or record the negative with its terms, so a hollow trail is auditably
+  hollow. The negative is a **passing** trail: a genuinely new question, a clarification of a
+  directive the founder just gave, and an external-clock relay (never to be delayed) all use it —
+  **do the check, then ask; never silently drop a question because asking got harder.**
+- **Date and status ride the citation** because a found record is not always an answer: a
+  counsel-gated or still-open row legitimately RE-OPENS the question (cite it and ask), and
+  *"the answer exists but the underlying facts changed"* is a legitimate re-ask that names the
+  record it would revise. A found controlling answer, by contrast, **terminates in the work record
+  as its citation — it is never relayed to the founder as a question.**
+- **Cite the nearest non-controlling record when nothing controls** — "ADR-X decided the adjacent
+  thing" is exactly what saves a re-litigation.
+- **The citation is fetched at ask-time, supersession followed then.** A record found early in a
+  long session and cited from memory at the moment it licenses an action is a snapshot without its
+  version — concurrent sessions land supersessions mid-run.
+
+**Search with the alias table, not only the question's own words.** A record written in another
+era's vocabulary honestly returns nothing — the miss that no hook can catch. The table is the
+Published Language for the search; **every rename appends its pair** (the CLAUDE.md "grep the OLD
+term" sweep already produces exactly these pairs — land them here instead of discarding them), and
+**every question later found to have been answered appends the term that would have found it**:
+
+| Canonical term | Also search |
+|---|---|
+| contribution | tip, tips (the 2026-08-18 incident's own miss) |
+| delivery | rider (the boundary rename, DECISIONS §31 BND-2; `RIDER` stays a role) |
+| founder | product owner, customer (all three eras coexist in the record) |
+| register | decision queue, DECISIONS.md, answer sheet |
+
+**Enforcement — what is mechanical and what is not** (state it honestly, believe no more): the
+`AskUserQuestion` tool path is gated by `.claude/hooks/register-check.sh` (PreToolUse, fail-closed,
+one greppable log line per firing in `.claude/register-check.log` for spot-checking hollow trails);
+questions travelling as PROSE — run reports, decision-queue sections, PR/issue comments, register
+rows, decision forms — are bound by the citation block every `.claude/agents/*.md` carries, whose
+presence (with this section's existence and the settings wiring) is asserted by
+`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). The hook
+proves the trail's **presence and shape**, never that the search happened — honesty stays with the
+mob briefing and the independent review, which is why the trail must name its artifact.
+
 Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
 required, and always end with a free-text question.

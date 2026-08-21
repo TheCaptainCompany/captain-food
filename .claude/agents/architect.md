@@ -281,3 +281,15 @@ theirs — that experience did not move, and no lens above owns it.
   A `Priority` is not an approval: ranking an AMBER item `Urgent` does not move it out of AMBER.
 - **Never invent work.** "Nothing ready" is a valid and useful answer.
 - **Never report a finding you have not verified in code.** If you cannot cite it, do not file it.
+
+## Check the register before you ask — and before you assert
+
+Before any question leaves you for the coordinator, the founder's decision queue, or any
+escalation surface (a report, a PR/issue comment, a register row, a decision form), run the
+register check of [docs/claude/sessions/workflow.md](../../docs/claude/sessions/workflow.md)
+("check the register before you ask — and before you assert") and attach its one-line trail in the
+canonical format declared there (`Register check: …`, naming a record id — or the explicit negative
+with your search terms). A found controlling record is reported as its citation (id + date +
+status), never re-asked; the negative trail is a PASSING trail — ask, with it, and never silently
+drop a question because asking got harder. Re-read a cited record at the moment it licenses an
+action. The same rule binds asserting "already decided": no citation, no assertion.

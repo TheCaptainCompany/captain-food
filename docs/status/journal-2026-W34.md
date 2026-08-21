@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔒 **2026-08-21 — AGENTS NEVER ASK AN ANSWERED QUESTION: the register check binds every agent and
+> the ask surface is gated**
+> ([ADR-20260821-010543](../adr/ADR-20260821-010543-agents-never-ask-an-answered-question-the-register-check-binds-every-agent.md),
+> deciding [DECISIONS §48](../proposals/DECISIONS.md) REG-1's direction — enforcement on the ASK —
+> per founder directive, verbatim: *"I want to ensure that the agents will no longer ask questions
+> already answered. Use the best practices known for that."*; whole roster consulted, 16 lines in
+> the ADR). The canonical `Register check:` trail format is declared once in
+> [workflow.md](../claude/sessions/workflow.md) ("The trail rides the question") with the alias
+> table; all 16 `.claude/agents/*.md` carry a thin citation block; `AskUserQuestion` is gated by
+> a fail-closed PreToolUse hook (`.claude/hooks/register-check.sh`, one greppable log line per
+> firing, log gitignored); and `.claude/hooks/register-check-selftest.sh` — seen RED before the
+> wiring existed — proves verdicts, wiring and block presence on every turn (stop gate) and via
+> `make hooks-test`. Honest scope recorded in the ADR: the hook proves trail presence and shape on
+> the tool path only; prose surfaces are bound by the agent blocks; honesty stays with mob and
+> review. REG-2/REG-3/REG-4 stay open and founder-owned.
+
 > 🗂️ **2026-08-20 — THE JOURNAL WRITE PATH SWITCHES: `STATUS.md` is durable state plus an index,
 > dated entries go to the ISO-week file** ([#665](https://github.com/TheCaptainCompany/captain-food/pull/665)).
 > `docs/STATUS.md` is now **durable state and the journal index** — deployment, read/write side,
