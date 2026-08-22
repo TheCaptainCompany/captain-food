@@ -3,6 +3,25 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 📇 **2026-08-22 — RETRIEVAL-QMD: the decision package lands; the row is OPEN, nothing is decided,
+> nothing is installed** (founder-directed sequence, 2026-08-22: documentation/governance first,
+> sandbox experiment only after a separately recorded approval). Landed: `docs/decisions/RETRIEVAL-QMD.yaml`
+> (`status: open` — per the founder's row-status correction, the row records a decision only when a
+> durable change flips it, and a future decided outcome authorizes the SANDBOX EXPERIMENT only,
+> never QMD integration) and
+> [PROP-20260822-171212](../proposals/PROP-20260822-171212-qmd-phase0-bm25-advisory-retrieval.md) —
+> the sandbox-only Phase-0 protocol for a scriptless, BM25-only, local, disposable, ADVISORY
+> retrieval experiment with `@tobilu/qmd` pinned at 2.8.3: everything (install, wrapper, index,
+> logs, fixtures, rollback) lives in an isolated audit directory outside the repository; the repo
+> stays clean before and after; exit = evidence report + a proposed integration diff needing its
+> own founder decision. Whole-roster consultation complete with dispositions (proposal §16; holub's
+> dissent recorded and adopted: premise marked UNVERIFIED, sequencing clause — does not displace
+> [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556),
+> no mob/dispatch slot before one order flows). Explicitly NOT graph engineering: the
+> [#643](https://github.com/TheCaptainCompany/captain-food/issues/643) deferral of
+> PROP-20260818-013222 stands untouched and controls any future graph proposal on its own.
+> Baseline unchanged and authoritative: rg + aliases + direct structured-register resolution.
+
 > 🛡️ **2026-08-21 — ASK-GATE HARDENING: the selftest gates CI on every path, the wiring check is
 > semantic, and STATUS carries the register as durable state** (founder-directed follow-up to the
 > [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669)
