@@ -120,3 +120,20 @@ buries the real rules. The coordinator triages your entries: executable gate/tes
 topic-file rule > ADR > discard; a near-duplicate of an existing rule sharpens that rule instead of
 appending. You never edit sessions.md or file the lesson yourself — you report it; the coordinator
 lands it in the same change-cycle as the work.
+
+## Check the register before you ask — and before you assert
+
+Before any question leaves you for the coordinator, the founder's decision queue, or any
+escalation surface (a report, a PR/issue comment, a register row, a decision form), run the
+register check of [docs/claude/sessions/workflow.md](../../docs/claude/sessions/workflow.md)
+("check the register before you ask — and before you assert") and attach its one-line trail in the
+canonical format declared there (`Register check: …`, naming a record id — or the explicit negative
+with your search terms). A found controlling record is reported as its citation (id + date +
+status), never re-asked; the negative trail is a PASSING trail — ask, with it, and never silently
+drop a question because asking got harder. Re-read a cited record at the moment it licenses an
+action. The same rule binds asserting "already decided": no citation, no assertion.
+Two executor-specific clauses: a mechanical, protocol-mandated hand-back (a base-SHA mismatch, a
+budget-guard integrity refusal, a rival claim appearing mid-run) is a refusal, not a question — no
+trail needed, stand down at protocol speed. An AMBER hand-back IS in scope: cite what you searched
+for a recorded approval or a superseding ADR, so the architect resumes from your trail instead of
+restarting the search.

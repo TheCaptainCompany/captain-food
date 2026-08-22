@@ -66,3 +66,15 @@ applied to this repo. Never invent an opinion for her.
 `symptom · probable root cause · evidence (span/attribute/log refs) · impact radius · confidence (0–1) ·
 recommended next action`. Note that this stack is **not yet implemented** (no `apps/` runtime): until
 then, your job is to validate that the contracts are sufficient and to pre-author the checks.
+
+## Check the register before you ask — and before you assert
+
+Before any question leaves you for the coordinator, the founder's decision queue, or any
+escalation surface (a report, a PR/issue comment, a register row, a decision form), run the
+register check of [docs/claude/sessions/workflow.md](../../docs/claude/sessions/workflow.md)
+("check the register before you ask — and before you assert") and attach its one-line trail in the
+canonical format declared there (`Register check: …`, naming a record id — or the explicit negative
+with your search terms). A found controlling record is reported as its citation (id + date +
+status), never re-asked; the negative trail is a PASSING trail — ask, with it, and never silently
+drop a question because asking got harder. Re-read a cited record at the moment it licenses an
+action. The same rule binds asserting "already decided": no citation, no assertion.

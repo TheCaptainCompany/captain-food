@@ -1,0 +1,7 @@
+key: "OC-LEDGER"
+status: "open"
+question: "Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded?"
+owner: "team"
+opened: "2026-08-19"
+register: "docs/proposals/DECISIONS.md §47"
+evidence: "NEW 2026-08-19 — TEAM-owned design, FOUNDER-owned configuration; a money door with no ACL and a quantity authoritative OUTSIDE domain_events ... Two designs exist and neither is recorded"

@@ -80,6 +80,49 @@ fn main() {
     // the same gate. GFM pads a short row and drops the excess of a long one without a murmur, so
     // one stray `|` silently reshapes a register row.
     issues.extend(validate_markdown_tables(&load_decision_table_files(&repo_root(&specs))));
+    // ─── §22 — the decision register rows (docs/decisions/*.yaml, REG-2/REG-4, #658): the closed
+    // status vocabulary, resolvable decided_by/superseded_by, the status↔field coupling table and
+    // the supersession DAG. Same posture as §13: repo text, same issue list, same gate. The ask
+    // gate (the register-check hook) reads these FILES at the point of need, never the generated
+    // index — a stale projection must not gate a live decision.
+    {
+        let root = repo_root(&specs);
+        let mut dec_issues = Vec::new();
+        let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut dec_issues);
+        let corpus = load_record_corpus(&root);
+        let legacy_keys = load_legacy_keys(&root);
+        dec_issues.extend(validate_decision_rows(&dec_rows, &legacy_keys, &|id| {
+            record_resolves(id, &corpus)
+        }));
+        // §22b — the committed index region must equal the fold over the source rows (founder
+        // requirement 12): caught at VALIDATE time with the clearer message; check-drift stays
+        // the outer net and compares the same bytes via the same emit function. CHECK MODE ONLY,
+        // deliberately (found by the 2026-08-21 verification slice): generation IS the repair for
+        // a stale region, and a fatal staleness error in generate mode deadlocks `make generate`
+        // against the very staleness it exists to fix — the gate must never lock its own key in
+        // the room.
+        if check {
+            let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
+            dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
+        }
+        // §22c — the decision-form template anchors questions to rows (requirement 6; published
+        // form copies are uncommitted and NOT mechanically validated — recorded in the ADR).
+        if let Ok(tpl) = fs::read_to_string(root.join("docs/templates/decision-form.html")) {
+            dec_issues.extend(validate_decision_form_template("docs/templates/decision-form.html", &tpl));
+        }
+        // §22d — dispatch-card `Decision row:` references resolve to declared, non-legacy keys
+        // (declare-before-ask on the card surface; status stays an ask-time concern).
+        let declared_keys: BTreeSet<String> = dec_rows.iter().map(|r| r.stem.clone()).collect();
+        dec_issues.extend(validate_dispatch_card_rows(&load_dispatch_files(&root), &declared_keys, &legacy_keys));
+        // §23 — the record-citation ratchet over docs/** + CLAUDE.md (requirements 7-9): every
+        // full-form ADR/PROP citation resolves, dangling ids need a declared exemption with a
+        // retirement event, unused exemptions are errors, and record stamps stay unique per kind.
+        let (exemptions, mut ex_issues) = load_citation_exemptions(&root);
+        dec_issues.append(&mut ex_issues);
+        dec_issues.extend(validate_citations(&load_governed_doc_files(&root), &corpus, &exemptions));
+        dec_issues.extend(validate_record_stamps(&corpus));
+        issues.extend(dec_issues);
+    }
     // ─── §16 — writer/schema agreement (#474): a NOT NULL column with no DEFAULT that its
     // writer's insert list omits fails EVERY insert (the #451 cart defect, which passed `cargo
     // check`, six hand-run suites and three `make rust` rounds). Same posture as §13: reads
@@ -164,6 +207,15 @@ fn main() {
     eprintln!(
         "    - metrics: {} declared observability metrics — each has a name constant and an instrument in crates/telemetry (§20)",
         declared_metrics(&model).len()
+    );
+    eprintln!(
+        "    - decisions: {} docs/decisions/*.yaml rows — closed status vocabulary, decided_by resolves, supersession DAG, {} legacy keys allowlisted, index region in sync (§22)",
+        load_decision_files(&repo_root(&specs)).len(),
+        load_legacy_keys(&repo_root(&specs)).len()
+    );
+    eprintln!(
+        "    - citations: full-form ADR/PROP citations across docs/** + CLAUDE.md resolve to record files; {} declared exemption(s); record stamps unique (§23)",
+        load_citation_exemptions(&repo_root(&specs)).0.len()
     );
     eprintln!(
         "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",
@@ -292,6 +344,45 @@ fn main() {
         Err(e) => {
             eprintln!("✗ {}", e);
             std::process::exit(1);
+        }
+    }
+    // DECISIONS.md: inject the decision-register index between the GENERATED:decisions markers
+    // (§22, REG-3(a): only the index is generated; the prose stays authored). Unlike database.md's
+    // benign skip, MISSING MARKERS ARE AN ERROR: the §22 ask discipline depends on the register
+    // page being current, so a silently skipped region is a stale founder surface, not a no-op.
+    // The emitted body is checked as a GFM table BEFORE it lands (DECISIONS.md is in the §13b
+    // corpus, so a bad emit would otherwise pass THIS run and redden the next), and may not carry
+    // a marker substring (it would corrupt the next splice).
+    {
+        let root = repo_root(&specs);
+        let mut dec_parse_issues = Vec::new();
+        let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut dec_parse_issues);
+        let body = emit_decisions_index(&dec_rows, load_legacy_keys(&root).len());
+        if body.contains("<!-- GENERATED:") {
+            eprintln!("✗ decisions index: emitted body contains a GENERATED marker substring — refusing to splice.");
+            std::process::exit(1);
+        }
+        let table_issues = validate_markdown_tables(&[("(emitted decisions index)".to_string(), body.clone())]);
+        if !table_issues.is_empty() {
+            for i in &table_issues {
+                eprintln!("✗ decisions index: {} {} — {}", i.rule, i.location, i.message);
+            }
+            std::process::exit(1);
+        }
+        let reg_md = root.join("docs/proposals/DECISIONS.md");
+        match inject_generated(&reg_md, "decisions", &body) {
+            Ok(true) => eprintln!("✓ injected decision index into {}", reg_md.display()),
+            Ok(false) => {
+                eprintln!(
+                    "✗ {}: no GENERATED:decisions markers — the register index cannot be silently skipped (§22); restore the marker pair.",
+                    reg_md.display()
+                );
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("✗ {}", e);
+                std::process::exit(1);
+            }
         }
     }
     // crates/domains/{scope}/: PER-SCOPE GENERATED domain crates + the kernel (#373,

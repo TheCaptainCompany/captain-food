@@ -82,6 +82,12 @@ jobs:
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only (base=$BASE_SHA head=$HEAD_SHA event=$EVENT_NAME)"
+      # The ask-gate's own guard, on EVERY change — docs-only included. This job is the one
+      # always-run job with a checkout (no `if:`), so a broken register-check hook cannot ship
+      # silently on the paths that skip the Rust suites; pure shell, ~200ms. Pinned by the
+      # `the_hook_selftest_runs_in_the_always_run_changes_job` codegen test (2026-08-21 hardening).
+      - name: Register-check hook selftest (the ask-gate must never be disarmed silently)
+        run: bash .claude/hooks/register-check-selftest.sh
 
   lint:
     # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
@@ -308,6 +314,41 @@ jobs:
           path: crash-evidence/
           if-no-files-found: ignore
 
+  docs-validate:
+    # THE DOCS-ONLY PATH IS VALIDATED SURFACE SINCE 2026-08-21 (ADR-20260821-103403 §23: every
+    # full-form ADR/PROP citation across docs/** + CLAUDE.md must resolve; §22: the decision
+    # register + its generated index region live under docs/). The 2026-07-28 header directive
+    # ("docs have nothing to validate or regenerate") was TRUE when written and is not any more —
+    # before this job, a docs-only push reached `main` with a GREEN required check and zero
+    # validation, the exact silent-fallback class ADR-20260810-231300 names. This job runs on
+    # exactly the docs-only complement and executes the CANONICAL validator commands VERBATIM from
+    # the `specs` job — never a parallel implementation of the rules — building tools/codegen-rs
+    # only (cached), which preserves the 2026-07-28 cost bound: no workspace build, no test
+    # suites. Accepted latency: ~10s before, ~1–3 min warm cache now (cold first run pays the
+    # codegen build). Verified locally red/green with a planted dangling citation (the 2026-08-21
+    # verification slice); the codegen aggregator asserts this job's result BY NAME, because the
+    # generic skipped-acceptance below would let a mis-gated skip slide.
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate (canonical validator — §22 decision register + index-sync, §23 citation ratchet, and everything else)
+        run: cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --check --specs specs
+
+      - name: Regenerate + fail on drift (a docs/decisions edit regenerates the DECISIONS.md index region)
+        run: |
+          cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --specs specs
+          if ! git diff --quiet --ignore-cr-at-eol; then
+            echo "::error::Generated artifacts are stale — run 'make generate' and commit the result."
+            git --no-pager diff --ignore-cr-at-eol --stat
+            exit 1
+          fi
+          echo "✓ generated artifacts match"
+
   codegen:
     # THE REQUIRED STATUS CHECK ON `main`. Keep this job id: branch protection matches on it, and a
     # required check whose job never appears leaves every PR stuck on "Expected - waiting for status"
@@ -319,16 +360,18 @@ jobs:
     # build as an acceptable skip and silently disable the entire gate. `if: always()` makes this job
     # run whatever happened upstream, and the step fails unless every upstream result is `success`
     # (normal run) or `skipped` (docs-only change). `cancelled` and `failure` both fail here.
-    needs: [changes, lint, specs, build-test, db-test]
+    needs: [changes, lint, specs, build-test, db-test, docs-validate]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Every gate job must have succeeded (or been skipped as docs-only)
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          DOCS_VALIDATE: ${{ needs.docs-validate.result }}
         run: |
           set -euo pipefail
-          echo "upstream gate results: $RESULTS"
+          echo "upstream gate results: $RESULTS (docs_only=$DOCS_ONLY docs-validate=$DOCS_VALIDATE)"
           status=0
           for r in $RESULTS; do
             case "$r" in
@@ -336,6 +379,13 @@ jobs:
               *) echo "::error::a required gate job reported '$r'"; status=1 ;;
             esac
           done
+          # The docs-only lane is asserted BY NAME (2026-08-21 verification slice): the generic
+          # skipped-acceptance above is exactly how a docs-only push used to get a green required
+          # check with ZERO validation, so a skipped docs-validate on a docs-only change fails here.
+          if [ "$DOCS_ONLY" = "true" ] && [ "$DOCS_VALIDATE" != "success" ]; then
+            echo "::error::docs-validate reported '$DOCS_VALIDATE' on a docs-only change — the docs path is validated surface (§22/§23) and may not skip the canonical validator."
+            status=1
+          fi
           if [ "$status" -ne 0 ]; then
             echo "::error::ci gate FAILED — see the failing job above."
             exit 1

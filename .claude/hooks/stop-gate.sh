@@ -85,6 +85,13 @@ fi
 # EVERY turn regardless of what the diff touched.
 step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 
+# ALWAYS: the register-check discipline (~100ms, pure shell, no fixtures touched). Founder
+# directive 2026-08-21 (ADR-20260821-010543): agents must not re-ask answered questions. The gate
+# is a PreToolUse hook that is silent-when-broken by shape (a matcher typo or a dropped settings
+# entry disarms it with no signal -- ADR-20260810-231300's defect class), so its selftest runs
+# every turn: hook verdicts, settings wiring, and the agent files' citation blocks.
+step bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+
 # WHEN THE HOOK ITSELF CHANGES: the full guard suite (~2s, hermetic git fixture). Diff-scoped for
 # the same reason as the workspace suite above -- it proves the budget hook, so it runs when the
 # budget hook moves, and costs a docs turn nothing.

@@ -1,0 +1,18 @@
+# Citation-ratchet exemptions (§23, ADR named in this file's git history) — the NARROW mechanism
+# for ids that are knowingly unresolvable. Every entry carries the event that retires it, and an
+# exemption that exempts nothing is a validator ERROR (citation-exemption-unused), so this file is
+# a self-pruning queue, never a permanent bypass. An exempt id is citable as EXISTING, never as
+# CONTROLLING — a held record has no authority until deposited.
+exempt:
+  - id: "ADR-20260817-232744"
+    reason: "Externally authored, HELD and not deposited until corrected (ADR-20260818-004647:179; DECISIONS.md 2026-08-18 reconciliation)."
+    retires_when: "The record is deposited under docs/adr/ (or the holding decision retires it) — its citations then resolve and this entry errors as unused."
+  - id: "ADR-20260817-232745"
+    reason: "Externally authored, HELD and not deposited until corrected (ADR-20260818-004647:179)."
+    retires_when: "Deposit or retirement of the held record, as above."
+  - id: "ADR-20260817-232746"
+    reason: "Externally authored, HELD and not deposited until corrected (ADR-20260818-004647:179)."
+    retires_when: "Deposit or retirement of the held record, as above."
+  - id: "ADR-20260724-172808"
+    reason: "The one genuinely dangling id the register audit found (PROP-20260819-110442 §1.2); the remaining citations QUOTE it in order to describe that defect — they cite the id as a specimen, not as a record."
+    retires_when: "The describing sites are reworded, or the lost record is recovered/re-minted — either way the citations disappear or resolve."

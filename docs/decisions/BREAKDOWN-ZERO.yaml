@@ -1,0 +1,7 @@
+key: "BREAKDOWN-ZERO"
+status: "open"
+question: "What supersedes ADR-0016/0017's margin-proportional fee in the stored PaymentBreakdown, and what pins restaurantContribution (half B, blocked on DELIV-THRESHOLD)?"
+owner: "team"
+opened: "2026-08-18"
+register: "docs/proposals/DECISIONS.md §47"
+evidence: "SPLIT 2026-08-19 — half A folds into the margin-retirement card; half B is NEWLY BLOCKED by Q5 ... the safe slice is restaurantContribution + the description strip, and serviceFee waits"

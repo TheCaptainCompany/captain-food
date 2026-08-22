@@ -1,0 +1,8 @@
+key: "CONFLICTS-20260819"
+status: "open"
+question: "Which change carries each of the ten record conflicts (C1-C10) the six answers surfaced?"
+owner: "team"
+opened: "2026-08-19"
+register: "docs/proposals/DECISIONS.md §47"
+evidence: "OPEN — the ten register conflicts the six answers surfaced. NAMED HERE, NONE DECIDED ... a live record that contradicts a decided answer is read as current"
+note: "C8 is also a missing gate (a story describing a mechanism that no longer exists) and is the cheapest to make executable."

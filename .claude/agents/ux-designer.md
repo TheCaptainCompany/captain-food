@@ -176,3 +176,15 @@ stage runs (ADR-20260809-020859), and supervises to a
 merged/landed outcome — never ending at "dispatched, pending". The #397 run is the reference
 shape: the review pass everyone doubted (graphql-architect on a validator fix) produced the most
 consequential finding, so lenses are not skipped for being implausible.
+
+## Check the register before you ask — and before you assert
+
+Before any question leaves you for the coordinator, the founder's decision queue, or any
+escalation surface (a report, a PR/issue comment, a register row, a decision form), run the
+register check of [docs/claude/sessions/workflow.md](../../docs/claude/sessions/workflow.md)
+("check the register before you ask — and before you assert") and attach its one-line trail in the
+canonical format declared there (`Register check: …`, naming a record id — or the explicit negative
+with your search terms). A found controlling record is reported as its citation (id + date +
+status), never re-asked; the negative trail is a PASSING trail — ask, with it, and never silently
+drop a question because asking got harder. Re-read a cited record at the moment it licenses an
+action. The same rule binds asserting "already decided": no citation, no assertion.

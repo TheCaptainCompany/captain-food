@@ -452,6 +452,101 @@ Scale the search to the question — one well-aimed grep plus reading its record
 sweep of every surface. This is cheap insurance against answering from a stale context or missing a
 supersession, not a guarantee that a repeated question can never recur.
 
+### The trail rides the question — canonical format, declared once, HERE
+
+**Founder directive 2026-08-21** (verbatim: *"I want to ensure that the agents will no longer ask
+questions already answered. Use the best practices known for that."* —
+ADR-20260821-010543, deciding DECISIONS §48 REG-1's direction: enforcement goes on the ASK). Every
+question that survives the check carries ONE trail line in its own text, in exactly one of two
+shapes — this section is the only place the format is defined; the hook, the agent blocks and the
+selftest cite it, never re-spell it:
+
+```
+Register check: <record id> (<date>, <status>) -- covers <X>, silent on <Y>
+Register check: no controlling record -- terms: <terms searched>; nearest: <record id or none>
+```
+
+**The ENVELOPE, and the dated meaning-shift (2026-08-21 evening, ADR-20260821-103403 —
+decision-ask-unregistered).** A **decision question** — the published tiebreaker: *would the
+answer bind future work? then it is one* — carries the envelope line instead of a trail:
+
+```
+Decision row: <KEY>
+```
+
+meaning exactly: *this question asks (or, freshly declared, creates) register row
+`docs/decisions/<KEY>.yaml`*. Exactly one line, one key; the row must be declared and **open**
+(the hook refuses non-open, unknown, and legacy keys, each with its next action; an open
+counsel-owned row takes only the external-action question). The envelope IS the register check —
+no trail line rides with it, because the declared row carries the provenance. A genuinely new
+decision question **declares its open row first** (one cheap act — worked example in
+`docs/decisions/README.md`), and a challenge to a decided row is a NEW row with
+`reconsiders: <OLD-KEY>`, never a re-ask. **Since this shift, the negative trail asserts "this is
+not a decision question"** — legitimate only for clarifying an in-flight directive, an
+external-clock relay (never delayed by row ceremony, ADR-20260812-143619), or a mechanical
+choice; trails written BEFORE 2026-08-21 were authored under the earlier grammar and make no such
+classification claim. On dispatch cards, a `Decision row:` line must name a declared, non-legacy
+key (`make validate`, §22d); the same `row:` anchor is required per question on the decision-form
+template. A docs push touching any citation-governed surface (all of `docs/**` + `CLAUDE.md`,
+§23) runs `make validate` first — the docs-only carve-out predates the ratchet. Skipping it is
+now caught by CI's `docs-validate` job (before the 2026-08-21 verification slice this sentence
+claimed an asynchronous CI backstop that DID NOT EXIST — docs-only pushes skipped every gate job
+and the required check reported green; ADR-20260821-103403 as amended).
+
+What the format encodes, each clause earned by a lens at the 2026-08-21 briefing:
+
+- **A record id, or the explicit negative — never a bare "done".** A trail must name a verifiable
+  artifact (`ADR-YYYYMMDD-HHMMSS`, legacy `ADR-00NN`, `PROP-YYYYMMDD-HHMMSS`, a `DECISIONS` section,
+  a `journal-YYYY-Www` entry) or record the negative with its terms, so a hollow trail is auditably
+  hollow. The negative is a **passing** trail: a genuinely new question, a clarification of a
+  directive the founder just gave, and an external-clock relay (never to be delayed) all use it —
+  **do the check, then ask; never silently drop a question because asking got harder.**
+- **Date and status ride the citation** because a found record is not always an answer: a
+  counsel-gated or still-open row legitimately RE-OPENS the question (cite it and ask), and
+  *"the answer exists but the underlying facts changed"* is a legitimate re-ask that names the
+  record it would revise. A found controlling answer, by contrast, **terminates in the work record
+  as its citation — it is never relayed to the founder as a question.**
+- **Cite the nearest non-controlling record when nothing controls** — "ADR-X decided the adjacent
+  thing" is exactly what saves a re-litigation.
+- **The citation is fetched at ask-time, supersession followed then.** A record found early in a
+  long session and cited from memory at the moment it licenses an action is a snapshot without its
+  version — concurrent sessions land supersessions mid-run.
+
+**Search with the alias table, not only the question's own words.** A record written in another
+era's vocabulary honestly returns nothing — the miss that no hook can catch. The table is the
+Published Language for the search; **every rename appends its pair** (the CLAUDE.md "grep the OLD
+term" sweep already produces exactly these pairs — land them here instead of discarding them), and
+**every question later found to have been answered appends the term that would have found it**:
+
+| Canonical term | Also search |
+|---|---|
+| contribution | tip, tips (the 2026-08-18 incident's own miss) |
+| delivery | rider (the boundary rename, DECISIONS §31 BND-2; `RIDER` stays a role) |
+| founder | product owner, customer (all three eras coexist in the record) |
+| register | decision queue, DECISIONS.md, answer sheet |
+
+**Check `docs/decisions/` FIRST** (REG-2/REG-4, ADR-20260821-095957): every migrated register row
+key has a `docs/decisions/<KEY>.yaml` that is **authoritative for its CURRENT status** — one
+`grep -l` there beats any prose search, and a question referencing a key whose row is not `open`
+is refused mechanically with the citation that answers it (a `decided` row is not a question — a
+changed premise opens a NEW row citing the old one; an open `counsel`-owned row takes only the
+external-action question). Keys on `docs/decisions/_legacy.yaml` are still prose-only; the sources
+above stay the search surface for them.
+
+**Enforcement — what is mechanical and what is not** (state it honestly, believe no more): the
+`AskUserQuestion` tool path is gated by `.claude/hooks/register-check.sh` (PreToolUse, fail-closed:
+the trail's presence and shape, plus the row gate above, reading the row FILES at the point of
+need — never the generated index; one log line per firing in `.claude/register-check.log` with a
+closed reason taxonomy — `trail-missing`, `trail-hollow`, `key-decided`, `key-superseded`,
+`key-deferred`, `key-withdrawn`, `key-counsel-owned`, `key-legacy` — plus the keys hit, so hollow
+trails and stale-decision citations stay decomposable defects); questions travelling as PROSE —
+run reports, decision-queue sections, PR/issue comments, register rows, decision forms — are bound
+by the citation block every `.claude/agents/*.md` carries, whose presence (with this section's
+existence, the settings wiring, and the live row gate) is asserted by
+`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). The hook
+proves presence, shape and row status, never that a search happened — honesty stays with the mob
+briefing and the independent review, which is why the trail must name its artifact.
+
 Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
 required, and always end with a free-text question.

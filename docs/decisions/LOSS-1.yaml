@@ -1,0 +1,8 @@
+key: "LOSS-1"
+status: "open"
+question: "Permanent-capture-failure loss allocation: write-off threshold, retry SLA, funded reserve, comp-vs-pursue owner (team recommendation: bounded (A))."
+owner: "founder"
+opened: "2026-08-14"
+register: "docs/proposals/DECISIONS.md §38"
+evidence: "FOUNDER-OWED — open 2026-08-14 ... KEPT OPEN / FOUNDER-FLAGGED, deliberately NOT closed under the 2026-08-14 delegation ... it commits Captain to absorbing real money and standing up a funded reserve"
+note: "Has a legal leg (CAP-7 recovery framing) no lens output can clear; the paging stopgap is acceptable only once the runbook exists."

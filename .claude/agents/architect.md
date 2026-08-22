@@ -165,7 +165,13 @@ historical record: never rewrite it to match what was built.
 
 **Reconcile [`docs/proposals/DECISIONS.md`](../../docs/proposals/DECISIONS.md) on every run.** Add a row
 for each decision a new proposal surfaces; move answered ones to §5 with the date and what recorded
-them; and **flag any decision that has been open for several runs, with its age**, in your report. Rank
+them; and **flag any decision that has been open for several runs, with its age**, in your report.
+**Since REG-2/REG-4 (ADR-20260821-095957) reconciliation means authoring row FILES**: a new row is
+a `docs/decisions/<KEY>.yaml` (schema: `docs/decisions/README.md`), a closed one edits its file
+(status + `decided` + `decided_by`) — plus `make generate` in the same change, because the register
+index is a GENERATED region and `check-drift` is red otherwise. A legacy prose row (on
+`_legacy.yaml`) migrates when a dispatch explicitly includes it; new rows land as prose NOWHERE —
+the file is the declaration. Rank
 new entries by leverage — how much of the backlog the answer unblocks — not by the order you found
 them. The product owner works from this page, so its ordering is a real deliverable, not bookkeeping.
 
@@ -281,3 +287,15 @@ theirs — that experience did not move, and no lens above owns it.
   A `Priority` is not an approval: ranking an AMBER item `Urgent` does not move it out of AMBER.
 - **Never invent work.** "Nothing ready" is a valid and useful answer.
 - **Never report a finding you have not verified in code.** If you cannot cite it, do not file it.
+
+## Check the register before you ask — and before you assert
+
+Before any question leaves you for the coordinator, the founder's decision queue, or any
+escalation surface (a report, a PR/issue comment, a register row, a decision form), run the
+register check of [docs/claude/sessions/workflow.md](../../docs/claude/sessions/workflow.md)
+("check the register before you ask — and before you assert") and attach its one-line trail in the
+canonical format declared there (`Register check: …`, naming a record id — or the explicit negative
+with your search terms). A found controlling record is reported as its citation (id + date +
+status), never re-asked; the negative trail is a PASSING trail — ask, with it, and never silently
+drop a question because asking got harder. Re-read a cited record at the moment it licenses an
+action. The same rule binds asserting "already decided": no citation, no assertion.

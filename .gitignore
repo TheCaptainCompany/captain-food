@@ -16,3 +16,6 @@ tools/codegen-rs/out/
 # makes that mistake unspellable rather than merely discouraged. Prefer /tmp for a
 # worktree; this is the safety net for when someone does not.
 wt*/
+
+# Register-check hook firing log (runtime artifact, ADR-20260821-010543)
+.claude/register-check.log

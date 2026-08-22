@@ -33,6 +33,11 @@ const FORM = {
   questions: [
     {
       title: "The question, as a question",
+      row: "KEY-NAMESPACE",              // REQUIRED on every option-question (ADR-20260821-103403):
+                                         // the docs/decisions/<KEY>.yaml register row this question
+                                         // decides — declared and OPEN before the form is built
+                                         // (a new question declares its row first; a decided row
+                                         // is never re-asked, it is challenged via `reconsiders:`)
       why: "One or two sentences on why it is being asked and what it is blocking. Name the file or the record if there is one.",
       gates: "Gates 2 · 5",              // optional; omit when nothing downstream depends on it
       options: [
@@ -96,6 +101,7 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--body);
 .q header{display:flex;gap:14px;align-items:flex-start;padding:18px 20px 14px;border-bottom:1px solid var(--line)}
 .num{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--surface);background:var(--accent);min-width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:2px}
 .qh{display:flex;flex-direction:column;gap:6px}
+.rowkey{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-soft);padding:2px 7px;align-self:flex-start;border-radius:2px}
 .qh h2{font-family:var(--display);font-weight:600;font-size:21px;margin:0;line-height:1.24;letter-spacing:-.01em;text-wrap:balance}
 .qh .why{margin:0;font-size:14px;color:var(--muted)}
 .gates{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--open);background:var(--open-soft);padding:2px 7px;align-self:flex-start;border-radius:2px}
@@ -147,6 +153,7 @@ button.ghost{background:transparent;color:var(--accent);border:1px solid var(--l
   FORM.questions.forEach(function(q,i){
     var n=i+1;
     html+='<section class="q"><header><div class="num">'+n+'</div><div class="qh">'+
+          (q.row?'<div class="rowkey">Decision row: '+esc(q.row)+'</div>':'')+
           '<h2>'+esc(q.title)+'</h2>'+
           (q.why?'<p class="why">'+esc(q.why)+'</p>':'')+
           (q.gates?'<span class="gates">'+esc(q.gates)+'</span>':'')+
@@ -180,7 +187,7 @@ button.ghost{background:transparent;color:var(--accent);border:1px solid var(--l
           c=note?note.value.trim():"";
       if(q.free){ if(c){lines.push(n+". "+q.title,"   "+c.replace(/\n/g,"\n   "),"");} return; }
       if(picked||c){
-        lines.push(n+". "+q.title);
+        lines.push(n+". "+(q.row?"["+q.row+"] ":"")+q.title);
         lines.push(picked?("   → "+picked.value):"   → (no option picked)");
         if(picked)answered++;
         if(c)lines.push("   comment: "+c.replace(/\n/g,"\n   "));

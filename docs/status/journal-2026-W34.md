@@ -3,6 +3,148 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🛡️ **2026-08-21 — ASK-GATE HARDENING: the selftest gates CI on every path, the wiring check is
+> semantic, and STATUS carries the register as durable state** (founder-directed follow-up to the
+> [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669)
+> review). **(A)** `.claude/hooks/register-check-selftest.sh` now runs in `ci.yml`'s `changes` job —
+> the ONE always-run job with a checkout (no `if:`, every push/PR, docs-only included; `lint` was
+> considered first per the dispatch but is gated `docs_only != 'true'`, failing the both-paths
+> requirement) — so a disarmed hook fails the required `codegen` aggregator via the `changes` result
+> on every path; pinned by the red-first `the_hook_selftest_runs_in_the_always_run_changes_job`
+> shape test (mutation-proven: deleting the step line turns it red). **(B)** selftest case W is
+> structural, not substring: `check_wiring` (python3 stdlib json, fail-closed if python3 is absent)
+> proves a `hooks.PreToolUse` entry with matcher EXACTLY `AskUserQuestion` runs the real hook
+> script; three planted disarming mutants derived from the committed file (W1 fuzzed matcher, W2
+> entry under PostToolUse, W3 command re-pointed) must each be refused — the OLD greps passed W1
+> and W2 outright. **(C)** `docs/STATUS.md` gains the durable-state section for the register
+> authority, ask gate and CI enforcement — the PR body's "recorded in STATUS.md" claim was ahead of
+> the file; policy ("keep this file current with every substantive change") says the entry belongs,
+> so the file was corrected, not the claim weakened.
+> **Reviewed and DEFERRED in this slice, each with its trigger** (no claim of fix):
+> **(D1) docs-only drift untracked-files parity** — failure mode: `docs-validate`'s drift step
+> checks modified tracked files but not brand-new uncommitted generated files (the `specs` job
+> does both); mitigation: today no emitter creates NEW files from a docs-only edit — the decisions
+> index regenerates an existing region; deferred because the failing shape is currently
+> unspellable; trigger: the first emitter that writes per-row/new generated files under `docs/**`
+> copies the `specs` job's untracked check into `docs-validate` in the same change.
+> **(D2) legacy-YAML indentation coupling** — failure mode: re-indenting/quoting `_legacy.yaml`
+> silently empties the HOOK's legacy set (a legacy envelope ask then blocks as `key-unknown`
+> instead of `key-legacy-ask`, and `key-legacy` burn-down logging goes quiet); mitigation:
+> fail-closed direction preserved, §22 parses legacy properly, and selftest L2 sed-parses the live
+> file every turn so a wholesale format break screams; deferred because the format is exercised
+> live today (all 103 lines conform) and the fix is a format-pinning case, not urgent; trigger:
+> any change that reformats `_legacy.yaml` or touches either parser adds the format-pin selftest
+> case in the same change.
+> **(D3) non-UTF-8 governed-file handling** — failure mode: `load_governed_doc_files`
+> (`citations.rs`) skips a file whose `read_to_string` fails, so a non-UTF-8 governed doc escapes
+> the §23 ratchet silently; mitigation: zero such files exist and agent/editor output is UTF-8;
+> deferred because a lossy-read or hard-error policy deserves its own small decision rather than a
+> rider; trigger: the first non-UTF-8 file under `docs/**`, or the next §23 walker change,
+> whichever first — that change makes the skip loud (error or lossy-scan).
+
+> 🔬 **2026-08-21 — INDEPENDENT REVIEW OF [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669): PASS WITH FINDINGS; F2+F3 FIXED, F4–F8 DEFERRED**
+> (founder-ordered independent pass, `reviewer` + `beck` lenses, eyes that did not write the diff).
+> **Fixed in the follow-up commit** (founder-approved, narrow): **F2** — selftest case E5 never
+> exercised the `envelope-multiple` lane it named (its two tokens on one JSON line collapsed into
+> ONE greedy grep match; the red was carried by `key-unknown`, and deleting the lane kept all
+> cases green while a two-line envelope naming two OPEN rows would have failed OPEN). The hook now
+> counts envelope TOKENS, not extracted lines — same-line and multi-line double envelopes both
+> block as `envelope-multiple` deliberately (the same-line shape previously died in `sed` noise
+> with a garbled message; exit was still 2, fail-closed) — and the selftest helper asserts the
+> logged REASON on block cases, proven mutation-sensitive (branch disabled → E5/E5b fail-open red,
+> restored → green). **F3** — `record_resolves`'s legacy `ADR-00NN` arm matched a bare 4-digit
+> filename prefix, so a truncated-stamp typo (the ADR prefix plus only the first four stamp
+> digits) resolved silently against the 54 prefixless middle-era `2026…` filenames; the arm now
+> requires the `NNNN-` shape (red-first test;
+> zero such truncations exist in governed docs, so the ratchet surface is unchanged). **Reviewed
+> and DEFERRED, explicitly NOT fixed**: F1 (approval-to-land + tip-commit wording precede any
+> merge — founder's call), F4 (open envelope does not shield a passive decided-key context
+> mention — loud block, rewording path exists), F5 (main.rs §22/§23 wiring has no end-to-end
+> binary test), F6 (ci.yml shape test is structural — cannot catch an inverted aggregator
+> condition or mis-wired env), F7 (bare exemption-count pin; legacy-empty asserts redden when the
+> burn-down COMPLETES), F8 (card-scanner prose friction, hook `_legacy.yaml` format coupling,
+> unclosed-fence under-scanning duplicated in two files, `reconsiders` mutual-cycle shape passes,
+> unparseable `_legacy.yaml` loads empty).
+
+> 🔍 **2026-08-21 — THE DOCS-ONLY CI BYPASS WAS REAL, AND IS CLOSED** (founder-ordered
+> verification slice; [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)
+> amended in place; narrow roster farley/beck/generator, REVERSIBLE INTERNAL). Verified: `ci.yml`
+> skipped every gate job on docs-only pushes (docs/** + README.md + CLAUDE.md + LICENSE) and the
+> `codegen` aggregator accepts `skipped` — so the surface §22/§23 govern reached `main` with a
+> **green required check and zero validation**; the previous ADR's "CI reports it asynchronously"
+> claim was FALSE and is corrected in its amendment. Closed minimally: a `docs-validate` job on
+> exactly the docs-only complement running the `specs` job's canonical commands VERBATIM
+> (validator `--check` + regenerate/drift; tools/codegen-rs build only — the 2026-07-28 cost
+> bound kept, its "nothing to validate" premise retired), plus a **named** aggregator assertion
+> (`docs_only ⇒ docs-validate==success` — the generic skipped-acceptance was the hole). Pinned by
+> a red-first shape test; proven red/green locally with a planted dangling citation
+> (docs_only=true through the detector logic; canonical command exit 1 → removed → exit 0).
+> **Found-and-fixed**: `decision-index-stale` deadlocked `make generate` against the staleness
+> generation repairs — now `--check`-only. **Legacy visibility**: the generated index tail states
+> `Legacy rows remaining: 103` · `Migrated rows: 19` · the four migration triggers · the boundary
+> sentence (never an authority, never a founder-question bypass); per-change migration counts are
+> deliberately NOT manufactured — the tail's diff is the record. On-GitHub red/green exercise of
+> `docs-validate` deferred to post-approval (this slice stops at the verification report).
+
+> 📮 **2026-08-21 — DECISION-ASK-UNREGISTERED + THE CITATION RATCHET: every decision question
+> names its open row, every citation resolves**
+> ([ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md),
+> the day's third founder directive, 15 requirements; whole roster consulted). The **envelope**:
+> a decision question carries `Decision row: <KEY>` — exactly one declared OPEN row; non-open,
+> unknown, and **legacy** keys are refused with the controlling record and the next action
+> (legacy = migrate in the SAME change; the gate re-reads live — never a permanent bypass); a
+> genuinely new question declares its row first (worked example in `docs/decisions/README.md`);
+> a reversal is a NEW row with `reconsiders: <OLD-KEY>`, whose closure IS the two-file
+> supersession (validator-coupled). The negative trail is **reclassified** (dated shift at the
+> canonical site): it now asserts "this is not a decision question" (tiebreaker: would the answer
+> bind future work?). §22d validates `Decision row:` on dispatch cards (resolution-only — status
+> stays an ask-time concern, pinned green so history never reddens); the form template requires
+> a per-question `row:` anchor, rendered key-first and carried into the pasted answers. **§23
+> citation ratchet**: all 5,130 full-form ADR/PROP citations across docs/** + CLAUDE.md resolve;
+> the 4 dangling ids ride `docs/decisions/_exempt.yaml` (id + reason + retires_when; unused
+> exemptions error) — **zero historical rewriting**; a REAL §22 resolver bug fixed (104
+> prefixless middle-era ADR filenames — pre-fix a naive ratchet saw 90+ dangling); record stamps
+> gated unique. Planted red first: 9 hook flips/cases against the old hook, 20+ validator
+> mutants, index↔source disagreement. Enforcement boundary recorded honestly in the ADR; legacy
+> count **103**, burn-down triggers: referenced-in-a-question / amended / reopened / dispatched.
+
+> 🗝️ **2026-08-21 — THE REGISTER ROW GETS MACHINE IDENTITY: REG-2/REG-4 land, the index is
+> generated, and the ask gate reads the rows**
+> ([ADR-20260821-095957](../adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md),
+> deciding [DECISIONS §48](../proposals/DECISIONS.md) REG-2 + REG-4 (vocabulary half) + REG-3's
+> index + REG-SEQ per founder directive, verbatim in the ADR; whole roster consulted, one line per
+> lens). `docs/decisions/<KEY>.yaml` — **19 rows migrated** (the 2026-08-19 live set, the §48
+> family, the sitting's closed money rows), each carrying its `register` anchor and verbatim
+> `evidence`; closed vocabulary `open·decided·deferred·superseded·withdrawn` with **biconditional**
+> status↔field couplings, resolvable `decided_by`, a supersession **DAG**, `until` on deferred,
+> `note` on withdrawn — validator **§22** (`validate/decisions.rs`), every rejection rule proven
+> red on a planted defect. The DECISIONS.md index is now a **GENERATED region** (deterministic,
+> `opened`-date not computed age, pipes escaped, §13b-checked before splicing, missing markers a
+> hard error); **any `docs/decisions/**` edit is a generating edit — `make generate` in the same
+> commit, straight-to-main path included**. The register-check hook now reads the row FILES at the
+> point of need (never the index): a question referencing a non-open key is refused with the
+> status-specific citation; open counsel-owned rows take only the external-action question; the
+> firing log carries a closed reason taxonomy. **Legacy is a declaration**: the 103 unmigrated
+> keys are enumerated in `_legacy.yaml` (pass, logged); next-touch migration, decided at dispatch
+> time. New open row `KEY-NAMESPACE` carries REG-4's namespacing residue (split-at-close).
+> `holub`'s #556 position recorded; the founder's directive is the sequencing override.
+
+> 🔒 **2026-08-21 — AGENTS NEVER ASK AN ANSWERED QUESTION: the register check binds every agent and
+> the ask surface is gated**
+> ([ADR-20260821-010543](../adr/ADR-20260821-010543-agents-never-ask-an-answered-question-the-register-check-binds-every-agent.md),
+> deciding [DECISIONS §48](../proposals/DECISIONS.md) REG-1's direction — enforcement on the ASK —
+> per founder directive, verbatim: *"I want to ensure that the agents will no longer ask questions
+> already answered. Use the best practices known for that."*; whole roster consulted, 16 lines in
+> the ADR). The canonical `Register check:` trail format is declared once in
+> [workflow.md](../claude/sessions/workflow.md) ("The trail rides the question") with the alias
+> table; all 16 `.claude/agents/*.md` carry a thin citation block; `AskUserQuestion` is gated by
+> a fail-closed PreToolUse hook (`.claude/hooks/register-check.sh`, one greppable log line per
+> firing, log gitignored); and `.claude/hooks/register-check-selftest.sh` — seen RED before the
+> wiring existed — proves verdicts, wiring and block presence on every turn (stop gate) and via
+> `make hooks-test`. Honest scope recorded in the ADR: the hook proves trail presence and shape on
+> the tool path only; prose surfaces are bound by the agent blocks; honesty stays with mob and
+> review. REG-2/REG-3/REG-4 stay open and founder-owned.
+
 > 🗂️ **2026-08-20 — THE JOURNAL WRITE PATH SWITCHES: `STATUS.md` is durable state plus an index,
 > dated entries go to the ISO-week file** ([#665](https://github.com/TheCaptainCompany/captain-food/pull/665)).
 > `docs/STATUS.md` is now **durable state and the journal index** — deployment, read/write side,
