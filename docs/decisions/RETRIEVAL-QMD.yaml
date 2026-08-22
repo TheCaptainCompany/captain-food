@@ -1,0 +1,7 @@
+key: "RETRIEVAL-QMD"
+status: "open"
+question: "Approve or reject Phase 0: an isolated, scriptless, BM25-only, local advisory retrieval experiment using exactly @tobilu/qmd@2.8.3, under the supply-chain protocol, corpus boundary, measurement policy, T1-T3 runtime gates, reproducible rg+aliases benchmark, kill criteria, and rollback procedure defined in PROP-20260822-171212. Reject keeps rg + aliases + direct structured-register resolution as the system with QMD never installed or executed."
+owner: "founder"
+opened: "2026-08-22"
+register: "docs/proposals/DECISIONS.md (generated index row)"
+evidence: "Option space, evidence, and all protocol detail: PROP-20260822-171212-qmd-phase0-bm25-advisory-retrieval (the option-space authority; this row is a compact index and link, per the founder's 2026-08-22 corrections)"
