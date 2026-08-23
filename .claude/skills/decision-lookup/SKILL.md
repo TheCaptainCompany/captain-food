@@ -103,6 +103,10 @@ reaches the controlling record even where retrieval alone missed it.
   prints: *activation failed; remove `.qmd/` before any future approved retry*, plus the
   reversal-decision instruction (row `RETRIEVAL-QMD`). A failed install may leave a partial
   `.qmd/tool/`; it never claims "nothing changed".
+- **Post-update index assertion**: the corpus stamp is written only after the index database is
+  verified present and non-empty; a successful `qmd update` that leaves no index at the expected
+  location is treated as a rebuild failure — caches wiped, the named fallback fires, the corpus
+  is never stamped (an index-less stamped corpus would otherwise rebuild forever, silently).
 - **Cache layout / activation evidence**: `.qmd/tool/` (pinned package, lockfile, manifests),
   `.qmd/corpus/` (`git archive HEAD` export + `.sha` revision stamp + the project-local index
   database qmd 2.8.3 writes inside the collection dir, observed at activation 2026-08-23:
@@ -124,10 +128,11 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**30 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**32 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution and cache-invariance verification), plus 1 search-failure case,
-5 quoting cases, 1 python3-preflight case, 1 corpus-mask case, 1 stamp/archive-SHA case, and
-2 broken-cache cases — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+5 quoting cases, 1 python3-preflight case, 1 corpus-mask case, 1 stamp/archive-SHA case,
+2 broken-cache cases, and 2 post-update index-assertion cases — all against a temporary
+`DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -158,7 +163,9 @@ asserts it) and never depended on, and no package is installed. Coverage:
    the wrapper archives `"$head"`, never a re-resolved symbolic `HEAD`.
 10. **Broken cache**: a matching `corpus/.sha` with a missing `corpus/.qmd/index.sqlite` is
    REBUILT (candidates print; never the empty-result wording); if that rebuild fails, the named
-   rebuild-failed fallback fires with caches wiped — still never the empty-result wording.
+   rebuild-failed fallback fires with caches wiped — still never the empty-result wording. A
+   successful `qmd update` that writes no index is never stamped (positive + planted-red pair:
+   stamp and index must coexist; an index-less "success" is wiped, unstamped, and falls back).
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive
