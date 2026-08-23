@@ -3,6 +3,21 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-23 — decision-lookup post-update index assertion: a "successful" update that writes
+> no index is never stamped** (separately authorized; implements the founder-authorized fix for
+> the independent review's priority finding tracked on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671)). The wrapper now
+> verifies `corpus/.qmd/index.sqlite` exists and is non-empty immediately after a successful
+> `qmd update`, BEFORE writing `corpus/.sha` — an index-less "success" is treated exactly like a
+> rebuild failure: derived caches wiped, the existing named `rg + aliases` fallback fires, and the
+> corpus is never stamped, so a qmd version that relocates its index can no longer create a
+> silently stamped, permanently rebuilding cache (loud on the first occurrence and every retry).
+> Lookup exit-0, non-zero `--install` failures, no-auto-install/no-retry/no-stale-output, and the
+> network posture are unchanged. The hermetic suite grows to **32 cases**: a positive case (stamp
+> and index must coexist) and a planted-red case (fake `qmd update` succeeding without writing an
+> index — shown RED against the unpatched wrapper before being trusted).
+
 > 🔧 **2026-08-23 — decision-lookup reliability corrections: the corpus can no longer read about
 > itself, a broken cache rebuilds instead of answering empty, and the stamp is the archive's SHA**
 > (separately authorized review findings; wrapper + suite + skill + proposal §6.2). Three fixes:

@@ -28,7 +28,7 @@ mkfake() { # $1 = QDIR, $2 = payload file for `search`
 #!/usr/bin/env bash
 case "\$1" in
   init|collection) exit 0 ;;
-  update) rc=\${FAKE_UPDATE_EXIT:-0}; [ "\$rc" -eq 0 ] && { mkdir -p .qmd; : > .qmd/index.sqlite; echo x > .qmd/index.sqlite; }; exit "\$rc" ;;
+  update) rc=\${FAKE_UPDATE_EXIT:-0}; [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; echo x > .qmd/index.sqlite; }; exit "\$rc" ;;
   search) cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
 esac
 EOF
@@ -258,6 +258,25 @@ out="$(FAKE_UPDATE_EXIT=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
   && verdict ok "T12b missing index + rebuild failure -> named fallback, caches wiped" || verdict bad "T12b (rc=$rc)"
+
+# T13 post-update index assertion: the stamp is written only when the index verifiably landed.
+# T13a (positive): a successful update that writes the index -> stamped AND indexed, candidates.
+Q="$S/t13a"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+  && [ -f "$Q/corpus/.sha" ] && [ -s "$Q/corpus/.qmd/index.sqlite" ] \
+  && verdict ok "T13a successful update -> stamp and index coexist, candidates" || verdict bad "T13a (rc=$rc)"
+
+# T13b (planted red): update exits 0 but writes NO index -> rebuild failure, caches wiped,
+# NOTHING stamped, the named fallback — never candidates, never the empty-result wording.
+Q="$S/t13b"; mkfake "$Q" "$S/p5a.json"
+out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q "rebuild failed" \
+  && ! echo "$out" | grep -q '^candidate ' \
+  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
+  && [ -z "$(find "$Q" -name '.sha' 2>/dev/null)" ] \
+  && verdict ok "T13b index-less successful update -> wiped, unstamped, named fallback" || verdict bad "T13b (rc=$rc)"
 
 echo "----"
 echo "RESULT: $pass passed, $fail failed"

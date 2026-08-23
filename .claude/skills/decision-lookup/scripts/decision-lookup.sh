@@ -63,7 +63,9 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 # from `git archive` of the ONE resolved SHA that is also written to the stamp — HEAD is resolved
 # exactly once, so the archive source and the stamp can never diverge (no re-resolve race). The
 # WORKING TREE is never indexed. If the rebuild fails, the caches stay wiped and the caller gets
-# the rg + aliases fallback — never stale QMD output. Exclusions (decided): DECISIONS.md
+# the rg + aliases fallback — never stale QMD output. The stamp is written only after the index
+# database is verified present and non-empty: a successful update that writes no index at the
+# expected location is a rebuild failure, never a stamped cache. Exclusions (decided): DECISIONS.md
 # (generated region), the QMD proposal (recorded contamination), docs/status/** (the journals
 # narrate this tool's own verification queries and answers — indexing them lets a lookup match
 # the account of itself, the recorded self-contamination/false-authority shape; rg + aliases
@@ -81,6 +83,9 @@ build_corpus() {
   ( cd "$CORPUS" && env HOME="$QHOME" "$QMD" init >/dev/null 2>&1 \
     && env HOME="$QHOME" "$QMD" collection add . >/dev/null 2>&1 \
     && env HOME="$QHOME" "$QMD" update >/dev/null 2>&1 ) || { rm -rf "$CORPUS" "$QHOME"; return 1; }
+  # A "successful" update that left no index at the checked location is a rebuild failure:
+  # never stamp it (a stamped index-less corpus would rebuild forever, silently).
+  [ -s "$CORPUS/.qmd/index.sqlite" ] || { rm -rf "$CORPUS" "$QHOME"; return 1; }
   printf '%s' "$head" > "$CORPUS/.sha"
 }
 
