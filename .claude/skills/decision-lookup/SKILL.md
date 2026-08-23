@@ -75,8 +75,12 @@ reaches the controlling record even where retrieval alone missed it.
 
 ## Exit semantics and activation
 
-- **Lookup path**: always exit 0 — unavailability, empty result, stale index, rebuild failure, or an
-  output-contract failure print the advisory fallback. The wrapper consumes qmd's `--json` output
+- **Lookup path**: always exit 0 — unavailability, empty result, stale index, rebuild failure, a
+  search-tool failure, or an output-contract failure print the advisory fallback. **A non-zero
+  `qmd search` exit is a named tool failure, distinct from an empty successful result** — it never
+  reads as "no candidates". The fallback's `rg` command renders the query as data via Bash
+  `printf %q` — **Bash-safe only**: safe to copy/paste into Bash whatever the query contains
+  (`%q` may emit `$'...'`/backslash forms), with no claim made for other shells. The wrapper consumes qmd's `--json` output
   through a python3 standard-library parser against a **pinned, strict top-level schema** (a
   ranked-result array, or `{results: [...]}`; per-result path/excerpt read from DIRECT keys only —
   **nothing nested is ever scanned**, so a metadata path can never become a candidate; source order
@@ -103,11 +107,19 @@ reaches the controlling record even where retrieval alone missed it.
   and makes activation **failed/inconclusive pending a new decision — never a reason to modify the
   parser or broaden the accepted shapes**.
 
-## Non-executing test plan (stubs only — never creates `.qmd/`, never calls the real package)
+## Hermetic test suite (stubs only — never installs, never touches the real `.qmd/`)
 
-The hermetic stub suite (**19 cases** as of the 2026-08-23 activation; re-run after any wrapper
-change) runs with a temporary `DECISION_LOOKUP_HOME` and fake `bun`/`qmd` executables; the real
-repo `.qmd/` is never created and no package is installed. Coverage:
+The committed suite is the executable authority; re-run it after any wrapper change:
+
+```
+bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+```
+
+**25 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+repository-relative execution and cache-invariance verification), plus 1 search-failure case and
+5 quoting cases — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
+asserts it) and never depended on, and no package is installed. Coverage:
 
 1. **Syntax**: `bash -n .claude/skills/decision-lookup/scripts/decision-lookup.sh`.
 2. **Lookup cache miss falls back**: fresh cache home (no tool) + a query → fallback text, exit 0.
@@ -126,6 +138,14 @@ repo `.qmd/` is never created and no package is installed. Coverage:
 6. **Structural `trustedDependencies` check** (the shipped function, extracted verbatim):
    Bun-reformatted, compact, and multiline empty lists accepted; a missing key, an allowlist
    entry, a non-list value, and invalid JSON all rejected.
+7. **Search failure ≠ empty result** (planted red): fake `qmd search` exiting non-zero → the
+   distinct named tool-failure fallback, exit 0, never the empty-result wording.
+8. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
+   leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
+   documented target shell** — against a recording `rg` stub: the exact query must arrive
+   verbatim as ONE argv element and no side-effect sentinel may appear; the `$()`/backtick cases
+   additionally assert in the RENDERED TEXT that the payload is escaped as data (no unescaped
+   `$(` or backtick). The guarantee is Bash-quoting only — no claim for other shells.
 
 ## What this skill must never grow without a NEW decision row
 

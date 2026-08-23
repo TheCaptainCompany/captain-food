@@ -3,6 +3,27 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-23 — decision-lookup review corrections: a tool failure is not an empty result, the
+> fallback is copy/paste-safe, the hermetic suite is committed, and §12's rollback removes what
+> actually exists** (separately authorized review findings; wrapper + skill + proposal). The
+> wrapper now distinguishes a **non-zero `qmd search` exit** (a named tool-failure fallback) from
+> an empty successful result (the absence-decides-nothing fallback) — a dying tool can no longer
+> read as "no candidates"; the fallback's `rg` command renders the query as data via Bash
+> `printf %q` — **Bash-safe only** (quotes, `$()`, backticks, newlines and leading hyphens cannot
+> execute when pasted into Bash; no claim for other shells). The **25-case hermetic stub suite is
+> now committed** at `.claude/skills/decision-lookup/scripts/stub-tests.sh` — the 19 existing
+> behavioral cases retained (with limited harness adaptations for repository-relative execution
+> and cache-invariance verification), plus one planted-red search-failure case and five
+> Bash-quoting cases executed under `bash -c` against a recording `rg` stub; it never installs,
+> never touches the real `.qmd/` — a before/after fingerprint asserts it. Proposal §12 is
+> reconciled to the shipped integration (the unexplained-egress kill criterion is an external,
+> operator-observed condition — the wrapper implements no egress detector): the executable
+> no-consult rollback is `rm -rf <repo>/.qmd` (untracked, rebuildable, loses no record), the
+> obsolete `/tmp/qmd-audit` deletion and "nothing in the repository to remove" assertion are gone,
+> a kill still writes its journal line and opens the row reversal before any reinstall, removing
+> the tracked surface stays a recorded reversal commit, and the wrapper performs no automatic
+> rollback. Lookup exit-0, no-auto-repair and the strict pinned parser are unchanged.
+
 > ✅ **2026-08-23 — RETRIEVAL-QMD ACTIVATED: the required activation test passed on the approved
 > retry, after one correctly-failing false negative** (separately authorized sequence; this entry is the
 > durable activation record — the gitignored `.qmd/activation-evidence.txt` is a cache artifact,

@@ -128,7 +128,7 @@ Per the founder's standing correction: the abstraction is the **`decision-lookup
 
 - **Input**: one query string, or `--install`. There is **no `--k` flag**; the candidate cap is **fixed at 3**.
 - **Success output (plain text, in order)**: on the first successful lookup only, the recorded activation-evidence block; then the fixed advisory disclaimer (unsuppressible, every invocation); the observed-schema line `qmd-json-schema: top-level-array` or `qmd-json-schema: object.results-array`; up to **three** `candidate N: <repo-relative path>` lines each with a short one-line excerpt; and the closing instruction to READ the candidates and resolve the exact `docs/decisions/<KEY>.yaml` row before any decision assertion or founder question. Exit 0.
-- **Fallback output (plain text; every degraded path)**: the same disclaimer; the named reason (not installed / bun absent / rebuild failed with caches wiped / empty result / output contract unavailable); the exact `rg --fixed-strings -i` command **with the user's actual query substituted**; the pointer to the `workflow.md` alias table; and the row-resolution instruction. Exit 0 — unavailability is never an error, and the wrapper never installs, downloads, retries with privileges, or repairs itself.
+- **Fallback output (plain text; every degraded path)**: the same disclaimer; the named reason (not installed / bun absent / rebuild failed with caches wiped / **search-tool failure — a non-zero `qmd search` exit, named distinctly and never presented as an empty result** / empty successful result / output contract unavailable); the exact `rg --fixed-strings -i` command **with the user's actual query rendered as data via Bash `printf %q`** — a **Bash-safe** quoting for copy/paste into Bash specifically (quotes, `$()`, backticks, newlines and leading hyphens cannot execute there, and `--` fences the pattern); `%q` may emit `$'...'`/backslash forms, so no claim is made for other shells; the pointer to the `workflow.md` alias table; and the row-resolution instruction. Exit 0 — unavailability is never an error, and the wrapper never installs, downloads, retries with privileges, or repairs itself.
 - **Internal parser (strict, pinned — part of the activation/rollback condition)**: top level must be a JSON array of result objects or an object whose `results` key holds one; per-result path from DIRECT keys `file`/`path`/`filename` only and excerpt from DIRECT keys `snippet`/`excerpt`/`text`/`title` only — **nothing nested is ever scanned**; source order preserved; first-occurrence dedup; first three unique paths win. Any other shape is "QMD output contract unavailable" → fallback; a shape mismatch is **never** a reason to broaden the parser.
 - **`--install` (the activation test)**: the only path that touches the network; pinned `bun add --exact`, scriptless (`trustedDependencies: []` verified **structurally** via stdlib JSON parsing — the key must exist and be exactly an empty list — plus `bunfig.toml` `ignoreScripts = true`), lockfile integrity verified against the recorded digest. Exits **non-zero** on any failure with the remove-`.qmd/`-before-retry instruction and the reversal-decision rule.
 - **Empty state discipline** (ux + young lenses, unchanged in force): an empty result prints the disclaimer's verbatim rule that no result is NOT evidence of "undecided"; a negative claim requires the fallback search plus direct `docs/decisions/` resolution at HEAD.
@@ -166,28 +166,42 @@ Per the founder's standing correction: the abstraction is the **`decision-lookup
 - **The 19-case hermetic stub suite** (fake `qmd`/`bun`, `DECISION_LOOKUP_HOME` override; never touches the live cache, never installs): syntax; cache-miss fallback exit 0; no-bun `--install` exit 1 with the remove-`.qmd/` message; rebuild-failure cache wipe + fallback; strict-parser acceptance of both pinned shapes with schema line, source order, first-occurrence dedup and the cap of 3; nested-path exclusion (a `meta.path` never becomes a candidate); malformed/unpinned shapes → contract fallback with the activation-inconclusive wording and **no** evidence file; evidence file written exactly once with all seven lines; and the structural trustedDependencies matrix (Bun-format acceptance; missing key, allowlist entry, non-list, invalid JSON all rejected). Re-run manually after any wrapper change.
 - **Standing policy (unchanged in force)**: delete-the-index neutrality — `.qmd/` may be deleted at any time and only recall may change, never an answer; a conclusion that differs with the index absent is a false-authority incident. The verification questions in the SKILL.md table are re-run manually after any wrapper or corpus-mask change.
 
-## 12. Kill criteria and rollback/deletion procedure
+## 12. Kill criteria and rollback/deletion — AS SHIPPED
 
-**Kill criteria — any single one ends the experiment:**
-- failed benchmark hurdle (§10);
-- unavailable/yanked package at the pinned version;
-- T1/T2/T3 or delete-the-index gate failure;
-- **excessive index latency, pre-registered** (farley lens — a kill criterion without a number is a discussion): cold full-index build > **120 s** or benchmark query wall-time p95 > **1000 ms** on the pinned corpus, both fixed here a priori, before any measurement exists;
-- **any false-authority incident** — explicitly including (a) QMD output cited as evidence or authority anywhere, (b) a wrong-record citation traced to the tool reaching any decision surface (business lens: the confident wrong hit is the expensive failure, weighted above misses), and (c) **a "no controlling record" negative sourced from a stale index** (young lens);
-- any lifecycle-script requirement on the BM25 path;
-- **any unexplained egress, with the detector named** (farley lens): the environment proxy's access-log diff over the run window — not the phrase "no egress";
-- **adoption floor** (business lens): fewer than **5 wrapper invocations across 10 logged sessions** after the benchmark completes → the tool is a standing tax with no benefit; rollback executes without debate;
-- the load-bearing detector firing (§11).
+**Historical note**: the benchmark hurdle, the T1/T2/T3 gate failures, the pre-registered latency
+numbers and the adoption floor belonged to the unexecuted full Phase-0 protocol (§4, §11 history).
+The criteria below are the ones that survive for the shipped project-local integration.
 
-**Rollback/deletion (executable, not prose; byte-counted per dba lens; simplified by the sandbox-only rider — there is nothing in the repository to remove):**
+**Kill criteria — any single one triggers the rollback:**
+- **any false-authority incident** — explicitly including (a) QMD output cited as evidence or
+  authority anywhere, (b) a wrong-record citation traced to the tool reaching any decision
+  surface (business lens: the confident wrong hit is the expensive failure, weighted above
+  misses), and (c) **a "no controlling record" negative sourced from the index** (young lens);
+- any lifecycle-script requirement appearing on the BM25 path — at install or at lookup;
+- **any unexplained egress on the lookup path — an external, operator-observed condition, NOT a
+  wrapper detector** (farley lens): the shipped wrapper implements no egress detection; the
+  observation comes from the environment level (e.g. the environment proxy's access log over the
+  window), and the bare phrase "no egress" is never accepted as the observation;
+- the pinned version unavailable/yanked upstream (blocks any future authorized reinstall);
+- a **delete-the-index neutrality violation** (§11): any conclusion that differs with the cache
+  absent.
+
+**Rollback/deletion (executable, no consult — the recorded incident path):**
 ```bash
-# after frozen-export of measurement rows if a gate decision is pending (§9),
-# and after issue-archival of the evidence set if §6.5 applies:
-rm -rf /tmp/qmd-audit/            # wrapper, install, lockfile, index, logs, fixtures, evidence — everything
-df -h /tmp                        # freed space verified immediately writable (environment.md §2)
-git -C /home/user/captain-food status --porcelain   # asserted EMPTY — the repo never held any of it
+# The cache is untracked, gitignored, derived and rebuildable — removing it is always safe and
+# loses no record (the durable activation record lives in the journal and on the row, never in
+# the cache):
+rm -rf "$(git rev-parse --show-toplevel)/.qmd"
+git status --porcelain   # asserted UNCHANGED — the cache was never tracked
 ```
-plus one journal line recording the kill and which criterion fired. The procedure is itself planted-red tested and its proof dated (§11). After rollback, the system is exactly `rg + aliases + direct row resolution` — which it never stopped being.
+plus, in the same change, one journal line recording the kill and which criterion fired — and,
+because the integration is a decided row, a **reversal/new decision on row `RETRIEVAL-QMD`**
+before any reinstall or any change to package, version, permissions or dependency shape.
+**Removing the tracked surface** (SKILL.md, the wrapper, the test suite, the ignore entries) is
+that recorded reversal's commit — never part of the no-consult incident path. **The wrapper
+performs no automatic rollback**: cache deletion is always a deliberate operator action, and the
+wrapper's own behavior on a missing cache is the ordinary fallback. After cache removal the
+system is exactly `rg + aliases + direct row resolution` — which it never stopped being.
 
 ## 13. Phase 1/2 approval boundaries, and the GraphRAG exclusion
 

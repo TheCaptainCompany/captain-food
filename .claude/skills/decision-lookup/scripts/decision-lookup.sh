@@ -45,7 +45,11 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
   echo "$DISCLAIMER"
   echo
   echo "qmd unavailable ($1) — use the baseline (this is the system, not a degraded mode):"
-  echo "  rg --fixed-strings -i -l -- \"$2\" docs/ CLAUDE.md"
+  # %q renders the query as DATA for copy/paste into BASH specifically (this wrapper's and the
+  # repo's documented shell) — quotes, $(), backticks, newlines and a leading hyphen (already
+  # fenced by --) cannot execute there. Bash-quoting only: %q may emit $'...' and backslash
+  # forms that other shells do not guarantee to parse identically.
+  printf '  rg --fixed-strings -i -l -- %q docs/ CLAUDE.md\n' "$2"
   echo "  aliases: docs/claude/sessions/workflow.md (contribution/tip, delivery/rider, founder/product owner/customer, register/decision queue)"
   echo "  then resolve the row: docs/decisions/<KEY>.yaml and READ the controlling record"
   exit 0
@@ -134,7 +138,11 @@ build_corpus || fallback "corpus/index rebuild failed (caches wiped — no stale
 # without its path field is an output-contract failure -> fallback ("QMD output contract
 # unavailable") — never guesswork. The activation test confirms the real shape; a mismatch
 # degrades safely to the fallback and is recorded, per the activation/rollback condition.
-OUT="$(cd "$CORPUS" && env HOME="$QHOME" "$QMD" search "$Q" --json 2>/dev/null)" || OUT=""
+OUT="$(cd "$CORPUS" && env HOME="$QHOME" "$QMD" search "$Q" --json 2>/dev/null)"
+SEARCH_RC=$?
+# A tool failure is NOT an empty result: a non-zero qmd exit takes its own named fallback and
+# must never read as "no candidates". An empty SUCCESSFUL output is the empty-result path.
+[ "$SEARCH_RC" -ne 0 ] && fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; no retry, no repair" "$Q"
 [ -z "$OUT" ] && fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q"
 
 CANDIDATES="$(printf '%s' "$OUT" | python3 -c '
