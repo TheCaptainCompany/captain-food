@@ -2,7 +2,8 @@
 name: decision-lookup
 description: >
   Advisory BM25 candidate retrieval over the committed governing Markdown (ADRs, proposals,
-  journals, session docs, CLAUDE.md) to speed up finding the record that answers a question. Use
+  session docs, STATUS.md, CLAUDE.md — status journals excluded) to speed up finding the record
+  that answers a question. Use
   when searching for a controlling decision record, a prior ruling, or "have we decided X" — BEFORE
   formulating a register-check trail or a founder question. ADVISORY ONLY: candidates, never
   evidence or authority. Every use ends with direct reading of the candidate and exact
@@ -49,14 +50,18 @@ fixed disclaimer, printed on every invocation and never suppressed:
 
 ## Corpus policy (include/exclude — the wrapper enforces it)
 
-- **Included** (committed Markdown only, exported via `git archive HEAD`, never the working tree):
-  `docs/adr/**`, `docs/proposals/**`, `docs/status/**`, `docs/claude/**`, `docs/STATUS.md`,
+- **Included** (committed Markdown only, exported via `git archive` of the one resolved HEAD SHA,
+  never the working tree): `docs/adr/**`, `docs/proposals/**`, `docs/claude/**`, `docs/STATUS.md`,
   `CLAUDE.md`.
-- **Excluded**: `docs/proposals/DECISIONS.md` (carries a GENERATED region duplicating row data —
-  the duplicate/authority-confusion shape this decision forbids), `docs/proposals/PROP-20260822-171212-*`
-  and any QMD experiment artifacts (the recorded contamination source), `specs/generated/**` and
-  all generated files, and everything that is not Markdown — **including `docs/decisions/*.yaml`:
-  row indexing is explicitly out of scope pending separate evidence**.
+- **Excluded**: `docs/status/**` (**the status journals narrate this tool's own activation and
+  verification — queries and answers verbatim — so indexing them lets a lookup match the account
+  of itself, the recorded self-contamination/false-authority shape; `rg + aliases` still searches
+  status records directly whenever they are actually the target**), `docs/proposals/DECISIONS.md`
+  (carries a GENERATED region duplicating row data — the duplicate/authority-confusion shape this
+  decision forbids), `docs/proposals/PROP-20260822-171212-*` and any QMD experiment artifacts
+  (the recorded contamination source), `specs/generated/**` and all generated files, and
+  everything that is not Markdown — **including `docs/decisions/*.yaml`: row indexing is
+  explicitly out of scope pending separate evidence**. (`specs/**` was never included.)
 
 ## Verification cases (run manually after any wrapper or corpus-mask change)
 
@@ -119,11 +124,12 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**26 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**30 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution and cache-invariance verification), plus 1 search-failure case,
-5 quoting cases, and 1 python3-preflight case — all against a temporary `DECISION_LOOKUP_HOME`
-with fake `bun`/`qmd` executables; the real repo `.qmd/` is never created, never modified (a
-before/after fingerprint asserts it) and never depended on, and no package is installed. Coverage:
+5 quoting cases, 1 python3-preflight case, 1 corpus-mask case, 1 stamp/archive-SHA case, and
+2 broken-cache cases — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
+asserts it) and never depended on, and no package is installed. Coverage:
 
 1. **Syntax**: `bash -n .claude/skills/decision-lookup/scripts/decision-lookup.sh`.
 2. **Lookup cache miss falls back**: fresh cache home (no tool) + a query → fallback text, exit 0.
@@ -145,7 +151,15 @@ before/after fingerprint asserts it) and never depended on, and no package is in
    entry, a non-list value, and invalid JSON all rejected.
 7. **Search failure ≠ empty result** (planted red): fake `qmd search` exiting non-zero → the
    distinct named tool-failure fallback, exit 0, never the empty-result wording.
-8. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
+8. **Corpus mask**: after a lookup, the exported corpus contains no `docs/status/**`, no
+   `DECISIONS.md`, no QMD-proposal file — and still contains the governed sources — so a
+   status-only journal document can never be indexed or surface as a candidate.
+9. **Stamp/archive same-SHA**: `corpus/.sha` equals the one resolved `git rev-parse HEAD`, and
+   the wrapper archives `"$head"`, never a re-resolved symbolic `HEAD`.
+10. **Broken cache**: a matching `corpus/.sha` with a missing `corpus/.qmd/index.sqlite` is
+   REBUILT (candidates print; never the empty-result wording); if that rebuild fails, the named
+   rebuild-failed fallback fires with caches wiped — still never the empty-result wording.
+11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive
    verbatim as ONE argv element and no side-effect sentinel may appear; the `$()`/backtick cases

@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-23 — decision-lookup reliability corrections: the corpus can no longer read about
+> itself, a broken cache rebuilds instead of answering empty, and the stamp is the archive's SHA**
+> (separately authorized review findings; wrapper + suite + skill + proposal §6.2). Three fixes:
+> **(1) `docs/status/**` is excluded from the QMD corpus** — the journals narrate this tool's own
+> activation and verification, queries and answers verbatim, so indexing them let a lookup match
+> the account of itself (the recorded self-contamination/false-authority shape); ADRs, proposals,
+> `docs/claude/**`, `docs/STATUS.md` and `CLAUDE.md` remain, and `rg + aliases` still searches
+> status records directly. **(2) A matching `corpus/.sha` with a missing
+> `corpus/.qmd/index.sqlite` is a BROKEN CACHE**: the wrapper now rebuilds it from the pinned
+> archive instead of serving "no result" forever; a failed rebuild wipes the caches and takes the
+> named fallback — never the empty-result wording, never stale output, still exit 0 and no
+> auto-install. **(3) The HEAD/archive race is closed**: `git rev-parse HEAD` is resolved once
+> and that SHA is used for both `git archive` and the stamp — they can no longer diverge. The
+> hermetic suite grows to **30 cases** (corpus-mask, stamp/archive-SHA, and two broken-cache
+> cases), still never touching the live cache.
+
 > 🔧 **2026-08-23 — decision-lookup review corrections: a tool failure is not an empty result, the
 > fallback is copy/paste-safe, the hermetic suite is committed, and §12's rollback removes what
 > actually exists** (separately authorized review findings; wrapper + skill + proposal). The

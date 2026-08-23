@@ -21,11 +21,14 @@ BEFORE="$(fingerprint)"
 
 mkfake() { # $1 = QDIR, $2 = payload file for `search`
   mkdir -p "$1/tool/node_modules/.bin"
+  # `update` mirrors real qmd 2.8.3: on success it leaves the index database inside the
+  # collection dir (cwd) at .qmd/index.sqlite — so the wrapper's index-presence cache check is
+  # exercised for real in these tests.
   cat > "$1/tool/node_modules/.bin/qmd" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   init|collection) exit 0 ;;
-  update) exit \${FAKE_UPDATE_EXIT:-0} ;;
+  update) rc=\${FAKE_UPDATE_EXIT:-0}; [ "\$rc" -eq 0 ] && { mkdir -p .qmd; : > .qmd/index.sqlite; echo x > .qmd/index.sqlite; }; exit "\$rc" ;;
   search) cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
 esac
 EOF
@@ -219,6 +222,42 @@ t9 "command subst quoted as data (bash)"     "\$(touch $S/pwned)"      nodollarp
 t9 "backticks quoted as data (bash)"         "\`touch $S/pwned\`"      nobacktick
 t9 "newline stays one argument (bash)"       $'line one\nline two'     none
 t9 "leading hyphen stays data (bash)"        '-hyphen-start'           none
+
+# T10 corpus mask: docs/status/** is never exported into the corpus, so a status-only journal
+# document can never be indexed and therefore never surface as a candidate (qmd only indexes the
+# collection dir). Uses the REAL `git archive` of the repo via a normal fake lookup; also
+# re-proves the standing exclusions and that the governed sources remain present.
+Q="$S/t10"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "activation verification" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && [ ! -e "$Q/corpus/docs/status" ] \
+  && [ ! -e "$Q/corpus/docs/proposals/DECISIONS.md" ] \
+  && ! ls "$Q"/corpus/docs/proposals/PROP-20260822-171212-* >/dev/null 2>&1 \
+  && [ -d "$Q/corpus/docs/adr" ] && [ -f "$Q/corpus/CLAUDE.md" ] && [ -f "$Q/corpus/docs/STATUS.md" ] \
+  && verdict ok "T10 corpus excludes docs/status/**, keeps governed sources" || verdict bad "T10 corpus mask (rc=$rc)"
+
+# T11 stamp/archive same-SHA: the stamp equals `git rev-parse HEAD` (the one resolved SHA), and
+# the wrapper source archives "$head" — never a re-resolved symbolic HEAD.
+[ "$(cat "$Q/corpus/.sha")" = "$(git -C "$(dirname "$W")/../../../.." rev-parse HEAD)" ] \
+  && grep -q 'git -C "\$REPO" archive "\$head" --' "$W" \
+  && ! grep -q 'archive HEAD --' "$W" \
+  && verdict ok "T11 stamp == resolved SHA; archive uses \$head, not HEAD" || verdict bad "T11 stamp/archive SHA"
+
+# T12 broken cache: corpus/.sha matches HEAD but the index database is missing -> the wrapper
+# must REBUILD (never treat it as a successful empty result). 12a: rebuild succeeds -> candidates
+# print, no empty-result wording. 12b: rebuild fails -> the named rebuild-failed fallback, caches
+# wiped, still never the empty-result wording.
+rm -f "$Q/corpus/.qmd/index.sqlite"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+  && [ -s "$Q/corpus/.qmd/index.sqlite" ] \
+  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && verdict ok "T12a missing index + matching stamp -> rebuilt, candidates, no empty-result" || verdict bad "T12a (rc=$rc)"
+rm -f "$Q/corpus/.qmd/index.sqlite"
+out="$(FAKE_UPDATE_EXIT=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q "rebuild failed" \
+  && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
+  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && verdict ok "T12b missing index + rebuild failure -> named fallback, caches wiped" || verdict bad "T12b (rc=$rc)"
 
 echo "----"
 echo "RESULT: $pass passed, $fail failed"

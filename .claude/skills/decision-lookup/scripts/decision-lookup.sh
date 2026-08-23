@@ -17,8 +17,9 @@
 # authoritative), overridable for hermetic tests via DECISION_LOOKUP_HOME:
 #   .qmd/tool/    the pinned package: package.json (trustedDependencies: []), bunfig.toml
 #                 (ignoreScripts), bun.lock, node_modules/ — created only by `--install`.
-#   .qmd/corpus/  the `git archive HEAD` export of committed Markdown + `.sha` (the pinned
-#                 revision stamp) + the project-local index dir `qmd init` creates inside it.
+#   .qmd/corpus/  the `git archive` export (of the one resolved HEAD SHA) of committed governing
+#                 Markdown + `.sha` (the revision stamp, the same resolved SHA) + the
+#                 project-local index dir `qmd init` creates inside it.
 #   .qmd/index/   QMD's HOME-side state: with HOME pointed here, qmd writes its config under
 #                 .qmd/index/.config/qmd/. The index DATABASE is project-local (observed at
 #                 activation, 2026-08-23): qmd 2.8.3 writes .qmd/corpus/.qmd/index.sqlite
@@ -55,17 +56,25 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
   exit 0
 }
 
-# Cache lifecycle: BEFORE EVERY LOOKUP the cached corpus revision is compared with
-# `git rev-parse HEAD`; on mismatch, `.qmd/corpus` AND `.qmd/index` are discarded and rebuilt from
-# `git archive HEAD` — the WORKING TREE is never indexed. If the rebuild fails, the caches stay
-# wiped and the caller gets the rg + aliases fallback — never stale QMD output. Exclusions
-# (decided): DECISIONS.md (generated region), the QMD proposal (recorded contamination), all
-# non-Markdown (row-YAML indexing is out of scope by decision).
+# Cache lifecycle: BEFORE EVERY LOOKUP the cache is validated — the stored corpus revision must
+# equal `git rev-parse HEAD` AND the index database (corpus/.qmd/index.sqlite) must exist: a
+# matching stamp with a missing index is a BROKEN CACHE (it would answer "no result" forever),
+# not a hit. On mismatch or breakage, `.qmd/corpus` AND `.qmd/index` are discarded and rebuilt
+# from `git archive` of the ONE resolved SHA that is also written to the stamp — HEAD is resolved
+# exactly once, so the archive source and the stamp can never diverge (no re-resolve race). The
+# WORKING TREE is never indexed. If the rebuild fails, the caches stay wiped and the caller gets
+# the rg + aliases fallback — never stale QMD output. Exclusions (decided): DECISIONS.md
+# (generated region), the QMD proposal (recorded contamination), docs/status/** (the journals
+# narrate this tool's own verification queries and answers — indexing them lets a lookup match
+# the account of itself, the recorded self-contamination/false-authority shape; rg + aliases
+# still searches status records directly), and all non-Markdown (row-YAML indexing is out of
+# scope by decision).
 build_corpus() {
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
-  [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] && return 0
+  [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
+    && [ -s "$CORPUS/.qmd/index.sqlite" ] && return 0
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
-  git -C "$REPO" archive HEAD -- docs/adr docs/proposals docs/status docs/claude docs/STATUS.md CLAUDE.md \
+  git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \
     | tar -x -C "$CORPUS" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
   rm -f "$CORPUS/docs/proposals/DECISIONS.md" "$CORPUS"/docs/proposals/PROP-20260822-171212-*
   find "$CORPUS" -type f ! -name '*.md' -delete
