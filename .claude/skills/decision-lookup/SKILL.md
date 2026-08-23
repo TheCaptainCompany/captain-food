@@ -88,6 +88,10 @@ reaches the controlling record even where retrieval alone missed it.
   sandbox spike ran `search` without `--json`, so the real shape is confirmed at the activation
   test; any other structure is "QMD output contract unavailable; use rg + aliases", never
   guesswork.
+- **Python 3 is a required local runtime** for both the structural `trustedDependencies` install
+  verification and the strict JSON results parser. Its absence at `--install` causes a **named
+  non-zero activation failure** (with the standard reversal instruction) — never a fallback
+  installation, download, or repair.
 - **`--install` (the activation test)**: exits **non-zero** on any failure — bun absent, install
   failure, pin/integrity verification against the recorded digest failing, or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and
@@ -115,16 +119,17 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**25 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
-repository-relative execution and cache-invariance verification), plus 1 search-failure case and
-5 quoting cases — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
-executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
-asserts it) and never depended on, and no package is installed. Coverage:
+**26 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+repository-relative execution and cache-invariance verification), plus 1 search-failure case,
+5 quoting cases, and 1 python3-preflight case — all against a temporary `DECISION_LOOKUP_HOME`
+with fake `bun`/`qmd` executables; the real repo `.qmd/` is never created, never modified (a
+before/after fingerprint asserts it) and never depended on, and no package is installed. Coverage:
 
 1. **Syntax**: `bash -n .claude/skills/decision-lookup/scripts/decision-lookup.sh`.
 2. **Lookup cache miss falls back**: fresh cache home (no tool) + a query → fallback text, exit 0.
 3. **Install without Bun exits non-zero**: `PATH` without `bun`, `--install` → "ACTIVATION
-   FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message.
+   FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message. **Install with Bun but
+   without python3** → the named python3-preflight failure, exit ≠ 0, same reversal message.
 4. **Rebuild failure wipes cache and falls back**: fake `qmd` whose `update` exits 1 → fallback,
    exit 0, and the corpus/index dirs are gone.
 5. **Strict parser** (both pinned shapes and every rejection path): `top-level-array` and

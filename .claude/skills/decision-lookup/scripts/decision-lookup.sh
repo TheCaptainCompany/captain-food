@@ -99,6 +99,8 @@ if [ "${1:-}" = "--install" ]; then
   # gitignored cache. Run it deliberately — agents never run it implicitly as part of another
   # task, and its first execution requires the founder's separate approval.
   command -v bun >/dev/null 2>&1 || activation_fail "bun runtime not present"
+  command -v python3 >/dev/null 2>&1 \
+    || activation_fail "python3 not present — required for the structural trustedDependencies verification and the strict results parser"
   mkdir -p "$TOOL" "$QHOME"
   printf '{"name":"captain-qmd","private":true,"trustedDependencies":[]}\n' > "$TOOL/package.json"
   printf '[install]\nignoreScripts = true\n' > "$TOOL/bunfig.toml"

@@ -48,6 +48,27 @@ out="$(env PATH=/usr/bin:/bin DECISION_LOOKUP_HOME="$Q" bash "$W" --install 2>&1
   && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
   && verdict ok "T3 no-bun install exit $rc" || verdict bad "T3 no-bun install (rc=$rc)"
 
+# T3b --install with bun resolvable but python3 ABSENT -> named python3 preflight failure,
+# exit != 0. A controlled PATH dir carries only the externals the script needs before the
+# preflight (bun, dirname) — python3 is deliberately unresolvable. PRECONDITION: the real bun
+# must be found and its symlink created — otherwise T3b FAILS outright, so it can never pass
+# through the earlier "bun runtime not present" path by accident.
+Q="$S/t3b"; mkdir -p "$Q" "$S/t3b-bin"
+BUN_REAL="$(command -v bun || true)"
+if [ -z "$BUN_REAL" ] \
+  || ! ln -s "$BUN_REAL" "$S/t3b-bin/bun" 2>/dev/null || [ ! -x "$S/t3b-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ]; then
+  verdict bad "T3b no-python3 install (precondition: real bun + symlinks unavailable)"
+else
+  out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
+  [ $rc -ne 0 ] \
+    && ! echo "$out" | grep -q "bun runtime not present" \
+    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not present" \
+    && echo "$out" | grep -q "structural trustedDependencies verification and the strict results parser" \
+    && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
+    && verdict ok "T3b no-python3 install: named preflight, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
+fi
+
 # T4 rebuild failure wipes caches and falls back
 Q="$S/t4"; mkfake "$Q" /dev/null
 out="$(FAKE_UPDATE_EXIT=1 DECISION_LOOKUP_HOME="$Q" "$W" "free-delivery threshold" 2>&1)"; rc=$?
