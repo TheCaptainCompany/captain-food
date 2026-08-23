@@ -76,6 +76,18 @@ activation_fail() { # $1 = what failed — the activation test is loud AND non-z
   exit 1
 }
 
+# Structural check (reversal 2026-08-23, replacing a whitespace-sensitive grep that failed against
+# Bun's reformatted JSON while the enforcement itself held): the key "trustedDependencies" must
+# exist in package.json and be EXACTLY an empty list — never an allowlist entry.
+trusted_deps_empty() {
+  python3 -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if d.get("trustedDependencies") == [] else 1)' "$1" 2>/dev/null
+}
+
 if [ "${1:-}" = "--install" ]; then
   # THE ACTIVATION TEST and the ONLY path that touches the network. Pinned, scriptless, inside the
   # gitignored cache. Run it deliberately — agents never run it implicitly as part of another
@@ -92,8 +104,8 @@ if [ "${1:-}" = "--install" ]; then
   grep -qF "$INTEGRITY" "$TOOL/bun.lock" 2>/dev/null \
     || activation_fail "recorded integrity digest not found in bun.lock — the artifact is not the assessed one"
   # Lifecycle-script enforcement must be establishable from the on-disk configuration:
-  grep -q '"trustedDependencies":\[\]' "$TOOL/package.json" 2>/dev/null \
-    || activation_fail "trustedDependencies: [] not present in .qmd/tool/package.json"
+  trusted_deps_empty "$TOOL/package.json" \
+    || activation_fail "trustedDependencies is not exactly an empty list in .qmd/tool/package.json"
   grep -q 'ignoreScripts = true' "$TOOL/bunfig.toml" 2>/dev/null \
     || activation_fail "ignoreScripts = true not present in .qmd/tool/bunfig.toml"
   [ -x "$QMD" ] || activation_fail "qmd binary missing at .qmd/tool/node_modules/.bin/qmd after install"
@@ -184,7 +196,7 @@ if [ ! -f "$EVIDENCE" ]; then
     echo "activation evidence — first successful lookup ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo "package: $PIN"
     if grep -qF "$INTEGRITY" "$TOOL/bun.lock" 2>/dev/null; then echo "lockfile-integrity: verified ($INTEGRITY)"; else echo "lockfile-integrity: NOT VERIFIED in this cache"; fi
-    if grep -q '"trustedDependencies":\[\]' "$TOOL/package.json" 2>/dev/null && grep -q 'ignoreScripts = true' "$TOOL/bunfig.toml" 2>/dev/null; then echo "scriptless-install: enforced (trustedDependencies [] + ignoreScripts)"; else echo "scriptless-install: enforcement NOT confirmed in this cache"; fi
+    if trusted_deps_empty "$TOOL/package.json" && grep -q 'ignoreScripts = true' "$TOOL/bunfig.toml" 2>/dev/null; then echo "scriptless-install: enforced (trustedDependencies [] + ignoreScripts)"; else echo "scriptless-install: enforcement NOT confirmed in this cache"; fi
     echo "corpus-head-sha: $(cat "$CORPUS/.sha" 2>/dev/null || echo missing)"
     echo "corpus-stamp: $CORPUS/.sha"
     echo "sqlite-index: $(find "$QHOME/.cache" -name '*.sqlite' 2>/dev/null | head -1 || true)"
