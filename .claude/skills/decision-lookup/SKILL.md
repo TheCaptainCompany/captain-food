@@ -91,9 +91,10 @@ reaches the controlling record even where retrieval alone missed it.
   reversal-decision instruction (row `RETRIEVAL-QMD`). A failed install may leave a partial
   `.qmd/tool/`; it never claims "nothing changed".
 - **Cache layout / activation evidence**: `.qmd/tool/` (pinned package, lockfile, manifests),
-  `.qmd/corpus/` (`git archive HEAD` export + `.sha` revision stamp), `.qmd/index/` (qmd's
-  HOME-side state — config under `.qmd/index/.config/qmd/`, index database under
-  `.qmd/index/.cache/qmd/*.sqlite`). **Activation evidence** is printed and recorded at
+  `.qmd/corpus/` (`git archive HEAD` export + `.sha` revision stamp + the project-local index
+  database qmd 2.8.3 writes inside the collection dir, observed at activation 2026-08-23:
+  `.qmd/corpus/.qmd/index.sqlite` plus its `-wal`/`-shm` files), `.qmd/index/` (qmd's HOME-side
+  state — config under `.qmd/index/.config/qmd/`). **Activation evidence** is printed and recorded at
   `.qmd/activation-evidence.txt` on the **first successful lookup**: the package pin
   `@tobilu/qmd@2.8.3`, lockfile-integrity verification, scriptless-install enforcement, the corpus
   HEAD SHA, the `.qmd/corpus/.sha` stamp path, the observed SQLite index location, and the

@@ -20,9 +20,11 @@
 #   .qmd/corpus/  the `git archive HEAD` export of committed Markdown + `.sha` (the pinned
 #                 revision stamp) + the project-local index dir `qmd init` creates inside it.
 #   .qmd/index/   QMD's HOME-side state: with HOME pointed here, qmd writes its config under
-#                 .qmd/index/.config/qmd/ and its index database under
-#                 .qmd/index/.cache/qmd/*.sqlite. Activation evidence after the first successful
-#                 lookup = `.qmd/corpus/.sha` exists and `.qmd/index/.cache/qmd/` holds a .sqlite.
+#                 .qmd/index/.config/qmd/. The index DATABASE is project-local (observed at
+#                 activation, 2026-08-23): qmd 2.8.3 writes .qmd/corpus/.qmd/index.sqlite
+#                 (+ -wal/-shm) inside the collection dir. Activation evidence after the first
+#                 successful lookup = `.qmd/corpus/.sha` exists and .qmd/corpus/.qmd/ holds
+#                 index.sqlite.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -110,7 +112,7 @@ if [ "${1:-}" = "--install" ]; then
     || activation_fail "ignoreScripts = true not present in .qmd/tool/bunfig.toml"
   [ -x "$QMD" ] || activation_fail "qmd binary missing at .qmd/tool/node_modules/.bin/qmd after install"
   echo "ACTIVATION INSTALL OK: $PIN (scriptless, pin+integrity verified) at $TOOL"
-  echo "activation completes at the first successful lookup: expect .qmd/corpus/.sha (revision stamp) and a .sqlite under .qmd/index/.cache/qmd/ — report both as activation evidence."
+  echo "activation completes at the first successful lookup: expect .qmd/corpus/.sha (revision stamp) and .qmd/corpus/.qmd/index.sqlite (the project-local index database) — report both as activation evidence."
   exit 0
 fi
 
@@ -199,7 +201,7 @@ if [ ! -f "$EVIDENCE" ]; then
     if trusted_deps_empty "$TOOL/package.json" && grep -q 'ignoreScripts = true' "$TOOL/bunfig.toml" 2>/dev/null; then echo "scriptless-install: enforced (trustedDependencies [] + ignoreScripts)"; else echo "scriptless-install: enforcement NOT confirmed in this cache"; fi
     echo "corpus-head-sha: $(cat "$CORPUS/.sha" 2>/dev/null || echo missing)"
     echo "corpus-stamp: $CORPUS/.sha"
-    echo "sqlite-index: $(find "$QHOME/.cache" -name '*.sqlite' 2>/dev/null | head -1 || true)"
+    echo "sqlite-index: $(find "$CORPUS/.qmd" -maxdepth 1 -name '*.sqlite' 2>/dev/null | head -1 || true)"
     echo "$SCHEMA_LINE"
   } > "$EVIDENCE"
   echo "── activation evidence (recorded at $EVIDENCE) ──"
