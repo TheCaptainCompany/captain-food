@@ -60,3 +60,6 @@ wt*/
 # Filtered-gate logs (`make test-quiet` / `make rust-quiet`) -- read the wrapper's summary, and open
 # this file deliberately with an offset when a verdict needs its surrounding context.
 target/quiet-gate.log
+
+# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD)
+.qmd/

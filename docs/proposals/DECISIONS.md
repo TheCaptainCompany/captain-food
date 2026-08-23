@@ -21,7 +21,6 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `DELIV-THRESHOLD` | open | 2026-08-19 | The free-delivery threshold: which field, computed where, and the ninth money term — design team-owned, commercial parameters founder-owned (suggest, never cap). | team |
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
 | `KEY-NAMESPACE` | open | 2026-08-21 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? | team |
-| `RETRIEVAL-QMD` | open | 2026-08-22 | Approve or reject Phase 0: an isolated, scriptless, BM25-only, local advisory retrieval experiment using exactly @tobilu/qmd@2.8.3, under the supply-chain protocol, corpus boundary, measurement policy, T1-T3 runtime gates, reproducible rg+aliases benchmark, kill criteria, and rollback procedure defined in PROP-20260822-171212. Reject keeps rg + aliases + direct structured-register resolution as the system with QMD never installed or executed. | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
 | `CONTROLLER-HANDOVER` | decided | 2026-08-19 | Is the association-to-company controller handover made reconstructible in the event log? -> ADR-20260819-103112 | founder |
@@ -32,9 +31,10 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REG-3` | decided | 2026-08-21 | Is the whole register page generated, or only its index? -> ADR-20260821-095957 | founder |
 | `REG-4` | decided | 2026-08-21 | What is the status vocabulary? -> ADR-20260821-095957 | founder |
 | `REG-SEQ` | decided | 2026-08-21 | When does the register machinery land, relative to #556 Local acceptance harness? -> ADR-20260821-095957 | founder |
+| `RETRIEVAL-QMD` | decided | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> PROP-20260822-171212 | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**Migrated rows: 20 — 9 open · 10 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 20 — 8 open · 11 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 103** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

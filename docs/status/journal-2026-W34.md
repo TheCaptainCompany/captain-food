@@ -3,6 +3,33 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-22 — RETRIEVAL-QMD DECIDED: the smallest advisory QMD integration is authorized —
+> the skill lands, the authority path does not move** (founder decision, reversing a same-day
+> deferral direction before it landed; the sandbox spike is the evidence). The isolated smoke spike
+> (nine commands, `/tmp/qmd-audit`, scriptless pinned `@tobilu/qmd` 2.8.3, deleted after, repo
+> clean before and after) showed scriptless BM25 works and returns useful ranked Markdown
+> candidates for broad queries; its Markdown mask cannot see `docs/decisions/*.yaml`; **both QMD
+> and rg missed a controlling record once**; the corpus carried QMD-proposal contamination — so
+> the integration is advisory candidates ONLY. Landed: row `RETRIEVAL-QMD` → `decided`
+> (decided_by: the proposal), the proposal's Integration decision record, and the
+> `decision-lookup` skill (`.claude/skills/decision-lookup/` — SKILL.md + wrapper): ≤3 candidates
+> + fixed advisory disclaimer, corpus = committed governing Markdown excluding DECISIONS.md's
+> generated region, the QMD proposal, generated files and all YAML; **project-local `.qmd/` cache
+> (`tool/`, `corpus/`, `index/`), gitignored AND claudeignored** — derived, disposable, never
+> authoritative, durable across sessions on a machine; exact pin, scripts disabled, **no
+> auto-install** (only the explicit documented `--install` command — the **required activation
+> test**, whose first execution needs separate founder approval; a failed activation is recorded
+> and opens a new/reversal decision, never a silent repair or widening — the spike is evidence,
+> not proof the repository wrapper works); before every lookup the cached corpus revision is
+> compared with `git rev-parse HEAD` and rebuilt from `git archive HEAD` on mismatch (working
+> tree never indexed; failed rebuild → rg+aliases fallback, never stale output); rg+aliases
+> fallback printed verbatim on unavailability, and **no result is never evidence of "undecided"**.
+> Non-goals unchanged and each needing a new row: GraphRAG (#643 deferral untouched),
+> vector/embeddings/models, reranking, expansion, MCP/servers, hosted services, credentials,
+> hooks/CI/validator/agent-contract changes, YAML row indexing. `rg + aliases + direct
+> structured-register resolution` and the AskUserQuestion gate remain the authority path,
+> mandatory and unchanged.
+
 > 📇 **2026-08-22 — RETRIEVAL-QMD: the decision package lands; the row is OPEN, nothing is decided,
 > nothing is installed** (founder-directed sequence, 2026-08-22: documentation/governance first,
 > sandbox experiment only after a separately recorded approval). Landed: `docs/decisions/RETRIEVAL-QMD.yaml`
