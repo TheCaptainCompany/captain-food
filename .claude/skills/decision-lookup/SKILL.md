@@ -105,20 +105,27 @@ reaches the controlling record even where retrieval alone missed it.
 
 ## Non-executing test plan (stubs only — never creates `.qmd/`, never calls the real package)
 
-Run with a temporary cache override and fake `bun`/`qmd` executables on `PATH`; the real repo
-`.qmd/` is never created and no package is installed:
+The hermetic stub suite (**19 cases** as of the 2026-08-23 activation; re-run after any wrapper
+change) runs with a temporary `DECISION_LOOKUP_HOME` and fake `bun`/`qmd` executables; the real
+repo `.qmd/` is never created and no package is installed. Coverage:
 
-1. `bash -n .claude/skills/decision-lookup/scripts/decision-lookup.sh` — syntax.
-2. **Lookup cache miss falls back**: fresh `DECISION_LOOKUP_HOME` (no tool) + a query → fallback
-   text, exit 0.
+1. **Syntax**: `bash -n .claude/skills/decision-lookup/scripts/decision-lookup.sh`.
+2. **Lookup cache miss falls back**: fresh cache home (no tool) + a query → fallback text, exit 0.
 3. **Install without Bun exits non-zero**: `PATH` without `bun`, `--install` → "ACTIVATION
-   FAILED", exit ≠ 0.
+   FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message.
 4. **Rebuild failure wipes cache and falls back**: fake `qmd` whose `update` exits 1 → fallback,
    exit 0, and the corpus/index dirs are gone.
-5. **Parser failure falls back**: fake `qmd search --json` emitting invalid JSON → "output
-   contract unavailable" fallback, exit 0.
-6. **At most three candidates**: fake `qmd search --json` emitting five results → exactly three
-   `candidate N:` lines.
+5. **Strict parser** (both pinned shapes and every rejection path): `top-level-array` and
+   `object.results-array` accepted with the `qmd-json-schema:` line printed, source order
+   preserved, first-occurrence dedup, at most three `candidate N:` lines; a nested
+   `meta.path`/`meta.source.file` never becomes a candidate; invalid JSON, an unpinned top-level
+   shape, a missing `results` key, or a result without a direct path key → "output contract
+   unavailable" fallback (the unpinned-shape case with the activation-inconclusive wording), exit
+   0, and **no** activation-evidence file; on a valid first success the evidence file is written
+   exactly once with all seven lines and never re-printed.
+6. **Structural `trustedDependencies` check** (the shipped function, extracted verbatim):
+   Bun-reformatted, compact, and multiline empty lists accepted; a missing key, an allowlist
+   entry, a non-list value, and invalid JSON all rejected.
 
 ## What this skill must never grow without a NEW decision row
 

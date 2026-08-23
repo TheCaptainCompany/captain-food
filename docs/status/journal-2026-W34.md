@@ -3,6 +3,30 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-23 — RETRIEVAL-QMD ACTIVATED: the required activation test passed on the approved
+> retry, after one correctly-failing false negative** (separately authorized sequence; this entry is the
+> durable activation record — the gitignored `.qmd/activation-evidence.txt` is a cache artifact,
+> never the record). The first `--install` (2026-08-23, separately authorized) installed pinned
+> `@tobilu/qmd@2.8.3` scriptlessly — Bun reported **"Blocked 6 postinstalls"**, `bunfig.toml`
+> `ignoreScripts = true` held, and `trustedDependencies` remained an empty list on disk — but the
+> activation test **failed correctly on its own verification defect**: the whitespace-sensitive
+> grep could not match Bun's reformatted `package.json` (a false negative; the enforcement itself
+> held). Per the recorded activation/rollback condition the failure was reported, `.qmd/` removed,
+> and a separately authorized reversal (`588cbd8`) replaced the grep with **structural stdlib-JSON
+> parsing** (the key must exist and be EXACTLY an empty list — never an allowlist entry; the
+> separate `ignoreScripts` check and the non-zero failure semantics unchanged). The separately
+> authorized retry
+> passed end to end: scriptless install verified, **lockfile integrity verified against the
+> recorded sha512 digest**, and the first real lookup ("who bears the refund cost") returned three
+> ranked candidates — the third excerpt being the controlling Q8 cagnotte ruling — with the
+> observed JSON schema **`top-level-array`** (one of the two pinned shapes; no parser change
+> needed), the corpus built from `git archive HEAD` (stamp equal to HEAD, working tree never
+> indexed), and the index database observed at **`.qmd/corpus/.qmd/index.sqlite`** (project-local,
+> not the HOME-side path first documented — corrected in `c75e01e`, which also points the
+> evidence-writer at the real location). **QMD remains advisory only**: candidates, never evidence
+> or authority — never replacing direct source reading, exact `docs/decisions/<KEY>.yaml`
+> resolution, the `rg + aliases` fallback, or the AskUserQuestion register gate.
+
 > ✅ **2026-08-22 — RETRIEVAL-QMD DECIDED: the smallest advisory QMD integration is authorized —
 > the skill lands, the authority path does not move** (founder decision, reversing a same-day
 > deferral direction before it landed; the sandbox spike is the evidence). The isolated smoke spike

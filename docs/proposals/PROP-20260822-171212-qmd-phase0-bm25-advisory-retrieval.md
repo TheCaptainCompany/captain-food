@@ -3,8 +3,8 @@
 - **Status**: **Decided** (founder, 2026-08-22) — a **minimal, advisory, BM25-only QMD integration** is authorized: the `decision-lookup` skill plus one wrapper, and nothing else. See the Integration decision record below for the sandbox-spike evidence, the narrow boundary, the non-goals, and what still requires separate approval. The row `RETRIEVAL-QMD` is `decided` with this proposal as `decided_by`.
 - **Date**: 2026-08-22
 - **Decision row**: `RETRIEVAL-QMD` (decided; this proposal is its option-space authority and deciding record — the row is a compact index and link)
-- **Tracking issue**: PENDING — created immediately before this document's landing commit, its real number inserted here in that same change (ADR-20260724-143000; a guessed number would be the dead-reference anti-pattern PROP-20260818-013222's own header documents)
-- **Realized by**: (filled at completion)
+- **Tracking issue**: [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671) (created 2026-08-23, separately authorized, in the same change that inserted this number — ADR-20260724-143000)
+- **Realized by**: [PR #670 "RETRIEVAL-QMD decided: advisory decision-lookup skill (QMD BM25) — integration package"](https://github.com/TheCaptainCompany/captain-food/pull/670) on branch `claude/retrieval-qmd-decision-package` (decision package `24e9fe8`; decided integration + skill/wrapper `afbf9b4`; structural-check reversal `588cbd8`; index-location fix `c75e01e`) — activation test passed 2026-08-23, recorded in `docs/status/journal-2026-W34.md` and on row `RETRIEVAL-QMD`
 - **Base**: `main` @ `7c6f0bf` — the supply-chain evidence in §2 was gathered 2026-08-22 with this as the repository head
 - **Authority statement**: this proposal proposes. `docs/decisions/<KEY>.yaml` rows remain the sole decision authority; QMD output is **neither controlling nor evidence — a candidate pointer with no citation standing of any class** (evans lens, adopted).
 - **Landing mechanics** (architect lens): key grammar + required fields per `docs/decisions/README.md`; `make generate` in the same commit (the DECISIONS.md index is a GENERATED region — `check-drift` is red otherwise).
@@ -66,15 +66,11 @@ Scope guard: this principle governs tool **selection**. It is not a mandate to r
 - **`rg + aliases + direct structured-register resolution` — the approved baseline and fallback**, and the benchmark control.
 - If no acceptable installation path is established, **Phase 0 is rejected** rather than the Rust preference relaxed or supply-chain ambiguity accepted.
 
-## 4. Phase-0 boundary — SANDBOX-ONLY (founder approval rider, 2026-08-22)
+## 4. Boundary — the decided integration surface (superseding the sandbox-only rider in place, per the living-proposal rule)
 
-**Phase 0 authorizes only an isolated audit-sandbox experiment outside the repository.** Everything Phase 0 creates — the wrapper/harness, the package installation, the lockfile, the `.qmd/` configuration and index, the measurement log, the benchmark fixtures, and the rollback — lives **only inside the isolated audit directory** (`/tmp/qmd-audit/`). **The repository remains clean before and after the experiment**, asserted by `git status --porcelain` at every evidence checkpoint.
+**Historical note (accurate, kept short)**: the sandbox-only rider of 2026-08-22 governed the pre-decision experiment. It was executed in the reduced form the founder directed — the nine-command smoke spike in `/tmp/qmd-audit`, deleted after, repository clean before and after — and its evidence is recorded in the Integration decision record above. The full Phase-0 protocol (pre-registered benchmark, measurement log, three-gate audit) was **not** executed; the founder decided the integration on the smoke-spike evidence, with the activation test as the required proof point.
 
-**Phase 0 does NOT authorize adding to Captain.Food**: a wrapper script; a QMD skill; `.qmd/` configuration or index; `.gitignore`/`.claudeignore` entries; Makefile targets; any `.claude/**` file; agent instructions; hooks, CI, validator, decision-register, or generated-document changes. **Exit deliverable**: after the three runtime gates and the benchmark pass, a short evidence report plus an **exact proposed repository diff** — and a **separate founder decision** is required before any QMD skill, wrapper, repository-local index configuration, or workflow integration is added to Captain.Food.
-
-**In scope (all of it sandbox-local, disposable, advisory):** one isolated scriptless install; `qmd init` inside the sandbox; BM25-only indexing of the corpus copy (§6); `qmd search --json` behind one sandbox wrapper script implementing the contract in §8; the pre-registered benchmark (§10); the three runtime acceptance gates (§11); the non-severable measurement design (§9); the before-number baseline measurement (§1, §10).
-
-**Standing invariants** (farley lens, adopted; strengthened by the rider): the experiment lives **outside the repository entirely** — nothing of it is tracked, so it cannot ride CI and no gate verdict input changes. **The moment anything tracked references the wrapper, qmd, or the sandbox — any tracked file, any `.claude/**` config, any Makefile target — Phase 0 is over by definition**; the audit script carries an executable `grep -r` detector for exactly this plus the repo-cleanliness assertion, run at every evidence checkpoint, so load-bearing-ness has a positive detector rather than depending on someone noticing an incident.
+**The decided tracked surface is exactly**: `.claude/skills/decision-lookup/SKILL.md`, `.claude/skills/decision-lookup/scripts/decision-lookup.sh`, and the `.qmd/` ignore entries in `.gitignore` and `.claudeignore` — plus this proposal, row `RETRIEVAL-QMD`, the regenerated register index, and the journal entries. **Anything beyond that surface — a Makefile target, a hook, CI, validator, agent-contract or mandatory-workflow reference to QMD — requires a new decision row.** The skill is advisory and non-blocking: no gate, hook, validator, or agent contract consumes its output.
 
 **Non-goals — every one of these requires a NEW decision row, none is a fallback:** model downloads of any kind; vector/semantic search; reranking; query expansion; hybrid modes; the QMD MCP server or any server process; GraphRAG (§13); hosted or external services; credentials; hooks; CI changes; `.claude/agents/**` or agent-contract edits; `settings.json` changes; decision-register semantic changes; generated-spec changes; production code; incremental index maintenance (young lens: "freshness pressure is how a cache acquires authority" — rebuild-only, §6); any mandatory-workflow rule (the skill is **advisory** in Phase 0 — it creates no obligation to use it).
 
@@ -109,7 +105,7 @@ Failure of any acceptance gate likewise must not trigger a permission grant, a p
 ## 6. Corpus, storage, and artifact policy (sandbox-only)
 
 - **6.1 Corpus (read-only input)**: `docs/**` + `CLAUDE.md` + `specs/**` markdown — the governed decision/record surfaces — **exported into the sandbox at the pinned commit SHA** (`git archive <SHA> -- docs CLAUDE.md specs | tar -x -C /tmp/qmd-audit/corpus`), so indexing never touches the working tree and the corpus is byte-identical across reruns (a floating corpus makes every number unrepeatable). **Re-index cadence** (architect + young lenses): manual full rebuild only, each rebuild re-pins the SHA; **never incremental maintenance**.
-- **6.2 Nothing enters Git or Claude context** (rider): the `.qmd/` configuration and index live **inside the sandbox** (`/tmp/qmd-audit/work/.qmd/`), not in the repository — so no `.gitignore`/`.claudeignore` entries exist or are needed in Phase 0. Ignore entries appear only in the **proposed repository diff** delivered at Phase-0 exit, for the separate integration decision. The repo-cleanliness assertion (`git status --porcelain` empty) is a planted-red test case (§11).
+- **6.2 The cache is project-local and never enters Git or Claude context** (decided integration, superseding the sandbox location): `.qmd/` lives at the repository root — `tool/` (pinned package + lockfile + manifests), `corpus/` (`git archive HEAD` export + `.sha` revision stamp + the project-local index database qmd 2.8.3 writes at `corpus/.qmd/index.sqlite`), `index/` (qmd's HOME-side config) — **gitignored and claudeignored** (entries landed with the integration commit), derived, disposable, never authoritative, never citable. Before every lookup the wrapper compares `corpus/.sha` with `git rev-parse HEAD` and on mismatch wipes and rebuilds corpus and index from `git archive HEAD` — the working tree is never indexed; a failed rebuild wipes the caches and yields the `rg + aliases` fallback, never stale output. `DECISION_LOOKUP_HOME` overrides the cache location for hermetic tests only.
 - **6.3 Storage discipline** (dba lens, adopted): the index size bound is stated **with its antecedents** — corpus bytes at the pinned SHA × an FTS5 expansion factor of roughly 0.5–1.5× source text + SQLite page/WAL overhead; the builder enforces a hard cap derived from that arithmetic and runs a **pre-build free-space check** (the ephemeral-container disk allowance fails hard at exhaustion — `docs/claude/sessions/environment.md` §2; this repo already paid for skipping this once, SIRENE at 655 MB/77% before #231). **Repair is forbidden by policy**: any open/corruption/version-mismatch error on the index ⇒ delete wholesale and rebuild from the pinned corpus — this is derived data with a replay-restore story by construction; no one writes a repair path. `journal_mode=OFF` or `MEMORY` during the one-shot build is legitimate because durability is explicitly not a goal.
 - **6.4** The index lives at the sandbox `qmd init` location, never in `~/.cache` (the sandbox `XDG_CACHE_HOME` catches any leak; a non-empty sandbox cache after a run is an audit finding).
 - **6.5** Nothing under `.qmd/` or the audit directory is ever citable: citations resolve to `docs/adr/`/`docs/proposals/` files only (validator §23 enforces this — the resolver knows only those directories, by construction). **The audit-directory lockfile is an EVIDENCE ARTIFACT, not a repository dependency lockfile.** It is **not** committed to Captain.Food unless a later approved decision explicitly chooses that. Retention: the evidence set (lockfile, inventories, egress logs, command transcripts, the **dated** rollback-proof run) is retained in the audit directory for the life of the experiment plus 30 days after the Phase-0 decision, then deleted by the rollback procedure (§12); if Phase 0 is approved to continue, the evidence set is archived as an attachment on the tracking issue before the sandbox is deleted.
@@ -126,25 +122,16 @@ Per the founder's standing correction: the abstraction is the **`decision-lookup
 - **The existing `AskUserQuestion` register-check gate**: deterministic enforcement (untouched by this proposal).
 - **`rg` + alias protocol**: mandatory fallback and baseline. **QMD consumes the same alias table by name** (evans lens): the alias table is the declared published language for search; if QMD searched its own vocabulary, the negative trail's `terms:` clause would be ambiguous about which language was searched and the control would stop being a control.
 
-## 8. Wrapper input/output contract
+## 8. Wrapper input/output contract — AS SHIPPED (the decided integration)
 
-- **Input**: one query string; optional `--k N` (default 5, max 20; out-of-range or non-numeric values **clamp and proceed** — graphql lens — consistent with "never refuse, never retry-with-privileges").
-- **One envelope, every path** (graphql lens, adopted — a shape-flip on the unavailability path would make a healthy fallback parse as a crash): stdout is always the same bounded JSON:
-  ```json
-  {"advisory": true,
-   "banner": "ADVISORY ONLY — candidates, not evidence. Resolve and READ the controlling record (docs/decisions/, docs/adr/) before acting. Baseline: rg + aliases.",
-   "candidates": [{"kind": "candidate", "path": "docs/decisions/REFUND-BEARER.yaml", "record": "REFUND-BEARER", "score": 0.91}],
-   "unavailable_reason": null,
-   "fallback": ["rg -n -i \"<actual query>\" docs/ specs/ CLAUDE.md",
-                 "check docs/claude/sessions/workflow.md aliases for <actual query>",
-                 "resolve the row under docs/decisions/, then READ the controlling record"]}
-  ```
-  This **refines, and does not contradict**, the founder's "must print the exact fallback" requirement: the exact fallback commands are printed on every invocation, inside the envelope, **with the user's actual query substituted** — no placeholders, no cwd-dependent paths (ux lens).
-- **Contract rules** (graphql + ux lenses, adopted): the JSON shape evolves **additively only** — keys are never removed or renamed, consumers ignore unknown keys; `score` is **ordinal within a single response only**, higher = better, never comparable across queries or versions — no threshold on it may become load-bearing; `path` is **repo-root-relative POSIX**; every candidate row carries `"kind": "candidate"` and the resolvable `record` id + path, so a single extracted line still self-declares as advisory and the mandated direct read is the cheapest next action (one copy-paste).
-- **Banner discipline** (ux lens): the banner is present on **every** invocation, is **not suppressible by any flag in Phase 0**, and is the first element of the envelope.
-- **Unavailability**: same envelope, `candidates: []`, `unavailable_reason` set to one of `"not-installed" | "index-absent" | "index-stale" | "index-error"` (naming *why*, because "fix it or ignore it" are different next actions), the `fallback` commands carrying the actual query. Exit 0. The wrapper **must not** install anything, download anything, call any other external tool, or retry with different privileges — silent auto-repair is the ADR-20260810-231300 silent-fallback class and is a planted-red test.
-- **Zero-candidates empty state** (ux + young lenses, adopted — the most expensive wrong belief this tool can create is a trusted "nothing exists"): `candidates: []` with a `banner` extension stating verbatim that **an empty advisory result is NOT evidence of absence** and that a "no controlling record" conclusion requires the fallback search at HEAD; the fallback commands are always present in the envelope.
-- The wrapper is a **sandbox artifact** (`/tmp/qmd-audit/bin/decision-lookup`, rider) — never a repository file in Phase 0; the repository version, if ever, arrives via the proposed diff and the separate integration decision. It never writes outside the sandbox (index + opt-in measurement log, §9) and never reads or transmits credentials.
+**Contract resolution, stated explicitly**: the one-JSON-envelope design below in this section's history (graphql lens, drafted for the Phase-0 sandbox wrapper) was **not shipped**. The decided repository wrapper emits **plain text** for direct agent/human reading, and uses JSON only **internally** — it consumes `qmd search --json` through a strict pinned parser. The envelope remains a recorded future *option*; adopting it is an additive output change requiring its own approval, never a silent widening. The founder's binding requirements the envelope was designed to carry — an unsuppressible advisory banner on every path, the exact fallback commands with the actual query substituted, exit 0 on every lookup path, no install/retry/auto-repair (ADR-20260810-231300) — are all carried by the plain-text contract below.
+
+- **Input**: one query string, or `--install`. There is **no `--k` flag**; the candidate cap is **fixed at 3**.
+- **Success output (plain text, in order)**: on the first successful lookup only, the recorded activation-evidence block; then the fixed advisory disclaimer (unsuppressible, every invocation); the observed-schema line `qmd-json-schema: top-level-array` or `qmd-json-schema: object.results-array`; up to **three** `candidate N: <repo-relative path>` lines each with a short one-line excerpt; and the closing instruction to READ the candidates and resolve the exact `docs/decisions/<KEY>.yaml` row before any decision assertion or founder question. Exit 0.
+- **Fallback output (plain text; every degraded path)**: the same disclaimer; the named reason (not installed / bun absent / rebuild failed with caches wiped / empty result / output contract unavailable); the exact `rg --fixed-strings -i` command **with the user's actual query substituted**; the pointer to the `workflow.md` alias table; and the row-resolution instruction. Exit 0 — unavailability is never an error, and the wrapper never installs, downloads, retries with privileges, or repairs itself.
+- **Internal parser (strict, pinned — part of the activation/rollback condition)**: top level must be a JSON array of result objects or an object whose `results` key holds one; per-result path from DIRECT keys `file`/`path`/`filename` only and excerpt from DIRECT keys `snippet`/`excerpt`/`text`/`title` only — **nothing nested is ever scanned**; source order preserved; first-occurrence dedup; first three unique paths win. Any other shape is "QMD output contract unavailable" → fallback; a shape mismatch is **never** a reason to broaden the parser.
+- **`--install` (the activation test)**: the only path that touches the network; pinned `bun add --exact`, scriptless (`trustedDependencies: []` verified **structurally** via stdlib JSON parsing — the key must exist and be exactly an empty list — plus `bunfig.toml` `ignoreScripts = true`), lockfile integrity verified against the recorded digest. Exits **non-zero** on any failure with the remove-`.qmd/`-before-retry instruction and the reversal-decision rule.
+- **Empty state discipline** (ux + young lenses, unchanged in force): an empty result prints the disclaimer's verbatim rule that no result is NOT evidence of "undecided"; a negative claim requires the fallback search plus direct `docs/decisions/` resolution at HEAD.
 
 ## 9. Measurement design (opt-in write, sanitized, local — a NON-severable Phase-0 condition)
 
@@ -170,25 +157,14 @@ Per the founder's standing correction: the abstraction is the **`decision-lookup
 - **Determinism**: BM25 scores depend on tokenizer + corpus snapshot — the pinned SHA makes reruns reproducible; a rerun that diverges is itself a finding.
 - **No informal comparison is ever citable**: "QMD beats rg" may only be uttered with this harness's output as its antecedent.
 
-## 11. Acceptance gates and planted-red tests
+## 11. Acceptance — what actually verifies the shipped wrapper
 
-**Runtime acceptance gates (execution, in the sandbox — source-reading predictions are NOT accepted as passes):**
-- **T1 — scriptless BM25 works**: `bun add --exact @tobilu/qmd@2.8.3 --ignore-scripts` with `trustedDependencies: []`, then `qmd init` + index the pinned corpus + `qmd search --json` returns well-formed results. Any step demanding a lifecycle script → the invariant (§5.1) fires: experiment fails.
-- **T2 — no script executed, reproducible install**: post-install checks find zero script-execution evidence (no build artifacts, no gyp output, no modified package contents vs tarball); lockfile integrity matches §2 digests; frozen-lockfile reinstall reproduces byte-identical `node_modules` inventory; the omit-optional flag behavior is recorded.
-- **T3 — egress and module-loading proof**: proxy logs show `registry.npmjs.org` only during install and **zero** egress during init/index/search; runtime module tracing confirms neither `node-llama-cpp` nor any `@node-llama-cpp/*`/model path loads during the BM25 path, and records which SQLite driver actually loaded (expected `bun:sqlite`).
+**Historical note**: the sandbox gates T1/T2/T3 and the planted-red battery below in this section's git history belonged to the full Phase-0 protocol, which the founder replaced with the nine-command smoke spike (Integration decision record). What verifies the decided integration is the following, all executed and recorded:
 
-**Additional acceptance requirements:**
-- **Delete-the-index neutrality test** (young lens, adopted): delete `.qmd/` and re-run the workflow — **only recall may change, never an answer**. If any conclusion differs with the index absent, the index was load-bearing: false-authority incident.
-- **Rollback proof is dated and re-run** (farley lens, adopted): the planted-red rollback run is dated in the evidence set, and the review that decides "continue" **re-runs it first** — a continue decision on a stale rollback proof is the same as no proof.
-- **Load-bearing detector**: the audit script's `grep -r` assertion (§4) — no tracked file, no `.claude/**` config, no Makefile target references qmd/`.qmd/` — runs at every evidence checkpoint.
-
-**Planted-red tests (each seen red before trusted, per repo doctrine):**
-- Unavailability: point the wrapper at a missing binary → the standard envelope with `candidates: []`, the correct `unavailable_reason`, and the query-substituted fallback commands; exit 0; **no** install/network attempt (red by deleting the fallback branch).
-- Envelope stability: every path — success, empty, unavailable — emits the same JSON shape (red by re-introducing the plain-text unavailability message).
-- Repo cleanliness (rider): after every experiment step — install, init, index, search, benchmark, measurement — `git status --porcelain` in the repository is empty and no repo path has a new/modified file (red by planting a file at the repo root from the harness).
-- No raw-query leakage: run a query containing a unique sentinel token with measurement ON → sentinel absent from every file the wrapper can write (red by flipping a verbose flag).
-- Kill-path works: execute §12 → assert `.qmd/`, the sandbox, and the wrapper are gone and the freed bytes verified writable (red by leaving one file behind).
-- Banner: the advisory banner asserted verbatim in wrapper output on every path (red by deleting the banner line).
+- **The activation test (`--install`), executed 2026-08-23**: the first attempt **failed correctly** — the trustedDependencies verification grep was whitespace-sensitive and could not match Bun's reformatted `package.json`, a **false negative** (the enforcement itself held: Bun reported "Blocked 6 postinstalls"); per the recorded activation/rollback condition the failure was reported, `.qmd/` removed, and a separately authorized reversal (`588cbd8`) replaced the grep with structural stdlib-JSON parsing (key exists and is exactly an empty list — never an allowlist entry). The separately authorized retry passed: scriptless install of pinned `@tobilu/qmd@2.8.3`, six blocked postinstalls, lockfile integrity verified against the recorded sha512 digest.
+- **The first real lookup, executed 2026-08-23**: observed JSON schema **`top-level-array`** (one of the two pinned shapes — no parser change needed); corpus built from `git archive HEAD`, `corpus/.sha` equal to HEAD; index database observed at `.qmd/corpus/.qmd/index.sqlite`; three ranked candidates whose third excerpt was the controlling Q8 refund ruling; activation evidence printed and recorded.
+- **The 19-case hermetic stub suite** (fake `qmd`/`bun`, `DECISION_LOOKUP_HOME` override; never touches the live cache, never installs): syntax; cache-miss fallback exit 0; no-bun `--install` exit 1 with the remove-`.qmd/` message; rebuild-failure cache wipe + fallback; strict-parser acceptance of both pinned shapes with schema line, source order, first-occurrence dedup and the cap of 3; nested-path exclusion (a `meta.path` never becomes a candidate); malformed/unpinned shapes → contract fallback with the activation-inconclusive wording and **no** evidence file; evidence file written exactly once with all seven lines; and the structural trustedDependencies matrix (Bun-format acceptance; missing key, allowlist entry, non-list, invalid JSON all rejected). Re-run manually after any wrapper change.
+- **Standing policy (unchanged in force)**: delete-the-index neutrality — `.qmd/` may be deleted at any time and only recall may change, never an answer; a conclusion that differs with the index absent is a false-authority incident. The verification questions in the SKILL.md table are re-run manually after any wrapper or corpus-mask change.
 
 ## 12. Kill criteria and rollback/deletion procedure
 
@@ -229,52 +205,54 @@ plus one journal line recording the kill and which criterion fired. The procedur
 
 **Option C — defer until a maintained Rust candidate satisfies the same contracts.** Pros: aligns with the language preference at zero present cost. Cons: indefinite wait on third-party maintenance; the preference explicitly does not license waiting when a compliant candidate exists and the experiment is this bounded.
 
-## 15. Lookup flow (sequence) and terminal transcripts
+## 15. Lookup flow (sequence) and terminal transcripts — AS SHIPPED
 
 ```mermaid
 sequenceDiagram
     participant A as Agent (any session)
-    participant W as decision-lookup wrapper (skill)
-    participant Q as QMD (.qmd/ BM25 index — projection)
+    participant W as decision-lookup.sh (skill wrapper)
+    participant Q as QMD over .qmd/ cache (projection)
     participant R as docs/decisions/<KEY>.yaml + controlling record (authority, at HEAD)
-    A->>W: query ("refund bearer decision")
-    alt QMD available, candidates found
-        W->>Q: qmd search --json (BM25, local, no egress)
-        Q-->>W: ranked candidate paths
-        W-->>A: envelope: banner + candidates(kind,record,path,score) + fallback cmds
-    else QMD available, ZERO candidates
-        W-->>A: envelope: banner + candidates:[] + "empty is NOT evidence of absence" + fallback cmds
-        Note over A: a negative REQUIRES the fallback search at HEAD — never the index
-    else QMD unavailable
-        W-->>A: envelope: banner + candidates:[] + unavailable_reason + query-substituted fallback cmds (exit 0, no install, no retry)
+    A->>W: query ("who bears the refund cost")
+    W->>W: corpus/.sha vs git rev-parse HEAD (mismatch: wipe + rebuild from git archive HEAD)
+    alt QMD installed, corpus fresh, candidates found
+        W->>Q: qmd search --json (BM25, local; strict pinned parser)
+        Q-->>W: ranked results (top-level-array | object.results-array)
+        W-->>A: plain text: disclaimer + qmd-json-schema line + up to 3 candidates + READ/resolve instruction (exit 0)
+    else empty result / unpinned output shape
+        W-->>A: plain text: disclaimer + reason + rg command with the actual query + alias-table pointer + row resolution (exit 0)
+        Note over A: no result is NOT evidence of "undecided" — a negative requires the fallback search at HEAD
+    else not installed / bun absent / rebuild failed (caches wiped)
+        W-->>A: the same fallback text, named reason (exit 0; no install, no retry, no repair)
     end
     A->>R: resolve row, READ controlling record at HEAD (MANDATORY — unchanged)
     R-->>A: authoritative status + record (supersession followed forward)
     Note over A,R: A record id enters a trail only after this read. The register-check gate is untouched.
 ```
 
-Transcript mockups (Phase-0 target behavior; one envelope on every path):
+Real transcripts (the recorded 2026-08-23 activation lookup, abridged; and the fallback shape):
 
 ```
-$ decision-lookup "who bears refund cost"
-{"advisory":true,
- "banner":"ADVISORY ONLY — candidates, not evidence. Resolve and READ the controlling record (docs/decisions/, docs/adr/) before acting. Baseline: rg + aliases.",
- "candidates":[
-   {"kind":"candidate","record":"REFUND-BEARER","path":"docs/decisions/REFUND-BEARER.yaml","score":0.91},
-   {"kind":"candidate","record":"ADR-20260819-103112","path":"docs/adr/ADR-20260819-103112-the-six-queue-answers.md","score":0.63}],
- "unavailable_reason":null,
- "fallback":["rg -n -i \"who bears refund cost\" docs/ specs/ CLAUDE.md",
-              "check docs/claude/sessions/workflow.md aliases for: refund, bearer",
-              "resolve the row under docs/decisions/, then READ the controlling record"]}
+$ .claude/skills/decision-lookup/scripts/decision-lookup.sh "who bears the refund cost"
+ADVISORY ONLY — candidates, not evidence. READ the candidate directly, then resolve the
+exact row: docs/decisions/<KEY>.yaml. Baseline and fallback: rg + aliases (workflow.md alias
+table). No result is NOT evidence of "undecided".
 
-$ decision-lookup "anything"        # with .qmd/ deleted
-{"advisory":true,
- "banner":"ADVISORY ONLY — candidates, not evidence. ... Baseline: rg + aliases.",
- "candidates":[],
- "unavailable_reason":"index-absent",
- "fallback":["rg -n -i \"anything\" docs/ specs/ CLAUDE.md",
-              "check docs/claude/sessions/workflow.md aliases for: anything",
-              "resolve the row under docs/decisions/, then READ the controlling record"]}
+qmd-json-schema: top-level-array
+candidate 1: docs/adr/ADR-20260819-103112-the-six-queue-answers-a-fiscal-host-in-the-money-path-and-a-refund-bearer-with-no-field.md
+  ...
+candidate 3: docs/adr/ADR-20260818-233000-the-ten-answers-per-head-monthly-invoice-and-a-cagnotte-that-exists-only-in-prose.md
+  ... Q8 — who bears a refund? -> THE CAGNOTTE bears all of it. ...
+
+next: READ the candidate(s) above, then resolve docs/decisions/<KEY>.yaml before any decision assertion or founder question.
+
+$ .claude/skills/decision-lookup/scripts/decision-lookup.sh "anything"   # with .qmd/ deleted
+ADVISORY ONLY — candidates, not evidence. ...
+
+qmd unavailable (not installed — to install deliberately: .claude/skills/decision-lookup/scripts/decision-lookup.sh --install) — use the baseline (this is the system, not a degraded mode):
+  rg --fixed-strings -i -l -- "anything" docs/ CLAUDE.md
+  aliases: docs/claude/sessions/workflow.md (contribution/tip, delivery/rider, founder/product owner/customer, register/decision queue)
+  then resolve the row: docs/decisions/<KEY>.yaml and READ the controlling record
 ```
 
 ## 16. Consulted (whole roster, per ADR-20260812-143619 — consultation COMPLETE, 2026-08-22)
