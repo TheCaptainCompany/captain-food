@@ -3,6 +3,113 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-23 — decision-lookup reliability corrections: the corpus can no longer read about
+> itself, a broken cache rebuilds instead of answering empty, and the stamp is the archive's SHA**
+> (separately authorized review findings; wrapper + suite + skill + proposal §6.2). Three fixes:
+> **(1) `docs/status/**` is excluded from the QMD corpus** — the journals narrate this tool's own
+> activation and verification, queries and answers verbatim, so indexing them let a lookup match
+> the account of itself (the recorded self-contamination/false-authority shape); ADRs, proposals,
+> `docs/claude/**`, `docs/STATUS.md` and `CLAUDE.md` remain, and `rg + aliases` still searches
+> status records directly. **(2) A matching `corpus/.sha` with a missing
+> `corpus/.qmd/index.sqlite` is a BROKEN CACHE**: the wrapper now rebuilds it from the pinned
+> archive instead of serving "no result" forever; a failed rebuild wipes the caches and takes the
+> named fallback — never the empty-result wording, never stale output, still exit 0 and no
+> auto-install. **(3) The HEAD/archive race is closed**: `git rev-parse HEAD` is resolved once
+> and that SHA is used for both `git archive` and the stamp — they can no longer diverge. The
+> hermetic suite grows to **30 cases** (corpus-mask, stamp/archive-SHA, and two broken-cache
+> cases), still never touching the live cache.
+
+> 🔧 **2026-08-23 — decision-lookup review corrections: a tool failure is not an empty result, the
+> fallback is copy/paste-safe, the hermetic suite is committed, and §12's rollback removes what
+> actually exists** (separately authorized review findings; wrapper + skill + proposal). The
+> wrapper now distinguishes a **non-zero `qmd search` exit** (a named tool-failure fallback) from
+> an empty successful result (the absence-decides-nothing fallback) — a dying tool can no longer
+> read as "no candidates"; the fallback's `rg` command renders the query as data via Bash
+> `printf %q` — **Bash-safe only** (quotes, `$()`, backticks, newlines and leading hyphens cannot
+> execute when pasted into Bash; no claim for other shells). The **25-case hermetic stub suite is
+> now committed** at `.claude/skills/decision-lookup/scripts/stub-tests.sh` — the 19 existing
+> behavioral cases retained (with limited harness adaptations for repository-relative execution
+> and cache-invariance verification), plus one planted-red search-failure case and five
+> Bash-quoting cases executed under `bash -c` against a recording `rg` stub; it never installs,
+> never touches the real `.qmd/` — a before/after fingerprint asserts it. Proposal §12 is
+> reconciled to the shipped integration (the unexplained-egress kill criterion is an external,
+> operator-observed condition — the wrapper implements no egress detector): the executable
+> no-consult rollback is `rm -rf <repo>/.qmd` (untracked, rebuildable, loses no record), the
+> obsolete `/tmp/qmd-audit` deletion and "nothing in the repository to remove" assertion are gone,
+> a kill still writes its journal line and opens the row reversal before any reinstall, removing
+> the tracked surface stays a recorded reversal commit, and the wrapper performs no automatic
+> rollback. Lookup exit-0, no-auto-repair and the strict pinned parser are unchanged.
+
+> ✅ **2026-08-23 — RETRIEVAL-QMD ACTIVATED: the required activation test passed on the approved
+> retry, after one correctly-failing false negative** (separately authorized sequence; this entry is the
+> durable activation record — the gitignored `.qmd/activation-evidence.txt` is a cache artifact,
+> never the record). The first `--install` (2026-08-23, separately authorized) installed pinned
+> `@tobilu/qmd@2.8.3` scriptlessly — Bun reported **"Blocked 6 postinstalls"**, `bunfig.toml`
+> `ignoreScripts = true` held, and `trustedDependencies` remained an empty list on disk — but the
+> activation test **failed correctly on its own verification defect**: the whitespace-sensitive
+> grep could not match Bun's reformatted `package.json` (a false negative; the enforcement itself
+> held). Per the recorded activation/rollback condition the failure was reported, `.qmd/` removed,
+> and a separately authorized reversal (`588cbd8`) replaced the grep with **structural stdlib-JSON
+> parsing** (the key must exist and be EXACTLY an empty list — never an allowlist entry; the
+> separate `ignoreScripts` check and the non-zero failure semantics unchanged). The separately
+> authorized retry
+> passed end to end: scriptless install verified, **lockfile integrity verified against the
+> recorded sha512 digest**, and the first real lookup ("who bears the refund cost") returned three
+> ranked candidates — the third excerpt being the controlling Q8 cagnotte ruling — with the
+> observed JSON schema **`top-level-array`** (one of the two pinned shapes; no parser change
+> needed), the corpus built from `git archive HEAD` (stamp equal to HEAD, working tree never
+> indexed), and the index database observed at **`.qmd/corpus/.qmd/index.sqlite`** (project-local,
+> not the HOME-side path first documented — corrected in `c75e01e`, which also points the
+> evidence-writer at the real location). **QMD remains advisory only**: candidates, never evidence
+> or authority — never replacing direct source reading, exact `docs/decisions/<KEY>.yaml`
+> resolution, the `rg + aliases` fallback, or the AskUserQuestion register gate.
+
+> ✅ **2026-08-22 — RETRIEVAL-QMD DECIDED: the smallest advisory QMD integration is authorized —
+> the skill lands, the authority path does not move** (founder decision, reversing a same-day
+> deferral direction before it landed; the sandbox spike is the evidence). The isolated smoke spike
+> (nine commands, `/tmp/qmd-audit`, scriptless pinned `@tobilu/qmd` 2.8.3, deleted after, repo
+> clean before and after) showed scriptless BM25 works and returns useful ranked Markdown
+> candidates for broad queries; its Markdown mask cannot see `docs/decisions/*.yaml`; **both QMD
+> and rg missed a controlling record once**; the corpus carried QMD-proposal contamination — so
+> the integration is advisory candidates ONLY. Landed: row `RETRIEVAL-QMD` → `decided`
+> (decided_by: the proposal), the proposal's Integration decision record, and the
+> `decision-lookup` skill (`.claude/skills/decision-lookup/` — SKILL.md + wrapper): ≤3 candidates
+> + fixed advisory disclaimer, corpus = committed governing Markdown excluding DECISIONS.md's
+> generated region, the QMD proposal, generated files and all YAML; **project-local `.qmd/` cache
+> (`tool/`, `corpus/`, `index/`), gitignored AND claudeignored** — derived, disposable, never
+> authoritative, durable across sessions on a machine; exact pin, scripts disabled, **no
+> auto-install** (only the explicit documented `--install` command — the **required activation
+> test**, whose first execution needs separate founder approval; a failed activation is recorded
+> and opens a new/reversal decision, never a silent repair or widening — the spike is evidence,
+> not proof the repository wrapper works); before every lookup the cached corpus revision is
+> compared with `git rev-parse HEAD` and rebuilt from `git archive HEAD` on mismatch (working
+> tree never indexed; failed rebuild → rg+aliases fallback, never stale output); rg+aliases
+> fallback printed verbatim on unavailability, and **no result is never evidence of "undecided"**.
+> Non-goals unchanged and each needing a new row: GraphRAG (#643 deferral untouched),
+> vector/embeddings/models, reranking, expansion, MCP/servers, hosted services, credentials,
+> hooks/CI/validator/agent-contract changes, YAML row indexing. `rg + aliases + direct
+> structured-register resolution` and the AskUserQuestion gate remain the authority path,
+> mandatory and unchanged.
+
+> 📇 **2026-08-22 — RETRIEVAL-QMD: the decision package lands; the row is OPEN, nothing is decided,
+> nothing is installed** (founder-directed sequence, 2026-08-22: documentation/governance first,
+> sandbox experiment only after a separately recorded approval). Landed: `docs/decisions/RETRIEVAL-QMD.yaml`
+> (`status: open` — per the founder's row-status correction, the row records a decision only when a
+> durable change flips it, and a future decided outcome authorizes the SANDBOX EXPERIMENT only,
+> never QMD integration) and
+> [PROP-20260822-171212](../proposals/PROP-20260822-171212-qmd-phase0-bm25-advisory-retrieval.md) —
+> the sandbox-only Phase-0 protocol for a scriptless, BM25-only, local, disposable, ADVISORY
+> retrieval experiment with `@tobilu/qmd` pinned at 2.8.3: everything (install, wrapper, index,
+> logs, fixtures, rollback) lives in an isolated audit directory outside the repository; the repo
+> stays clean before and after; exit = evidence report + a proposed integration diff needing its
+> own founder decision. Whole-roster consultation complete with dispositions (proposal §16; holub's
+> dissent recorded and adopted: premise marked UNVERIFIED, sequencing clause — does not displace
+> [#556 "Local acceptance harness"](https://github.com/TheCaptainCompany/captain-food/issues/556),
+> no mob/dispatch slot before one order flows). Explicitly NOT graph engineering: the
+> [#643](https://github.com/TheCaptainCompany/captain-food/issues/643) deferral of
+> PROP-20260818-013222 stands untouched and controls any future graph proposal on its own.
+> Baseline unchanged and authoritative: rg + aliases + direct structured-register resolution.
+
 > 🛡️ **2026-08-21 — ASK-GATE HARDENING: the selftest gates CI on every path, the wiring check is
 > semantic, and STATUS carries the register as durable state** (founder-directed follow-up to the
 > [#669 "Decision-register enforcement"](https://github.com/TheCaptainCompany/captain-food/pull/669)

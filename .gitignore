@@ -19,3 +19,6 @@ wt*/
 
 # Register-check hook firing log (runtime artifact, ADR-20260821-010543)
 .claude/register-check.log
+
+# QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD)
+.qmd/

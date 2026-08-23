@@ -31,9 +31,10 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REG-3` | decided | 2026-08-21 | Is the whole register page generated, or only its index? -> ADR-20260821-095957 | founder |
 | `REG-4` | decided | 2026-08-21 | What is the status vocabulary? -> ADR-20260821-095957 | founder |
 | `REG-SEQ` | decided | 2026-08-21 | When does the register machinery land, relative to #556 Local acceptance harness? -> ADR-20260821-095957 | founder |
+| `RETRIEVAL-QMD` | decided | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> PROP-20260822-171212 | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**Migrated rows: 19 — 8 open · 10 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 20 — 8 open · 11 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 103** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
