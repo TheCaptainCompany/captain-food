@@ -28,7 +28,10 @@ mkfake() { # $1 = QDIR, $2 = payload file for `search`
 #!/usr/bin/env bash
 case "\$1" in
   init|collection) exit 0 ;;
-  update) rc=\${FAKE_UPDATE_EXIT:-0}; [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; echo x > .qmd/index.sqlite; }; exit "\$rc" ;;
+  update) rc=\${FAKE_UPDATE_EXIT:-0}
+          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; echo x > .qmd/index.sqlite; }
+          [ -n "\${FAKE_UPDATE_STAMP_BLOCK:-}" ] && mkdir -p .sha   # a DIRECTORY at the stamp path makes the stamp write fail deterministically
+          exit "\$rc" ;;
   search) cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
 esac
 EOF
@@ -44,12 +47,20 @@ out="$(DECISION_LOOKUP_HOME="$Q" "$W" "who bears the refund cost" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "not installed" && echo "$out" | grep -q "rg --fixed-strings" \
   && verdict ok "T2 cache-miss fallback exit 0" || verdict bad "T2 cache-miss fallback (rc=$rc)"
 
-# T3 --install without bun -> ACTIVATION FAILED, exit != 0
-Q="$S/t3"; mkdir -p "$Q"
-out="$(env PATH=/usr/bin:/bin DECISION_LOOKUP_HOME="$Q" bash "$W" --install 2>&1)"; rc=$?
-[ $rc -ne 0 ] && echo "$out" | grep -q "ACTIVATION FAILED: bun runtime not present" \
-  && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
-  && verdict ok "T3 no-bun install exit $rc" || verdict bad "T3 no-bun install (rc=$rc)"
+# T3 --install without bun -> ACTIVATION FAILED, exit != 0. Controlled-PATH design (T3b's
+# model — no reliance on bun being absent from any host directory): the PATH dir carries ONLY
+# the externals the script needs before the bun check (dirname); PRECONDITIONS assert the
+# symlink exists AND that bun is genuinely unresolvable in that PATH, else T3 FAILS outright.
+Q="$S/t3"; mkdir -p "$Q" "$S/t3-bin"
+if ! ln -s "$(command -v dirname)" "$S/t3-bin/dirname" 2>/dev/null || [ ! -x "$S/t3-bin/dirname" ] \
+  || env PATH="$S/t3-bin" /bin/bash -c 'command -v bun' >/dev/null 2>&1; then
+  verdict bad "T3 no-bun install (precondition: controlled PATH not constructible or bun resolvable)"
+else
+  out="$(env PATH="$S/t3-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
+  [ $rc -ne 0 ] && echo "$out" | grep -q "ACTIVATION FAILED: bun runtime not present" \
+    && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
+    && verdict ok "T3 no-bun install exit $rc" || verdict bad "T3 no-bun install (rc=$rc)"
+fi
 
 # T3b --install with bun resolvable but python3 ABSENT -> named python3 preflight failure,
 # exit != 0. A controlled PATH dir carries only the externals the script needs before the
@@ -277,6 +288,17 @@ out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && [ -z "$(find "$Q" -name '.sha' 2>/dev/null)" ] \
   && verdict ok "T13b index-less successful update -> wiped, unstamped, named fallback" || verdict bad "T13b (rc=$rc)"
+
+# T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
+# the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,
+# and exit 0. The fake update blocks the stamp by pre-creating a DIRECTORY at the stamp path.
+Q="$S/t14"; mkfake "$Q" "$S/p5a.json"
+out="$(FAKE_UPDATE_STAMP_BLOCK=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q "rebuild failed" \
+  && echo "$out" | grep -q "caches wiped" \
+  && ! echo "$out" | grep -q '^candidate ' \
+  && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
+  && verdict ok "T14 stamp-write failure -> caches truly wiped, named fallback, exit 0" || verdict bad "T14 (rc=$rc)"
 
 echo "----"
 echo "RESULT: $pass passed, $fail failed"

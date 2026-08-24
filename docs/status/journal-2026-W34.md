@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-24 — decision-lookup slice-A corrections: the "caches wiped" message is now true on
+> every failure arm, the bun-absent test is host-independent, and the `.qmd/` ignore entry records
+> its deliberate non-mirror** (separately authorized; three small follow-ups tracked on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671)). (1) A failure to
+> write `corpus/.sha` after a successful indexed build now wipes the derived corpus/index caches
+> before returning failure — the existing named rebuild-failed fallback's "caches wiped" wording
+> was inaccurate on that one arm; every failure arm of `build_corpus` now behaves identically.
+> (2) Stub case T3 (bun-absent `--install`) reworked to T3b's controlled-PATH model with asserted
+> preconditions — no more reliance on bun being absent from `/usr/bin:/bin`. (3) The
+> `.claudeignore` `.qmd/` entry now records that it is deliberately NOT mirrored in
+> `settings.json` `permissions.deny` (the RETRIEVAL-QMD decision forbids `settings.json` changes
+> without separate approval) — `settings.json` untouched. Hermetic suite: **33 cases** (T14
+> stamp-write-failure regression added). Lookup exit-0, `--install` semantics, cache policy and
+> all boundaries unchanged.
+
 > 🔧 **2026-08-23 — decision-lookup post-update index assertion: a "successful" update that writes
 > no index is never stamped** (separately authorized; implements the founder-authorized fix for
 > the independent review's priority finding tracked on

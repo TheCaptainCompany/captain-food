@@ -86,7 +86,9 @@ build_corpus() {
   # A "successful" update that left no index at the checked location is a rebuild failure:
   # never stamp it (a stamped index-less corpus would rebuild forever, silently).
   [ -s "$CORPUS/.qmd/index.sqlite" ] || { rm -rf "$CORPUS" "$QHOME"; return 1; }
-  printf '%s' "$head" > "$CORPUS/.sha"
+  # A failed stamp write wipes the derived caches like every other failure arm, so the caller's
+  # "caches wiped" fallback wording stays exactly true and no partial state survives.
+  printf '%s' "$head" > "$CORPUS/.sha" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
 }
 
 activation_fail() { # $1 = what failed — the activation test is loud AND non-zero
