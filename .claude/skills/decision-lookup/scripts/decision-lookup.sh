@@ -73,10 +73,21 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 # the account of itself, the recorded self-contamination/false-authority shape; rg + aliases
 # still searches status records directly), and all non-Markdown (row-YAML indexing is out of
 # scope by decision).
-index_openable() { # bounded openability probe (delete-wholesale on failure — no repair path)
-  python3 -c 'import sqlite3, sys
+index_openable() { # bounded openability probe (delete-wholesale on failure — no repair path).
+  # IMMUTABLE (implies read-only) on purpose — the probe must be a ZERO-WRITE observer: a
+  # default rw connect silently runs SQLite WAL recovery on a pending -wal (a WRITE into the
+  # derived index on the hit path, i.e. the repair proposal 6.3 forbids) and can block on the
+  # 5s busy wait; even plain mode=ro still CREATES the -shm side file when a -wal is present
+  # (verified empirically, sqlite 3.45). immutable=1 + timeout=0 touch nothing: the question is
+  # whether the MAIN database file is openable — a pending -wal is deliberately ignored (WAL
+  # handling belongs to the tool's own rw open; lookups are sequential, so the no-locking
+  # semantics of immutable are safe here). pathname2url keeps an arbitrary DECISION_LOOKUP_HOME
+  # path URI-safe.
+  python3 -c 'import sqlite3, sys, urllib.request
 try:
-    c = sqlite3.connect(sys.argv[1]); c.execute("PRAGMA schema_version"); c.close()
+    uri = "file:" + urllib.request.pathname2url(sys.argv[1]) + "?immutable=1"
+    c = sqlite3.connect(uri, uri=True, timeout=0)
+    c.execute("PRAGMA schema_version"); c.close()
 except Exception:
     sys.exit(1)' "$1" 2>/dev/null
 }

@@ -342,6 +342,28 @@ else
     || verdict bad "T15b no-python3 lookup (rc=$rc)"
 fi
 
+# T15c the probe is a ZERO-WRITE observer: a garbage index.sqlite-wal planted beside a healthy
+# stamped index must survive a cache-hit lookup with the index sidecar set byte-identical — no
+# file changed, none deleted, NONE CREATED. Verified empirically (sqlite 3.45): a default rw
+# connect runs WAL recovery during the probe and DELETES the planted -wal (the silent repair
+# proposal 6.3 forbids); even plain mode=ro CREATES the -shm side file. Both mutants change the
+# fingerprint; only immutable=1 leaves it. Candidates must still print (the fake search never
+# reads the index).
+Q="$S/t15c"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ]; then
+  verdict bad "T15c probe read-only (precondition: healthy build failed)"
+else
+  printf 'garbage-not-a-wal-header' > "$Q/corpus/.qmd/index.sqlite-wal"
+  fp_b="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15c probe is read-only: planted -wal survives a hit byte-identical" \
+    || verdict bad "T15c probe read-only (rc=$rc)"
+fi
+
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,
 # and exit 0. The fake update blocks the stamp by pre-creating a DIRECTORY at the stamp path.

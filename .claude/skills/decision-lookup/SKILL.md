@@ -86,9 +86,16 @@ reaches the controlling record even where retrieval alone missed it.
   reads as "no candidates", **and it wipes the derived corpus/index caches before falling back**
   (delete-wholesale, never repair — proposal §6.3): deep index corruption cannot degrade every
   lookup until HEAD changes; the next lookup rebuilds from the pinned archive. The cache-hit
-  check also runs a **bounded openability probe** (sqlite connect + `PRAGMA schema_version` —
-  never `quick_check`/`integrity_check` per lookup): a corrupt-but-present index is a broken
-  cache and takes the ordinary wipe-and-rebuild path. **python3 is preflighted on the lookup
+  check also runs a **bounded openability probe** (**immutable read-only** sqlite connect —
+  zero writes, zero locks, zero busy timeout — + `PRAGMA schema_version`; never
+  `quick_check`/`integrity_check` per lookup): a corrupt-but-present index is a broken cache
+  and takes the ordinary wipe-and-rebuild path. The probe is a **zero-write observer** — a
+  default read-write connect would silently run SQLite WAL recovery on the hit path (a write
+  into the derived index: the repair §6.3 forbids), and even a plain read-only connect creates
+  the `-shm` side file; `immutable=1` touches nothing. The probe asks only whether the main
+  database file is openable — a pending `-wal` is deliberately ignored (WAL handling belongs to
+  the tool's own read-write open); an unopenable main file fails the probe and is wiped and
+  rebuilt. **python3 is preflighted on the lookup
   path before the cache is consulted**: without it the probe's failure would be
   indistinguishable from corruption and every lookup would wipe and rebuild a healthy cache —
   absence instead degrades to the named fallback with the caches untouched. The fallback's `rg` command renders the
@@ -137,13 +144,14 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**35 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**36 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 2 python3-preflight cases (install non-zero; lookup falls back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
-1 corrupt-index case — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+2 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
+byte-identical — the probe never writes) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -184,6 +192,9 @@ asserts it) and never depended on, and no package is installed. Coverage:
    "caches wiped" wording is true on every failure arm. A corrupt-but-present index (garbage
    bytes, matching stamp) fails the openability probe and is rebuilt — candidates print, never a
    permanent tool-failure; a failed search wipes the derived caches before its named fallback.
+   The probe itself never writes: a garbage `index.sqlite-wal` planted beside a healthy stamped
+   index survives a cache-hit lookup byte-identical (a read-write connect would have run WAL
+   recovery and deleted it).
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive
