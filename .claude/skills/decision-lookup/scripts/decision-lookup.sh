@@ -83,7 +83,16 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # handling belongs to the tool's own rw open; lookups are sequential, so the no-locking
   # semantics of immutable are safe here). pathname2url keeps an arbitrary DECISION_LOOKUP_HOME
   # path URI-safe.
-  python3 -c 'import sqlite3, sys, urllib.request
+  # Exit contract: 0 = openable; 1 = NOT openable (wipe + rebuild); 2 = probe UNAVAILABLE —
+  # the sqlite3 module is a COMPILE-TIME optional of python3 (unlike json), and its absence
+  # must never be read as corruption, or every lookup would silently wipe and rebuild a
+  # healthy cache (the same conflation the lookup-path python3 preflight closes, one layer
+  # down). The caller routes 2 to a named fallback with the caches untouched.
+  python3 -c 'import sys, urllib.request
+try:
+    import sqlite3
+except Exception:
+    sys.exit(2)
 try:
     uri = "file:" + urllib.request.pathname2url(sys.argv[1]) + "?immutable=1"
     c = sqlite3.connect(uri, uri=True, timeout=0)
@@ -92,11 +101,16 @@ except Exception:
     sys.exit(1)' "$1" 2>/dev/null
 }
 
-build_corpus() {
+build_corpus() { # returns 0 = cache ready; 2 = openability probe unavailable (caches untouched); 1 = rebuild failed (caches wiped)
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
-  [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
-    && [ -s "$CORPUS/.qmd/index.sqlite" ] \
-    && index_openable "$CORPUS/.qmd/index.sqlite" && return 0
+  if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
+    && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
+    index_openable "$CORPUS/.qmd/index.sqlite"
+    case $? in
+      0) return 0 ;;
+      2) return 2 ;;   # probe unavailable — NOT corruption: leave the stamped cache alone
+    esac                # exit 1 falls through: broken cache, wipe and rebuild below
+  fi
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
   git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \
     | tar -x -C "$CORPUS" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
@@ -170,7 +184,10 @@ command -v bun >/dev/null 2>&1 || fallback "bun runtime not present" "$Q"
 command -v python3 >/dev/null 2>&1 \
   || fallback "python3 not present — required for the openability probe and the strict results parser" "$Q"
 [ -x "$QMD" ] || fallback "not installed — to install deliberately: .claude/skills/decision-lookup/scripts/decision-lookup.sh --install" "$Q"
-build_corpus || fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
+build_corpus
+BC_RC=$?
+[ "$BC_RC" -eq 2 ] && fallback "python3 lacks the sqlite3 module — the openability probe cannot run; caches untouched (probe unavailability is never read as corruption)" "$Q"
+[ "$BC_RC" -ne 0 ] && fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
 
 # Machine-readable output only: qmd's --json mode, parsed with the python3 standard library
 # against a PINNED, STRICT top-level schema. PROVENANCE NOTE (honest): the completed sandbox spike
@@ -190,7 +207,11 @@ SEARCH_RC=$?
 # must never read as "no candidates". An empty SUCCESSFUL output is the empty-result path.
 # Per the delete-wholesale policy (proposal 6.3), a search failure also wipes the derived caches
 # BEFORE falling back — deep index corruption the openability probe cannot see must not degrade
-# every lookup until HEAD changes; the next lookup rebuilds from the pinned archive.
+# every lookup until HEAD changes; the next lookup rebuilds from the pinned archive. HONEST COST
+# (recorded): the exit code cannot distinguish a damaged index from qmd rejecting the QUERY
+# itself, so a query-triggered failure pays the same wipe and the NEXT lookup pays a full
+# rebuild. That cost-shift is accepted over ever serving a possibly-poisoned cache; if the
+# cache "keeps rebuilding", look for a query shape qmd rejects.
 [ "$SEARCH_RC" -ne 0 ] && { rm -rf "$CORPUS" "$QHOME"; fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; derived caches wiped (delete-wholesale, never repair); no retry" "$Q"; }
 [ -z "$OUT" ] && fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q"
 

@@ -364,6 +364,30 @@ else
     || verdict bad "T15c probe read-only (rc=$rc)"
 fi
 
+# T15d probe UNAVAILABLE is not corruption: python3 present but the sqlite3 MODULE missing (a
+# compile-time optional, unlike json) must take a NAMED fallback with the stamped cache left
+# byte-untouched — never the silent wipe-and-rebuild that reading exit 2 as "corrupt" would
+# cause. Simulated hermetically by poisoning PYTHONPATH with an import-raising sqlite3 module.
+Q="$S/t15d"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
+mkdir -p "$S/t15d-py"
+printf 'raise ImportError("sqlite3 blocked for T15d")\n' > "$S/t15d-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || PYTHONPATH="$S/t15d-py" python3 -c 'import sqlite3' 2>/dev/null; then
+  verdict bad "T15d probe-unavailable (precondition: seeded cache or sqlite3 poisoning failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15d-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && echo "$out" | grep -q "sqlite3 module" \
+    && echo "$out" | grep -q "never read as corruption" \
+    && ! echo "$out" | grep -q '^candidate ' \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15d sqlite3-module-absent: named fallback, cache untouched, exit $rc" \
+    || verdict bad "T15d probe-unavailable (rc=$rc)"
+fi
+
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,
 # and exit 0. The fake update blocks the stamp by pre-creating a DIRECTORY at the stamp path.
