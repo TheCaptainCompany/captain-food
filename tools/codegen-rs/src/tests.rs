@@ -9980,6 +9980,17 @@ mod docs_only_ci_and_legacy_visibility {
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
         let cmd = "bash .claude/hooks/register-check-selftest.sh";
         let cmd_at = ci.find(cmd).expect("ci.yml must run the register-check hook selftest — the ask-gate is otherwise unverified on every push");
+        // Verbatim, for the same reason the stub-suite pin below asserts it: `|| true` keeps a
+        // substring search green while the gate can never fail.
+        let selftest_line = ci[ci.find("\n  changes:").expect("changes job")..]
+            .lines()
+            .find(|l| l.contains(cmd))
+            .expect("the selftest step line");
+        assert_eq!(
+            selftest_line.trim(),
+            format!("run: {}", cmd),
+            "the selftest step must be the bare command — a trailing `|| true` or `; exit 0` disarms it invisibly"
+        );
         let changes_at = ci.find("\n  changes:").expect("changes job");
         let lint_at = ci.find("\n  lint:").expect("lint job");
         assert!(
@@ -9990,6 +10001,75 @@ mod docs_only_ci_and_legacy_visibility {
         assert!(
             !changes_job.contains("\n    if:"),
             "the `changes` job must stay ungated — a job-level `if:` would let the selftest skip on some path"
+        );
+    }
+
+    /// Pins the decision-lookup hermetic stub suite into the always-run `changes` job
+    /// (decision row `RETRIEVAL-QMD-CI`, ADR-20260824-205911 — that row authorizes this step and
+    /// this pin and nothing else in CI).
+    ///
+    /// Deliberately STRUCTURE-SENSITIVE: the step's location in ci.yml IS the behaviour under
+    /// test. It also asserts the step's line VERBATIM, because the precedent test above is green
+    /// under four mutants that fully disarm the step it claims to pin (`beck`, 2026-08-24 mob
+    /// briefing): a trailing `|| true`, a trailing `; exit 0`, `continue-on-error: true` on the
+    /// step, and a step-level `if:`. A substring search cannot see any of them. The job-level
+    /// assertions here cover every step of the job, the hook selftest included.
+    #[test]
+    fn the_stub_suite_runs_in_the_always_run_changes_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let cmd = "bash .claude/skills/decision-lookup/scripts/stub-tests.sh";
+        let cmd_at = ci.find(cmd).expect(
+            "ci.yml must run the decision-lookup stub suite — SKILL.md declares it the authority for a wrapper carrying a supply-chain gate, and an unrun suite reports the author's machine",
+        );
+        let changes_at = ci.find("\n  changes:").expect("changes job");
+        let lint_at = ci.find("\n  lint:").expect("lint job");
+        assert!(
+            changes_at < cmd_at && cmd_at < lint_at,
+            "the stub-suite step must live INSIDE the always-run `changes` job (found outside the changes..lint span) — anywhere else it can skip on the docs-only path"
+        );
+        let changes_job = &ci[changes_at..lint_at];
+        // Comments are inert — an assertion that reds on a comment MENTIONING the shortcut would
+        // punish documenting it here, which is exactly where it should be documented.
+        let effective: String = changes_job
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // The step's VERBATIM line: `run: <cmd>` and nothing more. `|| true` / `; exit 0` / a pipe
+        // keeps a substring search green while the gate can never fail.
+        let step_line = changes_job
+            .lines()
+            .find(|l| l.contains(cmd))
+            .expect("the step line");
+        assert_eq!(
+            step_line.trim(),
+            format!("run: {}", cmd),
+            "the stub-suite step must be the bare command — a trailing `|| true`, `; exit 0` or pipe silently disarms it while this test's substring search stays green"
+        );
+
+        // Job-wide, so they hold for the hook selftest step too.
+        assert!(
+            !effective.contains("continue-on-error"),
+            "no `continue-on-error` anywhere in the `changes` job — at step level it makes a red step a green job; at job level it reports `success` to `needs`, which the `codegen` aggregator accepts, turning the whole required check green with the suite red"
+        );
+        assert!(
+            !effective.contains("\n        if:"),
+            "no step-level `if:` in the `changes` job — a condition like `github.event_name == 'push'` skips the gate on every PR while the job itself stays ungated"
+        );
+        assert!(
+            !effective.contains("\n    if:"),
+            "the `changes` job must stay ungated — a job-level `if:` would let both selftests skip on some path"
+        );
+
+        // The suite's own count guard must stay armed: `skipped()` is not a failure, so without it
+        // a host that cannot construct preconditions prints a green with a fraction of the cases.
+        let suite = fs::read_to_string(root.join(".claude/skills/decision-lookup/scripts/stub-tests.sh"))
+            .expect("stub-tests.sh");
+        assert!(
+            suite.contains("EXPECTED_CASES=") && suite.contains("$pass\" -ne \"$EXPECTED_CASES"),
+            "stub-tests.sh must assert its case COUNT, not merely the absence of failures — a skipped case is not a covered case"
         );
     }
 

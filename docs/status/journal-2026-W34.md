@@ -3,6 +3,65 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-24 — RETRIEVAL-QMD-CI decided: the decision-lookup stub suite now runs in CI, and
+> the mob's briefing found four disarm mutants alive in the gate it was told to copy.** Founder
+> approval of the open challenge row filed earlier the same day. **The instrument, this time,
+> is the one the register defines**: closing a challenge IS the supersession move, so
+> `RETRIEVAL-QMD-CI` -> `decided` (`decided_by: ADR-20260824-205911`) and `RETRIEVAL-QMD` ->
+> `superseded` + `superseded_by: RETRIEVAL-QMD-CI` land in ONE commit — the validator's
+> `decision-reconsiders-shape` rejects either half alone. Because the successor becomes the CHAIN
+> HEAD, it carries the predecessor's controlling content forward IN FULL with exactly one clause
+> narrowed; nothing is lost by the flip. Landed as
+> [#679](https://github.com/TheCaptainCompany/captain-food/pull/679), issue
+> [#678 "Wire the decision-lookup hermetic stub suite into CI (RETRIEVAL-QMD-CI)"](https://github.com/TheCaptainCompany/captain-food/issues/678).
+>
+> **What the briefing caught, before any CI code existed — the reason the mob happens first.**
+> `beck` read the precedent this dispatch told me to mirror,
+> `the_hook_selftest_runs_in_the_always_run_changes_job`, and found it **green under four mutants
+> that fully disarm the step it claims to pin**: a trailing `|| true`, a trailing `; exit 0`,
+> `continue-on-error: true` on the step, and a step-level `if:`. `ci.find(cmd)` is a substring
+> search, so none of them are visible to it. The new pin therefore asserts the step's **whole
+> line** (`assert_eq!(step_line.trim(), "run: <cmd>")`) plus three job-wide properties, and the
+> precedent got the same line-equality assertion in the same change — the job-wide ones cover its
+> step too. **Cost that earned the rule: zero, this time — the gate had never been asked to be
+> wrong.** A pin that proves WHERE a step is proves nothing about whether it can fail.
+>
+> **A second vacuity, in the suite itself, found by both lenses independently.** `skipped()` does
+> not count as failure and `exit "$fail"` was the only verdict, so a host on which preconditions
+> become unconstructible would print `6 passed, 0 failed, 12 skipped` and **exit 0** — a green
+> reporting the runner, not the wrapper. This is the `DB_TESTS_REQUIRED=1` shape of
+> [#230](https://github.com/TheCaptainCompany/captain-food/issues/230) transposed. Fixed INSIDE
+> the script (`EXPECTED_CASES=54`), not in the YAML, so the CI step stays one bare line the pin
+> can match exactly and adding a case must move the number in the same diff.
+>
+> **Planted-red, ten mutants, each with its own message** (a gate never seen red is an unverified
+> claim): M1 step deleted · M2 step moved into `lint:` · M3 `|| true` · M4 `; exit 0` · M5
+> step-level `continue-on-error` · M6 step-level `if:` · M7 job-level `if:` on `changes` · M8 case
+> count drifts (54 vs declared 55) · M9 the count guard removed from the suite · M10 a real
+> wrapper defect (`qmd_lock_binding_ok` always accepts) — which reds 6 lockfile-integrity cases,
+> proving the suite can still testify about the thing it exists to protect. All ten red; `ci.yml`
+> and both scripts restored byte-identical afterwards.
+>
+> **STOP RAISED, NOT OVERRIDDEN — the #677 half does not land yet.** `farley`'s register check
+> surfaced [DECISIONS §45 **REV-1**](../proposals/DECISIONS.md): the founder decided on 2026-08-17,
+> **against the team's own recommendation**, that `claude-review` comes OUT of the required
+> checks — and it was **never executed** (403 from the session's agent proxy on the ruleset write
+> path, an open action on
+> [#593 "The claude-review bot gate blocks every merge when it cannot run"](https://github.com/TheCaptainCompany/captain-food/issues/593)).
+> Hardening a check that is decided-out but still required turns every "the reviewer could not
+> post" into a repo-wide merge stop — which is #593 verbatim, the failure that produced REV-1, and
+> `claude-code-review.yml` records `api_error_status: 429` / out-of-credits runs from **today**.
+> Worse, it is **self-blocking**: the revert PR would itself need `claude-review` green to merge,
+> and the only key is the admin ruleset path that 403s. The ordering, not the instrument, is the
+> defect — REV-1 first, then the hardening. **Reversibility class corrected**: a self-blocking
+> merge gate is not "reversible" because its diff is small; the merge machinery is a named
+> `HOLD: human` class whatever the diff looks like.
+>
+> **Recorded because it is not derivable from the code**: a workflow file cannot make itself
+> required or un-required, and cannot stop branch protection accepting `skipped` — so every YAML
+> edit in `claude-code-review.yml` is a **verdict-honesty** fix and never a requiredness fix.
+> Anyone reading #677 as "option 2 solves requiredness" is reading it wrong.
+
 > 🔧 **2026-08-24 — decision-lookup fast-follow: the probe verdict is narrowed to what can
 > actually testify, and two tests that were passing for the wrong reason are fixed** (separately
 > authorized; the reviewer-classified non-blocking findings recorded on

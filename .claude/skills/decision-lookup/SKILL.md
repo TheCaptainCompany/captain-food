@@ -295,8 +295,9 @@ the ONLY skip the suite allows; every other precondition stays a loud failure. C
 ## What this skill must never grow without a NEW decision row
 
 Vector/semantic search, embeddings, model downloads, reranking, query expansion, MCP or any server
-process, hosted services, credentials, hooks, **any CI or workflow change beyond the single pinned
-stub-suite step**, validator or agent-contract changes, YAML decision-row indexing, or any
+process, hosted services, credentials, hooks, **any other CI or workflow change that references or serves this
+integration** (this clause governs the QMD surface, not unrelated CI work), validator or
+agent-contract changes, YAML decision-row indexing, or any
 mandatory-workflow rule.
 
 **The one CI change that IS authorized** (`RETRIEVAL-QMD-CI`, decided 2026-08-24 by
