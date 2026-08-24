@@ -128,10 +128,11 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**32 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
-repository-relative execution and cache-invariance verification), plus 1 search-failure case,
-5 quoting cases, 1 python3-preflight case, 1 corpus-mask case, 1 stamp/archive-SHA case,
-2 broken-cache cases, and 2 post-update index-assertion cases — all against a temporary
+**33 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
+bun-absent install case), plus 1 search-failure case, 5 quoting cases, 1 python3-preflight case,
+1 corpus-mask case, 1 stamp/archive-SHA case, 2 broken-cache cases, 2 post-update
+index-assertion cases, and 1 stamp-write-failure case — all against a temporary
 `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
@@ -166,6 +167,8 @@ asserts it) and never depended on, and no package is installed. Coverage:
    rebuild-failed fallback fires with caches wiped — still never the empty-result wording. A
    successful `qmd update` that writes no index is never stamped (positive + planted-red pair:
    stamp and index must coexist; an index-less "success" is wiped, unstamped, and falls back).
+   A failed `corpus/.sha` write also wipes the derived caches before falling back, so the
+   "caches wiped" wording is true on every failure arm.
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive
