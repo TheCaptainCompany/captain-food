@@ -95,14 +95,19 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # between HEAD changes for zero gained safety (qmd bundles its own SQLite; host-python
   # module absence says nothing about the index). Deep corruption on such hosts stays bounded
   # by the search-failure wipe below.
+  # URI construction lives in the UNAVAILABLE arm, not the verdict arm: quote() raises
+  # UnicodeEncodeError on a cache path carrying non-UTF-8 bytes (argv arrives surrogate-
+  # escaped; verified empirically), and a path-shaped failure must never read as the
+  # not-openable verdict. The exit-1 arm holds ONLY connect + PRAGMA — the sole operations
+  # that can genuinely testify about the database file.
   python3 -c 'import sys
 try:
     import sqlite3
     from urllib.parse import quote
+    uri = "file:" + quote(sys.argv[1]) + "?immutable=1"
 except Exception:
     sys.exit(2)
 try:
-    uri = "file:" + quote(sys.argv[1]) + "?immutable=1"
     c = sqlite3.connect(uri, uri=True, timeout=0)
     c.execute("PRAGMA schema_version"); c.close()
 except Exception:
@@ -216,8 +221,13 @@ SEARCH_RC=$?
 # A tool failure is NOT an empty result: a non-zero qmd exit takes its own named fallback and
 # must never read as "no candidates". An empty SUCCESSFUL output is the empty-result path.
 # Per the delete-wholesale policy (proposal 6.3), a search failure also wipes the derived caches
-# BEFORE falling back — deep index corruption the openability probe cannot see must not degrade
-# every lookup until HEAD changes; the next lookup rebuilds from the pinned archive. HONEST COST
+# BEFORE falling back — deep index corruption THAT QMD REPORTS AS A NON-ZERO EXIT must not
+# degrade every lookup until HEAD changes; the next lookup rebuilds from the pinned archive.
+# SCOPE (recorded honestly): corruption that surfaces as a SUCCESSFUL exit — garbage output
+# (the contract fallback below) or empty output (the no-result arm) — keeps the cache and does
+# degrade per-HEAD; the contract arm is DELIBERATELY not a wipe, because it is also the
+# schema-pin-mismatch path, and wiping there would rebuild-loop a healthy cache under a
+# genuinely changed output contract. HONEST COST
 # (recorded): the exit code cannot distinguish a damaged index from qmd rejecting the QUERY
 # itself, so a query-triggered failure pays the same wipe and the NEXT lookup pays a full
 # rebuild. That cost-shift is accepted over ever serving a possibly-poisoned cache; if the

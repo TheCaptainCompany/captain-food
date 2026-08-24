@@ -440,6 +440,27 @@ else
     || verdict bad "T15f unknown-probe-exit (rc=$rc)"
 fi
 
+# T15g URI construction failure is not a verdict: a cache path carrying a non-UTF-8 byte makes
+# quote() raise UnicodeEncodeError (argv arrives surrogate-escaped). That failure must land in
+# the probe's UNAVAILABLE arm (accept the stamped hit, bytes untouched), never the exit-1
+# verdict arm — with quote() inside the verdict try, every lookup under such a path silently
+# wiped and fully rebuilt a healthy cache (candidates still printed, so only the fingerprint
+# discriminates).
+Q="$S/t15g$(printf '\375')"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
+  verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
+    || verdict bad "T15g non-utf8 path (rc=$rc)"
+fi
+
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,
 # and exit 0. The fake update blocks the stamp by pre-creating a DIRECTORY at the stamp path.
