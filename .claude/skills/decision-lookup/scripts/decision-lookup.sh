@@ -173,8 +173,9 @@ qmd_lock_binding_ok() { # $1 = bun.lock, $2 = exact pin, $3 = recorded integrity
   # The comma-strip regex runs over raw bytes, including string INTERIORS — provably harmless
   # for the verdict: the two compared elements (pin alphabet, sha512 base64) cannot contain
   # "," + whitespace + "}"/"]", so no rewrite can manufacture a matching first/last element;
-  # the only reachable effect elsewhere is a spurious parse difference, which lands in the
-  # loud activation_fail arm (fails safe, never a false pass).
+  # the effect elsewhere is either a harmless string alteration that cannot touch the compared
+  # elements, or a parse difference that lands in the loud activation_fail arm. Never a false
+  # pass either way.
   python3 -c 'import json, re, sys
 try:
     raw = open(sys.argv[1]).read()
