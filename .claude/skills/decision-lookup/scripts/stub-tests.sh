@@ -64,15 +64,16 @@ fi
 
 # T3b --install with bun resolvable but python3 ABSENT -> named python3 preflight failure,
 # exit != 0. A controlled PATH dir carries only the externals the script needs before the
-# preflight (bun, dirname) — python3 is deliberately unresolvable. PRECONDITION: the real bun
-# must be found and its symlink created — otherwise T3b FAILS outright, so it can never pass
-# through the earlier "bun runtime not present" path by accident.
+# preflight (bun, dirname) — python3 is deliberately unresolvable. bun is a STUB (exit-0, per
+# T3c): the wrapper only needs resolvability before the preflight, and a stub means even a
+# preflight-less mutant can never reach a real network install from inside this suite.
+# PRECONDITION: the stub and symlink must exist — otherwise T3b FAILS outright, so it can
+# never pass through the earlier "bun runtime not present" path by accident.
 Q="$S/t3b"; mkdir -p "$Q" "$S/t3b-bin"
-BUN_REAL="$(command -v bun || true)"
-if [ -z "$BUN_REAL" ] \
-  || ! ln -s "$BUN_REAL" "$S/t3b-bin/bun" 2>/dev/null || [ ! -x "$S/t3b-bin/bun" ] \
+printf '#!/bin/sh\nexit 0\n' > "$S/t3b-bin/bun"; chmod +x "$S/t3b-bin/bun"
+if [ ! -x "$S/t3b-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ]; then
-  verdict bad "T3b no-python3 install (precondition: real bun + symlinks unavailable)"
+  verdict bad "T3b no-python3 install (precondition: stub bun + symlinks unavailable)"
 else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
@@ -511,6 +512,10 @@ else
     "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-TAMPERED\"]}}" 1
   t16 "digest present but NOT last element -> FAIL" \
     "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"$INTEG16\", {}]}}" 1
+  t16 "entry not a list (object shape) -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": {\"version\": \"$PIN16\", \"integrity\": \"$INTEG16\"}}}" 1
+  t16 "one-element entry -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\"]}}" 1
   t16 "valid JSONC trailing commas -> pass" \
     "{
   \"lockfileVersion\": 1,

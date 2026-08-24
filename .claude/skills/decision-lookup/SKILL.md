@@ -182,7 +182,7 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**46 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**48 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
@@ -192,10 +192,11 @@ network touch; absent and broken lookups fall back cache-untouched),
 5 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
 byte-identical — the probe never writes; a poisoned sqlite3 module, an unknown probe exit,
 and a non-UTF-8 cache path all still serve the stamped hit cache-untouched — only the
-deliberate exit-1 verdict wipes), and 5 lockfile-binding cases (the extracted real
+deliberate exit-1 verdict wipes), and 7 lockfile-binding cases (the extracted real
 `qmd_lock_binding_ok` against fixtures: valid binding; right version with the digest on
-another package; tampered digest; the digest present but NOT as the final element — pinning
-the `[pin, …, integrity]` shape assumption red; valid JSONC trailing commas) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+another package; tampered digest; the digest present but NOT as the final element, a non-list
+entry, and a one-element entry — pinning every guard of the `[pin, …, integrity]` shape
+assumption red; valid JSONC trailing commas) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -205,8 +206,8 @@ asserts it) and never depended on, and no package is installed. Coverage:
    FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message. **Install with Bun but
    without python3, and install with a python3 that resolves but cannot start** → the named
    "python3 not usable" preflight failure, exit ≠ 0, same reversal message, no install dir
-   created and no network touched (the broken-interpreter case uses a stub bun so even a
-   preflight-less mutant cannot reach the network).
+   created and no network touched (both install-preflight cases use a stub bun so even a
+   preflight-less mutant cannot reach the network from inside the suite).
    **Lookup without python3, and lookup with a python3 that resolves but cannot start** (seeded
    healthy cache, controlled PATH) → the named preflight fallback, exit 0, and the cache
    fingerprint (paths, sizes, mtimes) byte-identical — never a wipe or rebuild.
