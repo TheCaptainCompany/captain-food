@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-24 — decision-lookup slice-B corruption handling: a corrupt index is deleted
+> wholesale and rebuilt, never repaired and never a permanent degradation** (separately
+> authorized; implements the founder-authorized fix for the corruption follow-up tracked on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671), per §6.3's
+> delete-wholesale policy). Two changes: **(1)** the cache-hit check adds a **bounded openability
+> probe** — python3 stdlib `sqlite3.connect` + `PRAGMA schema_version` (microseconds; never
+> `quick_check`/`integrity_check` on the hit path) — so a corrupt-but-present
+> `corpus/.qmd/index.sqlite` under a matching stamp is a BROKEN CACHE that takes the ordinary
+> wipe-and-rebuild path; **(2)** a failed `qmd search` now **wipes the derived corpus/index
+> caches before its named tool-failure fallback**, so deep corruption the probe cannot see is
+> rebuilt on the next lookup instead of degrading every lookup until HEAD changes. No repair
+> path exists anywhere. The fake `qmd update` now writes a REAL sqlite index so the probe is
+> exercised genuinely; suite grows to **34 cases** (T15 corrupt-index rebuild; T8 extended with
+> the wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
+
 > 🔧 **2026-08-24 — decision-lookup slice-A corrections: the "caches wiped" message is now true on
 > every failure arm, the bun-absent test is host-independent, and the `.qmd/` ignore entry records
 > its deliberate non-mirror** (separately authorized; three small follow-ups tracked on

@@ -21,15 +21,15 @@ BEFORE="$(fingerprint)"
 
 mkfake() { # $1 = QDIR, $2 = payload file for `search`
   mkdir -p "$1/tool/node_modules/.bin"
-  # `update` mirrors real qmd 2.8.3: on success it leaves the index database inside the
-  # collection dir (cwd) at .qmd/index.sqlite — so the wrapper's index-presence cache check is
-  # exercised for real in these tests.
+  # `update` mirrors real qmd 2.8.3: on success it leaves a VALID sqlite index database inside
+  # the collection dir (cwd) at .qmd/index.sqlite — so the wrapper's index-presence AND
+  # openability cache checks are exercised for real in these tests.
   cat > "$1/tool/node_modules/.bin/qmd" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   init|collection) exit 0 ;;
   update) rc=\${FAKE_UPDATE_EXIT:-0}
-          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; echo x > .qmd/index.sqlite; }
+          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; python3 -c 'import sqlite3; c = sqlite3.connect(".qmd/index.sqlite"); c.execute("CREATE TABLE IF NOT EXISTS t(x)"); c.commit(); c.close()'; }
           [ -n "\${FAKE_UPDATE_STAMP_BLOCK:-}" ] && mkdir -p .sha   # a DIRECTORY at the stamp path makes the stamp write fail deterministically
           exit "\$rc" ;;
   search) cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
@@ -192,13 +192,17 @@ t7 "non-list value -> FAIL"                     '{"trustedDependencies":true}' 1
 t7 "invalid JSON -> FAIL"                       'not json' 1
 
 # T8 planted-red: qmd search exits non-zero -> the DISTINCT named tool-failure fallback,
-# never the empty-result wording; exit 0; no retry, no repair
+# never the empty-result wording; exit 0; no retry, no repair — and per the delete-wholesale
+# policy the derived caches are WIPED before the fallback, so deep corruption cannot cause a
+# permanent tool-failure state until HEAD changes.
 Q="$S/t8"; mkfake "$Q" /dev/null
 out="$(FAKE_SEARCH_EXIT=7 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "qmd search failed (exit 7)" \
   && echo "$out" | grep -q "a tool failure, not an empty result" \
+  && echo "$out" | grep -q "derived caches wiped" \
   && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
-  && verdict ok "T8 search failure -> distinct tool-failure fallback, exit 0" || verdict bad "T8 (rc=$rc)"
+  && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
+  && verdict ok "T8 search failure -> tool-failure fallback, caches wiped, exit 0" || verdict bad "T8 (rc=$rc)"
 
 # T9 Bash-safe fallback rendering: the emitted rg command's documented target shell is BASH
 # (the wrapper quotes with Bash printf %q — no claim is made for other shells). Each rendered
@@ -288,6 +292,28 @@ out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && [ -z "$(find "$Q" -name '.sha' 2>/dev/null)" ] \
   && verdict ok "T13b index-less successful update -> wiped, unstamped, named fallback" || verdict bad "T13b (rc=$rc)"
+
+# T15 corrupt-but-present index: a matching stamp with GARBAGE bytes at index.sqlite must fail
+# the openability probe and take the ordinary wipe-and-rebuild path — candidates print (the
+# rebuild recreates a valid index), never a permanent tool-failure and never the empty-result
+# wording. Delete-wholesale, no repair (proposal 6.3).
+Q="$S/t15"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
+  verdict bad "T15 corrupt-index rebuild (precondition: healthy build failed)"
+else
+  printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "qmd search failed" \
+    && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+    && index_ok="$(python3 -c 'import sqlite3,sys
+try:
+    sqlite3.connect(sys.argv[1]).execute("PRAGMA schema_version"); print("ok")
+except Exception:
+    print("bad")' "$Q/corpus/.qmd/index.sqlite")" && [ "$index_ok" = ok ] \
+    && verdict ok "T15 corrupt index + matching stamp -> rebuilt, candidates, healthy index" || verdict bad "T15 (rc=$rc)"
+fi
 
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,

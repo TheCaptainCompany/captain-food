@@ -83,9 +83,15 @@ reaches the controlling record even where retrieval alone missed it.
 - **Lookup path**: always exit 0 — unavailability, empty result, stale index, rebuild failure, a
   search-tool failure, or an output-contract failure print the advisory fallback. **A non-zero
   `qmd search` exit is a named tool failure, distinct from an empty successful result** — it never
-  reads as "no candidates". The fallback's `rg` command renders the query as data via Bash
-  `printf %q` — **Bash-safe only**: safe to copy/paste into Bash whatever the query contains
-  (`%q` may emit `$'...'`/backslash forms), with no claim made for other shells. The wrapper consumes qmd's `--json` output
+  reads as "no candidates", **and it wipes the derived corpus/index caches before falling back**
+  (delete-wholesale, never repair — proposal §6.3): deep index corruption cannot degrade every
+  lookup until HEAD changes; the next lookup rebuilds from the pinned archive. The cache-hit
+  check also runs a **bounded openability probe** (sqlite connect + `PRAGMA schema_version` —
+  never `quick_check`/`integrity_check` per lookup): a corrupt-but-present index is a broken
+  cache and takes the ordinary wipe-and-rebuild path. The fallback's `rg` command renders the
+  query as data via Bash `printf %q` — **Bash-safe only**: safe to copy/paste into Bash whatever
+  the query contains (`%q` may emit `$'...'`/backslash forms), with no claim made for other
+  shells. The wrapper consumes qmd's `--json` output
   through a python3 standard-library parser against a **pinned, strict top-level schema** (a
   ranked-result array, or `{results: [...]}`; per-result path/excerpt read from DIRECT keys only —
   **nothing nested is ever scanned**, so a metadata path can never become a candidate; source order
@@ -128,12 +134,12 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**33 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**34 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
-bun-absent install case), plus 1 search-failure case, 5 quoting cases, 1 python3-preflight case,
-1 corpus-mask case, 1 stamp/archive-SHA case, 2 broken-cache cases, 2 post-update
-index-assertion cases, and 1 stamp-write-failure case — all against a temporary
-`DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
+5 quoting cases, 1 python3-preflight case, 1 corpus-mask case, 1 stamp/archive-SHA case,
+2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
+1 corrupt-index case — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -168,7 +174,9 @@ asserts it) and never depended on, and no package is installed. Coverage:
    successful `qmd update` that writes no index is never stamped (positive + planted-red pair:
    stamp and index must coexist; an index-less "success" is wiped, unstamped, and falls back).
    A failed `corpus/.sha` write also wipes the derived caches before falling back, so the
-   "caches wiped" wording is true on every failure arm.
+   "caches wiped" wording is true on every failure arm. A corrupt-but-present index (garbage
+   bytes, matching stamp) fails the openability probe and is rebuilt — candidates print, never a
+   permanent tool-failure; a failed search wipes the derived caches before its named fallback.
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive

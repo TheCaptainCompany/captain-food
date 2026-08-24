@@ -57,9 +57,11 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 }
 
 # Cache lifecycle: BEFORE EVERY LOOKUP the cache is validated — the stored corpus revision must
-# equal `git rev-parse HEAD` AND the index database (corpus/.qmd/index.sqlite) must exist: a
-# matching stamp with a missing index is a BROKEN CACHE (it would answer "no result" forever),
-# not a hit. On mismatch or breakage, `.qmd/corpus` AND `.qmd/index` are discarded and rebuilt
+# equal `git rev-parse HEAD` AND the index database (corpus/.qmd/index.sqlite) must exist AND be
+# OPENABLE (a bounded sqlite probe: connect + PRAGMA schema_version — never quick_check or
+# integrity_check on the hit path): a matching stamp with a missing OR corrupt index is a BROKEN
+# CACHE, not a hit — per the recorded delete-wholesale policy (proposal 6.3) it is wiped and
+# rebuilt, never repaired. On mismatch or breakage, `.qmd/corpus` AND `.qmd/index` are discarded and rebuilt
 # from `git archive` of the ONE resolved SHA that is also written to the stamp — HEAD is resolved
 # exactly once, so the archive source and the stamp can never diverge (no re-resolve race). The
 # WORKING TREE is never indexed. If the rebuild fails, the caches stay wiped and the caller gets
@@ -71,10 +73,19 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 # the account of itself, the recorded self-contamination/false-authority shape; rg + aliases
 # still searches status records directly), and all non-Markdown (row-YAML indexing is out of
 # scope by decision).
+index_openable() { # bounded openability probe (delete-wholesale on failure — no repair path)
+  python3 -c 'import sqlite3, sys
+try:
+    c = sqlite3.connect(sys.argv[1]); c.execute("PRAGMA schema_version"); c.close()
+except Exception:
+    sys.exit(1)' "$1" 2>/dev/null
+}
+
 build_corpus() {
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
   [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
-    && [ -s "$CORPUS/.qmd/index.sqlite" ] && return 0
+    && [ -s "$CORPUS/.qmd/index.sqlite" ] \
+    && index_openable "$CORPUS/.qmd/index.sqlite" && return 0
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
   git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \
     | tar -x -C "$CORPUS" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
@@ -160,7 +171,10 @@ OUT="$(cd "$CORPUS" && env HOME="$QHOME" "$QMD" search "$Q" --json 2>/dev/null)"
 SEARCH_RC=$?
 # A tool failure is NOT an empty result: a non-zero qmd exit takes its own named fallback and
 # must never read as "no candidates". An empty SUCCESSFUL output is the empty-result path.
-[ "$SEARCH_RC" -ne 0 ] && fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; no retry, no repair" "$Q"
+# Per the delete-wholesale policy (proposal 6.3), a search failure also wipes the derived caches
+# BEFORE falling back — deep index corruption the openability probe cannot see must not degrade
+# every lookup until HEAD changes; the next lookup rebuilds from the pinned archive.
+[ "$SEARCH_RC" -ne 0 ] && { rm -rf "$CORPUS" "$QHOME"; fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; derived caches wiped (delete-wholesale, never repair); no retry" "$Q"; }
 [ -z "$OUT" ] && fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q"
 
 CANDIDATES="$(printf '%s' "$OUT" | python3 -c '
