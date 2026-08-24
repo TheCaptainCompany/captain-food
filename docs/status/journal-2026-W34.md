@@ -3,6 +3,54 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-24 — decision-lookup fast-follow: the probe verdict is narrowed to what can
+> actually testify, and two tests that were passing for the wrong reason are fixed** (separately
+> authorized; the reviewer-classified non-blocking findings recorded on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671) during the PR #674 and
+> #675 reviews). **A DECISION BOUNDARY WAS ATTEMPTED AND WITHDRAWN — the instrument was wrong.**
+> The recorded fast-follow "wire the stub suite into CI" is a CI change, and both the
+> `RETRIEVAL-QMD` row and PROP-20260822-171212 §"Non-goals" send CI changes to a NEW decision
+> row. The first attempt appended an `AMENDMENT` paragraph to the `evidence:` of that *decided*
+> row — which `docs/decisions/README.md` forbids: a decided row is challenged by a new open row
+> carrying `reconsiders:`, and `superseded_by` is the ONE legal edit to it. The independent
+> review caught it; the edit was reverted and the CI wiring dropped from the change. **The
+> lesson, worth the cost**: an unauthorized change can be honestly scoped in CONTENT (it was —
+> exactly one CI step and one pin) and still be recorded with the wrong INSTRUMENT, and the
+> instrument is what a future session can check. The question now sits as the open row
+> `RETRIEVAL-QMD-CI` (`docs/decisions/RETRIEVAL-QMD-CI.yaml`, `reconsiders: RETRIEVAL-QMD`) for
+> the founder, not as prose inside the artifact it would authorize.
+> **What landed** — wrapper: the probe's verdict arm classifies with
+> `isinstance(e, getattr(sqlite3, "Error", ()))`, so a failure of the CALL (an interpreter whose
+> `connect()` lacks the `uri=`/`timeout=` kwargs, or a shim module with no `Error` attribute at
+> all — where a bare `except sqlite3.Error:` would raise AttributeError while evaluating the
+> clause and exit 1) is never a corruption verdict; the caller dispatches on the **exit status**
+> rather than a command substitution, with the probe's stdout silenced, so interpreter noise (a
+> printing `sitecustomize.py`) cannot reshape the one verdict that wipes; `bun.lock` is read with
+> an explicit `encoding="utf-8"`; and the "lookups are sequential" justification is now stated as
+> an ACCEPTED ASSUMPTION with its bounded consequence.
+> **Two tests were passing for the wrong reason, and that is the sharper finding.** (1) T3b/T3c's
+> "no install dir" assertion could not fail: `mkdir` was absent from their controlled PATH, so the
+> wrapper physically could not create the dir whatever the ordering — the assertion survived the
+> very mutant it existed to catch (moving `mkdir -p "$TOOL"` above the preflight). `mkdir` is now
+> on that PATH and the reordering mutant genuinely reddens both cases. (2) The ASCII-locale
+> precondition compared `getpreferredencoding()` to the string `"utf-8"`, which is case-sensitive
+> and alias-blind (`UTF-8`, musl's C locale), so on such a host it would declare an ASCII locale
+> reached while running under UTF-8 — vacuously green with the `encoding=` fix removed. It now
+> asserts the PROPERTY: a locale-dependent `open()` of the fixture must actually raise.
+> **T15g's skip is gated on an ASCII control**: skipping on any `mkdir` failure would have
+> swallowed ENOSPC/EROFS/EACCES as "filesystem rejects non-UTF-8 names" — coverage vanishing at
+> exit 0. Control succeeds AND the `\375` name fails ⇒ skip; control fails ⇒ loud failure.
+> **Suite 54 cases**, every new gate planted-red proven against its own mutant — with one
+> honestly stated exception: the stdout-noise hole needs the COMBINED substitution-plus-
+> unsilenced mutant to reopen, each half alone being safe, so the two are recorded as ONE defense
+> (SKILL.md said "planted red" of a half-mutant that stays green; corrected).
+> **The suite was also not hermetic**: it silently required a real `bun` on PATH (the wrapper
+> preflights `command -v bun` before any lookup work), so on a host without one every
+> cache-building case failed its precondition — its green reported the author's machine. An
+> exit-0 stub bun now covers the whole run, with a fatal guard if it is unresolvable; verified
+> 53/53 both with bun present and on a PATH where it is absent.
+
 > 🔧 **2026-08-24 — decision-lookup slice-C lockfile binding: version and integrity are now ONE
 > structural fact, not two independent greps** (separately authorized — this is the SEPARATE
 > VERIFICATION-DESIGN DECISION the deferred note on

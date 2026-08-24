@@ -11,13 +11,29 @@ W="$HERE/decision-lookup.sh"
 REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 S="$(mktemp -d)"
 trap 'rm -rf "$S"' EXIT
-pass=0; fail=0
+pass=0; fail=0; skip=0
 verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=$((fail+1)); echo "FAIL  $2"; fi }
+# A SKIP is ONLY for a setup the host FILESYSTEM/KERNEL forbids — never for a precondition the
+# harness could construct and didn't (those stay loud `verdict bad`, per T3/T15b). It does not
+# count as a failure, and it is printed so a green run always names what it did not cover.
+skipped() { skip=$((skip+1)); echo "SKIP  $1"; }
 
 fingerprint() { # the real cache must be untouched by this suite, whether present or absent
   if [ -e "$REPO_ROOT/.qmd" ]; then find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum; else echo absent; fi
 }
 BEFORE="$(fingerprint)"
+
+# A STUB `bun` on PATH for the whole suite. The wrapper preflights `command -v bun` before any
+# lookup work, but a LOOKUP never invokes bun — only `--install` does, and all three install
+# cases (T3/T3b/T3c) build their own controlled PATH, so nothing here can reach a real install.
+# Without this stub every cache-building case fails its precondition on a host with no bun (a CI
+# runner), which is a false red about the HOST, not the wrapper — the suite claims to be
+# hermetic, so it must not silently depend on a bun being installed. Shadowing a real bun is
+# deliberate: this suite never wants one.
+mkdir -p "$S/bin"
+printf '#!/bin/sh\nexit 0\n' > "$S/bin/bun"; chmod +x "$S/bin/bun"
+PATH="$S/bin:$PATH"; export PATH
+command -v bun >/dev/null 2>&1 || { echo "FATAL: stub bun not resolvable — the suite would report host-shaped failures"; exit 1; }
 
 mkfake() { # $1 = QDIR, $2 = payload file for `search`
   mkdir -p "$1/tool/node_modules/.bin"
@@ -71,8 +87,13 @@ fi
 # never pass through the earlier "bun runtime not present" path by accident.
 Q="$S/t3b"; mkdir -p "$Q" "$S/t3b-bin"
 printf '#!/bin/sh\nexit 0\n' > "$S/t3b-bin/bun"; chmod +x "$S/t3b-bin/bun"
+# `mkdir` MUST be on the controlled PATH: the wrapper creates $TOOL with it, so without it the
+# "no install dir" assertion below passes because mkdir was unavailable, not because the preflight
+# ran first — a vacuous green that survives the very mutant it exists to catch (moving `mkdir -p
+# "$TOOL"` above the preflight). Same for t3c.
 if [ ! -x "$S/t3b-bin/bun" ] \
-  || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ]; then
+  || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ] \
+  || ! ln -s "$(command -v mkdir)" "$S/t3b-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3b-bin/mkdir" ]; then
   verdict bad "T3b no-python3 install (precondition: stub bun + symlinks unavailable)"
 else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
@@ -81,7 +102,8 @@ else
     && echo "$out" | grep -q "ACTIVATION FAILED: python3 not usable" \
     && echo "$out" | grep -q "structural lockfile-binding and trustedDependencies verifications and the strict results parser" \
     && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
-    && verdict ok "T3b no-python3 install: named preflight, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
+    && [ ! -d "$Q/tool" ] \
+    && verdict ok "T3b no-python3 install: named preflight, no install dir, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
 fi
 
 # T3c --install with bun resolvable but python3 BROKEN (resolves, cannot start) -> the named
@@ -94,7 +116,8 @@ Q="$S/t3c"; mkdir -p "$Q" "$S/t3c-bin"
 printf '#!/bin/sh\nexit 9\n' > "$S/t3c-bin/python3"; chmod +x "$S/t3c-bin/python3"
 printf '#!/bin/sh\nexit 0\n' > "$S/t3c-bin/bun"; chmod +x "$S/t3c-bin/bun"
 if [ ! -x "$S/t3c-bin/python3" ] || [ ! -x "$S/t3c-bin/bun" ] \
-  || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ]; then
+  || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ] \
+  || ! ln -s "$(command -v mkdir)" "$S/t3c-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3c-bin/mkdir" ]; then
   verdict bad "T3c broken-python3 install (precondition: controlled PATH not constructible)"
 else
   out="$(env PATH="$S/t3c-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
@@ -469,19 +492,135 @@ fi
 # verdict arm — with quote() inside the verdict try, every lookup under such a path silently
 # wiped and fully rebuilt a healthy cache (candidates still printed, so only the fingerprint
 # discriminates).
-Q="$S/t15g$(printf '\375')"; mkfake "$Q" "$S/p5a.json"
+# CAPABILITY GATE (Linux-only case): macOS/APFS enforces valid UTF-8 in filenames and REJECTS
+# the \375 name outright, so the setup is impossible by filesystem policy — not a precondition
+# this harness declined to build. That is a SKIP, not a FAIL: a hard red on every Mac would
+# train readers to discount reds. The mkdir is attempted first and decides.
+Q="$S/t15g$(printf '\375')"
+# An ASCII CONTROL decides WHY the mkdir failed. Skipping on any mkdir failure would silently
+# swallow ENOSPC/EROFS/EACCES/ENOTDIR — coverage vanishing while the suite still exits 0. Control
+# succeeds AND the \375 name fails => a genuine filesystem-encoding refusal (skip). Control also
+# fails => the harness/host is broken, which is a loud failure like every other precondition.
+if ! mkdir -p "${Q%$(printf '\375')}-ascii-control" 2>/dev/null; then
+  verdict bad "T15g non-utf8 path (precondition: ASCII control mkdir failed — host/harness broken, not an encoding refusal)"
+elif ! mkdir -p "$Q" 2>/dev/null || [ ! -d "$Q" ]; then
+  skipped "T15g non-utf8 cache path — filesystem rejects non-UTF-8 names (Linux-only case)"
+else
+  mkfake "$Q" "$S/p5a.json"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+  if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
+    verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+  else
+    fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+    out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+    fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+    [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+      && ! echo "$out" | grep -q "rebuild failed" \
+      && [ "$fp_b" = "$fp_a" ] \
+      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
+      || verdict bad "T15g non-utf8 path (rc=$rc)"
+  fi
+fi
+
+# T15h a non-sqlite3 exception inside the probe's verdict arm is NOT the not-openable verdict:
+# a connect() call failure (e.g. an interpreter whose sqlite3.connect lacks the uri=/timeout=
+# kwargs -> TypeError) says nothing about the database file, so it must take the UNAVAILABLE
+# arm and accept the stamped hit. Simulated by a PYTHONPATH sqlite3 shim that imports cleanly,
+# defines Error, and raises TypeError from connect() — indistinguishable from the real
+# kwargs-unsupported host. With a bare `except Exception: sys.exit(1)` this wipes and rebuilds.
+Q="$S/t15h"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
-if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
-  verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+mkdir -p "$S/t15h-py"
+printf 'class Error(Exception):\n    pass\n\n\ndef connect(*a, **k):\n    raise TypeError("connect() got an unexpected keyword argument")\n' > "$S/t15h-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! PYTHONPATH="$S/t15h-py" python3 -c 'import sqlite3, sys
+try:
+    sqlite3.connect("x", uri=True, timeout=0)
+except TypeError:
+    sys.exit(0)
+sys.exit(1)' 2>/dev/null; then
+  verdict bad "T15h non-sqlite3 probe exception (precondition: seeded cache or TypeError shim failed)"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
-  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  out="$(PYTHONPATH="$S/t15h-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
-    || verdict bad "T15g non-utf8 path (rc=$rc)"
+    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched" \
+    || verdict bad "T15h non-sqlite3 probe exception (rc=$rc)"
+fi
+
+# T15j a sqlite3 module WITHOUT an `Error` attribute must not decide a wipe: with a bare
+# `except sqlite3.Error:` the except clause itself raises AttributeError while being evaluated,
+# which is unhandled and exits 1 — a corruption verdict decided by a missing attribute rather
+# than by the database. The shipped `isinstance(e, getattr(sqlite3, "Error", ()))` form routes
+# it to the unavailable arm instead, so the stamped hit is accepted, cache untouched.
+Q="$S/t15j"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15j-py"
+printf 'def connect(*a, **k):\n    raise RuntimeError("no Error attribute on this module")\n' > "$S/t15j-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || PYTHONPATH="$S/t15j-py" python3 -c 'import sqlite3, sys; sys.exit(0 if hasattr(sqlite3, "Error") else 1)' 2>/dev/null; then
+  verdict bad "T15j sqlite3 without Error (precondition: seeded cache or attribute-less shim failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15j-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15j sqlite3 module without Error: not a verdict, cache untouched" \
+    || verdict bad "T15j sqlite3 without Error (rc=$rc)"
+fi
+
+# T15k an Error attribute that is PRESENT BUT NOT A CLASS must not decide a wipe either: with a
+# bare `isinstance(e, getattr(sqlite3, "Error", ()))`, a shim exporting `Error = "not a class"`
+# makes isinstance() raise TypeError inside the except clause -> unhandled -> exit 1, the wipe
+# verdict decided by a malformed attribute. The shipped isinstance/issubclass guard routes it to
+# the unavailable arm. One step out from T15j (absent attribute); same defect class.
+Q="$S/t15k"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15k-py"
+printf 'Error = "not a class"\n\n\ndef connect(*a, **k):\n    raise RuntimeError("boom")\n' > "$S/t15k-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! PYTHONPATH="$S/t15k-py" python3 -c 'import sqlite3, sys; sys.exit(0 if not isinstance(getattr(sqlite3, "Error", ()), type) else 1)' 2>/dev/null; then
+  verdict bad "T15k malformed Error attribute (precondition: seeded cache or non-class Error shim failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15k-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15k Error present but not a class: not a verdict, cache untouched" \
+    || verdict bad "T15k malformed Error attribute (rc=$rc)"
+fi
+
+# T15i the verdict survives interpreter stdout NOISE: a genuinely corrupt index under a
+# sitecustomize.py that prints on every interpreter start must still be REBUILT. Dispatching on
+# a command substitution ("$(index_openable ...; echo $?)") would match the pattern against the
+# noise plus the code and fall to the accept arm, silently disabling the only verdict that
+# wipes — a corrupt index would then be served until HEAD changes.
+Q="$S/t15i"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15i-py"
+printf 'print("sitecustomize noise")\n' > "$S/t15i-py/sitecustomize.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || [ "$(PYTHONPATH="$S/t15i-py" python3 -c 'pass' 2>/dev/null)" != "sitecustomize noise" ]; then
+  verdict bad "T15i stdout-noise verdict (precondition: seeded cache or sitecustomize noise failed)"
+else
+  printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
+  out="$(PYTHONPATH="$S/t15i-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  index_ok="$(python3 -c 'import sqlite3,sys
+try:
+    sqlite3.connect(sys.argv[1]).execute("PRAGMA schema_version"); print("ok")
+except Exception:
+    print("bad")' "$Q/corpus/.qmd/index.sqlite")"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && [ "$index_ok" = ok ] \
+    && verdict ok "T15i corrupt index under stdout noise: verdict holds, rebuilt" \
+    || verdict bad "T15i stdout-noise verdict (rc=$rc, index=$index_ok)"
 fi
 
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
@@ -528,10 +667,34 @@ else
     \"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"],
   },
 }" 0
+  # The verdict must be HOST-LOCALE INDEPENDENT: a valid binding in a lockfile carrying a
+  # non-ASCII byte elsewhere (a unicode author/description in another entry's metadata) must
+  # still PASS on an ASCII-locale host. Without an explicit encoding="utf-8", open() decodes
+  # with the host locale and .read() raises there, reporting a host defect among the artifact
+  # causes. PYTHONCOERCECLOCALE=0 + PYTHONUTF8=0 are required to reach a genuine ASCII locale:
+  # PEP 538/540 otherwise coerce LC_ALL=C back to UTF-8 and the case would pass vacuously —
+  # asserted as a PRECONDITION, so a python that ignores them fails the case loudly.
+  printf '%s' "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"], \"other\": [\"other@1.0.0\", \"$(printf '\303\234nicode Auth\303\266r')\", {}, \"sha512-OTHER\"]}}" > "$S/t16-utf8.lock"
+  ascii_locale='LC_ALL=C LANG=C PYTHONCOERCECLOCALE=0 PYTHONUTF8=0'
+  # Assert the PROPERTY, not a codeset string: a locale-dependent open() of this file must
+  # actually RAISE under the chosen env. Comparing `getpreferredencoding()` to "utf-8" is
+  # case-sensitive and alias-blind ("UTF-8" on glibc, musl/Alpine's C locale), so the guard could
+  # declare an ASCII locale reached while the case ran under UTF-8 — passing vacuously with the
+  # encoding= fix removed. This probe cannot be aliased away.
+  if env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
+    enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
+    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition: locale-dependent open did NOT raise; enc='$enc' — no genuine ASCII locale on this host)"
+  else
+    enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
+    ( eval "export $ascii_locale"; qmd_lock_binding_ok "$S/t16-utf8.lock" "$PIN16" "$INTEG16" ); rc=$?
+    [ $rc -eq 0 ] \
+      && verdict ok "T16 non-ASCII lockfile on ASCII locale ($enc) -> pass (locale-independent)" \
+      || verdict bad "T16 non-ASCII lockfile on ASCII locale (rc=$rc, want 0)"
+  fi
 fi
 
 echo "----"
-echo "RESULT: $pass passed, $fail failed"
+if [ "$skip" -gt 0 ]; then echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability)"; else echo "RESULT: $pass passed, $fail failed"; fi
 AFTER="$(fingerprint)"
 if [ "$BEFORE" = "$AFTER" ]; then echo "repo .qmd/ untouched by this suite — confirmed"; else echo "repo .qmd/ CHANGED during the suite — VIOLATION"; fail=$((fail+1)); fi
 exit "$fail"
