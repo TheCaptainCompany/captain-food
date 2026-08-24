@@ -160,8 +160,10 @@ except Exception:
 sys.exit(0 if d.get("trustedDependencies") == [] else 1)' "$1" 2>/dev/null
 }
 
-# Structural version<->integrity BINDING in bun.lock (separate verification-design decision,
-# founder-approved — closing the recorded asymmetry with the structural package.json check): the
+# Structural version<->integrity BINDING in bun.lock (the separate verification-design decision
+# the #671 deferred note required — separately authorized under the standing completion
+# directive, recorded in journal-2026-W34; closing the recorded asymmetry with the structural
+# package.json check): the
 # "@tobilu/qmd" packages entry must itself name exactly $PIN AND carry the recorded integrity
 # digest as its final element. Two independent presence greps could be satisfied by different
 # entries; this cannot. bun.lock is JSONC (bun emits trailing commas), so trailing commas are
