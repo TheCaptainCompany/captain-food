@@ -81,25 +81,28 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # (verified empirically, sqlite 3.45). immutable=1 + timeout=0 touch nothing: the question is
   # whether the MAIN database file is openable — a pending -wal is deliberately ignored (WAL
   # handling belongs to the tool's own rw open; lookups are sequential, so the no-locking
-  # semantics of immutable are safe here). pathname2url keeps an arbitrary DECISION_LOOKUP_HOME
-  # path URI-safe.
-  # Exit contract: 0 = openable; 1 = NOT openable (wipe + rebuild); 2 = probe UNAVAILABLE —
-  # the sqlite3 module is a COMPILE-TIME optional of python3 (unlike json), and its absence
-  # must never be read as corruption, or every lookup would silently wipe and rebuild a
-  # healthy cache (the same conflation the lookup-path python3 preflight closes, one layer
-  # down). The probe is BEST-EFFORT: on 2 the caller accepts the stamped non-empty index at
-  # the pre-probe trust level — the rebuild arm serves exactly that trust level unprobed, so
-  # refusing on the hit path would disable the advisory tool on such hosts between HEAD
-  # changes for zero gained safety (qmd bundles its own SQLite; host-python module absence
-  # says nothing about the index). Deep corruption on such hosts stays bounded by the
-  # search-failure wipe below.
-  python3 -c 'import sys, urllib.request
+  # semantics of immutable are safe here). urllib.parse.quote (safe="/" default; on POSIX
+  # pathname2url IS quote) keeps an arbitrary DECISION_LOOKUP_HOME path URI-safe — imported
+  # INSIDE the guarded try because it must never widen the import surface that can be read as
+  # corruption (urllib.request would transitively pull socket, another compile-time optional).
+  # Exit contract: 1 = the DELIBERATE NOT-openable verdict (wipe + rebuild); 0 = openable;
+  # 2 = probe UNAVAILABLE (the sqlite3 module is a COMPILE-TIME optional of python3, unlike
+  # json); ANY OTHER exit (import chain failure, signal death, 126/127) is a probe failure,
+  # never a corruption verdict — the same conflation the lookup-path python3 preflight closes,
+  # one layer down. The probe is BEST-EFFORT: on anything but 1 the caller accepts the stamped
+  # non-empty index at the pre-probe trust level — the rebuild arm serves exactly that trust
+  # level unprobed, so refusing on the hit path would disable the advisory tool on such hosts
+  # between HEAD changes for zero gained safety (qmd bundles its own SQLite; host-python
+  # module absence says nothing about the index). Deep corruption on such hosts stays bounded
+  # by the search-failure wipe below.
+  python3 -c 'import sys
 try:
     import sqlite3
+    from urllib.parse import quote
 except Exception:
     sys.exit(2)
 try:
-    uri = "file:" + urllib.request.pathname2url(sys.argv[1]) + "?immutable=1"
+    uri = "file:" + quote(sys.argv[1]) + "?immutable=1"
     c = sqlite3.connect(uri, uri=True, timeout=0)
     c.execute("PRAGMA schema_version"); c.close()
 except Exception:
@@ -111,9 +114,11 @@ build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
   if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
     && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
     case "$(index_openable "$CORPUS/.qmd/index.sqlite"; echo $?)" in
-      0|2) return 0 ;;   # 2 = probe unavailable, NOT corruption: accept the stamped hit at the
-                         # pre-probe trust level (see the probe's exit contract above)
-    esac                 # exit 1 falls through: broken cache, wipe and rebuild below
+      1) : ;;          # the deliberate NOT-openable verdict: broken cache — wipe and rebuild
+      *) return 0 ;;   # 0 = openable; 2 = probe unavailable; anything else = probe failure —
+                       # never read as corruption: accept the stamped hit at the pre-probe
+                       # trust level (see the probe's exit contract above)
+    esac
   fi
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
   git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \

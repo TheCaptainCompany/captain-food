@@ -417,6 +417,29 @@ else
     || verdict bad "T15e broken-python3 lookup (rc=$rc)"
 fi
 
+# T15f an UNKNOWN probe exit is never a corruption verdict: only exit 1 — the probe's
+# deliberate NOT-openable verdict — may wipe; any other failure code (import-chain death,
+# signals, 126/127) must accept the stamped hit at the pre-probe trust level, cache untouched.
+# Simulated by a poisoned sqlite3 module that hard-exits 7 on import (no exception raised, so
+# the probe's own exit-2 arm cannot catch it — the code reaches the caller as-is).
+Q="$S/t15f"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15f-py"
+printf 'import os\nos._exit(7)\n' > "$S/t15f-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || PYTHONPATH="$S/t15f-py" python3 -c 'import sqlite3' 2>/dev/null; then
+  verdict bad "T15f unknown-probe-exit (precondition: seeded cache or exit-7 poisoning failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15f-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, cache untouched, exit $rc" \
+    || verdict bad "T15f unknown-probe-exit (rc=$rc)"
+fi
+
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,
 # and exit 0. The fake update blocks the stamp by pre-creating a DIRECTORY at the stamp path.

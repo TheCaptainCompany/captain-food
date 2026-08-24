@@ -99,10 +99,14 @@ reaches the controlling record even where retrieval alone missed it.
   the `-shm` side file; `immutable=1` touches nothing. The probe asks only whether the main
   database file is openable — a pending `-wal` is deliberately ignored (WAL handling belongs to
   the tool's own read-write open); an unopenable main file fails the probe and is wiped and
-  rebuilt. **Probe unavailability is never read as corruption**: python3 is preflighted on the
-  lookup path, and a python3 built without the compile-optional sqlite3 module makes the probe
-  exit distinctly (2, not 1) — the same conflation guard as the preflight, one layer down. The
-  probe is **best-effort**: on unavailability the stamped non-empty hit is **accepted at the
+  rebuilt. **Only the probe's deliberate not-openable verdict (exit 1) may wipe** — probe
+  unavailability or failure is never read as corruption: a python3 built without the
+  compile-optional sqlite3 module exits distinctly (2), and **any other** exit (import-chain
+  failure, signal death, 126/127) is likewise a probe failure, not a verdict — the same
+  conflation guard as the preflight, one layer down (the probe's import surface is kept
+  minimal on purpose: `urllib.parse.quote` inside the guarded try, never `urllib.request`,
+  whose transitive `socket` import is another compile-time optional). The probe is
+  **best-effort**: on anything but exit 1 the stamped non-empty hit is **accepted at the
   pre-probe trust level** — the rebuild arm serves exactly that trust level unprobed, so
   refusing the hit would disable the advisory tool on such hosts between HEAD changes for zero
   gained safety (qmd bundles its own SQLite; host-python module absence says nothing about the
@@ -157,16 +161,16 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**38 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**39 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 3 python3-preflight cases (install non-zero; absent and present-but-broken
 lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
-3 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
-byte-identical — the probe never writes; a poisoned sqlite3 module still serves the stamped
-hit cache-untouched — probe unavailability is neither corruption nor a refusal) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+4 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
+byte-identical — the probe never writes; a poisoned sqlite3 module and an unknown probe exit
+both still serve the stamped hit cache-untouched — only the deliberate exit-1 verdict wipes) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -209,9 +213,10 @@ asserts it) and never depended on, and no package is installed. Coverage:
    permanent tool-failure; a failed search wipes the derived caches before its named fallback.
    The probe itself never writes: a garbage `index.sqlite-wal` planted beside a healthy stamped
    index survives a cache-hit lookup byte-identical (a read-write connect would have run WAL
-   recovery and deleted it). Probe unavailability is neither corruption nor a refusal: with
-   the sqlite3 module poisoned (PYTHONPATH shim raising ImportError), the stamped hit is
-   accepted — candidates print, exit 0, cache fingerprint byte-identical.
+   recovery and deleted it). Probe unavailability or failure is neither corruption nor a
+   refusal: with the sqlite3 module poisoned (PYTHONPATH shim raising ImportError → exit 2, or
+   hard-exiting 7 → an unknown code), the stamped hit is accepted — candidates print, exit 0,
+   cache fingerprint byte-identical. Only the probe's deliberate exit-1 verdict wipes.
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive

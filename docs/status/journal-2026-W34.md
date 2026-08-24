@@ -26,21 +26,25 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > on the hit path, i.e. the repair §6.3 forbids — and even plain `mode=ro` creates the `-shm`
 > side file; `immutable=1` touches nothing and probes only whether the main database file is
 > openable, a pending `-wal` being the tool's own business on its read-write open; **(c)** probe
-> UNAVAILABILITY is never read as corruption — the sqlite3 module is a compile-time optional of
-> python3, and its absence now exits distinctly (2, not 1); the probe is best-effort, so the
-> stamped non-empty hit is then ACCEPTED at the pre-probe trust level rather than silently
-> wiping a healthy cache (reading 2 as corrupt) or refusing it (the rebuild arm serves exactly
-> that trust level unprobed, so a refusal would disable the advisory tool on such hosts between
-> HEAD changes for zero gained safety); **(d)**
+> UNAVAILABILITY OR FAILURE is never read as corruption — only the probe's deliberate exit-1
+> not-openable verdict may wipe: the sqlite3 module is a compile-time optional of python3 and
+> its absence exits distinctly (2); any OTHER exit (import-chain failure, signal death) is
+> likewise a probe failure, not a verdict, and the probe's import surface is kept minimal
+> (`urllib.parse.quote` inside the guarded try, never `urllib.request`, whose transitive
+> `socket` import is another compile-time optional); on anything but exit 1 the best-effort
+> probe ACCEPTS the stamped non-empty hit at the pre-probe trust level rather than silently
+> wiping a healthy cache or refusing it (the rebuild arm serves exactly that trust level
+> unprobed, so a refusal would disable the advisory tool on such hosts between HEAD changes
+> for zero gained safety); **(d)**
 > the honest cost of the search-failure wipe is now recorded in the wrapper, SKILL and §6.2:
 > the exit code cannot distinguish a damaged index from qmd rejecting the query itself, so a
 > query-triggered failure also wipes and the next lookup pays a full rebuild — accepted over
 > ever serving a possibly-poisoned cache. The fake `qmd update` writes a REAL sqlite index
-> so the probe is exercised genuinely; suite grows to **38 cases** (T15 corrupt-index rebuild;
+> so the probe is exercised genuinely; suite grows to **39 cases** (T15 corrupt-index rebuild;
 > T15b python3-absent and T15e python3-broken lookups leave the cache byte-untouched; T15c a
 > planted garbage `-wal` survives a cache hit byte-identical — the probe never writes; T15d a
-> poisoned sqlite3 module still serves the stamped hit cache-untouched; T8 extended with the
-> wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
+> poisoned sqlite3 module and T15f an unknown probe exit both still serve the stamped hit
+> cache-untouched; T8 extended with the wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
 
 > 🔧 **2026-08-24 — decision-lookup slice-A corrections: the "caches wiped" message is now true on
 > every failure arm, the bun-absent test is host-independent, and the `.qmd/` ignore entry records
