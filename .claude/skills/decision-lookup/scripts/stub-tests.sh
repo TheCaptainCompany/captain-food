@@ -516,6 +516,8 @@ else
     "{\"packages\": {\"@tobilu/qmd\": {\"version\": \"$PIN16\", \"integrity\": \"$INTEG16\"}}}" 1
   t16 "one-element entry -> FAIL" \
     "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\"]}}" 1
+  t16 "wrong version, recorded digest last -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"@tobilu/qmd@2.9.9\", \"\", {}, \"$INTEG16\"]}}" 1
   t16 "valid JSONC trailing commas -> pass" \
     "{
   \"lockfileVersion\": 1,

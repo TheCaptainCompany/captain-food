@@ -25,8 +25,10 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > not tampering), and the comma-strip's string-interior harmlessness is recorded at the
 > function; the proposal's `--install` bullet is rewritten in the same change (living-proposal
 > rule) so the register-pointed record carries the current verification design. Suite grows to
-> **48 cases** (seven T16 fixture cases against the extracted real
+> **49 cases** (eight T16 fixture cases against the extracted real
 > function: valid binding; right version with the digest on another package; tampered digest;
+> wrong version with the recorded digest last — pinning the version arm red, so BOTH halves of
+> the binding have been seen red;
 > the digest present but NOT last, a non-list entry, and a one-element entry — pinning every
 > guard of the tuple-shape assumption red;
 > valid JSONC trailing commas — fixture 2 is the discriminator the old greps lacked; plus T3c

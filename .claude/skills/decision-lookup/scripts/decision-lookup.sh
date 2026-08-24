@@ -197,7 +197,7 @@ if [ "${1:-}" = "--install" ]; then
   # through python3, so a broken-but-resolvable interpreter must fail HERE, named and before
   # any network touch — never inside the binding check, where its failure would allege a
   # non-assessed artifact for a host defect.
-  python3 -c 'import json' >/dev/null 2>&1 \
+  python3 -c 'import json, re' >/dev/null 2>&1 \
     || activation_fail "python3 not usable — required for the structural lockfile-binding and trustedDependencies verifications and the strict results parser"
   mkdir -p "$TOOL" "$QHOME"
   printf '{"name":"captain-qmd","private":true,"trustedDependencies":[]}\n' > "$TOOL/package.json"
