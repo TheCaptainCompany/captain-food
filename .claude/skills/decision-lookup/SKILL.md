@@ -138,10 +138,13 @@ reaches the controlling record even where retrieval alone missed it.
   sandbox spike ran `search` without `--json`, so the real shape is confirmed at the activation
   test; any other structure is "QMD output contract unavailable; use rg + aliases", never
   guesswork.
-- **Python 3 is a required local runtime** for both the structural `trustedDependencies` install
-  verification and the strict JSON results parser. Its absence at `--install` causes a **named
-  non-zero activation failure** (with the standard reversal instruction) — never a fallback
-  installation, download, or repair.
+- **Python 3 is a required local runtime** for the structural lockfile-binding and
+  `trustedDependencies` install verifications and the strict JSON results parser. `--install`
+  **preflights it by execution** (`command -v` proves resolvability, not runnability — and this
+  path routes the lockfile-binding tampering verdict through python3, so a broken interpreter
+  must fail as a named host defect before any network touch, never inside the binding check):
+  an absent or unusable python3 causes a **named non-zero activation failure** (with the
+  standard reversal instruction) — never a fallback installation, download, or repair.
 - **`--install` (the activation test)**: exits **non-zero** on any failure — bun absent, install
   failure, the **structural `bun.lock` binding** failing (the `@tobilu/qmd` packages entry must
   itself name the exact pin AND carry the recorded integrity digest — parse failure, missing
@@ -179,11 +182,11 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**44 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**45 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
-5 quoting cases, 3 python3-preflight cases (install non-zero; absent and present-but-broken
-lookups fall back cache-untouched),
+5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
+network touch; absent and broken lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
 5 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
@@ -199,7 +202,10 @@ asserts it) and never depended on, and no package is installed. Coverage:
 2. **Lookup cache miss falls back**: fresh cache home (no tool) + a query → fallback text, exit 0.
 3. **Install without Bun exits non-zero**: `PATH` without `bun`, `--install` → "ACTIVATION
    FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message. **Install with Bun but
-   without python3** → the named python3-preflight failure, exit ≠ 0, same reversal message.
+   without python3, and install with a python3 that resolves but cannot start** → the named
+   "python3 not usable" preflight failure, exit ≠ 0, same reversal message, no install dir
+   created and no network touched (the broken-interpreter case uses a stub bun so even a
+   preflight-less mutant cannot reach the network).
    **Lookup without python3, and lookup with a python3 that resolves but cannot start** (seeded
    healthy cache, controlled PATH) → the named preflight fallback, exit 0, and the cache
    fingerprint (paths, sizes, mtimes) byte-identical — never a wipe or rebuild.

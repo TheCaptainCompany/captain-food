@@ -170,6 +170,11 @@ sys.exit(0 if d.get("trustedDependencies") == [] else 1)' "$1" 2>/dev/null
 # stripped before json parsing — a whitespace/format change never produces a false verdict
 # (the 588cbd8 lesson); any parse failure fails LOUD at --install, never silently.
 qmd_lock_binding_ok() { # $1 = bun.lock, $2 = exact pin, $3 = recorded integrity
+  # The comma-strip regex runs over raw bytes, including string INTERIORS — provably harmless
+  # for the verdict: the two compared elements (pin alphabet, sha512 base64) cannot contain
+  # "," + whitespace + "}"/"]", so no rewrite can manufacture a matching first/last element;
+  # the only reachable effect elsewhere is a spurious parse difference, which lands in the
+  # loud activation_fail arm (fails safe, never a false pass).
   python3 -c 'import json, re, sys
 try:
     raw = open(sys.argv[1]).read()
@@ -186,8 +191,13 @@ if [ "${1:-}" = "--install" ]; then
   # gitignored cache. Run it deliberately — agents never run it implicitly as part of another
   # task, and its first execution requires the founder's separate approval.
   command -v bun >/dev/null 2>&1 || activation_fail "bun runtime not present"
-  command -v python3 >/dev/null 2>&1 \
-    || activation_fail "python3 not present — required for the structural trustedDependencies verification and the strict results parser"
+  # Preflight python3 BY EXECUTION, mirroring the lookup path (`command -v` proves
+  # resolvability, not runnability): this path routes the lockfile-binding TAMPERING verdict
+  # through python3, so a broken-but-resolvable interpreter must fail HERE, named and before
+  # any network touch — never inside the binding check, where its failure would allege a
+  # non-assessed artifact for a host defect.
+  python3 -c 'import json' >/dev/null 2>&1 \
+    || activation_fail "python3 not usable — required for the structural lockfile-binding and trustedDependencies verifications and the strict results parser"
   mkdir -p "$TOOL" "$QHOME"
   printf '{"name":"captain-qmd","private":true,"trustedDependencies":[]}\n' > "$TOOL/package.json"
   printf '[install]\nignoreScripts = true\n' > "$TOOL/bunfig.toml"

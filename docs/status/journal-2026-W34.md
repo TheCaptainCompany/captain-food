@@ -16,9 +16,18 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > (`activation_fail`, non-zero) — format churn can no longer produce a false verdict (the
 > `588cbd8` lesson applied to the lockfile side); the activation-evidence line now reports the
 > BINDING, not bare digest presence. No dependency, lockfile, QMD-version, or supply-chain-policy
-> change; `bun.lock` is never regenerated. Suite grows to **44 cases** (four T16 fixture cases
-> against the extracted real function: valid binding; right version with the digest on another
-> package; tampered digest; valid JSONC trailing commas).
+> change; `bun.lock` is never regenerated. Because this change routes the lockfile-binding
+> TAMPERING verdict through python3, `--install` now also **preflights python3 by execution**
+> (realizing the recorded #674-review fast-follow, in scope here for exactly that reason): a
+> broken-but-resolvable interpreter fails as a named host defect ("python3 not usable") before
+> any network touch, never inside the binding check alleging a non-assessed artifact; the
+> binding failure message also names the shape-assumption cause (a format-assumption miss is
+> not tampering), and the comma-strip's string-interior harmlessness is recorded at the
+> function. Suite grows to **45 cases** (four T16 fixture cases against the extracted real
+> function: valid binding; right version with the digest on another package; tampered digest;
+> valid JSONC trailing commas — fixture 2 is the discriminator the old greps lacked; plus T3c
+> broken-python3 install fails the named preflight with no install dir and, via a stub bun, no
+> possible network touch even under a preflight-less mutant).
 
 > 🔧 **2026-08-24 — decision-lookup slice-B corruption handling: a corrupt index is deleted
 > wholesale and rebuilt, never repaired and never a permanent degradation** (separately

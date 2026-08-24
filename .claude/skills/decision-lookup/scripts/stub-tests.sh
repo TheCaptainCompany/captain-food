@@ -77,10 +77,32 @@ else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
     && ! echo "$out" | grep -q "bun runtime not present" \
-    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not present" \
-    && echo "$out" | grep -q "structural trustedDependencies verification and the strict results parser" \
+    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not usable" \
+    && echo "$out" | grep -q "structural lockfile-binding and trustedDependencies verifications and the strict results parser" \
     && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
     && verdict ok "T3b no-python3 install: named preflight, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
+fi
+
+# T3c --install with bun resolvable but python3 BROKEN (resolves, cannot start) -> the named
+# "python3 not usable" preflight failure BEFORE any install dir is created, exit != 0. The
+# preflight executes (command -v proves resolvability, not runnability): this path routes the
+# lockfile-binding TAMPERING verdict through python3, so a broken interpreter must fail here,
+# named as a host defect — never inside the binding check alleging a non-assessed artifact.
+# bun is a FAKE (exit-0 stub), so even a preflight-less mutant can never touch the network.
+Q="$S/t3c"; mkdir -p "$Q" "$S/t3c-bin"
+printf '#!/bin/sh\nexit 9\n' > "$S/t3c-bin/python3"; chmod +x "$S/t3c-bin/python3"
+printf '#!/bin/sh\nexit 0\n' > "$S/t3c-bin/bun"; chmod +x "$S/t3c-bin/bun"
+if [ ! -x "$S/t3c-bin/python3" ] || [ ! -x "$S/t3c-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ]; then
+  verdict bad "T3c broken-python3 install (precondition: controlled PATH not constructible)"
+else
+  out="$(env PATH="$S/t3c-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
+  [ $rc -ne 0 ] \
+    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not usable" \
+    && ! echo "$out" | grep -q "not the assessed one" \
+    && [ ! -d "$Q/tool" ] \
+    && verdict ok "T3c broken python3 install: named host-defect preflight, no install dir, exit $rc" \
+    || verdict bad "T3c broken-python3 install (rc=$rc)"
 fi
 
 # T4 rebuild failure wipes caches and falls back
