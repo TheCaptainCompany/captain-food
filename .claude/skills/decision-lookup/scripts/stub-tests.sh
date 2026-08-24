@@ -315,6 +315,33 @@ except Exception:
     && verdict ok "T15 corrupt index + matching stamp -> rebuilt, candidates, healthy index" || verdict bad "T15 (rc=$rc)"
 fi
 
+# T15b lookup with python3 ABSENT -> the named preflight fallback, exit 0, and a HEALTHY cache
+# left byte-untouched. Without the lookup-path preflight, the openability probe would exit 127
+# (indistinguishable from "corrupt") and every lookup would wipe + fully rebuild a healthy cache.
+# Controlled-PATH model per T3/T3b: the PATH dir carries only bun + dirname; PRECONDITIONS
+# assert the seeded cache exists, the symlinks resolve, and python3 is genuinely unresolvable —
+# else the case FAILS outright.
+Q="$S/t15b"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "seed" 2>&1)"   # seed a healthy stamped cache first
+mkdir -p "$S/t15b-bin"
+BUN_REAL="$(command -v bun || true)"
+if [ -z "$BUN_REAL" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! ln -s "$BUN_REAL" "$S/t15b-bin/bun" 2>/dev/null || [ ! -x "$S/t15b-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t15b-bin/dirname" 2>/dev/null || [ ! -x "$S/t15b-bin/dirname" ] \
+  || env PATH="$S/t15b-bin" /bin/bash -c 'command -v python3' >/dev/null 2>&1; then
+  verdict bad "T15b no-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(env PATH="$S/t15b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "seed" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not present" \
+    && echo "$out" | grep -q "openability probe and the strict results parser" \
+    && ! echo "$out" | grep -q '^candidate ' \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15b no-python3 lookup: named fallback, healthy cache untouched, exit $rc" \
+    || verdict bad "T15b no-python3 lookup (rc=$rc)"
+fi
+
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,
 # and exit 0. The fake update blocks the stamp by pre-creating a DIRECTORY at the stamp path.

@@ -15,9 +15,13 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > wipe-and-rebuild path; **(2)** a failed `qmd search` now **wipes the derived corpus/index
 > caches before its named tool-failure fallback**, so deep corruption the probe cannot see is
 > rebuilt on the next lookup instead of degrading every lookup until HEAD changes. No repair
-> path exists anywhere. The fake `qmd update` now writes a REAL sqlite index so the probe is
-> exercised genuinely; suite grows to **34 cases** (T15 corrupt-index rebuild; T8 extended with
-> the wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
+> path exists anywhere. Review finding absorbed pre-merge: **python3 is preflighted on the
+> lookup path before the cache is consulted** — without it the probe's exit 127 reads as
+> "corrupt" and every lookup would wipe and rebuild a healthy cache; absence now degrades to a
+> named fallback with the caches untouched. The fake `qmd update` now writes a REAL sqlite
+> index so the probe is exercised genuinely; suite grows to **35 cases** (T15 corrupt-index
+> rebuild; T15b python3-absent lookup leaves the cache byte-untouched; T8 extended with the
+> wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
 
 > 🔧 **2026-08-24 — decision-lookup slice-A corrections: the "caches wiped" message is now true on
 > every failure arm, the bun-absent test is host-independent, and the `.qmd/` ignore entry records
