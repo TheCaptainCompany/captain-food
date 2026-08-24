@@ -574,6 +574,29 @@ else
     || verdict bad "T15j sqlite3 without Error (rc=$rc)"
 fi
 
+# T15k an Error attribute that is PRESENT BUT NOT A CLASS must not decide a wipe either: with a
+# bare `isinstance(e, getattr(sqlite3, "Error", ()))`, a shim exporting `Error = "not a class"`
+# makes isinstance() raise TypeError inside the except clause -> unhandled -> exit 1, the wipe
+# verdict decided by a malformed attribute. The shipped isinstance/issubclass guard routes it to
+# the unavailable arm. One step out from T15j (absent attribute); same defect class.
+Q="$S/t15k"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15k-py"
+printf 'Error = "not a class"\n\n\ndef connect(*a, **k):\n    raise RuntimeError("boom")\n' > "$S/t15k-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! PYTHONPATH="$S/t15k-py" python3 -c 'import sqlite3, sys; sys.exit(0 if not isinstance(getattr(sqlite3, "Error", ()), type) else 1)' 2>/dev/null; then
+  verdict bad "T15k malformed Error attribute (precondition: seeded cache or non-class Error shim failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15k-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15k Error present but not a class: not a verdict, cache untouched" \
+    || verdict bad "T15k malformed Error attribute (rc=$rc)"
+fi
+
 # T15i the verdict survives interpreter stdout NOISE: a genuinely corrupt index under a
 # sitecustomize.py that prints on every interpreter start must still be REBUILT. Dispatching on
 # a command substitution ("$(index_openable ...; echo $?)") would match the pattern against the

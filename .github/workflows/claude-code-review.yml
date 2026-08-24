@@ -75,7 +75,8 @@ jobs:
           # The reviewer is a quality gate on a spec-driven repo and runs on the top model by
           # DECISION, not by default: this pin is what makes that explicit and survives the
           # action changing its own default. `model:` as an action INPUT is DEPRECATED in v1;
-          # `--model` inside claude_args is the only supported form.
+          # `--model` inside claude_args is the RECOMMENDED form — the migration path the
+          # action's own usage docs give (the input still functions; deprecated != unsupported).
           # NOTE (2026-08-24): runs from 16:39Z failed with `api_error_status: 429` /
           # "You're out of usage credits. Switch to another model to continue." — an
           # account-level billing condition, NOT a code one. The answer is to restore the

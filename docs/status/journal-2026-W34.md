@@ -17,8 +17,9 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > review caught it; the edit was reverted and the CI wiring dropped from the change. **The
 > lesson, worth the cost**: an unauthorized change can be honestly scoped in CONTENT (it was —
 > exactly one CI step and one pin) and still be recorded with the wrong INSTRUMENT, and the
-> instrument is what a future session can check. The question now sits as an open row for the
-> founder, not as prose inside the artifact it would authorize.
+> instrument is what a future session can check. The question now sits as the open row
+> `RETRIEVAL-QMD-CI` (`docs/decisions/RETRIEVAL-QMD-CI.yaml`, `reconsiders: RETRIEVAL-QMD`) for
+> the founder, not as prose inside the artifact it would authorize.
 > **What landed** — wrapper: the probe's verdict arm classifies with
 > `isinstance(e, getattr(sqlite3, "Error", ()))`, so a failure of the CALL (an interpreter whose
 > `connect()` lacks the `uri=`/`timeout=` kwargs, or a shim module with no `Error` attribute at
@@ -40,7 +41,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **T15g's skip is gated on an ASCII control**: skipping on any `mkdir` failure would have
 > swallowed ENOSPC/EROFS/EACCES as "filesystem rejects non-UTF-8 names" — coverage vanishing at
 > exit 0. Control succeeds AND the `\375` name fails ⇒ skip; control fails ⇒ loud failure.
-> **Suite 53 cases**, every new gate planted-red proven against its own mutant — with one
+> **Suite 54 cases**, every new gate planted-red proven against its own mutant — with one
 > honestly stated exception: the stdout-noise hole needs the COMBINED substitution-plus-
 > unsilenced mutant to reopen, each half alone being safe, so the two are recorded as ONE defense
 > (SKILL.md said "planted red" of a half-mutant that stays green; corrected).

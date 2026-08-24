@@ -193,18 +193,19 @@ The committed suite is the declared authority; re-run it after any wrapper chang
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**53 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**54 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
 network touch and with no install dir; absent and broken lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
-8 corrupt-index/probe cases (garbage index rebuilt, and rebuilt too under interpreter stdout
+9 corrupt-index/probe cases (garbage index rebuilt, and rebuilt too under interpreter stdout
 noise — the verdict is dispatched on the exit status, never on captured output; a planted `-wal`
 survives a hit byte-identical — the probe never writes; a poisoned sqlite3 module, an unknown
 probe exit, a call-site `TypeError` that is not a `sqlite3.Error`, a module with no `Error`
-attribute, and a non-UTF-8 cache path all still serve the stamped hit cache-untouched — only the
+attribute or an `Error` that is not a class, and a non-UTF-8 cache path all still serve the
+stamped hit cache-untouched — only the
 deliberate exit-1 verdict wipes), and 9 lockfile-binding cases (the extracted real
 `qmd_lock_binding_ok` against fixtures: valid binding; right version with the digest on
 another package; tampered digest; wrong version with the recorded digest last — pinning the
@@ -296,5 +297,6 @@ decision-row indexing, or any mandatory-workflow rule.
 
 **Open question, not yet decided**: nothing executable runs this suite, so its green is
 executor-side only — which is what "declared authority" above is worth today. Wiring it into CI
-is a **CI change**, which the clause above sends to a new decision row; that row is open and the
-wiring does not exist until it is decided.
+is a **CI change**, which the clause above sends to a new decision row. That row is open —
+`RETRIEVAL-QMD-CI` (`docs/decisions/RETRIEVAL-QMD-CI.yaml`, `reconsiders: RETRIEVAL-QMD`) — and
+the wiring does not exist until it is decided.
