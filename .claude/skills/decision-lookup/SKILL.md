@@ -145,7 +145,9 @@ reaches the controlling record even where retrieval alone missed it.
 - **`--install` (the activation test)**: exits **non-zero** on any failure — bun absent, install
   failure, the **structural `bun.lock` binding** failing (the `@tobilu/qmd` packages entry must
   itself name the exact pin AND carry the recorded integrity digest — parse failure, missing
-  package, wrong version, or a digest attached to a different entry all fail loudly; bun's JSONC
+  package, wrong version, a digest attached to a different entry, or a lockfile entry shape
+  differing from the assumed `[pin, …, integrity]` tuple all fail loudly, and the failure
+  message names the shape-assumption cause so it is never misread as tampering; bun's JSONC
   trailing commas are stripped before parsing, so formatting churn never produces a false
   verdict), or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and

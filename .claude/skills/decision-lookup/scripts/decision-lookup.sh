@@ -193,7 +193,7 @@ if [ "${1:-}" = "--install" ]; then
     || activation_fail "bun add --exact $PIN --ignore-scripts returned non-zero (a partially created .qmd/tool/ may exist)"
   # Pin + integrity verification against the recorded digest (supply-chain assessment 2026-08-22):
   qmd_lock_binding_ok "$TOOL/bun.lock" "$PIN" "$INTEGRITY" \
-    || activation_fail "bun.lock does not structurally bind $PIN to the recorded integrity digest (parse failure, missing package, wrong version, or a digest attached to a different entry) — the artifact is not the assessed one"
+    || activation_fail "bun.lock does not structurally bind $PIN to the recorded integrity digest (parse failure, missing package, wrong version, a digest attached to a different entry — or the lockfile entry shape differs from the assumed [pin, ..., integrity] tuple, a format-assumption miss in this check, not tampering) — either the artifact is not the assessed one or the shape assumption needs re-verification"
   # Lifecycle-script enforcement must be establishable from the on-disk configuration:
   trusted_deps_empty "$TOOL/package.json" \
     || activation_fail "trustedDependencies is not exactly an empty list in .qmd/tool/package.json"
