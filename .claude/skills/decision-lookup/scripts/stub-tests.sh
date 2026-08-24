@@ -87,8 +87,13 @@ fi
 # never pass through the earlier "bun runtime not present" path by accident.
 Q="$S/t3b"; mkdir -p "$Q" "$S/t3b-bin"
 printf '#!/bin/sh\nexit 0\n' > "$S/t3b-bin/bun"; chmod +x "$S/t3b-bin/bun"
+# `mkdir` MUST be on the controlled PATH: the wrapper creates $TOOL with it, so without it the
+# "no install dir" assertion below passes because mkdir was unavailable, not because the preflight
+# ran first — a vacuous green that survives the very mutant it exists to catch (moving `mkdir -p
+# "$TOOL"` above the preflight). Same for t3c.
 if [ ! -x "$S/t3b-bin/bun" ] \
-  || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ]; then
+  || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ] \
+  || ! ln -s "$(command -v mkdir)" "$S/t3b-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3b-bin/mkdir" ]; then
   verdict bad "T3b no-python3 install (precondition: stub bun + symlinks unavailable)"
 else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
@@ -111,7 +116,8 @@ Q="$S/t3c"; mkdir -p "$Q" "$S/t3c-bin"
 printf '#!/bin/sh\nexit 9\n' > "$S/t3c-bin/python3"; chmod +x "$S/t3c-bin/python3"
 printf '#!/bin/sh\nexit 0\n' > "$S/t3c-bin/bun"; chmod +x "$S/t3c-bin/bun"
 if [ ! -x "$S/t3c-bin/python3" ] || [ ! -x "$S/t3c-bin/bun" ] \
-  || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ]; then
+  || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ] \
+  || ! ln -s "$(command -v mkdir)" "$S/t3c-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3c-bin/mkdir" ]; then
   verdict bad "T3c broken-python3 install (precondition: controlled PATH not constructible)"
 else
   out="$(env PATH="$S/t3c-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
@@ -491,7 +497,13 @@ fi
 # this harness declined to build. That is a SKIP, not a FAIL: a hard red on every Mac would
 # train readers to discount reds. The mkdir is attempted first and decides.
 Q="$S/t15g$(printf '\375')"
-if ! mkdir -p "$Q" 2>/dev/null || [ ! -d "$Q" ]; then
+# An ASCII CONTROL decides WHY the mkdir failed. Skipping on any mkdir failure would silently
+# swallow ENOSPC/EROFS/EACCES/ENOTDIR — coverage vanishing while the suite still exits 0. Control
+# succeeds AND the \375 name fails => a genuine filesystem-encoding refusal (skip). Control also
+# fails => the harness/host is broken, which is a loud failure like every other precondition.
+if ! mkdir -p "${Q%$(printf '\375')}-ascii-control" 2>/dev/null; then
+  verdict bad "T15g non-utf8 path (precondition: ASCII control mkdir failed — host/harness broken, not an encoding refusal)"
+elif ! mkdir -p "$Q" 2>/dev/null || [ ! -d "$Q" ]; then
   skipped "T15g non-utf8 cache path — filesystem rejects non-UTF-8 names (Linux-only case)"
 else
   mkfake "$Q" "$S/p5a.json"
@@ -537,6 +549,29 @@ else
     && [ "$fp_b" = "$fp_a" ] \
     && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched" \
     || verdict bad "T15h non-sqlite3 probe exception (rc=$rc)"
+fi
+
+# T15j a sqlite3 module WITHOUT an `Error` attribute must not decide a wipe: with a bare
+# `except sqlite3.Error:` the except clause itself raises AttributeError while being evaluated,
+# which is unhandled and exits 1 — a corruption verdict decided by a missing attribute rather
+# than by the database. The shipped `isinstance(e, getattr(sqlite3, "Error", ()))` form routes
+# it to the unavailable arm instead, so the stamped hit is accepted, cache untouched.
+Q="$S/t15j"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15j-py"
+printf 'def connect(*a, **k):\n    raise RuntimeError("no Error attribute on this module")\n' > "$S/t15j-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || PYTHONPATH="$S/t15j-py" python3 -c 'import sqlite3, sys; sys.exit(0 if hasattr(sqlite3, "Error") else 1)' 2>/dev/null; then
+  verdict bad "T15j sqlite3 without Error (precondition: seeded cache or attribute-less shim failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15j-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15j sqlite3 module without Error: not a verdict, cache untouched" \
+    || verdict bad "T15j sqlite3 without Error (rc=$rc)"
 fi
 
 # T15i the verdict survives interpreter stdout NOISE: a genuinely corrupt index under a
@@ -618,10 +653,16 @@ else
   # asserted as a PRECONDITION, so a python that ignores them fails the case loudly.
   printf '%s' "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"], \"other\": [\"other@1.0.0\", \"$(printf '\303\234nicode Auth\303\266r')\", {}, \"sha512-OTHER\"]}}" > "$S/t16-utf8.lock"
   ascii_locale='LC_ALL=C LANG=C PYTHONCOERCECLOCALE=0 PYTHONUTF8=0'
-  enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
-  if [ "$enc" = "utf-8" ] || [ -z "$enc" ]; then
-    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition: ASCII locale unreachable, got '$enc')"
+  # Assert the PROPERTY, not a codeset string: a locale-dependent open() of this file must
+  # actually RAISE under the chosen env. Comparing `getpreferredencoding()` to "utf-8" is
+  # case-sensitive and alias-blind ("UTF-8" on glibc, musl/Alpine's C locale), so the guard could
+  # declare an ASCII locale reached while the case ran under UTF-8 — passing vacuously with the
+  # encoding= fix removed. This probe cannot be aliased away.
+  if env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
+    enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
+    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition: locale-dependent open did NOT raise; enc='$enc' — no genuine ASCII locale on this host)"
   else
+    enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
     ( eval "export $ascii_locale"; qmd_lock_binding_ok "$S/t16-utf8.lock" "$PIN16" "$INTEG16" ); rc=$?
     [ $rc -eq 0 ] \
       && verdict ok "T16 non-ASCII lockfile on ASCII locale ($enc) -> pass (locale-independent)" \

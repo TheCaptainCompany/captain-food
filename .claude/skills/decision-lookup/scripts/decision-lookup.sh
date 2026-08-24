@@ -108,8 +108,11 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # database's own verdicts (garbage bytes -> DatabaseError, unreadable -> OperationalError)
   # are subclasses of it, while a failure of the CALL itself (e.g. a python3 whose connect()
   # lacks the uri=/timeout= kwargs -> TypeError) says nothing about the file and routes to the
-  # unavailable arm. Stdout is silenced with stderr: the caller dispatches on the exit status,
-  # and interpreter-level stdout noise (a printing sitecustomize.py) must never reshape it.
+  # unavailable arm. `getattr(sqlite3, "Error", ())` rather than `except sqlite3.Error:` on
+  # purpose: a shim module without an Error attribute would raise AttributeError while EVALUATING
+  # the except clause, which is unhandled and exits 1 — a wipe decided by a missing attribute.
+  # Stdout is silenced with stderr: the caller dispatches on the exit status, and
+  # interpreter-level stdout noise (a printing sitecustomize.py) must never reshape it.
   python3 -c 'import sys
 try:
     import sqlite3
@@ -120,10 +123,8 @@ except Exception:
 try:
     c = sqlite3.connect(uri, uri=True, timeout=0)
     c.execute("PRAGMA schema_version"); c.close()
-except sqlite3.Error:
-    sys.exit(1)
-except Exception:
-    sys.exit(2)' "$1" >/dev/null 2>&1
+except Exception as e:
+    sys.exit(1 if isinstance(e, getattr(sqlite3, "Error", ())) else 2)' "$1" >/dev/null 2>&1
 }
 
 build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)

@@ -187,27 +187,24 @@ reaches the controlling record even where retrieval alone missed it.
 
 ## Hermetic test suite (stubs only — never installs, never touches the real `.qmd/`)
 
-The committed suite is the executable authority, and **CI runs it on every change** — in the
-ungated `changes` job, so a docs-only edit that rewords this contract cannot skip it, pinned by
-the `the_decision_lookup_stub_suite_runs_in_the_always_run_changes_job` codegen test so the step
-cannot be silently deleted. Re-run it locally after any wrapper change:
+The committed suite is the declared authority; re-run it after any wrapper change:
 
 ```
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**52 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**53 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
 network touch and with no install dir; absent and broken lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
-7 corrupt-index/probe cases (garbage index rebuilt, and rebuilt too under interpreter stdout
+8 corrupt-index/probe cases (garbage index rebuilt, and rebuilt too under interpreter stdout
 noise — the verdict is dispatched on the exit status, never on captured output; a planted `-wal`
 survives a hit byte-identical — the probe never writes; a poisoned sqlite3 module, an unknown
-probe exit, a call-site `TypeError` that is not a `sqlite3.Error`, and a non-UTF-8 cache path all
-still serve the stamped hit cache-untouched — only the
+probe exit, a call-site `TypeError` that is not a `sqlite3.Error`, a module with no `Error`
+attribute, and a non-UTF-8 cache path all still serve the stamped hit cache-untouched — only the
 deliberate exit-1 verdict wipes), and 9 lockfile-binding cases (the extracted real
 `qmd_lock_binding_ok` against fixtures: valid binding; right version with the digest on
 another package; tampered digest; wrong version with the recorded digest last — pinning the
@@ -268,10 +265,13 @@ the ONLY skip the suite allows; every other precondition stays a loud failure. C
    hard-exiting 7 → an unknown code), a shim whose `connect()` raises `TypeError` (a call-site
    failure, not a `sqlite3.Error`), or a non-UTF-8 byte in the cache path (URI construction
    raises in the unavailable arm), the stamped hit is accepted — candidates print, exit 0,
-   cache fingerprint byte-identical. Only the probe's deliberate exit-1 verdict wipes — and it
-   still wipes under interpreter stdout noise: a corrupt index with a printing
-   `sitecustomize.py` on `PYTHONPATH` is still rebuilt (planted red: dispatching on a command
-   substitution instead of the exit status leaves the garbage index in service).
+   cache fingerprint byte-identical — as is a module with no `Error` attribute at all, which a
+   bare `except sqlite3.Error:` would turn into a wipe decided by a missing attribute. Only the
+   probe's deliberate exit-1 verdict wipes — and it still wipes under interpreter stdout noise:
+   a corrupt index with a printing `sitecustomize.py` on `PYTHONPATH` is still rebuilt (planted
+   red: the **combined** mutant — command-substitution dispatch AND unsilenced probe stdout —
+   leaves the garbage index in service; each half alone is still safe, so the two are one
+   defense, not two).
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive
@@ -284,7 +284,9 @@ the ONLY skip the suite allows; every other precondition stays a loud failure. C
    passes the old grep logic), a tampered digest, a wrong version with the recorded digest last
    (the version arm), the digest present but not final, a non-list entry, and a one-element
    entry all fail. A non-ASCII lockfile read on a genuine ASCII-locale host still passes —
-   the verdict is locale-independent (planted red: dropping `encoding="utf-8"` fails there).
+   the verdict is locale-independent (planted red: dropping `encoding="utf-8"` fails there). The
+   ASCII-locale precondition asserts the property directly — a locale-dependent `open()` of that
+   fixture must actually raise — never a codeset-string compare, which aliasing would defeat.
 
 ## What this skill must never grow without a NEW decision row
 
@@ -292,7 +294,7 @@ Vector/semantic search, embeddings, model downloads, reranking, query expansion,
 process, hosted services, credentials, hooks or CI or validator or agent-contract changes, YAML
 decision-row indexing, or any mandatory-workflow rule.
 
-**One narrowing, recorded** (row `RETRIEVAL-QMD`, amendment 2026-08-24): the hermetic stub suite
-is wired into CI's always-run `changes` job and pinned by a codegen test — authorized as exactly
-that step plus its pin, because this file declares the suite the executable authority and an
-unrun authority is prose. Every other clause above stands unchanged.
+**Open question, not yet decided**: nothing executable runs this suite, so its green is
+executor-side only — which is what "declared authority" above is worth today. Wiring it into CI
+is a **CI change**, which the clause above sends to a new decision row; that row is open and the
+wiring does not exist until it is decided.

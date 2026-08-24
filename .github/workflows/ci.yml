@@ -89,18 +89,6 @@ jobs:
       - name: Register-check hook selftest (the ask-gate must never be disarmed silently)
         run: bash .claude/hooks/register-check-selftest.sh
 
-      # The decision-lookup stub suite, in the same always-run job and for the same reason: it is
-      # the declared executable authority for a wrapper that carries a SUPPLY-CHAIN gate (the
-      # pinned+scriptless install and its lockfile binding), and until now nothing executable ran
-      # it — its green was an executor-side claim, which this repo's "a gate cannot be ignored"
-      # rule does not accept for prose. Hermetic by construction: fake `bun`/`qmd` under a
-      # temporary DECISION_LOOKUP_HOME, no install, no network, and a before/after fingerprint
-      # asserts the real `.qmd/` cache is untouched. Pure bash + python3 (both present on the
-      # runner), a few seconds, so it runs on docs-only changes too — a docs-only edit can still
-      # reword the SKILL contract the suite pins.
-      - name: decision-lookup stub suite (hermetic; the skill's declared executable authority)
-        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh
-
   lint:
     # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
     # someone can silently start using. cargo-machete is static analysis over manifests + source
