@@ -89,7 +89,11 @@ reaches the controlling record even where retrieval alone missed it.
   recorded: the exit code cannot distinguish a damaged index from qmd rejecting the query
   itself, so a query-triggered failure pays the same wipe and the **next** lookup pays a full
   rebuild — accepted over ever serving a possibly-poisoned cache (a cache that "keeps
-  rebuilding" points to a query shape qmd rejects). The cache-hit
+  rebuilding" points to a query shape qmd rejects; the **known reproducer is a leading-hyphen
+  query** — the query is positional and unfenced at the qmd call, so it may parse as an
+  option; rephrase without the leading hyphen. Whether qmd 2.8.3 honors a `--` fence is
+  unverifiable offline — the pinned package lives inside the claudeignored cache — and
+  fencing unverified would risk breaking every query). The cache-hit
   check also runs a **bounded openability probe** (**immutable read-only** sqlite connect —
   zero writes, zero locks, zero busy timeout — + `PRAGMA schema_version`; never
   `quick_check`/`integrity_check` per lookup): a corrupt-but-present index is a broken cache

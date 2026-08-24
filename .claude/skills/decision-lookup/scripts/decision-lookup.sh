@@ -221,7 +221,12 @@ SEARCH_RC=$?
 # (recorded): the exit code cannot distinguish a damaged index from qmd rejecting the QUERY
 # itself, so a query-triggered failure pays the same wipe and the NEXT lookup pays a full
 # rebuild. That cost-shift is accepted over ever serving a possibly-poisoned cache; if the
-# cache "keeps rebuilding", look for a query shape qmd rejects.
+# cache "keeps rebuilding", look for a query shape qmd rejects — the KNOWN reproducer is a
+# LEADING-HYPHEN query ("$Q" is positional and unfenced below, so qmd may parse it as an
+# option and exit non-zero; whether qmd 2.8.3 honors a "--" fence is unverifiable offline —
+# the pinned package lives inside the claudeignored cache — and fencing unverified would risk
+# breaking every query, so the class is documented instead: rephrase the query without the
+# leading hyphen).
 [ "$SEARCH_RC" -ne 0 ] && { rm -rf "$CORPUS" "$QHOME"; fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; derived caches wiped (delete-wholesale, never repair); no retry" "$Q"; }
 [ -z "$OUT" ] && fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q"
 
