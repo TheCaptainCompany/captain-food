@@ -87,7 +87,12 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # the sqlite3 module is a COMPILE-TIME optional of python3 (unlike json), and its absence
   # must never be read as corruption, or every lookup would silently wipe and rebuild a
   # healthy cache (the same conflation the lookup-path python3 preflight closes, one layer
-  # down). The caller routes 2 to a named fallback with the caches untouched.
+  # down). The probe is BEST-EFFORT: on 2 the caller accepts the stamped non-empty index at
+  # the pre-probe trust level — the rebuild arm serves exactly that trust level unprobed, so
+  # refusing on the hit path would disable the advisory tool on such hosts between HEAD
+  # changes for zero gained safety (qmd bundles its own SQLite; host-python module absence
+  # says nothing about the index). Deep corruption on such hosts stays bounded by the
+  # search-failure wipe below.
   python3 -c 'import sys, urllib.request
 try:
     import sqlite3
@@ -101,15 +106,14 @@ except Exception:
     sys.exit(1)' "$1" 2>/dev/null
 }
 
-build_corpus() { # returns 0 = cache ready; 2 = openability probe unavailable (caches untouched); 1 = rebuild failed (caches wiped)
+build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
   if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
     && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
-    index_openable "$CORPUS/.qmd/index.sqlite"
-    case $? in
-      0) return 0 ;;
-      2) return 2 ;;   # probe unavailable — NOT corruption: leave the stamped cache alone
-    esac                # exit 1 falls through: broken cache, wipe and rebuild below
+    case "$(index_openable "$CORPUS/.qmd/index.sqlite"; echo $?)" in
+      0|2) return 0 ;;   # 2 = probe unavailable, NOT corruption: accept the stamped hit at the
+                         # pre-probe trust level (see the probe's exit contract above)
+    esac                 # exit 1 falls through: broken cache, wipe and rebuild below
   fi
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
   git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \
@@ -184,10 +188,7 @@ command -v bun >/dev/null 2>&1 || fallback "bun runtime not present" "$Q"
 command -v python3 >/dev/null 2>&1 \
   || fallback "python3 not present — required for the openability probe and the strict results parser" "$Q"
 [ -x "$QMD" ] || fallback "not installed — to install deliberately: .claude/skills/decision-lookup/scripts/decision-lookup.sh --install" "$Q"
-build_corpus
-BC_RC=$?
-[ "$BC_RC" -eq 2 ] && fallback "python3 lacks the sqlite3 module — the openability probe cannot run; caches untouched (probe unavailability is never read as corruption)" "$Q"
-[ "$BC_RC" -ne 0 ] && fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
+build_corpus || fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
 
 # Machine-readable output only: qmd's --json mode, parsed with the python3 standard library
 # against a PINNED, STRICT top-level schema. PROVENANCE NOTE (honest): the completed sandbox spike

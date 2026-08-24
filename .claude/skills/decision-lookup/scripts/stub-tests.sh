@@ -365,9 +365,13 @@ else
 fi
 
 # T15d probe UNAVAILABLE is not corruption: python3 present but the sqlite3 MODULE missing (a
-# compile-time optional, unlike json) must take a NAMED fallback with the stamped cache left
-# byte-untouched — never the silent wipe-and-rebuild that reading exit 2 as "corrupt" would
-# cause. Simulated hermetically by poisoning PYTHONPATH with an import-raising sqlite3 module.
+# compile-time optional, unlike json) must ACCEPT the stamped non-empty hit at the pre-probe
+# trust level — candidates print and the cache stays byte-untouched. Neither the silent
+# wipe-and-rebuild that reading exit 2 as "corrupt" would cause, nor a refusal fallback: the
+# rebuild arm serves exactly this trust level unprobed, so refusing the hit would disable the
+# advisory tool on such hosts between HEAD changes for zero gained safety. Simulated
+# hermetically by poisoning PYTHONPATH with an import-raising sqlite3 module (the parser needs
+# only json, so candidates still parse).
 Q="$S/t15d"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
 mkdir -p "$S/t15d-py"
@@ -379,12 +383,11 @@ else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15d-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
-  [ $rc -eq 0 ] && echo "$out" | grep -q "sqlite3 module" \
-    && echo "$out" | grep -q "never read as corruption" \
-    && ! echo "$out" | grep -q '^candidate ' \
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
+    && ! echo "$out" | grep -q "qmd unavailable" \
     && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15d sqlite3-module-absent: named fallback, cache untouched, exit $rc" \
+    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc" \
     || verdict bad "T15d probe-unavailable (rc=$rc)"
 fi
 
