@@ -64,23 +64,46 @@ fi
 
 # T3b --install with bun resolvable but python3 ABSENT -> named python3 preflight failure,
 # exit != 0. A controlled PATH dir carries only the externals the script needs before the
-# preflight (bun, dirname) — python3 is deliberately unresolvable. PRECONDITION: the real bun
-# must be found and its symlink created — otherwise T3b FAILS outright, so it can never pass
-# through the earlier "bun runtime not present" path by accident.
+# preflight (bun, dirname) — python3 is deliberately unresolvable. bun is a STUB (exit-0, per
+# T3c): the wrapper only needs resolvability before the preflight, and a stub means even a
+# preflight-less mutant can never reach a real network install from inside this suite.
+# PRECONDITION: the stub and symlink must exist — otherwise T3b FAILS outright, so it can
+# never pass through the earlier "bun runtime not present" path by accident.
 Q="$S/t3b"; mkdir -p "$Q" "$S/t3b-bin"
-BUN_REAL="$(command -v bun || true)"
-if [ -z "$BUN_REAL" ] \
-  || ! ln -s "$BUN_REAL" "$S/t3b-bin/bun" 2>/dev/null || [ ! -x "$S/t3b-bin/bun" ] \
+printf '#!/bin/sh\nexit 0\n' > "$S/t3b-bin/bun"; chmod +x "$S/t3b-bin/bun"
+if [ ! -x "$S/t3b-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ]; then
-  verdict bad "T3b no-python3 install (precondition: real bun + symlinks unavailable)"
+  verdict bad "T3b no-python3 install (precondition: stub bun + symlinks unavailable)"
 else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
     && ! echo "$out" | grep -q "bun runtime not present" \
-    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not present" \
-    && echo "$out" | grep -q "structural trustedDependencies verification and the strict results parser" \
+    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not usable" \
+    && echo "$out" | grep -q "structural lockfile-binding and trustedDependencies verifications and the strict results parser" \
     && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
     && verdict ok "T3b no-python3 install: named preflight, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
+fi
+
+# T3c --install with bun resolvable but python3 BROKEN (resolves, cannot start) -> the named
+# "python3 not usable" preflight failure BEFORE any install dir is created, exit != 0. The
+# preflight executes (command -v proves resolvability, not runnability): this path routes the
+# lockfile-binding TAMPERING verdict through python3, so a broken interpreter must fail here,
+# named as a host defect — never inside the binding check alleging a non-assessed artifact.
+# bun is a FAKE (exit-0 stub), so even a preflight-less mutant can never touch the network.
+Q="$S/t3c"; mkdir -p "$Q" "$S/t3c-bin"
+printf '#!/bin/sh\nexit 9\n' > "$S/t3c-bin/python3"; chmod +x "$S/t3c-bin/python3"
+printf '#!/bin/sh\nexit 0\n' > "$S/t3c-bin/bun"; chmod +x "$S/t3c-bin/bun"
+if [ ! -x "$S/t3c-bin/python3" ] || [ ! -x "$S/t3c-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ]; then
+  verdict bad "T3c broken-python3 install (precondition: controlled PATH not constructible)"
+else
+  out="$(env PATH="$S/t3c-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
+  [ $rc -ne 0 ] \
+    && echo "$out" | grep -q "ACTIVATION FAILED: python3 not usable" \
+    && ! echo "$out" | grep -q "not the assessed one" \
+    && [ ! -d "$Q/tool" ] \
+    && verdict ok "T3c broken python3 install: named host-defect preflight, no install dir, exit $rc" \
+    || verdict bad "T3c broken-python3 install (rc=$rc)"
 fi
 
 # T4 rebuild failure wipes caches and falls back
@@ -471,6 +494,41 @@ out="$(FAKE_UPDATE_STAMP_BLOCK=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$
   && ! echo "$out" | grep -q '^candidate ' \
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && verdict ok "T14 stamp-write failure -> caches truly wiped, named fallback, exit 0" || verdict bad "T14 (rc=$rc)"
+
+# T16 structural bun.lock version<->integrity BINDING — tests the REAL shipped function
+# (extracted verbatim). Fixtures only; no lockfile is generated or modified.
+eval "$(sed -n '/^qmd_lock_binding_ok()/,/^}/p' "$W")"
+PIN16="$(sed -n 's/^PIN="\(.*\)" *#.*$/\1/p; s/^PIN="\(.*\)"$/\1/p' "$W" | head -1)"
+INTEG16="$(sed -n 's/^INTEGRITY="\(.*\)"$/\1/p' "$W" | head -1)"
+if [ -z "$PIN16" ] || [ -z "$INTEG16" ]; then
+  verdict bad "T16 (precondition: PIN/INTEGRITY not extractable from wrapper)"
+else
+  t16() { printf '%s' "$2" > "$S/t16.lock"; qmd_lock_binding_ok "$S/t16.lock" "$PIN16" "$INTEG16"; rc=$?; [ $rc -eq "$3" ] && verdict ok "T16 $1" || verdict bad "T16 $1 (rc=$rc, want $3)"; }
+  t16 "valid binding -> pass" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"]}}" 0
+  t16 "right version, integrity on ANOTHER package -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-WRONGWRONGWRONG\"], \"other\": [\"other@1.0.0\", \"\", {}, \"$INTEG16\"]}}" 1
+  t16 "wrong integrity on the qmd entry -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-TAMPERED\"]}}" 1
+  t16 "digest present but NOT last element -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"$INTEG16\", {}]}}" 1
+  t16 "entry not a list (object shape) -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": {\"version\": \"$PIN16\", \"integrity\": \"$INTEG16\"}}}" 1
+  t16 "one-element entry -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\"]}}" 1
+  t16 "wrong version, recorded digest last -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"@tobilu/qmd@2.9.9\", \"\", {}, \"$INTEG16\"]}}" 1
+  t16 "valid JSONC trailing commas -> pass" \
+    "{
+  \"lockfileVersion\": 1,
+  \"workspaces\": {
+    \"\": { \"dependencies\": { \"@tobilu/qmd\": \"2.8.3\", }, },
+  },
+  \"packages\": {
+    \"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"],
+  },
+}" 0
+fi
 
 echo "----"
 echo "RESULT: $pass passed, $fail failed"

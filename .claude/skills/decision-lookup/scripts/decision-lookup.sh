@@ -160,23 +160,53 @@ except Exception:
 sys.exit(0 if d.get("trustedDependencies") == [] else 1)' "$1" 2>/dev/null
 }
 
+# Structural version<->integrity BINDING in bun.lock (the separate verification-design decision
+# the #671 deferred note required — separately authorized under the standing completion
+# directive, recorded in journal-2026-W34; closing the recorded asymmetry with the structural
+# package.json check): the
+# "@tobilu/qmd" packages entry must itself name exactly $PIN AND carry the recorded integrity
+# digest as its final element. Two independent presence greps could be satisfied by different
+# entries; this cannot. bun.lock is JSONC (bun emits trailing commas), so trailing commas are
+# stripped before json parsing — a whitespace/format change never produces a false verdict
+# (the 588cbd8 lesson); any parse failure fails LOUD at --install, never silently.
+qmd_lock_binding_ok() { # $1 = bun.lock, $2 = exact pin, $3 = recorded integrity
+  # The comma-strip regex runs over raw bytes, including string INTERIORS — provably harmless
+  # for the verdict: the two compared elements (pin alphabet, sha512 base64) cannot contain
+  # "," + whitespace + "}"/"]", so no rewrite can manufacture a matching first/last element;
+  # the effect elsewhere is either a harmless string alteration that cannot touch the compared
+  # elements, or a parse difference that lands in the loud activation_fail arm. Never a false
+  # pass either way.
+  python3 -c 'import json, re, sys
+try:
+    raw = open(sys.argv[1]).read()
+    data = json.loads(re.sub(r",(\s*[}\]])", r"\1", raw))
+    entry = data["packages"]["@tobilu/qmd"]
+except Exception:
+    sys.exit(1)
+ok = isinstance(entry, list) and len(entry) >= 2 and entry[0] == sys.argv[2] and entry[-1] == sys.argv[3]
+sys.exit(0 if ok else 1)' "$1" "$2" "$3" 2>/dev/null
+}
+
 if [ "${1:-}" = "--install" ]; then
   # THE ACTIVATION TEST and the ONLY path that touches the network. Pinned, scriptless, inside the
   # gitignored cache. Run it deliberately — agents never run it implicitly as part of another
   # task, and its first execution requires the founder's separate approval.
   command -v bun >/dev/null 2>&1 || activation_fail "bun runtime not present"
-  command -v python3 >/dev/null 2>&1 \
-    || activation_fail "python3 not present — required for the structural trustedDependencies verification and the strict results parser"
+  # Preflight python3 BY EXECUTION, mirroring the lookup path (`command -v` proves
+  # resolvability, not runnability): this path routes the lockfile-binding TAMPERING verdict
+  # through python3, so a broken-but-resolvable interpreter must fail HERE, named and before
+  # any network touch — never inside the binding check, where its failure would allege a
+  # non-assessed artifact for a host defect.
+  python3 -c 'import json, re' >/dev/null 2>&1 \
+    || activation_fail "python3 not usable — required for the structural lockfile-binding and trustedDependencies verifications and the strict results parser"
   mkdir -p "$TOOL" "$QHOME"
   printf '{"name":"captain-qmd","private":true,"trustedDependencies":[]}\n' > "$TOOL/package.json"
   printf '[install]\nignoreScripts = true\n' > "$TOOL/bunfig.toml"
   ( cd "$TOOL" && env HOME="$QHOME" bun add --exact "$PIN" --ignore-scripts ) \
     || activation_fail "bun add --exact $PIN --ignore-scripts returned non-zero (a partially created .qmd/tool/ may exist)"
   # Pin + integrity verification against the recorded digest (supply-chain assessment 2026-08-22):
-  grep -q '"@tobilu/qmd@2.8.3"' "$TOOL/bun.lock" 2>/dev/null \
-    || activation_fail "pinned version @tobilu/qmd@2.8.3 not found in bun.lock"
-  grep -qF "$INTEGRITY" "$TOOL/bun.lock" 2>/dev/null \
-    || activation_fail "recorded integrity digest not found in bun.lock — the artifact is not the assessed one"
+  qmd_lock_binding_ok "$TOOL/bun.lock" "$PIN" "$INTEGRITY" \
+    || activation_fail "bun.lock does not structurally bind $PIN to the recorded integrity digest (parse failure, missing package, wrong version, a digest attached to a different entry — or the lockfile entry shape differs from the assumed [pin, ..., integrity] tuple, a format-assumption miss in this check, not tampering) — either the artifact is not the assessed one or the shape assumption needs re-verification"
   # Lifecycle-script enforcement must be establishable from the on-disk configuration:
   trusted_deps_empty "$TOOL/package.json" \
     || activation_fail "trustedDependencies is not exactly an empty list in .qmd/tool/package.json"
@@ -300,7 +330,7 @@ if [ ! -f "$EVIDENCE" ]; then
   {
     echo "activation evidence — first successful lookup ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
     echo "package: $PIN"
-    if grep -qF "$INTEGRITY" "$TOOL/bun.lock" 2>/dev/null; then echo "lockfile-integrity: verified ($INTEGRITY)"; else echo "lockfile-integrity: NOT VERIFIED in this cache"; fi
+    if qmd_lock_binding_ok "$TOOL/bun.lock" "$PIN" "$INTEGRITY"; then echo "lockfile-integrity: verified (structurally bound to $PIN; $INTEGRITY)"; else echo "lockfile-integrity: NOT VERIFIED in this cache"; fi
     if trusted_deps_empty "$TOOL/package.json" && grep -q 'ignoreScripts = true' "$TOOL/bunfig.toml" 2>/dev/null; then echo "scriptless-install: enforced (trustedDependencies [] + ignoreScripts)"; else echo "scriptless-install: enforcement NOT confirmed in this cache"; fi
     echo "corpus-head-sha: $(cat "$CORPUS/.sha" 2>/dev/null || echo missing)"
     echo "corpus-stamp: $CORPUS/.sha"

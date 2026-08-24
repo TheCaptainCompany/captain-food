@@ -138,12 +138,21 @@ reaches the controlling record even where retrieval alone missed it.
   sandbox spike ran `search` without `--json`, so the real shape is confirmed at the activation
   test; any other structure is "QMD output contract unavailable; use rg + aliases", never
   guesswork.
-- **Python 3 is a required local runtime** for both the structural `trustedDependencies` install
-  verification and the strict JSON results parser. Its absence at `--install` causes a **named
-  non-zero activation failure** (with the standard reversal instruction) — never a fallback
-  installation, download, or repair.
+- **Python 3 is a required local runtime** for the structural lockfile-binding and
+  `trustedDependencies` install verifications and the strict JSON results parser. `--install`
+  **preflights it by execution** (`command -v` proves resolvability, not runnability — and this
+  path routes the lockfile-binding tampering verdict through python3, so a broken interpreter
+  must fail as a named host defect before any network touch, never inside the binding check):
+  an absent or unusable python3 causes a **named non-zero activation failure** (with the
+  standard reversal instruction) — never a fallback installation, download, or repair.
 - **`--install` (the activation test)**: exits **non-zero** on any failure — bun absent, install
-  failure, pin/integrity verification against the recorded digest failing, or lifecycle-script
+  failure, the **structural `bun.lock` binding** failing (the `@tobilu/qmd` packages entry must
+  itself name the exact pin AND carry the recorded integrity digest — parse failure, missing
+  package, wrong version, a digest attached to a different entry, or a lockfile entry shape
+  differing from the assumed `[pin, …, integrity]` tuple all fail loudly, and the failure
+  message names the shape-assumption cause so it is never misread as tampering; bun's JSONC
+  trailing commas are stripped before parsing, so formatting churn never produces a false
+  verdict), or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and
   prints: *activation failed; remove `.qmd/` before any future approved retry*, plus the
   reversal-decision instruction (row `RETRIEVAL-QMD`). A failed install may leave a partial
@@ -173,17 +182,22 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**40 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**49 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
-5 quoting cases, 3 python3-preflight cases (install non-zero; absent and present-but-broken
-lookups fall back cache-untouched),
+5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
+network touch; absent and broken lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
-2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
+2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
 5 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
 byte-identical — the probe never writes; a poisoned sqlite3 module, an unknown probe exit,
 and a non-UTF-8 cache path all still serve the stamped hit cache-untouched — only the
-deliberate exit-1 verdict wipes) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+deliberate exit-1 verdict wipes), and 8 lockfile-binding cases (the extracted real
+`qmd_lock_binding_ok` against fixtures: valid binding; right version with the digest on
+another package; tampered digest; wrong version with the recorded digest last — pinning the
+version arm red; the digest present but NOT as the final element, a non-list
+entry, and a one-element entry — pinning every guard of the `[pin, …, integrity]` shape
+assumption red; valid JSONC trailing commas) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -191,7 +205,10 @@ asserts it) and never depended on, and no package is installed. Coverage:
 2. **Lookup cache miss falls back**: fresh cache home (no tool) + a query → fallback text, exit 0.
 3. **Install without Bun exits non-zero**: `PATH` without `bun`, `--install` → "ACTIVATION
    FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message. **Install with Bun but
-   without python3** → the named python3-preflight failure, exit ≠ 0, same reversal message.
+   without python3, and install with a python3 that resolves but cannot start** → the named
+   "python3 not usable" preflight failure, exit ≠ 0, same reversal message, no install dir
+   created and no network touched (both install-preflight cases use a stub bun so even a
+   preflight-less mutant cannot reach the network from inside the suite).
    **Lookup without python3, and lookup with a python3 that resolves but cannot start** (seeded
    healthy cache, controlled PATH) → the named preflight fallback, exit 0, and the cache
    fingerprint (paths, sizes, mtimes) byte-identical — never a wipe or rebuild.

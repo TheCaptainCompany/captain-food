@@ -3,6 +3,39 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-24 — decision-lookup slice-C lockfile binding: version and integrity are now ONE
+> structural fact, not two independent greps** (separately authorized — this is the SEPARATE
+> VERIFICATION-DESIGN DECISION the deferred note on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671) required). The two
+> independent `bun.lock` presence greps — satisfiable by DIFFERENT entries — are replaced by one
+> python3-stdlib structural check: bun's JSONC trailing commas are stripped, the file is
+> json-parsed, and the `@tobilu/qmd` packages entry must itself name exactly `@tobilu/qmd@2.8.3`
+> AND carry the recorded sha512 digest as its final element. Parse failure, missing package,
+> wrong version, or a digest attached to a different entry all fail `--install` loudly
+> (`activation_fail`, non-zero) — format churn can no longer produce a false verdict (the
+> `588cbd8` lesson applied to the lockfile side); the activation-evidence line now reports the
+> BINDING, not bare digest presence. No dependency, lockfile, QMD-version, or supply-chain-policy
+> change; `bun.lock` is never regenerated. Because this change routes the lockfile-binding
+> TAMPERING verdict through python3, `--install` now also **preflights python3 by execution**
+> (realizing the recorded #674-review fast-follow, in scope here for exactly that reason): a
+> broken-but-resolvable interpreter fails as a named host defect ("python3 not usable") before
+> any network touch, never inside the binding check alleging a non-assessed artifact; the
+> binding failure message also names the shape-assumption cause (a format-assumption miss is
+> not tampering), and the comma-strip's string-interior harmlessness is recorded at the
+> function; the proposal's `--install` bullet is rewritten in the same change (living-proposal
+> rule) so the register-pointed record carries the current verification design. Suite grows to
+> **49 cases** (eight T16 fixture cases against the extracted real
+> function: valid binding; right version with the digest on another package; tampered digest;
+> wrong version with the recorded digest last — pinning the version arm red, so BOTH halves of
+> the binding have been seen red;
+> the digest present but NOT last, a non-list entry, and a one-element entry — pinning every
+> guard of the tuple-shape assumption red;
+> valid JSONC trailing commas — fixture 2 is the discriminator the old greps lacked; plus T3c
+> broken-python3 install fails the named preflight with no install dir, and both
+> install-preflight cases use a stub bun so no network touch is reachable even under a
+> preflight-less mutant).
+
 > 🔧 **2026-08-24 — decision-lookup slice-B corruption handling: a corrupt index is deleted
 > wholesale and rebuilt, never repaired and never a permanent degradation** (separately
 > authorized; implements the founder-authorized fix for the corruption follow-up tracked on
