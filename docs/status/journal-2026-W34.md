@@ -23,8 +23,11 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > any network touch, never inside the binding check alleging a non-assessed artifact; the
 > binding failure message also names the shape-assumption cause (a format-assumption miss is
 > not tampering), and the comma-strip's string-interior harmlessness is recorded at the
-> function. Suite grows to **45 cases** (four T16 fixture cases against the extracted real
+> function; the proposal's `--install` bullet is rewritten in the same change (living-proposal
+> rule) so the register-pointed record carries the current verification design. Suite grows to
+> **46 cases** (five T16 fixture cases against the extracted real
 > function: valid binding; right version with the digest on another package; tampered digest;
+> the digest present but NOT last — pinning the tuple-shape assumption red;
 > valid JSONC trailing commas — fixture 2 is the discriminator the old greps lacked; plus T3c
 > broken-python3 install fails the named preflight with no install dir and, via a stub bun, no
 > possible network touch even under a preflight-less mutant).

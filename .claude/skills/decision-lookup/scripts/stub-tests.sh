@@ -509,6 +509,8 @@ else
     "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-WRONGWRONGWRONG\"], \"other\": [\"other@1.0.0\", \"\", {}, \"$INTEG16\"]}}" 1
   t16 "wrong integrity on the qmd entry -> FAIL" \
     "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-TAMPERED\"]}}" 1
+  t16 "digest present but NOT last element -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"$INTEG16\", {}]}}" 1
   t16 "valid JSONC trailing commas -> pass" \
     "{
   \"lockfileVersion\": 1,
