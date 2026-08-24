@@ -182,11 +182,15 @@ Q="${1:-}"
 [ -z "$Q" ] && { echo "usage: decision-lookup.sh \"<question>\"   (or --install)"; exit 0; }
 command -v bun >/dev/null 2>&1 || fallback "bun runtime not present" "$Q"
 # python3 must be preflighted BEFORE the cache is consulted: without it the openability probe
-# exits 127, which is indistinguishable from "corrupt" — every lookup would then wipe and fully
-# rebuild a healthy cache and still fail later at the parser, misnamed as a contract failure.
-# Absence degrades to the named fallback with the caches untouched.
-command -v python3 >/dev/null 2>&1 \
-  || fallback "python3 not present — required for the openability probe and the strict results parser" "$Q"
+# fails with a code that is indistinguishable from "corrupt" — every lookup would then wipe and
+# fully rebuild a healthy cache and still fail later at the parser, misnamed as a contract
+# failure. The preflight EXECUTES rather than resolves (`command -v` proves resolvability, not
+# runnability — a resolvable python3 that cannot start, e.g. a venv shim whose interpreter was
+# removed or a broken PYTHONHOME, would re-enter the same loop), and `import json` vouches for
+# exactly what the results parser needs. Unusability degrades to the named fallback with the
+# caches untouched.
+python3 -c 'import json' >/dev/null 2>&1 \
+  || fallback "python3 not usable — required for the openability probe and the strict results parser" "$Q"
 [ -x "$QMD" ] || fallback "not installed — to install deliberately: .claude/skills/decision-lookup/scripts/decision-lookup.sh --install" "$Q"
 build_corpus || fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
 

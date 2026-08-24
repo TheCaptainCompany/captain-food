@@ -107,9 +107,11 @@ reaches the controlling record even where retrieval alone missed it.
   refusing the hit would disable the advisory tool on such hosts between HEAD changes for zero
   gained safety (qmd bundles its own SQLite; host-python module absence says nothing about the
   index). Deep corruption on such hosts stays bounded by the search-failure wipe. **python3 is preflighted on the lookup
-  path before the cache is consulted**: without it the probe's failure would be
-  indistinguishable from corruption and every lookup would wipe and rebuild a healthy cache —
-  absence instead degrades to the named fallback with the caches untouched. The fallback's `rg` command renders the
+  path before the cache is consulted, by execution** (`python3 -c 'import json'` — `command -v`
+  proves resolvability, not runnability: a resolvable interpreter that cannot start would fail
+  the probe exactly like corruption): without the preflight, every lookup would wipe and
+  rebuild a healthy cache — an absent or unusable python3 instead degrades to the named
+  fallback with the caches untouched. The fallback's `rg` command renders the
   query as data via Bash `printf %q` — **Bash-safe only**: safe to copy/paste into Bash whatever
   the query contains (`%q` may emit `$'...'`/backslash forms), with no claim made for other
   shells. The wrapper consumes qmd's `--json` output
@@ -155,10 +157,11 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**37 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**38 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
-5 quoting cases, 2 python3-preflight cases (install non-zero; lookup falls back cache-untouched),
+5 quoting cases, 3 python3-preflight cases (install non-zero; absent and present-but-broken
+lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
 3 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
@@ -172,9 +175,9 @@ asserts it) and never depended on, and no package is installed. Coverage:
 3. **Install without Bun exits non-zero**: `PATH` without `bun`, `--install` → "ACTIVATION
    FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message. **Install with Bun but
    without python3** → the named python3-preflight failure, exit ≠ 0, same reversal message.
-   **Lookup without python3** (seeded healthy cache, controlled PATH) → the named preflight
-   fallback, exit 0, and the cache fingerprint (paths, sizes, mtimes) byte-identical — never a
-   wipe or rebuild.
+   **Lookup without python3, and lookup with a python3 that resolves but cannot start** (seeded
+   healthy cache, controlled PATH) → the named preflight fallback, exit 0, and the cache
+   fingerprint (paths, sizes, mtimes) byte-identical — never a wipe or rebuild.
 4. **Rebuild failure wipes cache and falls back**: fake `qmd` whose `update` exits 1 → fallback,
    exit 0, and the corpus/index dirs are gone.
 5. **Strict parser** (both pinned shapes and every rejection path): `top-level-array` and

@@ -334,7 +334,7 @@ else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(env PATH="$S/t15b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "seed" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
-  [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not present" \
+  [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
     && echo "$out" | grep -q "openability probe and the strict results parser" \
     && ! echo "$out" | grep -q '^candidate ' \
     && [ "$fp_b" = "$fp_a" ] \
@@ -389,6 +389,32 @@ else
     && [ "$fp_b" = "$fp_a" ] \
     && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc" \
     || verdict bad "T15d probe-unavailable (rc=$rc)"
+fi
+
+# T15e a python3 that RESOLVES but cannot start (broken venv shim, missing libpython) must hit
+# the same named preflight fallback with the cache untouched — `command -v` would pass it and
+# the probe's startup-failure exit would then read as a broken cache (wipe + rebuild every
+# lookup, misnamed as a contract failure at the parser). The preflight executes, so it catches
+# this. Controlled PATH per T15b, with a fake python3 that exits 9 without running anything.
+Q="$S/t15e"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15e-bin"
+printf '#!/bin/sh\nexit 9\n' > "$S/t15e-bin/python3"; chmod +x "$S/t15e-bin/python3"
+BUN_REAL="$(command -v bun || true)"
+if [ -z "$BUN_REAL" ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! ln -s "$BUN_REAL" "$S/t15e-bin/bun" 2>/dev/null || [ ! -x "$S/t15e-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t15e-bin/dirname" 2>/dev/null || [ ! -x "$S/t15e-bin/dirname" ]; then
+  verdict bad "T15e broken-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(env PATH="$S/t15e-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
+    && ! echo "$out" | grep -q '^candidate ' \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15e broken python3: named preflight fallback, cache untouched, exit $rc" \
+    || verdict bad "T15e broken-python3 lookup (rc=$rc)"
 fi
 
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
