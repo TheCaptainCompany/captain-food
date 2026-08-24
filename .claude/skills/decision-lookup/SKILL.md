@@ -187,7 +187,10 @@ reaches the controlling record even where retrieval alone missed it.
 
 ## Hermetic test suite (stubs only — never installs, never touches the real `.qmd/`)
 
-The committed suite is the declared authority; re-run it after any wrapper change:
+The committed suite is the authority for this wrapper, and it is **executable in CI**: one step of
+`.github/workflows/ci.yml`'s always-run `changes` job runs it on every push, pinned there by the
+`the_stub_suite_runs_in_the_always_run_changes_job` codegen test (decided 2026-08-24,
+`RETRIEVAL-QMD-CI`). Re-run it locally after any wrapper change:
 
 ```
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
@@ -292,11 +295,12 @@ the ONLY skip the suite allows; every other precondition stays a loud failure. C
 ## What this skill must never grow without a NEW decision row
 
 Vector/semantic search, embeddings, model downloads, reranking, query expansion, MCP or any server
-process, hosted services, credentials, hooks or CI or validator or agent-contract changes, YAML
-decision-row indexing, or any mandatory-workflow rule.
+process, hosted services, credentials, hooks, **any CI or workflow change beyond the single pinned
+stub-suite step**, validator or agent-contract changes, YAML decision-row indexing, or any
+mandatory-workflow rule.
 
-**Open question, not yet decided**: nothing executable runs this suite, so its green is
-executor-side only — which is what "declared authority" above is worth today. Wiring it into CI
-is a **CI change**, which the clause above sends to a new decision row. That row is open —
-`RETRIEVAL-QMD-CI` (`docs/decisions/RETRIEVAL-QMD-CI.yaml`, `reconsiders: RETRIEVAL-QMD`) — and
-the wiring does not exist until it is decided.
+**The one CI change that IS authorized** (`RETRIEVAL-QMD-CI`, decided 2026-08-24 by
+`ADR-20260824-205911`): the single `bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step
+in the always-run `changes` job, plus the codegen test pinning it. It tests the **wrapper** — it
+runs no QMD, installs nothing, and never touches a live `.qmd/` cache. Anything else in CI still
+needs a new row.
