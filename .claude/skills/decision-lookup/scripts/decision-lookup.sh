@@ -57,9 +57,11 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 }
 
 # Cache lifecycle: BEFORE EVERY LOOKUP the cache is validated — the stored corpus revision must
-# equal `git rev-parse HEAD` AND the index database (corpus/.qmd/index.sqlite) must exist: a
-# matching stamp with a missing index is a BROKEN CACHE (it would answer "no result" forever),
-# not a hit. On mismatch or breakage, `.qmd/corpus` AND `.qmd/index` are discarded and rebuilt
+# equal `git rev-parse HEAD` AND the index database (corpus/.qmd/index.sqlite) must exist AND be
+# OPENABLE (a bounded sqlite probe: connect + PRAGMA schema_version — never quick_check or
+# integrity_check on the hit path): a matching stamp with a missing OR corrupt index is a BROKEN
+# CACHE, not a hit — per the recorded delete-wholesale policy (proposal 6.3) it is wiped and
+# rebuilt, never repaired. On mismatch or breakage, `.qmd/corpus` AND `.qmd/index` are discarded and rebuilt
 # from `git archive` of the ONE resolved SHA that is also written to the stamp — HEAD is resolved
 # exactly once, so the archive source and the stamp can never diverge (no re-resolve race). The
 # WORKING TREE is never indexed. If the rebuild fails, the caches stay wiped and the caller gets
@@ -71,10 +73,58 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 # the account of itself, the recorded self-contamination/false-authority shape; rg + aliases
 # still searches status records directly), and all non-Markdown (row-YAML indexing is out of
 # scope by decision).
-build_corpus() {
+index_openable() { # bounded openability probe (delete-wholesale on failure — no repair path).
+  # IMMUTABLE (implies read-only) on purpose — the probe must be a ZERO-WRITE observer: a
+  # default rw connect silently runs SQLite WAL recovery on a pending -wal (a WRITE into the
+  # derived index on the hit path, i.e. the repair proposal 6.3 forbids) and can block on the
+  # 5s busy wait; even plain mode=ro still CREATES the -shm side file when a -wal is present
+  # (verified empirically, sqlite 3.45). immutable=1 + timeout=0 touch nothing: the question is
+  # whether the MAIN database file is openable — a pending -wal is deliberately ignored (WAL
+  # handling belongs to the tool's own rw open; lookups are sequential, so the no-locking
+  # semantics of immutable are safe here). urllib.parse.quote (safe="/" default; on POSIX
+  # pathname2url IS quote) keeps an arbitrary DECISION_LOOKUP_HOME path URI-safe — imported
+  # INSIDE the guarded try because it must never widen the import surface that can be read as
+  # corruption (urllib.request would transitively pull socket, another compile-time optional).
+  # Exit contract: 1 = the DELIBERATE NOT-openable verdict (wipe + rebuild); 0 = openable;
+  # 2 = probe UNAVAILABLE (the sqlite3 module is a COMPILE-TIME optional of python3, unlike
+  # json); ANY OTHER exit (import chain failure, signal death, 126/127) is a probe failure,
+  # never a corruption verdict — the same conflation the lookup-path python3 preflight closes,
+  # one layer down. The probe is BEST-EFFORT: on anything but 1 the caller accepts the stamped
+  # non-empty index at the pre-probe trust level — the rebuild arm serves exactly that trust
+  # level unprobed, so refusing on the hit path would disable the advisory tool on such hosts
+  # between HEAD changes for zero gained safety (qmd bundles its own SQLite; host-python
+  # module absence says nothing about the index). Deep corruption on such hosts stays bounded
+  # by the search-failure wipe below.
+  # URI construction lives in the UNAVAILABLE arm, not the verdict arm: quote() raises
+  # UnicodeEncodeError on a cache path carrying non-UTF-8 bytes (argv arrives surrogate-
+  # escaped; verified empirically), and a path-shaped failure must never read as the
+  # not-openable verdict. The exit-1 arm holds ONLY connect + PRAGMA — the sole operations
+  # that can genuinely testify about the database file.
+  python3 -c 'import sys
+try:
+    import sqlite3
+    from urllib.parse import quote
+    uri = "file:" + quote(sys.argv[1]) + "?immutable=1"
+except Exception:
+    sys.exit(2)
+try:
+    c = sqlite3.connect(uri, uri=True, timeout=0)
+    c.execute("PRAGMA schema_version"); c.close()
+except Exception:
+    sys.exit(1)' "$1" 2>/dev/null
+}
+
+build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
-  [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
-    && [ -s "$CORPUS/.qmd/index.sqlite" ] && return 0
+  if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
+    && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
+    case "$(index_openable "$CORPUS/.qmd/index.sqlite"; echo $?)" in
+      1) : ;;          # the deliberate NOT-openable verdict: broken cache — wipe and rebuild
+      *) return 0 ;;   # 0 = openable; 2 = probe unavailable; anything else = probe failure —
+                       # never read as corruption: accept the stamped hit at the pre-probe
+                       # trust level (see the probe's exit contract above)
+    esac
+  fi
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
   git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \
     | tar -x -C "$CORPUS" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
@@ -141,6 +191,16 @@ fi
 Q="${1:-}"
 [ -z "$Q" ] && { echo "usage: decision-lookup.sh \"<question>\"   (or --install)"; exit 0; }
 command -v bun >/dev/null 2>&1 || fallback "bun runtime not present" "$Q"
+# python3 must be preflighted BEFORE the cache is consulted: without it the openability probe
+# fails with a code that is indistinguishable from "corrupt" — every lookup would then wipe and
+# fully rebuild a healthy cache and still fail later at the parser, misnamed as a contract
+# failure. The preflight EXECUTES rather than resolves (`command -v` proves resolvability, not
+# runnability — a resolvable python3 that cannot start, e.g. a venv shim whose interpreter was
+# removed or a broken PYTHONHOME, would re-enter the same loop), and `import json` vouches for
+# exactly what the results parser needs. Unusability degrades to the named fallback with the
+# caches untouched.
+python3 -c 'import json' >/dev/null 2>&1 \
+  || fallback "python3 not usable — required for the openability probe and the strict results parser" "$Q"
 [ -x "$QMD" ] || fallback "not installed — to install deliberately: .claude/skills/decision-lookup/scripts/decision-lookup.sh --install" "$Q"
 build_corpus || fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
 
@@ -160,7 +220,24 @@ OUT="$(cd "$CORPUS" && env HOME="$QHOME" "$QMD" search "$Q" --json 2>/dev/null)"
 SEARCH_RC=$?
 # A tool failure is NOT an empty result: a non-zero qmd exit takes its own named fallback and
 # must never read as "no candidates". An empty SUCCESSFUL output is the empty-result path.
-[ "$SEARCH_RC" -ne 0 ] && fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; no retry, no repair" "$Q"
+# Per the delete-wholesale policy (proposal 6.3), a search failure also wipes the derived caches
+# BEFORE falling back — deep index corruption THAT QMD REPORTS AS A NON-ZERO EXIT must not
+# degrade every lookup until HEAD changes; the next lookup rebuilds from the pinned archive.
+# SCOPE (recorded honestly): corruption that surfaces as a SUCCESSFUL exit — garbage output
+# (the contract fallback below) or empty output (the no-result arm) — keeps the cache and does
+# degrade per-HEAD; the contract arm is DELIBERATELY not a wipe, because it is also the
+# schema-pin-mismatch path, and wiping there would rebuild-loop a healthy cache under a
+# genuinely changed output contract. HONEST COST
+# (recorded): the exit code cannot distinguish a damaged index from qmd rejecting the QUERY
+# itself, so a query-triggered failure pays the same wipe and the NEXT lookup pays a full
+# rebuild. That cost-shift is accepted over ever serving a possibly-poisoned cache; if the
+# cache "keeps rebuilding", look for a query shape qmd rejects — the KNOWN reproducer is a
+# LEADING-HYPHEN query ("$Q" is positional and unfenced below, so qmd may parse it as an
+# option and exit non-zero; whether qmd 2.8.3 honors a "--" fence is unverifiable offline —
+# the pinned package lives inside the claudeignored cache — and fencing unverified would risk
+# breaking every query, so the class is documented instead: rephrase the query without the
+# leading hyphen).
+[ "$SEARCH_RC" -ne 0 ] && { rm -rf "$CORPUS" "$QHOME"; fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; derived caches wiped (delete-wholesale, never repair); no retry" "$Q"; }
 [ -z "$OUT" ] && fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q"
 
 CANDIDATES="$(printf '%s' "$OUT" | python3 -c '

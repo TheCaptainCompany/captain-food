@@ -3,6 +3,62 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-24 — decision-lookup slice-B corruption handling: a corrupt index is deleted
+> wholesale and rebuilt, never repaired and never a permanent degradation** (separately
+> authorized; implements the founder-authorized fix for the corruption follow-up tracked on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671), per §6.3's
+> delete-wholesale policy). Two changes: **(1)** the cache-hit check adds a **bounded openability
+> probe** — python3 stdlib `sqlite3.connect` + `PRAGMA schema_version` (microseconds; never
+> `quick_check`/`integrity_check` on the hit path) — so a corrupt-but-present
+> `corpus/.qmd/index.sqlite` under a matching stamp is a BROKEN CACHE that takes the ordinary
+> wipe-and-rebuild path; **(2)** a failed `qmd search` now **wipes the derived corpus/index
+> caches before its named tool-failure fallback**, so deep corruption the probe cannot see is
+> rebuilt on the next lookup instead of degrading every lookup until HEAD changes. No repair
+> path exists anywhere. Review findings absorbed pre-merge — eight fixes and three record-only
+> items, folded into the four themes (a)–(d) below ((a) folds the python3-absent and
+> resolvable-but-broken findings; (c) folds the exit-2 introduction, the best-effort
+> acceptance, the exit-1-only-verdict completion and the URI-construction move into the
+> unavailable arm; (d) folds the cost-shift record, its named reproducer and the scoped
+> corruption claim): **(a)** python3 is preflighted
+> on the lookup path before the cache is consulted, BY EXECUTION (`command -v` proves
+> resolvability, not runnability — an absent python3 or a resolvable one that cannot start
+> would both fail the probe exactly like "corrupt", wiping and rebuilding a healthy cache on
+> every lookup); an unusable python3 now degrades to a named fallback with the caches
+> untouched; **(b)** the probe connects **immutable read-only
+> with zero busy timeout** — a default read-write connect silently runs SQLite WAL recovery on
+> a pending `-wal` (verified empirically: it deletes the file), a write into the derived index
+> on the hit path, i.e. the repair §6.3 forbids — and even plain `mode=ro` creates the `-shm`
+> side file; `immutable=1` touches nothing and probes only whether the main database file is
+> openable, a pending `-wal` being the tool's own business on its read-write open; **(c)** probe
+> UNAVAILABILITY OR FAILURE is never read as corruption — only the probe's deliberate exit-1
+> not-openable verdict may wipe: the sqlite3 module is a compile-time optional of python3 and
+> its absence exits distinctly (2); any OTHER exit (import-chain failure, signal death) is
+> likewise a probe failure, not a verdict, and the probe's import surface is kept minimal
+> (`urllib.parse.quote` inside the guarded try, never `urllib.request`, whose transitive
+> `socket` import is another compile-time optional; URI construction also lives in that arm —
+> a non-UTF-8 byte in the cache path makes `quote()` raise, and a path-shaped failure is not a
+> verdict — so the verdict arm holds only connect + `PRAGMA`); on anything but exit 1 the best-effort
+> probe ACCEPTS the stamped non-empty hit at the pre-probe trust level rather than silently
+> wiping a healthy cache or refusing it (the rebuild arm serves exactly that trust level
+> unprobed, so a refusal would disable the advisory tool on such hosts between HEAD changes
+> for zero gained safety); **(d)**
+> the honest cost of the search-failure wipe is now recorded in the wrapper, SKILL and §6.2:
+> the exit code cannot distinguish a damaged index from qmd rejecting the query itself, so a
+> query-triggered failure also wipes and the next lookup pays a full rebuild — accepted over
+> ever serving a possibly-poisoned cache, with the known reproducer (a leading-hyphen query,
+> positional and unfenced at the qmd call) named in both breadcrumbs — a `--` fence is
+> unverifiable offline against the claudeignored pinned package, so the class is documented
+> rather than fenced unverified; the wipe's reach is scoped honestly — it bounds corruption
+> qmd reports as a non-zero exit, while exit-0 corruption (garbage or empty output) keeps the
+> cache and degrades per-HEAD, because the output-contract arm is also the schema-pin-mismatch
+> path and must never wipe. The fake `qmd update` writes a REAL sqlite index
+> so the probe is exercised genuinely; suite grows to **40 cases** (T15 corrupt-index rebuild;
+> T15b python3-absent and T15e python3-broken lookups leave the cache byte-untouched; T15c a
+> planted garbage `-wal` survives a cache hit byte-identical — the probe never writes; T15d a
+> poisoned sqlite3 module, T15f an unknown probe exit and T15g a non-UTF-8 cache path all
+> still serve the stamped hit cache-untouched; T8 extended with the wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
+
 > 🔧 **2026-08-24 — decision-lookup slice-A corrections: the "caches wiped" message is now true on
 > every failure arm, the bun-absent test is host-independent, and the `.qmd/` ignore entry records
 > its deliberate non-mirror** (separately authorized; three small follow-ups tracked on

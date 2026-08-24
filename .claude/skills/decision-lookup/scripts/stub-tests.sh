@@ -21,15 +21,15 @@ BEFORE="$(fingerprint)"
 
 mkfake() { # $1 = QDIR, $2 = payload file for `search`
   mkdir -p "$1/tool/node_modules/.bin"
-  # `update` mirrors real qmd 2.8.3: on success it leaves the index database inside the
-  # collection dir (cwd) at .qmd/index.sqlite — so the wrapper's index-presence cache check is
-  # exercised for real in these tests.
+  # `update` mirrors real qmd 2.8.3: on success it leaves a VALID sqlite index database inside
+  # the collection dir (cwd) at .qmd/index.sqlite — so the wrapper's index-presence AND
+  # openability cache checks are exercised for real in these tests.
   cat > "$1/tool/node_modules/.bin/qmd" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   init|collection) exit 0 ;;
   update) rc=\${FAKE_UPDATE_EXIT:-0}
-          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; echo x > .qmd/index.sqlite; }
+          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; python3 -c 'import sqlite3; c = sqlite3.connect(".qmd/index.sqlite"); c.execute("CREATE TABLE IF NOT EXISTS t(x)"); c.commit(); c.close()'; }
           [ -n "\${FAKE_UPDATE_STAMP_BLOCK:-}" ] && mkdir -p .sha   # a DIRECTORY at the stamp path makes the stamp write fail deterministically
           exit "\$rc" ;;
   search) cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
@@ -192,13 +192,17 @@ t7 "non-list value -> FAIL"                     '{"trustedDependencies":true}' 1
 t7 "invalid JSON -> FAIL"                       'not json' 1
 
 # T8 planted-red: qmd search exits non-zero -> the DISTINCT named tool-failure fallback,
-# never the empty-result wording; exit 0; no retry, no repair
+# never the empty-result wording; exit 0; no retry, no repair — and per the delete-wholesale
+# policy the derived caches are WIPED before the fallback, so deep corruption cannot cause a
+# permanent tool-failure state until HEAD changes.
 Q="$S/t8"; mkfake "$Q" /dev/null
 out="$(FAKE_SEARCH_EXIT=7 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "qmd search failed (exit 7)" \
   && echo "$out" | grep -q "a tool failure, not an empty result" \
+  && echo "$out" | grep -q "derived caches wiped" \
   && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
-  && verdict ok "T8 search failure -> distinct tool-failure fallback, exit 0" || verdict bad "T8 (rc=$rc)"
+  && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
+  && verdict ok "T8 search failure -> tool-failure fallback, caches wiped, exit 0" || verdict bad "T8 (rc=$rc)"
 
 # T9 Bash-safe fallback rendering: the emitted rg command's documented target shell is BASH
 # (the wrapper quotes with Bash printf %q — no claim is made for other shells). Each rendered
@@ -288,6 +292,174 @@ out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && [ -z "$(find "$Q" -name '.sha' 2>/dev/null)" ] \
   && verdict ok "T13b index-less successful update -> wiped, unstamped, named fallback" || verdict bad "T13b (rc=$rc)"
+
+# T15 corrupt-but-present index: a matching stamp with GARBAGE bytes at index.sqlite must fail
+# the openability probe and take the ordinary wipe-and-rebuild path — candidates print (the
+# rebuild recreates a valid index), never a permanent tool-failure and never the empty-result
+# wording. Delete-wholesale, no repair (proposal 6.3).
+Q="$S/t15"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
+  verdict bad "T15 corrupt-index rebuild (precondition: healthy build failed)"
+else
+  printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "qmd search failed" \
+    && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+    && index_ok="$(python3 -c 'import sqlite3,sys
+try:
+    sqlite3.connect(sys.argv[1]).execute("PRAGMA schema_version"); print("ok")
+except Exception:
+    print("bad")' "$Q/corpus/.qmd/index.sqlite")" && [ "$index_ok" = ok ] \
+    && verdict ok "T15 corrupt index + matching stamp -> rebuilt, candidates, healthy index" || verdict bad "T15 (rc=$rc)"
+fi
+
+# T15b lookup with python3 ABSENT -> the named preflight fallback, exit 0, and a HEALTHY cache
+# left byte-untouched. Without the lookup-path preflight, the openability probe would exit 127
+# (indistinguishable from "corrupt") and every lookup would wipe + fully rebuild a healthy cache.
+# Controlled-PATH model per T3/T3b: the PATH dir carries only bun + dirname; PRECONDITIONS
+# assert the seeded cache exists, the symlinks resolve, and python3 is genuinely unresolvable —
+# else the case FAILS outright.
+Q="$S/t15b"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "seed" 2>&1)"   # seed a healthy stamped cache first
+mkdir -p "$S/t15b-bin"
+BUN_REAL="$(command -v bun || true)"
+if [ -z "$BUN_REAL" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! ln -s "$BUN_REAL" "$S/t15b-bin/bun" 2>/dev/null || [ ! -x "$S/t15b-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t15b-bin/dirname" 2>/dev/null || [ ! -x "$S/t15b-bin/dirname" ] \
+  || env PATH="$S/t15b-bin" /bin/bash -c 'command -v python3' >/dev/null 2>&1; then
+  verdict bad "T15b no-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(env PATH="$S/t15b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "seed" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
+    && echo "$out" | grep -q "openability probe and the strict results parser" \
+    && ! echo "$out" | grep -q '^candidate ' \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15b no-python3 lookup: named fallback, healthy cache untouched, exit $rc" \
+    || verdict bad "T15b no-python3 lookup (rc=$rc)"
+fi
+
+# T15c the probe is a ZERO-WRITE observer: a garbage index.sqlite-wal planted beside a healthy
+# stamped index must survive a cache-hit lookup with the index sidecar set byte-identical — no
+# file changed, none deleted, NONE CREATED. Verified empirically (sqlite 3.45): a default rw
+# connect runs WAL recovery during the probe and DELETES the planted -wal (the silent repair
+# proposal 6.3 forbids); even plain mode=ro CREATES the -shm side file. Both mutants change the
+# fingerprint; only immutable=1 leaves it. Candidates must still print (the fake search never
+# reads the index).
+Q="$S/t15c"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ]; then
+  verdict bad "T15c probe read-only (precondition: healthy build failed)"
+else
+  printf 'garbage-not-a-wal-header' > "$Q/corpus/.qmd/index.sqlite-wal"
+  fp_b="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15c probe is read-only: planted -wal survives a hit byte-identical" \
+    || verdict bad "T15c probe read-only (rc=$rc)"
+fi
+
+# T15d probe UNAVAILABLE is not corruption: python3 present but the sqlite3 MODULE missing (a
+# compile-time optional, unlike json) must ACCEPT the stamped non-empty hit at the pre-probe
+# trust level — candidates print and the cache stays byte-untouched. Neither the silent
+# wipe-and-rebuild that reading exit 2 as "corrupt" would cause, nor a refusal fallback: the
+# rebuild arm serves exactly this trust level unprobed, so refusing the hit would disable the
+# advisory tool on such hosts between HEAD changes for zero gained safety. Simulated
+# hermetically by poisoning PYTHONPATH with an import-raising sqlite3 module (the parser needs
+# only json, so candidates still parse).
+Q="$S/t15d"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
+mkdir -p "$S/t15d-py"
+printf 'raise ImportError("sqlite3 blocked for T15d")\n' > "$S/t15d-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || PYTHONPATH="$S/t15d-py" python3 -c 'import sqlite3' 2>/dev/null; then
+  verdict bad "T15d probe-unavailable (precondition: seeded cache or sqlite3 poisoning failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15d-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && ! echo "$out" | grep -q "qmd unavailable" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc" \
+    || verdict bad "T15d probe-unavailable (rc=$rc)"
+fi
+
+# T15e a python3 that RESOLVES but cannot start (broken venv shim, missing libpython) must hit
+# the same named preflight fallback with the cache untouched — `command -v` would pass it and
+# the probe's startup-failure exit would then read as a broken cache (wipe + rebuild every
+# lookup, misnamed as a contract failure at the parser). The preflight executes, so it catches
+# this. Controlled PATH per T15b, with a fake python3 that exits 9 without running anything.
+Q="$S/t15e"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15e-bin"
+printf '#!/bin/sh\nexit 9\n' > "$S/t15e-bin/python3"; chmod +x "$S/t15e-bin/python3"
+BUN_REAL="$(command -v bun || true)"
+if [ -z "$BUN_REAL" ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! ln -s "$BUN_REAL" "$S/t15e-bin/bun" 2>/dev/null || [ ! -x "$S/t15e-bin/bun" ] \
+  || ! ln -s "$(command -v dirname)" "$S/t15e-bin/dirname" 2>/dev/null || [ ! -x "$S/t15e-bin/dirname" ]; then
+  verdict bad "T15e broken-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(env PATH="$S/t15e-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
+    && ! echo "$out" | grep -q '^candidate ' \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15e broken python3: named preflight fallback, cache untouched, exit $rc" \
+    || verdict bad "T15e broken-python3 lookup (rc=$rc)"
+fi
+
+# T15f an UNKNOWN probe exit is never a corruption verdict: only exit 1 — the probe's
+# deliberate NOT-openable verdict — may wipe; any other failure code (import-chain death,
+# signals, 126/127) must accept the stamped hit at the pre-probe trust level, cache untouched.
+# Simulated by a poisoned sqlite3 module that hard-exits 7 on import (no exception raised, so
+# the probe's own exit-2 arm cannot catch it — the code reaches the caller as-is).
+Q="$S/t15f"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15f-py"
+printf 'import os\nos._exit(7)\n' > "$S/t15f-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || PYTHONPATH="$S/t15f-py" python3 -c 'import sqlite3' 2>/dev/null; then
+  verdict bad "T15f unknown-probe-exit (precondition: seeded cache or exit-7 poisoning failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(PYTHONPATH="$S/t15f-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, cache untouched, exit $rc" \
+    || verdict bad "T15f unknown-probe-exit (rc=$rc)"
+fi
+
+# T15g URI construction failure is not a verdict: a cache path carrying a non-UTF-8 byte makes
+# quote() raise UnicodeEncodeError (argv arrives surrogate-escaped). That failure must land in
+# the probe's UNAVAILABLE arm (accept the stamped hit, bytes untouched), never the exit-1
+# verdict arm — with quote() inside the verdict try, every lookup under such a path silently
+# wiped and fully rebuilt a healthy cache (candidates still printed, so only the fingerprint
+# discriminates).
+Q="$S/t15g$(printf '\375')"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
+  verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+else
+  fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && ! echo "$out" | grep -q "rebuild failed" \
+    && [ "$fp_b" = "$fp_a" ] \
+    && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
+    || verdict bad "T15g non-utf8 path (rc=$rc)"
+fi
 
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
 # the derived caches (so the named "caches wiped" fallback wording is TRUE), serve nothing,

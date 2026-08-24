@@ -83,9 +83,54 @@ reaches the controlling record even where retrieval alone missed it.
 - **Lookup path**: always exit 0 — unavailability, empty result, stale index, rebuild failure, a
   search-tool failure, or an output-contract failure print the advisory fallback. **A non-zero
   `qmd search` exit is a named tool failure, distinct from an empty successful result** — it never
-  reads as "no candidates". The fallback's `rg` command renders the query as data via Bash
-  `printf %q` — **Bash-safe only**: safe to copy/paste into Bash whatever the query contains
-  (`%q` may emit `$'...'`/backslash forms), with no claim made for other shells. The wrapper consumes qmd's `--json` output
+  reads as "no candidates", **and it wipes the derived corpus/index caches before falling back**
+  (delete-wholesale, never repair — proposal §6.3): deep index corruption **that qmd reports
+  as a non-zero exit** cannot degrade every lookup until HEAD changes; the next lookup
+  rebuilds from the pinned archive. Scope, recorded honestly: corruption surfacing as a
+  successful exit — garbage output (the contract fallback) or empty output (the no-result
+  arm) — keeps the cache and does degrade per-HEAD; the contract arm deliberately never
+  wipes, because it is also the schema-pin-mismatch path, and wiping there would rebuild-loop
+  a healthy cache under a genuinely changed output contract. Honest cost,
+  recorded: the exit code cannot distinguish a damaged index from qmd rejecting the query
+  itself, so a query-triggered failure pays the same wipe and the **next** lookup pays a full
+  rebuild — accepted over ever serving a possibly-poisoned cache (a cache that "keeps
+  rebuilding" points to a query shape qmd rejects; the **known reproducer is a leading-hyphen
+  query** — the query is positional and unfenced at the qmd call, so it may parse as an
+  option; rephrase without the leading hyphen. Whether qmd 2.8.3 honors a `--` fence is
+  unverifiable offline — the pinned package lives inside the claudeignored cache — and
+  fencing unverified would risk breaking every query). The cache-hit
+  check also runs a **bounded openability probe** (**immutable read-only** sqlite connect —
+  zero writes, zero locks, zero busy timeout — + `PRAGMA schema_version`; never
+  `quick_check`/`integrity_check` per lookup): a corrupt-but-present index is a broken cache
+  and takes the ordinary wipe-and-rebuild path. The probe is a **zero-write observer** — a
+  default read-write connect would silently run SQLite WAL recovery on the hit path (a write
+  into the derived index: the repair §6.3 forbids), and even a plain read-only connect creates
+  the `-shm` side file; `immutable=1` touches nothing. The probe asks only whether the main
+  database file is openable — a pending `-wal` is deliberately ignored (WAL handling belongs to
+  the tool's own read-write open); an unopenable main file fails the probe and is wiped and
+  rebuilt. **Only the probe's deliberate not-openable verdict (exit 1) may wipe** — probe
+  unavailability or failure is never read as corruption: a python3 built without the
+  compile-optional sqlite3 module exits distinctly (2), and **any other** exit (import-chain
+  failure, signal death, 126/127) is likewise a probe failure, not a verdict — the same
+  conflation guard as the preflight, one layer down (the probe's import surface is kept
+  minimal on purpose: `urllib.parse.quote` inside the guarded try, never `urllib.request`,
+  whose transitive `socket` import is another compile-time optional; URI construction also
+  lives in that guarded arm — a non-UTF-8 byte in the cache path makes `quote()` raise, and a
+  path-shaped failure must never read as the verdict — so the verdict arm holds only
+  connect + `PRAGMA`, the sole operations that can testify about the database file). The probe is
+  **best-effort**: on anything but exit 1 the stamped non-empty hit is **accepted at the
+  pre-probe trust level** — the rebuild arm serves exactly that trust level unprobed, so
+  refusing the hit would disable the advisory tool on such hosts between HEAD changes for zero
+  gained safety (qmd bundles its own SQLite; host-python module absence says nothing about the
+  index). Deep corruption on such hosts stays bounded by the search-failure wipe. **python3 is preflighted on the lookup
+  path before the cache is consulted, by execution** (`python3 -c 'import json'` — `command -v`
+  proves resolvability, not runnability: a resolvable interpreter that cannot start would fail
+  the probe exactly like corruption): without the preflight, every lookup would wipe and
+  rebuild a healthy cache — an absent or unusable python3 instead degrades to the named
+  fallback with the caches untouched. The fallback's `rg` command renders the
+  query as data via Bash `printf %q` — **Bash-safe only**: safe to copy/paste into Bash whatever
+  the query contains (`%q` may emit `$'...'`/backslash forms), with no claim made for other
+  shells. The wrapper consumes qmd's `--json` output
   through a python3 standard-library parser against a **pinned, strict top-level schema** (a
   ranked-result array, or `{results: [...]}`; per-result path/excerpt read from DIRECT keys only —
   **nothing nested is ever scanned**, so a metadata path can never become a candidate; source order
@@ -128,12 +173,17 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**33 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**40 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
-bun-absent install case), plus 1 search-failure case, 5 quoting cases, 1 python3-preflight case,
-1 corpus-mask case, 1 stamp/archive-SHA case, 2 broken-cache cases, 2 post-update
-index-assertion cases, and 1 stamp-write-failure case — all against a temporary
-`DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
+5 quoting cases, 3 python3-preflight cases (install non-zero; absent and present-but-broken
+lookups fall back cache-untouched),
+1 corpus-mask case, 1 stamp/archive-SHA case,
+2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
+5 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
+byte-identical — the probe never writes; a poisoned sqlite3 module, an unknown probe exit,
+and a non-UTF-8 cache path all still serve the stamped hit cache-untouched — only the
+deliberate exit-1 verdict wipes) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 
@@ -142,6 +192,9 @@ asserts it) and never depended on, and no package is installed. Coverage:
 3. **Install without Bun exits non-zero**: `PATH` without `bun`, `--install` → "ACTIVATION
    FAILED", exit ≠ 0, with the remove-`.qmd/`-before-retry message. **Install with Bun but
    without python3** → the named python3-preflight failure, exit ≠ 0, same reversal message.
+   **Lookup without python3, and lookup with a python3 that resolves but cannot start** (seeded
+   healthy cache, controlled PATH) → the named preflight fallback, exit 0, and the cache
+   fingerprint (paths, sizes, mtimes) byte-identical — never a wipe or rebuild.
 4. **Rebuild failure wipes cache and falls back**: fake `qmd` whose `update` exits 1 → fallback,
    exit 0, and the corpus/index dirs are gone.
 5. **Strict parser** (both pinned shapes and every rejection path): `top-level-array` and
@@ -168,7 +221,16 @@ asserts it) and never depended on, and no package is installed. Coverage:
    successful `qmd update` that writes no index is never stamped (positive + planted-red pair:
    stamp and index must coexist; an index-less "success" is wiped, unstamped, and falls back).
    A failed `corpus/.sha` write also wipes the derived caches before falling back, so the
-   "caches wiped" wording is true on every failure arm.
+   "caches wiped" wording is true on every failure arm. A corrupt-but-present index (garbage
+   bytes, matching stamp) fails the openability probe and is rebuilt — candidates print, never a
+   permanent tool-failure; a failed search wipes the derived caches before its named fallback.
+   The probe itself never writes: a garbage `index.sqlite-wal` planted beside a healthy stamped
+   index survives a cache-hit lookup byte-identical (a read-write connect would have run WAL
+   recovery and deleted it). Probe unavailability or failure is neither corruption nor a
+   refusal: with the sqlite3 module poisoned (PYTHONPATH shim raising ImportError → exit 2, or
+   hard-exiting 7 → an unknown code) or a non-UTF-8 byte in the cache path (URI construction
+   raises in the unavailable arm), the stamped hit is accepted — candidates print, exit 0,
+   cache fingerprint byte-identical. Only the probe's deliberate exit-1 verdict wipes.
 11. **Bash-safe fallback rendering**: for a double quote, `$()`, backticks, a newline and a
    leading hyphen, the rendered `rg` command is executed under **Bash — the emitted command's
    documented target shell** — against a recording `rg` stub: the exact query must arrive
