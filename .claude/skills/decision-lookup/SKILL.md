@@ -143,7 +143,11 @@ reaches the controlling record even where retrieval alone missed it.
   non-zero activation failure** (with the standard reversal instruction) — never a fallback
   installation, download, or repair.
 - **`--install` (the activation test)**: exits **non-zero** on any failure — bun absent, install
-  failure, pin/integrity verification against the recorded digest failing, or lifecycle-script
+  failure, the **structural `bun.lock` binding** failing (the `@tobilu/qmd` packages entry must
+  itself name the exact pin AND carry the recorded integrity digest — parse failure, missing
+  package, wrong version, or a digest attached to a different entry all fail loudly; bun's JSONC
+  trailing commas are stripped before parsing, so formatting churn never produces a false
+  verdict), or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and
   prints: *activation failed; remove `.qmd/` before any future approved retry*, plus the
   reversal-decision instruction (row `RETRIEVAL-QMD`). A failed install may leave a partial
@@ -173,17 +177,19 @@ The committed suite is the executable authority; re-run it after any wrapper cha
 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
 
-**40 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**44 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 3 python3-preflight cases (install non-zero; absent and present-but-broken
 lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
-2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case, and
+2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
 5 corrupt-index/probe cases (garbage index rebuilt; a planted `-wal` survives a hit
 byte-identical — the probe never writes; a poisoned sqlite3 module, an unknown probe exit,
 and a non-UTF-8 cache path all still serve the stamped hit cache-untouched — only the
-deliberate exit-1 verdict wipes) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
+deliberate exit-1 verdict wipes), and 4 lockfile-binding cases (the extracted real
+`qmd_lock_binding_ok` against fixtures: valid binding; right version with the digest on
+another package; tampered digest; valid JSONC trailing commas) — all against a temporary `DECISION_LOOKUP_HOME` with fake `bun`/`qmd`
 executables; the real repo `.qmd/` is never created, never modified (a before/after fingerprint
 asserts it) and never depended on, and no package is installed. Coverage:
 

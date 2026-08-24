@@ -472,6 +472,33 @@ out="$(FAKE_UPDATE_STAMP_BLOCK=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && verdict ok "T14 stamp-write failure -> caches truly wiped, named fallback, exit 0" || verdict bad "T14 (rc=$rc)"
 
+# T16 structural bun.lock version<->integrity BINDING — tests the REAL shipped function
+# (extracted verbatim). Fixtures only; no lockfile is generated or modified.
+eval "$(sed -n '/^qmd_lock_binding_ok()/,/^}/p' "$W")"
+PIN16="$(sed -n 's/^PIN="\(.*\)" *#.*$/\1/p; s/^PIN="\(.*\)"$/\1/p' "$W" | head -1)"
+INTEG16="$(sed -n 's/^INTEGRITY="\(.*\)"$/\1/p' "$W" | head -1)"
+if [ -z "$PIN16" ] || [ -z "$INTEG16" ]; then
+  verdict bad "T16 (precondition: PIN/INTEGRITY not extractable from wrapper)"
+else
+  t16() { printf '%s' "$2" > "$S/t16.lock"; qmd_lock_binding_ok "$S/t16.lock" "$PIN16" "$INTEG16"; rc=$?; [ $rc -eq "$3" ] && verdict ok "T16 $1" || verdict bad "T16 $1 (rc=$rc, want $3)"; }
+  t16 "valid binding -> pass" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"]}}" 0
+  t16 "right version, integrity on ANOTHER package -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-WRONGWRONGWRONG\"], \"other\": [\"other@1.0.0\", \"\", {}, \"$INTEG16\"]}}" 1
+  t16 "wrong integrity on the qmd entry -> FAIL" \
+    "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"sha512-TAMPERED\"]}}" 1
+  t16 "valid JSONC trailing commas -> pass" \
+    "{
+  \"lockfileVersion\": 1,
+  \"workspaces\": {
+    \"\": { \"dependencies\": { \"@tobilu/qmd\": \"2.8.3\", }, },
+  },
+  \"packages\": {
+    \"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"],
+  },
+}" 0
+fi
+
 echo "----"
 echo "RESULT: $pass passed, $fail failed"
 AFTER="$(fingerprint)"
