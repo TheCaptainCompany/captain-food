@@ -23,6 +23,18 @@ fingerprint() { # the real cache must be untouched by this suite, whether presen
 }
 BEFORE="$(fingerprint)"
 
+# A STUB `bun` on PATH for the whole suite. The wrapper preflights `command -v bun` before any
+# lookup work, but a LOOKUP never invokes bun — only `--install` does, and all three install
+# cases (T3/T3b/T3c) build their own controlled PATH, so nothing here can reach a real install.
+# Without this stub every cache-building case fails its precondition on a host with no bun (a CI
+# runner), which is a false red about the HOST, not the wrapper — the suite claims to be
+# hermetic, so it must not silently depend on a bun being installed. Shadowing a real bun is
+# deliberate: this suite never wants one.
+mkdir -p "$S/bin"
+printf '#!/bin/sh\nexit 0\n' > "$S/bin/bun"; chmod +x "$S/bin/bun"
+PATH="$S/bin:$PATH"; export PATH
+command -v bun >/dev/null 2>&1 || { echo "FATAL: stub bun not resolvable — the suite would report host-shaped failures"; exit 1; }
+
 mkfake() { # $1 = QDIR, $2 = payload file for `search`
   mkdir -p "$1/tool/node_modules/.bin"
   # `update` mirrors real qmd 2.8.3: on success it leaves a VALID sqlite index database inside

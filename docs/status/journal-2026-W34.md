@@ -35,6 +35,15 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > precondition the harness could build and didn't, which stays a loud failure. Each change was
 > planted-red proven against its own mutant; only the COMBINED substitution-plus-unsilenced-stdout
 > mutant reopens the noise hole, so both halves are recorded as one defense.
+> **The new gate paid for itself on its first run**: CI went red at 26/52 and exposed a hidden
+> HOST DEPENDENCY the suite had carried unnoticed — the wrapper preflights `command -v bun`
+> before any lookup work, so on a runner with no bun every cache-building case failed its
+> precondition. The suite called itself hermetic while silently requiring a real bun to be
+> installed; it now puts an exit-0 stub bun on PATH for the whole run (a lookup never invokes
+> bun — only `--install` does, and all three install cases build their own controlled PATH), with
+> a fatal guard if the stub is unresolvable. Verified both ways: 52/52 on a host with bun and on
+> a PATH where bun is absent. **This is the lesson the wiring existed to buy** — an
+> executor-side-only suite reports the author's machine, not the contract.
 
 > 🔧 **2026-08-24 — decision-lookup slice-C lockfile binding: version and integrity are now ONE
 > structural fact, not two independent greps** (separately authorized — this is the SEPARATE
