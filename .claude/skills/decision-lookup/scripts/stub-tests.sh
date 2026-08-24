@@ -11,8 +11,12 @@ W="$HERE/decision-lookup.sh"
 REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 S="$(mktemp -d)"
 trap 'rm -rf "$S"' EXIT
-pass=0; fail=0
+pass=0; fail=0; skip=0
 verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=$((fail+1)); echo "FAIL  $2"; fi }
+# A SKIP is ONLY for a setup the host FILESYSTEM/KERNEL forbids — never for a precondition the
+# harness could construct and didn't (those stay loud `verdict bad`, per T3/T15b). It does not
+# count as a failure, and it is printed so a green run always names what it did not cover.
+skipped() { skip=$((skip+1)); echo "SKIP  $1"; }
 
 fingerprint() { # the real cache must be untouched by this suite, whether present or absent
   if [ -e "$REPO_ROOT/.qmd" ]; then find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum; else echo absent; fi
@@ -81,7 +85,8 @@ else
     && echo "$out" | grep -q "ACTIVATION FAILED: python3 not usable" \
     && echo "$out" | grep -q "structural lockfile-binding and trustedDependencies verifications and the strict results parser" \
     && echo "$out" | grep -q "remove .qmd/ before any future approved retry" \
-    && verdict ok "T3b no-python3 install: named preflight, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
+    && [ ! -d "$Q/tool" ] \
+    && verdict ok "T3b no-python3 install: named preflight, no install dir, exit $rc" || verdict bad "T3b no-python3 install (rc=$rc)"
 fi
 
 # T3c --install with bun resolvable but python3 BROKEN (resolves, cannot start) -> the named
@@ -469,19 +474,83 @@ fi
 # verdict arm — with quote() inside the verdict try, every lookup under such a path silently
 # wiped and fully rebuilt a healthy cache (candidates still printed, so only the fingerprint
 # discriminates).
-Q="$S/t15g$(printf '\375')"; mkfake "$Q" "$S/p5a.json"
+# CAPABILITY GATE (Linux-only case): macOS/APFS enforces valid UTF-8 in filenames and REJECTS
+# the \375 name outright, so the setup is impossible by filesystem policy — not a precondition
+# this harness declined to build. That is a SKIP, not a FAIL: a hard red on every Mac would
+# train readers to discount reds. The mkdir is attempted first and decides.
+Q="$S/t15g$(printf '\375')"
+if ! mkdir -p "$Q" 2>/dev/null || [ ! -d "$Q" ]; then
+  skipped "T15g non-utf8 cache path — filesystem rejects non-UTF-8 names (Linux-only case)"
+else
+  mkfake "$Q" "$S/p5a.json"
+  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+  if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
+    verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+  else
+    fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+    out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+    fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
+    [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+      && ! echo "$out" | grep -q "rebuild failed" \
+      && [ "$fp_b" = "$fp_a" ] \
+      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
+      || verdict bad "T15g non-utf8 path (rc=$rc)"
+  fi
+fi
+
+# T15h a non-sqlite3 exception inside the probe's verdict arm is NOT the not-openable verdict:
+# a connect() call failure (e.g. an interpreter whose sqlite3.connect lacks the uri=/timeout=
+# kwargs -> TypeError) says nothing about the database file, so it must take the UNAVAILABLE
+# arm and accept the stamped hit. Simulated by a PYTHONPATH sqlite3 shim that imports cleanly,
+# defines Error, and raises TypeError from connect() — indistinguishable from the real
+# kwargs-unsupported host. With a bare `except Exception: sys.exit(1)` this wipes and rebuilds.
+Q="$S/t15h"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
-if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
-  verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+mkdir -p "$S/t15h-py"
+printf 'class Error(Exception):\n    pass\n\n\ndef connect(*a, **k):\n    raise TypeError("connect() got an unexpected keyword argument")\n' > "$S/t15h-py/sqlite3.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || ! PYTHONPATH="$S/t15h-py" python3 -c 'import sqlite3, sys
+try:
+    sqlite3.connect("x", uri=True, timeout=0)
+except TypeError:
+    sys.exit(0)
+sys.exit(1)' 2>/dev/null; then
+  verdict bad "T15h non-sqlite3 probe exception (precondition: seeded cache or TypeError shim failed)"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
-  out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  out="$(PYTHONPATH="$S/t15h-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
-    || verdict bad "T15g non-utf8 path (rc=$rc)"
+    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched" \
+    || verdict bad "T15h non-sqlite3 probe exception (rc=$rc)"
+fi
+
+# T15i the verdict survives interpreter stdout NOISE: a genuinely corrupt index under a
+# sitecustomize.py that prints on every interpreter start must still be REBUILT. Dispatching on
+# a command substitution ("$(index_openable ...; echo $?)") would match the pattern against the
+# noise plus the code and fall to the accept arm, silently disabling the only verdict that
+# wipes — a corrupt index would then be served until HEAD changes.
+Q="$S/t15i"; mkfake "$Q" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
+mkdir -p "$S/t15i-py"
+printf 'print("sitecustomize noise")\n' > "$S/t15i-py/sitecustomize.py"
+if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
+  || [ "$(PYTHONPATH="$S/t15i-py" python3 -c 'pass' 2>/dev/null)" != "sitecustomize noise" ]; then
+  verdict bad "T15i stdout-noise verdict (precondition: seeded cache or sitecustomize noise failed)"
+else
+  printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
+  out="$(PYTHONPATH="$S/t15i-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
+  index_ok="$(python3 -c 'import sqlite3,sys
+try:
+    sqlite3.connect(sys.argv[1]).execute("PRAGMA schema_version"); print("ok")
+except Exception:
+    print("bad")' "$Q/corpus/.qmd/index.sqlite")"
+  [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
+    && [ "$index_ok" = ok ] \
+    && verdict ok "T15i corrupt index under stdout noise: verdict holds, rebuilt" \
+    || verdict bad "T15i stdout-noise verdict (rc=$rc, index=$index_ok)"
 fi
 
 # T14 stamp-write failure: a successful indexed build whose corpus/.sha write fails must wipe
@@ -528,10 +597,28 @@ else
     \"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"],
   },
 }" 0
+  # The verdict must be HOST-LOCALE INDEPENDENT: a valid binding in a lockfile carrying a
+  # non-ASCII byte elsewhere (a unicode author/description in another entry's metadata) must
+  # still PASS on an ASCII-locale host. Without an explicit encoding="utf-8", open() decodes
+  # with the host locale and .read() raises there, reporting a host defect among the artifact
+  # causes. PYTHONCOERCECLOCALE=0 + PYTHONUTF8=0 are required to reach a genuine ASCII locale:
+  # PEP 538/540 otherwise coerce LC_ALL=C back to UTF-8 and the case would pass vacuously —
+  # asserted as a PRECONDITION, so a python that ignores them fails the case loudly.
+  printf '%s' "{\"packages\": {\"@tobilu/qmd\": [\"$PIN16\", \"\", {}, \"$INTEG16\"], \"other\": [\"other@1.0.0\", \"$(printf '\303\234nicode Auth\303\266r')\", {}, \"sha512-OTHER\"]}}" > "$S/t16-utf8.lock"
+  ascii_locale='LC_ALL=C LANG=C PYTHONCOERCECLOCALE=0 PYTHONUTF8=0'
+  enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
+  if [ "$enc" = "utf-8" ] || [ -z "$enc" ]; then
+    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition: ASCII locale unreachable, got '$enc')"
+  else
+    ( eval "export $ascii_locale"; qmd_lock_binding_ok "$S/t16-utf8.lock" "$PIN16" "$INTEG16" ); rc=$?
+    [ $rc -eq 0 ] \
+      && verdict ok "T16 non-ASCII lockfile on ASCII locale ($enc) -> pass (locale-independent)" \
+      || verdict bad "T16 non-ASCII lockfile on ASCII locale (rc=$rc, want 0)"
+  fi
 fi
 
 echo "----"
-echo "RESULT: $pass passed, $fail failed"
+if [ "$skip" -gt 0 ]; then echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability)"; else echo "RESULT: $pass passed, $fail failed"; fi
 AFTER="$(fingerprint)"
 if [ "$BEFORE" = "$AFTER" ]; then echo "repo .qmd/ untouched by this suite — confirmed"; else echo "repo .qmd/ CHANGED during the suite — VIOLATION"; fail=$((fail+1)); fi
 exit "$fail"

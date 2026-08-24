@@ -9993,6 +9993,26 @@ mod docs_only_ci_and_legacy_visibility {
         );
     }
 
+    // Same shape, same reason, for the decision-lookup stub suite: SKILL.md declares it the
+    // executable authority for a wrapper carrying a supply-chain gate, so it must actually run —
+    // and in the ungated `changes` job, or a docs-only change could reword the contract it pins
+    // while the suite sits out. Without this test the CI step is deletable in one silent line.
+    #[test]
+    fn the_decision_lookup_stub_suite_runs_in_the_always_run_changes_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let cmd = "bash .claude/skills/decision-lookup/scripts/stub-tests.sh";
+        let cmd_at = ci.find(cmd).expect(
+            "ci.yml must run the decision-lookup stub suite — SKILL.md calls it the executable authority, so it cannot be executor-side only",
+        );
+        let changes_at = ci.find("\n  changes:").expect("changes job");
+        let lint_at = ci.find("\n  lint:").expect("lint job");
+        assert!(
+            changes_at < cmd_at && cmd_at < lint_at,
+            "the stub-suite step must live INSIDE the always-run `changes` job (found outside the changes..lint span)"
+        );
+    }
+
     #[test]
     fn the_index_tail_states_the_legacy_boundary_and_triggers() {
         let owned = vec![("docs/decisions/ROW-A.yaml".to_string(),

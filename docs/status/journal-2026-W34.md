@@ -3,6 +3,39 @@
 Journal entries for ISO week 2026-W34, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-24 — decision-lookup fast-follow: the stub suite becomes an EXECUTABLE gate, and
+> the probe verdict is narrowed to what can actually testify** (separately authorized; the seven
+> reviewer-classified non-blocking findings recorded on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671) during the PR #674 and
+> #675 reviews, landed as one commit). **DECISION BOUNDARY, recorded, not crossed silently**: the
+> `RETRIEVAL-QMD` row's evidence explicitly did NOT authorize CI/validator changes, so wiring the
+> suite required amending that row — the amendment NARROWS the non-authorization to exactly this
+> step plus its codegen pin (SKILL.md declares the suite the executable authority, and an unrun
+> authority is prose; every other clause stands). **Gate**: `bash …/stub-tests.sh` now runs in
+> CI's always-run `changes` job — ungated so a docs-only edit that rewords the contract cannot
+> skip it — pinned by `the_decision_lookup_stub_suite_runs_in_the_always_run_changes_job`,
+> mirroring the register-check-hook precedent, so the step cannot be silently deleted.
+> **Wrapper**: the probe's verdict arm now catches only `sqlite3.Error` (a call-site `TypeError`
+> from an interpreter whose `connect()` lacks the `uri=`/`timeout=` kwargs says nothing about the
+> file and takes the unavailable arm); the caller dispatches on the **exit status**, not on a
+> command substitution, and the probe's stdout is silenced — interpreter noise (a printing
+> `sitecustomize.py`) could otherwise reshape the one verdict that wipes, silently leaving a
+> corrupt index in service; `bun.lock` is read with an explicit `encoding="utf-8"`, so an
+> ASCII-locale host cannot report a locale defect among the artifact causes; and the probe's
+> "lookups are sequential" justification is now stated as an ACCEPTED ASSUMPTION with its bounded
+> consequence (a probe racing another session's rebuild can wipe under it — both land on the loud
+> exit-0 fallback, the next lookup rebuilds). **Suite** grows to **52 cases**: T15h (call-site
+> TypeError accepted, cache untouched), T15i (corrupt index still rebuilt under stdout noise),
+> a locale fixture (non-ASCII lockfile on a genuine ASCII locale — `PYTHONCOERCECLOCALE=0
+> PYTHONUTF8=0` asserted as a precondition, since PEP 538/540 would otherwise coerce the case
+> vacuously green), and T3b now asserts no install dir like T3c. **T15g is host-gated**: on a
+> filesystem that enforces UTF-8 names (macOS/APFS) the `\375` path is unconstructible, so it
+> prints a named `SKIP` and does not count as a failure — the suite's ONLY skip, distinct from a
+> precondition the harness could build and didn't, which stays a loud failure. Each change was
+> planted-red proven against its own mutant; only the COMBINED substitution-plus-unsilenced-stdout
+> mutant reopens the noise hole, so both halves are recorded as one defense.
+
 > 🔧 **2026-08-24 — decision-lookup slice-C lockfile binding: version and integrity are now ONE
 > structural fact, not two independent greps** (separately authorized — this is the SEPARATE
 > VERIFICATION-DESIGN DECISION the deferred note on

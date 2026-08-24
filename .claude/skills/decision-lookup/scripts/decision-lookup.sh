@@ -80,8 +80,13 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # 5s busy wait; even plain mode=ro still CREATES the -shm side file when a -wal is present
   # (verified empirically, sqlite 3.45). immutable=1 + timeout=0 touch nothing: the question is
   # whether the MAIN database file is openable — a pending -wal is deliberately ignored (WAL
-  # handling belongs to the tool's own rw open; lookups are sequential, so the no-locking
-  # semantics of immutable are safe here). urllib.parse.quote (safe="/" default; on POSIX
+  # handling belongs to the tool's own rw open). ACCEPTED ASSUMPTION, not an enforced property:
+  # lookups are treated as SEQUENTIAL, so immutable's no-locking semantics are safe. Concurrent
+  # sessions share one checkout's .qmd/ and nothing serializes it, so a probe racing another
+  # session's rebuild can take a torn read, return the exit-1 verdict, and wipe the corpus under
+  # that running update — which then reports a rebuild failure for a healthy rebuild. Bounded
+  # and self-healing: both sessions land on the loud exit-0 rg fallback, the next lookup
+  # rebuilds, and the tool is advisory-only. urllib.parse.quote (safe="/" default; on POSIX
   # pathname2url IS quote) keeps an arbitrary DECISION_LOOKUP_HOME path URI-safe — imported
   # INSIDE the guarded try because it must never widen the import surface that can be read as
   # corruption (urllib.request would transitively pull socket, another compile-time optional).
@@ -99,7 +104,12 @@ index_openable() { # bounded openability probe (delete-wholesale on failure — 
   # UnicodeEncodeError on a cache path carrying non-UTF-8 bytes (argv arrives surrogate-
   # escaped; verified empirically), and a path-shaped failure must never read as the
   # not-openable verdict. The exit-1 arm holds ONLY connect + PRAGMA — the sole operations
-  # that can genuinely testify about the database file.
+  # that can genuinely testify about the database file — and catches ONLY sqlite3.Error: the
+  # database's own verdicts (garbage bytes -> DatabaseError, unreadable -> OperationalError)
+  # are subclasses of it, while a failure of the CALL itself (e.g. a python3 whose connect()
+  # lacks the uri=/timeout= kwargs -> TypeError) says nothing about the file and routes to the
+  # unavailable arm. Stdout is silenced with stderr: the caller dispatches on the exit status,
+  # and interpreter-level stdout noise (a printing sitecustomize.py) must never reshape it.
   python3 -c 'import sys
 try:
     import sqlite3
@@ -110,15 +120,21 @@ except Exception:
 try:
     c = sqlite3.connect(uri, uri=True, timeout=0)
     c.execute("PRAGMA schema_version"); c.close()
+except sqlite3.Error:
+    sys.exit(1)
 except Exception:
-    sys.exit(1)' "$1" 2>/dev/null
+    sys.exit(2)' "$1" >/dev/null 2>&1
 }
 
 build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
   if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
     && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
-    case "$(index_openable "$CORPUS/.qmd/index.sqlite"; echo $?)" in
+    # Dispatch on the EXIT STATUS directly, never on a command substitution: matching a pattern
+    # against captured stdout + the echoed code would let interpreter-level stdout noise turn a
+    # genuine exit-1 verdict into the accept arm, silently disabling the only verdict that wipes.
+    index_openable "$CORPUS/.qmd/index.sqlite"
+    case $? in
       1) : ;;          # the deliberate NOT-openable verdict: broken cache — wipe and rebuild
       *) return 0 ;;   # 0 = openable; 2 = probe unavailable; anything else = probe failure —
                        # never read as corruption: accept the stamped hit at the pre-probe
@@ -175,10 +191,13 @@ qmd_lock_binding_ok() { # $1 = bun.lock, $2 = exact pin, $3 = recorded integrity
   # "," + whitespace + "}"/"]", so no rewrite can manufacture a matching first/last element;
   # the effect elsewhere is either a harmless string alteration that cannot touch the compared
   # elements, or a parse difference that lands in the loud activation_fail arm. Never a false
-  # pass either way.
+  # pass either way. The file is read as UTF-8 EXPLICITLY (bun.lock is UTF-8 by construction):
+  # a locale-dependent open() would make the verdict host-dependent — on a LANG=C host a single
+  # non-ASCII byte anywhere in the lockfile would raise and be reported under the binding
+  # failure, a host defect surfacing among artifact causes.
   python3 -c 'import json, re, sys
 try:
-    raw = open(sys.argv[1]).read()
+    raw = open(sys.argv[1], encoding="utf-8").read()
     data = json.loads(re.sub(r",(\s*[}\]])", r"\1", raw))
     entry = data["packages"]["@tobilu/qmd"]
 except Exception:
