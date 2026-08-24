@@ -15,7 +15,11 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > wipe-and-rebuild path; **(2)** a failed `qmd search` now **wipes the derived corpus/index
 > caches before its named tool-failure fallback**, so deep corruption the probe cannot see is
 > rebuilt on the next lookup instead of degrading every lookup until HEAD changes. No repair
-> path exists anywhere. Five review findings absorbed pre-merge: **(a)** python3 is preflighted
+> path exists anywhere. Review findings absorbed pre-merge — seven fixes and two record-only
+> items, folded into the four themes (a)–(d) below ((a) folds the python3-absent and
+> resolvable-but-broken findings; (c) folds the exit-2 introduction, the best-effort
+> acceptance and the exit-1-only-verdict completion; (d) folds the cost-shift record and its
+> named reproducer): **(a)** python3 is preflighted
 > on the lookup path before the cache is consulted, BY EXECUTION (`command -v` proves
 > resolvability, not runnability — an absent python3 or a resolvable one that cannot start
 > would both fail the probe exactly like "corrupt", wiping and rebuilding a healthy cache on
@@ -39,7 +43,10 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > the honest cost of the search-failure wipe is now recorded in the wrapper, SKILL and §6.2:
 > the exit code cannot distinguish a damaged index from qmd rejecting the query itself, so a
 > query-triggered failure also wipes and the next lookup pays a full rebuild — accepted over
-> ever serving a possibly-poisoned cache. The fake `qmd update` writes a REAL sqlite index
+> ever serving a possibly-poisoned cache, with the known reproducer (a leading-hyphen query,
+> positional and unfenced at the qmd call) named in both breadcrumbs — a `--` fence is
+> unverifiable offline against the claudeignored pinned package, so the class is documented
+> rather than fenced unverified. The fake `qmd update` writes a REAL sqlite index
 > so the probe is exercised genuinely; suite grows to **39 cases** (T15 corrupt-index rebuild;
 > T15b python3-absent and T15e python3-broken lookups leave the cache byte-untouched; T15c a
 > planted garbage `-wal` survives a cache hit byte-identical — the probe never writes; T15d a
