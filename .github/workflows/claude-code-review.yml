@@ -69,17 +69,20 @@ jobs:
           # allowlist does not cover what a reviewer needs (`gh pr comment`, the inline-comment
           # MCP tool) — the first runs of this workflow logged 41 permission denials each.
           # `permission_denials_count` in the run's result JSON is the health metric: it must be 0.
-          # MODEL PINNED (2026-08-24) — as a YAML comment, NOT inside the block scalar below:
-          # `claude_args: |` is a literal block, so a `#` line there would be passed to the CLI as
-          # an argument, not stripped as a comment. The action's default drew on the Opus-tier
-          # allowance, which is exhausted account-wide: every run since 16:39Z failed with
-          # `api_error_status: 429` / "You're out of usage credits. Switch to another model to
-          # continue." — a billing condition, not a code one, that made `claude-review` a
-          # permanently red required check. Sonnet 5 is the most capable model outside that
-          # allowance. `model:` as an action INPUT is DEPRECATED in v1; `--model` inside
-          # claude_args is the only supported form. Revisit when the Opus allowance is restored.
+          # MODEL PINNED TO OPUS 5 (founder directive 2026-08-24) — as a YAML comment, NOT
+          # inside the block scalar below: `claude_args: |` is a literal block, so a `#` line
+          # there would be passed to the CLI as an argument, not stripped as a comment.
+          # The reviewer is a quality gate on a spec-driven repo and runs on the top model by
+          # DECISION, not by default: this pin is what makes that explicit and survives the
+          # action changing its own default. `model:` as an action INPUT is DEPRECATED in v1;
+          # `--model` inside claude_args is the only supported form.
+          # NOTE (2026-08-24): runs from 16:39Z failed with `api_error_status: 429` /
+          # "You're out of usage credits. Switch to another model to continue." — an
+          # account-level billing condition, NOT a code one. The answer is to restore the
+          # allowance, not to downgrade the reviewer; a red claude-review with that result
+          # string means credits, and no workflow edit can fix it.
           claude_args: |
-            --model claude-sonnet-5
+            --model claude-opus-5
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api repos/TheCaptainCompany/captain-food:*),Bash(gh run view:*),Bash(gh run list:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob,Task"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
