@@ -586,76 +586,63 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
     Some(register_content[after_marker..end_idx].trim().to_string())
 }
 
-/// THE ONE corpus walk behind `decision-superseded-authority`.
+/// THE ONE corpus behind `decision-superseded-authority`, derived from GIT rather than the disk.
 ///
-/// It existed twice -- once in `main.rs` and once re-implemented inside the test that pins the
-/// rule -- and the test copy was missing every guard the real one had: no pruning, and
-/// `path.is_dir()` (which FOLLOWS symlinks) instead of `file_type()`. So `cargo test` reddened on
-/// any machine with a leftover `.claude/worktrees/<wt>/` -- a full checkout whose `docs/status/`
-/// carries citations of the superseded row -- pointing at an untracked file from another branch
-/// with nothing in the working tree that clears it, while CI stayed green because a runner has no
-/// worktrees. The divergence was introduced in the same commit that fixed the `main.rs` copy,
-/// which is "two lists that must agree WILL diverge" for the fifth time in PR #679. There is one
-/// now, and both callers use it.
+/// It existed twice -- once in `main.rs`, once re-implemented inside the test that pins the rule --
+/// and the test copy lacked every guard. There is one now, and both callers use it.
+///
+/// IT READS `git ls-files`, NOT `read_dir`, and that is the actual fix. A filesystem walk sees
+/// every untracked and gitignored file under `.claude/`, so it reddened `make validate` on a
+/// leftover `.claude/worktrees/<wt>/` -- an untracked checkout of another branch that the operator
+/// cannot resolve from the diff, while CI stayed green because a runner has none. The first
+/// remedy was a four-name denylist (`worktrees | target | node_modules | .git`) plus a `.local.`
+/// match, and review #11 pointed out that this treats a symptom: the same failure recurs under any
+/// name not on the list. `.claude/wt-679/` is the ready example -- the root `.gitignore` already
+/// carries `wt*/`, so that shape is expected here -- as is any scratch `.md` holding a citation.
+///
+/// The rule's subject is COMMITTED content: the agent surface, where a stale citation is read as
+/// an instruction. Deriving the list from the index makes the local and CI corpora identical BY
+/// CONSTRUCTION rather than by maintaining a denylist, and it retires the prune list and the
+/// symlink guard together. CLAUDE.md's compiler-first order, applied to a gate: prefer making the
+/// divergence unrepresentable over enumerating the ways it shows up.
 ///
 /// SCOPE, decided rather than defaulted:
-///   * `.claude/**` -- the agent surface, where a stale citation is read as an instruction.
+///   * `.claude/**` -- the agent surface.
 ///   * The root files that carry row references in prose: `.claudeignore` (one of the eight sites
 ///     PR #679 fixed by hand, and NOT under `.claude/`), `.gitignore`, `CLAUDE.md` -- the resident
 ///     index every session loads before anything else -- and the `Makefile`.
 ///   * `docs/**` is deliberately OUT: a record ABOUT a supersession must name the superseded row,
 ///     and redding those would make the rule unusable.
-///   * `.github/workflows/**` is OUT for the same reason as `docs/**` in one direction only -- its
-///     row references are provenance comments on decided work, not instructions to follow. Stated
-///     here rather than left to fall through the list, which is what happened to `CLAUDE.md`.
+///   * `.github/workflows/**` is OUT because its row references are provenance comments on decided
+///     work, not instructions to follow. Stated rather than left to fall through the list, which is
+///     what happened to `CLAUDE.md`.
+///
+/// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
+/// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
+/// corpus it may judge.
 pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, String)> {
-    let mut cited: Vec<(String, String)> = Vec::new();
-    for rel in [".claudeignore", ".gitignore", "CLAUDE.md", "Makefile"] {
+    let out = match std::process::Command::new("git")
+        .args(["ls-files", "-z", "--", ".claude", ".claudeignore", ".gitignore", "CLAUDE.md", "Makefile"])
+        .current_dir(root)
+        .output()
+    {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    let mut cited = Vec::new();
+    for rel in String::from_utf8_lossy(&out).split('\0').filter(|s| !s.is_empty()) {
+        let tracked_ext = std::path::Path::new(rel)
+            .extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|e| matches!(e, "md" | "sh" | "json" | "yaml" | "yml"));
+        // The root files carry no extension filter -- `Makefile` has none, and `.gitignore` /
+        // `.claudeignore` are extensions rather than stems.
+        let is_root_file = matches!(rel, ".claudeignore" | ".gitignore" | "CLAUDE.md" | "Makefile");
+        if !(tracked_ext || is_root_file) {
+            continue;
+        }
         if let Ok(text) = std::fs::read_to_string(root.join(rel)) {
             cited.push((rel.to_string(), text));
-        }
-    }
-    let mut stack = vec![root.join(".claude")];
-    let mut budget = 10_000usize; // a symlink cycle under .claude/ would otherwise spin
-    while let Some(dir) = stack.pop() {
-        budget = match budget.checked_sub(1) {
-            Some(b) => b,
-            None => break,
-        };
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for e in entries.flatten() {
-            let path = e.path();
-            // `is_dir()` FOLLOWS SYMLINKS, so a cycle loops forever rather than erroring;
-            // `file_type()` from the dir entry does not.
-            let Ok(ft) = e.file_type() else { continue };
-            if ft.is_symlink() {
-                continue;
-            }
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            // PRUNE THE GITIGNORED TREES. `.claude/worktrees/` holds FULL CHECKOUTS of the repo --
-            // their own docs/, specs/ and, after any build, a target/ with tens of thousands of
-            // cargo .fingerprint JSON files. Descending there re-admits `docs/**` through a side
-            // door, reads every fingerprint file on every run, and -- because a stale worktree can
-            // hold ANY branch -- reds a gate on an untracked file the operator cannot clear.
-            if matches!(name, "worktrees" | "target" | "node_modules" | ".git") {
-                continue;
-            }
-            // A contributor's local overrides are not committed content and must never red a
-            // shared gate. (This skips THAT name pattern, not "untracked files".)
-            if name.contains(".local.") {
-                continue;
-            }
-            if ft.is_dir() {
-                stack.push(path);
-            } else if matches!(
-                path.extension().and_then(|x| x.to_str()),
-                Some("md" | "sh" | "json" | "yaml" | "yml")
-            ) {
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    let rel = path.strip_prefix(root).unwrap_or(&path).display().to_string();
-                    cited.push((rel, text));
-                }
-            }
         }
     }
     cited
