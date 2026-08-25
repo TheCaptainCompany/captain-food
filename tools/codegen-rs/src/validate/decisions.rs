@@ -822,10 +822,22 @@ pub(crate) fn emit_decisions_index(rows: &[DecisionRow], legacy_count: usize) ->
             "decided" | "superseded" => r.get("decided_by").unwrap_or(""),
             _ => "",
         };
-        let question = if closing.is_empty() {
-            r.get("question").unwrap_or("").to_string()
-        } else {
-            format!("{} -> {}", r.get("question").unwrap_or(""), closing)
+        // A SUPERSEDED ROW MUST NAME ITS SUCCESSOR HERE. The arrow was built from `decided_by`
+        // for `decided` and `superseded` alike, so a superseded row pointed at its OWN deciding
+        // record and gave the reader no route to the head. That is the one GENERATED surface --
+        // the thing `make generate` puts in front of the next session -- and it was the only
+        // surface this change did not rewrite to name the head, while simultaneously making both
+        // of the reader's next moves illegal: `reconsiders:` at a superseded row is rejected, and
+        // so is citing it under `.claude/**`. Pointed out on PR #679; the data is already on the
+        // row and `validate_decision_rows` guarantees it resolves.
+        let question = match (closing.is_empty(), r.get("superseded_by")) {
+            (_, Some(head)) if status == "superseded" => format!(
+                "{} -> superseded by `{}`",
+                r.get("question").unwrap_or(""),
+                head
+            ),
+            (true, _) => r.get("question").unwrap_or("").to_string(),
+            (false, _) => format!("{} -> {}", r.get("question").unwrap_or(""), closing),
         };
         lines.push(format!(
             "| `{}` | {} | {} | {} | {} |",

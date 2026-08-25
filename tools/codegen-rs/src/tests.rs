@@ -9998,6 +9998,56 @@ mod decision_ask_and_citations {
         );
     }
 
+    /// A superseded row's index line must route the reader to its SUCCESSOR, not its predecessor.
+    ///
+    /// The arrow was built from `decided_by` for `decided` and `superseded` alike, so a superseded
+    /// row pointed at its own deciding record. That is the one GENERATED surface -- what
+    /// `make generate` puts in front of the next session -- and PR #679 rewrote every other surface
+    /// to name the head while making both of the reader's next moves illegal (`reconsiders:` at a
+    /// superseded row, and citing it under `.claude/**`). A dead end on the page whose whole job is
+    /// to be the route.
+    #[test]
+    fn a_superseded_rows_index_line_names_the_chain_head() {
+        let rows_src: Vec<(String, String)> = vec![
+            (
+                "docs/decisions/OLD-ROW.yaml".to_string(),
+                "key: \"OLD-ROW\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-01\"\ndecided: \"2026-08-02\"\ndecided_by: \"PROP-OLD\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\nsuperseded_by: \"NEW-ROW\"\n".to_string(),
+            ),
+            (
+                "docs/decisions/NEW-ROW.yaml".to_string(),
+                "key: \"NEW-ROW\"\nstatus: \"decided\"\nquestion: \"Q2?\"\nowner: \"team\"\nopened: \"2026-08-03\"\ndecided: \"2026-08-04\"\ndecided_by: \"ADR-NEW\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n".to_string(),
+            ),
+        ];
+        let mut sink = Vec::new();
+        let rows = parse_decision_rows(&rows_src, &mut sink);
+        let index = emit_decisions_index(&rows, 0);
+        let line = index
+            .lines()
+            .find(|l| l.contains("`OLD-ROW`"))
+            .expect("the superseded row must appear in the index");
+        assert!(
+            line.contains("NEW-ROW"),
+            "a superseded row's line must name its SUCCESSOR so the reader can reach the chain head -- every other route out of that row is now rejected by a gate. Got: {}",
+            line
+        );
+        assert!(
+            !line.contains("PROP-OLD"),
+            "a superseded row's line must NOT point at its own deciding record: that is the predecessor's authority, and following it is the dead end this line exists to prevent. Got: {}",
+            line
+        );
+        // A DECIDED row still points at its deciding record -- the control that stops the fix
+        // above becoming "always print superseded_by".
+        let decided_line = index
+            .lines()
+            .find(|l| l.contains("`NEW-ROW`"))
+            .expect("the decided row must appear");
+        assert!(
+            decided_line.contains("ADR-NEW"),
+            "a decided row must still name its deciding record. Got: {}",
+            decided_line
+        );
+    }
+
     #[test]
     fn the_index_sync_gate_goes_red_on_disagreement_and_missing_markers() {
         let owned = vec![("docs/decisions/ROW-A.yaml".to_string(), OPEN_A.to_string())];
