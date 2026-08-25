@@ -48,46 +48,70 @@ FENCE = re.compile(r"^ {0,3}(?P<d>`{3,}|~{3,})(?P<rest>.*)$")
 HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+")
 
 
-def _strip_containers(line: str) -> str:
-    """Remove blockquote/list prefixes, innermost-last, as a block parser would."""
-    prev = None
-    while prev != line:
-        prev = line
-        line = CONTAINER.sub("", line, count=1)
-    return line
+def _split_containers(line: str) -> tuple[str, str]:
+    """Return (container prefix consumed, remainder).
+
+    Blockquote and list markers are stripped innermost-last, ONE level at a time, and each list
+    marker takes exactly ONE following space -- `-     x` is how CommonMark spells "this item's
+    content is an indented code block", so eating the whole run would blind the indent test.
+    """
+    prefix, rest = "", line
+    while True:
+        m = CONTAINER.match(rest)
+        if not m:
+            return prefix, rest
+        prefix += m.group(0)
+        rest = rest[m.end():]
+
+
+def _expand_tabs(text: str) -> str:
+    """Tab stops of 4. CommonMark measures indentation in COLUMNS, not characters, so comparing
+    raw characters made ` \tmarker` read as live text -- the same defect as `>     marker`, one
+    dimension over (seventh review)."""
+    out, col = [], 0
+    for ch in text:
+        if ch == "\t":
+            pad = 4 - (col % 4)
+            out.append(" " * pad)
+            col += pad
+        else:
+            out.append(ch)
+            col += 1
+    return "".join(out)
 
 
 def live_lines(body: str):
     """Yield each line of `body` that GitHub renders as live text.
 
-    Skips fenced code blocks (``` and ~~~, respecting delimiter char, run length
-    and the rule that a CLOSER may carry only whitespace after it -- for BOTH
-    fence characters, which is what CommonMark says) and indented code blocks.
+    Skips fenced code blocks (``` and ~~~, respecting delimiter char, run length, and the rule
+    that a CLOSER may carry only whitespace -- for BOTH fence characters) and indented code
+    blocks, at any blockquote/list depth.
+
+    THE FENCE'S CONTAINER PREFIX IS PART OF ITS IDENTITY. Inside an open fence the content is
+    literal, so a line whose container prefix differs from the opener's cannot close it, and must
+    not even be examined as a fence. Without that, a fenced block QUOTING another fenced block let
+    the inner delimiter close the outer one, and a marker rendering inside <pre> counted as live
+    -- a FALSE GREEN against the exact property this gate exists to provide (seventh review).
     """
-    fence: tuple[str, int] | None = None
+    fence: tuple[str, int, str] | None = None  # (char, run length, container prefix)
     for raw in body.split("\n"):
         line = raw.rstrip("\r")
-        stripped = _strip_containers(line)
-        m = FENCE.match(stripped)
-        if m:
-            char, run = m.group("d")[0], len(m.group("d"))
-            if fence is None:
-                # An opener may carry an info string; a closer may not.
-                fence = (char, run)
-                continue
-            open_char, open_run = fence
-            if char == open_char and run >= open_run and m.group("rest").strip() == "":
-                fence = None
-            continue
+        prefix, rest = _split_containers(line)
+        expanded = _expand_tabs(rest)
+        m = FENCE.match(expanded)
         if fence is not None:
+            open_char, open_run, open_prefix = fence
+            if m and prefix == open_prefix:
+                char, run = m.group("d")[0], len(m.group("d"))
+                if char == open_char and run >= open_run and m.group("rest").strip() == "":
+                    fence = None
+            continue  # everything between opener and closer is literal
+        if m:
+            fence = (m.group("d")[0], len(m.group("d")), prefix)
             continue
-        # Indented code: 4+ spaces AFTER container stripping. A heading or a
-        # paragraph line can never be indented code, but we do not need that
-        # nuance -- erring toward "code" only ever costs a false red, and the
-        # prompt asks for the marker at the left margin.
-        if stripped.startswith("    ") or stripped.startswith("\t"):
-            continue
-        yield HEADING.sub("", stripped)
+        if expanded.startswith("    "):
+            continue  # indented code block
+        yield HEADING.sub("", rest)
 
 
 def comment_names_commit(body: str, shas: list[str]) -> bool:

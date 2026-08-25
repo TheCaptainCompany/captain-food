@@ -193,7 +193,9 @@ evidence — here it was not even true.
 - **`gh api --paginate --jq` applies the filter PER PAGE and concatenates**, and `--slurp` is
   *rejected* together with `--jq`. So a filter ending in `| length` emits one integer **per page**
   (`"1\n0"` on two pages) — which reds any numeric guard on a PR with more than 30 comments. The
-  only shape that works across pages is **emit one line per hit and count the lines**. Cost that
+  only shape that works across pages **while still using `--jq`** is emit one line per hit and
+  count the lines. Better: drop `--jq` and parse the whole array once in a real language — and
+  accept BOTH shapes, because a plain `json.load` raises "Extra data" on back-to-back arrays. Cost that
   earned this: a false red on a required check, on the second attempt at the same assertion.
 - **`x="$(cmd | grep -c ... || true)"` binds `|| true` to the WHOLE pipeline**, not to `grep`. An
   API failure then reads as "zero matches" instead of aborting under `set -e` — an outage

@@ -38,12 +38,17 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > no-review, side by side, one run id. That is #677 in a single artifact. `beck`'s ruling on the
 > self-red: keep it; a bootstrap carve-out *is* the hole under a nicer name.
 >
-> **Then the reviews found the fix carried FOUR false verdicts of its own** — on a check that is
+> **Then the reviews found the fix carried FOUR false verdicts of its own** — the two enumerated
+> below, plus the per-page `| length` (self-found) and `|| true` binding to the whole pipeline —
+> on a check that is
 > required *today*, so each was a repo-wide merge stop I had introduced while fixing one:
 > - `printf '%s' "$bodies" | grep -qF` makes grep exit at the first match, printf die of SIGPIPE and
 >   `pipefail` report **141 even though grep MATCHED**. Reproduced here: green at 64 000 trailing
 >   bytes, **FALSE RED at 128 000 and 512 000**. PR #674 already carries ~35 KB of bot comments, and
->   it grows with PR length. The match now runs entirely inside `jq` — no pipe, no SIGPIPE.
+>   it grows with PR length. The match no longer pipes into an early-exit reader.
+>   (It ran inside `jq` at that commit; since the round-6 extraction it is python, and the SIGPIPE
+>   safety now comes from the reader consuming the whole stream. The mechanism changed and this
+>   line described the old one — the drift these rounds keep producing, landed in the record.)
 > - The marker named `head.sha`, but `actions/checkout` on a `pull_request` event takes the **MERGE
 >   ref** (`refs/remotes/pull/680/merge` in the live log), so a reviewer resolving `git rev-parse
 >   HEAD` reports a different sha. Worse, across **23 real bot comments** it wrote a bare 40-char
@@ -92,7 +97,9 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > review then found the ONE dimension I had not tightened**: the opener regex was `^[ \t]*`, so an
 > indented delimiter opened a phantom fence that swallowed a live marker — a FALSE RED on a
 > required check — and a ```markdown block wrapping an indented fence still got a quoted marker
-> through. Bounded to `^ {0,3}` as CommonMark specifies, with both cases added to the battery. **The honest
+> through. Bounded to `^ {0,3}` as CommonMark specifies. **Those two cases were asserted here before they
+> existed**: the seventh review checked the battery and found neither. They are in it now, with ten
+> more that round proved the suite could not see red. **The honest
 > statement stays**: raising the bar is not impossibility, and anyone willing can still satisfy
 > this gate. Claiming otherwise in three places, while the same file elsewhere said the truth, was
 > the same overclaim this PR exists to fix — one level down.

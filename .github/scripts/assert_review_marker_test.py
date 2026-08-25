@@ -13,8 +13,11 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from assert_review_marker import comment_names_commit, count_matches  # noqa: E402
 
-H = "1111111111111111111111111111111111111111"
-M = "2222222222222222222222222222222222222222"
+# REAL shas, not repdigits. With H = "1"*40 the "uppercase hex" case was a literal no-op
+# (("1"*12).upper() == "1"*12) and two mutants survived the whole battery: startswith -> endswith,
+# and dropping .lower(). Measured by the seventh review; one line to fix, so it is fixed.
+H = "3f9a2c7e1b8d40526af1c93e07b45d8e2a6f1c04"
+M = "b71e4d9c02a83f5617ce4b90d283a1f6e5c70b94"
 SHAS = [H, M]
 BT = "`" * 3
 TL = "~" * 3
@@ -69,6 +72,34 @@ CASES = [
                               "round 5: \\b must not match mid-token"),
     ("text before marker",    f"Review done. Reviewed-Commit: {H}", False, "round 6: named boundary"),
     ("no marker",             "reviewed, no findings", False, "baseline"),
+
+    # --- seventh review: properties the battery could not see red ------------
+    ("fence QUOTING a fence, inner blockquoted",
+     f"prev reviewer wrote:\n{BT}\n> {BT}\nReviewed-Commit: {H}\n> {BT}\n{BT}\nno", False,
+     "round 7 FALSE GREEN: a container prefix inside an open fence closed it, so quoted code escaped"),
+    ("fence quoting a fence, inner list-marked",
+     f"q:\n{BT}\n- {BT}\nReviewed-Commit: {H}\n- {BT}\n{BT}\nno", False, "round 7, same mechanism"),
+    ("tilde fence quoting a fence",
+     f"q:\n{TL}\n> {TL}\nReviewed-Commit: {H}\n> {TL}\n{TL}\nno", False, "round 7, tilde variant"),
+    ("tab-indented code",     f"q:\n\n\tReviewed-Commit: {H}\nno", False,
+                              "round 7 FALSE GREEN: indentation is measured in COLUMNS, not characters"),
+    ("space+tab indented code", f"q:\n\n \tReviewed-Commit: {H}\nno", False, "round 7: tab stop 4"),
+    ("fence opener indented 4+ is not a fence",
+     f"q:\n\n    {BT}\n\nReviewed-Commit: {H}", True,
+     "round 7: the opener's 3-space bound had no case at all"),
+    ("closer of a DIFFERENT char does not close",
+     f"q:\n{BT}\n{TL}\nReviewed-Commit: {H}\n{BT}\nno", False,
+     "round 7: dropping char == open_char survived the battery"),
+    ("longer closer still closes",
+     f"q:\n{BT}\nx\n{BT}`\n\nReviewed-Commit: {H}", True,
+     "round 7: run >= open_run, not ==; the == mutant survived"),
+    ("CRLF body",             f"reviewed\r\n\r\nReviewed-Commit: {H}\r", True,
+                              "round 7: the CR strip was untested entirely"),
+    ("CRLF inside a fence",   f"q:\r\n{BT}\r\nReviewed-Commit: {H}\r\n{BT}\r\nno", False, "round 7"),
+    ("uppercase hex, real sha", f"reviewed\n\nReviewed-Commit: {H[:12].upper()}", True,
+                              "round 7: a no-op under repdigit fixtures"),
+    ("sha SUFFIX must not match", f"reviewed\n\nReviewed-Commit: {H[-12:]}", False,
+                              "round 7: the startswith -> endswith mutant survived"),
 ]
 
 

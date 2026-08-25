@@ -22,3 +22,7 @@ wt*/
 
 # QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD)
 .qmd/
+
+# Python bytecode (the review-marker matcher and its battery live in .github/scripts)
+__pycache__/
+*.pyc

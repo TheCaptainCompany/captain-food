@@ -131,8 +131,10 @@ jobs:
       #
       # `!cancelled()` rather than `always()`: a cancelled run (superseded push, manual cancel) is
       # not a missing review, and labelling it one trains readers to discount this red.
-      # The matcher's own regressions, ~40 cases, no network. If this reds, the assertion below
-      # cannot be trusted -- which is the failure mode #677 is about, one level down.
+      # The matcher's own regressions (the battery prints its own count), no network, ~0.1s. If
+      # this reds the assertion below cannot be trusted -- the #677 failure mode, one level down.
+      # The assert step runs on `!cancelled()`, so it still executes when THIS step fails; the job
+      # is red either way, but do not read an `OK -` line from it as meaningful when this is red.
       - name: Review-marker matcher self-test
         if: ${{ !cancelled() }}
         run: python3 .github/scripts/assert_review_marker_test.py
