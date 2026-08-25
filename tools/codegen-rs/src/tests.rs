@@ -10081,7 +10081,7 @@ mod docs_only_ci_and_legacy_visibility {
         // The twelfth mutant was a workflow-level `defaults.run.shell` that drops the step script
         // (GitHub's custom-shell form is `command [options] {0}`, so `bash -c "exit 0" {0}` passes
         // the script as $0 and never runs it). The first fix banned the KEYS `defaults` and `env`
-        // at the root -- which false-redded ordinary CI work: 4 of this repo's 16 workflows already
+        // at the root -- which false-redded ordinary CI work: 4 of this repo's 15 workflows already
         // carry a root `env:` (4 of 15, counted with
         // `for f in .github/workflows/*; do python3 -c 'import yaml,sys; print("env" in (yaml.safe_load(open(sys.argv[1])) or {}))' $f; done`),
         // and adding `CARGO_TERM_COLOR: always`, the standard Rust-CI idiom,
@@ -10187,44 +10187,62 @@ mod docs_only_ci_and_legacy_visibility {
             .and_then(|s| s.as_sequence())
             .expect("the `changes` job must have steps");
 
-        // EXHAUSTIVE STEP PIN. Everything above constrains the two gate steps and the job's own
-        // keys; none of it stops a SIBLING step from neutering them. Measured green before this
-        // assertion existed: an extra `run:` overwriting stub-tests.sh with `exit 0`; a checkout
-        // re-pointed at another `repository`/`ref`. Both are cheaper than any mutant M1-M23.
-        // This job is the always-run gate host and is meant to stay tiny, so its step list is
-        // pinned outright: four steps, in this order, each by shape.
-        assert_eq!(
-            steps.len(),
-            4,
-            "the `changes` job must have exactly 4 steps (checkout, docs-only detect, hook selftest, stub suite). A sibling step can overwrite a gate script or re-point the checkout and leave every other assertion here green -- that is the cheapest disarm there is, so the list is pinned, not just its members."
-        );
-        // Step 0: a plain checkout of THIS repo at the default ref. `repository:`/`ref:` would put
-        // someone else's scripts under the gate steps.
-        let checkout = steps[0].as_mapping().expect("step 0 is a mapping");
-        let uses = checkout
-            .get(serde_yaml::Value::String("uses".into()))
-            .and_then(|u| u.as_str())
-            .unwrap_or_default();
-        assert!(
-            uses.starts_with("actions/checkout@"),
-            "the `changes` job's first step must be actions/checkout, got `{}`",
-            uses
-        );
-        if let Some(with) = checkout.get(serde_yaml::Value::String("with".into())).and_then(|w| w.as_mapping()) {
-            for key in ["repository", "ref"] {
+        // PIN THE PROPERTY, NOT THE COUNT.
+        //
+        // The previous version asserted `steps.len() == 4`. Two things were wrong with it, both
+        // found by the fifth review. It did not stop the FOURTEENTH mutant -- two lines added
+        // INSIDE the existing docs-only detect step's `run:` block, overwriting both gate scripts
+        // with `exit 0`; four steps, both gates byte-identical, every assertion green. And it was
+        // the same instrument this file rejects one screen earlier: the `changes` job gained a gate
+        // step on 2026-08-21 and another on 2026-08-24, so the next innocent addition reds two
+        // tests whose one-character "fix" (4 -> 5) reopens the whole vector. A red that fires on
+        // innocent work trains readers to discount reds -- T15g's rule, applied consistently this
+        // time.
+        //
+        // So: any step may exist, but NO step other than the two gates may touch what the gates
+        // depend on. That is structure-insensitive to legitimate maintenance and closes the
+        // sibling-step and inside-a-sibling-step spellings together.
+        //
+        // What this still does not reach, stated once and only here: a commit that edits
+        // `stub-tests.sh` or `register-check-selftest.sh` directly. That is a code review's job,
+        // and the suite's own EXPECTED_CASES containment covers part of it.
+        let gate_cmds = [
+            "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+            "bash .claude/hooks/register-check-selftest.sh",
+        ];
+        for (i, st) in steps.iter().enumerate() {
+            env_ok(st, &format!("the `changes` job's step {}", i));
+            // A checkout of a different tree puts someone else's scripts under the gate steps.
+            if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.contains("actions/checkout")) {
+                if let Some(with) = st.get("with").and_then(|w| w.as_mapping()) {
+                    for key in ["repository", "ref"] {
+                        assert!(
+                            !with.contains_key(serde_yaml::Value::String(key.into())),
+                            "the `changes` job's checkout must not set `{}` -- it would run {} against a different tree than the one under review",
+                            key, what
+                        );
+                    }
+                }
+            }
+            let Some(run) = st.get("run").and_then(|r| r.as_str()) else { continue };
+            if gate_cmds.contains(&run.trim()) {
+                continue; // the gate steps themselves, key-set-locked below
+            }
+            for needle in [".claude/", "GITHUB_ENV", "GITHUB_PATH"] {
                 assert!(
-                    !with.contains_key(serde_yaml::Value::String(key.into())),
-                    "the `changes` job's checkout must not set `{}` -- it would run {} against a different tree than the one under review",
-                    key, what
+                    !run.contains(needle),
+                    "step {} of the `changes` job is not a gate step, but its `run` mentions `{}`. Nothing in this job except the two gate steps may touch the gate scripts or rewrite the environment they run in -- two lines here can overwrite {} with `exit 0` and leave every other assertion green.",
+                    i, needle, what
                 );
             }
         }
-        // Steps 2 and 3 are the two pinned gates; step 1 is the docs-only detector. No step may
-        // carry an execution-altering `env` (the pinned pair is already key-set-locked to
-        // {name, run}, so this reaches the other two).
-        for (i, st) in steps.iter().enumerate() {
-            env_ok(st, &format!("the `changes` job's step {}", i));
-        }
+        // The checkout must still exist: without it the gate steps have no scripts to run, and a
+        // `run:` that silently no-ops is the failure this whole pin exists to prevent.
+        assert!(
+            steps.iter().any(|st| st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout@"))),
+            "the `changes` job must check the repository out -- {} cannot run against an empty workspace",
+            what
+        );
         let matching: Vec<_> = steps
             .iter()
             .filter(|st| st.get("run").and_then(|r| r.as_str()) == Some(cmd))

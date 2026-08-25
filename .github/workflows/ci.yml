@@ -101,8 +101,9 @@ jobs:
       # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
       # `continue-on-error` / `strategy`, and, at BOTH workflow and job scope, a `defaults.run.shell`
       # that is not a bare shell name or an `env` key that changes how scripts EXECUTE (PATH,
-      # BASH_ENV, LD_PRELOAD, ...). It does NOT close every tamper vector -- a sibling step in this
-      # job could still append to $GITHUB_ENV -- and the test says so rather than overclaiming.
+      # BASH_ENV, LD_PRELOAD, ...), and no non-gate step in this job may mention `.claude/`,
+      # `GITHUB_ENV` or `GITHUB_PATH`. The residual it does NOT reach is stated in ONE place --
+      # the test's own comment -- and it is this: a commit that edits the gate scripts themselves.
       # HOST DRIFT vs WRAPPER DEFECT, read this before "fixing" a red: the suite asserts
       # COMPLETENESS -- every declared case must reach a verdict (pass + fail + skip ==
       # EXPECTED_CASES). A legitimate host-capability SKIP is loud but GREEN; what reds is a case
