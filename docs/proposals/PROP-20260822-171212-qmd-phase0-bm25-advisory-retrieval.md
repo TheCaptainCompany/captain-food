@@ -195,8 +195,11 @@ rm -rf "$(git rev-parse --show-toplevel)/.qmd"
 git status --porcelain   # asserted UNCHANGED — the cache was never tracked
 ```
 plus, in the same change, one journal line recording the kill and which criterion fired — and,
-because the integration is a decided row, a **reversal/new decision on row `RETRIEVAL-QMD`**
-before any reinstall or any change to package, version, permissions or dependency shape.
+because the integration is a decided row, a **reversal/new decision on the CHAIN HEAD** — today
+`RETRIEVAL-QMD-CI` — before any reinstall or any change to package, version, permissions or
+dependency shape. Name the head, never `RETRIEVAL-QMD`: it is `superseded`, and the validator
+rejects a `reconsiders:` pointing at a superseded row (*"challenge the HEAD of its supersession
+chain"*), so the old wording sent the next session straight into a gate error on the rollback path.
 **Removing the tracked surface** (SKILL.md, the wrapper, the test suite, its CI step and codegen pin, the ignore entries) is
 that recorded reversal's commit — never part of the no-consult incident path. **The wrapper
 performs no automatic rollback**: cache deletion is always a deliberate operator action, and the
