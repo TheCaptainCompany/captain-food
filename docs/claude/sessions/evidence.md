@@ -167,6 +167,27 @@ Smoke-test the reviewer the same way you would a deploy: land the change, then o
 deliberate, realistic bug and confirm the finding arrives **on the PR**. "The workflow ran" is not
 evidence — here it was not even true.
 
+- **The self-skip EXITS 0, and `claude-review` is a REQUIRED check — so such a PR clears its own
+  review gate** ([#677](https://github.com/TheCaptainCompany/captain-food/issues/677)). Since
+  [#680](https://github.com/TheCaptainCompany/captain-food/pull/680) the job asserts the outcome
+  instead: the reviewer's summary comment must END with, as its last non-empty line,
+
+  > `Reviewed-Commit: <sha>`
+
+  where `<sha>` is the PR's **head or merge** commit — decorated (backticks, bold) and abbreviated
+  to ≥7 hex are accepted, because across 23 real reviewer comments it wrote a bare 40-char sha
+  **zero** times. **Copy the sha from the prompt, not from the working tree**: on a `pull_request`
+  event the checkout is the MERGE ref, so `git rev-parse HEAD` reports something else.
+
+  Two things that gate CANNOT do, both learned the expensive way. **It cannot prove WHICH bot
+  reviewed** — this repo's own mob-lens sessions post under the identical `claude[bot]` identity, so
+  anyone quoting a marker into a comment satisfies it. Never paste a marker line into a comment: it
+  flips the check green and destroys the only signal it carries. **And it cannot make the check
+  required or un-required**, nor stop the ruleset accepting `skipped`. Requiredness lives in ruleset
+  `19179892` — [DECISIONS §45 REV-1](../../proposals/DECISIONS.md) and
+  [#593](https://github.com/TheCaptainCompany/captain-food/issues/593), still open. A red from that
+  step means **no verdict was produced**; it does not mean the reviewer found a problem.
+
 **And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and
 `permission_denials_count: 0`, it posted nothing on three consecutive probes of a 5-line diff
 carrying a deliberate oversell hole — 5 turns / $0.29, then 11 turns / $1.01, PR untouched, and no

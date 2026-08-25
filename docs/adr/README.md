@@ -287,6 +287,7 @@ New ADRs use a UTC date-time id (ADR-20260718-135417) and are listed here in id 
 | [20260818-210000](ADR-20260818-210000-the-ai-maintained-codebase-premise-prose-is-a-convention.md) | The AI-maintained-codebase premise: a rule that lives only in prose is a convention |
 | [20260818-233000](ADR-20260818-233000-the-ten-answers-per-head-monthly-invoice-and-a-cagnotte-that-exists-only-in-prose.md) | The founder's ten answers: per head, monthly invoice, stop checkout — and a cagnotte that exists only in prose |
 | [20260819-103112](ADR-20260819-103112-the-six-queue-answers-a-fiscal-host-in-the-money-path-and-a-refund-bearer-with-no-field.md) | The six queue answers: a fiscal host in the money path, a refund bearer with no field, and a margin rate that never had a consumer |
+| [20260825-005323](ADR-20260825-005323-claude-review-hardens-while-still-required-the-bypass-over-the-recorded-path.md) | `claude-review` hardens while still required: the bypass, chosen over the recorded path |
 
 ## Proposed (deferred until app/runtime code exists)
 
