@@ -215,6 +215,16 @@ incomplete.** Recorded in full because the pattern is now the finding:
   `unset "${!GIT_@}"` and `env_ok` bans the whole `GIT_*` prefix, because enumerating this family
   is precisely how the previous two misses happened.
 
+**THE FORK-PR RESIDUAL, stated in the record and not only in a source comment.** The `changes` job
+executes two shell scripts *from the PR head* on every `pull_request`, forks included — unchanged in
+kind from the `register-check-selftest.sh` step added 2026-08-21, with a `contents: read` token and
+no secrets exposed. But the honest reading of "the gate scripts are the ones in the commit CI
+checked out" is that **on a fork PR they are the FORK'S**, and the self-verification compares them
+against the fork's own merge commit. It proves internal consistency, not provenance. A reviewer
+reading a fork PR must still read the diff of those two scripts; nothing here substitutes for that.
+Recorded here because a residual that lives only in a code comment is one nobody finds at the moment
+it matters (review of PR #679).
+
 The honest verb is **DETECT**: the script still runs and refuses to report. It is not a defence
 against arbitrary code running before it, and a commit that changes the gate scripts in the same
 change remains a code review's job. **The recurring defect is not the mutants; it is
