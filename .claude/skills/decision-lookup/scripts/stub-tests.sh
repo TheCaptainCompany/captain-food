@@ -23,7 +23,12 @@ pass=0; fail=0; skip=0
 # So the gate checks the thing that actually matters: are the scripts about to run the ones in the
 # commit? ENFORCED IN CI ONLY -- locally a developer editing the wrapper must not be redded, and
 # the property being protected is "CI runs the committed scripts", not "nobody edits them".
-if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+# Print the verdict either way. A silent skip and a silent pass look identical in a green log,
+# and "the mechanism did not run" is exactly the vacuity this whole chain keeps producing.
+if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  echo "self-verification: SKIPPED (not CI) -- gate scripts are not compared against HEAD here."
+else
+  echo "self-verification: comparing gate scripts against their committed blobs at HEAD."
   for f in "$W" "${BASH_SOURCE[0]}"; do
     rel="${f#"$REPO_ROOT"/}"
     if ! git -C "$REPO_ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
@@ -37,6 +42,7 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
       exit 1
     fi
   done
+  echo "self-verification: OK -- both gate scripts are byte-identical to HEAD."
 fi
 verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=$((fail+1)); echo "FAIL  $2"; fi }
 # A SKIP is ONLY for a setup the host FILESYSTEM/KERNEL forbids — never for a precondition the
