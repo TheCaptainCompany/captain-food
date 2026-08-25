@@ -36,8 +36,17 @@ name: ci
 # alone would therefore turn every red build green. It asserts the upstream results explicitly.
 on:
   push:
-    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)
-    branches: ['**', '!badges']
+    # `main` ONLY. Until 2026-08-25 this was `['**', '!badges']`, which meant every commit on a
+    # branch with an open PR ran the ENTIRE suite twice -- once on the push event, once on the
+    # pull_request event, ~4 minutes of build-test and db-test duplicated each time (founder, on
+    # #679's check list; see #681). Coverage is unchanged where it matters:
+    #   * a branch push with an open PR   -> the pull_request event covers it;
+    #   * a DIRECT PUSH TO main           -> this trigger, and nothing else: CLAUDE.md routes spec-
+    #     and docs-only work straight to main with no branch and no PR, so that lane has no
+    #     pull_request event to fall back on. This is why the pin below still asserts `main`;
+    #   * a FORK PR                       -> produces no push to this repo; pull_request covers it;
+    #   * a branch push with no PR open   -> uncovered, and nothing can merge from it.
+    branches: [main]
   pull_request:
 
 permissions:

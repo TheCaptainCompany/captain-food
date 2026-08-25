@@ -12315,9 +12315,16 @@ mod docs_only_ci_and_legacy_visibility {
                 .as_sequence()
                 .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
                 .unwrap_or_default();
+            // THE PROPERTY IS "the gate runs on every push that can reach `main` DIRECTLY", not
+            // the literal `**`. #681 narrowed this trigger to `[main]` because `['**', ...]` ran
+            // the whole suite twice on every PR commit -- once on push, once on pull_request. A
+            // branch push with an open PR is covered by the pull_request event; the direct-to-main
+            // lane (spec/docs work, no branch, no PR) has NO such fallback, which is the lane this
+            // assertion exists for. So `**` and `main` both satisfy it, and neither may be removed
+            // by an exclusion below.
             assert!(
-                branches.iter().any(|b| *b == "**"),
-                "`on.push.branches` ({:?}) no longer contains `**` -- a positive filter narrows the branches {} guards, with every other assertion here green. Omitting `branches` entirely is fine (it means every branch); dropping `**` from a list is not",
+                branches.iter().any(|b| *b == "**" || *b == "main"),
+                "`on.push.branches` ({:?}) covers neither `**` nor `main` -- the direct-to-main lane has no `pull_request` event to fall back on, so nothing else would run {} on it. Omitting `branches` entirely is fine (it means every branch); dropping `main` from a list is not",
                 branches, what
             );
             for excluded in branches.iter().filter(|b| b.starts_with('!')) {
@@ -13333,30 +13340,36 @@ mod docs_only_ci_and_legacy_visibility {
             ("pull_request branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['release/*']\n", 1)),
             // `**` still present, workflow no longer triggers on main -- and the docs-only lane
             // reaches main as a PUSH with no PR, so nothing else covers it.
-            ("push.branches EXCLUDES main", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!main']", 1)),
-            ("push.branches excludes every single-segment branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*']", 1)),
+            ("push.branches EXCLUDES main", ci.replacen("    branches: [main]", "    branches: ['**', '!main']", 1)),
+            // THE CONTAINMENT HALF, WHICH WAS UNPINNED UNTIL #681. Replacing the whole assertion
+            // with `true` left the suite GREEN, because every push mutant here exercises the
+            // EXCLUSION arm. A positive filter that simply omits `main` -- the obvious way to lose
+            // the direct-to-main lane once the trigger is a positive list rather than `**` -- had
+            // no test at all.
+            ("push.branches covers neither ** nor main", ci.replacen("    branches: [main]", "    branches: ['release/*']", 1)),
+            ("push.branches excludes every single-segment branch", ci.replacen("    branches: [main]", "    branches: ['**', '!*']", 1)),
             // THE THREE CLASSES `hides_main` DECIDED BY A TRAILING `*` ALONE (reviews #43/#44).
             // `!*-*` and `!2*` leave `main` untouched and remove every `NN-slug` branch, i.e. the
             // pre-PR validation `ci.yml`'s header states as the reason `push` exists at all -- the
             // `!*` plant above caught its class only incidentally, because `*` also matches `main`.
             // `!mai?` and `!m[a]in` remove `main` itself through glob metacharacters a trailing-`*`
             // special case cannot see, which is why the matcher now fails CLOSED on `?` and `[`.
-            ("push.branches drops every NN-slug branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*-*']", 1)),
-            ("push.branches drops the 2-prefixed feature branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!2*']", 1)),
-            ("push.branches hides main through a ? wildcard", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!mai?']", 1)),
-            ("push.branches hides main through a character class", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!m[a]in']", 1)),
+            ("push.branches drops every NN-slug branch", ci.replacen("    branches: [main]", "    branches: ['**', '!*-*']", 1)),
+            ("push.branches drops the 2-prefixed feature branches", ci.replacen("    branches: [main]", "    branches: ['**', '!2*']", 1)),
+            ("push.branches hides main through a ? wildcard", ci.replacen("    branches: [main]", "    branches: ['**', '!mai?']", 1)),
+            ("push.branches hides main through a character class", ci.replacen("    branches: [main]", "    branches: ['**', '!m[a]in']", 1)),
             // THE ONE THAT NAMES THIS BRANCH. `!6*` leaves `main` alone and removes every
             // `6NN-slug` branch -- the live issue range, including `678-qmd-stub-suite-in-ci` --
             // and it passed the two-sample matcher. Same for `!1*`, `!3*`, `!5*`, `!7*`.
-            ("push.branches drops the live issue range", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!6*']", 1)),
+            ("push.branches drops the live issue range", ci.replacen("    branches: [main]", "    branches: ['**', '!6*']", 1)),
             // THE `pull_request` HALF, WHICH DID NOT LOOK AT EXCLUSIONS AT ALL. A fork produces no
             // push, so this trigger is a fork PR's only coverage.
             ("pull_request.branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['**', '!main']\n", 1)),
             // `branches-ignore` needs no `branches` key, so the containment check above never
             // looked at it; `tags` alone makes the trigger tag-only. Both removed BOTH gate steps
             // from the push lane with every assertion green (review of PR #679).
-            ("push branches-ignore excludes main", ci.replacen("    branches: ['**', '!badges']", "    branches-ignore: ['main']", 1)),
-            ("push tags-only trigger", ci.replacen("    branches: ['**', '!badges']", "    tags: ['v*']", 1)),
+            ("push branches-ignore excludes main", ci.replacen("    branches: [main]", "    branches-ignore: ['main']", 1)),
+            ("push tags-only trigger", ci.replacen("    branches: [main]", "    tags: ['v*']", 1)),
             // THE SEQUENCE `on:` FORM, COMBINED WITH A DISARMED GATE STEP. The sequence arm is a
             // legitimate widening and must not red on its own -- the control below says so -- but
             // it must not become a bypass either. Before review #22 this pair was GREEN: the arm
@@ -13612,7 +13625,7 @@ mod docs_only_ci_and_legacy_visibility {
             // `branches:` means EVERY branch, and a null `push:` body is the commonest spelling of
             // "every push". A guard against narrowing that blocks widening is the false-red
             // instrument wearing the other hat.
-            ("push.branches removed entirely", ci.replacen("    branches: ['**', '!badges']\n", "", 1)),
+            ("push.branches removed entirely", ci.replacen("    branches: [main]\n", "", 1)),
             // The control that keeps the tag rule about the PAIR rather than the key: adding a
             // tag filter NEXT TO the branch list is ordinary release plumbing and widens nothing.
             // `build-test` carries `uses:` steps and a step-level `DB_TESTS_REQUIRED` today; the
@@ -13621,11 +13634,18 @@ mod docs_only_ci_and_legacy_visibility {
             // A list `on:` carries no filters at all -- strictly wider than the mapping form, and
             // the fifth spelling of the false-red instrument this file has retracted (review #20).
             ("on: as a list of events", with_trigger("on: [push, pull_request]\n")),
-            ("push tags ALONGSIDE branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges']\n    tags: ['v*']", 1)),
+            ("push tags ALONGSIDE branches", ci.replacen("    branches: [main]", "    branches: [main]\n    tags: ['v*']", 1)),
             // The matcher must not become the next false-red instrument: `!badges` is the real
             // exclusion this file ships, and an added narrow one must stay green.
-            ("a second narrow branch exclusion", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!gh-pages']", 1)),
-            ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
+            ("a second narrow branch exclusion", ci.replacen("    branches: [main]", "    branches: [main, '!gh-pages']", 1)),
+            // DERIVED, NOT ANCHORED ON THE COMMENT. This used to splice out a literal that
+            // included ci.yml's own `# every branch EXCEPT ...` line, which #681 rewrote -- so the
+            // plant would have gone vacuous on a comment edit. Cut from `push:` to `pull_request:`.
+            ("push with a null body", {
+                let start = ci.find("  push:\n").expect("push block");
+                let end = ci.find("  pull_request:").expect("pull_request key");
+                format!("{}  push:\n{}", &ci[..start], &ci[end..])
+            }),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
             // to red on an innocent step addition (`steps.len() == 4`). An ordinary extra step
             // that names nothing sensitive must stay green, or the next contributor learns to
