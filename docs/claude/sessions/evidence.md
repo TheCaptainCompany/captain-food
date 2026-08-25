@@ -188,6 +188,20 @@ evidence — here it was not even true.
   [#593](https://github.com/TheCaptainCompany/captain-food/issues/593), still open. A red from that
   step means **no verdict was produced**; it does not mean the reviewer found a problem.
 
+- **`gh api --paginate --jq` applies the filter PER PAGE and concatenates**, and `--slurp` is
+  *rejected* together with `--jq`. So a filter ending in `| length` emits one integer **per page**
+  (`"1\n0"` on two pages) — which reds any numeric guard on a PR with more than 30 comments. The
+  only shape that works across pages is **emit one line per hit and count the lines**. Cost that
+  earned this: a false red on a required check, on the second attempt at the same assertion.
+- **`x="$(cmd | grep -c ... || true)"` binds `|| true` to the WHOLE pipeline**, not to `grep`. An
+  API failure then reads as "zero matches" instead of aborting under `set -e` — an outage
+  diagnosed as a missing review — and a partial failure after a match reads as a **pass**. Split
+  the fetch from the count: one assignment each, so the fetch's failure is its own exit status.
+- **Do not require a marker to be the LAST line of a bot comment.** This repo requires an
+  attribution footer on bot posts, so "last line" is a formatting-caused merge stop. Require it on
+  a line of its own and **not inside a fenced block** (``` or ~~~) — that is what actually stops a
+  quoted marker from satisfying a gate, which was the point.
+
 **And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and
 `permission_denials_count: 0`, it posted nothing on three consecutive probes of a 5-line diff
 carrying a deliberate oversell hole — 5 turns / $0.29, then 11 turns / $1.01, PR untouched, and no

@@ -33,11 +33,13 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REG-4` | decided | 2026-08-21 | What is the status vocabulary? -> ADR-20260821-095957 | founder |
 | `REG-SEQ` | decided | 2026-08-21 | When does the register machinery land, relative to #556 Local acceptance harness? -> ADR-20260821-095957 | founder |
 | `RETRIEVAL-QMD` | decided | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> PROP-20260822-171212 | founder |
+| `REV-1` | decided | 2026-08-17 | Does the `claude-review` bot check stay a REQUIRED status check on `main`? -> ADR-20260807-235930 | founder |
+| `REVIEW-GATE-BYPASS` | decided | 2026-08-24 | Does the #677 hardening of `claude-review` land BEFORE REV-1 is executed — merged by a one-time admin bypass, leaving the check required and newly able to fail — or does REV-1 execute first so the hardened check reds on a non-required gate? -> ADR-20260825-005323 | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**Migrated rows: 21 — 9 open · 11 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 23 — 9 open · 13 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
-**Legacy rows remaining: 103** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
+**Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
 For every key above, `docs/decisions/<KEY>.yaml` is **authoritative for CURRENT status**; the prose sections below are its history and their glyphs are not current status.
 

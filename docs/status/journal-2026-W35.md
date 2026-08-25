@@ -25,13 +25,20 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > with the cost stated. Recorded as declined, not as unstated. REV-1 stays open on #593 and
 > executing it later removes the exposure without touching the workflow.
 >
-> **The gate proved itself on its own PR, from the same condition** — the rarest kind of evidence
-> and the reason this landed at all: run 32778735735 `claude-review` **success in 4s** (the action
-> self-skipped and exited 0 — the false green), run 32792130350 **failure in 13s** carrying the new
-> message. `beck`'s ruling on the self-red: keep it; a bootstrap carve-out *is* the hole under a
-> nicer name.
+> **The gate proved itself on its own PR — and my first write-up of that proof was WRONG.** I cited
+> run 32778735735 (`claude-review` success in 4s) as the false green. It was not: its log reads
+> `IS_DRAFT: true` / *"draft PR - the review step is skipped by design"*, and the action step's
+> conclusion is `skipped`. That run demonstrates the DRAFT path. The action never ran, never
+> self-skipped, never exited 0 there. **Third false record claim in this chain, and the second one
+> where I asserted evidence without opening the log.**
 >
-> **Then the independent review found the fix was two false reds of its own** — on a check that is
+> The genuine proof is free, better, and inside **one** run — 32792130350: the step
+> `Run Claude Code Review` has conclusion **`success`** while its own log says
+> `Exiting due to workflow validation skip`, and the assert step reds in the same job. Success and
+> no-review, side by side, one run id. That is #677 in a single artifact. `beck`'s ruling on the
+> self-red: keep it; a bootstrap carve-out *is* the hole under a nicer name.
+>
+> **Then the reviews found the fix carried FOUR false verdicts of its own** — on a check that is
 > required *today*, so each was a repo-wide merge stop I had introduced while fixing one:
 > - `printf '%s' "$bodies" | grep -qF` makes grep exit at the first match, printf die of SIGPIPE and
 >   `pipefail` report **141 even though grep MATCHED**. Reproduced here: green at 64 000 trailing
