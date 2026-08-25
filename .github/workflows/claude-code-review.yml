@@ -65,7 +65,8 @@ jobs:
             as a message is discarded unread by design (the action hides stdout).
             - `gh pr comment` for the summary. Post one EVERY time, including when you find
               nothing: "reviewed, no findings" is the signal that the reviewer ran.
-              The LAST non-empty line of that comment must be exactly:
+              That comment must contain, on a line of its own (an attribution footer after it is
+              fine; it must simply not be inside a fenced code block):
                   Reviewed-Commit: ${{ github.event.pull_request.head.sha }}
               COPY THAT SHA FROM THIS PROMPT. Do not derive it from the working tree: on a
               pull_request event the checkout is the MERGE commit, so `git rev-parse HEAD` reports
@@ -74,8 +75,8 @@ jobs:
               A later step ASSERTS that marker and fails the job without it. It is what
               distinguishes "this commit was reviewed" from "some earlier commit was reviewed":
               comments survive pushes, so a bare "a review comment exists" is satisfied by a
-              verdict on a diff that no longer exists. It must be LAST so that a marker quoted
-              inside a code fence, in a comment that is not a review, cannot satisfy the gate.
+              verdict on a diff that no longer exists. A marker inside a ``` fence does NOT count,
+              so quoting one in an unrelated comment cannot satisfy the gate.
             - `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) for each
               specific issue, anchored to the line it concerns.
             Be concrete about consequence: name what breaks, for whom, and under what input.
@@ -167,26 +168,42 @@ jobs:
           # ~35 KB. A false red here is a repo-wide merge stop, which is #593 exactly.
           # `gh api --paginate --jq` applies the filter to EACH PAGE and concatenates the outputs,
           # so a jq program ending in `| length` emits one integer PER PAGE ("1\n0" on two pages) --
-          # a FALSE RED on any PR with more than one page of comments (>30), measured. Emit one
-          # MATCH line per matching comment instead and count lines: correct under either
-          # behaviour, and `wc -l` reads all its input so there is no SIGPIPE either.
-          hits="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '
+          # a FALSE RED on any PR with more than one page of comments (>30), measured. `--slurp` is
+          # rejected together with `--jq`, so emitting one MATCH line per hit and counting lines is
+          # the only shape that works. No pipe into an early-exit reader either, so the SIGPIPE
+          # class that caused the first false red cannot return.
+          #
+          # The marker must be on a line that is NOT inside a fenced code block -- that is what
+          # stops a QUOTED marker from satisfying the gate (``` and ~~~ both count). It deliberately does NOT have to be the
+          # LAST line: this repo requires an attribution footer on bot comments, and 1 of the 23
+          # real reviewer comments already ends with one, so "must be last" was a formatting-caused
+          # repo-wide merge stop waiting to happen. Decorations seen in the real corpus are all
+          # accepted: bold, italic, code span, list item, trailing period, tab, uppercase hex.
+          markers="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '
             .[]
             | select(.user.type == "Bot")
             | .body
             | split("\n")
             | map(sub("\r$"; ""))
-            | map(select(test("\\S")))
-            | (last // "")
-            | (capture("^[*_ ]*Reviewed-Commit:?[*_ ]*[ \t]*`?(?<h>[0-9a-f]{7,40})`?[.*_ ]*$") // empty)
+            | reduce .[] as $l ({fenced: false, out: []};
+                if ($l | test("^[ \t]*(```|~~~)")) then .fenced = (.fenced | not)
+                elif .fenced then .
+                else .out += [$l] end)
+            | .out[]
+            | (capture("^[-*_ `\t]*Reviewed-Commit:?[*_ `]*[ \t]*`?(?<h>[0-9a-fA-F]{7,40})`?[.*_ `\t]*$") // empty)
             | .h
+            | ascii_downcase
             | . as $h
-            | select((env.HEAD_SHA | startswith($h)) or (env.MERGE_SHA | startswith($h)))
-            | "MATCH"' | grep -c '^MATCH$' || true)"
-          # A gh/API failure aborts under `set -e` above: an API error must never read as "no
-          # review", and must never read as a pass either. (`grep -c` exits 1 on zero matches,
-          # which is a legitimate empty result, not an error -- hence the `|| true` on THAT
-          # command only.)
+            | select((env.HEAD_SHA | ascii_downcase | startswith($h)) or (env.MERGE_SHA | ascii_downcase | startswith($h)))
+            | "MATCH"')"
+          # SPLIT from the pipeline on purpose. `x="$(cmd | grep -c ... || true)"` binds `|| true`
+          # to the WHOLE pipeline, so a gh/API failure silently became `hits=0` and was reported as
+          # "no review performed" -- an outage diagnosed as a missing review, on a required,
+          # self-blocking check. Worse, a partial pagination failure after a matching page returned
+          # a pass. Now the gh failure IS the exit status of its own assignment and `set -e` aborts;
+          # only the counting step carries `|| true`, because `grep -c` exits 1 on zero matches,
+          # which is a legitimate empty result rather than an error.
+          hits="$(printf '%s\n' "$markers" | grep -c '^MATCH$' || true)"
           case "$hits" in
             ''|*[!0-9]*) echo "::error::could not count review comments (got: '$hits')."; exit 1 ;;
           esac
@@ -208,8 +225,8 @@ jobs:
             echo "     billing condition; no workflow edit fixes it. Restore the allowance."
             echo "  3. Permission denials (permission_denials_count must be 0) -- the reviewer ran"
             echo "     blindfolded and had nowhere to put its findings."
-            echo "  4. The reviewer ran but did not END its summary with the Reviewed-Commit line."
-            echo "     The marker must be the LAST non-empty line of the comment."
+            echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
+            echo "     It must be on its own line and NOT inside a fenced code block."
             echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
             echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."
           } >&2
