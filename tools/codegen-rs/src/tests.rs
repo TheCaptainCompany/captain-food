@@ -10082,7 +10082,9 @@ mod docs_only_ci_and_legacy_visibility {
         // (GitHub's custom-shell form is `command [options] {0}`, so `bash -c "exit 0" {0}` passes
         // the script as $0 and never runs it). The first fix banned the KEYS `defaults` and `env`
         // at the root -- which false-redded ordinary CI work: 4 of this repo's 16 workflows already
-        // carry a root `env:`, and adding `CARGO_TERM_COLOR: always`, the standard Rust-CI idiom,
+        // carry a root `env:` (4 of 15, counted with
+        // `for f in .github/workflows/*; do python3 -c 'import yaml,sys; print("env" in (yaml.safe_load(open(sys.argv[1])) or {}))' $f; done`),
+        // and adding `CARGO_TERM_COLOR: always`, the standard Rust-CI idiom,
         // redded these tests with a message accusing the author of disarming the ask-gate. The
         // suite's own T15g reasoning applies to its own guard: a red that fires on innocent work
         // trains readers to discount reds.
@@ -10092,10 +10094,18 @@ mod docs_only_ci_and_legacy_visibility {
         // $BASH_ENV before a non-interactive script, so two lines disarm BOTH pinned gates with the
         // step byte-identical and every other assertion green.
         //
-        // HONEST BOUNDARY, stated because the previous version of this comment overclaimed: no test
-        // of this class closes the vector. A sibling step in the same job can append to
-        // `$GITHUB_ENV` or overwrite the script on disk, and nothing here would see it. This
-        // narrows the cheap spellings; it does not make the job tamper-proof.
+        // The sibling-step vector IS closable with this same instrument, so it is closed below
+        // rather than excused. The previous version of this comment said "no test of this class
+        // closes the vector -- a sibling step can append to $GITHUB_ENV or overwrite the script on
+        // disk", and the fourth review demonstrated the cheapest disarm in the whole corpus: ONE
+        // extra step, `run: printf '#!/bin/sh\nexit 0\n' > .../stub-tests.sh`, left both gates
+        // GREEN with CI green. Calling that unclosable while claiming to "narrow the cheap
+        // spellings" was an overclaim about an overclaim. The `changes` job's step LIST is now
+        // pinned exhaustively, which kills it along with a re-pointed checkout.
+        //
+        // The residual this genuinely cannot reach: an edit to `stub-tests.sh` or
+        // `register-check-selftest.sh` themselves, in the same commit. That is a code review's
+        // job, and the suite's own EXPECTED_CASES containment covers part of it.
         let shell_ok = |v: &serde_yaml::Value, scope: &str| {
             if let Some(sh) = v
                 .get("defaults")
@@ -10134,6 +10144,28 @@ mod docs_only_ci_and_legacy_visibility {
             .and_then(|j| j.get("changes"))
             .expect("ci.yml must declare a `changes` job");
         shell_ok(changes_val, "the `changes` job's");
+        for key in ["container", "services"] {
+            assert!(
+                changes_val.get(key).is_none(),
+                "the `changes` job must carry no `{}` -- it changes the machine {} runs on, with the step byte-identical",
+                key, what
+            );
+        }
+        assert_eq!(
+            changes_val.get("runs-on").and_then(|r| r.as_str()),
+            Some("ubuntu-latest"),
+            "the `changes` job must run on `ubuntu-latest` -- a self-hosted label puts {} on a machine this repo does not control",
+            what
+        );
+        if let Some(run_defaults) = changes_val.get("defaults").and_then(|d| d.get("run")).and_then(|r| r.as_mapping()) {
+            for k in run_defaults.keys().filter_map(|k| k.as_str()) {
+                assert_eq!(
+                    k, "shell",
+                    "the `changes` job's `defaults.run` may only set `shell` -- `{}` (e.g. `working-directory`) changes where every step runs, disarming {} with the step byte-identical",
+                    k, what
+                );
+            }
+        }
         env_ok(changes_val, "the `changes` job's");
         let changes = changes_val
             .as_mapping()
@@ -10154,6 +10186,45 @@ mod docs_only_ci_and_legacy_visibility {
             .get(serde_yaml::Value::String("steps".into()))
             .and_then(|s| s.as_sequence())
             .expect("the `changes` job must have steps");
+
+        // EXHAUSTIVE STEP PIN. Everything above constrains the two gate steps and the job's own
+        // keys; none of it stops a SIBLING step from neutering them. Measured green before this
+        // assertion existed: an extra `run:` overwriting stub-tests.sh with `exit 0`; a checkout
+        // re-pointed at another `repository`/`ref`. Both are cheaper than any mutant M1-M23.
+        // This job is the always-run gate host and is meant to stay tiny, so its step list is
+        // pinned outright: four steps, in this order, each by shape.
+        assert_eq!(
+            steps.len(),
+            4,
+            "the `changes` job must have exactly 4 steps (checkout, docs-only detect, hook selftest, stub suite). A sibling step can overwrite a gate script or re-point the checkout and leave every other assertion here green -- that is the cheapest disarm there is, so the list is pinned, not just its members."
+        );
+        // Step 0: a plain checkout of THIS repo at the default ref. `repository:`/`ref:` would put
+        // someone else's scripts under the gate steps.
+        let checkout = steps[0].as_mapping().expect("step 0 is a mapping");
+        let uses = checkout
+            .get(serde_yaml::Value::String("uses".into()))
+            .and_then(|u| u.as_str())
+            .unwrap_or_default();
+        assert!(
+            uses.starts_with("actions/checkout@"),
+            "the `changes` job's first step must be actions/checkout, got `{}`",
+            uses
+        );
+        if let Some(with) = checkout.get(serde_yaml::Value::String("with".into())).and_then(|w| w.as_mapping()) {
+            for key in ["repository", "ref"] {
+                assert!(
+                    !with.contains_key(serde_yaml::Value::String(key.into())),
+                    "the `changes` job's checkout must not set `{}` -- it would run {} against a different tree than the one under review",
+                    key, what
+                );
+            }
+        }
+        // Steps 2 and 3 are the two pinned gates; step 1 is the docs-only detector. No step may
+        // carry an execution-altering `env` (the pinned pair is already key-set-locked to
+        // {name, run}, so this reaches the other two).
+        for (i, st) in steps.iter().enumerate() {
+            env_ok(st, &format!("the `changes` job's step {}", i));
+        }
         let matching: Vec<_> = steps
             .iter()
             .filter(|st| st.get("run").and_then(|r| r.as_str()) == Some(cmd))

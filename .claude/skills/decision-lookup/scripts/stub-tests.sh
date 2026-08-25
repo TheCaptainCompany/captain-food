@@ -70,7 +70,7 @@ out="$(DECISION_LOOKUP_HOME="$Q" "$W" "who bears the refund cost" 2>&1)"; rc=$?
 Q="$S/t3"; mkdir -p "$Q" "$S/t3-bin"
 if ! ln -s "$(command -v dirname)" "$S/t3-bin/dirname" 2>/dev/null || [ ! -x "$S/t3-bin/dirname" ] \
   || env PATH="$S/t3-bin" /bin/bash -c 'command -v bun' >/dev/null 2>&1; then
-  verdict bad "T3 no-bun install (precondition: controlled PATH not constructible or bun resolvable)"
+  verdict bad "T3 no-bun install (precondition HOST: controlled PATH not constructible or bun resolvable)"
 else
   out="$(env PATH="$S/t3-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] && echo "$out" | grep -q "ACTIVATION FAILED: bun runtime not present" \
@@ -94,7 +94,7 @@ printf '#!/bin/sh\nexit 0\n' > "$S/t3b-bin/bun"; chmod +x "$S/t3b-bin/bun"
 if [ ! -x "$S/t3b-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ] \
   || ! ln -s "$(command -v mkdir)" "$S/t3b-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3b-bin/mkdir" ]; then
-  verdict bad "T3b no-python3 install (precondition: stub bun + symlinks unavailable)"
+  verdict bad "T3b no-python3 install (precondition HOST: stub bun + symlinks unavailable)"
 else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
@@ -118,7 +118,7 @@ printf '#!/bin/sh\nexit 0\n' > "$S/t3c-bin/bun"; chmod +x "$S/t3c-bin/bun"
 if [ ! -x "$S/t3c-bin/python3" ] || [ ! -x "$S/t3c-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ] \
   || ! ln -s "$(command -v mkdir)" "$S/t3c-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3c-bin/mkdir" ]; then
-  verdict bad "T3c broken-python3 install (precondition: controlled PATH not constructible)"
+  verdict bad "T3c broken-python3 install (precondition HOST: controlled PATH not constructible)"
 else
   out="$(env PATH="$S/t3c-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
@@ -346,7 +346,7 @@ out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 Q="$S/t15"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
-  verdict bad "T15 corrupt-index rebuild (precondition: healthy build failed)"
+  verdict bad "T15 corrupt-index rebuild (precondition WRAPPER: healthy build failed)"
 else
   printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -375,7 +375,7 @@ if [ -z "$BUN_REAL" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ] || [ ! -f "$Q/co
   || ! ln -s "$BUN_REAL" "$S/t15b-bin/bun" 2>/dev/null || [ ! -x "$S/t15b-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t15b-bin/dirname" 2>/dev/null || [ ! -x "$S/t15b-bin/dirname" ] \
   || env PATH="$S/t15b-bin" /bin/bash -c 'command -v python3' >/dev/null 2>&1; then
-  verdict bad "T15b no-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
+  verdict bad "T15b no-python3 lookup (precondition WRAPPER: seeded cache failed (or controlled PATH unavailable))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(env PATH="$S/t15b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "seed" 2>&1)"; rc=$?
@@ -398,7 +398,7 @@ fi
 Q="$S/t15c"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ]; then
-  verdict bad "T15c probe read-only (precondition: healthy build failed)"
+  verdict bad "T15c probe read-only (precondition WRAPPER: healthy build failed)"
 else
   printf 'garbage-not-a-wal-header' > "$Q/corpus/.qmd/index.sqlite-wal"
   fp_b="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
@@ -424,7 +424,7 @@ mkdir -p "$S/t15d-py"
 printf 'raise ImportError("sqlite3 blocked for T15d")\n' > "$S/t15d-py/sqlite3.py"
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || PYTHONPATH="$S/t15d-py" python3 -c 'import sqlite3' 2>/dev/null; then
-  verdict bad "T15d probe-unavailable (precondition: seeded cache or sqlite3 poisoning failed)"
+  verdict bad "T15d probe-unavailable (precondition WRAPPER: seeded cache failed (or sqlite3 poisoning failed))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15d-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -450,7 +450,7 @@ BUN_REAL="$(command -v bun || true)"
 if [ -z "$BUN_REAL" ] || [ ! -f "$Q/corpus/.sha" ] \
   || ! ln -s "$BUN_REAL" "$S/t15e-bin/bun" 2>/dev/null || [ ! -x "$S/t15e-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t15e-bin/dirname" 2>/dev/null || [ ! -x "$S/t15e-bin/dirname" ]; then
-  verdict bad "T15e broken-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
+  verdict bad "T15e broken-python3 lookup (precondition WRAPPER: seeded cache failed (or controlled PATH unavailable))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(env PATH="$S/t15e-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "x" 2>&1)"; rc=$?
@@ -474,7 +474,7 @@ mkdir -p "$S/t15f-py"
 printf 'import os\nos._exit(7)\n' > "$S/t15f-py/sqlite3.py"
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || PYTHONPATH="$S/t15f-py" python3 -c 'import sqlite3' 2>/dev/null; then
-  verdict bad "T15f unknown-probe-exit (precondition: seeded cache or exit-7 poisoning failed)"
+  verdict bad "T15f unknown-probe-exit (precondition WRAPPER: seeded cache failed (or exit-7 poisoning failed))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15f-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -502,14 +502,14 @@ Q="$S/t15g$(printf '\375')"
 # succeeds AND the \375 name fails => a genuine filesystem-encoding refusal (skip). Control also
 # fails => the harness/host is broken, which is a loud failure like every other precondition.
 if ! mkdir -p "${Q%$(printf '\375')}-ascii-control" 2>/dev/null; then
-  verdict bad "T15g non-utf8 path (precondition: ASCII control mkdir failed — host/harness broken, not an encoding refusal)"
+  verdict bad "T15g non-utf8 path (precondition WRAPPER: ASCII control mkdir failed — host/harness broken, not an encoding refusal; this is a LOUD failure by design (it stops ENOSPC/EROFS/EACCES being swallowed), never adapt it away)"
 elif ! mkdir -p "$Q" 2>/dev/null || [ ! -d "$Q" ]; then
   skipped "T15g non-utf8 cache path — filesystem rejects non-UTF-8 names (Linux-only case)"
 else
   mkfake "$Q" "$S/p5a.json"
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
   if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
-    verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+    verdict bad "T15g non-utf8 path (precondition WRAPPER: seeded build under \\375 path failed)"
   else
     fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
     out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -539,7 +539,7 @@ try:
 except TypeError:
     sys.exit(0)
 sys.exit(1)' 2>/dev/null; then
-  verdict bad "T15h non-sqlite3 probe exception (precondition: seeded cache or TypeError shim failed)"
+  verdict bad "T15h non-sqlite3 probe exception (precondition WRAPPER: seeded cache failed (or TypeError shim failed))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15h-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -562,7 +562,7 @@ mkdir -p "$S/t15j-py"
 printf 'def connect(*a, **k):\n    raise RuntimeError("no Error attribute on this module")\n' > "$S/t15j-py/sqlite3.py"
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || PYTHONPATH="$S/t15j-py" python3 -c 'import sqlite3, sys; sys.exit(0 if hasattr(sqlite3, "Error") else 1)' 2>/dev/null; then
-  verdict bad "T15j sqlite3 without Error (precondition: seeded cache or attribute-less shim failed)"
+  verdict bad "T15j sqlite3 without Error (precondition WRAPPER: seeded cache failed (or attribute-less shim failed))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15j-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -585,7 +585,7 @@ mkdir -p "$S/t15k-py"
 printf 'Error = "not a class"\n\n\ndef connect(*a, **k):\n    raise RuntimeError("boom")\n' > "$S/t15k-py/sqlite3.py"
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || ! PYTHONPATH="$S/t15k-py" python3 -c 'import sqlite3, sys; sys.exit(0 if not isinstance(getattr(sqlite3, "Error", ()), type) else 1)' 2>/dev/null; then
-  verdict bad "T15k malformed Error attribute (precondition: seeded cache or non-class Error shim failed)"
+  verdict bad "T15k malformed Error attribute (precondition WRAPPER: seeded cache failed (or non-class Error shim failed))"
 else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15k-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -608,7 +608,7 @@ mkdir -p "$S/t15i-py"
 printf 'print("sitecustomize noise")\n' > "$S/t15i-py/sitecustomize.py"
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || [ "$(PYTHONPATH="$S/t15i-py" python3 -c 'pass' 2>/dev/null)" != "sitecustomize noise" ]; then
-  verdict bad "T15i stdout-noise verdict (precondition: seeded cache or sitecustomize noise failed)"
+  verdict bad "T15i stdout-noise verdict (precondition WRAPPER: seeded cache failed (or sitecustomize noise failed))"
 else
   printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
   out="$(PYTHONPATH="$S/t15i-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -640,7 +640,7 @@ eval "$(sed -n '/^qmd_lock_binding_ok()/,/^}/p' "$W")"
 PIN16="$(sed -n 's/^PIN="\(.*\)" *#.*$/\1/p; s/^PIN="\(.*\)"$/\1/p' "$W" | head -1)"
 INTEG16="$(sed -n 's/^INTEGRITY="\(.*\)"$/\1/p' "$W" | head -1)"
 if [ -z "$PIN16" ] || [ -z "$INTEG16" ]; then
-  verdict bad "T16 (precondition: PIN/INTEGRITY not extractable from wrapper)"
+  verdict bad "T16 (precondition WRAPPER: PIN/INTEGRITY not extractable from wrapper)"
 else
   t16() { printf '%s' "$2" > "$S/t16.lock"; qmd_lock_binding_ok "$S/t16.lock" "$PIN16" "$INTEG16"; rc=$?; [ $rc -eq "$3" ] && verdict ok "T16 $1" || verdict bad "T16 $1 (rc=$rc, want $3)"; }
   t16 "valid binding -> pass" \
@@ -683,7 +683,7 @@ else
   # encoding= fix removed. This probe cannot be aliased away.
   if env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
     enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
-    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition: locale-dependent open did NOT raise; enc='$enc' — no genuine ASCII locale on this host)"
+    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition HOST: locale-dependent open did NOT raise; enc='$enc' — no genuine ASCII locale on this host)"
   else
     enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
     ( eval "export $ascii_locale"; qmd_lock_binding_ok "$S/t16-utf8.lock" "$PIN16" "$INTEG16" ); rc=$?

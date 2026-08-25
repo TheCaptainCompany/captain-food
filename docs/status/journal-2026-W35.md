@@ -95,7 +95,38 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `{name, run}`, which leaves nowhere to put `if`, `continue-on-error`, `shell` or `env` in any
 > spelling. Re-planted: M11 hoisted `if:` RED · M12 decoy line + `|| true` RED · M13 `shell:` RED ·
 > M14 job-level `defaults:` RED · M15 renaming `lint:` GREEN, and that green is the fix working —
-> the pin no longer depends on that anchor. The precedent test was moved onto the same helper; it
+> the pin no longer depends on that anchor. **M14's spelling was later deliberately invalidated**
+> (see below): job-level `defaults` PRESENCE is legal now; what reds is a `defaults.run.shell`
+> that is not a bare shell name.
+>
+> **ROUNDS 3 AND 4 — the same mistake twice more, and a false red of my own.** The third review
+> found the **twelfth** mutant one scope UP: a workflow-level `defaults.run.shell` that drops the
+> step script (`bash -c "exit 0" {0}` passes it as `$0`), disarming BOTH pinned gates at once. My
+> fix banned the KEYS `defaults` and `env` at the root — **which reds ordinary CI work**: 4 of the
+> repo's 15 workflows already carry a root `env:`, so `CARGO_TERM_COLOR: always` would have failed
+> with a message accusing the author of disarming the ask-gate. The suite's own T15g reasoning
+> applies to its own guard. And banning the key at the root missed the **thirteenth** one scope
+> DOWN: a job-level `env: {BASH_ENV: preamble.sh}` — bash sources `$BASH_ENV` before a
+> non-interactive script, so two lines kill both gates. Both were the same error: **keying on key
+> PRESENCE instead of dangerous CONTENT.** Now both scopes check content (bare shell name;
+> no PATH/BASH_ENV/ENV/SHELLOPTS/LD_PRELOAD/LD_LIBRARY_PATH/BASH_FUNC_*). Planted: M19 job
+> `BASH_ENV` · M20/M21 shell-drops-script at job and workflow scope · M22 workflow `PATH` · M23 job
+> `LD_PRELOAD` → RED; `CARGO_TERM_COLOR`, `RUST_LOG`, `shell: bash` → GREEN.
+>
+> **The fourth review then showed my "honest boundary" was itself an overclaim.** The comment said
+> no test of this class could close the sibling-step vector — and the cheapest disarm in the entire
+> M1–M23 corpus was exactly that: **one extra step** running
+> `printf '#!/bin/sh\nexit 0\n' > .../stub-tests.sh`, leaving both gates GREEN and CI green. A
+> re-pointed checkout (`repository:`/`ref:`), a `container:`, a self-hosted `runs-on` and a
+> `defaults.run.working-directory` were all green too. **Declaring a vector unclosable while
+> claiming to narrow the cheap spellings, when the cheapest one was untouched, is an overclaim
+> about an overclaim.** The `changes` job's step LIST is now pinned exhaustively — four steps, by
+> shape — which kills all five. Planted red, each with its own message. The residual that really
+> is out of reach: editing the gate scripts themselves in the same commit.
+>
+> **Cost that earned the rule, stated once: three consecutive rounds of "I closed it" were wrong,
+> and each time the wrongness lived in a sentence claiming completeness. Prefer naming what a
+> guard does NOT reach over asserting it reaches everything — and then check that sentence too.** The precedent test was moved onto the same helper; it
 > had every one of these holes.
 >
 > **Banked, with attribution**: an invited-lens depth miss, not roster width — `beck` was briefed on

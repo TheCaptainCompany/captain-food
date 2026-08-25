@@ -62,12 +62,13 @@ That produced a contradiction the repo's own rules do not tolerate: a declared e
 that nothing executes. Its green reported the author's machine. "A gate cannot be ignored" is the
 reason this repository prefers executable over prose — an unrun suite is prose.
 
-**The evidence that this is not theoretical.** During PR #675 the step was briefly wired. Its
+**The evidence that this is not theoretical.** During PR #676 the step was briefly wired. Its
 **first CI run went red at 26/52** and exposed a host dependency the suite had carried unnoticed:
 the wrapper preflights `command -v bun`, so on a runner without `bun` every cache-building case
 failed its precondition. The suite claimed hermeticity while requiring a real `bun` to be installed.
-The defect is fixed independently (an exit-0 stub `bun` for the whole run, #676) — but it was found
-**only** by running the suite off the author's machine.
+The defect was fixed in the very next commit on that same branch — not, as an earlier draft of
+this ADR said, "independently" — but it was found **only** by running the suite off the author's
+machine.
 
 **The instrument matters, and got it wrong once.** PR #676's first attempt appended an `AMENDMENT`
 paragraph to the decided `RETRIEVAL-QMD` row's `evidence:`. [`docs/decisions/README.md`](../decisions/README.md)
@@ -149,3 +150,15 @@ the property unrepresentable; a wider roster would have put more readers in fron
 enumeration. It therefore does **not** return to the founder, and the reversibility class stands.
 The correction is the one the repo's compiler-first rule points at: the pin now asserts over
 PARSED YAML, so every spelling of the mutant is unrepresentable instead of enumerated.
+
+**Banked again after rounds 3 and 4** (same attribution — invited-lens depth, not roster width):
+parsed YAML was not the end of it. A **twelfth** mutant sat one scope up (workflow-level
+`defaults.run.shell` dropping the step script) and a **thirteenth** one scope down (job-level
+`env: BASH_ENV`), and my fix for the twelfth introduced a **false red on ordinary CI work** by
+banning key presence rather than dangerous content. The fourth round then found the cheapest
+disarm in the whole corpus untouched — a sibling step overwriting the gate script — while the
+guard's comment claimed no test of that class could close it. It could, and now does: the
+`changes` job's step list is pinned exhaustively. **The recurring defect is not the mutants; it is
+that each round's completeness claim was written before it was checked.** The register-machinery
+rule added here is governed by `docs/decisions/README.md`, not by this row's QMD surface — it is
+the remediation of a claim this ADR itself made, which is why it rides along.
