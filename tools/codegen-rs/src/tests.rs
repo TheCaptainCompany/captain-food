@@ -10379,12 +10379,34 @@ mod docs_only_ci_and_legacy_visibility {
             .get(serde_yaml::Value::String("push".into()))
             .expect("ci.yml must run on push -- the docs-only lane reaches `main` as a push");
         if let Some(push) = push_val.as_mapping() {
-        for key in ["paths", "paths-ignore"] {
+        // THE SAME BAN LIST AS `pull_request`, and for the same reason. This half banned only
+        // `paths`/`paths-ignore`, and the branch check below opens with `if let Some(seq) =
+        // push.get("branches")` -- so it does NOTHING when `branches` is absent. Review of PR
+        // #679 walked `branches-ignore: ['main']` straight through: it needs no `branches` key,
+        // so every assertion here stayed green while the workflow stopped running on `main` --
+        // the lane CLAUDE.md routes spec- and docs-only changes down, with no PR to fall back on.
+        for key in ["paths", "paths-ignore", "branches-ignore"] {
             assert!(
                 !push.contains_key(serde_yaml::Value::String(key.into())),
-                "`on.push.{}` must not be set -- it would stop {} running on the paths it exists to cover, with every other assertion here green",
+                "`on.push.{}` must not be set -- it narrows which pushes run {} at all, with every other assertion here green. The docs-only lane reaches `main` as a PUSH with no PR, so nothing else covers it",
                 key, what
             );
+        }
+        // TAG FILTERS ARE A BRANCH FILTER BY OMISSION. GitHub fires `push` on a branch only when
+        // the event matches the declared filters, and declaring `tags:` (or `tags-ignore:`) with
+        // NO `branches:` admits no branch at all -- `tags: ['v*']` in place of the branch list
+        // makes this workflow tag-only, and the second mutant review #679 walked through. Banning
+        // the KEY would be the key-presence instrument this file has retracted twice: `tags`
+        // ALONGSIDE `branches` is legitimate and is kept green by a control. So the rule is about
+        // the PAIR, not the presence.
+        for key in ["tags", "tags-ignore"] {
+            if push.contains_key(serde_yaml::Value::String(key.into())) {
+                assert!(
+                    push.contains_key(serde_yaml::Value::String("branches".into())),
+                    "`on.push.{}` is set with no `on.push.branches` -- that makes the push trigger TAG-ONLY, so {} stops running on every branch push including the docs-only lane to `main`, with every other assertion here green. Declaring both is fine; declaring tag filters alone is not",
+                    key, what
+                );
+            }
         }
         // CONTAINMENT PLUS THE EXCLUSIONS. `["**", "!badges"]` was pinned by equality once, which
         // reds a legitimate second exclusion. But treating every `!` pattern as benign was ALSO
@@ -10824,6 +10846,11 @@ mod docs_only_ci_and_legacy_visibility {
             // reaches main as a PUSH with no PR, so nothing else covers it.
             ("push.branches EXCLUDES main", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!main']", 1)),
             ("push.branches excludes every single-segment branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*']", 1)),
+            // `branches-ignore` needs no `branches` key, so the containment check above never
+            // looked at it; `tags` alone makes the trigger tag-only. Both removed BOTH gate steps
+            // from the push lane with every assertion green (review of PR #679).
+            ("push branches-ignore excludes main", ci.replacen("    branches: ['**', '!badges']", "    branches-ignore: ['main']", 1)),
+            ("push tags-only trigger", ci.replacen("    branches: ['**', '!badges']", "    tags: ['v*']", 1)),
             ("a self-hosted pool labelled to look hosted", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom", 1)),
         ];
         let mut survived = Vec::new();
@@ -10848,6 +10875,9 @@ mod docs_only_ci_and_legacy_visibility {
             // "every push". A guard against narrowing that blocks widening is the false-red
             // instrument wearing the other hat.
             ("push.branches removed entirely", ci.replacen("    branches: ['**', '!badges']\n", "", 1)),
+            // The control that keeps the tag rule about the PAIR rather than the key: adding a
+            // tag filter NEXT TO the branch list is ordinary release plumbing and widens nothing.
+            ("push tags ALONGSIDE branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges']\n    tags: ['v*']", 1)),
             ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
             // to red on an innocent step addition (`steps.len() == 4`). An ordinary extra step
@@ -10868,7 +10898,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 20 && must_stay_green.len() >= 5,
+            must_red.len() >= 23 && must_stay_green.len() >= 8,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

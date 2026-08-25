@@ -755,7 +755,32 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // `borrow` and `arrow` -- the false-red class this file has retracted three
                     // times, carried into the rule written to stop the previous one. Green controls
                     // for all three live in `a_superseded_row_may_not_be_cited_as_live_authority`.
-                    let cites = matches!(last.as_str(), "row" | "rows" | "per" | "the")
+                    // `the` IS NOT A CITING TOKEN ON ITS OWN -- it is the definite article, and
+                    // accepting it made this the false-red instrument the rest of this PR spends
+                    // nine rounds retracting: `mirrors the <KEY> rollout`, `the <KEY> experiment
+                    // was contaminated`, `narrower than the <KEY> surface` would each red
+                    // `make validate` as a hard error, with no escape but rewording or injecting
+                    // the word `superseded` into the clause. None of them tells a session to cite a
+                    // dead row. The green controls missed it because every one of them avoided
+                    // putting `the` immediately before the key. So `the <KEY>` counts only when the
+                    // word AFTER the key is a citing noun.
+                    let next_word = line[at + key.len()..]
+                        .trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
+                        .split(|c: char| !c.is_ascii_alphanumeric())
+                        .next()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let the_plus_noun = last == "the"
+                        && matches!(next_word.as_str(), "decision" | "row" | "record" | "ruling");
+                    let cites = matches!(last.as_str(), "row" | "rows" | "per")
+                        || the_plus_noun
+                        // `reconsiders:` is the form the MOTIVATING INCIDENT produced -- the
+                        // docstring says so in as many words -- and it was the one field name not
+                        // recognised while its sibling `decided_by` was. It was dropped earlier
+                        // because it false-redded this PR's own retraction comment; the
+                        // clause-scoped `superseded` exemption now covers that, so it can come
+                        // back doing the job it was named for.
+                        || matches!(last.as_str(), "decided_by" | "reconsiders" | "superseded_by")
                         || before.to_lowercase().ends_with("decided_by")
                         // The key opening a line or a parenthetical, both live in SKILL.md today
                         // (`(\`KEY\`, decided ...` and a line beginning with the key) and both

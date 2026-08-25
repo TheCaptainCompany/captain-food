@@ -167,9 +167,9 @@ activation_fail() { # $1 = what failed — the activation test is loud AND non-z
   echo "activation failed; remove .qmd/ before any future approved retry."
   # NAME THE CHAIN HEAD. This is the string the operator reads on the rollback path the FAILURE
   # PROTOCOL governs, and it used to say RETRIEVAL-QMD -- now superseded, so a session doing exactly
-  # what this line said wrote `reconsiders: RETRIEVAL-QMD` and hit the validator's "challenge the
-  # HEAD of its supersession chain". A gate error on the one path where the operator is already
-  # dealing with something broken. Review of PR #679.
+  # what this line said wrote `reconsiders: RETRIEVAL-QMD` against that superseded row, and hit the
+  # validator's "challenge the HEAD of its supersession chain" -- a gate error on the one path
+  # where the operator is already dealing with something broken. Review of PR #679.
   echo "Per row RETRIEVAL-QMD-CI (the chain head): record this failure and open a new/reversal decision before any change to package, version, permissions, or dependency shape. The baseline (rg + aliases + direct row resolution) is the system."
   exit 1
 }
