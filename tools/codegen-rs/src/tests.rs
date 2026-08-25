@@ -10314,6 +10314,27 @@ mod docs_only_ci_and_legacy_visibility {
                         // git and cmp, which is exactly what the banned LD_PRELOAD buys. No LD_*
                         // key has an innocent use in this job, so there is no control to balance.
                         || k.starts_with("LD_")
+                        // The PYTHON family, by PREFIX, and this one is not theoretical: the
+                        // SECOND gate step IS a python3 gate. `decision-lookup.sh` runs plain
+                        // `python3 -c` at six sites with no -E/-S/-I, including the
+                        // trustedDependencies structural verification and the bun.lock
+                        // version-integrity binding -- the two checks that ARE the supply-chain
+                        // gate. CPython imports `sitecustomize` from any PYTHONPATH entry at
+                        // interpreter startup, so `env: {PYTHONPATH: /tmp/shim}` puts arbitrary
+                        // code inside every probe while both `run:` lines stay byte-identical, the
+                        // needle scan sees nothing (writing /tmp/shim names no `.claude` path), and
+                        // the gate-set self-verification sees nothing either -- it compares
+                        // bash/git/cmp bytes, not what python3 does afterwards. The suite itself
+                        // drives python3 this way 14 times (T15h/T15j/T15k), so the vector is
+                        // in-tree. No PYTHON* key has an innocent use in this job.
+                        //
+                        // THE DEEPER FIX IS AT THE CALL SITES, not here: `python3 -I` (or -E -S)
+                        // would make it unspellable rather than banned, which is CLAUDE.md's
+                        // compiler-first order. It is NOT done in this change because those same
+                        // T15 cases deliberately simulate a broken interpreter THROUGH PYTHONPATH,
+                        // so hardening the wrapper rewrites its own test harness -- a separate
+                        // change, not a rider on this one.
+                        || k.starts_with("PYTHON")
                         // The gate scripts pin their oracle to $GITHUB_SHA so that a step cannot
                         // move HEAD onto its own tampered bytes (review #10 reproduced that with
                         // one `git commit`). Overriding GITHUB_SHA from `env:` would hand the
@@ -10763,6 +10784,10 @@ mod docs_only_ci_and_legacy_visibility {
         let must_red: Vec<(&str, String)> = vec![
             ("job BASH_ENV", at_job("BASH_ENV: /tmp/preamble.sh")),
             ("job LD_PRELOAD", at_job("LD_PRELOAD: /tmp/x.so")),
+            ("job LD_AUDIT", at_job("LD_AUDIT: /tmp/x.so")),
+            ("job PYTHONPATH", at_job("PYTHONPATH: /tmp/shim")),
+            ("job PYTHONSTARTUP", at_job("PYTHONSTARTUP: /tmp/shim.py")),
+            ("workflow PYTHONPATH", at_workflow("PYTHONPATH: /tmp/shim")),
             ("job PATH", at_job("PATH: /tmp/shim:/usr/bin")),
             ("job BASH_FUNC_x%%", at_job("BASH_FUNC_x%%: \"() { :; }\"")),
             // The oracle-redirect family (review #9): git obeys these even when the BINARY is
