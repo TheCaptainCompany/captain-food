@@ -208,8 +208,28 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > runtime plant-red now builds a decoy repo whose HEAD holds the tampered bytes and points
 > `GIT_DIR` at it.
 >
-> **The rule this chain has now re-learned six times and finally executed**: no assertion about a
-> guard ships until the guard has been made to fail FROM A TEST IN THE REPO. A reviewer's manual
+> ⚠️ **ROUND 10 THEN SHOWED THAT SENTENCE WAS FALSE ABOUT HALF ITS OWN SUBJECT**, and both the team
+> reviewer and the `claude-review` bot found it independently. The plant-red test copied all four
+> scripts into its fixture but only ever EXECUTED `stub-tests.sh`, so the hook selftest's block was
+> still held up by a substring scan — and a scan cannot tell live code from dead code. Changing its
+> opt-out default to `${REGISTER_CHECK_ALLOW_DIRTY:-1}` disarmed it in CI with every needle, every
+> gate path and all 285 tests green, which reopens the round-9 mutant because that block is the
+> ONLY detector for wholesale replacement of its twin. **Adding a script to a fixture as a TARGET
+> is not exercising its BLOCK** — the stated defect and the stated remedy were different things.
+> Both guards are executed now, and `:-1}` and `|| true` are planted red.
+>
+> Two more from the same pass: **four files claimed the pin "runs in the `codegen` job, a different
+> job with its own checkout"** — `codegen` is a pure aggregator with one step, no checkout and no
+> cargo; the tests run under `cargo test --workspace` in `build-test`. A thirty-second check,
+> landed by this branch, inside the paragraph announcing it was stating a boundary rather than a
+> claim. And **the oracle was not independent of the workspace**: `printf 'exit 0' > register-check.sh
+> && git commit` makes HEAD agree with the tampered disk, so both guards printed OK over a dead
+> gate. Closed by pinning the comparison to `$GITHUB_SHA` — which a later step cannot change for an
+> earlier one — and forbidding that key in `env:` at every scope.
+>
+> **The rule this chain has now re-learned SEVEN times**: no assertion about a guard ships until the
+> guard has been made to fail FROM A TEST IN THE REPO — and "the guard" means every instance of it,
+> not the one the test happens to invoke. A reviewer's manual
 > plant, reverted, is a story about a gate — not a gate. The correct verb is **DETECT**, not
 > prevent, and it is not a defence against arbitrary code running before it.
 >

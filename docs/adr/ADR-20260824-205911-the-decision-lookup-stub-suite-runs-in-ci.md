@@ -187,7 +187,7 @@ incomplete.** Recorded in full because the pattern is now the finding:
   `both_scopes_reject_execution_altering_env`, did not exist. The round's own headline lesson —
   *pin a guard from a test that fails when it is removed, not from a sentence* — was failing inside
   its own retraction. That test now exists, mutates the REAL `ci.yml` in 20 ways, and carries 5
-  innocent controls that must stay green; deleting either `env_ok` call reds it by name.
+  innocent controls that must stay green. There are THREE `env_ok` call sites, not two -- an earlier version of this line said "either", and review #10 found the per-STEP one unguarded, the round-8 refactor regression reopened one scope down. All three are now planted red.
 - **#2 did not fix the mutant it named.** A block inside a script goes away when the script is
   REPLACED, so putting one in `register-check-selftest.sh` cannot detect
   `find -name 'register-check-selftest.sh' -exec cp exit0.sh {} +`. Both gates stayed green. Each

@@ -15,9 +15,14 @@ pass=0; fail=0; skip=0
 
 # ── The suite testifies about the WHOLE GATE SET ─────────────────────────────────────────────────
 # GATE-SELF-VERIFICATION-V3 -- pinned by `assert_gate_script_self_verifies` in
-# tools/codegen-rs/src/tests.rs, which runs in the `codegen` job: a DIFFERENT job with its own
-# checkout, outside the blast radius of anything the `changes` job does. Neither half is
-# sufficient alone.
+# tools/codegen-rs/src/tests.rs, which runs under `cargo test --workspace` in the **build-test**
+# job: a DIFFERENT job with its own checkout, outside the blast radius of anything the `changes`
+# job does at runtime. (Four sites on this branch said "the `codegen` job". That job is a pure
+# AGGREGATOR -- one step, no checkout, no cargo -- so the sentence named the wrong job, a
+# non-existent checkout and the wrong `if:`. Review #10. build-test carries
+# `if: needs.changes.outputs.docs_only != 'true'`, and a `.claude/**` change can never be
+# docs-only, so the pin always runs on any change able to disarm it.) Neither half is sufficient
+# alone.
 #
 # WHY ALL FOUR FILES AND NOT JUST THIS SCRIPT'S OWN PAIR. V2 had each gate script verify itself
 # and the script it guards. That cannot work, and the ninth review of PR #679 proved it in one
@@ -30,8 +35,11 @@ pass=0; fail=0; skip=0
 # WHICH COMMIT, precisely: on a `pull_request` event `actions/checkout` checks out
 # `refs/pull/N/merge`, so `HEAD` is the MERGE commit, not the PR head. That is the right thing to
 # compare against -- the merge commit's tree IS the tree on disk, so this proves "these scripts
-# are the ones in the commit CI checked out". Confirmed in run 32810599803:
-# `HEAD is now at d9461b43 Merge 6c1cbaf1 into 2fb3bd3c`, then both gate steps printed OK.
+# are the ones the workflow was triggered for". NO RUN IS CITED HERE any more: the citation used
+# to name run 32810599803, whose head is four commits behind and PREDATES the V3 block the sentence
+# describes -- a figure that was true when written and silently stopped being about this code
+# (review #10, ADR-20260817-105845). The behaviour is pinned by
+# `the_gate_self_verification_reds_on_a_tampered_script` instead, which is re-run on every commit.
 #
 # DEFAULT-ON, with an explicit opt-out. V1 ran only when GITHUB_ACTIONS=true, which fails OPEN:
 # the discriminator was an ordinary environment variable, settable from the same untrusted surface
@@ -58,9 +66,19 @@ else
   _cmp="$(PATH="$_vpath" command -v cmp || true)"
   if [ -z "$_git" ] || [ -z "$_cmp" ]; then
     echo "FATAL: git or cmp not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
+    echo "  The PATH is pinned on purpose so this cannot be sent to a shim. On NixOS or a slim" >&2
+    echo "  container, re-run with DECISION_LOOKUP_ALLOW_DIRTY=1 rather than deleting this block." >&2
     exit 1
   fi
-  echo "self-verification: comparing all 4 gate scripts against their committed blobs at HEAD."
+  # WHICH COMMIT THE ORACLE READS is itself part of the defence. Comparing against `HEAD` lets a
+  # CI step move the oracle instead of hiding the file: `printf 'exit 0' > register-check.sh;
+  # git add -A && git commit` makes HEAD agree with the tampered disk, and both guards print OK
+  # over a gate that no longer does anything (review #10 reproduced it). In CI the runner sets
+  # GITHUB_SHA to the commit the workflow was triggered for, a later step cannot change it for an
+  # earlier one, and `env_ok` forbids it as a workflow/job/step `env:` key -- so pin to it when it
+  # is present and fall back to HEAD only for a local run, where the threat model is different.
+  _ref="${GITHUB_SHA:-HEAD}"
+  echo "self-verification: comparing all 4 gate scripts against their committed blobs at ${_ref}."
   # THE GATE SET. Both gate scripts carry this identical list; the codegen pin asserts that.
   for rel in \
     .claude/hooks/register-check.sh \
@@ -68,19 +86,19 @@ else
     .claude/skills/decision-lookup/scripts/decision-lookup.sh \
     .claude/skills/decision-lookup/scripts/stub-tests.sh
   do
-    if ! "$_git" -C "$REPO_ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
-      echo "FATAL: $rel is not tracked at HEAD -- refusing to report on a gate set CI cannot verify." >&2
+    if ! "$_git" -C "$REPO_ROOT" cat-file -e "${_ref}:$rel" 2>/dev/null; then
+      echo "FATAL: $rel is not tracked at ${_ref} -- refusing to report on a gate set CI cannot verify." >&2
       exit 1
     fi
-    if ! "$_git" -C "$REPO_ROOT" cat-file blob "HEAD:$rel" 2>/dev/null | "$_cmp" -s - "$REPO_ROOT/$rel"; then
-      echo "FATAL: $rel differs from the committed blob at HEAD." >&2
+    if ! "$_git" -C "$REPO_ROOT" cat-file blob "${_ref}:$rel" 2>/dev/null | "$_cmp" -s - "$REPO_ROOT/$rel"; then
+      echo "FATAL: $rel differs from the committed blob at ${_ref}." >&2
       echo "  Something modified a gate script between checkout and this run -- the disarm shape" >&2
       echo "  this check exists to DETECT. A green here would be a lie." >&2
       echo "  Editing it locally? Re-run with DECISION_LOOKUP_ALLOW_DIRTY=1." >&2
       exit 1
     fi
   done
-  echo "self-verification: OK -- all 4 gate scripts are byte-identical to HEAD."
+  echo "self-verification: OK -- all 4 gate scripts are byte-identical to ${_ref}."
 fi
 verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=$((fail+1)); echo "FAIL  $2"; fi }
 # A SKIP is ONLY for a setup the host FILESYSTEM/KERNEL forbids — never for a precondition the

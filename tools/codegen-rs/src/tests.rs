@@ -10140,11 +10140,21 @@ mod docs_only_ci_and_legacy_visibility {
                             | "BASH_ENV"
                             | "ENV"
                             | "SHELLOPTS"
-                            | "LD_PRELOAD"
-                            | "LD_LIBRARY_PATH"
                             | "DECISION_LOOKUP_ALLOW_DIRTY"
                             | "REGISTER_CHECK_ALLOW_DIRTY"
                     ) || k.starts_with("BASH_FUNC_")
+                        // The LD_ family, by PREFIX. It was enumerated (LD_PRELOAD,
+                        // LD_LIBRARY_PATH) two lines from a comment saying enumeration is how the
+                        // previous misses happened, and `claude-review` walked LD_AUDIT straight
+                        // through: glibc's loader runs the named object's constructor inside bash,
+                        // git and cmp, which is exactly what the banned LD_PRELOAD buys. No LD_*
+                        // key has an innocent use in this job, so there is no control to balance.
+                        || k.starts_with("LD_")
+                        // The gate scripts pin their oracle to $GITHUB_SHA so that a step cannot
+                        // move HEAD onto its own tampered bytes (review #10 reproduced that with
+                        // one `git commit`). Overriding GITHUB_SHA from `env:` would hand the
+                        // oracle straight back.
+                        || k == "GITHUB_SHA"
                         // GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY and friends redirect the
                         // gate scripts' ORACLE, not their binary: `git cat-file blob HEAD:<path>`
                         // reads a decoy repo whose HEAD holds the tampered bytes and reports OK.
@@ -10185,13 +10195,20 @@ mod docs_only_ci_and_legacy_visibility {
                 key, what
             );
         }
-        assert_eq!(
-            push.get(serde_yaml::Value::String("branches".into()))
-                .and_then(|b| b.as_sequence())
-                .map(|b| b.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
-            Some(vec!["**", "!badges"]),
-            "`on.push.branches` must stay every branch except badges -- narrowing it removes {} from the branches it guards",
-            what
+        // CONTAINMENT, not equality. `["**", "!badges"]` was pinned exactly, so adding a second
+        // workflow-written branch to the exclusion list -- the `badges` precedent says that will
+        // happen -- would red with a message accusing the author of removing the gate. What
+        // matters is that `**` is still there: a `!`-prefixed EXCLUSION does not narrow the
+        // guarded surface, a positive filter does.
+        let branches: Vec<&str> = push
+            .get(serde_yaml::Value::String("branches".into()))
+            .and_then(|b| b.as_sequence())
+            .map(|b| b.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert!(
+            branches.iter().any(|b| *b == "**"),
+            "`on.push.branches` ({:?}) no longer contains `**` -- a positive filter narrows the branches {} guards, with every other assertion here green. Excluding a workflow-written branch with `!name` is fine; dropping `**` is not",
+            branches, what
         );
         // `pull_request` exists for FORKED PRs, which never produce a push to this repo. Key
         // PRESENCE was all this asserted until review #8 of PR #679: `pull_request: {paths-ignore:
@@ -10266,11 +10283,22 @@ mod docs_only_ci_and_legacy_visibility {
                 key, what
             );
         }
-        assert_eq!(
-            changes_val.get("runs-on").and_then(|r| r.as_str()),
-            Some("ubuntu-latest"),
-            "the `changes` job must run on `ubuntu-latest` -- a self-hosted label puts {} on a machine this repo does not control",
-            what
+        // CONTENT, not a literal. The threat is a self-hosted label; asserting the exact string
+        // `ubuntu-latest` reds ordinary reproducibility work (pinning to `ubuntu-24.04`, which is
+        // what GitHub itself advises during a `-latest` migration) with a message accusing the
+        // author of moving the gate off controlled hardware -- the false-red class this file has
+        // now retracted three times, and the "fix" a reader reaches for is editing the literal.
+        let runner = changes_val
+            .get("runs-on")
+            .and_then(|r| r.as_str())
+            .unwrap_or_else(|| panic!(
+                "the `changes` job must declare a single `runs-on` STRING -- a matrix or a label list can put {} on a machine this repo does not control",
+                what
+            ));
+        assert!(
+            ["ubuntu-", "windows-", "macos-"].iter().any(|p| runner.starts_with(p)),
+            "the `changes` job's `runs-on` is `{}` -- only a GitHub-hosted runner label is allowed, because a `self-hosted` or otherwise custom label puts {} on a machine this repo does not control",
+            runner, what
         );
         let changes = changes_val
             .as_mapping()
@@ -10279,7 +10307,12 @@ mod docs_only_ci_and_legacy_visibility {
         // Job-level escapes that are never legitimate here. `if` gates the whole job;
         // `continue-on-error` at job level reports `success` to `needs`, which the `codegen`
         // aggregator accepts -- the entire required check goes green with the gate red.
-        for key in ["if", "continue-on-error", "strategy"] {
+        // `needs` belongs here for the same reason as `if`: GitHub SKIPS a job whose dependency
+        // was skipped, and the `codegen` aggregator accepts `skipped` for every upstream by design,
+        // so a skippable dependency takes both gates down with the required check still green.
+        // Not a one-liner to exploit -- every existing job already `needs: changes`, so a cycle
+        // fails to load loudly and the mutant must add a job too -- but so did `find -exec cp`.
+        for key in ["if", "continue-on-error", "strategy", "needs"] {
             assert!(
                 !changes.contains_key(serde_yaml::Value::String(key.into())),
                 "the `changes` job must carry no `{}` -- it is the one always-run job with a checkout, and {} depends on it never skipping or swallowing a failure",
@@ -10315,7 +10348,7 @@ mod docs_only_ci_and_legacy_visibility {
         // A substring scan cannot bound arbitrary shell -- a step can rebuild the path
         // (`d=".cl""aude"`) or never name it (`find . -name 'stub-tests.sh' | while read -r f`).
         // Those are NOT closed here and cannot be. They are DETECTED by the gate scripts
-        // themselves: each compares itself and the script it guards against their committed blobs
+        // themselves: each compares the WHOLE four-file gate set against its committed blobs
         // before reporting anything (`assert_gate_script_self_verifies` below pins that, from the
         // `codegen` job -- a different checkout, outside this job's blast radius).
         //
@@ -10418,6 +10451,21 @@ mod docs_only_ci_and_legacy_visibility {
             "the `{}` step may carry ONLY `name` and `run`. Any other key — `if` (in ANY spelling, including hoisted onto the `- ` item line), `continue-on-error`, `shell`, `env`, `working-directory` — is a way to make the step not run, or not report, while every text-matching assertion stays green.",
             what
         );
+    }
+
+    /// Shell source with comment lines removed, for pins that must see CODE and not PROSE.
+    ///
+    /// Shared on purpose. Review #9 fixed `assert_gate_script_self_verifies` this way and left
+    /// `the_stub_suite_runs_in_the_always_run_changes_job`'s `EXPECTED_CASES` scan matching the raw
+    /// file, so commenting the completeness block out kept that pin green while the suite went back
+    /// to printing `RESULT: n passed` on a host where cases had stopped running -- `claude-review`
+    /// found it one screen from the fix. Two stripping policies that must agree WILL diverge, the
+    /// same reason the two needle lists were collapsed into one.
+    fn shell_code_only(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// The docs-only fast path may never swallow the paths the gate pins live on.
@@ -10529,6 +10577,15 @@ mod docs_only_ci_and_legacy_visibility {
             ("job shell drops the script", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n", 1)),
             ("workflow shell drops the script", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    shell: bash -c \"exit 0\" {0}\njobs:\n", 1)),
             ("workflow defaults.run.working-directory", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    working-directory: /tmp/decoy\njobs:\n", 1)),
+            // THE THIRD env_ok CALL SITE. The docstring and the PR body both said "deleting
+            // EITHER env_ok call reds it" -- there are three, and review #10 found the per-step
+            // one (`env_ok(st, ...)`) unguarded: commenting it out left the whole suite green,
+            // which is the round-8 "a guard deleted during a refactor is invisible" regression
+            // reopened one scope down. A step-scoped GIT_DIR plants it.
+            ("STEP-scope GIT_DIR", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Warm\n        run: echo warm\n        env:\n          GIT_DIR: /tmp/decoy/.git\n      - name: decision-lookup hermetic stub suite",
+                1)),
             // Trigger filters that remove the gate from a whole class of change.
             ("push paths-ignore", ci.replacen("  push:\n", "  push:\n    paths-ignore: ['docs/**']\n", 1)),
             ("pull_request paths-ignore", ci.replacen("  pull_request:\n", "  pull_request:\n    paths-ignore: ['**']\n", 1)),
@@ -10551,6 +10608,18 @@ mod docs_only_ci_and_legacy_visibility {
             ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
             ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),
             ("pull_request types WIDENED", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", 1)),
+            // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
+            // to red on an innocent step addition (`steps.len() == 4`). An ordinary extra step
+            // that names nothing sensitive must stay green, or the next contributor learns to
+            // discount this red.
+            ("an ordinary extra step", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Print the toolchain\n        run: rustc --version\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            ("a reordering that keeps both gate steps", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Cache warm\n        run: echo warm\n      - name: decision-lookup hermetic stub suite",
+                1)),
         ];
         let mut false_reds = Vec::new();
         for (name, mutated) in &must_stay_green {
@@ -10597,11 +10666,7 @@ mod docs_only_ci_and_legacy_visibility {
             // SCAN THE CODE, NOT THE PROSE. Review #9 commented the whole block out of
             // `register-check-selftest.sh` and every needle still matched -- inside the comment
             // that describes the block. A pin that a `# ` prefix defeats is not a pin.
-            let src: String = raw
-                .lines()
-                .filter(|l| !l.trim_start().starts_with('#'))
-                .collect::<Vec<_>>()
-                .join("\n");
+            let src = shell_code_only(&raw);
             // ONE list, checked against the COMMENT-STRIPPED source. There used to be two -- a
             // `raw` list and a shorter `src` list -- and the newest needle was added to the raw one
             // only. `claude-review` caught it on PR #679: deleting the real `unset "${!GIT_@}"`
@@ -10699,14 +10764,29 @@ mod docs_only_ci_and_legacy_visibility {
         git(&["add", "-A"]);
         git(&["commit", "-qm", "gate scripts"]);
 
-        let run = || {
+        // BOTH GUARDS, not one. Review #10 and `claude-review` found the same hole independently:
+        // this test copied all four scripts into the fixture but only ever EXECUTED
+        // `stub-tests.sh`, so `register-check-selftest.sh`'s block was held up by a substring scan
+        // alone -- and a substring scan cannot tell live code from dead code. Changing its opt-out
+        // default to `${REGISTER_CHECK_ALLOW_DIRTY:-1}` disarmed it in CI with every needle, every
+        // GATE_SET path and all 285 tests green. Since V3's whole rationale is that each guard
+        // catches the OTHER's wholesale replacement, disarming one reopens the round-9 mutant.
+        // Adding a script to the fixture as a TARGET is not the same as exercising its BLOCK.
+        const GUARDS: [&str; 2] = [
+            ".claude/skills/decision-lookup/scripts/stub-tests.sh",
+            ".claude/hooks/register-check-selftest.sh",
+        ];
+        let run_guard = |guard: &str| {
             std::process::Command::new("bash")
-                .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
+                .arg(guard)
                 .current_dir(&tmp)
                 .env_remove("DECISION_LOOKUP_ALLOW_DIRTY")
+                .env_remove("REGISTER_CHECK_ALLOW_DIRTY")
+                .env_remove("GITHUB_SHA")
                 .output()
                 .expect("bash")
         };
+        let run = || run_guard(GUARDS[0]);
 
         // GREEN half: untouched tree, the block says so out loud. (The suite's own cases need a
         // wrapper this fixture does not provide, so only the self-verification verdict is read.)
@@ -10747,6 +10827,39 @@ mod docs_only_ci_and_legacy_visibility {
                 combined
             );
             fs::write(&path, original).expect("restore");
+        }
+
+        // EACH GUARD'S OWN BLOCK, planted red. The loop above proves `stub-tests.sh`'s block
+        // fires; this proves the hook selftest's does, which is the half that had never been seen
+        // red anywhere in the repo.
+        for guard in GUARDS {
+            let clean = run_guard(guard);
+            let clean_out = format!(
+                "{}{}",
+                String::from_utf8_lossy(&clean.stdout),
+                String::from_utf8_lossy(&clean.stderr)
+            );
+            assert!(
+                clean_out.contains("self-verification: OK"),
+                "{} must report its comparison PASSING out loud on an untouched tree -- a silent skip and a silent pass look identical in a green log. Got:\n{}",
+                guard, clean_out
+            );
+            // Tamper a script this guard is responsible for, and require THIS guard to say so.
+            let victim = tmp.join(".claude/hooks/register-check.sh");
+            let original = fs::read_to_string(&victim).expect("read");
+            fs::write(&victim, format!("{}\n# TAMPERED\n", original)).expect("write");
+            let out = run_guard(guard);
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            fs::write(&victim, original).expect("restore");
+            assert!(
+                !out.status.success() && combined.contains("differs from the committed blob"),
+                "{}'s OWN self-verification block never fires. It is asserted by a substring scan, which cannot tell live code from dead code -- so `${{REGISTER_CHECK_ALLOW_DIRTY:-1}}`, `if false; then`, or `|| true` on the cmp disarms it with every pin green. Got exit {:?}:\n{}",
+                guard, out.status.code(), combined
+            );
         }
 
         // THE ORACLE-REDIRECT ROUTE, exercised for real. `claude-review` on PR #679 pointed out
@@ -10850,7 +10963,10 @@ mod docs_only_ci_and_legacy_visibility {
         let suite = fs::read_to_string(root.join(".claude/skills/decision-lookup/scripts/stub-tests.sh"))
             .expect("stub-tests.sh");
         assert!(
-            suite.contains("EXPECTED_CASES=") && suite.contains("-ne \"$EXPECTED_CASES\""),
+            {
+                let code = shell_code_only(&suite);
+                code.contains("EXPECTED_CASES=") && code.contains("-ne \"$EXPECTED_CASES\"")
+            },
             "stub-tests.sh must assert its case COUNT, not merely the absence of failures — a skipped case is not a covered case"
         );
     }
