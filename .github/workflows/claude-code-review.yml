@@ -165,22 +165,30 @@ jobs:
           # SIGPIPE, and `pipefail` report 141 -- a FALSE RED once the matching comment is followed
           # by more than a pipe buffer (64 KiB) of other comments. Measured; PR #674 is already at
           # ~35 KB. A false red here is a repo-wide merge stop, which is #593 exactly.
+          # `gh api --paginate --jq` applies the filter to EACH PAGE and concatenates the outputs,
+          # so a jq program ending in `| length` emits one integer PER PAGE ("1\n0" on two pages) --
+          # a FALSE RED on any PR with more than one page of comments (>30), measured. Emit one
+          # MATCH line per matching comment instead and count lines: correct under either
+          # behaviour, and `wc -l` reads all its input so there is no SIGPIPE either.
           hits="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '
-            [ .[]
-              | select(.user.type == "Bot")
-              | .body
-              | split("\n")
-              | map(select(test("\\S")))
-              | (last // "")
-              | (capture("^[*_ ]*Reviewed-Commit:?[*_ ]*[ \t]*`?(?<h>[0-9a-f]{7,40})`?[.*_ ]*$") // empty)
-              | .h
-              | . as $h
-              | select((env.HEAD_SHA | startswith($h)) or (env.MERGE_SHA | startswith($h)))
-            ] | length')"
+            .[]
+            | select(.user.type == "Bot")
+            | .body
+            | split("\n")
+            | map(sub("\r$"; ""))
+            | map(select(test("\\S")))
+            | (last // "")
+            | (capture("^[*_ ]*Reviewed-Commit:?[*_ ]*[ \t]*`?(?<h>[0-9a-f]{7,40})`?[.*_ ]*$") // empty)
+            | .h
+            | . as $h
+            | select((env.HEAD_SHA | startswith($h)) or (env.MERGE_SHA | startswith($h)))
+            | "MATCH"' | grep -c '^MATCH$' || true)"
           # A gh/API failure aborts under `set -e` above: an API error must never read as "no
-          # review", and must never read as a pass either.
+          # review", and must never read as a pass either. (`grep -c` exits 1 on zero matches,
+          # which is a legitimate empty result, not an error -- hence the `|| true` on THAT
+          # command only.)
           case "$hits" in
-            ''|*[!0-9]*) echo "::error::could not read the comment list (got: '$hits')."; exit 1 ;;
+            ''|*[!0-9]*) echo "::error::could not count review comments (got: '$hits')."; exit 1 ;;
           esac
           if [ "$hits" -gt 0 ]; then
             echo "OK - $hits bot verdict(s) name this commit (head $HEAD_SHA / merge $MERGE_SHA)."
