@@ -9896,6 +9896,14 @@ mod decision_ask_and_citations {
             ("Per <KEY>", "See Per OLD-ROW for the rollback path."),
             ("decided_by field", "decided_by: OLD-ROW"),
             ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
+            // THE ENVELOPE FORMAT this repo mandates, enforced by register-check.sh as
+            // `ENVELOPE='Decision row:'`. A trailing colon killed the match, so the most
+            // load-bearing citation form under `.claude/**` was the one the detector could not
+            // see (review #11).
+            ("the mandated envelope", "Decision row: OLD-ROW (2026-08-01, decided)"),
+            ("plural rows", "See rows `OLD-ROW` for the rollback path."),
+            ("a parenthetical, as SKILL.md writes it", "**The one CI change that IS authorized** (`OLD-ROW`, decided 2026-08-01 by"),
+            ("the key opening a line", "`OLD-ROW`). Re-run it locally after any wrapper change."),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -9920,6 +9928,11 @@ mod decision_ask_and_citations {
             ("arrow", "arrow OLD-ROW"),
             ("a longer key is not a prefix match", "Decided by row `OLD-ROW-CI`."),
             ("no citation form at all", "OLD-ROW was the predecessor."),
+            // AN EXPLANATION IS NOT A CITATION, and it necessarily names the old row. Without an
+            // exemption this reds with no way to clear it but rewording -- a guard whose only
+            // escape is silence, on exactly the prose the rule wants people to write.
+            ("prose explaining the supersession", "row `OLD-ROW` is superseded; name the head instead"),
+            ("a retraction quoting the bad form", "# it used to say `Per row OLD-ROW`, now superseded"),
         ] {
             let issues = check(".claude/x.md", body);
             assert!(

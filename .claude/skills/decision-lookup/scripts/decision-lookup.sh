@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # decision-lookup — advisory BM25 candidate retrieval (row RETRIEVAL-QMD-CI, the chain head; decided_by
-# PROP-20260822-171212, founder 2026-08-22; the decision adopts the DESIGN — the first controlled
+# ADR-20260824-205911, founder 2026-08-24; the decision adopts the DESIGN — the first controlled
 # `--install` run is a required activation test). ADVISORY ONLY: candidates, never evidence or
 # authority. Decision YAML + direct source reading is the authority path; rg + aliases is the
 # baseline and the fallback. This wrapper NEVER installs anything on its own during a task:

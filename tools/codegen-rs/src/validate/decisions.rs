@@ -591,6 +591,10 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// `legacy_count` source, trimmed identically to the injector's `\n\n` framing, so the two gates
 /// can never disagree. The validator reads the ROW FILES as truth and treats the region purely as
 /// the projection under test (founder requirement 11).
+/// (This paragraph documents `validate_decisions_index_sync`, further down. The block below was
+/// once appended to it, leaving that function undocumented and this one described as the §22b
+/// index fold -- a doc naming the wrong thing, in the file whose subject is records.)
+
 /// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.
 ///
 /// PR #679 flipped `RETRIEVAL-QMD` to `superseded` and rewrote the proposal to say, verbatim,
@@ -649,28 +653,52 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     ) {
                         continue;
                     }
-                    let before = line[..at].trim_end().trim_end_matches(['`', '"', '\'']).trim_end();
-                    let lower = before.to_lowercase();
-                    // WORD-BOUNDED. `ends_with("row")` also matches `narrow`, `borrow` and `arrow`
-                    // -- the false-red class this file has retracted three times, reproduced in the
-                    // rule written to stop the last one. There is a green control for it below.
-                    let ends_with_word = |w: &str| {
-                        lower.strip_suffix(w).is_none_or(|head| {
-                            !head.chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-                        }) && lower.ends_with(w)
-                    };
-                    // The citation forms an author actually writes. Not exhaustive, and the
-                    // docstring says so rather than claiming to be the grep.
-                    if !(ends_with_word("row")
-                        || ends_with_word("per")
-                        || lower.ends_with("decided_by:")
-                        // NOT `reconsiders:` or `superseded_by:`. Those are register-row FIELDS,
-                        // and docs/decisions/** is out of scope anyway -- but including them here
-                        // false-redded this PR's own retraction comment, which quotes
-                        // `reconsiders: <old row>` as the thing NOT to write. Caught by running
-                        // the rule rather than by reading it, which is the whole argument.
-                        || ends_with_word("the"))
-                    {
+                    // AN EXPLANATION IS NOT A CITATION. Prose that says a row is superseded is
+                    // exactly what we want people writing, and it necessarily names the old row.
+                    // Without this, `row `X` is superseded, name the head` reds with no way to
+                    // clear it but rewording -- a guard whose only escape is silence.
+                    if line.to_lowercase().contains("superseded") {
+                        continue;
+                    }
+                    // TRIM TRAILING PUNCTUATION BEFORE LOOKING AT THE LAST TOKEN. A trailing colon
+                    // survived, which made `Decision row: <KEY>` invisible -- THE ENVELOPE FORMAT
+                    // this repo mandates and `.claude/hooks/register-check.sh` enforces as
+                    // `ENVELOPE='Decision row:'`. The single most load-bearing citation form under
+                    // `.claude/**` was the one the detector could not see (review #11).
+                    // Strip quoting marks first, THEN look for an opening bracket, because the
+                    // bracket is itself the citing signal in `(\`KEY\`, decided ...)`. Stripping
+                    // it away before testing is what made that form invisible.
+                    let quoted = line[..at].trim_end().trim_end_matches(['`', '"', '\'']).trim_end();
+                    let opens_a_parenthetical = quoted.ends_with('(') || quoted.ends_with('[');
+                    let mut before = quoted;
+                    loop {
+                        let next = before.trim_end().trim_end_matches([':', '(', '[', '*', '_', '-']);
+                        if next.len() == before.len() {
+                            break;
+                        }
+                        before = next;
+                    }
+                    let before = before.trim_end();
+                    let last = before
+                        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .next()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    // TOKEN equality, not a suffix test: `ends_with("row")` also matched `narrow`,
+                    // `borrow` and `arrow` -- the false-red class this file has retracted three
+                    // times, carried into the rule written to stop the previous one. Green controls
+                    // for all three live in `a_superseded_row_may_not_be_cited_as_live_authority`.
+                    let cites = matches!(last.as_str(), "row" | "rows" | "per" | "the")
+                        || before.to_lowercase().ends_with("decided_by")
+                        // The key opening a line or a parenthetical, both live in SKILL.md today
+                        // (`(\`KEY\`, decided ...` and a line beginning with the key) and both
+                        // invisible to the first version of this rule.
+                        || opens_a_parenthetical
+                        // A BACKTICKED key opening a line is a citation (`SKILL.md:193`); a bare
+                        // one is ordinary prose ("OLD-ROW was the predecessor."). The distinction
+                        // is the backtick, and without it the green control for prose reds.
+                        || (before.is_empty() && line[..at].ends_with('`'));
+                    if !cites {
                         continue;
                     }
                     issues.push(err(

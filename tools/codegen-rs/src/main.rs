@@ -119,11 +119,27 @@ fn main() {
                 }
             }
             let mut stack = vec![root.join(".claude")];
+            let mut budget = 10_000usize; // a symlink cycle under .claude/ would otherwise spin
             while let Some(dir) = stack.pop() {
+                budget = match budget.checked_sub(1) {
+                    Some(b) => b,
+                    None => break,
+                };
                 let Ok(entries) = fs::read_dir(&dir) else { continue };
                 for e in entries.flatten() {
                     let path = e.path();
-                    if path.is_dir() {
+                    // `is_dir()` FOLLOWS SYMLINKS, so a cycle loops forever rather than erroring.
+                    // `file_type()` from the dir entry does not. Untracked local files are skipped
+                    // too: `.claude/settings.local.json` on a contributor's machine must never red
+                    // `make validate` with no committed cause (review #11).
+                    let Ok(ft) = e.file_type() else { continue };
+                    if ft.is_symlink() {
+                        continue;
+                    }
+                    if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".local.")) {
+                        continue;
+                    }
+                    if ft.is_dir() {
                         stack.push(path);
                     } else if matches!(
                         path.extension().and_then(|x| x.to_str()),

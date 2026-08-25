@@ -104,8 +104,14 @@ jobs:
       # that is not a bare shell name, or an `env` key that changes how scripts EXECUTE (PATH,
       # BASH_ENV, LD_PRELOAD, ...) or names a gate script's self-verification opt-out. No non-gate
       # step may mention `.claude`, `GITHUB_ENV` or `GITHUB_PATH` anywhere in its definition, only
-      # `actions/checkout` may be `uses:`d here, and `on.push` / `on.pull_request` may carry no
-      # path, branch or type filter - a fork PR has no push, so that trigger is its only coverage.
+      # `actions/checkout` may be `uses:`d here. On the TRIGGERS the pin checks CONTAINMENT, not
+      # absence: no `paths`/`paths-ignore`/`branches-ignore`; `push.branches` must still contain
+      # `**` (so `!badges` and future exclusions are fine); `pull_request.types`, if set, must still
+      # cover opened/synchronize/reopened (widening is fine); `pull_request.branches` must still
+      # admit `main`. A fork PR produces no push, so that trigger is its only coverage. (An earlier
+      # version of this line said "no path, branch or type filter", which would have had a reader
+      # delete `!badges` from line 40 to satisfy a rule the pin does not have -- key-presence vs
+      # dangerous content, the instrument this file has retracted three times.)
       # What that does NOT reach is written in the test's own comment; it is not restated here,
       # because three copies of a residual statement is how the last one came to be wrong.
       # READ THE MESSAGE, read this before "fixing" a red: the suite asserts COMPLETENESS -- every
