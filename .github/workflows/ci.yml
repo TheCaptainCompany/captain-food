@@ -101,21 +101,24 @@ jobs:
       # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
       # `continue-on-error` / `strategy`, and, at BOTH workflow and job scope, a `defaults.run.shell`
       # that is not a bare shell name or an `env` key that changes how scripts EXECUTE (PATH,
-      # BASH_ENV, LD_PRELOAD, ...), and no non-gate step in this job may mention `.claude/`,
-      # `GITHUB_ENV` or `GITHUB_PATH`. The residual it does NOT reach is stated in ONE place --
-      # the test's own comment -- and it is this: a commit that edits the gate scripts themselves.
-      # HOST DRIFT vs WRAPPER DEFECT, read this before "fixing" a red: the suite asserts
-      # COMPLETENESS -- every declared case must reach a verdict (pass + fail + skip ==
-      # EXPECTED_CASES). A legitimate host-capability SKIP is loud but GREEN; what reds is a case
-      # that stops running at all.
+      # BASH_ENV, LD_PRELOAD, ...), no non-gate step may mention `.claude/`, `GITHUB_ENV` or
+      # `GITHUB_PATH` anywhere in its definition, and only `actions/checkout` may be `uses:`d here.
+      # What that does NOT reach is written in the test's own comment; it is not restated here,
+      # because three copies of a residual statement is how the last one came to be wrong.
+      # READ THE MESSAGE, read this before "fixing" a red: the suite asserts COMPLETENESS -- every
+      # declared case must reach a verdict (pass + fail + skip == EXPECTED_CASES). A legitimate
+      # host-capability SKIP is loud but GREEN; what reds is a case that stops running at all.
       #
-      # A `precondition:` in a red message is NOT automatically host drift, and reading it that way
-      # is how the supply-chain gate gets quietly weakened. Only preconditions naming a HOST
-      # capability -- locale, filesystem, `python3`, a controlled `PATH` -- are drift, and those are
-      # fixed by ADAPTING THE CASE to the host. A precondition naming a SEEDED BUILD or the
-      # WRAPPER'S OWN FORMAT ("healthy build failed", "seeded cache ... failed", "PIN/INTEGRITY not
-      # extractable from wrapper") is a WRAPPER DEFECT: the suite is telling you the thing this step
-      # exists to protect is broken. Investigate it; never adapt around it.
+      # A `precondition` in a red message names the disjuncts that could have produced it, for THAT
+      # case. Classify by which one actually fired, not by a rule stated here:
+      #   * a seeded build, a seeded cache, or the wrapper's own format ("PIN/INTEGRITY not
+      #     extractable from wrapper") => a WRAPPER DEFECT. The thing this step exists to protect
+      #     is broken. Investigate; never adapt around it.
+      #   * a host capability (locale, filesystem, python3, a controlled PATH) => usually drift,
+      #     fixed by ADAPTING THE CASE to the host -- EXCEPT where the message says the failure is
+      #     loud by design (T15g's ASCII-control mkdir exists to stop ENOSPC/EROFS/EACCES being
+      #     swallowed, so it is investigated, not adapted). Two classes could not sort every site;
+      #     rather than invent a third, the exceptions say so in their own message.
       #
       # Never delete a case and never weaken an assertion to recover green: this step is the only
       # thing standing behind the wrapper's supply-chain gate.

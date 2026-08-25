@@ -120,9 +120,36 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > re-pointed checkout (`repository:`/`ref:`), a `container:`, a self-hosted `runs-on` and a
 > `defaults.run.working-directory` were all green too. **Declaring a vector unclosable while
 > claiming to narrow the cheap spellings, when the cheapest one was untouched, is an overclaim
-> about an overclaim.** The `changes` job's step LIST is now pinned exhaustively — four steps, by
-> shape — which kills all five. Planted red, each with its own message. The residual that really
-> is out of reach: editing the gate scripts themselves in the same commit.
+> about an overclaim.**
+>
+> **ROUND 5 then broke the instrument I had just built.** I replaced the sibling-step hole with
+> `steps.len() == 4` — and the fifth review found the **fourteenth** mutant, two lines added INSIDE
+> an existing step, which a count cannot see; and pointed out that the count itself would red on
+> the next innocent step addition (that job gained a gate step twice in four days), whose
+> one-character "fix" reopens the vector. The count pin is gone. What replaced it pins the
+> PROPERTY: no non-gate step may mention `.claude/`, `GITHUB_ENV` or `GITHUB_PATH`; no checkout may
+> re-point `repository`/`ref`; a checkout must exist. Innocent additions and reordering stay green.
+>
+> **ROUND 6 found four more, and one of them ended the arms race.** A `uses: actions/github-script`
+> with a `with: script:` payload (no `run:` at all, so a run-only scan never saw it); any
+> non-checkout action; and `defaults.run.working-directory` at WORKFLOW scope — the same
+> one-scope-up miss as the twelfth mutant, again. All three are closed: the scan now serializes the
+> whole step, `uses:` is allow-listed to `actions/checkout`, and the `defaults.run` key restriction
+> applies at both scopes. **The fourth is not closable and that is the finding**: a step that
+> rebuilds the path (`d=".cl""aude"`) or never names it (`find . -name 'stub-tests.sh' | while
+> read -r f; ...`) defeats any substring scan. So the residual is now stated as what it is — this
+> narrows the CASUAL and ACCIDENTAL spellings, the ones a session reaches for under time pressure,
+> which is the failure mode this repo has actually hit. **It is not a defence against someone with
+> commit access who wants the gate off. No CI-config test can be.** Six rounds of new spellings is
+> the evidence for stating a boundary instead of another completeness claim.
+>
+> **And the precondition classifier from round 5 was reverted in round 6.** It routed on file
+> existence (`-e`) while the guards test non-emptiness (`-s`), and it named causes that are
+> impossible for the site it printed them on — T15g constructs no bun, no controlled PATH and no
+> python3 shim, yet got a message naming all three, and lost the disjunct that was the real cause.
+> A message naming three impossible causes is worse than the ambiguous one it replaced. The
+> per-site labels are back, each naming its own disjuncts; `ci.yml` now tells the reader to
+> classify by which disjunct fired rather than by a rule that could not sort 8 of 17 sites.
 >
 > **Cost that earned the rule, stated once: three consecutive rounds of "I closed it" were wrong,
 > and each time the wrongness lived in a sentence claiming completeness. Prefer naming what a

@@ -10094,19 +10094,22 @@ mod docs_only_ci_and_legacy_visibility {
         // $BASH_ENV before a non-interactive script, so two lines disarm BOTH pinned gates with the
         // step byte-identical and every other assertion green.
         //
-        // The sibling-step vector IS closable with this same instrument, so it is closed below
-        // rather than excused. The previous version of this comment said "no test of this class
-        // closes the vector -- a sibling step can append to $GITHUB_ENV or overwrite the script on
-        // disk", and the fourth review demonstrated the cheapest disarm in the whole corpus: ONE
-        // extra step, `run: printf '#!/bin/sh\nexit 0\n' > .../stub-tests.sh`, left both gates
-        // GREEN with CI green. Calling that unclosable while claiming to "narrow the cheap
-        // spellings" was an overclaim about an overclaim. The `changes` job's step LIST is now
-        // pinned exhaustively, which kills it along with a re-pointed checkout.
-        //
-        // The residual this genuinely cannot reach: an edit to `stub-tests.sh` or
-        // `register-check-selftest.sh` themselves, in the same commit. That is a code review's
-        // job, and the suite's own EXPECTED_CASES containment covers part of it.
+        // These guards narrow what the JOB may be, at both scopes. They do not, and cannot,
+        // make the job tamper-proof -- see the residual note at the step scan below.
         let shell_ok = |v: &serde_yaml::Value, scope: &str| {
+            // `defaults.run` may only set `shell`. `working-directory` there points every step at
+            // a different tree, so both gates would run a decoy copy of the scripts with the step
+            // byte-identical. This was guarded at job scope and not at workflow scope -- the same
+            // one-scope-up miss as the twelfth mutant, found again by the sixth review.
+            if let Some(run_defaults) = v.get("defaults").and_then(|d| d.get("run")).and_then(|r| r.as_mapping()) {
+                for k in run_defaults.keys().filter_map(|k| k.as_str()) {
+                    assert_eq!(
+                        k, "shell",
+                        "{} `defaults.run` may only set `shell` -- `{}` (e.g. `working-directory`) changes where every step runs, disarming {} with the step byte-identical",
+                        scope, k, what
+                    );
+                }
+            }
             if let Some(sh) = v
                 .get("defaults")
                 .and_then(|d| d.get("run"))
@@ -10157,16 +10160,6 @@ mod docs_only_ci_and_legacy_visibility {
             "the `changes` job must run on `ubuntu-latest` -- a self-hosted label puts {} on a machine this repo does not control",
             what
         );
-        if let Some(run_defaults) = changes_val.get("defaults").and_then(|d| d.get("run")).and_then(|r| r.as_mapping()) {
-            for k in run_defaults.keys().filter_map(|k| k.as_str()) {
-                assert_eq!(
-                    k, "shell",
-                    "the `changes` job's `defaults.run` may only set `shell` -- `{}` (e.g. `working-directory`) changes where every step runs, disarming {} with the step byte-identical",
-                    k, what
-                );
-            }
-        }
-        env_ok(changes_val, "the `changes` job's");
         let changes = changes_val
             .as_mapping()
             .expect("the `changes` job is a mapping");
@@ -10203,9 +10196,19 @@ mod docs_only_ci_and_legacy_visibility {
         // depend on. That is structure-insensitive to legitimate maintenance and closes the
         // sibling-step and inside-a-sibling-step spellings together.
         //
-        // What this still does not reach, stated once and only here: a commit that edits
-        // `stub-tests.sh` or `register-check-selftest.sh` directly. That is a code review's job,
-        // and the suite's own EXPECTED_CASES containment covers part of it.
+        // THE RESIDUAL, stated here and nowhere else, and stated as what it is.
+        //
+        // A substring scan cannot bound arbitrary shell. Both of these were measured GREEN and
+        // neither is closable this way: a step that rebuilds the path (`d=".cl""aude"`), and one
+        // that never names it (`find . -name 'stub-tests.sh' | while read -r f; do ... done`).
+        // Nor can any assertion here stop a commit that edits the gate scripts directly.
+        //
+        // So the honest scope: this narrows the CASUAL and ACCIDENTAL spellings -- the ones a
+        // future session reaches for under time pressure, which is the actual failure mode this
+        // repo has hit. It is NOT a defence against someone with commit access who wants the gate
+        // off; that is code review's job, and no CI-config test can take it. Five rounds of this
+        // review each found a new spelling, which is the evidence for stating a boundary instead
+        // of another completeness claim.
         let gate_cmds = [
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
@@ -10224,15 +10227,30 @@ mod docs_only_ci_and_legacy_visibility {
                     }
                 }
             }
-            let Some(run) = st.get("run").and_then(|r| r.as_str()) else { continue };
-            if gate_cmds.contains(&run.trim()) {
+            // Constrain what a non-gate step may BE, not just what its `run` says. A
+            // `uses: actions/github-script` with a `with: script:` payload writing to the gate
+            // scripts carries no `run:` at all, so a run-only scan never saw it (sixth review).
+            if let Some(u) = st.get("uses").and_then(|u| u.as_str()) {
+                assert!(
+                    u.starts_with("actions/checkout@"),
+                    "step {} of the `changes` job uses `{}`. Only `actions/checkout` is allowed here: any other action can write files in this workspace, and {} depends on the gate scripts being the ones in the commit under review.",
+                    i, u, what
+                );
+            }
+            // Serialize the WHOLE step, so `with:` payloads and any other key are covered.
+            let serialized = serde_yaml::to_string(st).unwrap_or_default();
+            let is_gate = st
+                .get("run")
+                .and_then(|r| r.as_str())
+                .is_some_and(|r| gate_cmds.contains(&r.trim()));
+            if is_gate {
                 continue; // the gate steps themselves, key-set-locked below
             }
             for needle in [".claude/", "GITHUB_ENV", "GITHUB_PATH"] {
                 assert!(
-                    !run.contains(needle),
-                    "step {} of the `changes` job is not a gate step, but its `run` mentions `{}`. Nothing in this job except the two gate steps may touch the gate scripts or rewrite the environment they run in -- two lines here can overwrite {} with `exit 0` and leave every other assertion green.",
-                    i, needle, what
+                    !serialized.contains(needle),
+                    "step {} of the `changes` job is not a gate step, but it mentions `{}`. Nothing in this job except the two gate steps may touch the gate scripts or rewrite the environment they run in.",
+                    i, needle
                 );
             }
         }

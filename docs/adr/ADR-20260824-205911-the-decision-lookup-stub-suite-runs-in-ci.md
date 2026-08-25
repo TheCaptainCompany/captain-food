@@ -157,8 +157,13 @@ parsed YAML was not the end of it. A **twelfth** mutant sat one scope up (workfl
 `env: BASH_ENV`), and my fix for the twelfth introduced a **false red on ordinary CI work** by
 banning key presence rather than dangerous content. The fourth round then found the cheapest
 disarm in the whole corpus untouched — a sibling step overwriting the gate script — while the
-guard's comment claimed no test of that class could close it. It could, and now does: the
-`changes` job's step list is pinned exhaustively. **The recurring defect is not the mutants; it is
+guard's comment claimed no test of that class could close it. Rounds 5 and 6 then broke and
+rebuilt the instrument twice more — a step-COUNT pin that a two-line edit inside an existing step
+walked past, then a run-only substring scan that a `uses:` payload walked past. What stands now
+pins the property (no non-gate step may mention the gate scripts or rewrite their environment,
+anywhere in its definition; `uses:` allow-listed; `defaults.run` restricted at both scopes) and
+**states a boundary instead of a completeness claim**: a substring scan cannot bound arbitrary
+shell, so this narrows the casual spellings and is not a defence against commit access. **The recurring defect is not the mutants; it is
 that each round's completeness claim was written before it was checked.** The register-machinery
 rule added here is governed by `docs/decisions/README.md`, not by this row's QMD surface — it is
 the remediation of a claim this ADR itself made, which is why it rides along.
