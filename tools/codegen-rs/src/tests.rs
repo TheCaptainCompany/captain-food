@@ -10485,26 +10485,38 @@ mod docs_only_ci_and_legacy_visibility {
     fn the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
-        let arm = ci
-            .lines()
-            .find(|l| l.contains("docs_only=false; break"))
-            .and_then(|_| ci.lines().find(|l| l.trim_end().ends_with(") ;;")))
-            .map(str::trim)
-            .expect(
-                "the docs-only `case` arm has moved or been reworded. It listed the paths a push \
-                 may touch while still SKIPPING the `codegen` job that runs the gate pins -- find \
-                 it and re-point this test, do not delete it.",
-            );
-        for forbidden in [".claude", ".github", "crates", "tools", "specs"] {
-            assert!(
-                !arm.contains(forbidden),
-                "the docs-only allowlist ({}) now covers `{}`. A push touching only that path \
-                 would SKIP the `codegen` job -- and with it `assert_gate_script_self_verifies` \
-                 and `both_scopes_reject_execution_altering_env`, the two tests that stop a gate \
-                 script or the CI pin being disarmed. Widening this arm is how the gate-disarm \
-                 class walks in through the door marked \"docs\".",
-                arm, forbidden
-            );
+        // PARSED YAML, AND EVERY ARM. The first version located the allowlist as "the first line
+        // in the whole file whose trimmed end is `) ;;`" -- and ci.yml has two, the second being
+        // the codegen aggregator's `success|skipped) ;;`. It was right by ORDERING alone: move the
+        // aggregator up, or add a `case` to any earlier step, and this silently starts asserting
+        // about the wrong arm, green forever, with the `expect` never firing because the `find`
+        // succeeded on the wrong line. It also read ONE arm, while the natural way to widen an
+        // allowlist is to ADD one. Both are the vacuity this file spent ten rounds removing from
+        // its neighbours, reproduced in the guard that protects them.
+        let doc: serde_yaml::Value = serde_yaml::from_str(&ci).expect("ci.yml must parse as YAML");
+        let detect = doc
+            .get("jobs")
+            .and_then(|j| j.get("changes"))
+            .and_then(|c| c.get("steps"))
+            .and_then(|s| s.as_sequence())
+            .and_then(|steps| steps.iter().find(|st| st.get("id").and_then(|i| i.as_str()) == Some("detect")))
+            .and_then(|st| st.get("run"))
+            .and_then(|r| r.as_str())
+            .expect("the `changes` job's `detect` step (whose `case` decides docs_only) has moved or been renamed -- find it and re-point this test, do not delete it");
+        assert!(
+            detect.contains("docs_only=false; break"),
+            "the docs-only `case` has been reworded -- re-point this test, do not delete it. A locator that silently finds nothing is the vacuous-pass shape this file has retracted repeatedly."
+        );
+        let arms: Vec<&str> = detect.lines().map(str::trim).filter(|l| l.ends_with(") ;;")).collect();
+        assert!(!arms.is_empty(), "no docs-only allowlist arm found in the `detect` step -- re-point this test");
+        for arm in &arms {
+            for forbidden in [".claude", ".github", "crates", "tools", "specs"] {
+                assert!(
+                    !arm.contains(forbidden),
+                    "a docs-only allowlist arm ({}) now covers `{}`. A push touching only that path would be classified docs-only and SKIP the gate pins -- how the gate-disarm class walks in through the door marked \"docs\". Adding an ARM is the same widening as editing one.",
+                    arm, forbidden
+                );
+            }
         }
     }
 
@@ -10523,27 +10535,21 @@ mod docs_only_ci_and_legacy_visibility {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
         const CMD: &str = "bash .claude/skills/decision-lookup/scripts/stub-tests.sh";
-        // THE PANIC HOOK IS PROCESS-WIDE, so silencing it needs a guard that restores on UNWIND,
-        // not a call at the end of the happy path. `claude-review` caught the first shape on PR
-        // #679: `set_hook(prev)` sat after three assertions that were themselves inside the
-        // suppressed window, so the guard whose entire job is to say "your plant is now vacuous"
-        // would have failed with NO MESSAGE -- and leaked the null hook to every later failing
-        // test in the binary, which libtest runs in parallel threads. Exactly the diagnosability
-        // this PR argues for everywhere else.
-        struct HookGuard(Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>);
-        impl Drop for HookGuard {
-            fn drop(&mut self) {
-                if let Some(prev) = self.0.take() {
-                    std::panic::set_hook(prev);
-                }
-            }
-        }
-
+        // NO PANIC HOOK AT ALL. Two earlier shapes silenced panics process-wide: the first leaked
+        // the null hook on the failure path, and the second (a Drop guard) still entered a global
+        // window ~26 times while libtest runs this binary's other tests on sibling threads -- so a
+        // sibling panicking inside a window lost its message, which is the diagnosability this file
+        // argues for everywhere else. `claude-review` flagged both.
+        //
+        // The hook was only ever suppressing LOG NOISE from deliberate panics, and libtest already
+        // captures a passing test's output: those ~26 "panicked at" lines are printed only if this
+        // test FAILS, which is exactly when you want to read them. So the fix is to delete the
+        // mechanism rather than guard it -- no global state, no catch_unwind subtleties, and every
+        // assertion inside `assert_pinned_in_changes_job` keeps its message. (The reviewer's
+        // Result-returning refactor is the deeper answer and would also surface WHY each survivor
+        // survived; it converts ~30 assertions, so it is not being done in the same step as a
+        // behaviour fix -- Beck. Recorded here rather than left as a silent choice.)
         let check = |src: &str| {
-            // Silence ONLY around the deliberate panic, so a failure anywhere else keeps its
-            // message and no other test's window is affected for longer than one call.
-            let _guard = HookGuard(Some(std::panic::take_hook()));
-            std::panic::set_hook(Box::new(|_| {}));
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 assert_pinned_in_changes_job(src, CMD, "the gate")
             }))

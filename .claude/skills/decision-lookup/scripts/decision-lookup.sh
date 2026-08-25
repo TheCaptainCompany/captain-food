@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# decision-lookup — advisory BM25 candidate retrieval (row RETRIEVAL-QMD, decided_by
+# decision-lookup — advisory BM25 candidate retrieval (row RETRIEVAL-QMD-CI, the chain head; decided_by
 # PROP-20260822-171212, founder 2026-08-22; the decision adopts the DESIGN — the first controlled
 # `--install` run is a required activation test). ADVISORY ONLY: candidates, never evidence or
 # authority. Decision YAML + direct source reading is the authority path; rg + aliases is the
@@ -165,7 +165,12 @@ build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
 activation_fail() { # $1 = what failed — the activation test is loud AND non-zero
   echo "ACTIVATION FAILED: $1"
   echo "activation failed; remove .qmd/ before any future approved retry."
-  echo "Per row RETRIEVAL-QMD: record this failure and open a new/reversal decision before any change to package, version, permissions, or dependency shape. The baseline (rg + aliases + direct row resolution) is the system."
+  # NAME THE CHAIN HEAD. This is the string the operator reads on the rollback path the FAILURE
+  # PROTOCOL governs, and it used to say RETRIEVAL-QMD -- now superseded, so a session doing exactly
+  # what this line said wrote `reconsiders: RETRIEVAL-QMD` and hit the validator's "challenge the
+  # HEAD of its supersession chain". A gate error on the one path where the operator is already
+  # dealing with something broken. Review of PR #679.
+  echo "Per row RETRIEVAL-QMD-CI (the chain head): record this failure and open a new/reversal decision before any change to package, version, permissions, or dependency shape. The baseline (rg + aliases + direct row resolution) is the system."
   exit 1
 }
 

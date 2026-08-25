@@ -105,6 +105,30 @@ fn main() {
             let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
             dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
         }
+        // A superseded row may not be cited as live authority anywhere under `.claude/**` — the
+        // grep CLAUDE.md prescribes after a reshape, executed instead of remembered.
+        {
+            let mut cited: Vec<(String, String)> = Vec::new();
+            let mut stack = vec![root.join(".claude")];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = fs::read_dir(&dir) else { continue };
+                for e in entries.flatten() {
+                    let path = e.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if matches!(
+                        path.extension().and_then(|x| x.to_str()),
+                        Some("md" | "sh" | "json" | "yaml" | "yml")
+                    ) {
+                        if let Ok(text) = fs::read_to_string(&path) {
+                            let rel = path.strip_prefix(&root).unwrap_or(&path).display().to_string();
+                            cited.push((rel, text));
+                        }
+                    }
+                }
+            }
+            dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));
+        }
         // §22c — the decision-form template anchors questions to rows (requirement 6; published
         // form copies are uncommitted and NOT mechanically validated — recorded in the ADR).
         if let Ok(tpl) = fs::read_to_string(root.join("docs/templates/decision-form.html")) {

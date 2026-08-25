@@ -20,10 +20,14 @@ wt*/
 # Register-check hook firing log (runtime artifact, ADR-20260821-010543)
 .claude/register-check.log
 
-# QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD)
+# QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD-CI)
 .qmd/
 
-# Python bytecode caches — running .github/scripts/*.py dirties a clean checkout, and a .pyc
-# with no source in the tree was committed once by an over-broad `git add` (review #8 of PR #679).
+# Python bytecode caches — a .pyc with no source in this tree was committed once by an over-broad
+# `git add` (review #8 of PR #679). Nothing in-tree runs a .py FILE today: both Python call sites
+# here use `python3 -c`, which never writes __pycache__. So this is insurance, not a fix for an
+# observed dirtying — the first version of this comment invented the cause (`running
+# .github/scripts/*.py`, a directory that does not exist on this branch), which is the defect this
+# PR catalogues nine times, in the comment justifying the entry.
 __pycache__/
 *.pyc

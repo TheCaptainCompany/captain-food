@@ -61,7 +61,7 @@ wt*/
 # this file deliberately with an offset when a verdict needs its surrounding context.
 target/quiet-gate.log
 
-# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD).
-# Deliberately NOT mirrored in settings.json permissions.deny: the RETRIEVAL-QMD decision forbids
+# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD-CI).
+# Deliberately NOT mirrored in settings.json permissions.deny: the RETRIEVAL-QMD-CI decision forbids
 # settings.json changes without separate approval (recorded on #671).
 .qmd/

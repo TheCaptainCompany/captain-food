@@ -14,7 +14,7 @@ description: >
 
 # decision-lookup — advisory retrieval over committed governing Markdown
 
-Decided by row `RETRIEVAL-QMD` (`decided_by: PROP-20260822-171212`, founder 2026-08-22). QMD is an
+Decided by row `RETRIEVAL-QMD-CI` (`decided_by: ADR-20260824-205911`, founder 2026-08-24) — the CHAIN HEAD, which carries `RETRIEVAL-QMD`'s controlling content forward in full. Name the head, never the superseded row: a `reconsiders:` pointing at a superseded row is rejected by the validator. QMD is an
 **advisory read path**; **decision YAML plus direct source reading is the authority path** — that
 sentence is the whole architecture.
 
@@ -166,7 +166,7 @@ reaches the controlling record even where retrieval alone missed it.
   verdict), or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and
   prints: *activation failed; remove `.qmd/` before any future approved retry*, plus the
-  reversal-decision instruction (row `RETRIEVAL-QMD`). A failed install may leave a partial
+  reversal-decision instruction (row `RETRIEVAL-QMD-CI`, the chain head). A failed install may leave a partial
   `.qmd/tool/`; it never claims "nothing changed".
 - **Post-update index assertion**: the corpus stamp is written only after the index database is
   verified present and non-empty; a successful `qmd update` that leaves no index at the expected

@@ -591,6 +591,71 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// `legacy_count` source, trimmed identically to the injector's `\n\n` framing, so the two gates
 /// can never disagree. The validator reads the ROW FILES as truth and treats the region purely as
 /// the projection under test (founder requirement 11).
+/// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.
+///
+/// PR #679 flipped `RETRIEVAL-QMD` to `superseded` and rewrote the proposal to say, verbatim,
+/// *"name the head, never `RETRIEVAL-QMD` ... the old wording sent the next session straight into a
+/// gate error on the rollback path"*. That correction reached the proposal and stopped: seven
+/// sites under `.claude/**` still named the superseded row, including
+/// `decision-lookup.sh`'s RUNTIME failure message -- the string an operator reads on the exact
+/// rollback path the row's FAILURE PROTOCOL governs. Doing what it said produced
+/// `reconsiders: <superseded row>`, which `decision-reconsiders-shape` rejects.
+///
+/// CLAUDE.md already says to grep the old term after any reshape; the term lived in `.claude/**`,
+/// which the grep did not cover. So this is the grep, executed on every run and at the moment the
+/// row flips rather than whenever someone remembers. It is derived from row STATUS, not a
+/// hard-coded key list, so it keeps working as the chain grows links.
+pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
+    rows: &[DecisionRow],
+    files: &[(String, String)],
+) -> Vec<Issue> {
+    let superseded: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.get("status") == Some("superseded"))
+        .filter_map(|r| r.get("key"))
+        .collect();
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        for line in content.lines() {
+            for key in &superseded {
+                // BIND TO THE CITING POSITION, not to the line. A first attempt flagged any line
+                // mentioning the key alongside the word "row", which false-redded the very sentence
+                // that names the head and EXPLAINS the supersession -- the key appeared in a
+                // possessive clause. That is the key-presence instrument this repo has retracted
+                // three times, reproduced here on the first try. A citation is the key immediately
+                // after `row` (optionally backticked); anything else is prose about the row.
+                let mut from = 0;
+                while let Some(i) = line[from..].find(*key) {
+                    let at = from + i;
+                    from = at + key.len();
+                    // Not a prefix of a longer key (`RETRIEVAL-QMD` inside `RETRIEVAL-QMD-CI`).
+                    if matches!(
+                        line[at + key.len()..].chars().next(),
+                        Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_'
+                    ) {
+                        continue;
+                    }
+                    let before = line[..at].trim_end().trim_end_matches('`').trim_end();
+                    if !before.to_lowercase().ends_with("row") {
+                        continue;
+                    }
+                    issues.push(err(
+                        "decision-superseded-authority",
+                        path.clone(),
+                        format!(
+                            "cites `{}` as a live row, but that row is SUPERSEDED. Name the CHAIN HEAD instead: a `reconsiders:` pointing at a superseded row is rejected, so this sends the next session into a gate error on the path it is trying to help them down. Line: {}",
+                            key,
+                            line.trim()
+                        ),
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    issues
+}
+
 pub(crate) fn validate_decisions_index_sync(
     rows: &[DecisionRow],
     legacy_count: usize,

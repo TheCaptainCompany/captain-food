@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic stub tests for decision-lookup.sh (row RETRIEVAL-QMD).
+# Hermetic stub tests for decision-lookup.sh (row RETRIEVAL-QMD-CI, the chain head).
 # NEVER installs QMD, never calls the live package, never creates or modifies the real repo
 # .qmd/ cache, and does not depend on it: every case runs against a temporary
 # DECISION_LOOKUP_HOME with fake `qmd` executables; a fingerprint of the repo .qmd/ (if any)
