@@ -9805,6 +9805,37 @@ mod decision_ask_and_citations {
             "a row superseded BY an OPEN challenge must be RED — the supersession was executed by a question that has not been answered; got {:?}",
             split
         );
+        // A LEGAL TWO-LINK CHAIN must be GREEN: ROW-B challenged ROW-A and closed, then ROW-C
+        // challenged ROW-B and closed, so ROW-B is now `superseded` while still carrying the
+        // `reconsiders` edge that closed ROW-A. The first version of the rule above demanded the
+        // challenge be `decided` and false-redded exactly this — the next legal move on the QMD
+        // chain, and the one PROP-20260822-171212's rollback path instructs. A rule that only ever
+        // plants red is not the same as one that has had its boundary fixed.
+        let a_sup = "key: \"ROW-A\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-B\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let b_sup = "key: \"ROW-B\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-C\"\nreconsiders: \"ROW-A\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let c_dec = "key: \"ROW-C\"\nstatus: \"decided\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-20\"\ndecided_by: \"ADR-20260819-103112\"\nreconsiders: \"ROW-B\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        // NOT a rule, recorded so it is not "fixed" again: a supersession with NO `reconsiders`
+        // edge at all is LEGAL. The second review of PR #679 required making it red; implementing
+        // that broke two PRE-EXISTING tests — `a_fully_valid_corpus_is_green` and
+        // `supersession_is_a_dag_walked_by_identity`, whose "A -> B (open) terminates: green" case
+        // is exactly this shape. Those tests encode a deliberate design (a row can be superseded
+        // by a successor that never formally challenged it, e.g. a migration), and CLAUDE.md is
+        // explicit that a failing behaviour test means fix the generator, never the test. So the
+        // coupling is enforced only where a challenge edge EXISTS, and the records say so.
+        let orphan_sup = "key: \"ROW-A\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-B\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let orphan = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", orphan_sup),
+            ("docs/decisions/ROW-B.yaml", DECIDED_B),
+        ]);
+        assert!(orphan.is_empty(), "a supersession without a challenge edge is legal by design, got {:?}", orphan);
+
+        let chain = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", a_sup),
+            ("docs/decisions/ROW-B.yaml", b_sup),
+            ("docs/decisions/ROW-C.yaml", c_dec),
+        ]);
+        assert!(chain.is_empty(), "a legal two-link supersession chain must be GREEN, got {:?}", chain);
+
         // Same shape with a DEFERRED and a WITHDRAWN challenge: neither closed the question, so
         // neither may have executed a supersession. RED.
         for st in ["deferred", "withdrawn"] {
@@ -10045,6 +10076,22 @@ mod docs_only_ci_and_legacy_visibility {
     /// `|| true`.
     fn assert_pinned_in_changes_job(ci: &str, cmd: &str, what: &str) {
         let doc: serde_yaml::Value = serde_yaml::from_str(ci).expect("ci.yml must parse as YAML");
+        // DOCUMENT ROOT first. `defaults.run.shell` one scope UP rewrites how every step in every
+        // job runs: GitHub's custom-shell form is `command [options] {0}`, so
+        // `shell: bash -c "exit 0" {0}` passes the step script as $0 and never executes it. The
+        // step stays byte-identical, its key set stays {name, run}, the job carries no forbidden
+        // key -- and BOTH pinned gates become unable to fail. That is the TWELFTH mutant, found by
+        // the second review of PR #679, and it is strictly worse than the eleventh: one line
+        // disarms the supply-chain suite and the ask-gate selftest together.
+        let root = doc.as_mapping().expect("ci.yml is a mapping");
+        for key in ["defaults", "env"] {
+            assert!(
+                !root.contains_key(serde_yaml::Value::String(key.into())),
+                "ci.yml must carry no workflow-level `{}` -- `defaults.run.shell` there rewrites how EVERY step runs (a custom shell can drop the script entirely), and workflow `env` can shadow PATH, disarming {} while every job- and step-level assertion stays green",
+                key, what
+            );
+        }
+
         let changes = doc
             .get("jobs")
             .and_then(|j| j.get("changes"))

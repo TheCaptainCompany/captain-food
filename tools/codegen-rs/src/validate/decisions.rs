@@ -524,13 +524,14 @@ pub(crate) fn validate_decision_rows(
             // at a question still open, so the chain head is not an answer. Found by the
             // independent review of PR #679, which asserted the coupling was total and proved
             // empirically that only one direction was enforced.
-            "superseded" if coupled && r.get("status") != Some("decided") => issues.push(err(
+            "superseded" if coupled && !matches!(r.get("status"), Some("decided") | Some("superseded")) => issues.push(err(
                 rule,
                 r.path.clone(),
                 format!(
-                    "`{}` is superseded BY this row, but this row's status is `{}` — a supersession may only be executed by a challenge that has itself closed as `decided`. Either close this row (with `decided`/`decided_by`) or return `{}` to `decided` and drop its `superseded_by`; the two moves are one move (docs/decisions/README.md).",
+                    "`{}` is superseded BY this row, but this row's status is `{}` — a supersession may only be executed by a challenge that has itself CLOSED. Close this row (`decided` + `decided_by`) before flipping `{}`; the two moves are one move (docs/decisions/README.md). Do NOT resolve this by editing `{}` back: `superseded_by` is the one legal edit to a decided row, and undoing a correctly executed supersession corrupts the chain.",
                     target_key,
                     r.get("status").unwrap_or(""),
+                    target_key,
                     target_key
                 ),
             )),

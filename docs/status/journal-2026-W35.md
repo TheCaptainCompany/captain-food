@@ -19,9 +19,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > enforced. A target `superseded` by a still-`open` challenge passed `make validate` with zero
 > errors, leaving the register in exactly the split state `docs/decisions/README.md` forbids — a
 > superseded row whose authority points at a question nobody answered. The mirror rule is now added
-> and planted red (without it the split state returns `[]`), so the README sentence is true because
-> it was MADE true, not softened. Cost that earned the note: a repeated claim is not a checked one,
-> and this one was repeated in three places. Because the successor becomes the CHAIN
+> and planted red. **That fix was then ALSO wrong, and the second review disproved its claim the
+> same way**: the mirror rule demanded the challenge be `decided`, so it FALSE-REDDED a legal
+> two-link chain — the next legal move on this very chain, and the one the rollback path instructs —
+> and its error text told the reader to *"return the row to `decided` and drop its
+> `superseded_by`"*, i.e. to undo a correctly executed supersession, the exact corruption the README
+> forbids. **A gate that teaches the corruption is worse than the gap it replaced.** Both are fixed;
+> the legal chain is now planted GREEN alongside the reds.
+>
+> **One required correction was DECLINED, with evidence.** The review also required reddening a
+> supersession that carries no `reconsiders` edge at all. Implementing it broke two PRE-EXISTING
+> tests (`a_fully_valid_corpus_is_green`, `supersession_is_a_dag_walked_by_identity` — whose
+> *"A → B (open) terminates: green"* case is exactly that shape). Those encode a deliberate design,
+> and CLAUDE.md says a failing behaviour test means fix the generator, never the test. So the rule
+> was reverted and the boundary recorded in the test file instead, with the reason, so the next
+> session does not re-implement it. **A reviewer requiring a change is not authority to break the
+> suite that already answers the question.**
+>
+> **Cost that earned the rule: two record cycles asserted this coupling was total before anyone
+> constructed the state, and the first fix for it shipped a false red. A claim about a gate is worth
+> nothing until the gate has been asked to be wrong — in BOTH directions. "I added the rule" is not
+> "I checked the rule's boundary."** Because the successor becomes the CHAIN
 > HEAD, it carries the predecessor's controlling content forward with one clause narrowed. On
 > [#679](https://github.com/TheCaptainCompany/captain-food/pull/679) (open at the time of writing —
 > this line is not a merge claim), issue

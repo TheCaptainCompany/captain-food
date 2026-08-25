@@ -96,13 +96,17 @@ jobs:
       # job rather than behind the docs-only skip. Authorized by decision row RETRIEVAL-QMD-CI
       # (ADR-20260824-205911) - that row authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI.
       # Pinned by the `the_stub_suite_runs_in_the_always_run_changes_job` codegen test, which
-      # asserts this line VERBATIM: `|| true`, a trailing `; exit 0`, a step-level `if:` or any
-      # `continue-on-error` in this job reds that test.
-      # HOST DRIFT, read this before "fixing" a red: the suite asserts its own case COUNT, so a
-      # case that SKIPS reds this step. A red whose message says `precondition:` is the runner
-      # changing (filesystem, locale, python3, PATH), not the wrapper breaking - adapt the case to
-      # the host. Never delete a case and never weaken an assertion to recover green: this step is
-      # the only thing standing behind the wrapper's supply-chain gate.
+      # asserts over PARSED YAML: this step is located by its `run` VALUE and its key set must be
+      # exactly {name, run}, so `|| true`, a trailing `; exit 0`, a step-level `if:` in ANY
+      # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
+      # `continue-on-error` / `defaults` / `strategy`, and a workflow-level `defaults` or `env`.
+      # HOST DRIFT, read this before "fixing" a red: the suite asserts COMPLETENESS - every
+      # declared case must reach a verdict (pass + fail + skip == EXPECTED_CASES). A legitimate
+      # host-capability SKIP is loud but GREEN; what reds is a case that stops running at all.
+      # A red whose message says `precondition:` is the runner changing (filesystem, locale,
+      # python3, PATH), not the wrapper breaking - adapt the case to the host. Never delete a case
+      # and never weaken an assertion to recover green: this step is the only thing standing
+      # behind the wrapper's supply-chain gate.
       - name: decision-lookup hermetic stub suite (the wrapper's supply-chain gate must stay proven)
         run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 

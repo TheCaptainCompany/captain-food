@@ -185,3 +185,4 @@ then add it to the list below and place the entry at the top of the new file.
 - [`journal-2026-W32.md`](status/journal-2026-W32.md)
 - [`journal-2026-W33.md`](status/journal-2026-W33.md)
 - [`journal-2026-W34.md`](status/journal-2026-W34.md)
+- [`journal-2026-W35.md`](status/journal-2026-W35.md)

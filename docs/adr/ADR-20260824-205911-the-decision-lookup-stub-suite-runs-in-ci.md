@@ -25,16 +25,25 @@ Accepted.
 - `the_stub_suite_runs_in_the_always_run_changes_job` (`tools/codegen-rs/src/tests.rs`) pins the
   step inside that job and asserts the job stays ungated, mirroring the
   `the_hook_selftest_runs_in_the_always_run_changes_job` precedent from the 2026-08-21 hardening.
-- The register's own gate enforces the supersession coupling — **but only after this change**.
-  `decision-reconsiders-shape` already red if a `decided` challenge row's target was not
-  `superseded` by it. The MIRROR half did not exist: a target `superseded` by a challenge still
-  `open` passed `make validate` with **zero errors**, leaving the register in exactly the split
-  state `docs/decisions/README.md` forbids — a superseded row whose authority points at a question
-  nobody has answered. The independent review of PR #679 disproved the "neither row can move
-  without the other" claim empirically, by constructing that state. This change adds the missing
-  rule and plants it red (`reconsiders_shapes_fire_red_and_the_legal_shapes_stay_green`: without
-  it the split state returns `[]`). Recorded rather than quietly fixed, because the claim was
-  written here first and believed.
+- The register's own gate enforces the supersession coupling **where a challenge edge exists**, and
+  that qualifier is load-bearing. Two earlier versions of this section claimed the coupling was
+  total; both were disproved by construction, in successive reviews. **What is enforced, precisely:**
+  (1) a `decided` challenge whose target is not `superseded` by it reds (pre-existing); (2) a target
+  `superseded` by a challenge that has not itself CLOSED — `decided`, or `superseded` further down a
+  chain — reds (added here). Both are planted red, and a legal two-link chain `A ← B ← C` is planted
+  GREEN, because the first version of (2) demanded `decided` and false-redded exactly that: the next
+  legal move on this chain, and the one this proposal's own rollback path instructs.
+  **What is NOT enforced, deliberately**: a supersession carrying **no** `reconsiders` edge at all is
+  legal. The second review required making it red; implementing that broke two PRE-EXISTING tests
+  (`a_fully_valid_corpus_is_green`, `supersession_is_a_dag_walked_by_identity`, whose *"A → B (open)
+  terminates: green"* case is exactly this shape). Those encode a deliberate design — a row can be
+  superseded by a successor that never formally challenged it — and CLAUDE.md is explicit that a
+  failing behaviour test means fix the generator, never the test. The required correction was
+  therefore **declined, with evidence**, and the boundary is recorded in the test file so it is not
+  re-litigated.
+  **The cost that earned this note: a claim about a gate is worth nothing until the gate has been
+  asked to be wrong, in both directions. Two record cycles asserted this coupling before anyone
+  constructed the state, and the first fix for it introduced a false red of its own.**
 
 ## Context
 
