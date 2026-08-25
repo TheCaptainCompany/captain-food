@@ -174,7 +174,8 @@ evidence — here it was not even true.
 
   > `Reviewed-Commit: <sha>`
 
-  on a line of its own, outside any fenced (``` / ~~~) or 4-space-indented code block, where
+  on a line of its own, outside any ``` / ~~~ fence **opened at column 0** (that is the entire
+  block rule — indentation, blockquotes and lists are all treated as live), where
   `<sha>` is the PR's **head or merge** commit — decorated (backticks, bold) and abbreviated to
   ≥7 hex are accepted, because across 23 real reviewer comments (every `claude[bot]` comment on
   PRs #670/#674/#675 — 5 + 10 + 8 — via `GET /repos/{owner}/{repo}/issues/{n}/comments`) it wrote
@@ -205,29 +206,48 @@ evidence — here it was not even true.
   footer, a sign-off, a horizontal rule, a postscript — then reds a complete, correct review. That
   is the whole argument and it needs no premise about how often it happens; two earlier versions of
   this bullet asserted one (a corpus count, then a repo rule requiring footers on bot comments) and
-  neither survived measurement. Require it on a line of its
-  own, outside any fenced (``` / ~~~) or 4-space-indented code block. **That RAISES the bar on a
-  quoted marker; it does not make quoting impossible** — a naive fence tracker that toggles on any
-  ``` desynchronises on NESTED fences, which is the idiomatic way to quote a fenced block, so track
-  the opening delimiter's char and run length and close only on a matching-or-longer run. **Bound
-  the opener at 3 spaces (`^ {0,3}`), as CommonMark does**: at 4+ spaces or a tab the line is code,
-  not a fence, and an unbounded tracker opens a phantom fence on an indented delimiter that then
-  swallows the real marker — a false red, which on a required check is a repo-wide merge stop.
-  `<pre>`, `<code>` and HTML comments still satisfy such a gate; an HTML comment does so invisibly.
-  **Do not hand-roll a CommonMark block parser to decide it.** Eight review rounds each found a
-  different block rule wrong — backtick closers with trailing content, tilde closers, blockquoted
-  fences, list-item plus indented code, a fence quoting a fence, tab columns, container lifetimes,
-  prefix equality vs block structure — because the rules interact and a hand-rolled parser
-  re-derives what a parser already knows. Decide the DIRECTION of error first: for a gate on a
-  REQUIRED check, a false red is a repo-wide merge stop whose revert needs the same check green,
-  while a false green costs a property this gate could never deliver anyway (it cannot prove which
-  bot posted). So bias to counting, keep one rule (a fence delimiter at column 0), state the
-  residual, and keep a DIFFERENTIAL harness against a real parser with a false-red budget —
-  `.github/scripts/assert_review_marker_differential.py`. It measured dozens of false reds in the
-  carefully-built version and at most one in the simple one. **The harness prints its own
-  antecedents** (corpus seed, corpus size, parser version) and no comment quotes its figure: the
-  first version of this line stated a bare count that had already drifted by the time the next
-  commit landed, which is ADR-20260817-105845 happening inside the note recording the lesson.
+  neither survived measurement.
+
+  **Do not hand-roll a CommonMark block parser to decide where the marker renders.** Nine review
+  rounds each found a different block rule wrong — backtick closers with trailing content, tilde
+  closers, blockquoted fences, list-item plus indented code, a fence quoting a fence, tab columns,
+  container lifetimes, prefix equality vs block structure — because the rules interact and a
+  hand-rolled parser re-derives what a parser already knows. Two earlier versions of this bullet
+  prescribed rules (`^ {0,3}` openers, excluding 4-space-indented code) that the design later
+  deleted on purpose; they are gone rather than annotated.
+
+  **Decide the DIRECTION of error first, and justify it with the property, not with the blast
+  radius.** For a marker gate the argument that survives measurement is: *no no-verdict path
+  produces a body that counts.* The action's self-skip, a 429, a model outage and permission
+  denials all end with no marker anywhere, so biasing toward counting cannot weaken what the gate
+  was built to catch. **The tempting argument — "a false red is a repo-wide merge stop whose revert
+  needs the same check green" — is false and was written into three files before a review checked
+  it**: a *matcher* false red blocks the one PR whose comment tripped it and clears by re-posting;
+  the repo-wide stop is the credit/outage case, which is a TRUE red; and an admin bypass exists
+  (`docs/decisions/REVIEW-GATE-BYPASS.yaml`). Get the mechanism right before reaching for the
+  consequence.
+
+  So: keep ONE rule (a fence delimiter at column 0), state the residual, and keep a DIFFERENTIAL
+  harness against a real parser with a false-red budget —
+  `.github/scripts/assert_review_marker_differential.py`. **Its oracle must track `<pre>` depth,
+  not strip every `<code>`**: an inline code span in a paragraph renders LIVE, it is the commonest
+  real shape for a sha, and blanket-stripping it makes the harness under-count exactly the number
+  the budget guards. **Sweep several seeds, not one** — the shipped matcher measures 0–4 false reds
+  across ordinary seeds, so a single-seed budget of 5 is unsensitive in both directions.
+  **The harness prints its own antecedents** (corpus seed, corpus size, parser version) and no
+  comment quotes its figure: the first version of this line stated a bare count that had already
+  drifted by the time the next commit landed, which is ADR-20260817-105845 happening inside the
+  note recording the lesson.
+
+  **A generated corpus flatters whatever it over-samples.** ~30% of its lines were fence
+  delimiters; only 1 of 29 real `claude[bot]` comments contains a fence character at all, and
+  against the real corpus the round-7 and round-8 matchers both score zero false reds. Measure
+  against the real population before believing a redesign bought anything.
+
+  **The residual is real and now cheap to trip**: a quoted marker inside a blockquote, a list, an
+  indented block or an HTML block counts, as do `<pre>`, `<code>` and HTML comments. That RAISES
+  the bar on quoting; it does not make it impossible, and it never could — the gate cannot prove
+  WHICH bot posted. Never paste a marker line into a comment.
 
   **And make the exemplar you give the model conform to the rule you enforce** — a prompt that
   demonstrates the marker indented, under an assertion that requires the left margin, reds every

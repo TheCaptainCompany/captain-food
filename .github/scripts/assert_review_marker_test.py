@@ -57,14 +57,6 @@ CASES = [
                               "round 5: a closer may carry only whitespace"),
     ("TILDE closer + text",   f"q:\n{TL}\n{TL} x\nReviewed-Commit: {H}\n{TL}\nno", False,
                               "round 6: the rule was applied to backticks only"),
-    ("4-space indented",      f"q:\n\n    Reviewed-Commit: {H}\nno", True,
-                              "round 8: ACCEPTED false green. The indent rule was the LAST false-red source (41 -> 2 measured against markdown-it over 4000 bodies); removing it is the whole difference."),
-    ("blockquoted fence",     f"q:\n> {BT}\n> Reviewed-Commit: {H}\n> {BT}\nno", True,
-     "round 8: ACCEPTED false green -- a fence or indent inside a CONTAINER is not tracked. Chasing this cost rounds 6-8 and produced live FALSE REDS; the gate cannot prove which bot posted anyway."),
-    ("blockquoted tilde fence",f"q:\n> {TL}\n> Reviewed-Commit: {H}\n> {TL}\nno", True, "round 8: ACCEPTED, same"),
-    ("blockquote + indented", f"q:\n\n>     Reviewed-Commit: {H}\nno", True,
-     "round 8: ACCEPTED, same"),
-    ("list item + indented",  f"q:\n\n-     Reviewed-Commit: {H}\nno", True, "round 8: ACCEPTED, same"),
     ("unclosed fence",        f"q:\n{BT}\nstuff\n\nReviewed-Commit: {H}", False, "everything after an opener is code"),
     ("stale sha",             f"reviewed\n\nReviewed-Commit: 9999999999999999999999999999999999999999", False,
                               "round 1: comments survive pushes"),
@@ -75,9 +67,9 @@ CASES = [
     ("no marker",             "reviewed, no findings", False, "baseline"),
 
     # --- eighth review: the FALSE REDS the old block parser produced ---------
-    # Each is a complete, correct review that the round-7 parser rejected. On a REQUIRED check a
-    # false red is a repo-wide merge stop whose revert needs the same check green -- which is why
-    # the design now fails open.
+    # Each is a complete, correct review that the round-7 parser rejected -- i.e. the gate calling
+    # a real review "no review". That is why the design now fails open; see live_lines and
+    # docs/decisions/REVIEW-MARKER-BIAS.yaml for the direction and its open row.
     ("fence in a list item that ENDS, marker after",
      f"Findings:\n\n- Log:\n\n  {BT}\n  boom\n\nReviewed-Commit: {H}", True,
      "round 8 FALSE RED: the old parser held the fence open to end of comment"),
@@ -111,12 +103,38 @@ CASES = [
      f"q:\n{BT}\nx\n{BT}`\n\nReviewed-Commit: {H}", True,
      "round 7: run >= open_run, not ==; the == mutant survived"),
     ("CRLF body",             f"reviewed\r\n\r\nReviewed-Commit: {H}\r", True,
-                              "round 7: the CR strip was untested entirely"),
+     "round 7. HONEST LABEL (review #9): this does NOT kill the `rstrip(chr(13))` mutant, and no "
+     "case can -- CR safety actually comes from `\\b` after the hex in MARKER and from `.strip()` "
+     "on a closer's rest, both of which absorb it. The strip is belt-and-braces. The earlier label "
+     "claimed coverage this case does not provide, which is the round-7 repdigit defect one field over."),
+    ("one-backtick line is NOT a fence",
+     f"`live_lines` is wrong.\n\nReviewed-Commit: {H}", True,
+     "review #9 SURVIVING MUTANT: relaxing the delimiter to `{1,}` made every comment opening with "
+     "an inline code span at column 0 start a phantom fence and swallow the marker -- a live false red, "
+     "in the one dimension the round-8 redesign claims to have made safe. Reviewers write this constantly."),
+    ("two-tilde line is NOT a fence",
+     f"~~struck~~ text\n\nReviewed-Commit: {H}", True,
+     "review #9: same mutant, tilde side. GFM strikethrough at column 0 is not a fence opener."),
     ("CRLF inside a fence",   f"q:\r\n{BT}\r\nReviewed-Commit: {H}\r\n{BT}\r\nno", False, "round 7"),
     ("uppercase hex, real sha", f"reviewed\n\nReviewed-Commit: {H[:12].upper()}", True,
                               "round 7: a no-op under repdigit fixtures"),
     ("sha SUFFIX must not match", f"reviewed\n\nReviewed-Commit: {H[-12:]}", False,
                               "round 7: the startswith -> endswith mutant survived"),
+
+    # --- renders as CODE and COUNTS ANYWAY: the ACCEPTED false greens -------
+    # These seven assert True while rendering as code. They are NOT mislabelled: round 8 chose the
+    # fail-open direction deliberately (see live_lines), and each was verified against markdown-it
+    # to genuinely render as code. They sat under the "must NOT count" header until review #9 --
+    # a section header that lies about its rows is how round 6 happened.
+    ("4-space indented",      f"q:\n\n    Reviewed-Commit: {H}\nno", True,
+     "round 8: ACCEPTED false green. The indent rule was the LAST false-red source; restoring it "
+     "costs dozens of false reds (lazy paragraph continuation), measured by the differential harness."),
+    ("blockquoted fence",     f"q:\n> {BT}\n> Reviewed-Commit: {H}\n> {BT}\nno", True,
+     "round 8: ACCEPTED false green -- a fence or indent inside a CONTAINER is not tracked. Chasing this cost rounds 6-8 and produced live FALSE REDS; the gate cannot prove which bot posted anyway."),
+    ("blockquoted tilde fence",f"q:\n> {TL}\n> Reviewed-Commit: {H}\n> {TL}\nno", True, "round 8: ACCEPTED, same"),
+    ("blockquote + indented", f"q:\n\n>     Reviewed-Commit: {H}\nno", True,
+     "round 8: ACCEPTED, same"),
+    ("list item + indented",  f"q:\n\n-     Reviewed-Commit: {H}\nno", True, "round 8: ACCEPTED, same"),
 ]
 
 

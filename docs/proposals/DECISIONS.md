@@ -22,6 +22,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
 | `KEY-NAMESPACE` | open | 2026-08-21 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? | team |
 | `RETRIEVAL-QMD-CI` | open | 2026-08-24 | Should the decision-lookup hermetic stub suite be wired into CI (the always-run `changes` job, pinned by a codegen test), narrowing RETRIEVAL-QMD's non-authorization of CI changes to exactly that one step plus its pin — or does the suite stay an executor-side authority? | founder |
+| `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
 | `CONTROLLER-HANDOVER` | decided | 2026-08-19 | Is the association-to-company controller handover made reconstructible in the event log? -> ADR-20260819-103112 | founder |
@@ -37,7 +38,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REVIEW-GATE-BYPASS` | decided | 2026-08-24 | Does the #677 hardening of `claude-review` land BEFORE REV-1 is executed — merged by a one-time admin bypass, leaving the check required and newly able to fail — or does REV-1 execute first so the hardened check reds on a non-required gate? -> ADR-20260825-005323 | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**Migrated rows: 23 — 9 open · 13 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 24 — 10 open · 13 decided · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

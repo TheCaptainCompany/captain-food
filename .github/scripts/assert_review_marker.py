@@ -45,9 +45,9 @@ HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+")
 def live_lines(body: str):
     """Yield lines that are NOT obviously inside a code block, biased toward LIVE.
 
-    DESIGN, after eight review rounds each found a different block-level rule wrong:
+    DESIGN, after nine review rounds each found a different block-level rule wrong:
 
-    A hand-rolled CommonMark block parser was the wrong instrument. Rounds 3-8 found, in turn:
+    A hand-rolled CommonMark block parser was the wrong instrument. Rounds 3-9 found, in turn:
     backtick closers with trailing content, tilde closers, blockquoted fences, list-item plus
     indented code, a fence quoting a fence, tab columns, container lifetimes, and prefix equality
     vs block structure. Each fix was correct and each left another dimension wrong, because the
@@ -66,19 +66,40 @@ def live_lines(body: str):
     to at most one, false greens rose, and the indented-code rule was the last false-red source.
     The DIRECTION of the error is the point, not its magnitude.
 
-    WHY BIAS THIS WAY. The gate exists to catch the SILENT NO-VERDICT paths -- the action's
-    self-skip, a 429, permission denials. It has never been able to prove WHICH bot posted a
-    comment (this repo's own agent sessions post under the same identity), so it was never an
-    anti-forgery mechanism, and `claude-code-review.yml` says so. Against that, a FALSE RED is
-    strictly worse than a missed quoted marker: `claude-review` is required, so a false red is a
-    repo-wide merge stop whose revert needs the same check green. Every misclassification this
-    design can still make therefore counts the marker rather than rejecting it.
+    WHY BIAS THIS WAY, stated as the property rather than the blast radius. The gate exists to
+    catch the SILENT NO-VERDICT paths -- the action's self-skip, a 429, a model outage, permission
+    denials. EVERY ONE of those ends with no marker anywhere in the thread, so biasing toward
+    counting cannot weaken what the gate was built to catch. That is the whole argument, and it is
+    checkable.
 
-    THE RESIDUAL, stated plainly: a marker quoted inside an INDENTED code block, inside a fence
-    opened at any column other than 0, inside a blockquote, a list, or an HTML block WILL satisfy
-    this gate. So will `<pre>`, `<code>`, and HTML comments. Do not paste a marker line into a
-    comment. If this ever needs to be airtight, the answer is a real CommonMark parser, not
-    another rule here.
+    THE DIRECTION HAS A DECLARED OPEN ROW: docs/decisions/REVIEW-MARKER-BIAS.yaml. It was settled
+    here by a code comment first and registered afterwards, which is the defect
+    docs/decisions/REVIEW-GATE-BYPASS.yaml exists to retire -- named so the next reader finds the
+    option space instead of re-deriving it from this docstring.
+
+    IT IS NOT the argument three earlier versions of this file made. They said a false red is "a
+    repo-wide merge stop whose revert needs the same check green". That is false, and review #9
+    said so: a MATCHER false red blocks the one PR whose comment tripped it and clears by
+    re-posting the comment; the repo-wide stop is the credit/outage case, which is a TRUE red; and
+    an admin bypass exists (docs/decisions/REVIEW-GATE-BYPASS.yaml). The direction survives the
+    correction -- a missed quoted marker costs a property this gate could never deliver, since it
+    cannot prove WHICH bot posted -- but the reason had to be repaired, not the conclusion.
+
+    THE RESIDUAL, stated plainly and in BOTH directions.
+
+    Counts but renders as code (accepted): a marker quoted inside an INDENTED code block, inside a
+    fence opened at any column other than 0, inside a blockquote, a list, or an HTML block. So will
+    `<pre>`, `<code>`, and HTML comments. Do not paste a marker line into a comment.
+
+    Renders live but does NOT count (the false-red side, characterised by review #9, both
+    reproduced): a fence opened at column 0 and closed by a delimiter indented 1-3 spaces -- the
+    closer is not seen, so the fence runs to end of comment and every later line is dead; and a
+    marker inside a GFM TABLE CELL, which the marker regex cannot match through the leading pipe.
+    Both are named in the operator hint in claude-code-review.yml, because a red the operator
+    cannot diagnose is a red they will work around.
+
+    If this ever needs to be airtight, the answer is a real CommonMark parser, not another rule
+    here.
     """
     fence: tuple[str, int] | None = None  # (delimiter char, run length) -- column 0 only
     for raw in body.split("\n"):

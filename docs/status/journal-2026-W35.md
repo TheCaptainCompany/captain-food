@@ -81,6 +81,12 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > This is precisely what ADR-20260817-105845 exists to prevent, and it was caught because the
 > number named its own antecedents and they refuted it.
 >
+> ⚠️ **THE THREE PARAGRAPHS THAT FOLLOW DESCRIBE A DESIGN THAT WAS DELETED ON PURPOSE.** They are
+> kept because the defects they name are real and were paid for, but their PRESCRIPTIONS —
+> `^ {0,3}` openers, excluding 4-space-indented code, "a table cell and a 4-space indent are not
+> accepted" — are NOT what the matcher does. Round 8 reversed the approach; see the two paragraphs
+> after them. Review #9 found these read as settled learning by anyone arriving at the top.
+>
 > **A FIFTH and SIXTH round found more of the same, and the pattern is now the finding.** The
 > marker exemplar the prompt DELIVERS was indented six spaces while the assertion enforced a
 > left-margin rule — so a reviewer copying the only example it is given would have redded the gate
@@ -117,10 +123,10 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > — backtick closers with trailing content, tilde closers, blockquoted fences, list-item plus
 > indented code, a fence quoting a fence, tab columns, container lifetime, prefix equality versus
 > block structure — because the rules interact, and the matcher was re-deriving what a CommonMark
-> parser already knows. So the DIRECTION of error was chosen first: on a check that is required
-> *today*, a false red is a repo-wide merge stop whose revert needs the same check green, while a
-> false green costs a property this gate could never deliver anyway (it cannot prove which bot
-> posted). The matcher now keeps **one** rule — a fence delimiter at column 0 — states its residual,
+> parser already knows. So the DIRECTION of error was chosen first: a false red reports a complete,
+> correct review as no review, while a false green costs a property this gate could never deliver
+> anyway (it cannot prove which bot posted). (The blast-radius version of that sentence, which
+> stood here first, is refuted below.) The matcher now keeps **one** rule — a fence delimiter at column 0 — states its residual,
 > and `.github/scripts/assert_review_marker_differential.py` **measures** the bias against
 > markdown-it-py instead of asserting it, failing if false reds exceed a budget.
 >
@@ -131,4 +137,31 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > file's stated contract: three places still promised that an INDENTED code block was excluded,
 > which round 8 had deliberately stopped doing — a docstring, a workflow comment and the operator
 > hint printed on failure, all telling a reader a rule the code no longer had.
+>
+> **The NINTH review then found the justification itself was false, which matters more than the
+> numbers did.** Every version of the fail-open argument said *"a false red is a repo-wide merge
+> stop whose revert needs the same check green"* — in three files. It is not: a MATCHER false red
+> blocks the one PR whose comment tripped it and clears by re-posting; the repo-wide stop is the
+> credit/outage case, which is a TRUE red; and an admin bypass exists, landed in this same series.
+> The direction survives, on the argument that does check out — **every no-verdict path this gate
+> exists to catch ends with no marker anywhere, so biasing toward counting cannot weaken it** — but
+> the reason had to be repaired, not the conclusion. **Get the mechanism right before reaching for
+> the consequence: a vivid blast-radius sentence propagates faster than a correct one.**
+>
+> **And the improvement the redesign was bought with is partly an artifact of the instrument.**
+> ~30% of the generated corpus's lines are fence delimiters; only 1 of 29 real `claude[bot]`
+> comments contains a fence character at all, and against the REAL corpus both the old and the new
+> matcher score zero false reds. The harness's oracle also stripped every `<code>`, so it read an
+> inline code span in a paragraph — the commonest real shape for a sha — as "renders as code",
+> hiding false reds in the only direction the budget guards. Fixed to track `<pre>` depth. The
+> budget now sweeps seven seeds instead of one, because the shipped matcher measures 0–4 across
+> ordinary seeds and a single-seed budget of 5 was unsensitive in both directions. **Measure
+> against the real population before believing a redesign bought anything.**
+>
+> **Two decisions had been taken by code comment with no register row** — the fail-open direction
+> and the harness's exclusion from CI — which is exactly the defect `REVIEW-GATE-BYPASS` was
+> created to retire, repeated one round later. Both now sit in `REVIEW-MARKER-BIAS` (open), with
+> the measured option space, including the one review #9 checked so nobody re-derives it: restoring
+> a correct indented-code rule costs 61–80 false reds across seven seeds, because lazy paragraph
+> continuation needs paragraph context. **Do not restore the indent rule.**
 
