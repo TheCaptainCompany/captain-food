@@ -201,7 +201,13 @@ dependency shape. Name the head, never `RETRIEVAL-QMD`: it is `superseded`, and 
 rejects a `reconsiders:` pointing at a superseded row (*"challenge the HEAD of its supersession
 chain"*), so the old wording sent the next session straight into a gate error on the rollback path.
 **Removing the tracked surface** (SKILL.md, the wrapper, the test suite, its CI step and codegen pin, the ignore entries) is
-that recorded reversal's commit — never part of the no-consult incident path. **The wrapper
+that recorded reversal's commit — never part of the no-consult incident path. **When you do remove
+it, the two gate scripts and `GATE_SET` must change in the SAME commit**, or both hard-red with
+`FATAL: <path> is not tracked at <ref> — refusing to report on a gate set CI cannot verify`: each
+script compares all four gate files against their committed blobs, so deleting two of them leaves
+the other two refusing to report. That is fail-closed and correct, and it is stated here so an
+operator meets it in the plan rather than mid-incident — the rollback path being exactly where a
+surprise costs most, as the stale-citation trap two sentences up already demonstrated once. **The wrapper
 performs no automatic rollback**: cache deletion is always a deliberate operator action, and the
 wrapper's own behavior on a missing cache is the ordinary fallback. After cache removal the
 system is exactly `rg + aliases + direct row resolution` — which it never stopped being.
