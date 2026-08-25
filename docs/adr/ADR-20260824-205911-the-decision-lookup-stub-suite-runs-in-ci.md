@@ -25,9 +25,16 @@ Accepted.
 - `the_stub_suite_runs_in_the_always_run_changes_job` (`tools/codegen-rs/src/tests.rs`) pins the
   step inside that job and asserts the job stays ungated, mirroring the
   `the_hook_selftest_runs_in_the_always_run_changes_job` precedent from the 2026-08-21 hardening.
-- The register's own gate enforces the supersession coupling: `decision-reconsiders-shape` reds if a
-  `decided` challenge row's target is not `superseded` by it, and `decision-superseded-shape` reds on
-  the other half alone. Neither row can move without the other.
+- The register's own gate enforces the supersession coupling — **but only after this change**.
+  `decision-reconsiders-shape` already red if a `decided` challenge row's target was not
+  `superseded` by it. The MIRROR half did not exist: a target `superseded` by a challenge still
+  `open` passed `make validate` with **zero errors**, leaving the register in exactly the split
+  state `docs/decisions/README.md` forbids — a superseded row whose authority points at a question
+  nobody has answered. The independent review of PR #679 disproved the "neither row can move
+  without the other" claim empirically, by constructing that state. This change adds the missing
+  rule and plants it red (`reconsiders_shapes_fire_red_and_the_legal_shapes_stay_green`: without
+  it the split state returns `[]`). Recorded rather than quietly fixed, because the claim was
+  written here first and believed.
 
 ## Context
 
@@ -70,7 +77,10 @@ challenge IS the supersession move. Because the successor becomes the chain head
 reader resolves to — it **carries the predecessor's controlling content forward in full**, with the
 CI clause narrowed. Nothing is lost by the flip; the predecessor stays readable as history.
 
-**Three.** The narrowing is exactly that one clause. Every other non-authorization of
+**Three.** The narrowing is that one clause, plus one naming correction: the successor row also
+names `.claude/skills/decision-lookup/scripts/stub-tests.sh` in the authorized surface, which the
+predecessor never did — the suite grew after that row was written and its enumeration was never
+updated. That is a widening of the RECORD to match what was already tracked, not of the surface. Every other non-authorization of
 `RETRIEVAL-QMD` stands verbatim in the successor: no hooks, no agent-contract changes, no validator
 rule over `specs/**`, no GraphRAG, vector search, embeddings, model downloads, reranking, query
 expansion, MCP, hosted services, credentials, or YAML decision-row indexing; no widening of package,
@@ -116,3 +126,14 @@ ADR-20260816-134352), with the full-diff independent review still to come as the
   validator-enforced.
 - **legal-specialist** — nothing in this lens: no personal data, no external artifact, no capacity
   statement. Recorded so a lens never asked is not mistaken for a lens with nothing to say.
+
+**Banked at the checkpoint** (ADR-20260816-134352 / ADR-20260817-105845): the narrow roster **did
+miss something**. The independent review found an eleventh disarm mutant — hoisting the step-level
+`if:` onto the `- ` item line, a spelling GitHub Actions accepts and the pin did not — plus a
+decoy-line hole in the same test, and disproved this ADR's own coupling claim. **Attribution:
+invited-lens depth miss, not roster width.** `beck` was briefed on exactly the question *"what
+mutant must redden the new pin"* and answered by enumerating ten spellings rather than by making
+the property unrepresentable; a wider roster would have put more readers in front of the same
+enumeration. It therefore does **not** return to the founder, and the reversibility class stands.
+The correction is the one the repo's compiler-first rule points at: the pin now asserts over
+PARSED YAML, so every spelling of the mutant is unrepresentable instead of enumerated.

@@ -9789,6 +9789,40 @@ mod decision_ask_and_citations {
         let sup_b = "key: \"ROW-B\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-A\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
         let ok = check_rows(&[("docs/decisions/ROW-A.yaml", &closed_challenge), ("docs/decisions/ROW-B.yaml", sup_b)]);
         assert!(ok.is_empty(), "coupled closure must be green, got {:?}", ok);
+        // THE MIRROR HALF (added 2026-08-25 after the independent review of PR #679 DISPROVED
+        // the claim that the coupling was already total). The case above is the challenge moving
+        // without its target; this is the TARGET moving without its challenge — a superseded row
+        // whose authority points at a question still OPEN, so the chain head is not an answer.
+        // Before the rule this returned zero issues: the register rested in exactly the split
+        // state docs/decisions/README.md forbids, and nothing saw it.
+        let open_challenge = format!("{}reconsiders: \"ROW-B\"\n", OPEN_A);
+        let split = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", &open_challenge),
+            ("docs/decisions/ROW-B.yaml", sup_b),
+        ]);
+        assert!(
+            split.contains(&rule),
+            "a row superseded BY an OPEN challenge must be RED — the supersession was executed by a question that has not been answered; got {:?}",
+            split
+        );
+        // Same shape with a DEFERRED and a WITHDRAWN challenge: neither closed the question, so
+        // neither may have executed a supersession. RED.
+        for st in ["deferred", "withdrawn"] {
+            let ch = format!(
+                "{}reconsiders: \"ROW-B\"\n{}",
+                OPEN_A.replace("\"open\"", &format!("\"{}\"", st)),
+                if st == "withdrawn" { "note: \"why it stopped being a question\"\n" } else { "until: \"a stated wake condition\"\n" }
+            );
+            let issues = check_rows(&[
+                ("docs/decisions/ROW-A.yaml", &ch),
+                ("docs/decisions/ROW-B.yaml", sup_b),
+            ]);
+            assert!(
+                issues.contains(&rule),
+                "a row superseded by a `{}` challenge must be RED; got {:?}",
+                st, issues
+            );
+        }
         // A challenge targeting a superseded MID-CHAIN row names the head: RED.
         let mid = format!("{}reconsiders: \"ROW-B\"\n", OPEN_A.replace("ROW-A", "ROW-D"));
         let sup_to_c = sup_b.replace("superseded_by: \"ROW-A\"", "superseded_by: \"ROW-C\"");

@@ -517,6 +517,23 @@ pub(crate) fn validate_decision_rows(
         let coupled = tstatus == "superseded" && target.get("superseded_by") == Some(&r.stem);
         match tstatus {
             "decided" | "withdrawn" => {}
+            // The OTHER half of the coupling. The `decided` challenge below is checked for a
+            // target that is not superseded by it; this is the mirror — a target superseded by a
+            // challenge that has not itself closed. Without it the register rests in a split
+            // state the README forbids and nothing sees: a superseded row whose authority points
+            // at a question still open, so the chain head is not an answer. Found by the
+            // independent review of PR #679, which asserted the coupling was total and proved
+            // empirically that only one direction was enforced.
+            "superseded" if coupled && r.get("status") != Some("decided") => issues.push(err(
+                rule,
+                r.path.clone(),
+                format!(
+                    "`{}` is superseded BY this row, but this row's status is `{}` — a supersession may only be executed by a challenge that has itself closed as `decided`. Either close this row (with `decided`/`decided_by`) or return `{}` to `decided` and drop its `superseded_by`; the two moves are one move (docs/decisions/README.md).",
+                    target_key,
+                    r.get("status").unwrap_or(""),
+                    target_key
+                ),
+            )),
             "superseded" if coupled => {}
             "superseded" => issues.push(err(
                 rule,
