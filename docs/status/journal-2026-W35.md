@@ -279,4 +279,29 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Recorded because it is not derivable from the code**: a workflow file cannot make itself
 > required or un-required, and cannot stop branch protection accepting `skipped` — so every YAML
 > edit in `claude-code-review.yml` is a **verdict-honesty** fix and never a requiredness fix.
-> Anyone reading #677 as "option 2 solves requiredness" is reading it wrong.
+> Anyone reading #677 as "option 2 solves requiredness" is reading it wrong.>
+> **Round 10, and the finding is in the half nobody looked at.** Six rounds hardened
+> `on.pull_request` — content-based bans, the default `types` triad, the `branches` containment
+> check with its `!`-exclusion analysis. The `on.push` half, three lines above it, still banned
+> only `paths`/`paths-ignore`, and its branch check opens `if let Some(seq) =
+> push.get("branches")` — so it did **nothing at all** when `branches` was absent.
+> `branches-ignore: ['main']` needs no `branches` key; `tags: ['v*']` in place of the branch list
+> makes the trigger tag-only. Each removes BOTH gate steps from the push lane with every assertion
+> green — and the push lane is the one CLAUDE.md routes spec- and docs-only changes down, with no
+> PR to fall back on. **The generalisable shape: when one of two symmetric surfaces gets six
+> rounds of attention, the other has silently become the cheap way in.** Both halves now carry
+> the same ban list, tag filters are ruled on as a PAIR (`tags` alongside `branches` is legitimate
+> release plumbing and has a green control; `tags` alone is the defect), and both holes are
+> planted mutants in the corpus.
+>
+> **The false-red instrument, one more time, in the rule written to stop stale citations.** The
+> `decision-superseded-authority` rule accepted the bare article `the` as a citing token, so
+> `mirrors the <KEY> rollout` or `narrower than the <KEY> surface` would each red `make validate`
+> as a **hard error** with no escape but rewording. None of them tells a session to cite a dead
+> row. Every green control had avoided putting `the` immediately before a key, which is why the
+> controls missed it. `the <KEY>` now counts only when the word AFTER the key is a citing noun.
+> **And the clause-scoped `superseded` exemption is per-LINE**: a multi-line comment explaining
+> the very incident that motivated the rule did not inherit it, so the wrapper's own retraction
+> comment redded. The prose was corrected to name the row as superseded in the citing clause,
+> which is what it always meant — recorded because the next author of a multi-line comment about a
+> dead row will hit exactly this.
