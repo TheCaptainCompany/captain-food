@@ -131,6 +131,12 @@ jobs:
       #
       # `!cancelled()` rather than `always()`: a cancelled run (superseded push, manual cancel) is
       # not a missing review, and labelling it one trains readers to discount this red.
+      # The matcher's own regressions, ~40 cases, no network. If this reds, the assertion below
+      # cannot be trusted -- which is the failure mode #677 is about, one level down.
+      - name: Review-marker matcher self-test
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/assert_review_marker_test.py
+
       - name: Assert a bot verdict naming this commit exists
         if: ${{ !cancelled() }}
         env:
@@ -149,82 +155,23 @@ jobs:
             echo "draft PR - the review step is skipped by design, nothing to assert."
             exit 0
           fi
-          # An empty or malformed sha would build a marker that a STALE comment satisfies, and
-          # `set -u` does not catch it: GitHub sets the variable to empty, it does not unset it.
-          for v in HEAD_SHA MERGE_SHA; do
-            val="${!v}"
-            case "$val" in
-              [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
-              *) echo "::error::$v does not start with 7 hex chars - refusing to assert against a marker that anything could satisfy."; exit 1 ;;
-            esac
-            [ "${#val}" -eq 40 ] || { echo "::error::$v is ${#val} chars, expected 40."; exit 1; }
-          done
-          # The whole match runs inside jq, reading the shas from the environment:
-          #   * only GitHub App bot comments (`user.type == "Bot"`);
-          #   * the marker must sit on a line of its own, outside any fenced (``` / ~~~) or
-          #     4-space-indented code block. That raises the bar on quoting a marker from an
-          #     unrelated comment; it does NOT make it impossible, and the block above says so.
-          #   * the printed hex must be a PREFIX (>=7 chars) of head or merge sha -- the reviewer
-          #     writes abbreviated and decorated shas in practice, and requiring a bare 40-char
-          #     string would red every real review. A stale sha still fails: it differs early.
-          # NO PIPE into grep: `printf | grep -q` makes grep exit at the first match, printf die of
-          # SIGPIPE, and `pipefail` report 141 -- a FALSE RED once the matching comment is followed
-          # by more than a pipe buffer (64 KiB) of other comments. Measured; PR #674 is already at
-          # ~35 KB. A false red here is a repo-wide merge stop, which is #593 exactly.
-          # `gh api --paginate --jq` applies the filter to EACH PAGE and concatenates the outputs,
-          # so a jq program ending in `| length` emits one integer PER PAGE ("1\n0" on two pages) --
-          # a FALSE RED on any PR with more than one page of comments (>30), measured. `--slurp` is
-          # rejected together with `--jq`, so emitting one MATCH line per hit and counting lines is
-          # the only shape that works. No pipe into an early-exit reader either, so the SIGPIPE
-          # class that caused the first false red cannot return.
+          # The matcher lives in .github/scripts/assert_review_marker.py, NOT here. It encodes
+          # ~16 block-level Markdown rules, and as a regex inside jq inside this block scalar it
+          # was quadruple-escaped and impossible to run in place -- so six consecutive review
+          # rounds were each the first thing ever to execute it, and each found new defects
+          # (backtick closers with trailing content, tilde closers, blockquoted code blocks,
+          # list-item + indented code, an exemplar the matcher itself rejected). The battery in
+          # assert_review_marker_test.py carries every one of those as a regression and runs in
+          # the step above, before this one.
           #
-          # The marker must be on a line of its own that is NOT inside a fenced code block, and
-          # NOT indented as a code block. It deliberately does NOT have to be the LAST line:
-          # ANY trailing text at all -- a footer, a sign-off, a horizontal rule, a postscript --
-          # would make a "last line" rule red a complete, correct review. That brittleness is the
-          # whole reason, and it needs no factual premise about how often it has happened. (An
-          # earlier version of this comment asserted a corpus count here; it was measured false.
-          # The one after that asserted a repo rule requiring footers on bot comments; no such rule
-          # was ever cited. Both are gone -- the argument never needed either.)
-          # ACCEPTED (each verified against the extracted step, not against a corpus): bold,
-          # italic, code span, list item, ordered list, heading, blockquote, trailing period,
-          # trailing tab, uppercase hex, and any trailing text. OBSERVED in the 23-comment corpus
-          # on #670/#674/#675: bold 11, code span 13, list item 5, trailing period 12, italic 1 --
-          # and trailing tab 0, uppercase hex 0. Accepted and observed are different claims; an
-          # earlier version of this comment merged them.
-          # NOT accepted, stated so the boundary is known rather than discovered on a red: a marker
-          # inside a TABLE CELL (arbitrary cell text can precede it) and a marker indented four or
-          # more spaces (that is a code block). The prompt asks for the line at the left margin, and
-          # its exemplar is delivered in exactly that shape -- an earlier version delivered it
-          # indented six spaces, which this assertion would have redded on every real review.
-          markers="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '
-            .[]
-            | select(.user.type == "Bot")
-            | .body
-            | split("\n")
-            | map(sub("\r$"; ""))
-            | reduce .[] as $l ({fence: null, out: []};
-                (($l | capture("^ {0,3}(?<d>`{3,}|~{3,})(?<rest>.*)$")) // null) as $m
-                | if $m == null then (if .fence == null then .out += [$l] else . end)
-                  elif .fence == null then .fence = {c: ($m.d[0:1]), n: ($m.d | length)}
-                  elif ($m.d[0:1] == .fence.c) and (($m.d | length) >= .fence.n)
-                       and (($m.d[0:1] != "`") or (($m.rest | test("^[ \t]*$")))) then .fence = null
-                  else . end)
-            | .out[]
-            | (capture("^ {0,3}(?:(?:[-*+]|[0-9]+[.)]|#{1,6}|>) +)*[*_`]*Reviewed-Commit:?[*_ `]*[ \t]*`?(?<h>[0-9a-fA-F]{7,40})`?\\b") // empty)
-            | .h
-            | ascii_downcase
-            | . as $h
-            | select((env.HEAD_SHA | ascii_downcase | startswith($h)) or (env.MERGE_SHA | ascii_downcase | startswith($h)))
-            | "MATCH"')"
-          # SPLIT from the pipeline on purpose. `x="$(cmd | grep -c ... || true)"` binds `|| true`
-          # to the WHOLE pipeline, so a gh/API failure silently became `hits=0` and was reported as
-          # "no review performed" -- an outage diagnosed as a missing review, on a required,
-          # self-blocking check. Worse, a partial pagination failure after a matching page returned
-          # a pass. Now the gh failure IS the exit status of its own assignment and `set -e` aborts;
-          # only the counting step carries `|| true`, because `grep -c` exits 1 on zero matches,
-          # which is a legitimate empty result rather than an error.
-          hits="$(printf '%s\n' "$markers" | grep -c '^MATCH$' || true)"
+          # `gh api --paginate` alone (no --jq): the filter would otherwise be applied PER PAGE.
+          # `--slurp` is rejected together with --jq, so the whole array comes back and python
+          # parses it once. No pipe into an early-exit reader, so the SIGPIPE class that caused
+          # the first false red cannot return.
+          comments="$(gh api --paginate "repos/$REPO/issues/$PR/comments")"
+          # A gh/API failure aborts under `set -e` above: an API error must never read as "no
+          # review", and must never read as a pass either.
+          hits="$(printf '%s' "$comments" | python3 .github/scripts/assert_review_marker.py "$HEAD_SHA" "$MERGE_SHA")"
           case "$hits" in
             ''|*[!0-9]*) echo "::error::could not count review comments (got: '$hits')."; exit 1 ;;
           esac
