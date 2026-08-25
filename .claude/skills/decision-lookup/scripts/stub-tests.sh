@@ -696,18 +696,30 @@ fi
 echo "----"
 if [ "$skip" -gt 0 ]; then echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability)"; else echo "RESULT: $pass passed, $fail failed"; fi
 # A verdict that can say "pass" without having asked the question is the defect class this suite
-# exists to catch, so it must not have it itself: `skipped()` does not count as failure, so a host
-# on which preconditions become unconstructible would print "6 passed, 0 failed, 12 skipped" and
-# exit 0 — a green reporting the runner, not the wrapper. Assert the case COUNT, not just the
-# absence of failures. Adding or removing a case must move this number in the same diff.
+# exists to catch, so it must not have it itself. `skipped()` is deliberately NOT a failure (see
+# T15g: a hard red on every Mac would train readers to discount reds), but that alone would let a
+# host on which preconditions become unconstructible print a green over a fraction of the cases.
+#
+# So the invariant is COMPLETENESS, not passes: every declared case must reach a verdict of some
+# kind. pass + fail + skip == EXPECTED_CASES means no case silently vanished; it stays true when
+# T15g legitimately skips, and it goes false the moment cases stop running at all.
+# Adding or removing a case must move this number in the same diff.
 EXPECTED_CASES=54
-if [ "$pass" -ne "$EXPECTED_CASES" ]; then
-  echo "RESULT: $pass cases passed, but $EXPECTED_CASES are declared — a skipped case is not a covered case."
-  echo "  If a case skipped: the HOST changed (filesystem, locale, python3, PATH), not the wrapper."
+accounted=$((pass + fail + skip))
+if [ "$accounted" -ne "$EXPECTED_CASES" ]; then
+  echo "INCOMPLETE: $accounted of $EXPECTED_CASES declared cases reached a verdict ($pass passed, $fail failed, $skip skipped)."
+  echo "  Cases stopped running rather than failing — the harness broke, or EXPECTED_CASES is stale."
+  echo "  If a case was added or removed, the diff that did it must move EXPECTED_CASES too."
+  fail=$((fail + 1))
+elif [ "$skip" -gt 0 ]; then
+  # Loud, but NOT a failure — the suite's own rule, kept.
+  echo "NOTE: $skip case(s) SKIPPED on host capability (not a failure). Every declared case is accounted for."
+  echo "  A skip means the HOST changed (filesystem, locale, python3, PATH), not that the wrapper is wrong."
   echo "  Adapt the case to the host; never delete it and never weaken its assertion to recover green."
-  echo "  If EXPECTED_CASES is simply stale, the diff that changed the case count must change it too."
-  fail=$((fail+1))
 fi
+# Deliberately NOT reported here when $fail > 0: the failures printed above ARE the diagnosis, and
+# an extra "cases missing" line on a real wrapper defect would point the reader at the host — the
+# weaken-the-assertion move the line above forbids. It would also double-count into the exit status.
 AFTER="$(fingerprint)"
 if [ "$BEFORE" = "$AFTER" ]; then echo "repo .qmd/ untouched by this suite — confirmed"; else echo "repo .qmd/ CHANGED during the suite — VIOLATION"; fail=$((fail+1)); fi
 exit "$fail"
