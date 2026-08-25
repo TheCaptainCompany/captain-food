@@ -111,4 +111,24 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > review as a PR comment**, because doing so would have carried the marker and flipped the check
 > green — destroying the evidence the PR rests on. That is the limit, demonstrated rather than
 > argued.
+>
+> **The EIGHTH round changed the approach rather than adding a ninth rule, and that is the finding
+> of the whole chain.** Every round from 3 to 8 found a *different* block-level Markdown rule wrong
+> — backtick closers with trailing content, tilde closers, blockquoted fences, list-item plus
+> indented code, a fence quoting a fence, tab columns, container lifetime, prefix equality versus
+> block structure — because the rules interact, and the matcher was re-deriving what a CommonMark
+> parser already knows. So the DIRECTION of error was chosen first: on a check that is required
+> *today*, a false red is a repo-wide merge stop whose revert needs the same check green, while a
+> false green costs a property this gate could never deliver anyway (it cannot prove which bot
+> posted). The matcher now keeps **one** rule — a fence delimiter at column 0 — states its residual,
+> and `.github/scripts/assert_review_marker_differential.py` **measures** the bias against
+> markdown-it-py instead of asserting it, failing if false reds exceed a budget.
+>
+> **And the drift closed itself one more time on the way out.** The comments landing that change
+> quoted the measured figures — and by the next commit the reproducible run disagreed with them.
+> The numbers are gone from every comment; the harness prints its own antecedents (corpus seed,
+> corpus size, parser version) and is the only thing allowed to state one. Same for the
+> file's stated contract: three places still promised that an INDENTED code block was excluded,
+> which round 8 had deliberately stopped doing — a docstring, a workflow comment and the operator
+> hint printed on failure, all telling a reader a rule the code no longer had.
 

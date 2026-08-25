@@ -36,10 +36,15 @@ H = "3f9a2c7e1b8d40526af1c93e07b45d8e2a6f1c04"
 MARKER = f"Reviewed-Commit: {H}"
 PREFIXES = ["", "> ", ">", "- ", "1. ", "  ", "    ", "\t", "> > ", "- > "]
 FENCES = ["```", "~~~", "````", "```yaml", "~~~~"]
-FALSE_RED_BUDGET = 5  # measured 2 at the time of writing; a jump means live_lines regressed
+FALSE_RED_BUDGET = 5  # a jump above this means live_lines regressed; the run prints the actual
+# A derived number may not be stated without its antecedents (ADR-20260817-105845). This harness
+# is the only place allowed to state one, so it prints the corpus seed, the corpus size and the
+# parser version it was measured against -- and no comment elsewhere quotes the figure.
+CORPUS_SEED = 11
+CORPUS_SIZE = 4000
 
 
-def bodies(n: int, seed: int = 11):
+def bodies(n: int, seed: int = CORPUS_SEED):
     rnd = random.Random(seed)
     for _ in range(n):
         out = []
@@ -67,7 +72,7 @@ def main() -> int:
     md = MarkdownIt("commonmark")
     total = false_red = false_green = 0
     first_red = None
-    for body in bodies(4000):
+    for body in bodies(CORPUS_SIZE):
         total += 1
         got = comment_names_commit(body, [H])
         want = renders_live(md, body)
@@ -76,7 +81,13 @@ def main() -> int:
             first_red = first_red or body
         elif got and not want:
             false_green += 1
-    print(f"{total} bodies vs markdown-it-py (commonmark)")
+    try:
+        from importlib.metadata import version as _v
+        parser_version = _v("markdown-it-py")
+    except Exception:  # noqa: BLE001 -- provenance is nice to have, never a reason to fail
+        parser_version = "unknown"
+    print(f"{total} bodies vs markdown-it-py {parser_version} (commonmark preset), "
+          f"corpus seed {CORPUS_SEED}")
     print(f"  FALSE RED   (renders live, gate rejects): {false_red}   budget {FALSE_RED_BUDGET}")
     print(f"  false green (renders code, gate counts) : {false_green}   accepted by design")
     if first_red:

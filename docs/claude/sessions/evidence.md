@@ -223,8 +223,11 @@ evidence — here it was not even true.
   while a false green costs a property this gate could never deliver anyway (it cannot prove which
   bot posted). So bias to counting, keep one rule (a fence delimiter at column 0), state the
   residual, and keep a DIFFERENTIAL harness against a real parser with a false-red budget —
-  `.github/scripts/assert_review_marker_differential.py`. It found 41 false reds in the
-  carefully-built version and 1 in the simple one.
+  `.github/scripts/assert_review_marker_differential.py`. It measured dozens of false reds in the
+  carefully-built version and at most one in the simple one. **The harness prints its own
+  antecedents** (corpus seed, corpus size, parser version) and no comment quotes its figure: the
+  first version of this line stated a bare count that had already drifted by the time the next
+  commit landed, which is ADR-20260817-105845 happening inside the note recording the lesson.
 
   **And make the exemplar you give the model conform to the rule you enforce** — a prompt that
   demonstrates the marker indented, under an assertion that requires the left margin, reds every

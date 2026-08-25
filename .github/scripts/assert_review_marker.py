@@ -2,26 +2,28 @@
 """Decide whether a PR carries a bot review verdict naming a given commit.
 
 WHY THIS IS A FILE AND NOT A jq PROGRAM IN A YAML BLOCK SCALAR (issue #677):
-the matcher encodes ~16 block-level Markdown rules. As a regex inside jq inside a
-YAML block scalar inside a shell heredoc it was quadruple-escaped and impossible
-to run in place, so SIX consecutive review rounds were each the first thing ever
-to execute it, and each found new defects: a backtick closer with trailing
-content, tilde closers, blockquoted code blocks, list-item + indented code, an
-exemplar the matcher rejected. Every one of those is a rule about *rendering*
-that a comment cannot assert. This module is executable and has a table-driven
-battery next to it (`assert_review_marker_test.py`), which runs in CI before the
-assertion does.
+as a regex inside jq inside a YAML block scalar inside a shell heredoc it was
+quadruple-escaped and impossible to run in place, so six consecutive review
+rounds were each the first thing ever to execute it, and each found new defects:
+a backtick closer with trailing content, tilde closers, blockquoted code blocks,
+list-item + indented code, an exemplar the matcher rejected. Every one of those
+is a rule about *rendering* that a comment cannot assert. This module is
+executable and has a table-driven battery next to it
+(`assert_review_marker_test.py`), which runs in CI before the assertion does.
 
-The rule: a comment counts if it is authored by a GitHub App bot AND carries a
-`Reviewed-Commit:` marker naming the head or merge sha on a line that GitHub
-renders as LIVE TEXT -- not inside a fenced code block, not inside an indented
-code block, at any container depth.
+THE RULE, and it is deliberately ONE rule: a comment counts if it is authored by
+a GitHub App bot AND carries a `Reviewed-Commit:` marker naming the head or merge
+sha on a line that is not inside a fenced code block opened by a delimiter at
+COLUMN 0. See `live_lines` for why every other block rule was deleted in round 8
+rather than fixed.
 
 The boundary, stated because claiming more is how this went wrong five times:
 this raises the bar on a marker quoted from another comment. It does not make it
-impossible -- HTML block forms (<pre>, <code>, multi-line HTML comments) still
-render as code while this counts them -- and it cannot prove WHICH bot posted the
-comment, because this repo's own agent sessions post under the same identity.
+impossible. INDENTED code blocks, fences opened inside a blockquote or a list,
+`<pre>`, `<code>` and multi-line HTML comments all render as code while this
+counts them -- that is the accepted direction of error, not an oversight. Nor can
+it prove WHICH bot posted the comment, because this repo's own agent sessions
+post under the same identity.
 """
 from __future__ import annotations
 
@@ -56,10 +58,13 @@ def live_lines(body: str):
       * ONLY a fence delimiter at COLUMN 0 opens or closes a block. That is the entire rule.
       * Everything else -- indented lines, blockquotes, lists, HTML -- is treated as LIVE.
 
-    Measured against markdown-it-py (commonmark preset) over 4000 generated bodies mixing
-    containers, fence characters and indents: 2 false reds, 330 false greens. The previous
-    design measured 41 false reds; the indented-code rule was the last false-red source and
-    removing it is the whole difference. The direction of the error is the point.
+    The bias is MEASURED, not asserted: `assert_review_marker_differential.py` classifies a
+    deterministic corpus against markdown-it-py and prints its own antecedents (corpus seed,
+    body count, parser version) so the figure is reproducible rather than quoted. Run it; do not
+    trust a number pasted here, because the last one drifted the moment this rule changed. What
+    the run showed when this design replaced the previous one: false reds collapsed from dozens
+    to at most one, false greens rose, and the indented-code rule was the last false-red source.
+    The DIRECTION of the error is the point, not its magnitude.
 
     WHY BIAS THIS WAY. The gate exists to catch the SILENT NO-VERDICT paths -- the action's
     self-skip, a 429, permission denials. It has never been able to prove WHICH bot posted a
@@ -69,10 +74,11 @@ def live_lines(body: str):
     repo-wide merge stop whose revert needs the same check green. Every misclassification this
     design can still make therefore counts the marker rather than rejecting it.
 
-    THE RESIDUAL, stated plainly: a marker quoted inside a blockquote, a list, or an HTML block
-    WILL satisfy this gate. So will `<pre>`, `<code>`, and HTML comments. Do not paste a marker
-    line into a comment. If this ever needs to be airtight, the answer is a real CommonMark
-    parser, not another rule here.
+    THE RESIDUAL, stated plainly: a marker quoted inside an INDENTED code block, inside a fence
+    opened at any column other than 0, inside a blockquote, a list, or an HTML block WILL satisfy
+    this gate. So will `<pre>`, `<code>`, and HTML comments. Do not paste a marker line into a
+    comment. If this ever needs to be airtight, the answer is a real CommonMark parser, not
+    another rule here.
     """
     fence: tuple[str, int] | None = None  # (delimiter char, run length) -- column 0 only
     for raw in body.split("\n"):

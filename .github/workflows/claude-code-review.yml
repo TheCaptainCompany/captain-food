@@ -78,8 +78,8 @@ jobs:
               A later step ASSERTS that marker and fails the job without it. It is what
               distinguishes "this commit was reviewed" from "some earlier commit was reviewed":
               comments survive pushes, so a bare "a review comment exists" is satisfied by a
-              verdict on a diff that no longer exists. A marker inside a fenced or indented code
-              block does not count.
+              verdict on a diff that no longer exists. Put the marker on a line of its own at the
+              left margin, outside any ``` fenced block.
             - `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) for each
               specific issue, anchored to the line it concerns.
             Be concrete about consequence: name what breaks, for whom, and under what input.
@@ -116,9 +116,11 @@ jobs:
       # outage, permission denials.
       #
       # WHAT THIS STEP ACTUALLY PROVES, stated exactly, because the name is shorter than the truth:
-      # that a comment authored by a GitHub App bot that carries, on a line of its own outside any
-      # fenced or indented code block, a Reviewed-Commit marker naming this PR's head or merge
-      # commit, exists on this PR. It does NOT and CANNOT
+      # that a comment authored by a GitHub App bot that carries, on a line outside any fenced
+      # block opened at column 0, a Reviewed-Commit marker naming this PR's head or merge
+      # commit, exists on this PR. Indented code, fences opened inside a blockquote or list, and
+      # HTML block forms all render as code and still COUNT -- an accepted, measured bias toward
+      # counting, because a false red here stops every merge in the repo. It does NOT and CANNOT
       # prove WHICH bot produced it -- this repo's own mob-lens sessions post under the identical
       # `claude[bot]` identity, indistinguishable by any field available here. So the gate is a
       # tripwire against the silent no-verdict paths above, not an authentication of the reviewer.
@@ -157,14 +159,15 @@ jobs:
             echo "draft PR - the review step is skipped by design, nothing to assert."
             exit 0
           fi
-          # The matcher lives in .github/scripts/assert_review_marker.py, NOT here. It encodes
-          # ~16 block-level Markdown rules, and as a regex inside jq inside this block scalar it
-          # was quadruple-escaped and impossible to run in place -- so six consecutive review
-          # rounds were each the first thing ever to execute it, and each found new defects
-          # (backtick closers with trailing content, tilde closers, blockquoted code blocks,
-          # list-item + indented code, an exemplar the matcher itself rejected). The battery in
-          # assert_review_marker_test.py carries every one of those as a regression and runs in
-          # the step above, before this one.
+          # The matcher lives in .github/scripts/assert_review_marker.py, NOT here. As a regex
+          # inside jq inside this block scalar it was quadruple-escaped and impossible to run in
+          # place -- so six consecutive review rounds were each the first thing ever to execute
+          # it, and each found new defects (backtick closers with trailing content, tilde closers,
+          # blockquoted code blocks, list-item + indented code, an exemplar the matcher itself
+          # rejected). Round 8 stopped patching block rules and kept exactly ONE, biasing the
+          # residual toward counting; assert_review_marker_differential.py measures that bias
+          # against a real CommonMark parser. The battery in assert_review_marker_test.py carries
+          # every defect above as a regression and runs in the step above, before this one.
           #
           # `gh api --paginate` alone (no --jq): the filter would otherwise be applied PER PAGE.
           # `--slurp` is rejected together with --jq, so the whole array comes back and python
@@ -196,8 +199,8 @@ jobs:
             echo "  3. Permission denials (permission_denials_count must be 0) -- the reviewer ran"
             echo "     blindfolded and had nowhere to put its findings."
             echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
-            echo "     It must render as LIVE TEXT: not inside a fenced code block (backtick or"
-            echo "     tilde, at any blockquote/list depth) and not indented four or more spaces."
+            echo "     It must sit outside any fenced code block opened at the LEFT MARGIN"
+            echo "     (backtick or tilde). Indentation and blockquote/list nesting are tolerated."
             echo "     .github/scripts/assert_review_marker_test.py is the exact contract."
             echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
             echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."
