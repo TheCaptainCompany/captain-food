@@ -10435,14 +10435,32 @@ mod docs_only_ci_and_legacy_visibility {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
         const CMD: &str = "bash .claude/skills/decision-lookup/scripts/stub-tests.sh";
+        // THE PANIC HOOK IS PROCESS-WIDE, so silencing it needs a guard that restores on UNWIND,
+        // not a call at the end of the happy path. `claude-review` caught the first shape on PR
+        // #679: `set_hook(prev)` sat after three assertions that were themselves inside the
+        // suppressed window, so the guard whose entire job is to say "your plant is now vacuous"
+        // would have failed with NO MESSAGE -- and leaked the null hook to every later failing
+        // test in the binary, which libtest runs in parallel threads. Exactly the diagnosability
+        // this PR argues for everywhere else.
+        struct HookGuard(Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>);
+        impl Drop for HookGuard {
+            fn drop(&mut self) {
+                if let Some(prev) = self.0.take() {
+                    std::panic::set_hook(prev);
+                }
+            }
+        }
+
         let check = |src: &str| {
+            // Silence ONLY around the deliberate panic, so a failure anywhere else keeps its
+            // message and no other test's window is affected for longer than one call.
+            let _guard = HookGuard(Some(std::panic::take_hook()));
+            std::panic::set_hook(Box::new(|_| {}));
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 assert_pinned_in_changes_job(src, CMD, "the gate")
             }))
             .is_ok()
         };
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {})); // the plants panic on purpose; keep the log readable
 
         assert!(check(&ci), "the real ci.yml must pass, or every mutant below is vacuous");
 
@@ -10501,8 +10519,6 @@ mod docs_only_ci_and_legacy_visibility {
                 false_reds.push(*name);
             }
         }
-        std::panic::set_hook(prev);
-
         assert!(
             survived.is_empty(),
             "these disarming mutants were NOT caught: {:?}. Each makes the gate step unable to fail while its `run:` stays byte-identical.",

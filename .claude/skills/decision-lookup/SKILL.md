@@ -193,8 +193,25 @@ The committed suite is the authority for this wrapper, and it is **executable in
 `RETRIEVAL-QMD-CI`). Re-run it locally after any wrapper change:
 
 ```
-bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
+
+**The variable is not optional in that loop.** Before running a single case, the suite compares all
+FOUR gate scripts (`stub-tests.sh`, `decision-lookup.sh`, and the two `.claude/hooks/register-check*`
+scripts) against their committed blobs at `HEAD`, and refuses to report if any of them drifted — the
+overwrite class a review planted green twice. So the moment you edit the wrapper or this suite, a
+bare invocation exits 1 with `FATAL: ... differs from the committed blob at HEAD` and **zero cases
+run**. `DECISION_LOOKUP_ALLOW_DIRTY=1` opts out of that comparison for the edit-and-re-run loop and
+nothing else. CI invokes the script with no opt-out, and the codegen pin forbids the variable as a
+CI `env:` key at every scope, so the CI path cannot be talked out of verifying.
+
+The same applies on a host that keeps `git` or `cmp` outside `/usr/bin:/bin:/usr/local/bin` — the
+block pins that PATH deliberately, so that it cannot be sent to a shim, and exits 1 if either tool
+is absent. Nix and some containers will need the opt-out for that reason alone.
+
+(This paragraph exists because `claude-review` caught the authority doc instructing a command that
+could not succeed on the one occasion it told you to run it — the same trap that was fixed for
+`make hooks-test` and `workflow.md` in the same change, and left open here.)
 
 **54 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
