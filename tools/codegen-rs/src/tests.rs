@@ -10366,10 +10366,16 @@ mod docs_only_ci_and_legacy_visibility {
             .or_else(|| doc.get(serde_yaml::Value::Bool(true)))
             .and_then(|t| t.as_mapping())
             .expect("ci.yml must declare `on:` (as the string \"on\" under YAML 1.2, or boolean true under 1.1)");
-        let push = trigger
+        // ABSENT AND NULL ARE THE WIDEST CASES, not violations. `push:` with a null body is the
+        // commonest spelling of "every push", and `.as_mapping()` on it is None -- so `.expect()`
+        // panicked with "must run on push" about a workflow that does run on push. Likewise an
+        // omitted `branches:` means EVERY branch, strictly wider than `['**', '!badges']`, and the
+        // containment check redded it for "narrowing". Two strictly-widening edits blocked by the
+        // guard against narrowing: the false-red instrument, a fourth time (review of PR #679).
+        let push_val = trigger
             .get(serde_yaml::Value::String("push".into()))
-            .and_then(|p| p.as_mapping())
             .expect("ci.yml must run on push -- the docs-only lane reaches `main` as a push");
+        if let Some(push) = push_val.as_mapping() {
         for key in ["paths", "paths-ignore"] {
             assert!(
                 !push.contains_key(serde_yaml::Value::String(key.into())),
@@ -10377,21 +10383,36 @@ mod docs_only_ci_and_legacy_visibility {
                 key, what
             );
         }
-        // CONTAINMENT, not equality. `["**", "!badges"]` was pinned exactly, so adding a second
-        // workflow-written branch to the exclusion list -- the `badges` precedent says that will
-        // happen -- would red with a message accusing the author of removing the gate. What
-        // matters is that `**` is still there: a `!`-prefixed EXCLUSION does not narrow the
-        // guarded surface, a positive filter does.
-        let branches: Vec<&str> = push
-            .get(serde_yaml::Value::String("branches".into()))
-            .and_then(|b| b.as_sequence())
-            .map(|b| b.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default();
-        assert!(
-            branches.iter().any(|b| *b == "**"),
-            "`on.push.branches` ({:?}) no longer contains `**` -- a positive filter narrows the branches {} guards, with every other assertion here green. Excluding a workflow-written branch with `!name` is fine; dropping `**` is not",
-            branches, what
-        );
+        // CONTAINMENT PLUS THE EXCLUSIONS. `["**", "!badges"]` was pinned by equality once, which
+        // reds a legitimate second exclusion. But treating every `!` pattern as benign was ALSO
+        // wrong, and worse: `['**', '!main']` keeps `**` present, passes every other assertion,
+        // and stops the workflow triggering on `main` -- the lane CLAUDE.md routes spec- and
+        // docs-only changes down with no branch and no PR, so it has no `pull_request` event to
+        // fall back on. `['**', '!*']` is worse still: `*` does not match `/`, so it drops every
+        // single-segment branch, which is every `NN-slug` branch this repo creates. GitHub
+        // evaluates `!` patterns as REMOVALS from the set the positive patterns admitted, so an
+        // exclusion absolutely can narrow the guarded surface (review of PR #679).
+        if let Some(seq) = push.get(serde_yaml::Value::String("branches".into())).and_then(|b| b.as_sequence()) {
+            let branches: Vec<&str> = seq.iter().filter_map(|v| v.as_str()).collect();
+            assert!(
+                branches.iter().any(|b| *b == "**"),
+                "`on.push.branches` ({:?}) no longer contains `**` -- a positive filter narrows the branches {} guards, with every other assertion here green. Omitting `branches` entirely is fine (it means every branch); dropping `**` from a list is not",
+                branches, what
+            );
+            for excluded in branches.iter().filter(|b| b.starts_with('!')) {
+                let pat = &excluded[1..];
+                let hides_main = pat == "main"
+                    || pat == "*"
+                    || pat == "**"
+                    || (pat.ends_with('*') && "main".starts_with(pat.trim_end_matches('*')));
+                assert!(
+                    !hides_main,
+                    "`on.push.branches` excludes `{}`, which removes `main` from the branches {} runs on -- and the docs-only lane reaches `main` as a PUSH with no PR, so nothing else covers it. `**` being present does not save you: GitHub applies `!` patterns as removals",
+                    excluded, what
+                );
+            }
+        }
+        }
         // `pull_request` exists for FORKED PRs, which never produce a push to this repo. Key
         // PRESENCE was all this asserted until review #8 of PR #679: `pull_request: {paths-ignore:
         // ['**']}` and `types: [labeled]` both left it green while removing the gate from every
@@ -10782,6 +10803,10 @@ mod docs_only_ci_and_legacy_visibility {
             ("pull_request paths-ignore", ci.replacen("  pull_request:\n", "  pull_request:\n    paths-ignore: ['**']\n", 1)),
             ("pull_request types drops synchronize", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened]\n", 1)),
             ("pull_request branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['release/*']\n", 1)),
+            // `**` still present, workflow no longer triggers on main -- and the docs-only lane
+            // reaches main as a PUSH with no PR, so nothing else covers it.
+            ("push.branches EXCLUDES main", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!main']", 1)),
+            ("push.branches excludes every single-segment branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*']", 1)),
         ];
         let mut survived = Vec::new();
         for (name, mutated) in &must_red {
@@ -10799,6 +10824,12 @@ mod docs_only_ci_and_legacy_visibility {
             ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
             ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),
             ("pull_request types WIDENED", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", 1)),
+            // STRICTLY WIDER trigger surfaces. Both redded before review #11: an omitted
+            // `branches:` means EVERY branch, and a null `push:` body is the commonest spelling of
+            // "every push". A guard against narrowing that blocks widening is the false-red
+            // instrument wearing the other hat.
+            ("push.branches removed entirely", ci.replacen("    branches: ['**', '!badges']\n", "", 1)),
+            ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
             // to red on an innocent step addition (`steps.len() == 4`). An ordinary extra step
             // that names nothing sensitive must stay green, or the next contributor learns to
@@ -10812,6 +10843,17 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - name: Cache warm\n        run: echo warm\n      - name: decision-lookup hermetic stub suite",
                 1)),
         ];
+        // ASSERTED, NOT NARRATED. The ADR, the journal and the PR body all said "20 mutants, 5
+        // controls" while the test carried 21 and 7 -- a derived number stated in three records
+        // with nothing re-deriving it, which is exactly ADR-20260817-105845. The prose no longer
+        // states a count; this is the only place one lives, and it cannot drift from the arrays it
+        // measures.
+        assert!(
+            must_red.len() >= 20 && must_stay_green.len() >= 5,
+            "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
+            must_red.len(),
+            must_stay_green.len()
+        );
         let mut false_reds = Vec::new();
         for (name, mutated) in &must_stay_green {
             assert_ne!(mutated, &ci, "control `{}` did not apply", name);

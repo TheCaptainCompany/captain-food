@@ -189,7 +189,9 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > WHOLE four-file gate set**, so replacing either guard is caught by the other; the pin ignores
 > comment lines and requires both lists complete; the fixture covers all four with the
 > guard-replacement case planted red; and `both_scopes_reject_execution_altering_env` now exists,
-> mutating the REAL `ci.yml` 20 ways with 5 innocent controls that must stay green. A fourth disarm
+> mutating the REAL `ci.yml` at every scope and on both trigger halves, with innocent controls that
+> must stay green (no count stated — it drifted in three records at once; the test asserts its own
+> corpus size now). A fourth disarm
 > of the same class fell out of it: **`GIT_DIR` redirects the ORACLE, not the binary** — `git
 > cat-file blob HEAD:<path>` reads a decoy repo whose HEAD holds the tampered bytes and reports OK
 > — reachable through a job-level `env:`. Closed with `unset "${!GIT_@}"` in both scripts and a

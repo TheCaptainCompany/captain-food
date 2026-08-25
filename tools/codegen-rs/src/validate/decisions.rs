@@ -653,11 +653,25 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     ) {
                         continue;
                     }
-                    // AN EXPLANATION IS NOT A CITATION. Prose that says a row is superseded is
-                    // exactly what we want people writing, and it necessarily names the old row.
-                    // Without this, `row `X` is superseded, name the head` reds with no way to
-                    // clear it but rewording -- a guard whose only escape is silence.
-                    if line.to_lowercase().contains("superseded") {
+                    // AN EXPLANATION IS NOT A CITATION -- but scope the exemption to the CLAUSE
+                    // around this occurrence, not the whole line. A whole-line test is a one-word
+                    // opt-out of a gate whose entire argument is that opt-outs must be explicit,
+                    // and it blinded the rule on the single most load-bearing line in the corpus:
+                    // SKILL.md's headline authority sentence cites the controlling row AND says
+                    // "never the superseded row" further along, so reverting that citation to the
+                    // dead row would have stayed green -- in the file whose stale citations
+                    // motivated this rule.
+                    let clause_end = line[at..]
+                        .find(['.', ';', '—'])
+                        .map_or(line.len(), |i| at + i);
+                    // `i + 1` would land INSIDE the em-dash: `—` is three bytes, and slicing a
+                    // str on a non-boundary panics. The corpus contains em-dashes, so the
+                    // round-trip test caught this immediately -- which is the argument for having
+                    // run it against real content rather than fixtures alone.
+                    let clause_start = line[..at].rfind(['.', ';', '—']).map_or(0, |i| {
+                        i + line[i..].chars().next().map_or(1, char::len_utf8)
+                    });
+                    if line[clause_start..clause_end].to_lowercase().contains("superseded") {
                         continue;
                     }
                     // TRIM TRAILING PUNCTUATION BEFORE LOOKING AT THE LAST TOKEN. A trailing colon

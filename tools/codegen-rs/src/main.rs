@@ -136,7 +136,24 @@ fn main() {
                     if ft.is_symlink() {
                         continue;
                     }
-                    if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".local.")) {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    // PRUNE THE GITIGNORED TREES. `.claude/worktrees/` holds FULL CHECKOUTS of the
+                    // repo (see .gitignore) -- their own docs/, specs/ and, after any build, a
+                    // target/ with tens of thousands of cargo .fingerprint JSON files. Descending
+                    // there did three bad things at once: it re-admitted `docs/**` through a side
+                    // door, defeating this rule's deliberate scope decision; it read every
+                    // fingerprint file on every run; and because a stale worktree can hold ANY
+                    // branch, `make validate` -- which stop-gate.sh runs every turn -- could red on
+                    // an untracked file from another branch with nothing in the working tree that
+                    // clears it. `journal-2026-W34.md` on main carries exactly such a line today.
+                    if matches!(name, "worktrees" | "target" | "node_modules" | ".git") {
+                        continue;
+                    }
+                    // `settings.local.json` and friends: a contributor's local overrides are not
+                    // committed content and must never red a shared gate. (This skips THAT name
+                    // pattern, not "untracked files" -- an earlier comment here claimed the latter,
+                    // which the code never did.)
+                    if name.contains(".local.") {
                         continue;
                     }
                     if ft.is_dir() {
