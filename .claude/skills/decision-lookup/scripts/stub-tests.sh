@@ -27,6 +27,13 @@ pass=0; fail=0; skip=0
 # cannot bound arbitrary shell. So the gate checks the thing that actually matters: are the
 # scripts about to run the ones in the commit?
 #
+# WHICH COMMIT, precisely -- the eighth review called the wording loose and it was. On a
+# `pull_request` event `actions/checkout` checks out `refs/pull/N/merge`, so `HEAD` is the MERGE
+# commit, not the PR head. That is the right thing to compare against: the merge commit's tree IS
+# the tree on disk, so the check proves "these scripts are the ones in the commit CI checked out".
+# Confirmed in run 32810599803: `HEAD is now at d9461b43 Merge 6c1cbaf1 into 2fb3bd3c`, then both
+# gate steps printed `self-verification: OK`.
+#
 # DEFAULT-ON, with an explicit opt-out (eighth review of PR #679). It used to run only when
 # GITHUB_ACTIONS=true, which fails OPEN: the discriminator was an ordinary environment variable,
 # settable from the same untrusted surface the check defends against. Now it always runs and a
