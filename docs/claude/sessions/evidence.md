@@ -170,12 +170,13 @@ evidence — here it was not even true.
 - **The self-skip EXITS 0, and `claude-review` is a REQUIRED check — so such a PR clears its own
   review gate** ([#677](https://github.com/TheCaptainCompany/captain-food/issues/677)). Since
   [#680](https://github.com/TheCaptainCompany/captain-food/pull/680) the job asserts the outcome
-  instead: the reviewer's summary comment must END with, as its last non-empty line,
+  instead: the reviewer's summary comment must CONTAIN, on a line of its own,
 
   > `Reviewed-Commit: <sha>`
 
-  where `<sha>` is the PR's **head or merge** commit — decorated (backticks, bold) and abbreviated
-  to ≥7 hex are accepted, because across 23 real reviewer comments it wrote a bare 40-char sha
+  on a line of its own, outside any fenced (``` / ~~~) or 4-space-indented code block, where
+  `<sha>` is the PR's **head or merge** commit — decorated (backticks, bold) and abbreviated to
+  ≥7 hex are accepted, because across 23 real reviewer comments it wrote a bare 40-char sha
   **zero** times. **Copy the sha from the prompt, not from the working tree**: on a `pull_request`
   event the checkout is the MERGE ref, so `git rev-parse HEAD` reports something else.
 
@@ -197,10 +198,14 @@ evidence — here it was not even true.
   API failure then reads as "zero matches" instead of aborting under `set -e` — an outage
   diagnosed as a missing review — and a partial failure after a match reads as a **pass**. Split
   the fetch from the count: one assignment each, so the fetch's failure is its own exit status.
-- **Do not require a marker to be the LAST line of a bot comment.** This repo requires an
-  attribution footer on bot posts, so "last line" is a formatting-caused merge stop. Require it on
-  a line of its own and **not inside a fenced block** (``` or ~~~) — that is what actually stops a
-  quoted marker from satisfying a gate, which was the point.
+- **Do not require a marker to be the LAST line of a bot comment.** Agent-authored comments in
+  this environment carry a required attribution footer, and any trailing text at all — a footer, a
+  sign-off, a horizontal rule — then reds a complete, correct review. Require it on a line of its
+  own, outside any fenced (``` / ~~~) or 4-space-indented code block. **That RAISES the bar on a
+  quoted marker; it does not make quoting impossible** — a naive fence tracker that toggles on any
+  ``` desynchronises on NESTED fences, which is the idiomatic way to quote a fenced block, so
+  track the opening delimiter's char and run length and close only on a matching-or-longer run.
+  Even then, anyone willing can satisfy such a gate; say so rather than claiming otherwise.
 
 **And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and
 `permission_denials_count: 0`, it posted nothing on three consecutive probes of a 5-line diff

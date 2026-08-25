@@ -47,7 +47,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > - The marker named `head.sha`, but `actions/checkout` on a `pull_request` event takes the **MERGE
 >   ref** (`refs/remotes/pull/680/merge` in the live log), so a reviewer resolving `git rev-parse
 >   HEAD` reports a different sha. Worse, across **23 real bot comments** it wrote a bare 40-char
->   sha **zero** times — 19 backticked, 41 abbreviated. An exact-string match would have redded
+>   sha **zero** times — 19 backticked — counts of sha OCCURRENCES, not of comments. An exact-string match would have redded
 >   every real review. **The pass path had never once been exercised**, and structurally cannot be
 >   on this PR.
 >
@@ -57,8 +57,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > Requiredness lives in ruleset `19179892`. Anyone reading #677 as "option 2 solved requiredness" is
 > reading it wrong.
 >
+> **A FOURTH false record claim, and this one was load-bearing.** The comment justifying the
+> marker-rule change said *"this repo requires an attribution footer on bot comments, and 1 of the
+> 23 real reviewer comments already ends with one"*. The third review measured that corpus:
+> **0 of 23** carry a footer, 0 carry a `---` rule, and the two repo rules about attribution
+> footers concern ISSUE bodies. The footer requirement that IS real applies to agent-authored
+> comments in this environment — a harness rule, not a repo rule, and not a fact about the corpus.
+> **I invented a count to support a design decision.** The rule change stands on its own merits —
+> any trailing text at all reds a complete, correct review — and the fabricated antecedent is gone.
+> This is precisely what ADR-20260817-105845 exists to prevent, and it was caught because the
+> number named its own antecedents and they refuted it.
+>
+> **The anti-quoting property was asserted three times and did not hold.** The fence tracker
+> toggled on any ``` line, so it desynchronised on NESTED fences — the idiomatic way to quote a
+> fenced block — and a 4-space-indented code block was never checked at all. Both defeated it;
+> both now red, and the tracker records the opening delimiter's char and run length. **The honest
+> statement stays**: raising the bar is not impossibility, and anyone willing can still satisfy
+> this gate. Claiming otherwise in three places, while the same file elsewhere said the truth, was
+> the same overclaim this PR exists to fix — one level down.
+>
 > **And the shape worth carrying forward**: this gate can only ever prove *"a GitHub App bot comment
-> ending in a marker for this commit exists"*. It cannot prove WHICH bot — the team's own mob-lens
+> carrying a marker for this commit exists"*. It cannot prove WHICH bot — the team's own mob-lens
 > sessions post under the identical `claude[bot]` identity. The step is named and commented for what
 > it proves, not for what one wishes it proved. The independent reviewer also **declined to post its
 > review as a PR comment**, because doing so would have carried the marker and flipped the check
