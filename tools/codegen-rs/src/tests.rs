@@ -10420,6 +10420,46 @@ mod docs_only_ci_and_legacy_visibility {
         );
     }
 
+    /// The docs-only fast path may never swallow the paths the gate pins live on.
+    ///
+    /// `assert_gate_script_self_verifies` and `both_scopes_reject_execution_altering_env` run in
+    /// the `codegen` job, which is SKIPPED when the `changes` job decides a push is docs-only. That
+    /// is safe today only because `.claude/**` and `.github/**` are absent from the allowlist, so
+    /// any change able to disarm a pin also runs it. Nothing recorded that coupling until
+    /// `claude-review` noted it on PR #679 -- as prose, in a review comment, which is where a
+    /// forgettable invariant goes to die.
+    ///
+    /// Widening the allowlist to cover either path would silently stop the pins running on exactly
+    /// the changes they exist to police: the gate-disarm class this whole PR is about, arriving
+    /// through the door marked "docs". CLAUDE.md's compiler-first rule says a check is the fallback
+    /// where types cannot reach, and a shell `case` arm in a YAML string is one of those places.
+    #[test]
+    fn the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let arm = ci
+            .lines()
+            .find(|l| l.contains("docs_only=false; break"))
+            .and_then(|_| ci.lines().find(|l| l.trim_end().ends_with(") ;;")))
+            .map(str::trim)
+            .expect(
+                "the docs-only `case` arm has moved or been reworded. It listed the paths a push \
+                 may touch while still SKIPPING the `codegen` job that runs the gate pins -- find \
+                 it and re-point this test, do not delete it.",
+            );
+        for forbidden in [".claude", ".github", "crates", "tools", "specs"] {
+            assert!(
+                !arm.contains(forbidden),
+                "the docs-only allowlist ({}) now covers `{}`. A push touching only that path \
+                 would SKIP the `codegen` job -- and with it `assert_gate_script_self_verifies` \
+                 and `both_scopes_reject_execution_altering_env`, the two tests that stop a gate \
+                 script or the CI pin being disarmed. Widening this arm is how the gate-disarm \
+                 class walks in through the door marked \"docs\".",
+                arm, forbidden
+            );
+        }
+    }
+
     /// The scope guards, PLANTED RED **from the repo**, not from a reviewer's scratchpad.
     ///
     /// This test exists because review #9 grepped for the name a comment two screens up promised
