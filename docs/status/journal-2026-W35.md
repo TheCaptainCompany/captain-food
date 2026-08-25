@@ -81,11 +81,14 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > This is precisely what ADR-20260817-105845 exists to prevent, and it was caught because the
 > number named its own antecedents and they refuted it.
 >
-> ⚠️ **THE THREE PARAGRAPHS THAT FOLLOW DESCRIBE A DESIGN THAT WAS DELETED ON PURPOSE.** They are
-> kept because the defects they name are real and were paid for, but their PRESCRIPTIONS —
-> `^ {0,3}` openers, excluding 4-space-indented code, "a table cell and a 4-space indent are not
-> accepted" — are NOT what the matcher does. Round 8 reversed the approach; see the two paragraphs
-> after them. Review #9 found these read as settled learning by anyone arriving at the top.
+> ⚠️ **THE NEXT TWO PARAGRAPHS PRESCRIBE A DESIGN THAT WAS DELETED ON PURPOSE.** They are kept
+> because the defects they name are real and were paid for, but two of their prescriptions —
+> `^ {0,3}` openers, and excluding 4-space-indented code — are NOT what the matcher does. Round 8
+> reversed the approach; see below. (The banner's first version said THREE paragraphs and swept in
+> the one after them, which is still true and still load-bearing; and it listed "a table cell is
+> not accepted" as deleted when a table cell is still not accepted. A new false statement inside a
+> retraction — review #10 caught it, and it is the fourth time in this chain that a correction
+> introduced its own error.)
 >
 > **A FIFTH and SIXTH round found more of the same, and the pattern is now the finding.** The
 > marker exemplar the prompt DELIVERS was indented six spaces while the assertion enforced a
@@ -149,9 +152,17 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > the consequence: a vivid blast-radius sentence propagates faster than a correct one.**
 >
 > **And the improvement the redesign was bought with is partly an artifact of the instrument.**
-> ~30% of the generated corpus's lines are fence delimiters; only 1 of 29 real `claude[bot]`
-> comments contains a fence character at all, and against the REAL corpus both the old and the new
-> matcher score zero false reds. The harness's oracle also stripped every `<code>`, so it read an
+> ~30% of the generated corpus's lines were fence delimiters — and **every entry in its fence
+> alphabet was a genuine fence OPENER**, so no body it could emit would ever expose a disagreement
+> about whether a column-0 delimiter opens one. Review #10 found a live false red hiding in that
+> blind spot for two rounds: ```` ```make validate``` ```` at the start of a line is a paragraph,
+> not a fence, because a backtick info string may not contain a backtick — and reviewers here write
+> that constantly. Fixed, alphabet widened, and the numbers IMPROVED (worst false red 4 → 1), which
+> is the tell that the old figure measured the alphabet rather than the matcher.
+> (An earlier version of this paragraph stated a corpus count — "1 of 29" — imported from a review
+> report and never measured. It is deleted, not re-guessed; the argument stands on the alphabet
+> measurement, which is in the repo and reproducible.)
+> The harness's oracle also stripped every `<code>`, so it read an
 > inline code span in a paragraph — the commonest real shape for a sha — as "renders as code",
 > hiding false reds in the only direction the budget guards. Fixed to track `<pre>` depth. The
 > budget now sweeps seven seeds instead of one, because the shipped matcher measures 0–4 across
@@ -162,6 +173,11 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > and the harness's exclusion from CI — which is exactly the defect `REVIEW-GATE-BYPASS` was
 > created to retire, repeated one round later. Both now sit in `REVIEW-MARKER-BIAS` (open), with
 > the measured option space, including the one review #9 checked so nobody re-derives it: restoring
-> a correct indented-code rule costs 61–80 false reds across seven seeds, because lazy paragraph
-> continuation needs paragraph context. **Do not restore the indent rule.**
+> a correct indented-code rule is expensive, because lazy paragraph continuation needs paragraph
+> context a line-at-a-time rule does not have. **That is now RUNNABLE rather than asserted**:
+> `assert_review_marker_differential.py --variant indent` measures it against the same corpus. The
+> first version of this sentence quoted a range from a review report against code that existed
+> nowhere — the sole evidence dismissing an option in an OPEN register row, and unreproducible by
+> anyone. **The lesson: importing a reviewer's number into a durable record is the same defect as
+> inventing one.** ADR-20260817-105845 does not care where the number came from.
 

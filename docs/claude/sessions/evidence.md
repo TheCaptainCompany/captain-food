@@ -239,10 +239,13 @@ evidence — here it was not even true.
   drifted by the time the next commit landed, which is ADR-20260817-105845 happening inside the
   note recording the lesson.
 
-  **A generated corpus flatters whatever it over-samples.** ~30% of its lines were fence
-  delimiters; only 1 of 29 real `claude[bot]` comments contains a fence character at all, and
-  against the real corpus the round-7 and round-8 matchers both score zero false reds. Measure
-  against the real population before believing a redesign bought anything.
+  **A generated corpus can only find disagreements its ALPHABET can express.** Every entry in this
+  one's fence list was a genuine fence opener, so no body it emitted could ever disagree with
+  CommonMark about whether a column-0 delimiter OPENS a fence — and a live false red sat in that
+  blind spot for two rounds (```` ```make validate``` ```` starts a paragraph, not a fence: a
+  backtick info string may not contain a backtick). Widening the alphabet with NON-openers and
+  indented delimiters found it, and the measured numbers then improved. **Before trusting a
+  differential harness, ask what its generator cannot produce.**
 
   **The residual is real and now cheap to trip**: a quoted marker inside a blockquote, a list, an
   indented block or an HTML block counts, as do `<pre>`, `<code>` and HTML comments. That RAISES

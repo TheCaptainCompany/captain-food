@@ -120,7 +120,12 @@ jobs:
       # block opened at column 0, a Reviewed-Commit marker naming this PR's head or merge
       # commit, exists on this PR. Indented code, fences opened inside a blockquote or list, and
       # HTML block forms all render as code and still COUNT -- an accepted, measured bias toward
-      # counting, because a false red here stops every merge in the repo. It does NOT and CANNOT
+      # counting, because every no-verdict path this gate exists to catch (the self-skip, a 429, a
+      # model outage, permission denials) produces NO marker at all, so counting an ambiguous one
+      # cannot weaken it. (An earlier version of this line said "a false red here stops every merge
+      # in the repo". Review #10 found it surviving here after the same claim was retracted in
+      # three other files: a MATCHER false red blocks this PR until the reviewer re-posts; the
+      # repo-wide stop is the credit/outage case, which is a TRUE red.) It does NOT and CANNOT
       # prove WHICH bot produced it -- this repo's own mob-lens sessions post under the identical
       # `claude[bot]` identity, indistinguishable by any field available here. So the gate is a
       # tripwire against the silent no-verdict paths above, not an authentication of the reviewer.
@@ -130,6 +135,16 @@ jobs:
       # itself required or un-required, and cannot stop the ruleset accepting `skipped`. This is a
       # VERDICT-HONESTY fix. Requiredness lives in the `main` ruleset -- DECISIONS §45 REV-1
       # and #593, still open.
+      #
+      # TWO RESIDUALS worth naming rather than discovering (review #10):
+      #  - The DRAFT path now reports `success` having reviewed nothing, where it used to report
+      #    `skipped` having reviewed nothing. Benign -- `ready_for_review` retriggers the workflow
+      #    -- but it converts one flavour of green-without-a-review into another rather than
+      #    removing it. The move was made because the ruleset ACCEPTS `skipped`, so a skipped job
+      #    was the worse of the two.
+      #  - `.github/scripts/**` is not this workflow file, so a PR that WEAKENS the matcher does
+      #    not trip the action's self-skip, and the assertion then runs the head's own matcher
+      #    against itself. The battery step above is what stands between that and a silent pass.
       #
       # `!cancelled()` rather than `always()`: a cancelled run (superseded push, manual cancel) is
       # not a missing review, and labelling it one trains readers to discount this red.
@@ -201,11 +216,18 @@ jobs:
             echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
             echo "     It must sit outside any fenced code block opened at the LEFT MARGIN"
             echo "     (backtick or tilde). Indentation and blockquote/list nesting are tolerated."
-            echo "     TWO SHAPES render live and are still MISSED (review #9 characterised both):"
+            echo "     THE MARKER MUST START ITS LINE. Only these prefixes may precede it:"
+            echo "       > (blockquote)  -  *  + (bullet)  1. (ordered)  # (heading)  ** _ \` (emphasis)"
+            echo "     Anything else in front of it does not count, even though it renders live:"
+            echo "       - prose before the marker  (\"Reviewed, no findings. Reviewed-Commit: ...\")"
+            echo "       - a task-list box          (\"- [x] Reviewed-Commit: ...\")"
+            echo "       - a GFM table cell         (\"| ok | Reviewed-Commit: ... |\")"
+            echo "     One more shape renders live and is missed for a different reason:"
             echo "       - a column-0 fence closed by a delimiter indented 1-3 spaces. CommonMark"
-            echo "         closes it; this matcher does not, so everything after it reads as code."
+            echo "         closes it; this matcher does not, so everything after reads as code."
             echo "         Close a fence at column 0."
-            echo "       - a marker inside a GFM TABLE CELL. Put it on a line of its own instead."
+            echo "     (An earlier version of this hint said there were TWO such shapes. Review #10"
+            echo "      found five, two of them pinned as cases in the battery it pointed at.)"
             echo "     .github/scripts/assert_review_marker_test.py is the exact contract."
             echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
             echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."

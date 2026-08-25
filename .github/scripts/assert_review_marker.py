@@ -39,7 +39,10 @@ MARKER = re.compile(
 )
 
 FENCE_AT_COL0 = re.compile(r"^(?P<d>`{3,}|~{3,})(?P<rest>.*)$")
-HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+")
+# (There was a HEADING regex here, stripped from every yielded line. It was DEAD: MARKER's own
+# prefix alternation already accepts `#{1,6}`, so review #10's "drop the HEADING.sub" mutant
+# survived the whole battery. Deleting a line no test can distinguish beats commenting that it
+# matters -- CLAUDE.md's compiler-first rule, applied downward.)
 
 
 def live_lines(body: str):
@@ -60,11 +63,15 @@ def live_lines(body: str):
 
     The bias is MEASURED, not asserted: `assert_review_marker_differential.py` classifies a
     deterministic corpus against markdown-it-py and prints its own antecedents (corpus seed,
-    body count, parser version) so the figure is reproducible rather than quoted. Run it; do not
-    trust a number pasted here, because the last one drifted the moment this rule changed. What
-    the run showed when this design replaced the previous one: false reds collapsed from dozens
-    to at most one, false greens rose, and the indented-code rule was the last false-red source.
-    The DIRECTION of the error is the point, not its magnitude.
+    body count, parser version) so the figure is reproducible rather than quoted, and ratchets a
+    committed per-seed baseline. Run it; do not trust a number pasted here.
+
+    THIS PARAGRAPH USED TO END WITH ONE ANYWAY -- "false reds collapsed from dozens to at most one,
+    and the indented-code rule was the last false-red source" -- and review #10 refuted both halves
+    from output the same commit printed: false reds ran 0-4 across seeds, and the harness's own
+    "first false red" was a column-0 opener with an indented CLOSER, not indented code. Twenty
+    lines under "do not trust a number pasted here". The DIRECTION of the error is the point; the
+    magnitude lives in the harness, which is the only thing that can keep it true.
 
     WHY BIAS THIS WAY, stated as the property rather than the blast radius. The gate exists to
     catch the SILENT NO-VERDICT paths -- the action's self-skip, a 429, a model outage, permission
@@ -91,11 +98,19 @@ def live_lines(body: str):
     fence opened at any column other than 0, inside a blockquote, a list, or an HTML block. So will
     `<pre>`, `<code>`, and HTML comments. Do not paste a marker line into a comment.
 
-    Renders live but does NOT count (the false-red side, characterised by review #9, both
-    reproduced): a fence opened at column 0 and closed by a delimiter indented 1-3 spaces -- the
-    closer is not seen, so the fence runs to end of comment and every later line is dead; and a
-    marker inside a GFM TABLE CELL, which the marker regex cannot match through the leading pipe.
-    Both are named in the operator hint in claude-code-review.yml, because a red the operator
+    Renders live but does NOT count (the false-red side). State it as a CLASS, because the
+    previous version enumerated "two shapes" and review #10 found five -- two of them already
+    pinned as cases in this repo's own battery, which is an enumeration refuted by the file next
+    to it:
+
+      * THE MARKER MUST START ITS LINE, after at most the prefixes MARKER accepts (blockquote,
+        bullet, ordered marker, heading, emphasis). Prose before it, a task-list box `- [x] `, or
+        a GFM table cell's leading pipe all render live and are all missed.
+      * A fence opened at column 0 and closed by a delimiter indented 1-3 spaces: CommonMark
+        closes it, this does not, so the fence runs to end of comment and every later line is
+        dead. This is the residual the differential harness's baseline tracks.
+
+    The operator hint in claude-code-review.yml prints the class, because a red the operator
     cannot diagnose is a red they will work around.
 
     If this ever needs to be airtight, the answer is a real CommonMark parser, not another rule
@@ -112,9 +127,17 @@ def live_lines(body: str):
                     fence = None
             continue
         if m:
-            fence = (m.group("d")[0], len(m.group("d")))
-            continue
-        yield HEADING.sub("", line.lstrip())
+            char, run = m.group("d")[0], len(m.group("d"))
+            # A BACKTICK fence's info string MAY NOT CONTAIN A BACKTICK (CommonMark 4.5). So
+            # ```make validate``` is green. at column 0 is a paragraph carrying a code span, not
+            # a fence opener -- and reviewers in this repo start lines that way constantly.
+            # Review #10 measured it as a LIVE FALSE RED: the phantom fence ran to end of comment
+            # and swallowed the marker. It is the same mechanism as the `{1,} mutant two cases in
+            # the battery already kill, surviving at `{3,}. Tildes carry no such restriction.
+            if not (char == "`" and "`" in m.group("rest")):
+                fence = (char, run)
+                continue
+        yield line.lstrip()
 
 
 
@@ -124,6 +147,9 @@ def comment_names_commit(body: str, shas: list[str]) -> bool:
         if not m:
             continue
         h = m.group("h").lower()
+        # BOTH sides are lowered. The comment side has a battery case ("uppercase hex, real sha");
+        # the ARGUMENT side did not, so `s.lower()` -> `s` survived review #10's mutation run.
+        # GitHub writes shas lowercase, but nothing here guarantees the caller does.
         if any(s.lower().startswith(h) for s in shas if s):
             return True
     return False
@@ -174,7 +200,14 @@ def main() -> int:
     if not args:
         print("usage: assert_review_marker.py <head-sha> [merge-sha]", file=sys.stderr)
         return 2
-    for name, value in zip(("head", "merge"), args):
+    if len(args) > 2:
+        print(f"::error::expected at most 2 shas (head, merge), got {len(args)} - "
+              f"an unvalidated extra sha would be matched by prefix like the others.",
+              file=sys.stderr)
+        return 2
+    # EVERY argument, not just the first two. `zip` stopped at the shorter sequence while
+    # `shas = list(args)` took them all, so a third argument was matched unvalidated (review #10).
+    for name, value in zip(("head", "merge", "extra"), args):
         if not re.fullmatch(r"[0-9a-fA-F]{40}", value or ""):
             print(f"::error::the {name} sha is empty or not 40 hex chars (got {value!r}) - "
                   f"refusing to assert against a marker that anything could satisfy.",

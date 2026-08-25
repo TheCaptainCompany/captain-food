@@ -86,6 +86,24 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 > supervise checks until MERGED; the hourly stale-claim reaper releases claims silent for >24h.
 > Method: `BACKLOG.md`.
 
+## ⚠️ `claude-review` is decided-out, STILL REQUIRED, and now able to fail (2026-08-25)
+
+> **If every PR in this repo is suddenly unmergeable on `claude-review`, this is why — read it
+> before debugging anything.** [REV-1](decisions/REV-1.yaml) decided on 2026-08-17 to remove
+> `claude-review` from the required checks and **was never executed** (403 from the session's agent
+> proxy on ruleset `19179892`; open on
+> [#593](https://github.com/TheCaptainCompany/captain-food/issues/593)). #680 then hardened the
+> check so it reds when no verdict was produced — the [#677](https://github.com/TheCaptainCompany/captain-food/issues/677)
+> fix — merged by a one-time admin bypass the founder chose over executing REV-1 first, against the
+> team's recommendation and with the cost stated twice
+> ([REVIEW-GATE-BYPASS](decisions/REVIEW-GATE-BYPASS.yaml), `ADR-20260825-005323`).
+>
+> **Consequence, knowingly carried**: any run where the reviewer cannot post — 429, model outage,
+> permission denials, or the action's own self-skip on a PR editing its workflow — is a repo-wide
+> merge stop, and a revert of #680 would itself need the check green. **A red there means NO
+> VERDICT WAS PRODUCED; it does not mean the reviewer found a problem.** Executing REV-1 removes
+> the exposure without touching any workflow file and remains the recommended next step.
+
 ## 🗂️ Decision register & ask gate (2026-08-21)
 
 | Piece | Status | Notes |
