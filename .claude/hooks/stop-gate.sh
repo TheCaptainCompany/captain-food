@@ -90,7 +90,8 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # is a PreToolUse hook that is silent-when-broken by shape (a matcher typo or a dropped settings
 # entry disarms it with no signal -- ADR-20260810-231300's defect class), so its selftest runs
 # every turn: hook verdicts, settings wiring, and the agent files' citation blocks.
-# REGISTER_CHECK_ALLOW_DIRTY: the selftest compares itself and the hook against their committed
+# REGISTER_CHECK_ALLOW_DIRTY: the selftest compares ALL FOUR gate scripts (both hooks and both
+# decision-lookup scripts) against their committed
 # blobs and refuses to report otherwise (the overwrite class the eighth review of PR #679 planted
 # green). Editing a hook and re-running is the normal interactive loop, so the two INTERACTIVE
 # callers -- this one and `make hooks-test` -- opt out, visibly and in the repo. CI invokes the

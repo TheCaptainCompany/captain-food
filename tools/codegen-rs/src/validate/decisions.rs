@@ -586,15 +586,6 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
     Some(register_content[after_marker..end_idx].trim().to_string())
 }
 
-/// §22b: the committed index region must equal the fold over the source rows — at VALIDATE time,
-/// before check-drift, with the clearer message. Same emit function as generation, same
-/// `legacy_count` source, trimmed identically to the injector's `\n\n` framing, so the two gates
-/// can never disagree. The validator reads the ROW FILES as truth and treats the region purely as
-/// the projection under test (founder requirement 11).
-/// (This paragraph documents `validate_decisions_index_sync`, further down. The block below was
-/// once appended to it, leaving that function undocumented and this one described as the §22b
-/// index fold -- a doc naming the wrong thing, in the file whose subject is records.)
-
 /// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.
 ///
 /// PR #679 flipped `RETRIEVAL-QMD` to `superseded` and rewrote the proposal to say, verbatim,
@@ -732,6 +723,16 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
     issues
 }
 
+/// A DOC COMMENT BINDS TO THE FOLLOWING ITEM, and a blank line does NOT break the block: every
+/// preceding `///` run attaches to the next item. This paragraph was left two functions up, so it
+/// documented `validate_no_superseded_row_is_cited_as_authority` while this function had none --
+/// and the first attempt to fix it added a parenthetical DESCRIBING the mis-binding rather than
+/// moving the text, which is a comment asserting the opposite of what the compiler does. Moved.
+/// §22b: the committed index region must equal the fold over the source rows — at VALIDATE time,
+/// before check-drift, with the clearer message. Same emit function as generation, same
+/// `legacy_count` source, trimmed identically to the injector's `\n\n` framing, so the two gates
+/// can never disagree. The validator reads the ROW FILES as truth and treats the region purely as
+/// the projection under test (founder requirement 11).
 pub(crate) fn validate_decisions_index_sync(
     rows: &[DecisionRow],
     legacy_count: usize,

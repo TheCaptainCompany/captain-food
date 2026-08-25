@@ -10498,10 +10498,20 @@ mod docs_only_ci_and_legacy_visibility {
                 "the `changes` job must declare a single `runs-on` STRING -- a matrix or a label list can put {} on a machine this repo does not control",
                 what
             ));
+        // A CLOSED SET, not a prefix. `starts_with("ubuntu-")` also admits `ubuntu-24.04-custom`,
+        // which is how a self-hosted pool gets labelled to look hosted -- a check whose message
+        // says "only a GitHub-hosted label is allowed" while admitting one that is not. The label
+        // set is closed and published, so match it exactly: the same property-not-shape argument
+        // the rest of this pin makes (review of PR #679).
+        const HOSTED_RUNNERS: [&str; 9] = [
+            "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04",
+            "windows-latest", "windows-2025", "windows-2022",
+            "macos-latest", "macos-15", "macos-14",
+        ];
         assert!(
-            ["ubuntu-", "windows-", "macos-"].iter().any(|p| runner.starts_with(p)),
-            "the `changes` job's `runs-on` is `{}` -- only a GitHub-hosted runner label is allowed, because a `self-hosted` or otherwise custom label puts {} on a machine this repo does not control",
-            runner, what
+            HOSTED_RUNNERS.contains(&runner),
+            "the `changes` job's `runs-on` is `{}`, which is not one of the GitHub-hosted labels {:?} -- a `self-hosted` label, or a custom pool labelled to look hosted (`ubuntu-24.04-custom`), puts {} on a machine this repo does not control. If GitHub has published a new image label, add it here deliberately",
+            runner, HOSTED_RUNNERS, what
         );
         let changes = changes_val
             .as_mapping()
@@ -10807,6 +10817,7 @@ mod docs_only_ci_and_legacy_visibility {
             // reaches main as a PUSH with no PR, so nothing else covers it.
             ("push.branches EXCLUDES main", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!main']", 1)),
             ("push.branches excludes every single-segment branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*']", 1)),
+            ("a self-hosted pool labelled to look hosted", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom", 1)),
         ];
         let mut survived = Vec::new();
         for (name, mutated) in &must_red {
@@ -10820,6 +10831,7 @@ mod docs_only_ci_and_legacy_visibility {
         // retracted twice; these are the controls that keep it honest.
         let must_stay_green: Vec<(&str, String)> = vec![
             ("job CARGO_TERM_COLOR", at_job("CARGO_TERM_COLOR: always")),
+            ("a pinned GitHub-hosted runner image", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04", 1)),
             ("workflow CARGO_TERM_COLOR", at_workflow("CARGO_TERM_COLOR: always")),
             ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
             ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),

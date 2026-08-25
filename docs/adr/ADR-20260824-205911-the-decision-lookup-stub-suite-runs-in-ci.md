@@ -219,6 +219,19 @@ incomplete.** Recorded in full because the pattern is now the finding:
   `unset "${!GIT_@}"` and `env_ok` bans the whole `GIT_*` prefix, because enumerating this family
   is precisely how the previous two misses happened.
 
+**THE BLAST RADIUS, recorded because the briefing did not put it to anyone.** Every other job
+carries `needs: changes`, so a red stub suite SKIPS `lint`, `specs`, `build-test` and `db-test` —
+you lose all feedback on an unrelated build for a reason that has nothing to do with it. The
+`register-check-selftest.sh` precedent already had that coupling, but it is ~200 ms of pure shell
+with no external dependency; this suite shells out to `python3`, constructs non-UTF-8 paths,
+symlinks, an ASCII-locale probe and a poisoned sqlite file, and its own step comment enumerates
+three distinct host-drift classes. `farley` was briefed on *"should the step be blocking"* and said
+yes; **nobody was asked whether it should be blocking FROM INSIDE `changes`**. A sibling always-run
+job, also aggregated by `codegen`, would be equally blocking without collapsing the rest of the
+pipeline's signal. Not changed here — the step is where the row authorizes it — but the question is
+recorded rather than left implicit, because the answer nobody was asked is the one that surprises
+the next on-call (review of PR #679).
+
 **THE FORK-PR RESIDUAL, stated in the record and not only in a source comment.** The `changes` job
 executes two shell scripts *from the PR head* on every `pull_request`, forks included — unchanged in
 kind from the `register-check-selftest.sh` step added 2026-08-21, with a `contents: read` token and

@@ -5,6 +5,11 @@
 # DECISION_LOOKUP_HOME with fake `qmd` executables; a fingerprint of the repo .qmd/ (if any)
 # is asserted byte-identical before and after the run.
 # Invocation (from the repo root):  bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+#   WHILE EDITING this suite or the wrapper, the gate-set comparison below correctly refuses
+#   to report, so a bare invocation exits 1 with zero cases run. Use:
+#     DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+#   SKILL.md, workflow.md, the Makefile and stop-gate.sh all carry this; this line -- the copy
+#   a maintainer opening the file is most likely to follow -- was the one the sweep missed.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W="$HERE/decision-lookup.sh"
