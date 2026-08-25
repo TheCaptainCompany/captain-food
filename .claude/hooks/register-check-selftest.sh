@@ -22,25 +22,46 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$ROOT/.claude/hooks/register-check.sh"
 [ -f "$HOOK" ] || { echo "register-check selftest: cannot find $HOOK" >&2; exit 2; }
 
-# ── This selftest testifies about its own inputs ─────────────────────────────────────────────
-# GATE-SELF-VERIFICATION-V2 -- same block as the decision-lookup stub suite, and pinned in both by
-# `assert_gate_script_self_verifies` (tools/codegen-rs/src/tests.rs), which runs in the `codegen`
-# job: a DIFFERENT job with its own checkout, outside the blast radius of anything the `changes`
-# job does. The eighth review of PR #679 planted `find . -name 'register-check-selftest.sh' -exec
-# cp /tmp/exit0.sh {} +` in an innocent-looking step and the whole gate went green with the hook
-# replaced by `exit 0`. A substring scan of step definitions cannot bound arbitrary shell; asking
-# "is the script about to run the one in the commit?" can.
+# ── This selftest testifies about the WHOLE GATE SET ─────────────────────────────────────────────────
+# GATE-SELF-VERIFICATION-V3 -- pinned by `assert_gate_script_self_verifies` in
+# tools/codegen-rs/src/tests.rs, which runs in the `codegen` job: a DIFFERENT job with its own
+# checkout, outside the blast radius of anything the `changes` job does. Neither half is
+# sufficient alone.
 #
-# DEFAULT-ON with a named opt-out. stop-gate.sh -- the interactive path, where editing a hook and
-# re-running is the normal loop -- passes REGISTER_CHECK_ALLOW_DIRTY=1 explicitly. CI invokes this
-# script directly and gets the comparison. Both opt-out names are forbidden as workflow/job/step
-# `env:` keys by the codegen pin, so the CI path cannot be talked out of verifying.
+# WHY ALL FOUR FILES AND NOT JUST THIS SCRIPT'S OWN PAIR. V2 had each gate script verify itself
+# and the script it guards. That cannot work, and the ninth review of PR #679 proved it in one
+# line: a block inside a script goes away when the script is REPLACED. `find . -name
+# 'register-check-selftest.sh' -exec cp exit0.sh {} +` left both gates green, which is the exact
+# mutant V2's own header claimed to answer. So each script now verifies the ENTIRE set, and
+# replacing either guard is caught by the other. `assert_gate_script_self_verifies` asserts both
+# scripts carry all four paths, so the two lists cannot drift apart.
 #
-# It DETECTS the named overwrite routes. It is not a defence against arbitrary code running first.
+# WHICH COMMIT, precisely: on a `pull_request` event `actions/checkout` checks out
+# `refs/pull/N/merge`, so `HEAD` is the MERGE commit, not the PR head. That is the right thing to
+# compare against -- the merge commit's tree IS the tree on disk, so this proves "these scripts
+# are the ones in the commit CI checked out". Confirmed in run 32810599803:
+# `HEAD is now at d9461b43 Merge 6c1cbaf1 into 2fb3bd3c`, then both gate steps printed OK.
+#
+# DEFAULT-ON, with an explicit opt-out. V1 ran only when GITHUB_ACTIONS=true, which fails OPEN:
+# the discriminator was an ordinary environment variable, settable from the same untrusted surface
+# the check defends against. Now it always runs and an editor opts out BY NAME. Both opt-out names
+# are forbidden as CI `env:` keys at every scope.
+#
+# WHAT THIS DOES NOT DO: it DETECTS the named overwrite routes. It is not a defence against
+# arbitrary code running before it. Closed so far, each because a review demonstrated it: a `git`
+# shell function via `env: BASH_ENV` (hence `unset -f`), a PATH shim (hence the fixed `_vpath`),
+# and `GIT_DIR` pointing the oracle at a decoy repo whose HEAD holds the tampered bytes (hence
+# `unset "${!GIT_@}"`, plus a `GIT_*` prefix ban in `env_ok`). "Arbitrary preamble" is not a
+# bounded set, and enumerating in one place only would repeat the mistake.
 if [ "${REGISTER_CHECK_ALLOW_DIRTY:-}" = "1" ]; then
   echo "self-verification: OPTED OUT (REGISTER_CHECK_ALLOW_DIRTY=1) -- gate scripts NOT compared to HEAD."
 else
+  # Strip anything an inherited environment could have put between us and the verifier: shell
+  # functions shadowing the tools, a PATH pointing at a shim, and every GIT_* variable -- git
+  # obeys GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY and friends, so the ORACLE itself is
+  # redirectable even when the binary is not. The prefix form cannot be out-enumerated.
   unset -f git cmp command 2>/dev/null || true
+  unset "${!GIT_@}" 2>/dev/null || true
   _vpath="/usr/bin:/bin:/usr/local/bin"
   _git="$(PATH="$_vpath" command -v git || true)"
   _cmp="$(PATH="$_vpath" command -v cmp || true)"
@@ -48,10 +69,16 @@ else
     echo "FATAL: git or cmp not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
     exit 1
   fi
-  echo "self-verification: comparing gate scripts against their committed blobs at HEAD."
-  for rel in .claude/hooks/register-check.sh .claude/hooks/register-check-selftest.sh; do
+  echo "self-verification: comparing all 4 gate scripts against their committed blobs at HEAD."
+  # THE GATE SET. Both gate scripts carry this identical list; the codegen pin asserts that.
+  for rel in \
+    .claude/hooks/register-check.sh \
+    .claude/hooks/register-check-selftest.sh \
+    .claude/skills/decision-lookup/scripts/decision-lookup.sh \
+    .claude/skills/decision-lookup/scripts/stub-tests.sh
+  do
     if ! "$_git" -C "$ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
-      echo "FATAL: $rel is not tracked at HEAD -- refusing to report on scripts CI cannot verify." >&2
+      echo "FATAL: $rel is not tracked at HEAD -- refusing to report on a gate set CI cannot verify." >&2
       exit 1
     fi
     if ! "$_git" -C "$ROOT" cat-file blob "HEAD:$rel" 2>/dev/null | "$_cmp" -s - "$ROOT/$rel"; then
@@ -62,7 +89,7 @@ else
       exit 1
     fi
   done
-  echo "self-verification: OK -- both gate scripts are byte-identical to HEAD."
+  echo "self-verification: OK -- all 4 gate scripts are byte-identical to HEAD."
 fi
 
 FIX="$(mktemp -d "${TMPDIR:-/tmp}/register-check-selftest.XXXXXX")"

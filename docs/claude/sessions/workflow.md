@@ -543,7 +543,11 @@ trails and stale-decision citations stay decomposable defects); questions travel
 run reports, decision-queue sections, PR/issue comments, register rows, decision forms — are bound
 by the citation block every `.claude/agents/*.md` carries, whose presence (with this section's
 existence, the settings wiring, and the live row gate) is asserted by
-`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). The hook
+`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). That script
+also compares all four gate scripts against their committed blobs before reporting, and REFUSES to
+report if one drifted; the two interactive callers (`stop-gate.sh` and `make hooks-test`) pass
+`REGISTER_CHECK_ALLOW_DIRTY=1` so editing a hook and re-running still works, while CI invokes it
+directly and gets the comparison. If you run the script by hand mid-edit, pass that variable. The hook
 proves presence, shape and row status, never that a search happened — honesty stays with the mob
 briefing and the independent review, which is why the trail must name its artifact.
 

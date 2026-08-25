@@ -188,8 +188,13 @@ gate:
 # Guard tests for the register-check gate (ADR-20260821-010543): hook verdicts on fixture
 # payloads, the settings.json wiring, and the agent files' citation blocks. Also run by the
 # Stop hook on every turn; this target is the direct entrypoint.
+# REGISTER_CHECK_ALLOW_DIRTY: the selftest compares all four gate scripts against their committed
+# blobs and refuses to report otherwise. This is the EDIT-AND-RE-RUN entrypoint, so it opts out --
+# visibly, like stop-gate.sh. CI invokes the script directly and gets the comparison. Review #9 of
+# PR #679 found this caller unlisted, which made `make hooks-test` exit 1 on any uncommitted hook
+# edit: a silent trap on the one loop the target exists for.
 hooks-test:
-	bash .claude/hooks/register-check-selftest.sh
+	env REGISTER_CHECK_ALLOW_DIRTY=1 bash .claude/hooks/register-check-selftest.sh
 
 # Night loop: validate the frozen DSL, regenerate, re-validate. NEVER edits specs/**.
 night-loop: validate generate

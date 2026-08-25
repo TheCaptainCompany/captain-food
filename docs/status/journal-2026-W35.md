@@ -172,10 +172,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > pass**: only `stub-tests.sh` carried the block, so a `find -exec cp` step replaced
 > `register-check-selftest.sh` with `exit 0` and every assertion stayed green; and the block itself
 > was disarmed by a `git` shell function sourced through job-level `env: BASH_ENV`, printing
-> `54 passed` over a visibly tampered wrapper. Both are fixed — both gate scripts carry the block,
-> it `unset -f`s and resolves `git`/`cmp` on a fixed PATH, and the pin forbids `BASH_ENV` at every
-> scope. The correct verb is **DETECT**, not prevent, and it is not a defence against arbitrary
-> code running before it.
+> `54 passed` over a visibly tampered wrapper.
+>
+> ⚠️ **THE NINTH REVIEW THEN DISPROVED THREE OF THE FOUR FIXES FOR THAT, AND THE FAILURE MODE IS
+> THE ONE WORTH KEEPING.** *"Both gate scripts carry the block"* does not close the mutant it was
+> written for: **a block inside a script goes away when the script is REPLACED**, so
+> `find -name 'register-check-selftest.sh' -exec cp exit0.sh {} +` still left both gates green. The
+> pin was a substring scan that matched **inside comments** — `# ` in front of every line left four
+> pins green over a script verifying nothing — and its plant-red fixture held only two of the four
+> scripts, so that block had never been exercised by anything in the repo. And the test a comment
+> named as the thing preventing the `env_ok` regression from recurring, `both_scopes_reject_
+> execution_altering_env`, **did not exist**: the plants were manual and reverted, i.e. the round's
+> own headline lesson failing inside its own retraction.
+>
+> All of it is fixed by making the guards mutual rather than reflexive: **each script verifies the
+> WHOLE four-file gate set**, so replacing either guard is caught by the other; the pin ignores
+> comment lines and requires both lists complete; the fixture covers all four with the
+> guard-replacement case planted red; and `both_scopes_reject_execution_altering_env` now exists,
+> mutating the REAL `ci.yml` 20 ways with 5 innocent controls that must stay green. A fourth disarm
+> of the same class fell out of it: **`GIT_DIR` redirects the ORACLE, not the binary** — `git
+> cat-file blob HEAD:<path>` reads a decoy repo whose HEAD holds the tampered bytes and reports OK
+> — reachable through a job-level `env:`. Closed with `unset "${!GIT_@}"` in both scripts and a
+> `GIT_*` PREFIX ban in `env_ok`, because enumerating that family is how the previous two misses
+> happened.
+>
+> **The rule this chain has now re-learned five times and finally executed**: no assertion about a
+> guard ships until the guard has been made to fail FROM A TEST IN THE REPO. A reviewer's manual
+> plant, reverted, is a story about a gate — not a gate. The correct verb is **DETECT**, not
+> prevent, and it is not a defence against arbitrary code running before it.
 >
 > **Two more shape errors the same review found, worth more than the mutants**: the block ran only
 > when `GITHUB_ACTIONS=true`, which fails OPEN — the on-switch was an ordinary environment variable

@@ -92,8 +92,10 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # every turn: hook verdicts, settings wiring, and the agent files' citation blocks.
 # REGISTER_CHECK_ALLOW_DIRTY: the selftest compares itself and the hook against their committed
 # blobs and refuses to report otherwise (the overwrite class the eighth review of PR #679 planted
-# green). Editing a hook and re-running is the normal interactive loop, so THIS caller -- and only
-# this one -- opts out, visibly and in the repo. CI invokes the script directly and verifies.
+# green). Editing a hook and re-running is the normal interactive loop, so the two INTERACTIVE
+# callers -- this one and `make hooks-test` -- opt out, visibly and in the repo. CI invokes the
+# script directly and verifies. Those two are the whole list; `assert_gate_script_self_verifies`
+# forbids both opt-out names as CI `env:` keys, so the CI path cannot be talked out of verifying.
 step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
 
 # WHEN THE HOOK ITSELF CHANGES: the full guard suite (~2s, hermetic git fixture). Diff-scoped for

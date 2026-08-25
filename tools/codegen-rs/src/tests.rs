@@ -10144,7 +10144,14 @@ mod docs_only_ci_and_legacy_visibility {
                             | "LD_LIBRARY_PATH"
                             | "DECISION_LOOKUP_ALLOW_DIRTY"
                             | "REGISTER_CHECK_ALLOW_DIRTY"
-                    ) || k.starts_with("BASH_FUNC_");
+                    ) || k.starts_with("BASH_FUNC_")
+                        // GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY and friends redirect the
+                        // gate scripts' ORACLE, not their binary: `git cat-file blob HEAD:<path>`
+                        // reads a decoy repo whose HEAD holds the tampered bytes and reports OK.
+                        // Review #9 demonstrated it end to end through a job-level `env:`. A
+                        // PREFIX rule, matching the scripts' own `unset "${!GIT_@}"`, because
+                        // enumerating this family is how the previous two misses happened.
+                        || k.starts_with("GIT_");
                     assert!(
                         !dangerous,
                         "{} `env.{}` alters how every `run:` script EXECUTES (or switches off a gate script's self-verification), not just what it sees -- it can make {} unable to fail while the step is byte-identical. Ordinary variables here are fine; this one is not.",
@@ -10195,11 +10202,42 @@ mod docs_only_ci_and_legacy_visibility {
             .get(serde_yaml::Value::String("pull_request".into()))
             .expect("ci.yml must also run on pull_request -- otherwise the gate never guards a forked PR head");
         if let Some(pr) = pull_request.as_mapping() {
-            for key in ["paths", "paths-ignore", "types", "branches", "branches-ignore"] {
+            // KEY PRESENCE is the instrument this file has retracted twice already (round 3's
+            // `CARGO_TERM_COLOR` false red, round 5's `steps.len() == 4`), and review #9 caught it
+            // returning here: banning `types` outright reds a LEGITIMATE widening such as
+            // `[opened, synchronize, reopened, ready_for_review]`, with a message accusing the
+            // author of narrowing. So ban dangerous CONTENT, as `env_ok`/`shell_ok` already do.
+            for key in ["paths", "paths-ignore", "branches-ignore"] {
                 assert!(
                     !pr.contains_key(serde_yaml::Value::String(key.into())),
                     "`on.pull_request.{}` must not be set -- it narrows which PRs run {} at all, with every other assertion here green. Forked PRs produce no push, so this trigger is their ONLY coverage",
                     key, what
+                );
+            }
+            // `types`, if set at all, must still cover the default triad. Adding to it is fine.
+            if let Some(types) = pr.get(serde_yaml::Value::String("types".into())) {
+                let got: Vec<&str> = types
+                    .as_sequence()
+                    .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                for required in ["opened", "synchronize", "reopened"] {
+                    assert!(
+                        got.contains(&required),
+                        "`on.pull_request.types` omits `{}` (got {:?}) -- that is the DEFAULT set, and dropping any of it silently stops {} running on whole classes of PR. Adding types is fine; removing one is not",
+                        required, got, what
+                    );
+                }
+            }
+            // `branches`, if set, must still admit the default branch.
+            if let Some(branches) = pr.get(serde_yaml::Value::String("branches".into())) {
+                let got: Vec<&str> = branches
+                    .as_sequence()
+                    .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                assert!(
+                    got.iter().any(|b| *b == "main" || *b == "**" || *b == "*"),
+                    "`on.pull_request.branches` ({:?}) must still admit PRs targeting `main` -- otherwise {} stops guarding the only branch that matters",
+                    got, what
                 );
             }
         }
@@ -10217,7 +10255,9 @@ mod docs_only_ci_and_legacy_visibility {
         // `env: {BASH_ENV: /tmp/preamble.sh}` and `env: {LD_PRELOAD: ...}` were BOTH green again,
         // reopening the exact mutant the same commit's comments claimed closed. A guard removed
         // during a refactor is invisible unless something plants it red, which is why
-        // `both_scopes_reject_execution_altering_env` exists below.
+        // `both_scopes_reject_execution_altering_env` exists below -- and review #9 found that
+        // sentence pointing at a test nobody had written. It exists now; deleting either `env_ok`
+        // call reds it, by name.
         env_ok(changes_val, "the `changes` job's");
         for key in ["container", "services"] {
             assert!(
@@ -10283,14 +10323,20 @@ mod docs_only_ci_and_legacy_visibility {
         // construction. It said the overwrite class was killed "-- every spelling of it --" while
         // only `stub-tests.sh` had the block; `register-check-selftest.sh` had nothing, so a
         // `find -exec cp` step replaced the ask-gate selftest with `exit 0` and every assertion
-        // here stayed green. Both scripts carry it now. That is the third completeness claim in
-        // this chain written before it was checked, so this one states its own boundary instead:
+        // here stayed green. Round 9 then showed that "both scripts carry it now" did not close it
+        // either -- a block inside a script goes away when the script is REPLACED. Each script now
+        // verifies the WHOLE gate set, so replacing either guard is caught by the other. That was
+        // the fourth completeness claim in this chain written before it was checked, so this one
+        // states its own boundary instead:
         //
         // - DETECTED, not prevented: the script still runs; it refuses to report a verdict.
-        // - NOT a defence against arbitrary code running BEFORE it. The eighth review disarmed the
-        //   comparison with a `git` shell function sourced via job-level `env: BASH_ENV`. The
-        //   scripts now `unset -f` and resolve `git`/`cmp` on a fixed PATH, and `env_ok` above
-        //   forbids `BASH_ENV` at every scope -- but "arbitrary preamble" is not a bounded set.
+        // - NOT a defence against arbitrary code running BEFORE it. Three routes have been closed,
+        //   each because a review demonstrated it end to end: a `git` shell FUNCTION via job-level
+        //   `env: BASH_ENV` (hence `unset -f`), a PATH shim (hence the fixed `_vpath`), and
+        //   `GIT_DIR` pointing the ORACLE at a decoy repo whose HEAD holds the tampered bytes
+        //   (hence `unset "${!GIT_@}"` in the scripts and a `GIT_*` PREFIX ban in `env_ok` above).
+        //   "Arbitrary preamble" is not a bounded set, and each of those three was found only
+        //   after the previous fix was declared complete.
         // - Out of reach of BOTH: a commit that changes the gate scripts in the same change. That
         //   is a code review's job, and always was.
         let gate_cmds = [
@@ -10374,6 +10420,101 @@ mod docs_only_ci_and_legacy_visibility {
         );
     }
 
+    /// The scope guards, PLANTED RED **from the repo**, not from a reviewer's scratchpad.
+    ///
+    /// This test exists because review #9 grepped for the name a comment two screens up promised
+    /// and found only the comment. The B1 regression -- `env_ok(changes_val, ...)` deleted by a
+    /// refactor, job-level `BASH_ENV` and `LD_PRELOAD` green again -- had been "fixed" and then
+    /// protected by a SENTENCE claiming plants that were manual and reverted. The round's own
+    /// headline lesson ("pin a guard from a test that fails when it is removed, not from a
+    /// sentence") was failing inside its own retraction.
+    ///
+    /// Mutations are applied to the REAL ci.yml so the fixture cannot drift away from what ships.
+    #[test]
+    fn both_scopes_reject_execution_altering_env() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        const CMD: &str = "bash .claude/skills/decision-lookup/scripts/stub-tests.sh";
+        let check = |src: &str| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert_pinned_in_changes_job(src, CMD, "the gate")
+            }))
+            .is_ok()
+        };
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {})); // the plants panic on purpose; keep the log readable
+
+        assert!(check(&ci), "the real ci.yml must pass, or every mutant below is vacuous");
+
+        // Job scope: insert directly under `  changes:`. Workflow scope: before `jobs:`.
+        let at_job = |body: &str| ci.replacen("  changes:\n", &format!("  changes:\n    env:\n      {}\n", body), 1);
+        let at_workflow = |body: &str| ci.replacen("\njobs:\n", &format!("\nenv:\n  {}\njobs:\n", body), 1);
+
+        let must_red: Vec<(&str, String)> = vec![
+            ("job BASH_ENV", at_job("BASH_ENV: /tmp/preamble.sh")),
+            ("job LD_PRELOAD", at_job("LD_PRELOAD: /tmp/x.so")),
+            ("job PATH", at_job("PATH: /tmp/shim:/usr/bin")),
+            ("job BASH_FUNC_x%%", at_job("BASH_FUNC_x%%: \"() { :; }\"")),
+            // The oracle-redirect family (review #9): git obeys these even when the BINARY is
+            // the real one, so the comparison reads a decoy repo and reports OK.
+            ("job GIT_DIR", at_job("GIT_DIR: /tmp/decoy/.git")),
+            ("job GIT_WORK_TREE", at_job("GIT_WORK_TREE: /tmp/decoy")),
+            ("job GIT_OBJECT_DIRECTORY", at_job("GIT_OBJECT_DIRECTORY: /tmp/decoy/objects")),
+            // The gate scripts' own off switches.
+            ("job DECISION_LOOKUP_ALLOW_DIRTY", at_job("DECISION_LOOKUP_ALLOW_DIRTY: \"1\"")),
+            ("job REGISTER_CHECK_ALLOW_DIRTY", at_job("REGISTER_CHECK_ALLOW_DIRTY: \"1\"")),
+            ("workflow BASH_ENV", at_workflow("BASH_ENV: /tmp/preamble.sh")),
+            ("workflow PATH", at_workflow("PATH: /tmp/shim:/usr/bin")),
+            ("workflow GIT_DIR", at_workflow("GIT_DIR: /tmp/decoy/.git")),
+            ("workflow DECISION_LOOKUP_ALLOW_DIRTY", at_workflow("DECISION_LOOKUP_ALLOW_DIRTY: \"1\"")),
+            // Shell that never executes the step script, at both scopes.
+            ("job shell drops the script", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n", 1)),
+            ("workflow shell drops the script", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    shell: bash -c \"exit 0\" {0}\njobs:\n", 1)),
+            ("workflow defaults.run.working-directory", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    working-directory: /tmp/decoy\njobs:\n", 1)),
+            // Trigger filters that remove the gate from a whole class of change.
+            ("push paths-ignore", ci.replacen("  push:\n", "  push:\n    paths-ignore: ['docs/**']\n", 1)),
+            ("pull_request paths-ignore", ci.replacen("  pull_request:\n", "  pull_request:\n    paths-ignore: ['**']\n", 1)),
+            ("pull_request types drops synchronize", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened]\n", 1)),
+            ("pull_request branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['release/*']\n", 1)),
+        ];
+        let mut survived = Vec::new();
+        for (name, mutated) in &must_red {
+            assert_ne!(mutated, &ci, "mutant `{}` did not apply -- ci.yml's shape changed and this plant is now vacuous", name);
+            if check(mutated) {
+                survived.push(*name);
+            }
+        }
+
+        // Innocent work must stay GREEN. Banning key PRESENCE is the instrument this file has
+        // retracted twice; these are the controls that keep it honest.
+        let must_stay_green: Vec<(&str, String)> = vec![
+            ("job CARGO_TERM_COLOR", at_job("CARGO_TERM_COLOR: always")),
+            ("workflow CARGO_TERM_COLOR", at_workflow("CARGO_TERM_COLOR: always")),
+            ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
+            ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),
+            ("pull_request types WIDENED", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", 1)),
+        ];
+        let mut false_reds = Vec::new();
+        for (name, mutated) in &must_stay_green {
+            assert_ne!(mutated, &ci, "control `{}` did not apply", name);
+            if !check(mutated) {
+                false_reds.push(*name);
+            }
+        }
+        std::panic::set_hook(prev);
+
+        assert!(
+            survived.is_empty(),
+            "these disarming mutants were NOT caught: {:?}. Each makes the gate step unable to fail while its `run:` stays byte-identical.",
+            survived
+        );
+        assert!(
+            false_reds.is_empty(),
+            "these INNOCENT changes were redded: {:?}. A guard that fires on ordinary CI work trains readers to discount reds — the T15g rule, and the defect rounds 3 and 5 both landed.",
+            false_reds
+        );
+    }
+
     /// Both gate scripts must compare themselves against their committed blobs before reporting.
     ///
     /// PINNED FROM HERE, deliberately: this test runs in the `codegen` job, which has its own
@@ -10384,21 +10525,53 @@ mod docs_only_ci_and_legacy_visibility {
     #[test]
     fn assert_gate_script_self_verifies() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        // THE GATE SET, named once here and required IN FULL in BOTH scripts. A script's own block
+        // cannot survive that script being REPLACED wholesale, so each must verify the others.
+        const GATE_SET: [&str; 4] = [
+            ".claude/hooks/register-check.sh",
+            ".claude/hooks/register-check-selftest.sh",
+            ".claude/skills/decision-lookup/scripts/decision-lookup.sh",
+            ".claude/skills/decision-lookup/scripts/stub-tests.sh",
+        ];
         for (rel, optout) in [
             (".claude/skills/decision-lookup/scripts/stub-tests.sh", "DECISION_LOOKUP_ALLOW_DIRTY"),
             (".claude/hooks/register-check-selftest.sh", "REGISTER_CHECK_ALLOW_DIRTY"),
         ] {
-            let src = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            let raw = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            // SCAN THE CODE, NOT THE PROSE. Review #9 commented the whole block out of
+            // `register-check-selftest.sh` and every needle still matched -- inside the comment
+            // that describes the block. A pin that a `# ` prefix defeats is not a pin.
+            let src: String = raw
+                .lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+                .collect::<Vec<_>>()
+                .join("\n");
             for needle in [
-                "GATE-SELF-VERIFICATION-V2",
+                "GATE-SELF-VERIFICATION-V3",
                 "cat-file blob",
-                "cmp",
+                "\"$_cmp\" -s -",
                 "unset -f git cmp",
+                "unset \"${!GIT_@}\"",
             ] {
                 assert!(
-                    src.contains(needle),
-                    "{} must carry the gate self-verification block (missing `{}`). Without it a step in the `changes` job can overwrite this script and the whole gate reports green — the exact mutant the eighth review of PR #679 planted successfully.",
+                    raw.contains(needle),
+                    "{} must carry the gate self-verification block (missing `{}`). Without it a step in the `changes` job can overwrite a gate script and the whole gate reports green — the exact mutant the eighth review of PR #679 planted successfully.",
                     rel, needle
+                );
+            }
+            // The EXECUTABLE half of each needle, outside comments.
+            for needle in ["cat-file blob", "\"$_cmp\" -s -", "unset -f git cmp"] {
+                assert!(
+                    src.contains(needle),
+                    "{} carries `{}` only inside a COMMENT. Review #9 made this exact mutation — `# ` in front of every line of the block — and four pins stayed green while the script verified nothing.",
+                    rel, needle
+                );
+            }
+            for gate in GATE_SET {
+                assert!(
+                    src.contains(gate),
+                    "{} must verify the WHOLE gate set and is missing `{}`. A block inside a script goes away when that script is REPLACED, so the only thing that catches `find -name '<guard>' -exec cp exit0.sh {{}} +` is the OTHER guard checking it.",
+                    rel, gate
                 );
             }
             assert!(
@@ -10434,12 +10607,19 @@ mod docs_only_ci_and_legacy_visibility {
         let _ = fs::remove_dir_all(&tmp);
         let scripts = tmp.join(".claude/skills/decision-lookup/scripts");
         fs::create_dir_all(&scripts).expect("mkdir");
-        for base in ["stub-tests.sh", "decision-lookup.sh"] {
-            fs::copy(
-                root.join(".claude/skills/decision-lookup/scripts").join(base),
-                scripts.join(base),
-            )
-            .unwrap_or_else(|e| panic!("copy {}: {}", base, e));
+        let hooks = tmp.join(".claude/hooks");
+        fs::create_dir_all(&hooks).expect("mkdir hooks");
+        // The fixture must hold the WHOLE gate set, or the tamper cases below can only ever reach
+        // the two files this script happens to sit next to — which is how review #9 found that
+        // `register-check-selftest.sh`'s block was never exercised by anything.
+        for (dir, base) in [
+            (".claude/skills/decision-lookup/scripts", "stub-tests.sh"),
+            (".claude/skills/decision-lookup/scripts", "decision-lookup.sh"),
+            (".claude/hooks", "register-check.sh"),
+            (".claude/hooks", "register-check-selftest.sh"),
+        ] {
+            fs::copy(root.join(dir).join(base), tmp.join(dir).join(base))
+                .unwrap_or_else(|e| panic!("copy {}: {}", base, e));
         }
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")
@@ -10477,8 +10657,15 @@ mod docs_only_ci_and_legacy_visibility {
         );
 
         // RED half, twice: tamper each script in turn and require a non-zero exit naming it.
-        for base in ["decision-lookup.sh", "stub-tests.sh"] {
-            let path = scripts.join(base);
+        for (dir, base) in [
+            (".claude/skills/decision-lookup/scripts", "decision-lookup.sh"),
+            (".claude/skills/decision-lookup/scripts", "stub-tests.sh"),
+            (".claude/hooks", "register-check.sh"),
+            // THE ONE THAT MATTERS: replacing a GUARD, not a guarded script. Under V2 this was
+            // green — the block went away with the file it lived in.
+            (".claude/hooks", "register-check-selftest.sh"),
+        ] {
+            let path = tmp.join(dir).join(base);
             let original = fs::read_to_string(&path).expect("read");
             fs::write(&path, format!("{}\n# TAMPERED\n", original)).expect("write");
             let out = run();

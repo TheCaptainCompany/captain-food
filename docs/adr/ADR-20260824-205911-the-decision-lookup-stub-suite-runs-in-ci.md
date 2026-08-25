@@ -170,19 +170,39 @@ are byte-identical to their committed blobs before reporting anything.
 that the same commit's refactor had silently deleted the `env_ok` call at job scope, reopening the
 thirteenth mutant this ADR two paragraphs above records as closed. Four corrections landed:
 
-1. **`env_ok` restored at job scope**, with `BASH_ENV` and `LD_PRELOAD` planted red at both scopes
-   so a refactor cannot delete it invisibly again. A guard removed during a refactor leaves no
-   trace unless something plants it red — that, not the mutant, is the finding.
-2. **Both gate scripts carry the block.** Only `stub-tests.sh` had it, so a `find -exec cp` step
-   replaced `register-check-selftest.sh` with `exit 0` and every assertion in this PR stayed green.
+1. **`env_ok` restored at job scope.** A guard removed during a refactor leaves no trace unless
+   something plants it red — that, not the mutant, is the finding.
+2. **Both gate scripts carry the block.**
 3. **The block is hardened and default-ON.** It was disarmed by a `git` shell function sourced via
    job-level `env: BASH_ENV`; it now `unset -f`s and resolves `git`/`cmp` on a fixed PATH. And it
    ran only when `GITHUB_ACTIONS=true` — an on-switch settable from the surface it defends against,
    i.e. fail-open. It is now always on, with a named opt-out that CI may not set.
-4. **It is pinned and planted red.** `assert_gate_script_self_verifies` asserts the block's presence
-   from the `codegen` job — a different checkout, outside the `changes` job's blast radius — and
-   `the_gate_self_verification_reds_on_a_tampered_script` builds a throwaway git repo, tampers each
-   script, and requires a non-zero exit naming the file.
+4. **It is pinned and planted red.**
+
+**Round 9 then found three of those four corrections were themselves false, and the fourth
+incomplete.** Recorded in full because the pattern is now the finding:
+
+- **#1's "planted red at both scopes so a refactor cannot delete it invisibly again" was a
+  SENTENCE.** The plants were manual and reverted; the test the comment named,
+  `both_scopes_reject_execution_altering_env`, did not exist. The round's own headline lesson —
+  *pin a guard from a test that fails when it is removed, not from a sentence* — was failing inside
+  its own retraction. That test now exists, mutates the REAL `ci.yml` in 20 ways, and carries 5
+  innocent controls that must stay green; deleting either `env_ok` call reds it by name.
+- **#2 did not fix the mutant it named.** A block inside a script goes away when the script is
+  REPLACED, so putting one in `register-check-selftest.sh` cannot detect
+  `find -name 'register-check-selftest.sh' -exec cp exit0.sh {} +`. Both gates stayed green. Each
+  script now verifies the WHOLE four-file gate set, so replacing either guard is caught by the
+  other, and the pin asserts both lists are complete.
+- **#4's pin was a substring scan that matched inside comments.** Prefixing `# ` to every line of
+  the block left four pins green over a script that verified nothing; and the plant-red fixture
+  held only two of the four scripts, so `register-check-selftest.sh`'s block had never been
+  exercised by anything in the repo. The scan now ignores comment lines and the fixture covers all
+  four, with the guard-replacement case planted red.
+- **A new disarm of the closed class**: `GIT_DIR` redirects the *oracle* rather than the binary —
+  `git cat-file blob HEAD:<path>` reads a decoy repo whose HEAD holds the tampered bytes and
+  reports OK — and it was reachable through a job-level `env:`. The scripts now
+  `unset "${!GIT_@}"` and `env_ok` bans the whole `GIT_*` prefix, because enumerating this family
+  is precisely how the previous two misses happened.
 
 The honest verb is **DETECT**: the script still runs and refuses to report. It is not a defence
 against arbitrary code running before it, and a commit that changes the gate scripts in the same
