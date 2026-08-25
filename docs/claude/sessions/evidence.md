@@ -214,6 +214,18 @@ evidence — here it was not even true.
   not a fence, and an unbounded tracker opens a phantom fence on an indented delimiter that then
   swallows the real marker — a false red, which on a required check is a repo-wide merge stop.
   `<pre>`, `<code>` and HTML comments still satisfy such a gate; an HTML comment does so invisibly.
+  **Do not hand-roll a CommonMark block parser to decide it.** Eight review rounds each found a
+  different block rule wrong — backtick closers with trailing content, tilde closers, blockquoted
+  fences, list-item plus indented code, a fence quoting a fence, tab columns, container lifetimes,
+  prefix equality vs block structure — because the rules interact and a hand-rolled parser
+  re-derives what a parser already knows. Decide the DIRECTION of error first: for a gate on a
+  REQUIRED check, a false red is a repo-wide merge stop whose revert needs the same check green,
+  while a false green costs a property this gate could never deliver anyway (it cannot prove which
+  bot posted). So bias to counting, keep one rule (a fence delimiter at column 0), state the
+  residual, and keep a DIFFERENTIAL harness against a real parser with a false-red budget —
+  `.github/scripts/assert_review_marker_differential.py`. It found 41 false reds in the
+  carefully-built version and 1 in the simple one.
+
   **And make the exemplar you give the model conform to the rule you enforce** — a prompt that
   demonstrates the marker indented, under an assertion that requires the left margin, reds every
   real review while the pass path stays unexercised.

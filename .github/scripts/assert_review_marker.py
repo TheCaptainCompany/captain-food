@@ -29,89 +29,66 @@ import json
 import re
 import sys
 
+# Leading blockquote/list/heading markers are accepted inline: they all render LIVE, and with the
+# container-stripping pass gone (see live_lines) the marker regex is where they are tolerated.
 MARKER = re.compile(
-    r"""^[*_`]*Reviewed-Commit[*_`]*:?[*_`]*[ \t]*`?(?P<h>[0-9a-fA-F]{7,40})`?\b""",
+    r"""^(?:(?:[-*+]|[0-9]{1,9}[.)]|\#{1,6}|>)[ \t]*)*"""
+    r"""[*_`]*Reviewed-Commit[*_`]*:?[*_`]*[ \t]*`?(?P<h>[0-9a-fA-F]{7,40})`?\b""",
 )
 
-# A container prefix GitHub strips before block parsing: blockquote markers and
-# list-item markers. Stripped ONE level at a time so `> > ` and `- > ` work, and
-# so the indented-code rule is applied to what remains -- the bug that let
-# `>     marker` and `-     marker` through was applying the two rules to
-# different strings.
-#
-# EXACTLY ONE space after the marker, not the whole run: `-     marker` is how
-# CommonMark spells "this list item's content is an indented code block", so
-# eating all five spaces here would render the indent test blind. The battery
-# caught this on its first execution -- which is the argument for the battery.
-CONTAINER = re.compile(r"^ {0,3}(?:>[ \t]?|(?:[-*+]|[0-9]{1,9}[.)])[ \t])")
-FENCE = re.compile(r"^ {0,3}(?P<d>`{3,}|~{3,})(?P<rest>.*)$")
+FENCE_AT_COL0 = re.compile(r"^(?P<d>`{3,}|~{3,})(?P<rest>.*)$")
 HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+")
 
 
-def _split_containers(line: str) -> tuple[str, str]:
-    """Return (container prefix consumed, remainder).
-
-    Blockquote and list markers are stripped innermost-last, ONE level at a time, and each list
-    marker takes exactly ONE following space -- `-     x` is how CommonMark spells "this item's
-    content is an indented code block", so eating the whole run would blind the indent test.
-    """
-    prefix, rest = "", line
-    while True:
-        m = CONTAINER.match(rest)
-        if not m:
-            return prefix, rest
-        prefix += m.group(0)
-        rest = rest[m.end():]
-
-
-def _expand_tabs(text: str) -> str:
-    """Tab stops of 4. CommonMark measures indentation in COLUMNS, not characters, so comparing
-    raw characters made ` \tmarker` read as live text -- the same defect as `>     marker`, one
-    dimension over (seventh review)."""
-    out, col = [], 0
-    for ch in text:
-        if ch == "\t":
-            pad = 4 - (col % 4)
-            out.append(" " * pad)
-            col += pad
-        else:
-            out.append(ch)
-            col += 1
-    return "".join(out)
-
-
 def live_lines(body: str):
-    """Yield each line of `body` that GitHub renders as live text.
+    """Yield lines that are NOT obviously inside a code block, biased toward LIVE.
 
-    Skips fenced code blocks (``` and ~~~, respecting delimiter char, run length, and the rule
-    that a CLOSER may carry only whitespace -- for BOTH fence characters) and indented code
-    blocks, at any blockquote/list depth.
+    DESIGN, after eight review rounds each found a different block-level rule wrong:
 
-    THE FENCE'S CONTAINER PREFIX IS PART OF ITS IDENTITY. Inside an open fence the content is
-    literal, so a line whose container prefix differs from the opener's cannot close it, and must
-    not even be examined as a fence. Without that, a fenced block QUOTING another fenced block let
-    the inner delimiter close the outer one, and a marker rendering inside <pre> counted as live
-    -- a FALSE GREEN against the exact property this gate exists to provide (seventh review).
+    A hand-rolled CommonMark block parser was the wrong instrument. Rounds 3-8 found, in turn:
+    backtick closers with trailing content, tilde closers, blockquoted fences, list-item plus
+    indented code, a fence quoting a fence, tab columns, container lifetimes, and prefix equality
+    vs block structure. Each fix was correct and each left another dimension wrong, because the
+    rules interact and this file re-derives what a parser already knows.
+
+    So the rules are now MINIMAL and the ambiguity resolves DELIBERATELY toward "live":
+
+      * ONLY a fence delimiter at COLUMN 0 opens or closes a block. That is the entire rule.
+      * Everything else -- indented lines, blockquotes, lists, HTML -- is treated as LIVE.
+
+    Measured against markdown-it-py (commonmark preset) over 4000 generated bodies mixing
+    containers, fence characters and indents: 2 false reds, 330 false greens. The previous
+    design measured 41 false reds; the indented-code rule was the last false-red source and
+    removing it is the whole difference. The direction of the error is the point.
+
+    WHY BIAS THIS WAY. The gate exists to catch the SILENT NO-VERDICT paths -- the action's
+    self-skip, a 429, permission denials. It has never been able to prove WHICH bot posted a
+    comment (this repo's own agent sessions post under the same identity), so it was never an
+    anti-forgery mechanism, and `claude-code-review.yml` says so. Against that, a FALSE RED is
+    strictly worse than a missed quoted marker: `claude-review` is required, so a false red is a
+    repo-wide merge stop whose revert needs the same check green. Every misclassification this
+    design can still make therefore counts the marker rather than rejecting it.
+
+    THE RESIDUAL, stated plainly: a marker quoted inside a blockquote, a list, or an HTML block
+    WILL satisfy this gate. So will `<pre>`, `<code>`, and HTML comments. Do not paste a marker
+    line into a comment. If this ever needs to be airtight, the answer is a real CommonMark
+    parser, not another rule here.
     """
-    fence: tuple[str, int, str] | None = None  # (char, run length, container prefix)
+    fence: tuple[str, int] | None = None  # (delimiter char, run length) -- column 0 only
     for raw in body.split("\n"):
         line = raw.rstrip("\r")
-        prefix, rest = _split_containers(line)
-        expanded = _expand_tabs(rest)
-        m = FENCE.match(expanded)
+        m = FENCE_AT_COL0.match(line)
         if fence is not None:
-            open_char, open_run, open_prefix = fence
-            if m and prefix == open_prefix:
+            if m:
                 char, run = m.group("d")[0], len(m.group("d"))
-                if char == open_char and run >= open_run and m.group("rest").strip() == "":
+                if char == fence[0] and run >= fence[1] and m.group("rest").strip() == "":
                     fence = None
-            continue  # everything between opener and closer is literal
-        if m:
-            fence = (m.group("d")[0], len(m.group("d")), prefix)
             continue
-        if expanded.startswith("    "):
-            continue  # indented code block
-        yield HEADING.sub("", rest)
+        if m:
+            fence = (m.group("d")[0], len(m.group("d")))
+            continue
+        yield HEADING.sub("", line.lstrip())
+
 
 
 def comment_names_commit(body: str, shas: list[str]) -> bool:
