@@ -194,8 +194,9 @@ jobs:
             echo "  3. Permission denials (permission_denials_count must be 0) -- the reviewer ran"
             echo "     blindfolded and had nowhere to put its findings."
             echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
-            echo "     It must start at the left margin (fewer than four leading spaces) and must"
-            echo "     not sit inside a fenced code block."
+            echo "     It must render as LIVE TEXT: not inside a fenced code block (backtick or"
+            echo "     tilde, at any blockquote/list depth) and not indented four or more spaces."
+            echo "     .github/scripts/assert_review_marker_test.py is the exact contract."
             echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
             echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."
           } >&2
