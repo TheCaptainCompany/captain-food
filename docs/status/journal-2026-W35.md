@@ -151,6 +151,22 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > per-site labels are back, each naming its own disjuncts; `ci.yml` now tells the reader to
 > classify by which disjunct fired rather than by a rule that could not sort 8 of 17 sites.
 >
+> **ROUND 7 ended the needle-chasing by changing what is verified.** Two more spellings walked
+> past the scan, one character apart: `cd .claude && ...` and `working-directory: .claude` (the
+> needle was `.claude/`, with the slash). And the workflow TRIGGER was unpinned — `paths-ignore:
+> ['docs/**']` removes both gates from the docs-only push path, which is the dominant path for
+> this repo, with every assertion green. Both are closed. But the durable fix is the one the review
+> recommended: **the suite now testifies about its own inputs.** In CI, before reporting anything,
+> `stub-tests.sh` verifies that it and the wrapper are byte-identical to their committed blobs.
+> That kills the ENTIRE overwrite class — including the two spellings the residual had called
+> unclosable — instead of chasing each one. Enforced in CI only, so a developer editing the wrapper
+> locally is not redded. **Cost that earned it: six rounds of mutants that were all one shape, and
+> a residual statement that was wrong about its own scope three rounds running.**
+>
+> A note for whoever next pins a workflow key: **`on:` resolves differently per YAML version** —
+> 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string `"on"`. A lookup
+> written for the wrong one returns None and the assertion passes VACUOUSLY. The pin accepts both.
+>
 > **Cost that earned the rule, stated once: three consecutive rounds of "I closed it" were wrong,
 > and each time the wrongness lived in a sentence claiming completeness. Prefer naming what a
 > guard does NOT reach over asserting it reaches everything — and then check that sentence too.** The precedent test was moved onto the same helper; it

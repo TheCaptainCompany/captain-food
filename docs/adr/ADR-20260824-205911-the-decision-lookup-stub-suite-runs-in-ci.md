@@ -162,7 +162,10 @@ rebuilt the instrument twice more — a step-COUNT pin that a two-line edit insi
 walked past, then a run-only substring scan that a `uses:` payload walked past. What stands now
 pins the property (no non-gate step may mention the gate scripts or rewrite their environment,
 anywhere in its definition; `uses:` allow-listed; `defaults.run` restricted at both scopes) and
-**states a boundary instead of a completeness claim**: a substring scan cannot bound arbitrary
+**states a boundary instead of a completeness claim**. Round 7 then replaced the
+approach rather than the boundary: the suite now verifies IN CI that it and the wrapper are
+byte-identical to their committed blobs before reporting, which closes the whole overwrite class
+that six rounds of needles had been chasing one spelling at a time: a substring scan cannot bound arbitrary
 shell, so this narrows the casual spellings and is not a defence against commit access. **The recurring defect is not the mutants; it is
 that each round's completeness claim was written before it was checked.** The register-machinery
 rule added here is governed by `docs/decisions/README.md`, not by this row's QMD surface — it is

@@ -12,6 +12,32 @@ REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 S="$(mktemp -d)"
 trap 'rm -rf "$S"' EXIT
 pass=0; fail=0; skip=0
+
+# ── The suite testifies about its own inputs (seventh review of PR #679) ──────────────────────
+# Six rounds of mutants were all one shape: make a step in the `changes` job overwrite a gate
+# script before it runs. The codegen pin chased that by scanning step definitions for strings
+# they must not mention -- and `cd .claude && ...`, `working-directory: .claude`, a path built
+# from fragments, and `find -name ... | while read` each walked past it, because a substring scan
+# cannot bound arbitrary shell.
+#
+# So the gate checks the thing that actually matters: are the scripts about to run the ones in the
+# commit? ENFORCED IN CI ONLY -- locally a developer editing the wrapper must not be redded, and
+# the property being protected is "CI runs the committed scripts", not "nobody edits them".
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  for f in "$W" "${BASH_SOURCE[0]}"; do
+    rel="${f#"$REPO_ROOT"/}"
+    if ! git -C "$REPO_ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
+      echo "FATAL: $rel is not tracked at HEAD -- refusing to report on scripts CI cannot verify."
+      exit 1
+    fi
+    if ! git -C "$REPO_ROOT" cat-file blob "HEAD:$rel" 2>/dev/null | cmp -s - "$f"; then
+      echo "FATAL: $rel differs from the committed blob at HEAD."
+      echo "  Something modified a gate script between checkout and this run. That is the disarm"
+      echo "  shape this suite exists to make impossible -- a green here would be a lie."
+      exit 1
+    fi
+  done
+fi
 verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=$((fail+1)); echo "FAIL  $2"; fi }
 # A SKIP is ONLY for a setup the host FILESYSTEM/KERNEL forbids — never for a precondition the
 # harness could construct and didn't (those stay loud `verdict bad`, per T3/T15b). It does not

@@ -117,8 +117,14 @@ jobs:
       #   * a host capability (locale, filesystem, python3, a controlled PATH) => usually drift,
       #     fixed by ADAPTING THE CASE to the host -- EXCEPT where the message says the failure is
       #     loud by design (T15g's ASCII-control mkdir exists to stop ENOSPC/EROFS/EACCES being
-      #     swallowed, so it is investigated, not adapted). Two classes could not sort every site;
-      #     rather than invent a third, the exceptions say so in their own message.
+      #     swallowed, so it is investigated, not adapted).
+      #   * a HARNESS-CONSTRUCTION disjunct -- "sqlite3 poisoning failed", "exit-7 poisoning
+      #     failed", "TypeError / attribute-less / non-class Error shim failed", "sitecustomize
+      #     noise failed" -- is a THIRD case, and six of the seventeen sites carry one. The fixture
+      #     the case needs could not be built: the harness is broken. Investigate it; adapting the
+      #     case would delete the coverage rather than restore it. (An earlier version of this
+      #     comment claimed two classes sufficed and that the exceptions announced themselves --
+      #     true of T15g only, which is why the third class is named here instead.)
       #
       # Never delete a case and never weaken an assertion to recover green: this step is the only
       # thing standing behind the wrapper's supply-chain gate.

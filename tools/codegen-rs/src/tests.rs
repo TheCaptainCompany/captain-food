@@ -10139,6 +10139,45 @@ mod docs_only_ci_and_legacy_visibility {
                 }
             }
         };
+        // THE TRIGGER. Everything below pins what the `changes` job DOES; none of it stops the job
+        // from never running. `paths-ignore: ['docs/**']` is the first optimisation anyone reaches
+        // for -- and CLAUDE.md routes spec- and docs-only changes straight to `main` as pushes, so
+        // it would silently remove both gates from the dominant path with every assertion green.
+        //
+        // NOTE for anyone editing this: the bare key `on:` resolves DIFFERENTLY per YAML version --
+        // 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string "on".
+        // A lookup written for the wrong one returns None and the test passes VACUOUSLY, which is
+        // this chain's signature defect. Accept either, so the assertion survives a parser change.
+        let trigger = doc
+            .get(serde_yaml::Value::String("on".into()))
+            .or_else(|| doc.get(serde_yaml::Value::Bool(true)))
+            .and_then(|t| t.as_mapping())
+            .expect("ci.yml must declare `on:` (as the string \"on\" under YAML 1.2, or boolean true under 1.1)");
+        let push = trigger
+            .get(serde_yaml::Value::String("push".into()))
+            .and_then(|p| p.as_mapping())
+            .expect("ci.yml must run on push -- the docs-only lane reaches `main` as a push");
+        for key in ["paths", "paths-ignore"] {
+            assert!(
+                !push.contains_key(serde_yaml::Value::String(key.into())),
+                "`on.push.{}` must not be set -- it would stop {} running on the paths it exists to cover, with every other assertion here green",
+                key, what
+            );
+        }
+        assert_eq!(
+            push.get(serde_yaml::Value::String("branches".into()))
+                .and_then(|b| b.as_sequence())
+                .map(|b| b.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["**", "!badges"]),
+            "`on.push.branches` must stay every branch except badges -- narrowing it removes {} from the branches it guards",
+            what
+        );
+        assert!(
+            trigger.contains_key(serde_yaml::Value::String("pull_request".into())),
+            "ci.yml must also run on pull_request -- otherwise {} never guards a PR head",
+            what
+        );
+
         shell_ok(&doc, "ci.yml workflow-level");
         env_ok(&doc, "ci.yml workflow-level");
 
@@ -10196,19 +10235,20 @@ mod docs_only_ci_and_legacy_visibility {
         // depend on. That is structure-insensitive to legitimate maintenance and closes the
         // sibling-step and inside-a-sibling-step spellings together.
         //
-        // THE RESIDUAL, stated here and nowhere else, and stated as what it is.
+        // THE RESIDUAL, stated NORMATIVELY here (the records narrate it as history, which is why
+        // this no longer claims to be the only copy -- the previous version made that claim in the
+        // same commit that landed two others).
         //
-        // A substring scan cannot bound arbitrary shell. Both of these were measured GREEN and
-        // neither is closable this way: a step that rebuilds the path (`d=".cl""aude"`), and one
-        // that never names it (`find . -name 'stub-tests.sh' | while read -r f; do ... done`).
-        // Nor can any assertion here stop a commit that edits the gate scripts directly.
+        // A substring scan cannot bound arbitrary shell -- a step can rebuild the path
+        // (`d=".cl""aude"`) or never name it (`find . -name 'stub-tests.sh' | while read -r f`).
+        // Those are NOT closed here and cannot be. They ARE closed by the suite itself: since the
+        // seventh review `stub-tests.sh` verifies, in CI, that it and the wrapper are byte-identical
+        // to their committed blobs before it reports anything. That kills the whole overwrite class
+        // -- every spelling of it -- which is why these needles are now defence in depth rather
+        // than the defence.
         //
-        // So the honest scope: this narrows the CASUAL and ACCIDENTAL spellings -- the ones a
-        // future session reaches for under time pressure, which is the actual failure mode this
-        // repo has hit. It is NOT a defence against someone with commit access who wants the gate
-        // off; that is code review's job, and no CI-config test can take it. Five rounds of this
-        // review each found a new spelling, which is the evidence for stating a boundary instead
-        // of another completeness claim.
+        // What remains genuinely out of reach of BOTH: a commit that changes the gate scripts in
+        // the same change, which is a code review's job.
         let gate_cmds = [
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
@@ -10237,7 +10277,10 @@ mod docs_only_ci_and_legacy_visibility {
                     i, u, what
                 );
             }
-            // Serialize the WHOLE step, so `with:` payloads and any other key are covered.
+            // `.claude` WITHOUT the trailing slash: `cd .claude && printf ... > skills/...` and
+            // `working-directory: .claude` both name the directory in the most ordinary spellings
+            // there are, and both walked past `".claude/"` -- one character apart (seventh review).
+            // Serializing the whole step also covers `working-directory` and `with:` payloads.
             let serialized = serde_yaml::to_string(st).unwrap_or_default();
             let is_gate = st
                 .get("run")
@@ -10246,7 +10289,7 @@ mod docs_only_ci_and_legacy_visibility {
             if is_gate {
                 continue; // the gate steps themselves, key-set-locked below
             }
-            for needle in [".claude/", "GITHUB_ENV", "GITHUB_PATH"] {
+            for needle in [".claude", "GITHUB_ENV", "GITHUB_PATH"] {
                 assert!(
                     !serialized.contains(needle),
                     "step {} of the `changes` job is not a gate step, but it mentions `{}`. Nothing in this job except the two gate steps may touch the gate scripts or rewrite the environment they run in.",
