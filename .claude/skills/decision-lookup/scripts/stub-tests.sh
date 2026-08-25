@@ -717,9 +717,11 @@ elif [ "$skip" -gt 0 ]; then
   echo "  A skip means the HOST changed (filesystem, locale, python3, PATH), not that the wrapper is wrong."
   echo "  Adapt the case to the host; never delete it and never weaken its assertion to recover green."
 fi
-# Deliberately NOT reported here when $fail > 0: the failures printed above ARE the diagnosis, and
-# an extra "cases missing" line on a real wrapper defect would point the reader at the host — the
-# weaken-the-assertion move the line above forbids. It would also double-count into the exit status.
+# Why this is keyed on `accounted` and not on `fail`: a FAILURE IS A VERDICT, so real failures keep
+# the count balanced and INCOMPLETE stays silent — the failures printed above are then the whole
+# diagnosis, with no "cases missing" line pointing the reader at the host. (If the count is ALSO
+# stale, both fire and INCOMPLETE does add one to `fail`; the exit status is then a count of
+# problems, not of failed cases, which is the honest reading of that state.)
 AFTER="$(fingerprint)"
 if [ "$BEFORE" = "$AFTER" ]; then echo "repo .qmd/ untouched by this suite — confirmed"; else echo "repo .qmd/ CHANGED during the suite — VIOLATION"; fail=$((fail+1)); fi
 exit "$fail"

@@ -50,7 +50,10 @@ Accepted.
 [`RETRIEVAL-QMD`](../decisions/RETRIEVAL-QMD.yaml) adopted the advisory-retrieval integration and
 enumerated what it does **not** authorize — among them *"hooks, CI/validator/agent-contract
 changes"*. The follow-up chain (PRs #672–#676) then grew
-`.claude/skills/decision-lookup/scripts/stub-tests.sh` from 34 to 54 hermetic cases and
+`.claude/skills/decision-lookup/scripts/stub-tests.sh` to **54 hermetic cases**
+(measured on `2fb3bd3c`, `main` at the time this row was decided, by the suite's own `RESULT`
+line — an earlier draft of this ADR said "from 34 to 54" and the 34 could not be reproduced at
+any commit in the named range, so the unverifiable endpoint is dropped rather than restated) and
 `SKILL.md` declared it the **executable authority** for a wrapper that carries a supply-chain gate:
 a pinned, scriptless `bun` install of `@tobilu/qmd`, a structural `bun.lock` version-integrity
 binding, and delete-wholesale handling of a corrupt index.

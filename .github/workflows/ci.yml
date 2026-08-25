@@ -99,14 +99,25 @@ jobs:
       # asserts over PARSED YAML: this step is located by its `run` VALUE and its key set must be
       # exactly {name, run}, so `|| true`, a trailing `; exit 0`, a step-level `if:` in ANY
       # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
-      # `continue-on-error` / `defaults` / `strategy`, and a workflow-level `defaults` or `env`.
-      # HOST DRIFT, read this before "fixing" a red: the suite asserts COMPLETENESS - every
-      # declared case must reach a verdict (pass + fail + skip == EXPECTED_CASES). A legitimate
-      # host-capability SKIP is loud but GREEN; what reds is a case that stops running at all.
-      # A red whose message says `precondition:` is the runner changing (filesystem, locale,
-      # python3, PATH), not the wrapper breaking - adapt the case to the host. Never delete a case
-      # and never weaken an assertion to recover green: this step is the only thing standing
-      # behind the wrapper's supply-chain gate.
+      # `continue-on-error` / `strategy`, and, at BOTH workflow and job scope, a `defaults.run.shell`
+      # that is not a bare shell name or an `env` key that changes how scripts EXECUTE (PATH,
+      # BASH_ENV, LD_PRELOAD, ...). It does NOT close every tamper vector -- a sibling step in this
+      # job could still append to $GITHUB_ENV -- and the test says so rather than overclaiming.
+      # HOST DRIFT vs WRAPPER DEFECT, read this before "fixing" a red: the suite asserts
+      # COMPLETENESS -- every declared case must reach a verdict (pass + fail + skip ==
+      # EXPECTED_CASES). A legitimate host-capability SKIP is loud but GREEN; what reds is a case
+      # that stops running at all.
+      #
+      # A `precondition:` in a red message is NOT automatically host drift, and reading it that way
+      # is how the supply-chain gate gets quietly weakened. Only preconditions naming a HOST
+      # capability -- locale, filesystem, `python3`, a controlled `PATH` -- are drift, and those are
+      # fixed by ADAPTING THE CASE to the host. A precondition naming a SEEDED BUILD or the
+      # WRAPPER'S OWN FORMAT ("healthy build failed", "seeded cache ... failed", "PIN/INTEGRITY not
+      # extractable from wrapper") is a WRAPPER DEFECT: the suite is telling you the thing this step
+      # exists to protect is broken. Investigate it; never adapt around it.
+      #
+      # Never delete a case and never weaken an assertion to recover green: this step is the only
+      # thing standing behind the wrapper's supply-chain gate.
       - name: decision-lookup hermetic stub suite (the wrapper's supply-chain gate must stay proven)
         run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 

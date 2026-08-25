@@ -528,7 +528,7 @@ pub(crate) fn validate_decision_rows(
                 rule,
                 r.path.clone(),
                 format!(
-                    "`{}` is superseded BY this row, but this row's status is `{}` — a supersession may only be executed by a challenge that has itself CLOSED. Close this row (`decided` + `decided_by`) before flipping `{}`; the two moves are one move (docs/decisions/README.md). Do NOT resolve this by editing `{}` back: `superseded_by` is the one legal edit to a decided row, and undoing a correctly executed supersession corrupts the chain.",
+                    "`{}` is superseded BY this row, but this row's status is `{}` — a supersession may only be executed by a challenge that ANSWERED its question. If this row is still `open`/`deferred`, the answer is coming: close it (`decided` + `decided_by`) rather than editing `{}` back, because `superseded_by` is the one legal edit to a decided row. If this row is `withdrawn`, the question was never answered, so the flip was NEVER a legal supersession and reverting `{}` IS the repair — closing this row instead would fabricate a decision nobody took (docs/decisions/README.md).",
                     target_key,
                     r.get("status").unwrap_or(""),
                     target_key,

@@ -10076,35 +10076,76 @@ mod docs_only_ci_and_legacy_visibility {
     /// `|| true`.
     fn assert_pinned_in_changes_job(ci: &str, cmd: &str, what: &str) {
         let doc: serde_yaml::Value = serde_yaml::from_str(ci).expect("ci.yml must parse as YAML");
-        // DOCUMENT ROOT first. `defaults.run.shell` one scope UP rewrites how every step in every
-        // job runs: GitHub's custom-shell form is `command [options] {0}`, so
-        // `shell: bash -c "exit 0" {0}` passes the step script as $0 and never executes it. The
-        // step stays byte-identical, its key set stays {name, run}, the job carries no forbidden
-        // key -- and BOTH pinned gates become unable to fail. That is the TWELFTH mutant, found by
-        // the second review of PR #679, and it is strictly worse than the eleventh: one line
-        // disarms the supply-chain suite and the ask-gate selftest together.
-        let root = doc.as_mapping().expect("ci.yml is a mapping");
-        for key in ["defaults", "env"] {
-            assert!(
-                !root.contains_key(serde_yaml::Value::String(key.into())),
-                "ci.yml must carry no workflow-level `{}` -- `defaults.run.shell` there rewrites how EVERY step runs (a custom shell can drop the script entirely), and workflow `env` can shadow PATH, disarming {} while every job- and step-level assertion stays green",
-                key, what
-            );
-        }
+        // Guard dangerous CONTENT, not key PRESENCE, at BOTH scopes.
+        //
+        // The twelfth mutant was a workflow-level `defaults.run.shell` that drops the step script
+        // (GitHub's custom-shell form is `command [options] {0}`, so `bash -c "exit 0" {0}` passes
+        // the script as $0 and never runs it). The first fix banned the KEYS `defaults` and `env`
+        // at the root -- which false-redded ordinary CI work: 4 of this repo's 16 workflows already
+        // carry a root `env:`, and adding `CARGO_TERM_COLOR: always`, the standard Rust-CI idiom,
+        // redded these tests with a message accusing the author of disarming the ask-gate. The
+        // suite's own T15g reasoning applies to its own guard: a red that fires on innocent work
+        // trains readers to discount reds.
+        //
+        // Banning the key at the ROOT also missed the THIRTEENTH mutant one scope down: a JOB-level
+        // `env: {BASH_ENV: preamble.sh}`. GitHub runs `run:` as `bash -e {0}`, and bash sources
+        // $BASH_ENV before a non-interactive script, so two lines disarm BOTH pinned gates with the
+        // step byte-identical and every other assertion green.
+        //
+        // HONEST BOUNDARY, stated because the previous version of this comment overclaimed: no test
+        // of this class closes the vector. A sibling step in the same job can append to
+        // `$GITHUB_ENV` or overwrite the script on disk, and nothing here would see it. This
+        // narrows the cheap spellings; it does not make the job tamper-proof.
+        let shell_ok = |v: &serde_yaml::Value, scope: &str| {
+            if let Some(sh) = v
+                .get("defaults")
+                .and_then(|d| d.get("run"))
+                .and_then(|r| r.get("shell"))
+                .and_then(|s| s.as_str())
+            {
+                assert!(
+                    matches!(sh, "bash" | "sh" | "pwsh" | "powershell" | "cmd" | "python"),
+                    "{} `defaults.run.shell` must be a bare shell name, got `{}` -- a custom shell form (`command [options] {{0}}`) can pass the step script as $0 and never execute it, disarming {} while the step stays byte-identical",
+                    scope, sh, what
+                );
+            }
+        };
+        // Variables that change how a `run:` script EXECUTES, rather than what it sees.
+        let env_ok = |v: &serde_yaml::Value, scope: &str| {
+            if let Some(env) = v.get("env").and_then(|e| e.as_mapping()) {
+                for k in env.keys().filter_map(|k| k.as_str()) {
+                    let dangerous = matches!(
+                        k,
+                        "PATH" | "BASH_ENV" | "ENV" | "SHELLOPTS" | "LD_PRELOAD" | "LD_LIBRARY_PATH"
+                    ) || k.starts_with("BASH_FUNC_");
+                    assert!(
+                        !dangerous,
+                        "{} `env.{}` alters how every `run:` script EXECUTES, not just what it sees -- it can make {} unable to fail while the step is byte-identical. Ordinary variables here are fine; this one is not.",
+                        scope, k, what
+                    );
+                }
+            }
+        };
+        shell_ok(&doc, "ci.yml workflow-level");
+        env_ok(&doc, "ci.yml workflow-level");
 
-        let changes = doc
+        let changes_val = doc
             .get("jobs")
             .and_then(|j| j.get("changes"))
-            .and_then(|c| c.as_mapping())
             .expect("ci.yml must declare a `changes` job");
+        shell_ok(changes_val, "the `changes` job's");
+        env_ok(changes_val, "the `changes` job's");
+        let changes = changes_val
+            .as_mapping()
+            .expect("the `changes` job is a mapping");
 
-        // Job-level escapes. `if` gates the whole job; `continue-on-error` at job level reports
-        // `success` to `needs`, which the `codegen` aggregator accepts — the entire required check
-        // goes green with the gate red. `defaults` and `strategy` can rewrite how every step runs.
-        for key in ["if", "continue-on-error", "defaults", "strategy"] {
+        // Job-level escapes that are never legitimate here. `if` gates the whole job;
+        // `continue-on-error` at job level reports `success` to `needs`, which the `codegen`
+        // aggregator accepts -- the entire required check goes green with the gate red.
+        for key in ["if", "continue-on-error", "strategy"] {
             assert!(
                 !changes.contains_key(serde_yaml::Value::String(key.into())),
-                "the `changes` job must carry no `{}` — it is the one always-run job with a checkout, and {} depends on it never skipping or swallowing a failure",
+                "the `changes` job must carry no `{}` -- it is the one always-run job with a checkout, and {} depends on it never skipping or swallowing a failure",
                 key, what
             );
         }
