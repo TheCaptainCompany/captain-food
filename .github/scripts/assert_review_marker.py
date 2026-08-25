@@ -101,6 +101,32 @@ def comment_names_commit(body: str, shas: list[str]) -> bool:
     return False
 
 
+def parse_comment_stream(raw: str) -> list:
+    """Parse what `gh api --paginate` writes, WITHOUT relying on how it joins pages.
+
+    Some gh versions merge top-level arrays across pages into one array; others emit one array
+    per page, back to back. A plain `json.load` handles the first and raises "Extra data" on the
+    second -- which would be a FALSE RED on every PR with more than one page of comments, the
+    exact defect class this gate has already shipped twice (the per-page `| length`, and the
+    SIGPIPE). Accepting both shapes costs four lines and removes the question.
+    """
+    raw = raw.strip()
+    if not raw:
+        return []
+    decoder = json.JSONDecoder()
+    out: list = []
+    idx = 0
+    while idx < len(raw):
+        value, end = decoder.raw_decode(raw, idx)
+        if not isinstance(value, list):
+            raise ValueError(f"expected a JSON array of comments, got {type(value).__name__}")
+        out.extend(value)
+        idx = end
+        while idx < len(raw) and raw[idx] in " \t\r\n":
+            idx += 1
+    return out
+
+
 def count_matches(comments, shas: list[str]) -> int:
     n = 0
     for c in comments:
@@ -127,13 +153,11 @@ def main() -> int:
                   file=sys.stderr)
             return 1
     shas = list(args)
+    raw = sys.stdin.read()
     try:
-        comments = json.load(sys.stdin)
+        comments = parse_comment_stream(raw)
     except Exception as exc:  # a malformed/empty body must never read as "no review"
         print(f"::error::could not parse the comment list: {exc}", file=sys.stderr)
-        return 1
-    if not isinstance(comments, list):
-        print("::error::comment list is not a JSON array", file=sys.stderr)
         return 1
     print(count_matches(comments, shas))
     return 0

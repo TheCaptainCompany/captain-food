@@ -104,8 +104,31 @@ def main() -> int:
         if r.returncode == 0:
             print(f"FAIL  {label} must be rejected, got rc=0 stdout={r.stdout!r}")
             failed += 1
-    total = len(CASES) + 3 + 4
-    print(f"RESULT: {total - failed} passed, {failed} failed  ({len(CASES)} body + 3 counting + 4 argument cases)")
+    # `gh api --paginate` may merge pages into one array or emit one array per page. Both must
+    # parse; the second shape raises "Extra data" under a plain json.load, which would be a false
+    # red on every PR with more than 30 comments.
+    from assert_review_marker import parse_comment_stream
+    one = f'[{{"user":{{"type":"Bot"}},"body":"Reviewed-Commit: {H}"}}]'
+    two = f'[{{"user":{{"type":"Bot"}},"body":"a"}}]'
+    for label, raw, n in [("single array", one, 1),
+                          ("two arrays back to back", one + "\n" + two, 2),
+                          ("three arrays", one + two + one, 3),
+                          ("empty stream", "", 0),
+                          ("whitespace only", "   \n ", 0)]:
+        try:
+            got = len(parse_comment_stream(raw))
+        except Exception as exc:
+            print(f"FAIL  pagination shape {label!r} raised {exc}"); failed += 1; continue
+        if got != n:
+            print(f"FAIL  pagination shape {label!r}: expected {n} comments, got {got}"); failed += 1
+    for label, raw in [("a JSON object", '{"a":1}'), ("truncated", '[{"user":')]:
+        try:
+            parse_comment_stream(raw)
+            print(f"FAIL  {label} must raise, not parse"); failed += 1
+        except Exception:
+            pass
+    total = len(CASES) + 3 + 4 + 7
+    print(f"RESULT: {total - failed} passed, {failed} failed  ({len(CASES)} body + 3 counting + 4 argument + 7 pagination cases)")
     return 1 if failed else 0
 
 
