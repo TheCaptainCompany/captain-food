@@ -65,9 +65,12 @@ jobs:
             as a message is discarded unread by design (the action hides stdout).
             - `gh pr comment` for the summary. Post one EVERY time, including when you find
               nothing: "reviewed, no findings" is the signal that the reviewer ran.
-              That comment must contain, on a line of its own (an attribution footer after it is
-              fine; it must simply not be inside a fenced code block):
-                  Reviewed-Commit: ${{ github.event.pull_request.head.sha }}
+              That comment must contain this line, starting at the LEFT MARGIN (no indentation --
+              four or more leading spaces would make it a code block), not inside a ``` or ~~~
+              fence. Anything may follow it, including an attribution footer:
+
+            Reviewed-Commit: ${{ github.event.pull_request.head.sha }}
+
               COPY THAT SHA FROM THIS PROMPT. Do not derive it from the working tree: on a
               pull_request event the checkout is the MERGE commit, so `git rev-parse HEAD` reports
               a different sha than the one named above. (The assertion accepts either, but the
@@ -183,8 +186,17 @@ jobs:
           # earlier version of this comment asserted a corpus count here; it was measured false.
           # The one after that asserted a repo rule requiring footers on bot comments; no such rule
           # was ever cited. Both are gone -- the argument never needed either.)
-          # Decorations seen in the real reviewer corpus are all accepted, each measured: bold,
-          # italic, code span, list item, trailing period, trailing tab, uppercase hex.
+          # ACCEPTED (each verified against the extracted step, not against a corpus): bold,
+          # italic, code span, list item, ordered list, heading, blockquote, trailing period,
+          # trailing tab, uppercase hex, and any trailing text. OBSERVED in the 23-comment corpus
+          # on #670/#674/#675: bold 11, code span 13, list item 5, trailing period 12, italic 1 --
+          # and trailing tab 0, uppercase hex 0. Accepted and observed are different claims; an
+          # earlier version of this comment merged them.
+          # NOT accepted, stated so the boundary is known rather than discovered on a red: a marker
+          # inside a TABLE CELL (arbitrary cell text can precede it) and a marker indented four or
+          # more spaces (that is a code block). The prompt asks for the line at the left margin, and
+          # its exemplar is delivered in exactly that shape -- an earlier version delivered it
+          # indented six spaces, which this assertion would have redded on every real review.
           markers="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '
             .[]
             | select(.user.type == "Bot")
@@ -192,13 +204,14 @@ jobs:
             | split("\n")
             | map(sub("\r$"; ""))
             | reduce .[] as $l ({fence: null, out: []};
-                (($l | capture("^ {0,3}(?<d>`{3,}|~{3,})")) // null) as $m
+                (($l | capture("^ {0,3}(?<d>`{3,}|~{3,})(?<rest>.*)$")) // null) as $m
                 | if $m == null then (if .fence == null then .out += [$l] else . end)
                   elif .fence == null then .fence = {c: ($m.d[0:1]), n: ($m.d | length)}
-                  elif ($m.d[0:1] == .fence.c) and (($m.d | length) >= .fence.n) then .fence = null
+                  elif ($m.d[0:1] == .fence.c) and (($m.d | length) >= .fence.n)
+                       and (($m.d[0:1] != "`") or (($m.rest | test("^[ \t]*$")))) then .fence = null
                   else . end)
             | .out[]
-            | (capture("^ {0,3}(?:[-*+] )?[*_`]*Reviewed-Commit:?[*_ `]*[ \t]*`?(?<h>[0-9a-fA-F]{7,40})`?[.*_ `\t]*$") // empty)
+            | (capture("^ {0,3}(?:(?:[-*+]|[0-9]+[.)]|#{1,6}|>) +)*[*_`]*Reviewed-Commit:?[*_ `]*[ \t]*`?(?<h>[0-9a-fA-F]{7,40})`?\\b") // empty)
             | .h
             | ascii_downcase
             | . as $h
@@ -234,8 +247,8 @@ jobs:
             echo "  3. Permission denials (permission_denials_count must be 0) -- the reviewer ran"
             echo "     blindfolded and had nowhere to put its findings."
             echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
-            echo "     It must be on its own line, NOT inside a fenced code block, and NOT indented"
-            echo "     four or more spaces (four spaces makes it a code block, not a marker)."
+            echo "     It must start at the left margin (fewer than four leading spaces) and must"
+            echo "     not sit inside a fenced code block."
             echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
             echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."
           } >&2

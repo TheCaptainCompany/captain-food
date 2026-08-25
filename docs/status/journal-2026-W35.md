@@ -64,13 +64,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > 5 + 10 + 8 — via `GET /repos/{o}/{r}/issues/{n}/comments`; named because a retraction that itself
 > states an unmeasurable count is the same defect), and the two repo rules about attribution footers
 > concern ISSUE bodies. **The replacement claim was ALSO unsourced** — "agent-authored comments in
-> this environment carry a required attribution footer" cites nothing, and the fourth review found
-> 1 of 114 bot comments carrying one. It is gone too. The rule change never needed a factual
+> this environment carry a required attribution footer" cites nothing, and no repo rule requires a
+> footer on a COMMENT (the two that exist concern issue bodies). It is gone too. **I then restated a
+> count for it — "1 of 114" — that I had not measured either; the fifth review measured 57 of 174
+> `claude[bot]` issue comments carrying a footer over the preceding month. The count is deleted
+> rather than corrected: the argument never needed one, and reaching for a number to prop up a
+> deleted number is the defect repeating inside its own retraction.** The rule change never needed a factual
 > premise: any trailing text at all reds a complete review, and that is the whole argument.
 > **I invented a count to support a design decision.** The rule change stands on its own merits —
 > any trailing text at all reds a complete, correct review — and the fabricated antecedent is gone.
 > This is precisely what ADR-20260817-105845 exists to prevent, and it was caught because the
 > number named its own antecedents and they refuted it.
+>
+> **A FIFTH and SIXTH round found more of the same, and the pattern is now the finding.** The
+> marker exemplar the prompt DELIVERS was indented six spaces while the assertion enforced a
+> left-margin rule — so a reviewer copying the only example it is given would have redded the gate
+> on every real review, and the pass path has never once been exercised. The matcher now also
+> accepts the live shapes a model actually writes (heading, ordered list, blockquote, trailing
+> text), and refuses a backtick closer carrying trailing content — which CommonMark does not treat
+> as a closer, so a marker rendering INSIDE a code block was satisfying the gate. Boundaries that
+> remain are now stated rather than discovered: a table cell and a 4-space indent are not accepted.
 >
 > **The anti-quoting property was asserted three times and did not hold.** The fence tracker
 > toggled on any ``` line, so it desynchronised on NESTED fences — the idiomatic way to quote a

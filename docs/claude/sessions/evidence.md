@@ -176,8 +176,9 @@ evidence — here it was not even true.
 
   on a line of its own, outside any fenced (``` / ~~~) or 4-space-indented code block, where
   `<sha>` is the PR's **head or merge** commit — decorated (backticks, bold) and abbreviated to
-  ≥7 hex are accepted, because across 23 real reviewer comments it wrote a bare 40-char sha
-  **zero** times. **Copy the sha from the prompt, not from the working tree**: on a `pull_request`
+  ≥7 hex are accepted, because across 23 real reviewer comments (every `claude[bot]` comment on
+  PRs #670/#674/#675 — 5 + 10 + 8 — via `GET /repos/{owner}/{repo}/issues/{n}/comments`) it wrote
+  a bare 40-char sha **zero** times. **Copy the sha from the prompt, not from the working tree**: on a `pull_request`
   event the checkout is the MERGE ref, so `git rev-parse HEAD` reports something else.
 
   Two things that gate CANNOT do, both learned the expensive way. **It cannot prove WHICH bot
@@ -211,6 +212,9 @@ evidence — here it was not even true.
   not a fence, and an unbounded tracker opens a phantom fence on an indented delimiter that then
   swallows the real marker — a false red, which on a required check is a repo-wide merge stop.
   `<pre>`, `<code>` and HTML comments still satisfy such a gate; an HTML comment does so invisibly.
+  **And make the exemplar you give the model conform to the rule you enforce** — a prompt that
+  demonstrates the marker indented, under an assertion that requires the left margin, reds every
+  real review while the pass path stays unexercised.
   Even then, anyone willing can satisfy such a gate; say so rather than claiming otherwise.
 
 **And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and
