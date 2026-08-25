@@ -10782,16 +10782,20 @@ mod docs_only_ci_and_legacy_visibility {
             ".claude/skills/decision-lookup/scripts/stub-tests.sh",
             ".claude/hooks/register-check-selftest.sh",
         ];
-        let run_guard = |guard: &str| {
-            std::process::Command::new("bash")
-                .arg(guard)
+        // ONE builder for every invocation in this test. Each site must clear both opt-outs AND
+        // GITHUB_SHA -- the last one because the fixture is a throwaway repo whose HEAD is not the
+        // runner's commit, so an inherited GITHUB_SHA makes the script refuse (correctly) for a
+        // reason none of these cases is about.
+        let guard_cmd = |guard: &str| {
+            let mut c = std::process::Command::new("bash");
+            c.arg(guard)
                 .current_dir(&tmp)
                 .env_remove("DECISION_LOOKUP_ALLOW_DIRTY")
                 .env_remove("REGISTER_CHECK_ALLOW_DIRTY")
-                .env_remove("GITHUB_SHA")
-                .output()
-                .expect("bash")
+                .env_remove("GITHUB_SHA");
+            c
         };
+        let run_guard = |guard: &str| guard_cmd(guard).output().expect("bash");
         let run = || run_guard(GUARDS[0]);
 
         // GREEN half: untouched tree, the block says so out loud. (The suite's own cases need a
@@ -10908,10 +10912,14 @@ mod docs_only_ci_and_legacy_visibility {
             dgit(&["commit", "-qm", "decoy"]);
 
             fs::write(&target, &tampered).expect("tamper");
-            let out = std::process::Command::new("bash")
-                .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
-                .current_dir(&tmp)
-                .env_remove("DECISION_LOOKUP_ALLOW_DIRTY")
+            // GITHUB_SHA MUST BE CLEARED HERE TOO. `run_guard` clears it; this site built its own
+            // Command and did not, so in CI -- where the runner sets it -- the script pinned its
+            // oracle to a commit that does not exist in this throwaway fixture and refused with
+            // `not tracked at <sha>`. Correct fail-closed behaviour, wrong message for this
+            // assertion: green locally, red in CI, on my own commit. Three invocation sites with
+            // three environments is the "two lists that must agree" defect one more time; they
+            // share `guard_cmd` now.
+            let out = guard_cmd(".claude/skills/decision-lookup/scripts/stub-tests.sh")
                 .env("GIT_DIR", decoy.join(".git"))
                 .env("GIT_WORK_TREE", &decoy)
                 .output()
@@ -10929,6 +10937,28 @@ mod docs_only_ci_and_legacy_visibility {
             fs::write(&target, original).expect("restore");
         }
 
+        // FAIL CLOSED when the oracle names a commit this tree does not have. Found the hard way:
+        // CI set GITHUB_SHA, the fixture is a throwaway repo without that commit, and the script
+        // refused with `not tracked at <sha>` rather than reporting anything -- which is exactly
+        // right, and was unpinned. A future edit could easily make an unresolvable ref fall back to
+        // "OK", which is the fail-open shape this whole block exists to remove.
+        {
+            let out = guard_cmd(GUARDS[0])
+                .env("GITHUB_SHA", "0000000000000000000000000000000000000000")
+                .output()
+                .expect("bash");
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                !out.status.success() && combined.contains("is not tracked at"),
+                "an oracle ref this tree cannot resolve must REFUSE, not report OK -- a gate that cannot verify must never say it verified. Got exit {:?}:\n{}",
+                out.status.code(), combined
+            );
+        }
+
         // And the opt-out must actually opt out, or the local loop is broken and someone deletes
         // the block instead of using it.
         fs::write(scripts.join("stub-tests.sh"), {
@@ -10937,7 +10967,7 @@ mod docs_only_ci_and_legacy_visibility {
             c
         })
         .expect("write");
-        let opted = std::process::Command::new("bash")
+        let opted = std::process::Command::new("bash") // deliberately NOT guard_cmd: sets the opt-out
             .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
             .current_dir(&tmp)
             .env("DECISION_LOOKUP_ALLOW_DIRTY", "1")
