@@ -198,6 +198,17 @@ incomplete.** Recorded in full because the pattern is now the finding:
   held only two of the four scripts, so `register-check-selftest.sh`'s block had never been
   exercised by anything in the repo. The scan now ignores comment lines and the fixture covers all
   four, with the guard-replacement case planted red.
+- **The pin for the newest needle was itself vacuous, and `claude-review` caught it** (round 10,
+  the first finding on this PR from the bot check rather than a team reviewer). The test kept TWO
+  needle lists — one matched against the raw file, a shorter one against the comment-stripped
+  source — and `unset "${!GIT_@}"` was added to the raw list only. Deleting the real line from both
+  scripts left the pin GREEN, satisfied by the header comment *describing* the line that no longer
+  existed, which re-opens the oracle-redirect route for every `GIT_*` source that is not `ci.yml`:
+  an inherited runner environment, a composite action, a local invocation. **Two lists that must
+  agree will diverge**; there is now one, checked where it has to hold. And nothing had ever SET a
+  `GIT_*` variable in a test, so the defence was asserted by string match and never by behaviour —
+  the runtime plant-red now builds a decoy repo whose HEAD holds the tampered bytes, points
+  `GIT_DIR` at it, and requires the block to notice anyway.
 - **A new disarm of the closed class**: `GIT_DIR` redirects the *oracle* rather than the binary —
   `git cat-file blob HEAD:<path>` reads a decoy repo whose HEAD holds the tampered bytes and
   reports OK — and it was reachable through a job-level `env:`. The scripts now

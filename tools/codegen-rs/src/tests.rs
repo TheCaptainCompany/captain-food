@@ -10546,27 +10546,33 @@ mod docs_only_ci_and_legacy_visibility {
                 .filter(|l| !l.trim_start().starts_with('#'))
                 .collect::<Vec<_>>()
                 .join("\n");
+            // ONE list, checked against the COMMENT-STRIPPED source. There used to be two -- a
+            // `raw` list and a shorter `src` list -- and the newest needle was added to the raw one
+            // only. `claude-review` caught it on PR #679: deleting the real `unset "${!GIT_@}"`
+            // line from both scripts left this test GREEN, because the identical string sits in the
+            // header comment DESCRIBING the line that no longer existed, re-opening the
+            // oracle-redirect route for every GIT_* source that is not ci.yml. That is the round-9
+            // defect (`raw.contains` matching inside a comment) recurring for the one needle added
+            // after round 9. Two lists that must agree WILL diverge; there is now one, and a needle
+            // added here is automatically checked where it has to hold.
             for needle in [
-                "GATE-SELF-VERIFICATION-V3",
                 "cat-file blob",
                 "\"$_cmp\" -s -",
                 "unset -f git cmp",
                 "unset \"${!GIT_@}\"",
             ] {
                 assert!(
-                    raw.contains(needle),
-                    "{} must carry the gate self-verification block (missing `{}`). Without it a step in the `changes` job can overwrite a gate script and the whole gate reports green — the exact mutant the eighth review of PR #679 planted successfully.",
-                    rel, needle
-                );
-            }
-            // The EXECUTABLE half of each needle, outside comments.
-            for needle in ["cat-file blob", "\"$_cmp\" -s -", "unset -f git cmp"] {
-                assert!(
                     src.contains(needle),
-                    "{} carries `{}` only inside a COMMENT. Review #9 made this exact mutation — `# ` in front of every line of the block — and four pins stayed green while the script verified nothing.",
+                    "{} is missing the EXECUTABLE `{}` (a copy inside a comment does not count). Without it a step in the `changes` job can overwrite a gate script, or redirect the oracle, and the whole gate reports green.",
                     rel, needle
                 );
             }
+            // The version marker is prose by construction, so it is the one thing checked in `raw`.
+            assert!(
+                raw.contains("GATE-SELF-VERIFICATION-V3"),
+                "{} must carry the GATE-SELF-VERIFICATION-V3 marker so a reader can tell which contract this block implements",
+                rel
+            );
             for gate in GATE_SET {
                 assert!(
                     src.contains(gate),
@@ -10685,6 +10691,67 @@ mod docs_only_ci_and_legacy_visibility {
                 combined
             );
             fs::write(&path, original).expect("restore");
+        }
+
+        // THE ORACLE-REDIRECT ROUTE, exercised for real. `claude-review` on PR #679 pointed out
+        // that nothing here had ever set a `GIT_*` variable, so `unset "${!GIT_@}"` was asserted
+        // by a string match and never by behaviour -- and the `env_ok` ban in ci.yml is a
+        // DIFFERENT defence that does not reach an inherited runner environment, a composite
+        // action, or a local invocation. Build a decoy repo whose HEAD holds the TAMPERED bytes,
+        // point GIT_DIR at it, and require the suite to notice anyway.
+        {
+            let decoy = tmp.join("decoy");
+            fs::create_dir_all(decoy.join(".claude/skills/decision-lookup/scripts")).expect("mkdir decoy");
+            fs::create_dir_all(decoy.join(".claude/hooks")).expect("mkdir decoy hooks");
+            let target = scripts.join("stub-tests.sh");
+            let original = fs::read_to_string(&target).expect("read");
+            let tampered = format!("{}\n# TAMPERED\n", original);
+            for (dir, base) in [
+                (".claude/skills/decision-lookup/scripts", "decision-lookup.sh"),
+                (".claude/hooks", "register-check.sh"),
+                (".claude/hooks", "register-check-selftest.sh"),
+            ] {
+                fs::copy(tmp.join(dir).join(base), decoy.join(dir).join(base)).expect("copy decoy");
+            }
+            // The decoy commits the TAMPERED bytes, so a redirected oracle sees a match.
+            fs::write(decoy.join(".claude/skills/decision-lookup/scripts/stub-tests.sh"), &tampered)
+                .expect("write decoy");
+            let dgit = |args: &[&str]| {
+                let out = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&decoy)
+                    .env("GIT_AUTHOR_NAME", "t")
+                    .env("GIT_AUTHOR_EMAIL", "t@t")
+                    .env("GIT_COMMITTER_NAME", "t")
+                    .env("GIT_COMMITTER_EMAIL", "t@t")
+                    .output()
+                    .expect("git");
+                assert!(out.status.success(), "decoy git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+            };
+            dgit(&["init", "-q", "-b", "main"]);
+            dgit(&["add", "-A"]);
+            dgit(&["commit", "-qm", "decoy"]);
+
+            fs::write(&target, &tampered).expect("tamper");
+            let out = std::process::Command::new("bash")
+                .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
+                .current_dir(&tmp)
+                .env_remove("DECISION_LOOKUP_ALLOW_DIRTY")
+                .env("GIT_DIR", decoy.join(".git"))
+                .env("GIT_WORK_TREE", &decoy)
+                .output()
+                .expect("bash");
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                !out.status.success() && combined.contains("differs from the committed blob at HEAD"),
+                "GIT_DIR pointed at a decoy repo whose HEAD holds the tampered bytes must NOT be able to talk the block into reporting OK. Deleting `unset \"${{!GIT_@}}\"` from the scripts must red exactly here. Got exit {:?}:\n{}",
+                out.status.code(), combined
+            );
+            fs::write(&target, original).expect("restore");
         }
 
         // And the opt-out must actually opt out, or the local loop is broken and someone deletes

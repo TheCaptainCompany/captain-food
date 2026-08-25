@@ -196,7 +196,19 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `GIT_*` PREFIX ban in `env_ok`, because enumerating that family is how the previous two misses
 > happened.
 >
-> **The rule this chain has now re-learned five times and finally executed**: no assertion about a
+> **Round 10 then found the fix for that had the same shape one level in**, and it was the
+> `claude-review` BOT that found it, not a team reviewer — the first time in this chain the required
+> check earned its keep. `assert_gate_script_self_verifies` kept TWO needle lists, one matched
+> against the raw file and a shorter one against the comment-stripped source, and the needle added
+> in round 9 went into the raw list only. Deleting the real `unset "${!GIT_@}"` from both scripts
+> left the pin green, satisfied by the header comment DESCRIBING the deleted line — the round-9
+> defect (`raw.contains` matching inside a comment) recurring for the one needle added after round
+> 9. **Two lists that must agree will diverge**: there is now one. And no test had ever SET a
+> `GIT_*` variable, so that defence was asserted by string match and never by behaviour; the
+> runtime plant-red now builds a decoy repo whose HEAD holds the tampered bytes and points
+> `GIT_DIR` at it.
+>
+> **The rule this chain has now re-learned six times and finally executed**: no assertion about a
 > guard ships until the guard has been made to fail FROM A TEST IN THE REPO. A reviewer's manual
 > plant, reverted, is a story about a gate — not a gate. The correct verb is **DETECT**, not
 > prevent, and it is not a defence against arbitrary code running before it.
