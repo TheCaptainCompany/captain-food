@@ -10094,8 +10094,11 @@ mod docs_only_ci_and_legacy_visibility {
         // $BASH_ENV before a non-interactive script, so two lines disarm BOTH pinned gates with the
         // step byte-identical and every other assertion green.
         //
-        // These guards narrow what the JOB may be, at both scopes. They do not, and cannot,
-        // make the job tamper-proof -- see the residual note at the step scan below.
+        // These guards narrow what the JOB may be. BOTH `shell_ok` and `env_ok` are called at
+        // BOTH scopes below -- the job-scope `env_ok` call was deleted once by the refactor that
+        // extracted `shell_ok`, and review #8 measured job-level `BASH_ENV` and `LD_PRELOAD` green
+        // again while this very comment said otherwise. They do not, and cannot, make the job
+        // tamper-proof -- see the residual note at the step scan below.
         let shell_ok = |v: &serde_yaml::Value, scope: &str| {
             // `defaults.run` may only set `shell`. `working-directory` there points every step at
             // a different tree, so both gates would run a decoy copy of the scripts with the step
@@ -10123,17 +10126,28 @@ mod docs_only_ci_and_legacy_visibility {
                 );
             }
         };
-        // Variables that change how a `run:` script EXECUTES, rather than what it sees.
+        // Variables that change how a `run:` script EXECUTES, rather than what it sees -- plus the
+        // two gate scripts' OWN opt-out names. Each gate script compares itself against its
+        // committed blob unless told not to by name; leaving that name settable from CI would put
+        // the off switch on the same untrusted surface the check defends against. The check is
+        // default-on precisely so the safe state needs no cooperation, and this keeps it that way.
         let env_ok = |v: &serde_yaml::Value, scope: &str| {
             if let Some(env) = v.get("env").and_then(|e| e.as_mapping()) {
                 for k in env.keys().filter_map(|k| k.as_str()) {
                     let dangerous = matches!(
                         k,
-                        "PATH" | "BASH_ENV" | "ENV" | "SHELLOPTS" | "LD_PRELOAD" | "LD_LIBRARY_PATH"
+                        "PATH"
+                            | "BASH_ENV"
+                            | "ENV"
+                            | "SHELLOPTS"
+                            | "LD_PRELOAD"
+                            | "LD_LIBRARY_PATH"
+                            | "DECISION_LOOKUP_ALLOW_DIRTY"
+                            | "REGISTER_CHECK_ALLOW_DIRTY"
                     ) || k.starts_with("BASH_FUNC_");
                     assert!(
                         !dangerous,
-                        "{} `env.{}` alters how every `run:` script EXECUTES, not just what it sees -- it can make {} unable to fail while the step is byte-identical. Ordinary variables here are fine; this one is not.",
+                        "{} `env.{}` alters how every `run:` script EXECUTES (or switches off a gate script's self-verification), not just what it sees -- it can make {} unable to fail while the step is byte-identical. Ordinary variables here are fine; this one is not.",
                         scope, k, what
                     );
                 }
@@ -10172,11 +10186,23 @@ mod docs_only_ci_and_legacy_visibility {
             "`on.push.branches` must stay every branch except badges -- narrowing it removes {} from the branches it guards",
             what
         );
-        assert!(
-            trigger.contains_key(serde_yaml::Value::String("pull_request".into())),
-            "ci.yml must also run on pull_request -- otherwise {} never guards a PR head",
-            what
-        );
+        // `pull_request` exists for FORKED PRs, which never produce a push to this repo. Key
+        // PRESENCE was all this asserted until review #8 of PR #679: `pull_request: {paths-ignore:
+        // ['**']}` and `types: [labeled]` both left it green while removing the gate from every
+        // fork PR. Same filters as `push`, plus the `types` list, which defaults to
+        // opened/synchronize/reopened and must not be narrowed.
+        let pull_request = trigger
+            .get(serde_yaml::Value::String("pull_request".into()))
+            .expect("ci.yml must also run on pull_request -- otherwise the gate never guards a forked PR head");
+        if let Some(pr) = pull_request.as_mapping() {
+            for key in ["paths", "paths-ignore", "types", "branches", "branches-ignore"] {
+                assert!(
+                    !pr.contains_key(serde_yaml::Value::String(key.into())),
+                    "`on.pull_request.{}` must not be set -- it narrows which PRs run {} at all, with every other assertion here green. Forked PRs produce no push, so this trigger is their ONLY coverage",
+                    key, what
+                );
+            }
+        }
 
         shell_ok(&doc, "ci.yml workflow-level");
         env_ok(&doc, "ci.yml workflow-level");
@@ -10186,6 +10212,13 @@ mod docs_only_ci_and_legacy_visibility {
             .and_then(|j| j.get("changes"))
             .expect("ci.yml must declare a `changes` job");
         shell_ok(changes_val, "the `changes` job's");
+        // JOB SCOPE TOO. This line was present, then silently deleted by the refactor that
+        // extracted `shell_ok` -- and review #8 of PR #679 measured the consequence: job-level
+        // `env: {BASH_ENV: /tmp/preamble.sh}` and `env: {LD_PRELOAD: ...}` were BOTH green again,
+        // reopening the exact mutant the same commit's comments claimed closed. A guard removed
+        // during a refactor is invisible unless something plants it red, which is why
+        // `both_scopes_reject_execution_altering_env` exists below.
+        env_ok(changes_val, "the `changes` job's");
         for key in ["container", "services"] {
             assert!(
                 changes_val.get(key).is_none(),
@@ -10241,14 +10274,25 @@ mod docs_only_ci_and_legacy_visibility {
         //
         // A substring scan cannot bound arbitrary shell -- a step can rebuild the path
         // (`d=".cl""aude"`) or never name it (`find . -name 'stub-tests.sh' | while read -r f`).
-        // Those are NOT closed here and cannot be. They ARE closed by the suite itself: since the
-        // seventh review `stub-tests.sh` verifies, in CI, that it and the wrapper are byte-identical
-        // to their committed blobs before it reports anything. That kills the whole overwrite class
-        // -- every spelling of it -- which is why these needles are now defence in depth rather
-        // than the defence.
+        // Those are NOT closed here and cannot be. They are DETECTED by the gate scripts
+        // themselves: each compares itself and the script it guards against their committed blobs
+        // before reporting anything (`assert_gate_script_self_verifies` below pins that, from the
+        // `codegen` job -- a different checkout, outside this job's blast radius).
         //
-        // What remains genuinely out of reach of BOTH: a commit that changes the gate scripts in
-        // the same change, which is a code review's job.
+        // THE PREVIOUS VERSION OF THIS PARAGRAPH WAS FALSE, and the eighth review proved it by
+        // construction. It said the overwrite class was killed "-- every spelling of it --" while
+        // only `stub-tests.sh` had the block; `register-check-selftest.sh` had nothing, so a
+        // `find -exec cp` step replaced the ask-gate selftest with `exit 0` and every assertion
+        // here stayed green. Both scripts carry it now. That is the third completeness claim in
+        // this chain written before it was checked, so this one states its own boundary instead:
+        //
+        // - DETECTED, not prevented: the script still runs; it refuses to report a verdict.
+        // - NOT a defence against arbitrary code running BEFORE it. The eighth review disarmed the
+        //   comparison with a `git` shell function sourced via job-level `env: BASH_ENV`. The
+        //   scripts now `unset -f` and resolve `git`/`cmp` on a fixed PATH, and `env_ok` above
+        //   forbids `BASH_ENV` at every scope -- but "arbitrary preamble" is not a bounded set.
+        // - Out of reach of BOTH: a commit that changes the gate scripts in the same change. That
+        //   is a code review's job, and always was.
         let gate_cmds = [
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
@@ -10328,6 +10372,154 @@ mod docs_only_ci_and_legacy_visibility {
             "the `{}` step may carry ONLY `name` and `run`. Any other key — `if` (in ANY spelling, including hoisted onto the `- ` item line), `continue-on-error`, `shell`, `env`, `working-directory` — is a way to make the step not run, or not report, while every text-matching assertion stays green.",
             what
         );
+    }
+
+    /// Both gate scripts must compare themselves against their committed blobs before reporting.
+    ///
+    /// PINNED FROM HERE, deliberately: this test runs in the `codegen` job, which has its own
+    /// checkout. A step in the `changes` job that overwrites a gate script cannot touch this copy,
+    /// so the presence of the block is asserted from outside the blast radius while the block does
+    /// the runtime comparison. Neither half is sufficient alone — the eighth review of PR #679
+    /// deleted the block from `stub-tests.sh` and every gate in the repo stayed green.
+    #[test]
+    fn assert_gate_script_self_verifies() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        for (rel, optout) in [
+            (".claude/skills/decision-lookup/scripts/stub-tests.sh", "DECISION_LOOKUP_ALLOW_DIRTY"),
+            (".claude/hooks/register-check-selftest.sh", "REGISTER_CHECK_ALLOW_DIRTY"),
+        ] {
+            let src = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            for needle in [
+                "GATE-SELF-VERIFICATION-V2",
+                "cat-file blob",
+                "cmp",
+                "unset -f git cmp",
+            ] {
+                assert!(
+                    src.contains(needle),
+                    "{} must carry the gate self-verification block (missing `{}`). Without it a step in the `changes` job can overwrite this script and the whole gate reports green — the exact mutant the eighth review of PR #679 planted successfully.",
+                    rel, needle
+                );
+            }
+            assert!(
+                src.contains(optout),
+                "{} must name its opt-out `{}` — the check is default-on, and a check with no documented way out gets deleted instead of opted out of",
+                rel, optout
+            );
+            // Default-ON. The previous shape ran the comparison only when GITHUB_ACTIONS=true,
+            // which fails OPEN: the discriminator was an ordinary environment variable, settable
+            // from the same untrusted surface the check defends against.
+            assert!(
+                !src.contains("${GITHUB_ACTIONS:-}"),
+                "{} must not gate its self-verification on GITHUB_ACTIONS — an attacker-settable variable as the on-switch means the safe state needs cooperation. Gate it on the explicit opt-out `{}` instead.",
+                rel, optout
+            );
+        }
+    }
+
+    /// The self-verification, PLANTED RED. A block never seen to fire is an unverified claim, and
+    /// this one is unreachable on every path anyone runs: locally it is opted out by stop-gate.sh
+    /// and by developers editing scripts, and in CI it only fires against a tampered tree — which
+    /// nothing else in the repo ever constructs. So construct it.
+    #[test]
+    fn the_gate_self_verification_reds_on_a_tampered_script() {
+        // Needs a real git; skip rather than red where the toolchain is absent (a HOST condition,
+        // never a precondition this test could build).
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            eprintln!("SKIP: no git on this host");
+            return;
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let tmp = std::env::temp_dir().join(format!("gate-selfverify-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let scripts = tmp.join(".claude/skills/decision-lookup/scripts");
+        fs::create_dir_all(&scripts).expect("mkdir");
+        for base in ["stub-tests.sh", "decision-lookup.sh"] {
+            fs::copy(
+                root.join(".claude/skills/decision-lookup/scripts").join(base),
+                scripts.join(base),
+            )
+            .unwrap_or_else(|e| panic!("copy {}: {}", base, e));
+        }
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "gate scripts"]);
+
+        let run = || {
+            std::process::Command::new("bash")
+                .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
+                .current_dir(&tmp)
+                .env_remove("DECISION_LOOKUP_ALLOW_DIRTY")
+                .output()
+                .expect("bash")
+        };
+
+        // GREEN half: untouched tree, the block says so out loud. (The suite's own cases need a
+        // wrapper this fixture does not provide, so only the self-verification verdict is read.)
+        let clean = run();
+        let clean_out = String::from_utf8_lossy(&clean.stdout).to_string();
+        assert!(
+            clean_out.contains("self-verification: OK"),
+            "an untouched tree must report the comparison PASSING, out loud -- a silent skip and a silent pass look identical in a green log. Got:\n{}",
+            clean_out
+        );
+
+        // RED half, twice: tamper each script in turn and require a non-zero exit naming it.
+        for base in ["decision-lookup.sh", "stub-tests.sh"] {
+            let path = scripts.join(base);
+            let original = fs::read_to_string(&path).expect("read");
+            fs::write(&path, format!("{}\n# TAMPERED\n", original)).expect("write");
+            let out = run();
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                !out.status.success(),
+                "tampering with {} must make the suite EXIT NON-ZERO. It exited 0:\n{}",
+                base, combined
+            );
+            assert!(
+                combined.contains("differs from the committed blob at HEAD") && combined.contains(base),
+                "the failure must name WHICH script drifted, or the operator cannot act on it. Got:\n{}",
+                combined
+            );
+            fs::write(&path, original).expect("restore");
+        }
+
+        // And the opt-out must actually opt out, or the local loop is broken and someone deletes
+        // the block instead of using it.
+        fs::write(scripts.join("stub-tests.sh"), {
+            let mut c = fs::read_to_string(scripts.join("stub-tests.sh")).expect("read");
+            c.push_str("\n# TAMPERED\n");
+            c
+        })
+        .expect("write");
+        let opted = std::process::Command::new("bash")
+            .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
+            .current_dir(&tmp)
+            .env("DECISION_LOOKUP_ALLOW_DIRTY", "1")
+            .output()
+            .expect("bash");
+        assert!(
+            String::from_utf8_lossy(&opted.stdout).contains("self-verification: OPTED OUT"),
+            "DECISION_LOOKUP_ALLOW_DIRTY=1 must skip the comparison and SAY so"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     /// Pins the decision-lookup hermetic stub suite into the always-run `changes` job

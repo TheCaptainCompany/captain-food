@@ -13,32 +13,63 @@ S="$(mktemp -d)"
 trap 'rm -rf "$S"' EXIT
 pass=0; fail=0; skip=0
 
-# ── The suite testifies about its own inputs (seventh review of PR #679) ──────────────────────
+# ── The suite testifies about its own inputs ─────────────────────────────────────────────────
+# GATE-SELF-VERIFICATION-V2 -- this marker is pinned by `assert_gate_script_self_verifies` in
+# tools/codegen-rs/src/tests.rs, which runs in the `codegen` job, i.e. a DIFFERENT job with its
+# own checkout. A step in `changes` that overwrites this script cannot touch that copy, so the
+# presence of this block is asserted from outside the blast radius while the block itself does
+# the runtime comparison. Neither half is sufficient alone.
+#
 # Six rounds of mutants were all one shape: make a step in the `changes` job overwrite a gate
 # script before it runs. The codegen pin chased that by scanning step definitions for strings
 # they must not mention -- and `cd .claude && ...`, `working-directory: .claude`, a path built
 # from fragments, and `find -name ... | while read` each walked past it, because a substring scan
-# cannot bound arbitrary shell.
+# cannot bound arbitrary shell. So the gate checks the thing that actually matters: are the
+# scripts about to run the ones in the commit?
 #
-# So the gate checks the thing that actually matters: are the scripts about to run the ones in the
-# commit? ENFORCED IN CI ONLY -- locally a developer editing the wrapper must not be redded, and
-# the property being protected is "CI runs the committed scripts", not "nobody edits them".
-# Print the verdict either way. A silent skip and a silent pass look identical in a green log,
-# and "the mechanism did not run" is exactly the vacuity this whole chain keeps producing.
-if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
-  echo "self-verification: SKIPPED (not CI) -- gate scripts are not compared against HEAD here."
+# DEFAULT-ON, with an explicit opt-out (eighth review of PR #679). It used to run only when
+# GITHUB_ACTIONS=true, which fails OPEN: the discriminator was an ordinary environment variable,
+# settable from the same untrusted surface the check defends against. Now it always runs and a
+# developer editing the wrapper opts out BY NAME.
+#
+# WHAT THIS DOES NOT DO, stated because the previous wording said "impossible": it DETECTS the
+# named overwrite routes. It is not a defence against arbitrary code running before it. The
+# eighth review demonstrated the concrete escape -- job-level `env: BASH_ENV` sourcing a preamble
+# that defines a `git` shell function -- and the actual fix for that is the `env_ok` guard on the
+# job in tests.rs, which stops BASH_ENV reaching the job at all. The hardening below closes the
+# function- and PATH-shadowing routes so the two guards are not one guard wearing two hats.
+if [ "${DECISION_LOOKUP_ALLOW_DIRTY:-}" = "1" ]; then
+  echo "self-verification: OPTED OUT (DECISION_LOOKUP_ALLOW_DIRTY=1) -- gate scripts NOT compared to HEAD."
 else
+  # Strip anything an inherited environment could have put between us and the verifier: shell
+  # functions shadowing the tools, and a PATH pointing at a shim. /usr/local/bin precedes /usr/bin
+  # on GitHub runners and nothing forbids writing there.
+  unset -f git cmp command 2>/dev/null || true
+  _vpath="/usr/bin:/bin:/usr/local/bin"
+  _git="$(PATH="$_vpath" command -v git || true)"
+  _cmp="$(PATH="$_vpath" command -v cmp || true)"
+  if [ -z "$_git" ] || [ -z "$_cmp" ]; then
+    echo "FATAL: git or cmp not found on $_vpath -- refusing to report on scripts that cannot be verified."
+    exit 1
+  fi
   echo "self-verification: comparing gate scripts against their committed blobs at HEAD."
-  for f in "$W" "${BASH_SOURCE[0]}"; do
-    rel="${f#"$REPO_ROOT"/}"
-    if ! git -C "$REPO_ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
+  # Derive the repo-relative paths from $HERE, which is absolute (cd && pwd). Using
+  # ${BASH_SOURCE[0]} directly worked only because CI happens to invoke this with the
+  # repo-relative path from the workspace root; from any other cwd the prefix strip was a no-op
+  # and this failed closed with a confusing message.
+  _reldir="${HERE#"$REPO_ROOT"/}"
+  for _base in decision-lookup.sh stub-tests.sh; do
+    rel="$_reldir/$_base"
+    f="$HERE/$_base"
+    if ! "$_git" -C "$REPO_ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
       echo "FATAL: $rel is not tracked at HEAD -- refusing to report on scripts CI cannot verify."
       exit 1
     fi
-    if ! git -C "$REPO_ROOT" cat-file blob "HEAD:$rel" 2>/dev/null | cmp -s - "$f"; then
+    if ! "$_git" -C "$REPO_ROOT" cat-file blob "HEAD:$rel" 2>/dev/null | "$_cmp" -s - "$f"; then
       echo "FATAL: $rel differs from the committed blob at HEAD."
-      echo "  Something modified a gate script between checkout and this run. That is the disarm"
-      echo "  shape this suite exists to make impossible -- a green here would be a lie."
+      echo "  Something modified a gate script between checkout and this run -- the disarm shape"
+      echo "  this check exists to DETECT. A green here would be a lie."
+      echo "  Editing it locally? Re-run with DECISION_LOOKUP_ALLOW_DIRTY=1."
       exit 1
     fi
   done

@@ -99,10 +99,13 @@ jobs:
       # asserts over PARSED YAML: this step is located by its `run` VALUE and its key set must be
       # exactly {name, run}, so `|| true`, a trailing `; exit 0`, a step-level `if:` in ANY
       # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
-      # `continue-on-error` / `strategy`, and, at BOTH workflow and job scope, a `defaults.run.shell`
-      # that is not a bare shell name or an `env` key that changes how scripts EXECUTE (PATH,
-      # BASH_ENV, LD_PRELOAD, ...), no non-gate step may mention `.claude/`, `GITHUB_ENV` or
-      # `GITHUB_PATH` anywhere in its definition, and only `actions/checkout` may be `uses:`d here.
+      # `continue-on-error` / `strategy`, and, at BOTH workflow and job scope (the job half was
+      # deleted once by a refactor and measured green again by review #8), a `defaults.run.shell`
+      # that is not a bare shell name, or an `env` key that changes how scripts EXECUTE (PATH,
+      # BASH_ENV, LD_PRELOAD, ...) or names a gate script's self-verification opt-out. No non-gate
+      # step may mention `.claude`, `GITHUB_ENV` or `GITHUB_PATH` anywhere in its definition, only
+      # `actions/checkout` may be `uses:`d here, and `on.push` / `on.pull_request` may carry no
+      # path, branch or type filter - a fork PR has no push, so that trigger is its only coverage.
       # What that does NOT reach is written in the test's own comment; it is not restated here,
       # because three copies of a residual statement is how the last one came to be wrong.
       # READ THE MESSAGE, read this before "fixing" a red: the suite asserts COMPLETENESS -- every

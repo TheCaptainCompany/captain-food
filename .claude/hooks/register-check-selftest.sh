@@ -22,6 +22,49 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$ROOT/.claude/hooks/register-check.sh"
 [ -f "$HOOK" ] || { echo "register-check selftest: cannot find $HOOK" >&2; exit 2; }
 
+# ── This selftest testifies about its own inputs ─────────────────────────────────────────────
+# GATE-SELF-VERIFICATION-V2 -- same block as the decision-lookup stub suite, and pinned in both by
+# `assert_gate_script_self_verifies` (tools/codegen-rs/src/tests.rs), which runs in the `codegen`
+# job: a DIFFERENT job with its own checkout, outside the blast radius of anything the `changes`
+# job does. The eighth review of PR #679 planted `find . -name 'register-check-selftest.sh' -exec
+# cp /tmp/exit0.sh {} +` in an innocent-looking step and the whole gate went green with the hook
+# replaced by `exit 0`. A substring scan of step definitions cannot bound arbitrary shell; asking
+# "is the script about to run the one in the commit?" can.
+#
+# DEFAULT-ON with a named opt-out. stop-gate.sh -- the interactive path, where editing a hook and
+# re-running is the normal loop -- passes REGISTER_CHECK_ALLOW_DIRTY=1 explicitly. CI invokes this
+# script directly and gets the comparison. Both opt-out names are forbidden as workflow/job/step
+# `env:` keys by the codegen pin, so the CI path cannot be talked out of verifying.
+#
+# It DETECTS the named overwrite routes. It is not a defence against arbitrary code running first.
+if [ "${REGISTER_CHECK_ALLOW_DIRTY:-}" = "1" ]; then
+  echo "self-verification: OPTED OUT (REGISTER_CHECK_ALLOW_DIRTY=1) -- gate scripts NOT compared to HEAD."
+else
+  unset -f git cmp command 2>/dev/null || true
+  _vpath="/usr/bin:/bin:/usr/local/bin"
+  _git="$(PATH="$_vpath" command -v git || true)"
+  _cmp="$(PATH="$_vpath" command -v cmp || true)"
+  if [ -z "$_git" ] || [ -z "$_cmp" ]; then
+    echo "FATAL: git or cmp not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
+    exit 1
+  fi
+  echo "self-verification: comparing gate scripts against their committed blobs at HEAD."
+  for rel in .claude/hooks/register-check.sh .claude/hooks/register-check-selftest.sh; do
+    if ! "$_git" -C "$ROOT" cat-file -e "HEAD:$rel" 2>/dev/null; then
+      echo "FATAL: $rel is not tracked at HEAD -- refusing to report on scripts CI cannot verify." >&2
+      exit 1
+    fi
+    if ! "$_git" -C "$ROOT" cat-file blob "HEAD:$rel" 2>/dev/null | "$_cmp" -s - "$ROOT/$rel"; then
+      echo "FATAL: $rel differs from the committed blob at HEAD." >&2
+      echo "  Something modified a gate script between checkout and this run -- the disarm shape" >&2
+      echo "  this check exists to DETECT. A green here would be a lie." >&2
+      echo "  Editing it locally? Re-run with REGISTER_CHECK_ALLOW_DIRTY=1." >&2
+      exit 1
+    fi
+  done
+  echo "self-verification: OK -- both gate scripts are byte-identical to HEAD."
+fi
+
 FIX="$(mktemp -d "${TMPDIR:-/tmp}/register-check-selftest.XXXXXX")"
 trap 'rm -rf "$FIX"' EXIT
 cat > "$FIX/OPEN-ROW.yaml" <<'EOF'

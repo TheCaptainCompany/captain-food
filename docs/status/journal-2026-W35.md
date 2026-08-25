@@ -109,9 +109,18 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > DOWN: a job-level `env: {BASH_ENV: preamble.sh}` — bash sources `$BASH_ENV` before a
 > non-interactive script, so two lines kill both gates. Both were the same error: **keying on key
 > PRESENCE instead of dangerous CONTENT.** Now both scopes check content (bare shell name;
-> no PATH/BASH_ENV/ENV/SHELLOPTS/LD_PRELOAD/LD_LIBRARY_PATH/BASH_FUNC_*). Planted: M19 job
-> `BASH_ENV` · M20/M21 shell-drops-script at job and workflow scope · M22 workflow `PATH` · M23 job
-> `LD_PRELOAD` → RED; `CARGO_TERM_COLOR`, `RUST_LOG`, `shell: bash` → GREEN.
+> no PATH/BASH_ENV/ENV/SHELLOPTS/LD_PRELOAD/LD_LIBRARY_PATH/BASH_FUNC_*, plus each gate script's
+> self-verification opt-out name). Planted: M19 job `BASH_ENV` · M20/M21 shell-drops-script at job
+> and workflow scope · M22 workflow `PATH` · M23 job `LD_PRELOAD` → RED; `CARGO_TERM_COLOR`,
+> `RUST_LOG`, `shell: bash` → GREEN.
+>
+> ⚠️ **This paragraph recorded a red that stopped existing two commits later, and the eighth review
+> measured it back to green.** The refactor extracting `shell_ok` deleted the `env_ok(changes_val)`
+> call in the same hunk, so M19 and M23 — the job half — passed again while this entry, `ci.yml`'s
+> comment and the ADR all still said they were closed. **The lesson is not "re-check the journal":
+> it is that a guard deleted during a refactor is invisible unless something plants it red.** Never
+> change structure and behaviour in one step (Beck), and pin a guard from a test that fails when it
+> is removed, not from a sentence.
 >
 > **The fourth review then showed my "honest boundary" was itself an overclaim.** The comment said
 > no test of this class could close the sibling-step vector — and the cheapest disarm in the entire
@@ -158,10 +167,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > this repo, with every assertion green. Both are closed. But the durable fix is the one the review
 > recommended: **the suite now testifies about its own inputs.** In CI, before reporting anything,
 > `stub-tests.sh` verifies that it and the wrapper are byte-identical to their committed blobs.
-> That kills the ENTIRE overwrite class — including the two spellings the residual had called
-> unclosable — instead of chasing each one. Enforced in CI only, so a developer editing the wrapper
-> locally is not redded. **Cost that earned it: six rounds of mutants that were all one shape, and
-> a residual statement that was wrong about its own scope three rounds running.**
+> **The claim that this "kills the ENTIRE overwrite class" was the FOURTH completeness claim in
+> this chain written before it was checked, and the eighth review disproved it two ways in one
+> pass**: only `stub-tests.sh` carried the block, so a `find -exec cp` step replaced
+> `register-check-selftest.sh` with `exit 0` and every assertion stayed green; and the block itself
+> was disarmed by a `git` shell function sourced through job-level `env: BASH_ENV`, printing
+> `54 passed` over a visibly tampered wrapper. Both are fixed — both gate scripts carry the block,
+> it `unset -f`s and resolves `git`/`cmp` on a fixed PATH, and the pin forbids `BASH_ENV` at every
+> scope. The correct verb is **DETECT**, not prevent, and it is not a defence against arbitrary
+> code running before it.
+>
+> **Two more shape errors the same review found, worth more than the mutants**: the block ran only
+> when `GITHUB_ACTIONS=true`, which fails OPEN — the on-switch was an ordinary environment variable
+> settable from the very surface it defends against. It is now default-on with a named opt-out
+> (`DECISION_LOOKUP_ALLOW_DIRTY` / `REGISTER_CHECK_ALLOW_DIRTY`), both forbidden as CI `env:` keys,
+> and `stop-gate.sh` — the interactive path where editing a hook is the normal loop — opts out
+> visibly at its one call site. And the block **had never been seen red anywhere**: local runs skip
+> it by design and nothing constructed a tampered tree, so its only proof of life was a reviewer's
+> manual run. `the_gate_self_verification_reds_on_a_tampered_script` now builds a throwaway git
+> repo, tampers each script in turn, and asserts a non-zero exit naming the file. **Cost that
+> earned it: six rounds of mutants that were all one shape, then two rounds proving the fix for
+> them was itself unpinned and unexercised.**
 >
 > A note for whoever next pins a workflow key: **`on:` resolves differently per YAML version** —
 > 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string `"on"`. A lookup

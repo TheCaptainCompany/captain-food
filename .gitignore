@@ -22,3 +22,8 @@ wt*/
 
 # QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD)
 .qmd/
+
+# Python bytecode caches — running .github/scripts/*.py dirties a clean checkout, and a .pyc
+# with no source in the tree was committed once by an over-broad `git add` (review #8 of PR #679).
+__pycache__/
+*.pyc

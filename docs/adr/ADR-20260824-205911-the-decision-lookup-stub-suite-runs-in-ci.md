@@ -163,10 +163,31 @@ walked past, then a run-only substring scan that a `uses:` payload walked past. 
 pins the property (no non-gate step may mention the gate scripts or rewrite their environment,
 anywhere in its definition; `uses:` allow-listed; `defaults.run` restricted at both scopes) and
 **states a boundary instead of a completeness claim**. Round 7 then replaced the
-approach rather than the boundary: the suite now verifies IN CI that it and the wrapper are
-byte-identical to their committed blobs before reporting, which closes the whole overwrite class
-that six rounds of needles had been chasing one spelling at a time: a substring scan cannot bound arbitrary
-shell, so this narrows the casual spellings and is not a defence against commit access. **The recurring defect is not the mutants; it is
-that each round's completeness claim was written before it was checked.** The register-machinery
+approach rather than the boundary: each gate script now verifies that it and the script it guards
+are byte-identical to their committed blobs before reporting anything.
+
+**Round 8 found that fix unpinned, unexercised, half-applied and itself disarmable** — and found
+that the same commit's refactor had silently deleted the `env_ok` call at job scope, reopening the
+thirteenth mutant this ADR two paragraphs above records as closed. Four corrections landed:
+
+1. **`env_ok` restored at job scope**, with `BASH_ENV` and `LD_PRELOAD` planted red at both scopes
+   so a refactor cannot delete it invisibly again. A guard removed during a refactor leaves no
+   trace unless something plants it red — that, not the mutant, is the finding.
+2. **Both gate scripts carry the block.** Only `stub-tests.sh` had it, so a `find -exec cp` step
+   replaced `register-check-selftest.sh` with `exit 0` and every assertion in this PR stayed green.
+3. **The block is hardened and default-ON.** It was disarmed by a `git` shell function sourced via
+   job-level `env: BASH_ENV`; it now `unset -f`s and resolves `git`/`cmp` on a fixed PATH. And it
+   ran only when `GITHUB_ACTIONS=true` — an on-switch settable from the surface it defends against,
+   i.e. fail-open. It is now always on, with a named opt-out that CI may not set.
+4. **It is pinned and planted red.** `assert_gate_script_self_verifies` asserts the block's presence
+   from the `codegen` job — a different checkout, outside the `changes` job's blast radius — and
+   `the_gate_self_verification_reds_on_a_tampered_script` builds a throwaway git repo, tampers each
+   script, and requires a non-zero exit naming the file.
+
+The honest verb is **DETECT**: the script still runs and refuses to report. It is not a defence
+against arbitrary code running before it, and a commit that changes the gate scripts in the same
+change remains a code review's job. **The recurring defect is not the mutants; it is
+that each round's completeness claim was written before it was checked** — round 7's was the
+fourth, and it was wrong in two independent ways at once. The register-machinery
 rule added here is governed by `docs/decisions/README.md`, not by this row's QMD surface — it is
 the remediation of a claim this ADR itself made, which is why it rides along.
