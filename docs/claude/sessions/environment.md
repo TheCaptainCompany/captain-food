@@ -177,6 +177,27 @@ session transcript.** Write the "what is true right now / what is deliberately n
 into the PR *as you go*. A coordinator that keeps that state only in context loses it; an executor
 that saves its report for the final message loses the whole run when the container recycles.
 
+**Sharpened 2026-08-25: the death is SILENT, and a waiting coordinator can wait forever.** Two
+`reviewer` agents were launched, the session went idle, the container suspended, and on resume the
+agents were gone — but **no completion notification is ever emitted for an agent that dies this
+way**. A coordinator whose next step is "act on the verdict" simply waits, and a scheduled check-in
+that says *"if nothing changed, re-arm silently"* will keep re-arming against a corpse. Worse, the
+transcript files still exist and their **mtime updates on session resume**, so "the file was touched
+a minute ago" reads as liveness when nothing is running.
+
+**Detect it in two cheap steps, and never trust mtime alone:**
+
+1. `ls -la` the agent's `.jsonl` twice, minutes apart, and compare **SIZE**, not mtime. Byte-identical
+   size across a real interval means no output is being produced.
+2. Confirm with `TaskStop` on the agent id. **`No task found with ID: ...` is the positive proof** —
+   the registry has no such task, so it is not running and cannot be waited on.
+
+Then relaunch rather than wait. Budget the relaunched brief explicitly (*"if you run long, return a
+PARTIAL verdict rather than nothing"*) and give it a priority order: a long agent that dies at 95%
+returns exactly as much as one that dies at 5%. This is the dead-man's-switch defect CLAUDE.md names
+under the no-polling rule, in the team's own loop: **a wait that can only end when a signal ARRIVES
+goes quiet exactly when the thing it waits on has died.**
+
 **Corollary**: after any unexplained gap, verify agent liveness before assuming a dispatch is still
 running. A silent agent and a dead agent are identical from inside the session, and the difference
 is one `ListAgents` call.
