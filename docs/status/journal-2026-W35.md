@@ -41,7 +41,10 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Then the reviews found the fix carried FOUR false verdicts of its own** — the two enumerated
 > below, plus the per-page `| length` (self-found) and `|| true` binding to the whole pipeline —
 > on a check that is
-> required *today*, so each was a repo-wide merge stop I had introduced while fixing one:
+> required *today*, so each blocked merges on the PRs it hit — a class of defect I introduced while
+> fixing one. (An earlier version said each was a *repo-wide* merge stop. Review #11: only the
+> credit/outage case is repo-wide; the SIGPIPE defect reds a PR whose comment stream exceeds the
+> pipe buffer, and the matcher defects red the PR whose comment tripped them.)
 > - `printf '%s' "$bodies" | grep -qF` makes grep exit at the first match, printf die of SIGPIPE and
 >   `pipefail` report **141 even though grep MATCHED**. Reproduced here: green at 64 000 trailing
 >   bytes, **FALSE RED at 128 000 and 512 000**. PR #674 already carries ~35 KB of bot comments, and
@@ -165,8 +168,11 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > The harness's oracle also stripped every `<code>`, so it read an
 > inline code span in a paragraph — the commonest real shape for a sha — as "renders as code",
 > hiding false reds in the only direction the budget guards. Fixed to track `<pre>` depth. The
-> budget now sweeps seven seeds instead of one, because the shipped matcher measures 0–4 across
-> ordinary seeds and a single-seed budget of 5 was unsensitive in both directions. **Measure
+> budget now sweeps seven seeds instead of one and ratchets the committed per-seed VECTOR, failing
+> in both directions; a scalar against a constant reproduces the same defect one level up, because
+> seeds sitting at zero carry the slack. **No range is quoted here** — the first version of this
+> sentence stated one that this branch's own committed baseline refuted two commits later, in the
+> paragraph recording that lesson. Fifth occurrence. **Measure
 > against the real population before believing a redesign bought anything.**
 >
 > **Two decisions had been taken by code comment with no register row** — the fail-open direction

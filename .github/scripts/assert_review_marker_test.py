@@ -9,7 +9,7 @@ that is why this file exists.
 
 Run: python3 .github/scripts/assert_review_marker_test.py
 """
-import sys, pathlib
+import os, sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from assert_review_marker import comment_names_commit, count_matches  # noqa: E402
 
@@ -124,9 +124,30 @@ CASES = [
      "review #10: the info-string restriction is backtick-only; do not over-apply the fix"),
     ("one-backtick line is NOT a fence",
      f"`live_lines` is wrong.\n\nReviewed-Commit: {H}", True,
-     "review #9 SURVIVING MUTANT: relaxing the delimiter to `{1,}` made every comment opening with "
-     "an inline code span at column 0 start a phantom fence and swallow the marker -- a live false red, "
-     "in the one dimension the round-8 redesign claims to have made safe. Reviewers write this constantly."),
+     "review #9: relaxing the delimiter to `{1,}` made every comment opening with an inline code "
+     "span at column 0 start a phantom fence and swallow the marker. HONEST LABEL (review #11): "
+     "this case no longer kills that mutant -- round 11's backtick-info-string guard rescues it, "
+     "because the tail carries a backtick. The case still documents a real live shape; the KILL "
+     "moved to the two cases below, which carry no backtick in the tail."),
+    ("col-0 opener, closer indented 1-3 spaces",
+     f"q:\n{BT}\nquoted\n   {BT}\nReviewed-Commit: {H}", False,
+     "ACCEPTED FALSE RED, direction 1: CommonMark closes this fence, the matcher does not see the "
+     "indented closer, so the fence runs to end of comment. Pinned as a FIXTURE so the residual is "
+     "not just a sentence -- review #11. Remedy for an operator: close fences at column 0."),
+    ("opener indented 1-3 spaces, closer at col 0",
+     f"q:\n  {BT}\nquoted\n{BT}\nReviewed-Commit: {H}", False,
+     "ACCEPTED FALSE RED, direction 2 -- the MIRROR, and the one actually sitting in the committed "
+     "differential baseline (seed 2) while the docstring documented only direction 1 and claimed the "
+     "baseline tracked it. An indented opener is legal CommonMark; the matcher reads its column-0 "
+     "closer as a fresh OPENER. Review #11."),
+    ("unbalanced col-0 backtick, no backtick in the tail",
+     f"`unclosed span at column zero\n\nReviewed-Commit: {H}", True,
+     "review #11 RESTORED KILL: with `{1,}` this opens a phantom fence the info-string guard does "
+     "NOT rescue (no backtick in the rest), so the marker is swallowed -- a live false red. This is "
+     "the case that actually pins the `{3,}` delimiter length."),
+    ("two-backtick line, no backtick in the tail",
+     f"``almost a span\n\nReviewed-Commit: {H}", True,
+     "review #11: same kill at run length 2, so `{2,}` is pinned too."),
     ("two-tilde line is NOT a fence",
      f"~~struck~~ text\n\nReviewed-Commit: {H}", True,
      "review #9: same mutant, tilde side. GFM strikethrough at column 0 is not a fence opener."),
@@ -170,6 +191,30 @@ def main() -> int:
         if got != want:
             print(f"FAIL  {name}: expected {want}, got {got}   [{why}]")
             failed += 1
+    # ARGUMENT ARITY, driven through the real entry point. Review #11 ran four mutants against
+    # round 10's argv fix -- `> 2` -> `> 3`, `> 2` -> `if False`, dropping "extra" from the zip,
+    # and `shas = args[:2]` -- and ALL FOUR survived the battery. The fix shipped with no coverage
+    # at all, in the file the workflow calls "the exact contract". These cases are why it now has
+    # some: a third sha must be refused outright, and the third zip slot must be live.
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    def run_argv(args):
+        return subprocess.run(
+            [sys.executable, os.path.join(here, "assert_review_marker.py"), *args],
+            input="[]", capture_output=True, text=True,
+        )
+    third = "c" * 40
+    for label, args, want_rc in [
+        ("three shas are refused outright", [H, M, third], 2),
+        ("a malformed THIRD sha is caught by the validation loop", [H, M, "nothex"], 2),
+        ("two good shas still validate", [H, M], 0),  # rc 0 + a printed count; the workflow asserts on it
+    ]:
+        got = run_argv(args)
+        if got.returncode != want_rc:
+            print(f"FAIL  argv: {label}: expected rc {want_rc}, got {got.returncode}   "
+                  f"[stderr: {got.stderr.strip()[:120]}]")
+            failed += 1
+
     # Author filtering and counting, end to end.
     human = [{"user": {"type": "User"}, "body": f"Reviewed-Commit: {H}"}]
     if count_matches(human, SHAS) != 0:
@@ -219,7 +264,7 @@ def main() -> int:
         except Exception:
             pass
     total = len(CASES) + 3 + 4 + 7
-    print(f"RESULT: {total - failed} passed, {failed} failed  ({len(CASES)} body + 3 counting + 4 argument + 7 pagination cases)")
+    print(f"RESULT: {total - failed} passed, {failed} failed  ({len(CASES)} body + 3 counting + 7 argument + 7 pagination cases)")
     return 1 if failed else 0
 
 

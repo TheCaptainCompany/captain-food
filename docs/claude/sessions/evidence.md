@@ -232,8 +232,13 @@ evidence — here it was not even true.
   `.github/scripts/assert_review_marker_differential.py`. **Its oracle must track `<pre>` depth,
   not strip every `<code>`**: an inline code span in a paragraph renders LIVE, it is the commonest
   real shape for a sha, and blanket-stripping it makes the harness under-count exactly the number
-  the budget guards. **Sweep several seeds, not one** — the shipped matcher measures 0–4 false reds
-  across ordinary seeds, so a single-seed budget of 5 is unsensitive in both directions.
+  the budget guards. **Sweep several seeds and ratchet the VECTOR, not a scalar against a constant.** A
+  single-seed budget lets a change that multiplies false reds pass and makes a fix invisible; so
+  does `max(per_seed) > K`, one level up, because seeds sitting at zero carry the slack. Commit the
+  per-seed counts the way `warning-baseline.json` is committed, and fail in both directions. No
+  magnitude is quoted here on purpose — an earlier version of this line stated a range that the
+  branch's own committed baseline refuted within two commits, which is the note's own lesson
+  happening inside the note for the second time.
   **The harness prints its own antecedents** (corpus seed, corpus size, parser version) and no
   comment quotes its figure: the first version of this line stated a bare count that had already
   drifted by the time the next commit landed, which is ADR-20260817-105845 happening inside the

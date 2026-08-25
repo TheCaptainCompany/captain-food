@@ -21,9 +21,17 @@ The boundary, stated because claiming more is how this went wrong five times:
 this raises the bar on a marker quoted from another comment. It does not make it
 impossible. INDENTED code blocks, fences opened inside a blockquote or a list,
 `<pre>`, `<code>` and multi-line HTML comments all render as code while this
-counts them -- that is the accepted direction of error, not an oversight. Nor can
-it prove WHICH bot posted the comment, because this repo's own agent sessions
-post under the same identity.
+counts them -- that is the accepted direction of error, not an oversight.
+
+INDENTATION IS NOT UNIFORMLY THAT DIRECTION, though, and saying so was wrong:
+an indented FENCE OPENER (legal CommonMark at 1-3 columns) errs the OTHER way,
+into a live false red, because this only tracks column-0 delimiters and reads the
+opener's column-0 closer as a fresh opener. See the residual below -- review #11
+found that shape sitting in the committed baseline while this paragraph implied
+indentation could only cost a false green.
+
+Nor can it prove WHICH bot posted the comment, because this repo's own agent
+sessions post under the same identity.
 """
 from __future__ import annotations
 
@@ -106,9 +114,14 @@ def live_lines(body: str):
       * THE MARKER MUST START ITS LINE, after at most the prefixes MARKER accepts (blockquote,
         bullet, ordered marker, heading, emphasis). Prose before it, a task-list box `- [x] `, or
         a GFM table cell's leading pipe all render live and are all missed.
-      * A fence opened at column 0 and closed by a delimiter indented 1-3 spaces: CommonMark
-        closes it, this does not, so the fence runs to end of comment and every later line is
-        dead. This is the residual the differential harness's baseline tracks.
+      * ANY disagreement about which delimiter opens and which closes a fence, once indentation
+        is in play. This matcher only ever sees column-0 delimiters, so both directions fail:
+        a column-0 opener closed by a delimiter indented 1-3 spaces (the closer is invisible, the
+        fence runs to end of comment), AND an opener indented 1-3 spaces -- legal in CommonMark --
+        whose column-0 closer this reads as a fresh OPENER, with the same result. Review #11 found
+        the second shape is the one actually sitting in the committed baseline, while this
+        paragraph documented only the first and claimed the baseline tracked it. Both are now
+        battery cases, so the accepted residual is a fixture rather than a sentence.
 
     The operator hint in claude-code-review.yml prints the class, because a red the operator
     cannot diagnose is a red they will work around.
@@ -137,7 +150,9 @@ def live_lines(body: str):
             if not (char == "`" and "`" in m.group("rest")):
                 fence = (char, run)
                 continue
-        yield line.lstrip()
+        # NOT `line.lstrip()`: both consumers lstrip again, so stripping here is a no-op whose
+        # removal no test can distinguish (review #11). Same rule that deleted `HEADING`.
+        yield line
 
 
 
@@ -207,7 +222,10 @@ def main() -> int:
         return 2
     # EVERY argument, not just the first two. `zip` stopped at the shorter sequence while
     # `shas = list(args)` took them all, so a third argument was matched unvalidated (review #10).
-    for name, value in zip(("head", "merge", "extra"), args):
+    # The arity check above bounds `args` to two, which makes a third name here DEAD -- review #11
+    # measured that mutant as surviving the battery and it is equivalent by construction, not a
+    # coverage hole. Deleted rather than pinned, same rule this file applied to `HEADING`.
+    for name, value in zip(("head", "merge"), args):
         if not re.fullmatch(r"[0-9a-fA-F]{40}", value or ""):
             print(f"::error::the {name} sha is empty or not 40 hex chars (got {value!r}) - "
                   f"refusing to assert against a marker that anything could satisfy.",

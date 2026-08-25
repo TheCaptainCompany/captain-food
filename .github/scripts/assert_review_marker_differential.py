@@ -45,6 +45,7 @@ except ImportError:
 
 H = "3f9a2c7e1b8d40526af1c93e07b45d8e2a6f1c04"
 MARKER = f"Reviewed-Commit: {H}"
+MARKER_BACKTICKED = f"Reviewed-Commit: `{H}`"
 PREFIXES = ["", "> ", ">", "- ", "1. ", "  ", "    ", "\t", "> > ", "- > "]
 # THE ALPHABET DECIDES WHAT THE BUDGET CAN SEE. Every entry here used to be a genuine fence
 # opener, so no generated body could ever make the matcher and CommonMark disagree about whether a
@@ -80,8 +81,14 @@ def bodies(n: int, seed: int):
             k = rnd.random()
             if k < 0.30:
                 out.append(rnd.choice(PREFIXES) + rnd.choice(FENCES))
-            elif k < 0.55:
+            elif k < 0.48:
                 out.append(rnd.choice(PREFIXES) + MARKER)
+            elif k < 0.55:
+                # A BACKTICKED sha. Round 9 rewrote the oracle to `<pre>`-depth tracking precisely
+                # so an inline code span in a paragraph reads LIVE, calling it "the commonest real
+                # shape a reviewer writes" -- and the corpus then emitted no body containing one, so
+                # that fix was unverified by its own instrument for two rounds (review #11).
+                out.append(rnd.choice(PREFIXES) + MARKER_BACKTICKED)
             elif k < 0.75:
                 out.append("")
             else:
@@ -202,12 +209,13 @@ def main() -> int:
             want = renders_live(md, body)
             if want and not got:
                 false_red += 1
-                first_red = first_red or body
+                if first_red is None:  # not `or`: an empty body is falsy and would be skipped,
+                    first_red = body      # silently reporting a LATER one as "first" (review #11)
             elif got and not want:
                 false_green += 1
         measured[seed] = false_red
         base = FALSE_RED_BASELINE.get(seed)
-        mark = "  <-- REGRESSION" if base is not None and false_red > base else (
+        mark = "" if variant else "  <-- REGRESSION" if base is not None and false_red > base else (
             "  <-- improved, tighten the baseline" if base is not None and false_red < base else "")
         print(f"  seed {seed:>4}:  FALSE RED {false_red:>3} (baseline {base})   "
               f"false green {false_green:>4} (accepted by design){mark}")
