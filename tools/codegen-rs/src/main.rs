@@ -108,67 +108,7 @@ fn main() {
         // A superseded row may not be cited as live authority anywhere under `.claude/**` — the
         // grep CLAUDE.md prescribes after a reshape, executed instead of remembered.
         {
-            let mut cited: Vec<(String, String)> = Vec::new();
-            // ROOT FILES TOO. `.claudeignore` is not under `.claude/`, and it was one of the eight
-            // sites this PR fixed by hand -- so the first version of this scope would not have
-            // caught the very file that motivated the rule (review #11). `docs/**` stays OUT on
-            // purpose: a record ABOUT a supersession must name the superseded row.
-            for rel in [".claudeignore", ".gitignore"] {
-                if let Ok(text) = fs::read_to_string(root.join(rel)) {
-                    cited.push((rel.to_string(), text));
-                }
-            }
-            let mut stack = vec![root.join(".claude")];
-            let mut budget = 10_000usize; // a symlink cycle under .claude/ would otherwise spin
-            while let Some(dir) = stack.pop() {
-                budget = match budget.checked_sub(1) {
-                    Some(b) => b,
-                    None => break,
-                };
-                let Ok(entries) = fs::read_dir(&dir) else { continue };
-                for e in entries.flatten() {
-                    let path = e.path();
-                    // `is_dir()` FOLLOWS SYMLINKS, so a cycle loops forever rather than erroring.
-                    // `file_type()` from the dir entry does not. Untracked local files are skipped
-                    // too: `.claude/settings.local.json` on a contributor's machine must never red
-                    // `make validate` with no committed cause (review #11).
-                    let Ok(ft) = e.file_type() else { continue };
-                    if ft.is_symlink() {
-                        continue;
-                    }
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    // PRUNE THE GITIGNORED TREES. `.claude/worktrees/` holds FULL CHECKOUTS of the
-                    // repo (see .gitignore) -- their own docs/, specs/ and, after any build, a
-                    // target/ with tens of thousands of cargo .fingerprint JSON files. Descending
-                    // there did three bad things at once: it re-admitted `docs/**` through a side
-                    // door, defeating this rule's deliberate scope decision; it read every
-                    // fingerprint file on every run; and because a stale worktree can hold ANY
-                    // branch, `make validate` -- which stop-gate.sh runs every turn -- could red on
-                    // an untracked file from another branch with nothing in the working tree that
-                    // clears it. `journal-2026-W34.md` on main carries exactly such a line today.
-                    if matches!(name, "worktrees" | "target" | "node_modules" | ".git") {
-                        continue;
-                    }
-                    // `settings.local.json` and friends: a contributor's local overrides are not
-                    // committed content and must never red a shared gate. (This skips THAT name
-                    // pattern, not "untracked files" -- an earlier comment here claimed the latter,
-                    // which the code never did.)
-                    if name.contains(".local.") {
-                        continue;
-                    }
-                    if ft.is_dir() {
-                        stack.push(path);
-                    } else if matches!(
-                        path.extension().and_then(|x| x.to_str()),
-                        Some("md" | "sh" | "json" | "yaml" | "yml")
-                    ) {
-                        if let Ok(text) = fs::read_to_string(&path) {
-                            let rel = path.strip_prefix(&root).unwrap_or(&path).display().to_string();
-                            cited.push((rel, text));
-                        }
-                    }
-                }
-            }
+            let cited = validate::decisions::claude_citation_corpus(&root);
             dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));
         }
         // §22c — the decision-form template anchors questions to rows (requirement 6; published

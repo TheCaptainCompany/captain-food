@@ -9967,29 +9967,11 @@ mod decision_ask_and_citations {
             real_rows.iter().any(|r| r.get("status") == Some("superseded")),
             "the corpus must contain at least one superseded row, or this assertion is vacuous"
         );
-        let mut corpus_files: Vec<(String, String)> = Vec::new();
-        for rel in [".claudeignore", ".gitignore"] {
-            if let Ok(t) = fs::read_to_string(root.join(rel)) {
-                corpus_files.push((rel.to_string(), t));
-            }
-        }
-        let mut stack = vec![root.join(".claude")];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = fs::read_dir(&dir) else { continue };
-            for e in entries.flatten() {
-                let path = e.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else if matches!(
-                    path.extension().and_then(|x| x.to_str()),
-                    Some("md" | "sh" | "json" | "yaml" | "yml")
-                ) {
-                    if let Ok(t) = fs::read_to_string(&path) {
-                        corpus_files.push((path.display().to_string(), t));
-                    }
-                }
-            }
-        }
+        // THE SAME WALK THE VALIDATOR USES, not a second copy. This test re-implemented it once,
+        // without the pruning or the symlink guard, so `cargo test` reddened on any machine with a
+        // leftover `.claude/worktrees/` while CI stayed green -- the divergence introduced in the
+        // very commit that fixed the other copy.
+        let corpus_files = claude_citation_corpus(&root);
         let real = validate_no_superseded_row_is_cited_as_authority(&real_rows, &corpus_files);
         assert!(
             real.is_empty(),
