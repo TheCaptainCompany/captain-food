@@ -109,6 +109,15 @@ fn main() {
         // grep CLAUDE.md prescribes after a reshape, executed instead of remembered.
         {
             let mut cited: Vec<(String, String)> = Vec::new();
+            // ROOT FILES TOO. `.claudeignore` is not under `.claude/`, and it was one of the eight
+            // sites this PR fixed by hand -- so the first version of this scope would not have
+            // caught the very file that motivated the rule (review #11). `docs/**` stays OUT on
+            // purpose: a record ABOUT a supersession must name the superseded row.
+            for rel in [".claudeignore", ".gitignore"] {
+                if let Ok(text) = fs::read_to_string(root.join(rel)) {
+                    cited.push((rel.to_string(), text));
+                }
+            }
             let mut stack = vec![root.join(".claude")];
             while let Some(dir) = stack.pop() {
                 let Ok(entries) = fs::read_dir(&dir) else { continue };

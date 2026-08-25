@@ -9866,6 +9866,125 @@ mod decision_ask_and_citations {
         assert!(issues.contains(&rule), "mid-chain challenge must be red, got {:?}", issues);
     }
 
+    /// The superseded-authority rule, planted RED and GREEN, plus the real corpus.
+    ///
+    /// It shipped with no test at all. `claude-review` pointed out that deleting the call site in
+    /// `main.rs` -- or making the function return an empty Vec -- left `cargo test --workspace`
+    /// entirely green, so the rule would vanish with no signal. That is the round-8 regression
+    /// (`env_ok` deleted by a refactor, invisible) and the round-9 lesson (*pin a guard from a test
+    /// that fails when it is removed, not from a sentence*) reproduced in the same PR that
+    /// catalogues both, in the rule written to stop the last recurrence.
+    #[test]
+    fn a_superseded_row_may_not_be_cited_as_live_authority() {
+        let rows_src: Vec<(String, String)> = vec![(
+            "docs/decisions/OLD-ROW.yaml".to_string(),
+            "key: \"OLD-ROW\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-01\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\nsuperseded_by: \"NEW-ROW\"\n".to_string(),
+        )];
+        let mut sink = Vec::new();
+        let rows = parse_decision_rows(&rows_src, &mut sink);
+        let check = |path: &str, body: &str| {
+            validate_no_superseded_row_is_cited_as_authority(
+                &rows,
+                &[(path.to_string(), body.to_string())],
+            )
+        };
+
+        // RED: every citation form an author actually writes.
+        for (label, body) in [
+            ("row + backticks", "Decided by row `OLD-ROW` (founder)."),
+            ("Per row, in a runtime message", "echo \"Per row OLD-ROW: record this failure\""),
+            ("Per <KEY>", "See Per OLD-ROW for the rollback path."),
+            ("decided_by field", "decided_by: OLD-ROW"),
+            ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
+        ] {
+            let issues = check(".claude/x.md", body);
+            assert_eq!(
+                issues.len(), 1,
+                "`{}` must be caught -- a superseded row cited as live authority sends the next session into a gate error. Body: {}",
+                label, body
+            );
+            assert_eq!(issues[0].rule, "decision-superseded-authority");
+        }
+
+        // GREEN: prose ABOUT the supersession, and words that merely end in the trigger letters.
+        for (label, body) in [
+            ("the chain head", "Decided by row `NEW-ROW` (the chain head)."),
+            (
+                "possessive clause explaining the supersession",
+                "Decided by row `NEW-ROW`, which carries `OLD-ROW`'s content forward in full.",
+            ),
+            // `ends_with(\"row\")` also matches these. That is the false-red class this file has
+            // retracted three times; without these controls the rule would carry it unnoticed.
+            ("narrow", "the narrow `OLD-ROW` boundary is deliberate"),
+            ("borrow", "we borrow OLD-ROW's wording here"),
+            ("arrow", "arrow OLD-ROW"),
+            ("a longer key is not a prefix match", "Decided by row `OLD-ROW-CI`."),
+            ("no citation form at all", "OLD-ROW was the predecessor."),
+        ] {
+            let issues = check(".claude/x.md", body);
+            assert!(
+                issues.is_empty(),
+                "`{}` must stay GREEN -- a guard that fires on ordinary prose trains readers to discount it. Body: {}, got {:?}",
+                label, body, issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        // THE REAL CORPUS, so the rule is exercised against shipped content and not only fixtures.
+        // This is what would have caught the eight sites this PR fixed by hand.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let real_rows_src: Vec<(String, String)> = {
+            let mut v = Vec::new();
+            if let Ok(entries) = fs::read_dir(root.join("docs/decisions")) {
+                for e in entries.flatten() {
+                    let path = e.path();
+                    if path.extension().and_then(|x| x.to_str()) == Some("yaml")
+                        && !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('_'))
+                    {
+                        if let Ok(t) = fs::read_to_string(&path) {
+                            v.push((path.display().to_string(), t));
+                        }
+                    }
+                }
+            }
+            v
+        };
+        let mut sink2 = Vec::new();
+        let real_rows = parse_decision_rows(&real_rows_src, &mut sink2);
+        assert!(
+            real_rows.iter().any(|r| r.get("status") == Some("superseded")),
+            "the corpus must contain at least one superseded row, or this assertion is vacuous"
+        );
+        let mut corpus_files: Vec<(String, String)> = Vec::new();
+        for rel in [".claudeignore", ".gitignore"] {
+            if let Ok(t) = fs::read_to_string(root.join(rel)) {
+                corpus_files.push((rel.to_string(), t));
+            }
+        }
+        let mut stack = vec![root.join(".claude")];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if matches!(
+                    path.extension().and_then(|x| x.to_str()),
+                    Some("md" | "sh" | "json" | "yaml" | "yml")
+                ) {
+                    if let Ok(t) = fs::read_to_string(&path) {
+                        corpus_files.push((path.display().to_string(), t));
+                    }
+                }
+            }
+        }
+        let real = validate_no_superseded_row_is_cited_as_authority(&real_rows, &corpus_files);
+        assert!(
+            real.is_empty(),
+            "the committed corpus cites a superseded row as live authority: {:?}",
+            real.iter().map(|i| format!("{} {}", i.location, i.message)).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn the_index_sync_gate_goes_red_on_disagreement_and_missing_markers() {
         let owned = vec![("docs/decisions/ROW-A.yaml".to_string(), OPEN_A.to_string())];

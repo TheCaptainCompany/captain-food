@@ -602,9 +602,23 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// `reconsiders: <superseded row>`, which `decision-reconsiders-shape` rejects.
 ///
 /// CLAUDE.md already says to grep the old term after any reshape; the term lived in `.claude/**`,
-/// which the grep did not cover. So this is the grep, executed on every run and at the moment the
-/// row flips rather than whenever someone remembers. It is derived from row STATUS, not a
-/// hard-coded key list, so it keeps working as the chain grows links.
+/// It is derived from row STATUS, not a hard-coded key list, so it keeps working as the chain
+/// grows links.
+///
+/// WHAT IT DOES NOT REACH, because the first version of this docstring claimed to be "the grep"
+/// and review #11 measured otherwise:
+///
+///   * Only the CITATION FORMS below are recognised — `row <KEY>`, `Per <KEY>`, `decided_by: <KEY>`
+///     and `the <KEY> decision`. Prose that names a row some other way is missed. This is a
+///     high-signal spot check, not an exhaustive grep.
+///   * It sees only the files the caller hands it. Today that is `.claude/**` plus the root files
+///     that carried citations (`.claudeignore`, `.gitignore`). `docs/**` is deliberately NOT in
+///     scope: records *about* a supersession necessarily name the superseded row, and redding
+///     those would make the rule unusable. That asymmetry is the reason the scope is a caller
+///     decision rather than a walk from the repo root.
+///   * `.claudeignore` is the case that proves the point: it is a ROOT file, it was one of the
+///     eight sites this PR fixed by hand, and the first version of this rule would not have seen
+///     it. It is in scope now.
 pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
     rows: &[DecisionRow],
     files: &[(String, String)],
@@ -635,8 +649,28 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     ) {
                         continue;
                     }
-                    let before = line[..at].trim_end().trim_end_matches('`').trim_end();
-                    if !before.to_lowercase().ends_with("row") {
+                    let before = line[..at].trim_end().trim_end_matches(['`', '"', '\'']).trim_end();
+                    let lower = before.to_lowercase();
+                    // WORD-BOUNDED. `ends_with("row")` also matches `narrow`, `borrow` and `arrow`
+                    // -- the false-red class this file has retracted three times, reproduced in the
+                    // rule written to stop the last one. There is a green control for it below.
+                    let ends_with_word = |w: &str| {
+                        lower.strip_suffix(w).is_none_or(|head| {
+                            !head.chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                        }) && lower.ends_with(w)
+                    };
+                    // The citation forms an author actually writes. Not exhaustive, and the
+                    // docstring says so rather than claiming to be the grep.
+                    if !(ends_with_word("row")
+                        || ends_with_word("per")
+                        || lower.ends_with("decided_by:")
+                        // NOT `reconsiders:` or `superseded_by:`. Those are register-row FIELDS,
+                        // and docs/decisions/** is out of scope anyway -- but including them here
+                        // false-redded this PR's own retraction comment, which quotes
+                        // `reconsiders: <old row>` as the thing NOT to write. Caught by running
+                        // the rule rather than by reading it, which is the whole argument.
+                        || ends_with_word("the"))
+                    {
                         continue;
                     }
                     issues.push(err(
