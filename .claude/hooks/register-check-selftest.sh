@@ -89,6 +89,26 @@ else
   _ref="${GITHUB_SHA:-HEAD}"
   echo "self-verification: comparing all 4 gate scripts against their committed blobs at ${_ref}."
   # THE GATE SET. Both gate scripts carry this identical list; the codegen pin asserts that.
+  # RESOLVE THE COMMIT BEFORE BLAMING A FILE. `cat-file -e "$ref:$path"` is false for two very
+  # different reasons -- the path is untracked there, or the COMMIT is absent from this checkout --
+  # and reporting both as "not tracked" sends the operator hunting a missing file that is present.
+  #
+  # It is not hypothetical. On a `pull_request` run GITHUB_SHA is the merge commit GitHub computed
+  # when the run was QUEUED, while actions/checkout resolves refs/pull/N/merge when it FETCHES. If
+  # the base branch moves in between, the merge ref is recomputed and the workspace no longer holds
+  # the object GITHUB_SHA names. Because `changes` is the always-run job, that race would take the
+  # required check down on EVERY branch -- including the docs-only pushes that go straight to main
+  # -- with a message that reads as tampering. Refusing is still right; being unable to tell
+  # "someone overwrote a gate script" from "the merge ref moved" is not. A re-run recomputes both
+  # and self-heals, which is why the message says so. (Review of PR #679, on a defect this branch
+  # introduced two commits earlier by pinning the oracle to GITHUB_SHA.)
+  if ! "$_git" -C "$ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
+    echo "FATAL: commit ${_ref} is not present in this checkout -- cannot verify the gate set." >&2
+    echo "  This is NOT a tamper signal. On a pull_request run GITHUB_SHA is the merge commit as of" >&2
+    echo "  queue time, and the merge ref can be recomputed before checkout fetches it. RE-RUN the" >&2
+    echo "  job: that recomputes both and self-heals." >&2
+    exit 1
+  fi
   for rel in \
     .claude/hooks/register-check.sh \
     .claude/hooks/register-check-selftest.sh \

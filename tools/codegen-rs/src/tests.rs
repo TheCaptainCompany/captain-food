@@ -10350,7 +10350,7 @@ mod docs_only_ci_and_legacy_visibility {
         // Those are NOT closed here and cannot be. They are DETECTED by the gate scripts
         // themselves: each compares the WHOLE four-file gate set against its committed blobs
         // before reporting anything (`assert_gate_script_self_verifies` below pins that, from the
-        // `codegen` job -- a different checkout, outside this job's blast radius).
+        // build-test job -- a different checkout, outside this job's blast radius).
         //
         // THE PREVIOUS VERSION OF THIS PARAGRAPH WAS FALSE, and the eighth review proved it by
         // construction. It said the overwrite class was killed "-- every spelling of it --" while
@@ -10471,7 +10471,10 @@ mod docs_only_ci_and_legacy_visibility {
     /// The docs-only fast path may never swallow the paths the gate pins live on.
     ///
     /// `assert_gate_script_self_verifies` and `both_scopes_reject_execution_altering_env` run in
-    /// the `codegen` job, which is SKIPPED when the `changes` job decides a push is docs-only. That
+    /// the build-test job, which is SKIPPED when the `changes` job decides a push is docs-only.
+    /// (NOT `codegen`: that job is `if: always()` with no checkout and no cargo, so it never skips
+    /// and runs no test. Five sites in this file said `codegen`; the correction reached the two
+    /// shell scripts and stopped, which is the half-applied-sweep defect one file over.) That
     /// is safe today only because `.claude/**` and `.github/**` are absent from the allowlist, so
     /// any change able to disarm a pin also runs it. Nothing recorded that coupling until
     /// `claude-review` noted it on PR #679 -- as prose, in a review comment, which is where a
@@ -10513,7 +10516,7 @@ mod docs_only_ci_and_legacy_visibility {
             for forbidden in [".claude", ".github", "crates", "tools", "specs"] {
                 assert!(
                     !arm.contains(forbidden),
-                    "a docs-only allowlist arm ({}) now covers `{}`. A push touching only that path would be classified docs-only and SKIP the gate pins -- how the gate-disarm class walks in through the door marked \"docs\". Adding an ARM is the same widening as editing one.",
+                    "a docs-only allowlist arm ({}) now covers `{}`. A push touching only that path would be classified docs-only and SKIP build-test, and with it the gate pins -- how the gate-disarm class walks in through the door marked \"docs\". Adding an ARM is the same widening as editing one.",
                     arm, forbidden
                 );
             }
@@ -10648,7 +10651,7 @@ mod docs_only_ci_and_legacy_visibility {
 
     /// Both gate scripts must compare themselves against their committed blobs before reporting.
     ///
-    /// PINNED FROM HERE, deliberately: this test runs in the `codegen` job, which has its own
+    /// PINNED FROM HERE, deliberately: this test runs in the build-test job, which has its own
     /// checkout. A step in the `changes` job that overwrites a gate script cannot touch this copy,
     /// so the presence of the block is asserted from outside the blast radius while the block does
     /// the runtime comparison. Neither half is sufficient alone — the eighth review of PR #679
@@ -10953,9 +10956,18 @@ mod docs_only_ci_and_legacy_visibility {
                 String::from_utf8_lossy(&out.stderr)
             );
             assert!(
-                !out.status.success() && combined.contains("is not tracked at"),
+                !out.status.success() && combined.contains("is not present in this checkout"),
                 "an oracle ref this tree cannot resolve must REFUSE, not report OK -- a gate that cannot verify must never say it verified. Got exit {:?}:\n{}",
                 out.status.code(), combined
+            );
+            // AND IT MUST SAY WHICH CONDITION FIRED. An absent COMMIT and an untracked PATH are
+            // different problems with the same `cat-file -e` exit code, and reporting the merge-ref
+            // race as "not tracked" sends the operator hunting a file that is present -- while
+            // reading exactly like tampering.
+            assert!(
+                combined.contains("NOT a tamper signal") && combined.contains("RE-RUN"),
+                "the missing-commit refusal must distinguish itself from tampering and tell the operator to re-run, because on a pull_request run the merge ref can be recomputed between queue time and checkout. Got:\n{}",
+                combined
             );
         }
 
