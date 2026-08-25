@@ -60,9 +60,13 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **A FOURTH false record claim, and this one was load-bearing.** The comment justifying the
 > marker-rule change said *"this repo requires an attribution footer on bot comments, and 1 of the
 > 23 real reviewer comments already ends with one"*. The third review measured that corpus:
-> **0 of 23** carry a footer, 0 carry a `---` rule, and the two repo rules about attribution
-> footers concern ISSUE bodies. The footer requirement that IS real applies to agent-authored
-> comments in this environment — a harness rule, not a repo rule, and not a fact about the corpus.
+> **0 of 23** carry a footer (corpus: every `claude[bot]` comment on PRs #670, #674 and #675 —
+> 5 + 10 + 8 — via `GET /repos/{o}/{r}/issues/{n}/comments`; named because a retraction that itself
+> states an unmeasurable count is the same defect), and the two repo rules about attribution footers
+> concern ISSUE bodies. **The replacement claim was ALSO unsourced** — "agent-authored comments in
+> this environment carry a required attribution footer" cites nothing, and the fourth review found
+> 1 of 114 bot comments carrying one. It is gone too. The rule change never needed a factual
+> premise: any trailing text at all reds a complete review, and that is the whole argument.
 > **I invented a count to support a design decision.** The rule change stands on its own merits —
 > any trailing text at all reds a complete, correct review — and the fabricated antecedent is gone.
 > This is precisely what ADR-20260817-105845 exists to prevent, and it was caught because the
@@ -71,7 +75,11 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **The anti-quoting property was asserted three times and did not hold.** The fence tracker
 > toggled on any ``` line, so it desynchronised on NESTED fences — the idiomatic way to quote a
 > fenced block — and a 4-space-indented code block was never checked at all. Both defeated it;
-> both now red, and the tracker records the opening delimiter's char and run length. **The honest
+> both now red, and the tracker records the opening delimiter's char and run length. **The fourth
+> review then found the ONE dimension I had not tightened**: the opener regex was `^[ \t]*`, so an
+> indented delimiter opened a phantom fence that swallowed a live marker — a FALSE RED on a
+> required check — and a ```markdown block wrapping an indented fence still got a quoted marker
+> through. Bounded to `^ {0,3}` as CommonMark specifies, with both cases added to the battery. **The honest
 > statement stays**: raising the bar is not impossibility, and anyone willing can still satisfy
 > this gate. Claiming otherwise in three places, while the same file elsewhere said the truth, was
 > the same overclaim this PR exists to fix — one level down.

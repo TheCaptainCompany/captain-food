@@ -198,13 +198,19 @@ evidence — here it was not even true.
   API failure then reads as "zero matches" instead of aborting under `set -e` — an outage
   diagnosed as a missing review — and a partial failure after a match reads as a **pass**. Split
   the fetch from the count: one assignment each, so the fetch's failure is its own exit status.
-- **Do not require a marker to be the LAST line of a bot comment.** Agent-authored comments in
-  this environment carry a required attribution footer, and any trailing text at all — a footer, a
-  sign-off, a horizontal rule — then reds a complete, correct review. Require it on a line of its
+- **Do not require a marker to be the LAST line of a bot comment.** ANY trailing text at all — a
+  footer, a sign-off, a horizontal rule, a postscript — then reds a complete, correct review. That
+  is the whole argument and it needs no premise about how often it happens; two earlier versions of
+  this bullet asserted one (a corpus count, then a repo rule requiring footers on bot comments) and
+  neither survived measurement. Require it on a line of its
   own, outside any fenced (``` / ~~~) or 4-space-indented code block. **That RAISES the bar on a
   quoted marker; it does not make quoting impossible** — a naive fence tracker that toggles on any
-  ``` desynchronises on NESTED fences, which is the idiomatic way to quote a fenced block, so
-  track the opening delimiter's char and run length and close only on a matching-or-longer run.
+  ``` desynchronises on NESTED fences, which is the idiomatic way to quote a fenced block, so track
+  the opening delimiter's char and run length and close only on a matching-or-longer run. **Bound
+  the opener at 3 spaces (`^ {0,3}`), as CommonMark does**: at 4+ spaces or a tab the line is code,
+  not a fence, and an unbounded tracker opens a phantom fence on an indented delimiter that then
+  swallows the real marker — a false red, which on a required check is a repo-wide merge stop.
+  `<pre>`, `<code>` and HTML comments still satisfy such a gate; an HTML comment does so invisibly.
   Even then, anyone willing can satisfy such a gate; say so rather than claiming otherwise.
 
 **And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and

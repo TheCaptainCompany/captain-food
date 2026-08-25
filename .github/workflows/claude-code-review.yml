@@ -149,10 +149,10 @@ jobs:
           # An empty or malformed sha would build a marker that a STALE comment satisfies, and
           # `set -u` does not catch it: GitHub sets the variable to empty, it does not unset it.
           for v in HEAD_SHA MERGE_SHA; do
-            eval "val=\${$v}"
+            val="${!v}"
             case "$val" in
               [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
-              *) echo "::error::$v is empty or not a hex sha - refusing to assert against a marker that anything could satisfy."; exit 1 ;;
+              *) echo "::error::$v does not start with 7 hex chars - refusing to assert against a marker that anything could satisfy."; exit 1 ;;
             esac
             [ "${#val}" -eq 40 ] || { echo "::error::$v is ${#val} chars, expected 40."; exit 1; }
           done
@@ -177,10 +177,12 @@ jobs:
           #
           # The marker must be on a line of its own that is NOT inside a fenced code block, and
           # NOT indented as a code block. It deliberately does NOT have to be the LAST line:
-          # agent-authored GitHub comments in this environment carry a required attribution footer,
-          # and any trailing text at all -- a footer, a sign-off, a horizontal rule -- would make a
-          # "last line" rule red a complete, correct review. That brittleness is the reason, on its
-          # own merits; no claim is made here about how often it has occurred.
+          # ANY trailing text at all -- a footer, a sign-off, a horizontal rule, a postscript --
+          # would make a "last line" rule red a complete, correct review. That brittleness is the
+          # whole reason, and it needs no factual premise about how often it has happened. (An
+          # earlier version of this comment asserted a corpus count here; it was measured false.
+          # The one after that asserted a repo rule requiring footers on bot comments; no such rule
+          # was ever cited. Both are gone -- the argument never needed either.)
           # Decorations seen in the real reviewer corpus are all accepted, each measured: bold,
           # italic, code span, list item, trailing period, trailing tab, uppercase hex.
           markers="$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '
@@ -190,7 +192,7 @@ jobs:
             | split("\n")
             | map(sub("\r$"; ""))
             | reduce .[] as $l ({fence: null, out: []};
-                (($l | capture("^[ \t]*(?<d>`{3,}|~{3,})")) // null) as $m
+                (($l | capture("^ {0,3}(?<d>`{3,}|~{3,})")) // null) as $m
                 | if $m == null then (if .fence == null then .out += [$l] else . end)
                   elif .fence == null then .fence = {c: ($m.d[0:1]), n: ($m.d | length)}
                   elif ($m.d[0:1] == .fence.c) and (($m.d | length) >= .fence.n) then .fence = null
@@ -232,7 +234,8 @@ jobs:
             echo "  3. Permission denials (permission_denials_count must be 0) -- the reviewer ran"
             echo "     blindfolded and had nowhere to put its findings."
             echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
-            echo "     It must be on its own line and NOT inside a fenced code block."
+            echo "     It must be on its own line, NOT inside a fenced code block, and NOT indented"
+            echo "     four or more spaces (four spaces makes it a code block, not a marker)."
             echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
             echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."
           } >&2
