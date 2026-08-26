@@ -8568,7 +8568,23 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
             );
             assert!(
                 check_warning_baseline(&sandbox, &empty, &CORPUS_DERIVED_KINDS).is_ok(),
-                "`{}` is in CORPUS_DERIVED_KINDS but the carry-forward does not cover it",
+                "`{}` is in CORPUS_DERIVED_KINDS but the floor does not cover it",
+                kind
+            );
+
+            // AND A GENUINE INCREASE MUST STILL RED, WITH THE KIND DECLARED UNMEASURED. This is the
+            // case that separates a FLOOR from a REPLACEMENT, and nothing pinned it: every earlier
+            // assertion here used live = 0, where the two are identical. A replacement suppresses
+            // the increase too, which on the partial-read path (`readable == true`, `unread`
+            // non-empty — a dangling tracked symlink, a sparse-checkout gap, one root-owned file)
+            // makes the ratchet SILENTLY NON-BLOCKING: an added out-of-allowlist `.claude/**` file
+            // scores clean, against `claude_citation_corpus`'s promise that it "becomes a
+            // deliberate, baseline-moving act". Unread files can only UNDER-count, so only the
+            // decrease is spurious and only the decrease may be suppressed. (Review #87.)
+            let higher: WarningProfile = [(kind.to_string(), 5usize)].into_iter().collect();
+            assert!(
+                check_warning_baseline(&sandbox, &higher, &CORPUS_DERIVED_KINDS).is_err(),
+                "`{}` went 2 -> 5 and the ratchet stayed clean because the kind was declared unmeasured. Declaring a kind unmeasured must FLOOR it at the committed value, never REPLACE it: a partially-read corpus still counts, it just under-counts, so an increase is real and must block",
                 kind
             );
         }

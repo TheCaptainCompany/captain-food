@@ -2598,3 +2598,37 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > change that adds a member — and in a long-lived branch that change is often your own, two rounds
 > on. Deriving the list is best; failing that, assert the COUPLING that makes a new member a member,
 > not the membership.**
+>
+> **Round 87 — round 84's fix made the ratchet SILENTLY NON-BLOCKING for three kinds, on any host
+> with one unreadable file.**
+>
+> Round 84 widened the unmeasured predicate to include a **partially** read corpus, and carried the
+> committed value forward for those kinds. The widening was right; **the carry-forward was the wrong
+> operation for it.** Replacement is sound only where **nothing** was measured — true of
+> `readable == false`, where every vector comes back cleared. On the partial-read path the counts
+> **are** computed:
+>
+> - `skipped_ext` is pushed **before** the `read_to_string` attempt, so it is **exact**;
+> - `unread_tree` and the citation findings lose only the files that could not be read.
+>
+> **An unread file can only REDUCE a count, never inflate one.** So the hazard is one-directional —
+> and a symmetric replacement suppressed the increase too. On any host with one dangling tracked
+> symlink, one sparse-checkout gap or one root-owned file anywhere in the corpus, adding an
+> out-of-allowlist `.claude/**` file would have scored **clean**, against `claude_citation_corpus`'s
+> own promise that doing so *"becomes a deliberate, baseline-moving act"* — and a genuinely new stale
+> citation would have landed with the ratchet quiet.
+>
+> **Fixed with a FLOOR: `max(live, committed)`.** Where nothing was measured, live is 0 and it is
+> identical to the carry-forward; where the count is a lower bound it suppresses only the spurious
+> decrease. **The remedy is one-directional because the hazard is.**
+>
+> **The distinguishing case was unpinned, again.** Every existing assertion used `live = 0`, where a
+> floor and a replacement behave identically — so the whole round-84 fix was green under both.
+> Pinned: with the kind declared unmeasured, `2 -> 5` must still red. Planted by reverting to the
+> replacement.
+>
+> **Shape: widening a guard's TRIGGER without re-deriving its ACTION is how a safety valve becomes a
+> bypass.** Round 84 changed *when* the suppression fires and kept *what* it does. The action was
+> correct for the original trigger and wrong for the new one — and the tests could not tell, because
+> the case that separates them never occurs under the original trigger. **When you widen a condition,
+> the assertions written for the narrow one are exactly the ones that will not fire.**

@@ -70,8 +70,13 @@ pub(crate) type WarningProfile = BTreeMap<String, usize>;
 /// `only_host_dependent_warnings_are_exempt_from_the_ratchet` rather than merely written.
 pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadable"];
 
-/// The kinds whose CONDITION is tree-caused but whose MEASUREMENT is gated on git answering — so on
-/// a run where the citation corpus could not be read they are UNMEASURED, not zero.
+/// The kinds whose CONDITION is tree-caused but whose MEASUREMENT depends on the corpus being fully
+/// read — so on a run where it was not, their counts are UNDER-COUNTS rather than facts.
+///
+/// TWO DIFFERENT SHORTFALLS, and this doc used to describe only the first. Where `git ls-files` does
+/// not answer at all, nothing is computed and the counts are zero. Where the corpus is only PARTLY
+/// read, the counts ARE computed and are lower bounds. Both are handled by FLOORING at the committed
+/// value in `check_warning_baseline` — see the note there on why a floor and not a replacement.
 ///
 /// This is the trap `RATCHET_EXEMPT` closes, re-entering one kind over. Both of these are
 /// deliberately NOT exempt, on the correct reasoning that non-UTF-8 bytes and an out-of-allowlist
@@ -268,9 +273,24 @@ pub(crate) fn render_baseline_failure(diff: &BaselineDiff, live: &WarningProfile
 /// Load + compare in one step; `Ok(())` means the ratchet holds. A MISSING or malformed artifact is
 /// a gate failure too, not a silent pass — an absent ratchet is exactly the state this section exists
 /// to make impossible.
-/// `unmeasured` names kinds this run could not count (see `CORPUS_DERIVED_KINDS`). They are carried
-/// forward from the committed artifact rather than compared, so an unmeasured zero cannot read as an
-/// elimination in either direction. Passing an empty slice is the ordinary case.
+/// `unmeasured` names kinds this run could not count fully (see `CORPUS_DERIVED_KINDS`). Their live
+/// value is FLOORED at the committed one rather than replaced by it, so an under-count cannot read
+/// as an elimination while a genuine INCREASE still blocks. An empty slice is the ordinary case.
+///
+/// A FLOOR, NOT A CARRY-FORWARD, and the difference is the whole gate. The first version replaced
+/// the live value outright, which is sound only where NOTHING was measured — true of
+/// `readable == false`, where `claude_citation_corpus` returns with every vector cleared. It is
+/// FALSE on the partial-read path (`readable == true`, `unread` non-empty), where the counts are
+/// still computed and are merely LOWER BOUNDS: `skipped_ext` is pushed BEFORE the `read_to_string`
+/// attempt, so it is exact; `unread_tree` and the citation findings lose only the files that could
+/// not be read. An unread file can therefore only REDUCE a count, never inflate one.
+///
+/// So a symmetric replacement made the ratchet SILENTLY NON-BLOCKING for three kinds on any host
+/// with one dangling tracked symlink, one sparse-checkout gap or one root-owned file anywhere in the
+/// corpus: adding an out-of-allowlist `.claude/**` file would have scored clean — against the
+/// promise in `claude_citation_corpus` that doing so "becomes a deliberate, baseline-moving act" —
+/// and a genuinely new stale citation would have landed with the ratchet quiet. The hazard is
+/// one-directional, so the remedy is too. (Review #87 of PR #679, on the fix from review #84.)
 pub(crate) fn check_warning_baseline(
     root: &std::path::Path,
     live: &WarningProfile,
@@ -283,12 +303,17 @@ pub(crate) fn check_warning_baseline(
         .map_err(|e| format!("\n✗ {}: {e}\n  run `make warning-baseline` to rewrite it.\n", path.display()))?;
     let mut effective = live.clone();
     for kind in unmeasured {
-        match committed.get(*kind) {
-            Some(n) => {
-                effective.insert((*kind).to_string(), *n);
-            }
-            None => {
+        // FLOOR, not replace: `max(live, committed)`. Where nothing was measured the live value is
+        // 0 and this is identical to carrying the committed value forward; where the count is a
+        // lower bound it suppresses only the spurious DECREASE. An increase survives and still reds.
+        let c = committed.get(*kind).copied().unwrap_or(0);
+        let l = live.get(*kind).copied().unwrap_or(0);
+        match l.max(c) {
+            0 => {
                 effective.remove(*kind);
+            }
+            n => {
+                effective.insert((*kind).to_string(), n);
             }
         }
     }
