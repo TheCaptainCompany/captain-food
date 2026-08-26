@@ -922,3 +922,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **The rule: when a reviewer proposes the same widening twice, the defect is usually that the
 > boundary is undiscoverable from where they are reading.** Moving the control next to the rule costs
 > nothing and is the difference between a decision and an apparent oversight.
+>
+> **Round 33 — a FIFTH rider named in no record, which is occurrence three of the drift the row
+> exists to track.** The `.gitignore` `__pycache__`/`*.pyc` entry landed in the same commit as the
+> four named ride-alongs and appears in no clause, no ADR paragraph and no journal line. The row's
+> own CLAUSE HISTORY already records this twice — *"an earlier version said TWO and omitted (c) …
+> the next version said THREE while FOUR had landed"* — so this is the third occurrence, **inside
+> the paragraph that documents the pattern.**
+>
+> The entry earns its clause rather than being dropped: the event is **observed on this branch** —
+> a `.pyc` with no source in the tree was committed once by an over-broad `git add` (review #8) — so
+> it guards the `git add`, not the suite. Nothing in-tree runs a `.py` FILE (both call sites use
+> `python3 -c`, which writes no bytecode), and that is now stated rather than implied.
+>
+> **Three retractions of the same number did not stop it, so the number stopped being prose.**
+> `the_ride_along_count_matches_the_clauses_named` derives the count from the clauses the sentence
+> enumerates: a sixth rider reds until the row names it. Planted with the exact historical drift —
+> understating FIVE as FOUR reds with *"the row says FOUR (4) … but enumerates 5 clauses"*. It
+> counts only inside the ride-along sentence, because the CLAUSE HISTORY quotes `(c)` and `(d)` when
+> narrating past misses and counting those would make the check drift with the prose it pins.
+>
+> **The rule: a count that has been retracted twice will be retracted a third time.** The second
+> retraction is the signal to derive it, not to write the new number more carefully — this branch
+> has now spent three rounds proving that on one sentence, after proving it on the mutant corpus and
+> on the citation corpus.

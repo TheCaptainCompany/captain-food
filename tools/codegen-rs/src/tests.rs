@@ -10309,6 +10309,43 @@ mod decision_ask_and_citations {
         }
     }
 
+    /// `RETRIEVAL-QMD-CI`'s stated ride-along COUNT must equal the clauses it enumerates.
+    ///
+    /// The row's own CLAUSE HISTORY records this drifting three times: it said TWO while three had
+    /// landed, then THREE while four had, and then review #30 found a FIFTH rider — the
+    /// `.gitignore` `__pycache__`/`*.pyc` entry — named in no record at all. Each time the repair
+    /// was to write the new number down, and each time the number went stale again, inside the
+    /// paragraph that exists to say it keeps going stale.
+    ///
+    /// A count restated in prose is a derived number with nothing re-deriving it — ADR-20260817-105845
+    /// exactly — so it is derived here instead. A sixth rider reds until the row names it.
+    #[test]
+    fn the_ride_along_count_matches_the_clauses_named() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let row = fs::read_to_string(root.join("docs/decisions/RETRIEVAL-QMD-CI.yaml"))
+            .expect("RETRIEVAL-QMD-CI.yaml");
+        let (stated_word, stated) = ["TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT"]
+            .iter()
+            .enumerate()
+            .find_map(|(i, w)| {
+                row.contains(&format!("{} ADDITIONS RIDE ALONG", w)).then_some((*w, i + 2))
+            })
+            .expect("the row must state `<N> ADDITIONS RIDE ALONG` in words");
+        // The enumerated clauses, `(a)`..`(z)`, counted only inside the ride-along sentence -- the
+        // CLAUSE HISTORY quotes `(c)` and `(d)` when narrating past misses, and counting those
+        // would make this assertion drift with the prose it exists to pin.
+        let start = row.find(&format!("{} ADDITIONS RIDE ALONG", stated_word)).expect("just found");
+        let end = row[start..].find("CLAUSE HISTORY").map_or(row.len(), |i| start + i);
+        let enumerated = ('a'..='z')
+            .filter(|c| row[start..end].contains(&format!("({})", c)))
+            .count();
+        assert_eq!(
+            enumerated, stated,
+            "the row says {} ({}) additions ride along but enumerates {} clauses in that sentence. A rider named in no record is the drift this row's CLAUSE HISTORY has now retracted three times -- name it, or drop it",
+            stated_word, stated, enumerated
+        );
+    }
+
     /// The rule must still be CALLED by `make validate`, not merely exist.
     ///
     /// Review #13: deleting the call site in `main.rs` left `cargo test --workspace` entirely
