@@ -1752,3 +1752,32 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `fetch-depth: 0` — a full-history clone, the only cost in it that grows with the **repository**
 > rather than the diff. The conclusion holds at today's size; the sentence inside a cap's
 > justification should still be true.
+>
+> **Round 61 — the `readable` flag did not close the route its own comment names.** The arm's comment
+> cites *"a shimmed `git` … exiting 0 with empty stdout"* as the motivating defect and says the flag
+> now distinguishes it. **It does not**: `readable` is false only when `git` *fails*. Exit-0-with-
+> empty-stdout takes the success arm, so the caller got `readable = true`, `cited = []`, no `unread`,
+> and `main.rs` emitted **neither** warning — the rule scanned zero files and printed an identical
+> green to a clean run. *"No stale citations"* and *"did not look"* printing identically, **in the arm
+> added to stop exactly that**, on the two jobs (`specs`, `docs-validate`) whose `PATH` guards exist
+> because a shimmed `git` does this.
+>
+> It needed no ambiguity tolerance: the pathspec names `CLAUDE.md` and the `Makefile`, tracked in
+> every legitimate checkout, so an empty result **cannot** be a real corpus. Also reachable without
+> tampering — a tree whose index is empty — and that was the *more* mundane case, while the less
+> recoverable one (no `.git` at all) was the one that warned.
+>
+> **Round 61b — my round-58 fix repeated round-57's defect one job over.** Round 58 argued at length
+> why `lint` must not be 20 and then picked **60 with no antecedent** — while `build-test`, whose work
+> that same justification calls the same class, got 120 precisely *because* its cold duration was
+> never measured. No cold `lint` duration is cited anywhere either. Same asymmetry, same
+> consequence: a `Cargo.lock` bump or a toolchain roll rekeys **every** job at once, so the run where
+> `lint` is cold is the run where the runner is most contended. 60 → 120.
+>
+> **Round 61c — the ADR carried caps this branch stopped shipping three rounds ago**, with the
+> justification round 57 retracted. `ci.yml`, `tests.rs`, `GATE-STEP-LOCUS` and the journal all moved;
+> the deciding record did not. **Nothing gates ADR prose against `ci.yml`, so it would not
+> self-correct** — and 60 is the value argued wrong in the *dangerous* direction, so a maintainer
+> trusting the record and editing `ci.yml` down to match reintroduces a repository-wide merge block
+> reachable from an ordinary dependency bump. Half-applied sweep — rounds 33, 36, 42, 48b — landing
+> on the record the change is decided by.

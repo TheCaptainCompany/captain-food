@@ -134,10 +134,21 @@ cache.
   step comment names three host-drift classes as expected failure modes; at peak
   (Friday/Saturday 19:00–21:30) that is a path to "no checkout, dispatch or payments fix merges for
   six hours". **This change therefore also sets a `timeout-minutes` on every job the aggregator
-  consumes** (`changes` 10; `lint`/`specs`/`docs-validate` 20; `build-test`/`db-test` 60;
+  consumes** (`changes` 10; `specs`/`docs-validate` 20; `lint`/`build-test`/`db-test` 120;
   `codegen` 10), because `codegen` is `if: always()` and `always()` still **waits** on `needs:` — so
-  a hang anywhere in that set keeps the required check queued and nothing merges. Each is orders of
-  magnitude above what its job legitimately does, so they bound a **hang and nothing else**; pinned
+  a hang anywhere in that set keeps the required check queued and nothing merges. **The three
+  workspace-building jobs are bounded ABOVE AN UNMEASURED COLD BUILD, not sized against a
+  measurement**: warm is ~4m, the cold duration was never taken, and the directions are asymmetric —
+  too high costs a hang some extra minutes, too low cancels the job, makes `codegen` fail on
+  `cancelled` by design, and does not converge on re-run because `Swatinem/rust-cache` saves nothing
+  on a cancellation. *(This paragraph said `build-test`/`db-test` **60** and `lint` **20**, with the
+  justification "orders of magnitude above what its job legitimately does", for three rounds after
+  `ci.yml`, `tests.rs`, `GATE-STEP-LOCUS` and the journal had moved — the half-applied sweep this
+  branch catalogues at rounds 33, 36, 42 and 48b, landing on the record the change is decided by.
+  Nothing gates ADR prose against `ci.yml`, so it would not have self-corrected, and 60 is the value
+  argued wrong in the dangerous direction: a maintainer trusting this line and editing `ci.yml` down
+  to match reintroduces a repository-wide merge block reachable from an ordinary dependency bump.
+  Reviews #57, #58 and #61.)* Pinned
   by `assert_pinned_in_changes_job`, which requires the key on every aggregated job and caps it.
   It does **not** settle `GATE-STEP-LOCUS`, and it does nothing for a **red**, which is the likelier
   event and has the same blast radius. *(This paragraph stated `~30×` its observed duration. The

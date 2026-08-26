@@ -223,7 +223,17 @@ jobs:
     # `codegen` reds on `needs.lint.result`, and nothing in the repository merges. That is the
     # "a cap that reds honest work" instrument landing on the one job in the cheap bucket that is
     # not seconds of work. (Review #58.)
-    timeout-minutes: 60    # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
+    #
+    # 120, NOT 60, AND THE FIRST VALUE REPEATED ROUND 57'S DEFECT ONE JOB OVER (review #61). Round
+    # 58 argued at length why `lint` must not be 20 and then picked 60 with no antecedent -- while
+    # `build-test`, whose work this job's own justification calls the same class, got 120 on the
+    # stated reasoning that its cold duration was never measured. No cold `lint` duration is cited
+    # anywhere on this branch either. The asymmetry above applies unchanged: too high costs a hang
+    # a few minutes; too low CANCELS, `codegen` fails on `cancelled` by design, the required check
+    # reds, and rust-cache saves nothing on a cancel so the re-run is cold and hits the same wall --
+    # reached by a `Cargo.lock` bump or a toolchain roll, which rekey EVERY job at once, so the run
+    # where `lint` is cold is the run where the runner is most contended.
+    timeout-minutes: 120    # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

@@ -702,6 +702,22 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
             Err(_) => unread.push(rel.to_string()),
         }
     }
+    // AN EMPTY CORPUS IS "DID NOT LOOK", AND IT IS DECIDABLE. `readable` is false only when `git`
+    // FAILS -- and the motivating defect this whole flag was added for is a shimmed `git` that
+    // EXITS 0 with empty stdout. That takes the success arm, so the caller got `readable = true`,
+    // `cited = []`, no `unread`, and `main.rs` emitted NEITHER warning: the rule scanned zero files
+    // and printed an identical green to a clean run. The arm added to stop "no stale citations"
+    // and "did not look" printing identically did not close the route its own comment names.
+    //
+    // It needs no ambiguity tolerance: the pathspec includes `CLAUDE.md` and the `Makefile`, both
+    // tracked in every legitimate checkout of this repo, so an empty result cannot be a real corpus
+    // -- it is a git that did not answer. Also reached without tampering, by a tree whose index is
+    // empty (a `git archive` extraction re-`git init`ed but never `git add`ed), and that was the
+    // MORE mundane case while the less recoverable one (no `.git` at all) was the one that warned.
+    // (Review #61 of PR #679.)
+    if cited.is_empty() && unread.is_empty() && unread_tree.is_empty() {
+        return (Vec::new(), false, Vec::new(), Vec::new());
+    }
     (cited, true, unread, unread_tree)
 }
 
