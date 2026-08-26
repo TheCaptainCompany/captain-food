@@ -741,3 +741,23 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `reconsiders: <dead row>` is the most dangerous spelling in the corpus, not the safest, and the
 > exemption that is right for cards would be backwards here. Recorded because it was previously true
 > by accident, and *"the next author should not have to derive which is which."*
+>
+> **Round 26 — a finding that was WRONG, and the half of it that was still worth acting on.**
+> The review held that a `CLAUDE.md`-only push never reaches `decision-superseded-authority`:
+> `CLAUDE.md` is on the docs-only allowlist, `specs` carries `if: docs_only != 'true'`, so the rule
+> is skipped and `codegen` accepts the skip. **It is not.** `docs-validate` carries the complement
+> `if: docs_only == 'true'` and runs the SAME canonical validator command, and the aggregator
+> asserts BY NAME that `docs_only=='true'` implies `docs-validate == success`. Both halves were
+> already pinned by `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths`. The reviewer
+> looked at `specs` and stopped; an earlier round had it right. **Checked before believing, because
+> two reviewers had contradicted each other on this exact point** — and the workflow, not either
+> comment, settled it.
+>
+> **What was real underneath:** if `docs-validate` is the only job running the citation rule on the
+> `CLAUDE.md`-only lane — the lane `CLAUDE.md` itself routes straight to `main` with no PR — then it
+> is exactly as load-bearing as `specs`, and last round I guarded `build-test` and `specs` and left
+> it out. Same half-applied sweep, one job over, in the round that named the half-applied sweep.
+> It is in the guard loop now, with a plant.
+>
+> **The rule: a wrong finding can still name a real gap.** Refuting the claim is not the end of the
+> work — the question is what the claim was reaching for, and whether that part holds.

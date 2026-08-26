@@ -10830,10 +10830,18 @@ mod docs_only_ci_and_legacy_visibility {
             }
         };
         // THE JOBS THAT EXECUTE THE PINS, not just the job under test. `build-test` runs every
-        // assertion in this file; `specs` runs `make validate`, which is where the new
-        // `decision-superseded-authority` rule actually executes -- and `specs` carried no
-        // job- or step-scope guard at all (review #23).
-        for job in ["build-test", "specs"] {
+        // assertion in this file; `specs` runs the canonical validator, which is where
+        // `decision-superseded-authority` executes -- and `specs` carried no job- or step-scope
+        // guard at all (review #23). `docs-validate` is the THIRD: it runs the same
+        // `--check --specs specs` on the docs-only complement, so on a `CLAUDE.md`-only push --
+        // the lane CLAUDE.md itself routes straight to `main` with no PR -- it is the ONLY job
+        // that runs the citation rule over a corpus that includes `CLAUDE.md`. Review #24 read
+        // that lane as uncovered because it looked at `specs` alone; it is covered, and
+        // `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` already pins both
+        // halves (same validator command, and the aggregator asserting docs-validate BY NAME).
+        // Guarding it here is the half that was missing: the job carrying the rule on that lane
+        // was as unbounded as `specs` was.
+        for job in ["build-test", "specs", "docs-validate"] {
             if let Some(j) = doc.get("jobs").and_then(|jobs| jobs.get(job)) {
                 shell_ok(j, &format!("the `{}` job's", job));
                 env_ok(j, &format!("the `{}` job's", job));
@@ -11338,6 +11346,7 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: dtolnay/rust-toolchain@stable\n")),
             // `specs` RUNS `make validate`, i.e. the new citation rule, and had no guard at all.
             ("specs job BASH_ENV", in_job("specs", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
+            ("docs-validate job BASH_ENV", in_job("docs-validate", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
             ("specs step shell drops the script", in_job("specs",
                 "      - uses: actions/checkout@v5\n",
                 "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: actions/checkout@v5\n")),
@@ -11470,7 +11479,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 52 && must_stay_green.len() >= 13,
+            must_red.len() >= 53 && must_stay_green.len() >= 13,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
