@@ -1300,3 +1300,16 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > status is deliberately not checked. Latent (no card carries a `Decision row:` line today, and the
 > ask-gate reads the row file at the point of need), and narrowing a recorded exclusion is a decision
 > about the rule's scope rather than a bug fix — so it is a row, not a rider.
+>
+> **Round 45 — the timeout comment stated a bare multiplier, and it was wrong.** *"~30x the observed
+> duration"* — review #45 measured the `changes` job at **14s** on a real run, which makes it ~43x.
+> Wrong in the conservative direction, which is exactly why it would have survived: **a citation
+> defect reads as correct whenever someone checks the value instead of the antecedent.** The figure
+> is gone rather than corrected, in both the workflow comment and the assertion beside it — the
+> multiplier was never the argument, "orders of magnitude above seconds of shell" is.
+>
+> Both of that review's findings — the timeout scoped to one of six aggregated jobs, and
+> `hides_main` deciding its class by a trailing `*` — were already closed in round 44. Its verdict:
+> *"no blocking correctness defect found"*, `HOLD: human` correctly declared, and the stated evidence
+> re-derived independently on the head (both gate steps' `self-verification: OK`, and
+> `54/54 cases accounted for`).

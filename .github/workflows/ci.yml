@@ -58,7 +58,11 @@ jobs:
     # failure modes. Compose that with peak (CLAUDE.md: Friday/Saturday 19:00-21:30) and a runner
     # image bump has a path to "no checkout, dispatch or payments fix merges for six hours", at the
     # hours where a paid order nobody is told about is the failure that costs most.
-    # 10 minutes is ~30x the observed duration of this job, so it bounds a HANG AND NOTHING ELSE --
+    # 10 minutes is orders of magnitude above anything this job legitimately does (it is seconds of
+    # shell and a shallow diff), so it bounds a HANG AND NOTHING ELSE -- the multiplier this line
+    # used to state was a bare derived number, and review #45 measured it as ~43x where the line
+    # said ~30x. Right in the conservative direction and still the shape ADR-20260817-105845
+    # governs, so the figure is gone rather than corrected. --
     # say that out loud, because the far likelier event is a RED, and a red has the SAME blast
     # radius: `changes` fails, all five downstream jobs are skipped, `codegen` reds on
     # `needs.*.result`, nothing merges. The timeout turns a six-hour worst case into ten minutes and

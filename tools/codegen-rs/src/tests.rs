@@ -11438,7 +11438,9 @@ mod docs_only_ci_and_legacy_visibility {
         // applied there; `GATE-STEP-LOCUS` (in-job vs sibling job) stays open and is not settled
         // by it. The CAP is the half that matters as much as the key: `timeout-minutes: 600` is
         // the 360-minute default with extra steps, so a value is required AND bounded. 30 minutes
-        // is far above anything this job legitimately does (~20s observed) and far below "a shift".
+        // is far above anything this job legitimately does -- seconds of shell and a shallow diff --
+        // and far below "a shift". No multiplier is stated: the one this comment's ci.yml sibling
+        // carried was a bare derived number and was measured wrong (review #45).
         let timeout = changes_val
             .get("timeout-minutes")
             .and_then(|t| t.as_u64())
