@@ -1852,3 +1852,51 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > against the tree you have. When the property under test is what happens to a shape the tree does not
 > contain, only a constructed fixture can see it — and "I closed the other three by reading" is the
 > reason the fourth survived, not evidence against it.**
+>
+> **Round 64 — the join defect returns in the layout the corpus actually uses, and a record's
+> authorization claim falsified by its own diff.**
+>
+> **(1) Two adjacent markdown table rows join into one unit, so an unrelated `superseded` in row 1
+> exempts a live citation in row 2.** `logical_units` ends a unit on a list marker or a marker-class
+> change; two table rows are both unmarked and neither starts a block, so nothing separated them.
+> Joined, there is no `;`, `—`, ` -- ` or sentence dot anywhere, the clause is the whole unit, and
+> `make validate` was **green over a live instruction to cite a dead row**. That is reviews #14 and
+> #18 one layout over — and the corpus carries **102 table rows across six tracked files**.
+> Reproduced as a failing case before the fix, per the shape round 63 added.
+>
+> **The suggested remedy was wrong and the corpus said so.** The review proposed ` | ` as a clause
+> boundary, on the grounds that it *"never appears mid-clause in this corpus"*. It appears **152
+> times** — every shell pipeline in `.claude/hooks/*.sh`, including inside comment prose
+> (`register-check-selftest.sh:172`). A boundary there **shrinks** the exempt window, i.e. it
+> **false-reds**, on the two gate scripts specifically. The fix taken instead is starts-with-`|`
+> **and** ends-with-`|`, which matches all 102 table rows and nothing else in the corpus.
+>
+> **Structural, not heuristic — and that is why the sibling case stays open.** A GFM table row is one
+> physical line *by grammar*, so it can never be the hard-wrap continuation review #13 protects. Two
+> adjacent `#` lines are indistinguishable from a wrap without a heuristic (line length against the
+> ~100-column wrap, or "the next line starts a sentence"), and **every such heuristic false-reds a
+> legal wrap**. On the gate guarding the required status check, a false red whose only escape is
+> rewording costs more than a latent miss — this branch has retracted two of those already.
+> **So the residual is pinned as a residual**, asserted in its current (missed) state with the
+> reason, so closing it later is a deliberate edit and not a rediscovery.
+>
+> **And the fix's own closing half was unpinned.** Two adjacent rows each open a unit through
+> `is_table_row` alone, so deleting `prev_table` left the case **green** — §19 shape #1 (*an
+> assertion held up by the sentence beside it*) reproduced inside the fix for #64. The control it
+> needed is prose beneath a table, which the last row was exempting.
+>
+> **(2) `GATE-STEP-LOCUS` justified all seven `timeout-minutes` with one sentence its own evidence
+> field falsifies.** It said a job-level cap *"references nothing about QMD"*. True of six —
+> `lint`, `specs`, `build-test`, `db-test`, `docs-validate`, `codegen` bound `cargo` and a postgres
+> container and would be correct on a branch that never heard of QMD. **Not true of the cap on
+> `changes`**, whose stated antecedent *is* the stub suite, in `ci.yml` beside the value and two
+> sentences earlier in the row itself (*"the hazard is one THIS PR CREATES"*). The honest form is the
+> stronger one: six unrelated CI changes, and one **mitigation of a hazard this PR's own step
+> introduces**. Named as ride-along clause **(f)** of `RETRIEVAL-QMD-CI`, where
+> `the_ride_along_count_matches_the_clauses_named` can see it — so the founder decides the placement
+> rather than inheriting it from a sentence.
+>
+> **Cost that earned the rule: nothing here was found by the gate. Finding (1) came from a reviewer
+> constructing a layout nobody had written down — round 63's own shape #8, arriving one round later
+> from the outside. And its proposed fix was falsified by grepping the corpus, which is the same
+> lesson pointing the other way: a reviewer's antecedent is a claim too.**

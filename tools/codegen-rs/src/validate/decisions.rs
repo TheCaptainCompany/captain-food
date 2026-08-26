@@ -796,6 +796,30 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
 /// a citation split across a wrap (`Decided by row` / `` `KEY` ``) that was missed before. It does
 /// NOT "strictly improve detection" — that claim was in the docstring one commit ago and this
 /// bullet rule is what makes it true.
+///
+/// AND THE CLASS IS NOT CLOSED — stated here because this paragraph read as if it were, and a
+/// reader who believes that stops looking. Three unit-ending signals exist (a list marker, a
+/// marker-class change, a table row), and they cover the layouts where the join is *structurally*
+/// wrong. Two adjacent lines of the SAME class are not among them:
+///
+/// ```sh
+/// # kept for history: the old row is superseded
+/// # Per row OLD-ROW, open a reversal decision before changing the pin
+/// ```
+///
+/// Those join, and line 1's `superseded` exempts line 2's live instruction. Both gate scripts are
+/// written in `#` blocks, so this is the corpus the rule exists for — and it is NOT closed on
+/// purpose. A plain line break cannot be a boundary: review #13's motivating case is `superseded`
+/// landing on the next line of a hard wrap, and separating same-class lines needs a HEURISTIC
+/// (line length against the ~100-column wrap, or "the next line starts a sentence"), every one of
+/// which false-reds a legal wrap. On the gate that guards the required status check, a false red
+/// whose only escape is rewording costs more than a latent miss.
+///
+/// A table row is different in kind, not in degree, which is why it IS closed: GFM makes a row one
+/// physical line by grammar, so it can never be a wrap continuation, and the test needs no
+/// heuristic. Latent today — no superseded key is cited anywhere in the corpus — and pinned as a
+/// residual in `a_superseded_row_may_not_be_cited_as_live_authority`, so closing it later is a
+/// deliberate edit rather than a rediscovery. (Review #64 of PR #679.)
 struct Unit {
     text: String,
     /// `(byte offset where this line's text starts in `text`, 1-based source line)`, ascending.
@@ -830,6 +854,9 @@ fn logical_units(content: &str) -> Vec<Unit> {
     // Whether the previous non-blank line carried a comment/quote marker. A CHANGE in that class
     // ends the unit -- see below.
     let mut prev_marked = false;
+    // Whether the previous non-blank line was a markdown table row. A table row both OPENS and
+    // CLOSES a unit -- see below.
+    let mut prev_table = false;
     for (i, raw) in content.lines().enumerate() {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -859,8 +886,34 @@ fn logical_units(content: &str) -> Vec<Unit> {
         // line-scoped it had redded. `decision-lookup.sh`'s `activation_fail` has exactly that
         // layout, and stayed caught only because its comment happens to end in a sentence dot.
         // A guard that depends on someone not reflowing a comment is not a guard. (Review #18.)
-        let opens = starts_a_block(after_marker) || marked != prev_marked;
+        // A MARKDOWN TABLE ROW IS ITS OWN UNIT, in BOTH directions. Two adjacent rows are both
+        // unmarked and neither `starts_a_block`, so nothing ended the unit between them and they
+        // joined -- reopening reviews #14 and #18 one layout over, in the layout most of this
+        // corpus is written in (102 table rows across six tracked files today):
+        //
+        // ```md
+        // | `OLD-ROW` | superseded | replaced by the chain head |
+        // | next      | Per row `OLD-ROW`, open a reversal decision |
+        // ```
+        //
+        // Joined, there is no `;`, `—`, ` -- ` or sentence dot anywhere, so the clause is the whole
+        // unit, row 1's `superseded` lands inside it, and the LIVE instruction in row 2 goes green.
+        // Line-scoped it redded.
+        //
+        // STRUCTURAL, NOT HEURISTIC, which is why it is safe where a plain line break is not: a
+        // GFM table row is one physical line BY GRAMMAR -- wrapping it ends the table -- so it can
+        // never be the hard-wrap continuation that review #13 protects. The test is starts-with-`|`
+        // AND ends-with-`|`, not a bare ` | `: the review that raised this proposed ` | ` as a
+        // separator that "never appears mid-clause in this corpus", and the corpus falsifies that
+        // 152 times over -- every shell pipeline in `.claude/hooks/*.sh`, including inside comment
+        // prose (`register-check-selftest.sh:172`). A boundary there SHRINKS the exempt window,
+        // i.e. it false-reds, on the two gate scripts specifically. Both-ends matches all 102 table
+        // rows and nothing else in the corpus; `| tar -x ...` and `|| activation_fail ...` open
+        // with a pipe and do not close with one. (Review #64 of PR #679.)
+        let is_table_row = after_marker.starts_with('|') && after_marker.ends_with('|') && after_marker.len() > 1;
+        let opens = starts_a_block(after_marker) || marked != prev_marked || is_table_row || prev_table;
         prev_marked = marked;
+        prev_table = is_table_row;
         // The list marker itself is dropped from the text: `- \`KEY\`` must still read as a key
         // opening the unit, which is one of the citation forms.
         let body = if opens {

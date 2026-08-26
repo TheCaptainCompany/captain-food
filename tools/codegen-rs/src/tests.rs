@@ -10131,6 +10131,25 @@ mod decision_ask_and_citations {
                 "a backticked key mid-parenthetical",
                 "the step is authorized (see `OLD-ROW` and the ADR) and nothing else.",
             ),
+            // THE SAME CLASS AS THE TWO BULLET CONTROLS ABOVE, IN THE LAYOUT MOST OF THE CORPUS
+            // USES. Two adjacent table rows are both unmarked and neither `starts_a_block`, so
+            // nothing ended the unit between them: joined, row 1's `superseded` exempted row 2's
+            // live instruction and `make validate` was green. Verified missed before the fix.
+            // A GFM table row is one physical line by grammar, so treating it as its own unit
+            // cannot collide with review #13's hard-wrap case. (Review #64.)
+            (
+                "an adjacent table row supplying the exemption word",
+                "| `OLD-ROW` | superseded | replaced by the chain head |\n| next | Per row `OLD-ROW`, open a reversal decision |",
+            ),
+            // AND THE CLOSING HALF, WHICH THE ROW-ABOVE CASE DOES NOT PIN. Two adjacent rows each
+            // open a unit through `is_table_row` alone, so deleting `prev_table` left that case
+            // green -- the assertion was held up by the comment beside it, which is §19 shape #1 in
+            // the fix for #64. A table row must also CLOSE its unit, or the prose beneath a table
+            // joins the last row and the last row's `superseded` exempts it.
+            (
+                "prose beneath a table exempted by the last row",
+                "| `OLD-ROW` | superseded | the head is `NEW-ROW` |\nPer row OLD-ROW, open a reversal decision.",
+            ),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -10302,6 +10321,36 @@ mod decision_ask_and_citations {
                 issues.is_empty(),
                 "`{}` must stay GREEN -- a guard that fires on ordinary prose trains readers to discount it. Body: {}, got {:?}",
                 label, body, issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        // THE RESIDUAL, PINNED AS A RESIDUAL RATHER THAN LEFT TO BE REDISCOVERED. Two adjacent
+        // lines of the SAME marker class still join, and a plain line break is deliberately not a
+        // clause boundary -- review #13's motivating case is `superseded` landing on the next line
+        // of a hard wrap, and the four wrapped GREEN controls above are exactly that. So an
+        // unrelated `superseded` on the preceding line of a comment block still exempts a live
+        // citation on the next one.
+        //
+        // THE FIX FOR THE TABLE VARIANT DOES NOT REACH IT, and the difference is the whole reason
+        // one was closed and one was not: a GFM table row is one physical line BY GRAMMAR, so it
+        // can never be a wrap continuation; two `#` lines are indistinguishable from a wrap without
+        // a heuristic (line length, or "the next line starts a sentence"), and every such heuristic
+        // FALSE-REDS a legal wrap. On the gate that guards the required status check, a false red
+        // whose only escape is rewording is worse than a latent miss -- this branch has retracted
+        // two of those already, and `adding a bound is adding a failure mode`.
+        //
+        // Asserted in its CURRENT state so the gap is visible and cannot change silently: if a
+        // later change closes it, this reds and is deleted deliberately. Latent today -- no
+        // superseded key is cited anywhere in the corpus. (Review #64 of PR #679.)
+        {
+            let residual = check(
+                ".claude/x.sh",
+                "# kept for history: the old row is superseded\n# Per row OLD-ROW, open a reversal decision before changing the pin",
+            );
+            assert!(
+                residual.is_empty(),
+                "KNOWN RESIDUAL CHANGED, which is good news needing a deliberate edit rather than a surprise: two adjacent same-marker lines now separate, so this live citation is caught. Delete this block and move the case up into the RED set -- but first check the four wrapped GREEN controls above still pass, because they are the reason a plain line break is not a boundary. Got {:?}",
+                residual.iter().map(|i| i.rule).collect::<Vec<_>>()
             );
         }
 
