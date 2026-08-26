@@ -263,26 +263,39 @@ jobs:
     # and both test suites first.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    # 20 -- AND UNLIKE THE HEAVY JOBS THIS ONE HAS A MEASURED ANTECEDENT. Review #65 was right that
-    # it had none: it shipped in the "seconds of work" bucket with `changes` and `codegen` on
-    # nothing but a comment saying why a cap exists, while both `specs` and `docs-validate` build
+    # 120 -- and the route to this number matters more than the number, because round 65 put 20 here
+    # with a measurement that was WRONG ABOUT WHAT IT MEASURED.
+    #
+    # Review #65 was right that these two caps had no antecedent: they shipped in the "seconds of
+    # work" bucket with `changes` and `codegen`, while both `specs` and `docs-validate` build
     # `tools/codegen-rs` and its tree (guppy, determinator, petgraph, cargo_metadata, target-spec,
-    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- and `docs-validate`'s own
-    # header admits "cold first run pays the codegen build".
+    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- which `docs-validate`'s own
+    # header already admitted.
     #
-    # MEASURED 2026-08-26, from an empty CARGO_TARGET_DIR on a 4-core container: 36s to build, then
-    # ~1s per validator invocation (this job runs two). Call it ~40s of compute cold, so 20 minutes
-    # is ~30x it. LOCAL, NOT A RUNNER: a GitHub standard runner is also 4 vCPU but has slower disk
-    # and pays checkout, toolchain install and cache restore on top, so treat the multiplier as the
-    # order of magnitude and not the number.
+    # THE RETRACTED MEASUREMENT: "empty CARGO_TARGET_DIR, 36s, so 20 minutes is ~30x". The target
+    # dir was empty; `CARGO_HOME` WAS NOT. That measured compile-from-a-warm-registry, which is half
+    # the cold path -- a cold CI runner also fetches every crate in the tree. The number was true and
+    # the sentence built on it was not, and the omission was in the permissive direction. The
+    # re-measurement with an isolated CARGO_HOME could not be completed here (the session's disk
+    # allowance ran out mid-build), so THE COLD PATH REMAINS UNMEASURED and this comment says so
+    # rather than quoting the half of it that happened to be cheap. Review #64's lesson pointing at
+    # its author: a measurement is defined by what it excludes.
     #
-    # NOT raised to the heavy jobs' value, which is what the review offered as the alternative. That
-    # bucket exists for an UNMEASURED cold workspace build where being wrong low cancels the job,
-    # reds the required check, and leaves rust-cache with nothing saved. This one is measured and
-    # the headroom is an order of magnitude; copying a number chosen for a different job's
-    # uncertainty would be the bare-derived-number defect this branch keeps retracting, one step
-    # removed. Bounds a HANG; `codegen` waits on `needs:` even under `if: always()`.
-    timeout-minutes: 20
+    # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- and for `docs-validate` the
+    # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang, and
+    # on the docs-only lane it blocks no merge at all, because CLAUDE.md routes that work straight to
+    # `main` as a push with no PR -- the change has already landed. Too LOW cancels the job, `codegen`
+    # fails on `cancelled` by design, and the change sits on `main` WITH NO VALIDATOR HAVING RUN,
+    # because this is the only gate that lane has. It does not self-heal either: `Swatinem/rust-cache`
+    # saves nothing on a cancellation, so every re-run is cold and hits the same wall. Reached by an
+    # ordinary `Cargo.lock` or toolchain bump, which rekeys every cache at once.
+    #
+    # `specs` carries the same value for the same unmeasured reason rather than a second guess: one
+    # number across the unmeasured jobs is one fewer figure to drift, which is the defect rounds 57,
+    # 61 and 62 spent three rounds on. Bounds a HANG; `codegen` waits on `needs:` even under
+    # `if: always()`. WHEN A COLD RUN IS ACTUALLY OBSERVED: read its duration off that run, state it
+    # here as the antecedent, and move this value deliberately -- do not lower it to fit a warm one.
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -488,26 +501,39 @@ jobs:
     # generic skipped-acceptance below would let a mis-gated skip slide.
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
-    # 20 -- AND UNLIKE THE HEAVY JOBS THIS ONE HAS A MEASURED ANTECEDENT. Review #65 was right that
-    # it had none: it shipped in the "seconds of work" bucket with `changes` and `codegen` on
-    # nothing but a comment saying why a cap exists, while both `specs` and `docs-validate` build
+    # 120 -- and the route to this number matters more than the number, because round 65 put 20 here
+    # with a measurement that was WRONG ABOUT WHAT IT MEASURED.
+    #
+    # Review #65 was right that these two caps had no antecedent: they shipped in the "seconds of
+    # work" bucket with `changes` and `codegen`, while both `specs` and `docs-validate` build
     # `tools/codegen-rs` and its tree (guppy, determinator, petgraph, cargo_metadata, target-spec,
-    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- and `docs-validate`'s own
-    # header admits "cold first run pays the codegen build".
+    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- which `docs-validate`'s own
+    # header already admitted.
     #
-    # MEASURED 2026-08-26, from an empty CARGO_TARGET_DIR on a 4-core container: 36s to build, then
-    # ~1s per validator invocation (this job runs two). Call it ~40s of compute cold, so 20 minutes
-    # is ~30x it. LOCAL, NOT A RUNNER: a GitHub standard runner is also 4 vCPU but has slower disk
-    # and pays checkout, toolchain install and cache restore on top, so treat the multiplier as the
-    # order of magnitude and not the number.
+    # THE RETRACTED MEASUREMENT: "empty CARGO_TARGET_DIR, 36s, so 20 minutes is ~30x". The target
+    # dir was empty; `CARGO_HOME` WAS NOT. That measured compile-from-a-warm-registry, which is half
+    # the cold path -- a cold CI runner also fetches every crate in the tree. The number was true and
+    # the sentence built on it was not, and the omission was in the permissive direction. The
+    # re-measurement with an isolated CARGO_HOME could not be completed here (the session's disk
+    # allowance ran out mid-build), so THE COLD PATH REMAINS UNMEASURED and this comment says so
+    # rather than quoting the half of it that happened to be cheap. Review #64's lesson pointing at
+    # its author: a measurement is defined by what it excludes.
     #
-    # NOT raised to the heavy jobs' value, which is what the review offered as the alternative. That
-    # bucket exists for an UNMEASURED cold workspace build where being wrong low cancels the job,
-    # reds the required check, and leaves rust-cache with nothing saved. This one is measured and
-    # the headroom is an order of magnitude; copying a number chosen for a different job's
-    # uncertainty would be the bare-derived-number defect this branch keeps retracting, one step
-    # removed. Bounds a HANG; `codegen` waits on `needs:` even under `if: always()`.
-    timeout-minutes: 20
+    # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- and for `docs-validate` the
+    # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang, and
+    # on the docs-only lane it blocks no merge at all, because CLAUDE.md routes that work straight to
+    # `main` as a push with no PR -- the change has already landed. Too LOW cancels the job, `codegen`
+    # fails on `cancelled` by design, and the change sits on `main` WITH NO VALIDATOR HAVING RUN,
+    # because this is the only gate that lane has. It does not self-heal either: `Swatinem/rust-cache`
+    # saves nothing on a cancellation, so every re-run is cold and hits the same wall. Reached by an
+    # ordinary `Cargo.lock` or toolchain bump, which rekeys every cache at once.
+    #
+    # `specs` carries the same value for the same unmeasured reason rather than a second guess: one
+    # number across the unmeasured jobs is one fewer figure to drift, which is the defect rounds 57,
+    # 61 and 62 spent three rounds on. Bounds a HANG; `codegen` waits on `needs:` even under
+    # `if: always()`. WHEN A COLD RUN IS ACTUALLY OBSERVED: read its duration off that run, state it
+    # here as the antecedent, and move this value deliberately -- do not lower it to fit a warm one.
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

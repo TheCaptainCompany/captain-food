@@ -684,3 +684,10 @@ Two more from the same branch, about the records rather than the tests:
 - **A verification recipe is itself a derived claim.** "Read its last three lines" was written from
   the intended shape and not from a log; the step prints one line. Read it off a real run, or state
   a property that cannot drift.
+- **A measurement is defined by what it excludes, and the omission runs permissive.** Taking a
+  number is not the end of the antecedent problem — it relocates it. A "cold build, 36s" measured an
+  empty target dir against a *warm* registry, which is half the path a cold CI runner walks; the
+  figure was true and the multiplier built on it was not. **Say which caches were warm, in the same
+  sentence as the number.** And when the honest re-measurement cannot be taken, "unmeasured" is a
+  publishable answer — decide on the asymmetry instead, and say that is what you did. This one
+  landed on the author, one round after writing the rule it breaks.

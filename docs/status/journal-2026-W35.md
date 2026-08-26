@@ -1939,3 +1939,46 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > second round running.** Round 64's ` | ` boundary was falsified by grepping the corpus; here the
 > proposed raise was falsified by taking the measurement nobody had taken. **A finding and its
 > proposed remedy are two claims, and the second is not carried by the first.**
+>
+> **Round 66 — the round-65 measurement was wrong about what it measured, and the author supplied the
+> bad antecedent one round after writing the rule against it.**
+>
+> Round 65 kept `specs`/`docs-validate` at 20 and justified it as *"~30× the cold compute"*, from an
+> empty `CARGO_TARGET_DIR` that built `tools/codegen-rs` in 36s. **`CARGO_HOME` was not empty.** That
+> measured **compile from a warm registry** — half the path a cold CI runner walks, since it also
+> fetches every crate in the tree. The number was true and the sentence built on it was not, in the
+> **permissive** direction. Retracted in `ci.yml` and in `GATE-STEP-LOCUS` rather than quietly
+> amended.
+>
+> **The honest re-measurement could not be taken**: an isolated `CARGO_HOME` doubles the cost again,
+> and the session's disk allowance ran out mid-build (`No space left on device`) — caused by the two
+> scratch target dirs the first measurement left behind. So the cold path stands **UNMEASURED**, and
+> the records say that instead of quoting the cheap half.
+>
+> **So the value is decided on the asymmetry, and it is stated as such.** Both raised to 120. For
+> `docs-validate` the asymmetry is the most lopsided in the file: too **high** costs idle runner
+> minutes and blocks **no merge at all** — CLAUDE.md routes the docs-only lane straight to `main` as
+> a push with no PR, so the change has already landed — while too **low** cancels the job and leaves
+> that change on `main` **with no validator having run**, non-self-healing because `rust-cache` saves
+> nothing on a cancel. `specs` takes the same value for the same unmeasured reason rather than a
+> second guess: one number across the unmeasured jobs is one fewer figure to drift, which is what
+> rounds 57, 61 and 62 were spent on.
+>
+> **The review's committed antecedent was real but does not say what it was read as saying.** It
+> quoted `tools/codegen-rs/Cargo.toml` on a *"tail risk that an incident rollback times out on
+> deploy.yml's `timeout-minutes: 10`"*. Read in place, that comment is about `tools/secret-gate`
+> being split OUT so its cold compile is **~7s measured** instead of dragging the codegen tree — the
+> 10 minutes is the whole **deploy** job's budget, not a claim about this crate's compile time. It
+> does support the direction (the codegen tree's cold compile is "minutes"), and it is a better
+> antecedent than the one round 65 used, which is the part worth keeping.
+>
+> **Shape, for [`gates.md` §19](../claude/sessions/gates.md): a measurement is defined by what it
+> excludes, and the omission runs permissive. Taking a number does not end the antecedent problem —
+> it relocates it. Say which caches were warm in the same sentence as the number; and when the honest
+> re-measurement cannot be taken, "unmeasured" is a publishable answer — decide on the asymmetry and
+> say that is what you did.** Third withdrawn multiplier on this branch (`~30×` at round 45, the
+> per-job enumeration at 62, this one) — and the first the **author** supplied, after the rule.
+>
+> Operational finding recorded in [`sessions/environment.md`](../claude/sessions/environment.md): a
+> second `CARGO_TARGET_DIR` is a full second copy against a fixed allowance, and an abandoned one is
+> the self-inflicted version of the stale-build-dir sweep already on that list.
