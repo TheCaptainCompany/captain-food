@@ -10827,7 +10827,39 @@ mod docs_only_ci_and_legacy_visibility {
                         // T15 cases deliberately simulate a broken interpreter THROUGH PYTHONPATH,
                         // so hardening the wrapper rewrites its own test harness -- a separate
                         // change, not a rider on this one.
-                        || k.starts_with("PYTHON")
+                        //
+                        // A CLOSED SET, NOT A PREFIX -- and this is where `PYTHON` differs from
+                        // `LD_` and `GIT_`. Those two families are execution- or oracle-redirecting
+                        // THROUGHOUT, so "no member has an innocent use in this job" is true of the
+                        // family and the prefix earns itself. Of `PYTHON*`, four members inject
+                        // code and the rest are the commonest Python-CI idioms there are:
+                        // `PYTHONUNBUFFERED`, `PYTHONDONTWRITEBYTECODE` (which this branch's own
+                        // `.gitignore` `__pycache__` rider exists to compensate for),
+                        // `PYTHONHASHSEED`, `PYTHONWARNINGS`, `PYTHONIOENCODING`. Under the prefix,
+                        // a Python step with `env: {PYTHONUNBUFFERED: '1'}` redded BOTH gate pins
+                        // with a message accusing its author of making the register-check selftest
+                        // unable to fail -- and the one-line "fix" that message invites is deleting
+                        // this arm, which reopens the `PYTHONPATH` route it was written for. That
+                        // is the arc this file records for `CARGO_TERM_COLOR`, `steps.len() == 4`,
+                        // the `['**','!badges']` equality, `types` key-presence and the null
+                        // `push:` body: a red that fires on innocent work trains readers to
+                        // discount reds. Dangerous CONTENT, as the comment two screens up says.
+                        //
+                        // The four that inject: `PYTHONPATH` (any entry's `sitecustomize`),
+                        // `PYTHONHOME` (relocates the whole stdlib), `PYTHONUSERBASE` (the user
+                        // site directory, whose `usercustomize` is imported at startup) and
+                        // `PYTHONEXECUTABLE`. `PYTHONSTARTUP` only fires for an INTERACTIVE
+                        // interpreter and cannot reach `python3 -c`, but it stays banned and
+                        // planted: it costs nothing, and a future gate that opens a REPL would
+                        // otherwise inherit the hole silently. (Review #36 of PR #679.)
+                        || matches!(
+                            k,
+                            "PYTHONPATH"
+                                | "PYTHONHOME"
+                                | "PYTHONUSERBASE"
+                                | "PYTHONEXECUTABLE"
+                                | "PYTHONSTARTUP"
+                        )
                         // The gate scripts pin their oracle to $GITHUB_SHA so that a step cannot
                         // move HEAD onto its own tampered bytes (review #10 reproduced that with
                         // one `git commit`). Overriding GITHUB_SHA from `env:` would hand the
@@ -11780,6 +11812,8 @@ mod docs_only_ci_and_legacy_visibility {
             ("job LD_AUDIT", at_job("LD_AUDIT: /tmp/x.so")),
             ("job PYTHONPATH", at_job("PYTHONPATH: /tmp/shim")),
             ("job PYTHONSTARTUP", at_job("PYTHONSTARTUP: /tmp/shim.py")),
+            ("job PYTHONHOME", at_job("PYTHONHOME: /tmp/fakelib")),
+            ("job PYTHONUSERBASE", at_job("PYTHONUSERBASE: /tmp/usersite")),
             ("workflow PYTHONPATH", at_workflow("PYTHONPATH: /tmp/shim")),
             ("job PATH", at_job("PATH: /tmp/shim:/usr/bin")),
             ("job BASH_FUNC_x%%", at_job("BASH_FUNC_x%%: \"() { :; }\"")),
@@ -12017,6 +12051,13 @@ mod docs_only_ci_and_legacy_visibility {
             ("a pinned GitHub-hosted runner image", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04")),
             ("workflow CARGO_TERM_COLOR", at_workflow("CARGO_TERM_COLOR: always")),
             ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
+            // THE INERT HALF OF THE `PYTHON*` FAMILY. `k.starts_with("PYTHON")` banned these, so
+            // the commonest Python-CI idiom there is redded both gate pins with a message about
+            // disarming the ask-gate -- the false-red instrument this file has now retracted six
+            // times, one family over (review #36).
+            ("job PYTHONUNBUFFERED", at_job("PYTHONUNBUFFERED: \"1\"")),
+            ("job PYTHONDONTWRITEBYTECODE", at_job("PYTHONDONTWRITEBYTECODE: \"1\"")),
+            ("workflow PYTHONHASHSEED", at_workflow("PYTHONHASHSEED: \"0\"")),
             ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),
             ("pull_request types WIDENED", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", 1)),
             // STRICTLY WIDER trigger surfaces. Both redded before review #11: an omitted
@@ -12066,7 +12107,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 77 && must_stay_green.len() >= 16,
+            must_red.len() >= 79 && must_stay_green.len() >= 19,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

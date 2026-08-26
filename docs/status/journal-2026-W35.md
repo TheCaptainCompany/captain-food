@@ -1046,3 +1046,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > reason is scope discipline — this PR's verified claim is one non-comment line pair in `ci.yml` —
 > and it now says so, next to the note that the new pin permits `timeout-minutes` and that after this
 > PR it is the only mitigation left.
+>
+> **Round 36 — the hermeticity clause said "untouched" on a host where it could not measure.**
+> `fingerprint()` is `find -printf | sort | md5sum`; `-printf` is GNU-only and `md5sum` is
+> coreutils-only. On a BSD/macOS host both fail, stderr goes to `/dev/null`, and the substitution
+> collapses to the **empty string — for `BEFORE` and for `AFTER` alike**, so `[ "$BEFORE" = "$AFTER" ]`
+> held unconditionally. A maintainer on macOS who has run the wrapper once (so `.qmd/` exists), edits
+> it and runs `make stub-tests`: the suite writes to the real cache and the quotable line says it did
+> not. **The `.qmd/`-absent case still caught creation** (`absent` is not the empty string) — it was
+> *modification of an existing cache* that went silent, which is the state a developer host is in and
+> a CI runner never is, so CI could not see it. Round 22 moved this verdict above `RESULT:` precisely
+> so the line every record quotes cannot be green over a violation, and the clause reproduced the
+> defect inside it. A host capability is loud, not red: the third clause now reads
+> `hermeticity NOT MEASURED (needs GNU find -printf + md5sum)`. Verified both ways by running the
+> suite with `md5sum` off `PATH`.
+>
+> **Round 36b — `PYTHON*` was a prefix ban where only four names inject code.** `LD_` and `GIT_` earn
+> their prefixes because the whole family redirects execution or the oracle; `PYTHON*` does not.
+> `PYTHONUNBUFFERED`, `PYTHONDONTWRITEBYTECODE` (which this branch's own `.gitignore` rider exists to
+> compensate for), `PYTHONHASHSEED`, `PYTHONWARNINGS` are the commonest Python-CI idioms there are,
+> and each redded **both** gate pins with a message accusing its author of disarming the ask-gate —
+> **and the one-line fix that message invites is deleting the arm, which reopens the `PYTHONPATH`
+> route it was written for.** Narrowed to the closed set (`PYTHONPATH`, `PYTHONHOME`,
+> `PYTHONUSERBASE`, `PYTHONEXECUTABLE`, plus `PYTHONSTARTUP` which cannot reach `python3 -c` but
+> costs nothing to keep); two new reds, three new green controls. Sixth retraction of the same
+> instrument — this file's own rule, applied to this file's own guard.
+>
+> **Round 36c — the durable record stated a bare derived number, twice, with two values.**
+> `gates.md` §19 said **thirty-three** while the PR body said **thirty-one**, and both split the same
+> set as "the first thirteen" + "the last eighteen" = 31. In the section whose closing bullet is *"a
+> count retracted twice will be retracted a third time — derive it."* The total is gone from the
+> durable record; the PR's round table is where one can be re-derived from something.

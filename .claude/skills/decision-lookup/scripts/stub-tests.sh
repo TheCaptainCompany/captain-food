@@ -189,7 +189,27 @@ verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=
 # count as a failure, and it is printed so a green run always names what it did not cover.
 skipped() { skip=$((skip+1)); echo "SKIP  $1"; }
 
+# THE MEASUREMENT MUST DISTINGUISH "unchanged" FROM "could not look" -- the same distinction this
+# whole suite is about, in its own hermeticity check. `find -printf` is GNU-only and `md5sum` is
+# coreutils-only: on a BSD/macOS host `find` errors, stderr goes to /dev/null, `md5sum` is not
+# found, and the substitution collapses to the EMPTY STRING -- for BEFORE and for AFTER alike. So
+# `[ "$BEFORE" = "$AFTER" ]` held unconditionally and the headline printed `repo .qmd/ untouched`
+# having measured nothing. Concretely: a maintainer on macOS who has run `decision-lookup.sh` once
+# (so `$REPO_ROOT/.qmd/` exists), edits the wrapper and runs `make stub-tests`; the suite writes to
+# the real cache and the quotable line says it did not. The `.qmd/`-absent case still caught
+# CREATION (`absent` is not the empty string); it is MODIFICATION OF AN EXISTING CACHE that went
+# silent -- the state a developer host is in and a CI runner never is, so CI could not see it
+# (the same structural blindness review #13 named for the CRLF class).
+#
+# A HOST CAPABILITY IS LOUD, NOT RED (T15g's rule): an unmeasurable host prints `NOT MEASURED` in
+# the headline's third clause rather than the word `untouched`. The ADR, the row and the PR body all
+# quote that line as the evidence, and round 22 moved this verdict ABOVE `RESULT:` precisely so it
+# cannot be green over a violation. (Review #36 of PR #679.)
 fingerprint() { # the real cache must be untouched by this suite, whether present or absent
+  if ! command -v md5sum >/dev/null 2>&1 || ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
+    echo unmeasurable
+    return
+  fi
   if [ -e "$REPO_ROOT/.qmd" ]; then find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum; else echo absent; fi
 }
 BEFORE="$(fingerprint)"
@@ -914,7 +934,11 @@ echo "----"
 # consumes a declared case, and false of this increment, which does not. (Review #25.)
 accounted=$((pass + fail + skip))
 AFTER="$(fingerprint)"
-if [ "$BEFORE" = "$AFTER" ]; then
+if [ "$BEFORE" = unmeasurable ] || [ "$AFTER" = unmeasurable ]; then
+  # Not a failure and not a pass: the question was never asked. Said out loud in the clause every
+  # record quotes, so nobody reads a green headline as a hermeticity guarantee it did not make.
+  hermetic="repo .qmd/ hermeticity NOT MEASURED (needs GNU find -printf + md5sum)"
+elif [ "$BEFORE" = "$AFTER" ]; then
   hermetic="repo .qmd/ untouched"
 else
   hermetic="repo .qmd/ CHANGED -- VIOLATION"

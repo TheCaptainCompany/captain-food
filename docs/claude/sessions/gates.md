@@ -614,10 +614,17 @@ wall-clock** — a green deploy on a warm runner hides the cold-cache tail that 
 ## 19. Seven shapes a gate test keeps reproducing
 
 From [#679 "RETRIEVAL-QMD-CI decided: the decision-lookup stub suite runs in
-CI"](https://github.com/TheCaptainCompany/captain-food/pull/679) — thirty-three independent review
-passes, all FAIL before the state that merged. **The recurring defect was never the mutants: it was
-that every round's completeness claim was written before it was checked.** Roughly a third of the
-last eighteen rounds were regressions introduced while fixing the previous round's finding.
+CI"](https://github.com/TheCaptainCompany/captain-food/pull/679) — many independent review passes,
+all FAIL before the state that merged. **The recurring defect was never the mutants: it was that
+every round's completeness claim was written before it was checked.** The early rounds found holes
+in the gate; most of the later ones were about the tests FOR the gate, and a large share of those
+were regressions introduced while fixing the previous round's finding.
+
+*No total is stated here on purpose.* The first version of this paragraph said **thirty-three**
+while the PR body said **thirty-one**, and both then split the same set as "the first thirteen"
+plus "the last eighteen" — 31, not 33 — in the section whose own closing bullet says a derived
+number stated in prose is consumed as established fact and must be derived instead. The PR's round
+table enumerates the rounds; that is where a count can be re-derived from something. (Review #36.)
 
 These seven are not derivable from the code, each cost a round, and **several of them reappeared
 inside the very guard written to close them** — which is why they are here rather than in a comment
