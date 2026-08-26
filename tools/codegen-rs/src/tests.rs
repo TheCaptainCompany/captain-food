@@ -12005,9 +12005,16 @@ mod docs_only_ci_and_legacy_visibility {
                         "the `{}` job declares no `timeout-minutes` -- `codegen` is `if: always()` and still WAITS on `needs:`, so a hang here keeps the required check queued for GitHub's 360-minute default and nothing in the repository merges",
                         job
                     ));
+                // A FLOOR AS WELL AS A CEILING, because the file's own argument is that too LOW is
+                // the harmful direction and only the high side was bounded. `timeout-minutes: 12`
+                // -- a dropped zero on a 120 -- passed this pin and every other assertion here, and
+                // then cancels on any cold-cache run, which is the exact failure the caps exist to
+                // prevent, reached by a typo rather than by a decision. FIVE is below every
+                // legitimate value in the file (the cheapest job is 10) and far above any plausible
+                // slip. (Review #79 of PR #679.)
                 assert!(
-                    (1..=120).contains(&cap),
-                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=120. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. THIS BOUND HAS NO HEADROOM AND THAT IS THE STATE OF THE FILE, not an oversight: five of the seven aggregated jobs sit EXACTLY at the ceiling, and only `changes` and `codegen` are below it -- so this check can only fire on a value ABOVE the documented ceiling, never on a raise within it. An earlier message here said the heavy jobs were set `well below it on purpose`, which was false of the file it guards and was read by the one person guaranteed to be editing these values (review #70). The direction to be careful about: a cap that is too HIGH costs a hang some extra minutes on most jobs -- but NOT on one the aggregator waits on with `always()`, where it queues the required check for the full value -- while one that is too LOW cancels the job, reds the required check on an ordinary dependency bump, and does not converge on re-run because a cancelled job saves no cache. If a cold-cache run ever approaches a job's value: read the duration off that run, state it in ci.yml as the antecedent, and raise BOTH this bound and that job's value in the SAME commit -- do not edit the job down to fit",
+                    (5..=120).contains(&cap),
+                    "the `{}` job's `timeout-minutes` is {} -- it must be in 5..=120. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. THIS BOUND HAS NO HEADROOM AND THAT IS THE STATE OF THE FILE, not an oversight: five of the seven aggregated jobs sit EXACTLY at the ceiling, and only `changes` and `codegen` are below it -- so this check can only fire on a value ABOVE the documented ceiling, never on a raise within it. An earlier message here said the heavy jobs were set `well below it on purpose`, which was false of the file it guards and was read by the one person guaranteed to be editing these values (review #70). The direction to be careful about: a cap that is too HIGH costs a hang some extra minutes on most jobs -- but NOT on one the aggregator waits on with `always()`, where it queues the required check for the full value -- while one that is too LOW cancels the job, reds the required check on an ordinary dependency bump, and does not converge on re-run because a cancelled job saves no cache. If a cold-cache run ever approaches a job's value: read the duration off that run, state it in ci.yml as the antecedent, and raise BOTH this bound and that job's value in the SAME commit -- do not edit the job down to fit",
                     job, cap
                 );
                 if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
@@ -13153,6 +13160,20 @@ mod docs_only_ci_and_legacy_visibility {
                     rel, needle
                 );
             }
+            // AND THE SHARED CONTRACT PARAGRAPH MUST BE IDENTICAL BETWEEN THE TWO SCRIPTS -- which
+            // nothing asserted, though three separate places CLAIMED it did ("the byte-identical
+            // copy ... which `assert_gate_script_self_verifies` requires to stay in lockstep").
+            // This function iterates the scripts INDEPENDENTLY and checks needles, paths and the
+            // version marker; it never compares one to the other. The two "WHEN IT IS ARMED"
+            // blocks were wrong together only because one author edited both by hand, and they
+            // could have drifted silently at any point -- which is the two-statements-of-one-scope
+            // defect this branch retracts repeatedly, with a false claim of a gate on top of it.
+            //
+            // The paragraph describes a CONTRACT that is the same for both scripts (when the
+            // comparison is armed, what it catches, what it does not), so it must read identically;
+            // everything around it legitimately differs, including the opt-out variable names.
+            // Planted by inverting one copy's claim. (Review #79 of PR #679.)
+            //
             // The version marker is prose by construction, so it is the one thing checked in `raw`.
             assert!(
                 raw.contains("GATE-SELF-VERIFICATION-V3"),
@@ -13180,6 +13201,138 @@ mod docs_only_ci_and_legacy_visibility {
                 rel, optout
             );
         }
+    }
+
+    /// The two gate scripts' shared CONTRACT paragraph must read identically.
+    ///
+    /// `assert_gate_script_self_verifies` iterates them independently, so nothing compared one to
+    /// the other -- while the ADR, a commit message and a PR reply all asserted it did. See that
+    /// function's comment for the full retraction. (Review #79 of PR #679.)
+    #[test]
+    fn both_gate_scripts_state_the_same_armed_contract() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let para = |rel: &str| -> String {
+            let s = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            let i = s
+                .find("# WHEN IT IS ARMED")
+                .unwrap_or_else(|| panic!("{} lost its `WHEN IT IS ARMED` block -- that paragraph is the contract both scripts publish; re-point this test rather than deleting it", rel));
+            let j = s[i..]
+                .find("# WHAT THIS DOES NOT DO")
+                .map(|k| i + k)
+                .unwrap_or_else(|| panic!("{}'s `WHEN IT IS ARMED` block is no longer terminated by `WHAT THIS DOES NOT DO`", rel));
+            s[i..j].to_string()
+        };
+        assert_eq!(
+            para(".claude/hooks/register-check-selftest.sh"),
+            para(".claude/skills/decision-lookup/scripts/stub-tests.sh"),
+            "the two gate scripts publish DIFFERENT versions of the same contract. That paragraph says when the comparison is armed, what it catches and what it does not -- facts about the shared mechanism, identical for both -- so a reader who opens either must get the same answer. Everything around it may differ, including the opt-out variable names"
+        );
+    }
+
+    /// THE PREDICATE, MEASURED IN BOTH DIRECTIONS -- because the sentence describing it was wrong.
+    ///
+    /// Review #72 claimed the conditional opt-out means "an in-session `cp exit0.sh <gate script>`
+    /// is caught on the next turn rather than on push". It is not: `git status --porcelain` over
+    /// those paths is non-empty exactly when the bytes differ from HEAD, which is exactly when the
+    /// selftest's comparison would mismatch, so **dirty implies opted out** and the comparison is
+    /// skipped in precisely the state where it could fail. No working-tree predicate can separate
+    /// "editing a gate script" from "overwriting one" -- at the byte level they are one state.
+    ///
+    /// What the block DOES deliver is the tamper that hides from `git status`
+    /// (`--assume-unchanged`, `--skip-worktree`): status clean, bytes different, so the predicate
+    /// arms and the selftest reds. That is the stealthier class, and the coverage is inverted from
+    /// the naive reading -- the clumsy overwrite is caught at push, the careful one on the next turn.
+    ///
+    /// Both directions are asserted here rather than argued, because a sentence carried this claim
+    /// for one round and was false. Runs the REAL predicate, lifted out of `stop-gate.sh`, against a
+    /// throwaway repo. (Review #79 of PR #679.)
+    #[test]
+    fn the_stop_gate_predicate_discriminates_a_hidden_tamper() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let have_git = std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !have_git {
+            eprintln!("SKIP the_stop_gate_predicate_discriminates_a_hidden_tamper: no git on this host");
+            return;
+        }
+        // LIFT THE PREDICATE OUT OF THE SHIPPED SCRIPT, never a copy: a re-implementation here
+        // would drift from what runs, which is the two-lists-of-one-scope defect this branch
+        // retracts repeatedly.
+        let hook = fs::read_to_string(root.join(".claude/hooks/stop-gate.sh")).expect("stop-gate.sh");
+        let start = hook
+            .find("_gate_scripts_dirty=0")
+            .expect("stop-gate.sh must initialise `_gate_scripts_dirty` -- the predicate moved, re-point this test rather than deleting it");
+        let end = hook[start..]
+            .find("if [ \"$_gate_scripts_dirty\" = \"1\" ]")
+            .map(|i| start + i)
+            .expect("stop-gate.sh must branch on `_gate_scripts_dirty`");
+        let predicate = &hook[start..end];
+
+        let sandbox = std::env::temp_dir().join(format!("cf-stopgate-pred-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(sandbox.join(".claude/hooks")).expect("mkdir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&sandbox)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?}: {}", args, e));
+            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        let target = ".claude/hooks/register-check.sh";
+        fs::write(sandbox.join(target), "#!/usr/bin/env bash\n# the real one\n").expect("write");
+        git(&["init", "-q", "-b", "main", "."]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "base"]);
+
+        let verdict = || -> String {
+            let script = format!(
+                "ROOT={:?}\n{}\nprintf '%s' \"$_gate_scripts_dirty\"\n",
+                sandbox.to_string_lossy(),
+                predicate
+            );
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("run the lifted predicate");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        assert_eq!(verdict(), "0", "a clean tree must ARM the comparison");
+
+        fs::write(sandbox.join(target), "#!/usr/bin/env bash\nexit 0\n").expect("tamper");
+        assert_eq!(
+            verdict(),
+            "1",
+            "an ordinary overwrite leaves the tree DIRTY, so the predicate opts out -- this is the claim review #72 got wrong, and it is asserted so the retraction cannot quietly un-retract. The comparison does not run here; that overwrite is caught at push"
+        );
+
+        git(&["update-index", "--assume-unchanged", target]);
+        assert_eq!(
+            verdict(),
+            "0",
+            "a tamper HIDDEN from `git status` (--assume-unchanged / --skip-worktree) leaves the status clean while the bytes differ, so the predicate must ARM and let the selftest's hash comparison catch it. This is the only class the conditional opt-out actually buys, and if it stops holding the block delivers nothing"
+        );
     }
 
     /// `stop-gate.sh` MAY NOT DISARM THE COMPARISON UNCONDITIONALLY.

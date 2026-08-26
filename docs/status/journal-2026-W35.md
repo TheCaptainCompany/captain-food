@@ -2325,3 +2325,37 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Shape: a gate's own commit is a test input. Run the gate against the file it ships with and ask
 > whether it CAN fire — "it would catch X" is a claim about a hypothetical; "it does not fire on the
 > diff beside it" is a fact you can check in one command.**
+>
+> **Round 79 — round 72's block was vacuous for its own stated case, and the "lockstep" gate that was
+> supposed to keep its retraction honest does not exist.**
+>
+> **(1) The conditional opt-out cannot do what I said it does, and no working-tree predicate can.**
+> `git status --porcelain` over the four gate scripts is non-empty **exactly when** the bytes differ
+> from HEAD — which is **exactly when** the selftest's `hash-object` comparison would mismatch. The
+> two predicates are **complements**. So *dirty ⇒ opted out*: the comparison is skipped in precisely
+> the state where it could fail. **Measured, not reasoned**: an ordinary `cp exit0.sh` over
+> `register-check.sh` yields OPTED OUT. Round 72's claim — *"an in-session overwrite is caught on the
+> next turn rather than on push"* — is false, and I put it in three prose sites one round later.
+>
+> **What the block DOES buy, also measured: the tamper that hides from `git status`.**
+> `--assume-unchanged` / `--skip-worktree` leave the status clean while the bytes differ; the
+> predicate then arms and the selftest reds with `differs from the committed blob`. **So the coverage
+> is inverted from the naive reading — the clumsy overwrite is caught at push, the careful one on the
+> next turn.** That is a real and defensible property, and it is the one the block now claims. Both
+> directions pinned by `the_stop_gate_predicate_discriminates_a_hidden_tamper`, which lifts the
+> predicate out of the shipped script rather than re-implementing it.
+>
+> **(2) The retraction relied on a gate that was never there.** Three places — the ADR, a commit
+> message, a PR reply — asserted that `assert_gate_script_self_verifies` *"requires the two scripts
+> to stay in lockstep, so both are wrong together"*. **It does not.** It iterates them independently
+> and checks needles, paths and the version marker; nothing compares one to the other. The two
+> paragraphs were wrong together only because one author edited both by hand. Planted: inverting one
+> copy's claim left every test green. Now gated by `both_gate_scripts_state_the_same_armed_contract`.
+>
+> **A false claim OF a gate is worse than a missing gate: it is a missing gate plus a reason not to
+> look for one.**
+>
+> **(3) The cap bound was one-sided in the direction the file itself calls harmful.** `(1..=120)`
+> bounds only the high side, while every comment argues too-LOW is what cancels a job, reds the
+> required check and does not converge on re-run. `build-test: timeout-minutes: 12` — a dropped zero
+> — passed the pin and every other assertion. Floor added at 5; planted with the dropped zero.

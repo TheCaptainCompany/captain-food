@@ -548,8 +548,10 @@ also compares all four gate scripts against their committed blobs before reporti
 report if one drifted. `make hooks-test` and `make stub-tests` pass the matching
 `REGISTER_CHECK_ALLOW_DIRTY=1` / `DECISION_LOOKUP_ALLOW_DIRTY=1` unconditionally, so editing a gate
 script and re-running still works. **`stop-gate.sh` opts out only when a gate script is DIRTY in the
-working tree** — on an ordinary turn it runs the comparison armed, so an in-session overwrite of a
-gate script is caught on the next turn rather than on push. CI invokes both directly and cannot be
+working tree** — on an ordinary turn it runs the comparison armed. What that catches is narrower
+than it first reads: an ordinary overwrite leaves the tree dirty, so it opts out and is caught at
+push; the armed path catches the tamper that *hides* from `git status` (`--assume-unchanged`,
+`--skip-worktree`), which is the stealthier class. CI invokes both directly and cannot be
 talked out of the comparison at all (`env_ok` forbids both opt-out names as `env:` keys). **A local green from
 either `make` target therefore EXCLUDES the gate-set comparison** — that is the point of the opt-out,
 and it is the one thing those targets do not prove. If you run either script by hand mid-edit, pass

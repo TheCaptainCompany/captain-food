@@ -69,9 +69,14 @@ pass=0; fail=0; skip=0
 # WHAT IS TRUE NOW. `make hooks-test` and `make stub-tests` opt out unconditionally -- they exist
 # for the edit-and-re-run loop, and an armed-only entrypoint gets DELETED rather than opted out of.
 # `stop-gate.sh` opts out ONLY when a gate script is dirty in the working tree, so on an ordinary
-# turn it runs this comparison ARMED: an in-session `cp exit0.sh <gate script>` is caught on the
-# NEXT TURN, not on push. That is the every-turn cross-guard V3 was written for, and it was
-# decorative until #72 because the only caller that runs every turn disarmed it every time.
+# turn it runs this comparison ARMED. WHAT THAT BUYS IS NARROWER THAN REVIEW #72 CLAIMED AND THE
+# CLAIM IS RETRACTED HERE: an ordinary `cp exit0.sh <gate script>` leaves the tree DIRTY, so it opts
+# out and is still caught at push, not on the next turn. The two predicates are complements -- dirty
+# is exactly when the hash comparison would mismatch -- and no working-tree test can separate
+# editing from overwriting. What the armed path DOES catch is the tamper that hides from
+# `git status` (`--assume-unchanged`, `--skip-worktree`): clean status, different bytes. That is the
+# stealthier class, so the coverage is inverted from the naive reading -- the clumsy overwrite is
+# caught at push, the careful one on the next turn. (Reviews #72 and #79.)
 #
 # CI is still the caller that CANNOT be talked out of it -- `env_ok` forbids both opt-out names as
 # `env:` keys at every scope, which no local shell can. Default-on remains the right shape: the safe

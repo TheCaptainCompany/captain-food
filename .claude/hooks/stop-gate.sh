@@ -105,12 +105,27 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # ("a comment named a test as the thing preventing the regression; that test did not exist") one
 # file over, in a sentence written after it. (Review #17.)
 #
-# THE OPT-OUT IS NOW CONDITIONAL, because unconditional it gave up the exact property V3 exists
-# for. V3's rationale is that a guard cannot detect its own wholesale replacement and only the
-# OTHER guard can -- yet this is the only caller that runs every turn, and it disarmed the
-# comparison on every one of them. So an in-session `cp exit0.sh
-# .claude/hooks/register-check-selftest.sh` was silent until push: the cross-guard existed and was
-# never consulted on the path where it would fire first. (Review #72 of PR #679.)
+# THE OPT-OUT IS CONDITIONAL, AND WHAT THAT BUYS IS NARROWER THAN REVIEW #72 CLAIMED FOR IT.
+#
+# THE CLAIM, RETRACTED: "an in-session `cp exit0.sh <gate script>` is now caught on the next turn
+# rather than on push." FALSE, and it cannot be made true by any working-tree predicate. The two
+# tests are COMPLEMENTS: `git status --porcelain` over these paths is non-empty exactly when the
+# worktree bytes differ from HEAD, which is exactly when the selftest's `hash-object` comparison
+# would mismatch. So dirty implies opted out -- the comparison is skipped in precisely the state
+# where it could fail -- and clean implies it runs and passes by construction. Measured, not
+# reasoned: an ordinary `cp` over `register-check.sh` yields OPTED OUT. Nothing in the working tree
+# separates "the maintainer is editing a gate script" from "a gate script was overwritten", because
+# at the byte level they are the same state. (Review #79 of PR #679, correcting review #72.)
+#
+# WHAT IT DOES DELIVER, and it is not nothing: the tamper that HIDES FROM `git status`. A
+# `git update-index --assume-unchanged` or `--skip-worktree` on a gate script leaves the status
+# clean while the bytes differ -- this block then ARMS, and the selftest reds with
+# `differs from the committed blob at HEAD`. Measured too. That is the stealthier class and the one
+# an attacker who has read this file would reach for, so the coverage is inverted from the naive
+# reading: the CLUMSY overwrite is caught at push, the CAREFUL one on the next turn.
+#
+# Pinned by `the_stop_gate_predicate_discriminates_a_hidden_tamper` -- both directions, against a
+# throwaway repo -- because this rationale has now been wrong once and a sentence is what carried it.
 #
 # THE PREDICATE IS THE WORKING TREE, NOT THE BRANCH DIFF, and the difference decides whether this
 # is a no-op. `$changed` above folds in `diff "$base"...HEAD`, so on THIS branch -- which edits all
@@ -155,7 +170,7 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   then _gate_scripts_dirty=1; else _gate_scripts_dirty=0; fi
 fi
 if [ "$_gate_scripts_dirty" = "1" ]; then
-  echo "-> register-check selftest (a gate script is dirty in the working tree -- comparison opted out for this turn)"
+  echo "-> register-check selftest (a gate script is dirty in the working tree -- comparison opted out; an overwrite in this state is caught at push, not here)"
   step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
 else
   step bash "$ROOT/.claude/hooks/register-check-selftest.sh"
