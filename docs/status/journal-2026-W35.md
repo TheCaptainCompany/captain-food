@@ -2693,3 +2693,63 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > prose name for a predicate (`marker-class change`) is not a test of it. **Shape: when a comment
 > names a CLASS and the code stores a BOOLEAN, the code can only see the class's edges — read the
 > collapse, not the name.**
+>
+> **Round 90 — two findings, and my first fix for the first one closed only half of it.**
+>
+> **(1) The anti-paste gate could not see an inline justification, and then could not MEASURE one.**
+> `no_two_jobs_share_a_substantial_timeout_justification` collected only `#` lines sitting *above*
+> each `timeout-minutes:` key. Three of the seven caps (`build-test`, `db-test`, `codegen`) carry
+> their whole justification as a trailing comment on the key line, so their blocks were **empty**
+> and the effective comparison set was **four, not seven**. The review that raised this under-counted
+> its own evidence: `lint` carries a 26-line block *and* an inline remainder that is **byte-identical
+> to `codegen`'s** — a justification already shared by two jobs, invisible to the gate in both
+> directions. Legal today under the short-pointer carve-out, but it was legal *unseen*.
+>
+> **The fix I wrote first was wrong in the way this branch keeps cataloguing.** Appending the
+> trailing comment to the block makes the text visible — and the metric counts **lines**. A YAML
+> trailing comment is one physical line however long it is, so two jobs sharing a 400-character
+> inline justification still scored `1 < 5` and stayed green. I had made the input visible and left
+> the measurement blind, then nearly shipped it as "closed". Caught by asking what a plant would have
+> to look like: writing one showed the red never came. Now bounded on **characters too**
+> (`SUBSTANTIAL_CHARS = 240`, with its antecedent stated — the longest legal pointer in `ci.yml`
+> today is 93 characters, `lint`/`codegen`'s is 67, five lines of this file's prose is ~500).
+> The vacuity floor also stops being a literal: it was `>= 5` against seven keys, so two could be
+> reindented out of the scan with the assertion still green. Derived from `codegen`'s own `needs:`
+> (+1 for itself) and asserted exactly, same as the `continue-on-error` sweep.
+>
+> Planted **both ways on the real `ci.yml`**: a long shared inline comment reds the new scan at
+> 1 line / 266 characters, and the *old* scan is **green on that same plant** — which is the half
+> that proves the gate changed rather than the file.
+>
+> **(2) An unreadable corpus could mint a ratcheted warning nobody could clear.** `skipped_ext`
+> deliberately survives the empty-corpus early return, where it is the *explanation* for the empty
+> corpus. That return also sets `readable = false` → `corpus_incomplete` → `--write-warning-baseline`
+> **refuses**. Emitting those names under the tree-caused, ratcheted kind therefore produced
+> `0 -> N (NEW warning kind)` out of a run that, by that return's own statement, scanned nothing —
+> with the printed remedy exiting 1 as well. Verbatim the end state `CORPUS_DERIVED_KINDS` calls
+> *"WORSE than the reporters': the reader can no longer commit the bad 0, so they are left with a red
+> they cannot clear"*, reached through the one vector that return keeps alive.
+>
+> The principle that decides it: **the kind is tree-caused only when the tree is this repo's tree.**
+> When not one corpus file was readable, the checkout is not this repository — `CLAUDE.md` and the
+> `Makefile` are in the pathspecs and tracked in every legitimate one — so the ratchet's premise is
+> false and the names are a **diagnostic**, not a finding. Reported under the exempt kind there.
+> Latent today for exactly that reason, and closed anyway on this file's own stated grounds.
+>
+> **Asserted by execution rather than by reading `main.rs`.** The sibling predicate test says out
+> loud that a text assertion catches a deletion and not a rewrite, so the choice moved into
+> `out_of_corpus_warning_kind(readable)` and the test asserts the readable kind is ratcheted, the
+> unreadable kind is exempt, and the two never collapse. Planted red in both directions.
+>
+> Also corrected the coupled claims: the corpus-unreadable message advertised the discriminator as a
+> `decision-citation-file-out-of-corpus` line beside it, which the fix would have made false, and the
+> ADR's clause now states the exempt path.
+>
+> **Cost that earned the rule: I verified the first fix by re-reading it instead of by planting it.**
+> The code plainly did the thing the finding asked for — collect the inline text — and the thing the
+> finding asked for was not the thing that closes the hole.
+>
+> **Shape: making an input VISIBLE to a guard is not the same as making the guard's METRIC sensitive
+> to it.** When you widen what a check reads, re-derive what it *measures* over the new input — a
+> line-counting bound over a form that is always one line is a guard that sees everything and
+> concludes nothing.

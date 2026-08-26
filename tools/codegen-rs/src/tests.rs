@@ -8671,6 +8671,53 @@ fn the_unmeasured_predicate_covers_a_partially_read_corpus() {
     }
 }
 
+/// AN UNREADABLE CORPUS MAY NOT MINT A RATCHETED WARNING.
+///
+/// `skipped_ext` deliberately survives review #61's empty-corpus early return, where it is the
+/// EXPLANATION for the empty corpus. That return also sets `readable = false`, the caller turns
+/// that into `corpus_incomplete`, and `--write-warning-baseline` REFUSES on it. So emitting those
+/// names under the tree-caused, ratcheted kind produced `0 -> N (NEW warning kind)` out of a run
+/// that — by that return's own statement — scanned nothing, with the printed remedy
+/// (`make warning-baseline`) exiting 1 as well: verbatim the end state `CORPUS_DERIVED_KINDS`
+/// calls "WORSE than the reporters': the reader can no longer commit the bad 0, so they are left
+/// with a red they cannot clear".
+///
+/// Latent, and closed anyway on this branch's own stated grounds — it arms itself on a later,
+/// unrelated commit and the run that trips it reads as a validator regression on a tree nobody
+/// touched. ASSERTED BY EXECUTION, not by reading `main.rs`: the sibling predicate test says out
+/// loud that a text assertion catches a deletion and not a rewrite, which is why the choice was
+/// extracted into `out_of_corpus_warning_kind` rather than left as an `if` at the emission site.
+/// (Review #90 of PR #679.)
+#[test]
+fn an_unreadable_corpus_cannot_mint_a_ratcheted_warning() {
+    use crate::validate::decisions::out_of_corpus_warning_kind;
+
+    let (readable_kind, _) = out_of_corpus_warning_kind(true);
+    assert_eq!(
+        readable_kind, "decision-citation-file-out-of-corpus",
+        "on a READABLE corpus the allowlist drop is a property of this tree and must keep ratcheting -- adding a `.claude/**` file the rule cannot see is a deliberate, baseline-moving act, which is the whole reason the kind exists"
+    );
+    assert!(
+        !RATCHET_EXEMPT.contains(&readable_kind),
+        "`{}` became ratchet-exempt on the readable path, which switches the gate off in the case it was built for",
+        readable_kind
+    );
+
+    let (unreadable_kind, _) = out_of_corpus_warning_kind(false);
+    assert!(
+        RATCHET_EXEMPT.contains(&unreadable_kind),
+        "`{}` is emitted when NOT ONE corpus file was readable, and it is inside the section 17 ratchet. That run scanned nothing, so a kind absent from the baseline scores `0 -> N (NEW warning kind)` and `make validate` exits 1 -- while `--write-warning-baseline` refuses on the same `corpus_incomplete` flag, so the printed remedy exits 1 too. A red the reader cannot clear, over a tree that is not this repository. Report the names under a ratchet-exempt kind on this path",
+        unreadable_kind
+    );
+
+    // AND THE TWO PATHS MUST NOT COLLAPSE INTO ONE. Reporting both under the exempt kind would
+    // close this trap by disabling the gate; reporting both under the ratcheted kind is the bug.
+    assert_ne!(
+        readable_kind, unreadable_kind,
+        "the two paths report the same kind, so one of them is wrong: the readable path must ratchet (the count is a stable property of this tree) and the unreadable path must not (nothing was scanned, and the remedy is blocked)"
+    );
+}
+
 #[test]
 fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
     // AND THE TREE-CAUSED SIBLINGS ARE NOT ON IT. Both report the same OUTCOME as the exempt kind
@@ -11223,18 +11270,25 @@ mod decision_ask_and_citations {
     /// blocks long enough to BE a justification.
     ///
     /// WHAT IT DOES NOT CATCH, stated because "now gated" reads wider than this is. It is a
-    /// BYTE-IDENTITY check: `assert_ne!` over trimmed line vectors stops a VERBATIM paste and
-    /// nothing else. A paste with one word changed — the likelier next form, since an author who
-    /// pastes is usually adapting — passes. Both known occurrences were verbatim, so this catches
-    /// the shape that actually happened twice; it does not decide whether a justification is TRUE of
-    /// the job it sits on, which no textual rule can. Keep reading them. (Review #73 of PR #679.)
+    /// BYTE-IDENTITY check over consecutive lines: it stops a VERBATIM paste and nothing else. A
+    /// paste with one word changed — the likelier next form, since an author who pastes is usually
+    /// adapting — passes. Both known occurrences were verbatim, so this catches the shape that
+    /// actually happened twice; it does not decide whether a justification is TRUE of the job it
+    /// sits on, which no textual rule can. Keep reading them. (Review #73 of PR #679.)
+    ///
+    /// THE INLINE FORM IS COVERED NOW AND WAS NOT WHEN THIS LIST WAS WRITTEN. The scan collected
+    /// only `#` lines ABOVE the key, so a justification written as a trailing comment ON the key
+    /// line was invisible — and three of the seven caps are written exactly that way, which made
+    /// their blocks empty and shrank the effective comparison set to four. The trailing remainder
+    /// is now appended to the block. Named here rather than quietly fixed because this paragraph
+    /// enumerated the escape it did not have and omitted the one it did. (Review #90.)
     #[test]
     fn no_two_jobs_share_a_substantial_timeout_justification() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
         let lines: Vec<&str> = ci.lines().collect();
         // The comment block immediately above each job-level `timeout-minutes:`, in file order.
-        let mut blocks: Vec<Vec<&str>> = Vec::new();
+        let mut blocks: Vec<Vec<String>> = Vec::new();
         for (i, l) in lines.iter().enumerate() {
             if !l.trim_start().starts_with("timeout-minutes:") || !l.starts_with("    timeout-minutes:") {
                 continue;
@@ -11243,12 +11297,50 @@ mod decision_ask_and_citations {
             while j > 0 && lines[j - 1].trim_start().starts_with('#') {
                 j -= 1;
             }
-            blocks.push(lines[j..i].iter().map(|l| l.trim()).collect());
+            let mut block: Vec<String> = lines[j..i].iter().map(|l| l.trim().to_string()).collect();
+            // AND THE TRAILING COMMENT ON THE KEY LINE ITSELF, which the first version of this scan
+            // could not see -- it collected only `#` lines ABOVE the key. THREE of the seven caps
+            // carry their whole justification inline (`build-test`, `db-test`, `codegen`), so their
+            // blocks were EMPTY and contributed nothing to any pair: the effective comparison set
+            // was four, not seven, on the file this gate shipped with. Worse in the direction that
+            // matters, `lint` carries a 26-line block AND an inline remainder that is BYTE-IDENTICAL
+            // to `codegen`'s -- a justification already shared by two jobs, invisible to the gate in
+            // both directions. Legal today under the short-pointer carve-out (one line, far below
+            // SUBSTANTIAL), but moving a LONG justification inline is the natural next form once
+            // this gate reds someone for a block paste, and it would have escaped entirely.
+            // Appended rather than prepended: the trailing comment sits CLOSEST to the key, so it
+            // is the block's last line, and the shared-run scan below is order-sensitive.
+            // (Review #90 of PR #679.)
+            if let Some((_, inline)) = l.split_once(" #") {
+                let inline = inline.trim();
+                if !inline.is_empty() {
+                    block.push(format!("# {inline}"));
+                }
+            }
+            blocks.push(block);
         }
-        assert!(
-            blocks.len() >= 5,
-            "found {} job-level `timeout-minutes:` keys -- this test reads them by an exact four-space indent, so a reindent makes it vacuous rather than red. Re-point it",
-            blocks.len()
+        // THE FLOOR IS DERIVED FROM `codegen`'s OWN `needs:`, not a literal. It was `>= 5` against
+        // seven keys, so TWO could be reindented out of the scan -- or two jobs dropped from the
+        // aggregator -- with this assertion still green, which is the vacuity it was written to
+        // stop. Every job the aggregator waits on carries a cap (asserted elsewhere over the same
+        // derived list), plus `codegen` itself, so the count is knowable exactly. Same derivation
+        // as the `continue-on-error`/cap sweep, for the same reason: a hand-kept list here is the
+        // two-lists-of-one-scope divergence this file has retracted four times. (Review #90.)
+        let doc: serde_yaml::Value = serde_yaml::from_str(&ci).expect("ci.yml parses as YAML");
+        let aggregated = doc
+            .get("jobs")
+            .and_then(|j| j.get("codegen"))
+            .and_then(|c| c.get("needs"))
+            .and_then(|n| n.as_sequence())
+            .expect("the `codegen` job must declare a `needs:` LIST -- this floor is derived from it")
+            .len();
+        assert_eq!(
+            blocks.len(),
+            aggregated + 1,
+            "found {} job-level `timeout-minutes:` keys but `codegen` aggregates {} jobs (+ itself = {}) -- this test reads the keys by an exact four-space indent, so a reindent makes it VACUOUS rather than red, and a job added to the aggregator without a cap makes it incomplete. Re-point the scan, or give the new job its own justification",
+            blocks.len(),
+            aggregated,
+            aggregated + 1
         );
         // THE LONGEST SHARED CONSECUTIVE RUN, NOT WHOLE-BLOCK EQUALITY -- and the first version of
         // this gate got that wrong in the direction that made it VACUOUS ON THE FILE IT SHIPPED
@@ -11269,26 +11361,44 @@ mod decision_ask_and_citations {
         // justification and must stay legal. Below it, a shared line or two is boilerplate; at or
         // above it, enough reasoning is being carried across that it needs to be true of both jobs.
         const SUBSTANTIAL: usize = 5;
-        let longest_shared = |x: &[&str], y: &[&str]| -> usize {
-            let mut best = 0;
+        // AND A CHARACTER BOUND, BECAUSE A LINE COUNT CANNOT SEE AN INLINE PASTE AT ALL. A YAML
+        // trailing comment is ONE physical line however long it is, so appending it to the block
+        // (above) makes it VISIBLE but scores it 1 -- two jobs sharing a 400-character inline
+        // justification would still read as a short pointer under the line bound alone. That was
+        // the escape review #90 actually named, and the first fix for it closed only half.
+        //
+        // ANTECEDENT FOR THE VALUE, since a bare threshold is the defect this branch keeps
+        // retracting: the longest shared run in `ci.yml` today is `build-test`/`db-test`'s pointer
+        // at ONE line and 93 characters, and `lint`/`codegen` share an inline pointer of 67. 240 is
+        // ~2.5x the longest legal pointer and well under what 5 lines of this file's ~100-column
+        // prose costs (~500), so it separates a pointer from a justification without pinning either
+        // real one to the edge. Re-measure and move it deliberately if a legitimate pointer grows.
+        const SUBSTANTIAL_CHARS: usize = 240;
+        // Returns `(lines, chars)` for the longest shared consecutive run, ranked on lines first --
+        // the two real occurrences were multi-line block pastes, so that stays the primary reading
+        // and the character total is what catches the inline form.
+        let longest_shared = |x: &[String], y: &[String]| -> (usize, usize) {
+            let mut best = (0, 0);
             for i in 0..x.len() {
                 for j in 0..y.len() {
-                    let mut k = 0;
+                    let (mut k, mut chars) = (0, 0);
                     while i + k < x.len() && j + k < y.len() && x[i + k] == y[j + k] {
+                        chars += x[i + k].chars().count();
                         k += 1;
                     }
-                    best = best.max(k);
+                    best = best.max((k, chars));
                 }
             }
             best
         };
         for a in 0..blocks.len() {
             for b in (a + 1)..blocks.len() {
-                let run = longest_shared(&blocks[a], &blocks[b]);
+                let (run, chars) = longest_shared(&blocks[a], &blocks[b]);
                 assert!(
-                    run < SUBSTANTIAL,
-                    "two jobs share {} consecutive lines of `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on under `always()` cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other. Shared run starts: {:?}",
+                    run < SUBSTANTIAL && chars < SUBSTANTIAL_CHARS,
+                    "two jobs share {} consecutive line(s) / {} characters of `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on under `always()` cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other. A trailing comment on the key line counts too, and counts by CHARACTERS -- moving a long justification inline does not make it a pointer. Shared run starts: {:?}",
                     run,
+                    chars,
                     blocks[a].iter().find(|l| blocks[b].contains(l))
                 );
             }

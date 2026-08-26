@@ -165,7 +165,7 @@ fn main() {
                 dec_issues.push(model::warn(
                     "decision-citation-corpus-unreadable",
                     "tools/codegen-rs".to_string(),
-                    "The superseded-citation corpus came back EMPTY, so `decision-superseded-authority` checked nothing. Reported as OBSERVED rather than diagnosed, because this flag has more than one producer: `git ls-files` may have failed (git absent, not a repository, a dubious-ownership refusal on a bind-mounted checkout), OR it exited 0 and listed nothing this rule can read -- an index with no matching entries (a `git archive` extraction re-`git init`ed but never `git add`ed), or every listed file falling outside the extension allowlist. THE DISCRIMINATOR IS ALREADY COMPUTED and prints beside this line: a `decision-citation-file-out-of-corpus` warning names the files the allowlist dropped, and its absence means git itself did not answer. Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+                    "The superseded-citation corpus came back EMPTY, so `decision-superseded-authority` checked nothing. Reported as OBSERVED rather than diagnosed, because this flag has more than one producer: `git ls-files` may have failed (git absent, not a repository, a dubious-ownership refusal on a bind-mounted checkout), OR it exited 0 and listed nothing this rule can read -- an index with no matching entries (a `git archive` extraction re-`git init`ed but never `git add`ed), or every listed file falling outside the extension allowlist. THE DISCRIMINATOR IS ALREADY COMPUTED and prints beside this line, under THIS SAME KIND: a second `decision-citation-corpus-unreadable` warning names the files the allowlist dropped, and its absence means git itself did not answer. (It is emitted under this kind rather than `decision-citation-file-out-of-corpus` precisely because that kind ratchets and this path scanned nothing -- see the emission site.) Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
                 ));
             }
             // TRACKED, LISTED, AND NEVER OPENED. Same posture and same reason as the unreadable
@@ -205,14 +205,36 @@ fn main() {
             // and tree-caused, so it ratchets like `not-utf8` rather than being exempt like the
             // host causes: adding a `.claude/**` file the rule cannot see becomes a deliberate act
             // with a baseline diff, not a quiet one. Zero such files today. (Review #63.)
+            //
+            // BUT IT IS TREE-CAUSED ONLY WHEN THE TREE IS THIS REPO'S TREE, and on `!readable` it
+            // is not -- which is why the KIND is chosen here rather than fixed. `skipped_ext`
+            // deliberately survives review #61's empty-corpus early return, where it is the
+            // EXPLANATION for the empty corpus. That return also sets `readable = false`, and the
+            // caller turns that into `corpus_incomplete`, which makes `--write-warning-baseline`
+            // REFUSE. Emitting the ratcheted kind there produced `0 -> N (NEW warning kind)` out of
+            // a run that, by that return's own statement, scanned nothing -- with the printed remedy
+            // (`make warning-baseline`) exiting 1 as well. That is verbatim the end state
+            // `CORPUS_DERIVED_KINDS` calls "WORSE than the reporters': the reader can no longer
+            // commit the bad 0, so they are left with a red they cannot clear", reached through the
+            // one vector that return keeps alive. The ratchet's whole justification is that the kind
+            // fails identically on every host BECAUSE it is a property of this tree; when not one
+            // corpus file was readable, the checkout is not this repo (`CLAUDE.md` and the
+            // `Makefile` are in the pathspec and tracked in every legitimate one), so that premise
+            // is false and the names are a DIAGNOSTIC, not a finding. They are reported under the
+            // exempt kind instead -- same information, same fail-open posture, no unclearable red.
+            // Latent today for the same reason the premise fails, and closed anyway on this file's
+            // own stated grounds: it arms itself on a later, unrelated commit, and the run that
+            // trips it looks like a validator regression on a tree nobody touched. (Review #90.)
             if !skipped_ext.is_empty() {
+                let (kind, posture) = validate::decisions::out_of_corpus_warning_kind(readable);
                 dec_issues.push(model::warn(
-                    "decision-citation-file-out-of-corpus",
+                    kind,
                     "tools/codegen-rs".to_string(),
                     format!(
-                        "{} tracked file(s) in the citation corpus' pathspecs are outside its extension allowlist, so `decision-superseded-authority` does not scan them: {}. If one of these is an instruction surface a session reads, it can point at a superseded row with `make validate` green -- widen the allowlist, or accept it deliberately with `make warning-baseline` in the same commit.",
+                        "{} tracked file(s) in the citation corpus' pathspecs are outside its extension allowlist, so `decision-superseded-authority` does not scan them: {}. {}",
                         skipped_ext.len(),
-                        skipped_ext.join(", ")
+                        skipped_ext.join(", "),
+                        posture
                     ),
                 ));
             }

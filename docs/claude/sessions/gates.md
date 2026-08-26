@@ -752,3 +752,11 @@ is itself the argument: **a list that grows has no business stating its own leng
   docstring, the code comment and four reviews all read past it. **A prose name for a predicate is
   not a test of it: read the representation, not the label.** The tell is a boolean (or an
   `is_foo()`) standing where the sentence beside it says *kind*, *class* or *type*.
+- **Making an input VISIBLE to a guard is not the same as making its METRIC sensitive to that
+  input.** An anti-paste gate read only the comment block *above* a key, so justifications written
+  as a trailing comment were invisible. Collecting them fixed the blindness — and the bound counted
+  LINES, while a trailing comment is one physical line however long, so a shared 400-character
+  inline justification still scored 1 and stayed green. The fix did exactly what the finding asked
+  and closed none of the hole. **When you widen what a check reads, re-derive what it measures over
+  the new input**, and write the plant before believing either half. This is the widen-the-trigger
+  shape one level in: there the action went unrevised, here the metric did.

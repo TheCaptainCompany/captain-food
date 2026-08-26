@@ -338,7 +338,11 @@ permissive direction. That divergence is structurally invisible to
 checks one half of a description cannot see the other half overstate. What the filter drops is now
 counted and warned (`decision-citation-file-out-of-corpus`, inside the §17 ratchet), so a
 `.claude/**` file the rule cannot see becomes a deliberate, baseline-moving act rather than a silent
-one — zero such files are tracked today (review #63). This paragraph also omitted
+one — zero such files are tracked today (review #63). **On a corpus that came back entirely
+unreadable those names are reported under the ratchet-EXEMPT kind instead**, because the ratchet's
+premise is that the count is a property of *this tree* and on that path the checkout is not this
+repository; ratcheting it minted a red out of a run that scanned nothing, which
+`make warning-baseline` then refused to clear (review #90). This paragraph also omitted
 `.github/workflows` for a round, and `.claudeignore` from the outset (review #26);
 `the_records_state_the_same_citation_corpus_as_the_code` now reads the pathspec list out of the
 source and reds until both records name every entry, because prose has twice failed to track prose

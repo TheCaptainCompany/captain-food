@@ -786,9 +786,53 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
         // every one of them fell outside the allowlist, the reader needs the names to see why the
         // gate says it could not look. The other vectors are cleared because `readable = false`
         // already says the scan is not to be trusted. (Review #63.)
+        //
+        // THE CALLER MUST NOT RATCHET WHAT SURVIVES HERE, and for two rounds it did. The names are
+        // a DIAGNOSTIC on this path, not a finding about this tree: `readable = false` reaches the
+        // caller as `corpus_incomplete`, which makes `--write-warning-baseline` refuse -- so
+        // emitting them under the tree-caused, ratcheted `decision-citation-file-out-of-corpus`
+        // minted `0 -> N (NEW warning kind)` from a run that scanned nothing, with the printed
+        // remedy exiting 1 too. `main.rs` now picks the kind by `readable` and reports them under
+        // the exempt `decision-citation-corpus-unreadable` here. Stated at the SOURCE of the
+        // survival rather than only at the emission, because this comment is what justifies
+        // keeping the vector and a reader who changes that decision needs the constraint with it.
+        // (Review #90.)
         return (Vec::new(), false, Vec::new(), Vec::new(), skipped_ext);
     }
     (cited, true, unread, unread_tree, skipped_ext)
+}
+
+/// WHICH KIND REPORTS THE FILES THE EXTENSION ALLOWLIST DROPPED, and it depends on whether the
+/// corpus was readable at all. A FUNCTION rather than an `if` at the emission site so the property
+/// is assertable by execution: the sibling predicate in `main.rs` could only ever be checked by
+/// reading its source, and this file says out loud that a text assertion catches a deletion and
+/// not a rewrite.
+///
+/// * `readable` — `decision-citation-file-out-of-corpus`, TREE-caused and inside the §17 ratchet.
+///   The allowlist is deterministic, so the count has a stable committable value and adding a
+///   `.claude/**` file the rule cannot see becomes a deliberate, baseline-moving act.
+/// * `!readable` — the RATCHET-EXEMPT kind. `skipped_ext` deliberately survives the empty-corpus
+///   early return as the EXPLANATION for it, and that return also sets `readable = false`, which
+///   the caller turns into `corpus_incomplete` and `--write-warning-baseline` then REFUSES. Under
+///   the ratcheted kind that combination minted `0 -> N (NEW warning kind)` out of a run that
+///   scanned nothing, with the printed remedy exiting 1 as well — the end state
+///   `CORPUS_DERIVED_KINDS` calls worse than the reporters', because the reader cannot clear it.
+///   The ratchet's premise is that the kind is a property of THIS TREE; when not one corpus file
+///   was readable the checkout is not this repo (`CLAUDE.md` and the `Makefile` are in the
+///   pathspecs and tracked in every legitimate one), so the premise is false and the names are a
+///   diagnostic. (Review #90 of PR #679.)
+pub(crate) fn out_of_corpus_warning_kind(readable: bool) -> (&'static str, &'static str) {
+    if readable {
+        (
+            "decision-citation-file-out-of-corpus",
+            "If one of these is an instruction surface a session reads, it can point at a superseded row with `make validate` green -- widen the allowlist, or accept it deliberately with `make warning-baseline` in the same commit.",
+        )
+    } else {
+        (
+            "decision-citation-corpus-unreadable",
+            "THIS IS THE DIAGNOSTIC FOR THE EMPTY CORPUS REPORTED ABOVE, not a finding about this tree: not one file in the pathspecs was readable, and `CLAUDE.md` and the `Makefile` are in them and tracked in every legitimate checkout -- so what you are looking at is a checkout that is not this repository (a `git archive` extraction re-`git init`ed but never `git add`ed is the mundane case). Outside the section 17 ratchet deliberately: the allowlist count is a property of THIS TREE, and on this path the tree is not it -- ratcheting it would mint a `0 -> N (NEW warning kind)` red out of a run that scanned nothing, which `make warning-baseline` then refuses to clear because the corpus is incomplete. Fix the checkout.",
+        )
+    }
 }
 
 /// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
