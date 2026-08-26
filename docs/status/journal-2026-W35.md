@@ -2632,3 +2632,33 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > correct for the original trigger and wrong for the new one — and the tests could not tell, because
 > the case that separates them never occurs under the original trigger. **When you widen a condition,
 > the assertions written for the narrow one are exactly the ones that will not fire.**
+>
+> **Round 88 — the fourth independent review of the same defect, and it named the arm my own fix's
+> test did not cover.**
+>
+> The finding (carry-forward vs floor) was fixed in `7aa45fa6`; this review read a pre-fix head and
+> proposed `max(live, committed)` — the same code, arrived at independently for the fourth time. What
+> it added is the **concrete case**, and that case is a **different branch** from the one round 87
+> pinned:
+>
+> - round 87 asserted an **increase** — committed `2`, live `5`, kind declared unmeasured → must red;
+> - this review's case is a kind **absent from the baseline**, found once on a partial read —
+>   committed `None`, live `1`. Under the replacement that takes the `remove` branch and scores
+>   **clean**; under the floor it is `max(0, 1) = 1` and reds `0 -> 1 (NEW warning kind)`.
+>
+> **That is the arm that matters most.** A kind absent from the baseline and found once is exactly *a
+> new stale citation*, or a newly added out-of-corpus file — the first occurrence, which is what the
+> gate exists for. And at `warn` level the §17 red **is** the enforcement, so this branch is the
+> whole rule. Round 87's fix was correct on it; round 87's **test** was not asserting it. Now pinned,
+> planted by reverting to the replacement.
+>
+> **Cost that earned the rule: I pinned the case the finding was *about* rather than the case the
+> guard is *for*.** The reviewer's report framed the hazard as a suppressed increase, I asserted a
+> suppressed increase, and both of us were describing the second-most-important arm. The first
+> occurrence — `0 -> 1` — is the one a ratchet is built around, and it went untested through the fix
+> and its plant.
+>
+> **Shape: when a fix has two branches, the plant proves the one you were thinking about. Enumerate
+> the branches from the CODE (`match` arms, `Option` cases, the zero/non-zero split), not from the
+> finding that prompted the fix** — a report describes what its author noticed, and the arm nobody
+> noticed is the one with no assertion on it.

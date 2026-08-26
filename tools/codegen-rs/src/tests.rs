@@ -8581,6 +8581,24 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
             // scores clean, against `claude_citation_corpus`'s promise that it "becomes a
             // deliberate, baseline-moving act". Unread files can only UNDER-count, so only the
             // decrease is spurious and only the decrease may be suppressed. (Review #87.)
+            // AND THE ARM THAT MATTERS MOST: a kind ABSENT from the baseline, found on a partial
+            // read. That is a NEW stale citation (or a new out-of-corpus file) on a host with one
+            // unreadable path -- committed is `None`, so the replacement took the `remove` branch
+            // and scored clean, while the floor takes `max(0, 1) = 1` and reds `0 -> 1 (NEW warning
+            // kind)`. It is a different branch from the increase below and was not covered by it;
+            // at `warn` level this red IS the enforcement, so the two arms are the whole gate.
+            // (Review #88 of PR #679.)
+            fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&BTreeMap::new()))
+                .expect("rewrite the fixture baseline as empty");
+            let first_hit: WarningProfile = [(kind.to_string(), 1usize)].into_iter().collect();
+            assert!(
+                check_warning_baseline(&sandbox, &first_hit, &CORPUS_DERIVED_KINDS).is_err(),
+                "`{}` was FOUND once on a run where the corpus was only partly read, and the ratchet stayed clean because the kind is absent from the baseline. A finding the run actually observed was measured -- declaring the kind unmeasured may only raise a spuriously low count, never erase a hit",
+                kind
+            );
+            fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&committed_k))
+                .expect("restore the fixture baseline");
+
             let higher: WarningProfile = [(kind.to_string(), 5usize)].into_iter().collect();
             assert!(
                 check_warning_baseline(&sandbox, &higher, &CORPUS_DERIVED_KINDS).is_err(),
