@@ -590,4 +590,49 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > the executed tamper test already covers the exploit); and neither `make help` nor `workflow.md`
 > named `make stub-tests` — the target that exists *because* a default-on block with no interactive
 > entrypoint gets deleted rather than opted out of. Both now also say what those targets do NOT
-> prove: a local green excludes the gate-set comparison, which is the whole point of the opt-out.**
+> prove: a local green excludes the gate-set comparison, which is the whole point of the opt-out.
+>
+> **Round 21 — the rule could HANG `make validate`, and five other holes in the same instrument.**
+> Six findings, all in the citation rule and its pin, all planted red before landing.
+>
+> **The hang is the one that matters.** `line[from..].find("")` is `Some(0)` unconditionally and the
+> advance is `from = at + key.len()`, so a superseded row with `key: ""` spins on the first unit of
+> the first file forever. Reachable by template copy-paste: `parse_decision_rows` accepts an explicit
+> empty string (only a YAML *null* is rejected) and `valid_key` is applied to the FILE STEM, never to
+> the field. So the run that should have reported `decision-key-file-mismatch` — an issue already
+> sitting in the same list — instead prints nothing and hangs, locally and in the `codegen`/`specs`
+> jobs until GitHub's six-hour timeout. **A gate that cannot report is the exact shape this whole
+> change argues against, reproduced inside it.** Guarded by a test that runs the rule in a thread
+> with a 10s deadline — **an ordinary assertion cannot fail a test that never returns, and a hung
+> `cargo test` reads as a slow machine.**
+>
+> **The exempt window was far wider than anyone had measured.** `—` was a clause boundary; the ASCII
+> `--` that the shell and YAML half of the corpus writes throughout was not (the Makefile is
+> ASCII-only *by rule*). So in exactly the files this rule targets, a clause ran until a `;` or a
+> sentence dot — five joined lines in `activation_fail` — and one `superseded` silenced every
+> citation after it. Third time this defect has appeared: adjacent bullet (round 14), comment-block
+> join (round 19), and now *inside* the unit. And a bare `#`, the paragraph separator inside every
+> comment block, did not end a unit either, so the "a backticked key opens the unit" form could
+> never fire for any paragraph after the first — in the two gate scripts, which are long
+> `#`-separated blocks.
+>
+> **Two false reds that would have been hard `make validate` errors with rewording as the only
+> escape.** `next_word` trimmed forward over *all* non-alphanumerics, walking past the very sentence
+> dot that ended the clause to read a citing noun from the next sentence — so `narrower than the
+> <KEY>. Decision rows are cheap…` redded, and a `superseded` in that next sentence could not reach
+> back to exempt it. That phrase is named in the docstring as a case that must stay green; it stayed
+> green only because of what the next word happened to be. And a **backticked** markdown link still
+> redded through the line-start arm, because `[` is in the trim set — re-admitting exactly what round
+> 17 removed from `opens_a_parenthetical`. Both green controls used the *unbackticked* `[KEY]`, the
+> spelling nobody writes: **every row key in this repo is backticked.**
+>
+> **And the pin panicked on a strictly WIDER trigger.** `on: [push, pull_request]` and `on: push` are
+> both `Some(..)`, so the `Bool(true)` fallback never fired and `.and_then(as_mapping)` panicked with
+> *"ci.yml must declare `on:`"* — about a workflow that declares it. Fifth retraction of the same
+> instrument on this branch, and the paragraph directly below it makes precisely this argument one
+> level down and stops.
+>
+> **The through-line of rounds 14, 19 and 21, stated once: every green control was written from the
+> shape the author had in mind.** Same-marker wraps, unbackticked brackets, `the` without a following
+> sentence break, `—` and not `--`. A control set proves the cases it contains, and its silence about
+> everything else reads exactly like coverage.**

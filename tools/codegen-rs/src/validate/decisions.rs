@@ -805,6 +805,19 @@ fn logical_units(content: &str) -> Vec<Unit> {
         } else {
             after_marker
         };
+        // A MARKER-ONLY LINE IS THE PARAGRAPH SEPARATOR INSIDE A COMMENT BLOCK. A bare `#` trims to
+        // an empty body, `starts_a_block("")` is false, and it used to be joined as empty text --
+        // so `# ...end of a paragraph.` / `#` / `# \`KEY\` still governs.` was ONE unit, and the
+        // "a backticked key OPENS the unit" citation form could never fire for any paragraph after
+        // the first. That form is `SKILL.md:193`'s spelling and both gate scripts are long
+        // `#`-separated blocks, so the miss was in the corpus the rule exists for. One-directional
+        // (it misses, it never false-reds), which is why nothing surfaced it. (Review #20.)
+        if marked && after_marker.is_empty() {
+            if let Some(u) = cur.take() {
+                out.push(u);
+            }
+            continue;
+        }
         if opens {
             if let Some(u) = cur.take() {
                 out.push(u);
@@ -834,10 +847,20 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
     rows: &[DecisionRow],
     files: &[(String, String)],
 ) -> Vec<Issue> {
+    // A NON-EMPTY KEY, OR THIS FUNCTION NEVER RETURNS. `line[from..].find("")` is `Some(0)`
+    // unconditionally and the advance is `from = at + key.len()`, so a zero-length key spins on the
+    // first unit of the first file forever. It is reachable: `parse_decision_rows` accepts an
+    // explicit `key: ""` (only a YAML null is rejected as non-scalar) and `valid_key` is applied to
+    // the FILE STEM, not to this field -- so a template copy-paste with a blanked `key:` line and
+    // `status: "superseded"` would hang `make validate` locally and hang the `codegen`/`specs` jobs
+    // until GitHub's six-hour timeout, INSTEAD of reporting the `decision-key-file-mismatch` that
+    // was waiting in the same issue list. A gate that cannot report is the shape this whole change
+    // argues against. (Review #20 of PR #679.)
     let superseded: Vec<&str> = rows
         .iter()
         .filter(|r| r.get("status") == Some("superseded"))
         .filter_map(|r| r.get("key"))
+        .filter(|k| !k.is_empty())
         .collect();
     let mut issues = Vec::new();
     for (path, content) in files {
@@ -877,11 +900,31 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // superseded -- read the head` redded. A sentence dot is followed by whitespace
                     // or nothing; a filename dot is followed by a letter. `;` and `—` need no such
                     // test. Found by the green control, not by reading the code.
+                    // ` -- ` IS A BOUNDARY TOO, and leaving it out made the exempt window enormous
+                    // in exactly the files this rule targets. `—` was a boundary; the ASCII `--`
+                    // that the shell and YAML side of the corpus writes throughout (the Makefile is
+                    // ASCII-only by rule) was not -- so a clause there was bounded only by `;` and
+                    // sentence dots and could run for five joined lines. `activation_fail` is that
+                    // span today: one `superseded` written two lines earlier exempts everything to
+                    // the end of the block, so any LIVE stale instruction landing anywhere in it is
+                    // silenced by a word with nothing to do with it. Same defect as the adjacent
+                    // bullet (review #14) and the comment-then-code join (review #18), one
+                    // punctuation mark over and INSIDE the unit. (Review #20.)
+                    //
+                    // Whitespace on BOTH sides, so `--no-filters` and `--depth=1` are not
+                    // boundaries: the dash-dash has to be a dash, not the head of a flag.
                     let is_boundary = |i: usize, c: char| match c {
                         ';' | '—' => true,
                         '.' => line[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace),
+                        '-' => {
+                            line[i..].starts_with("--")
+                                && line[..i].chars().next_back().is_none_or(char::is_whitespace)
+                                && line[i + 2..].chars().next().is_none_or(char::is_whitespace)
+                        }
                         _ => false,
                     };
+                    // `--` is two bytes wide; every other boundary is one char.
+                    let boundary_width = |c: char| if c == '-' { 2 } else { c.len_utf8() };
                     let clause_end = line[at..]
                         .char_indices()
                         .find(|&(i, c)| is_boundary(at + i, c))
@@ -894,7 +937,7 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         .char_indices()
                         .filter(|&(i, c)| is_boundary(i, c))
                         .next_back()
-                        .map_or(0, |(i, c)| i + c.len_utf8());
+                        .map_or(0, |(i, c)| i + boundary_width(c));
                     if line[clause_start..clause_end].to_lowercase().contains("superseded") {
                         continue;
                     }
@@ -950,7 +993,18 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // dead row. The green controls missed it because every one of them avoided
                     // putting `the` immediately before the key. So `the <KEY>` counts only when the
                     // word AFTER the key is a citing noun.
-                    let next_word = line[at + key.len()..]
+                    // BOUNDED BY `clause_end`, the same boundary the exemption is scoped to. It
+                    // used to trim forward over ALL non-alphanumerics, which walks straight over
+                    // the sentence dot that ENDED the clause -- and, now that units are joined
+                    // blocks, over the end of the physical line -- to read a word from the next
+                    // sentence. So `narrower than the <KEY>. Decision rows are cheap...` matched
+                    // `the` + `decision` and redded as a hard error, while a `superseded` in that
+                    // following sentence could not exempt it because the clause was already over.
+                    // `narrower than the <KEY>` is named three lines below as a case that MUST stay
+                    // green; it did, only because of what the next word happened to be. No control
+                    // put `the` before the key with a sentence break after it. (Review #20.)
+                    let lookahead_end = clause_end.max(at + key.len());
+                    let next_word = line[at + key.len()..lookahead_end]
                         .trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
                         .split(|c: char| !c.is_ascii_alphanumeric())
                         .next()
@@ -975,7 +1029,19 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         // A BACKTICKED key opening a line is a citation (`SKILL.md:193`); a bare
                         // one is ordinary prose ("OLD-ROW was the predecessor."). The distinction
                         // is the backtick, and without it the green control for prose reds.
-                        || (before.is_empty() && line[..at].ends_with('`'))
+                        // ...but NOT when a `[` was what the trim loop ate to empty `before`.
+                        // Review #16 narrowed `opens_a_parenthetical` to drop `[` on the grounds
+                        // that a link's TEXT is not a citation -- and this arm re-admitted it,
+                        // because `[` is in the trim set, so `` [`KEY`](target) `` left `before`
+                        // empty with a backtick behind it and redded. Both green controls used the
+                        // UNBACKTICKED `[KEY]`, i.e. the spelling nobody writes; every row key in
+                        // `CLAUDE.md`, `SKILL.md` and the register is backticked. A link to an ADR
+                        // or an issue would have been a hard error with rewording as the only
+                        // escape. (`` [`KEY`](docs/decisions/KEY.yaml) `` stays red on the PATH arm
+                        // below, which is the intended behaviour.) Review #20.
+                        || (before.is_empty()
+                            && line[..at].ends_with('`')
+                            && !raw_before.trim_end_matches('`').ends_with('['))
                         // `docs/decisions/<KEY>.yaml` -- THE FORM THE REGISTER ITSELF MANDATES, and
                         // the one arm this rule shipped without. `SKILL.md` and `CLAUDE.md` both
                         // route resolution through "exact `docs/decisions/<KEY>.yaml` resolution",

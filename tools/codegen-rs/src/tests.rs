@@ -9922,6 +9922,19 @@ mod decision_ask_and_citations {
                 "a comment's explanation must not exempt the code beneath it",
                 "# kept for history: the old row is superseded\necho \"Per row OLD-ROW: open a reversal decision\"",
             ),
+            // ` -- ` IS THE DASH THIS CORPUS WRITES. `—` was a boundary and `--` was not, so a
+            // clause in a shell comment block ran until a `;` or a sentence dot -- often five
+            // joined lines -- and one `superseded` silenced everything after it (review #20).
+            (
+                "an explanation before a ` -- ` must not exempt a citation after it",
+                "# the old row is superseded -- and per row OLD-ROW, open a reversal decision",
+            ),
+            // A bare `#` separates paragraphs inside a comment block. Before it ended a unit, a
+            // backticked key opening any paragraph after the first could not be seen at all.
+            (
+                "a backticked key opening a later paragraph of a comment block",
+                "# an earlier paragraph.\n#\n# `OLD-ROW` still governs the rollback path.",
+            ),
             // THE DIRECTION THE JOIN CHANGED, and the one the three wrapped controls below do not
             // cover: they are all false-red cases. Joining grew the window the `superseded`
             // exemption searches, so an ADJACENT BULLET -- with nothing to do with the citation --
@@ -9971,6 +9984,19 @@ mod decision_ask_and_citations {
             ("the path form, explained", "docs/decisions/OLD-ROW.yaml is superseded -- read the head"),
             // `decisions/` must be the DIRECTORY, not any word ending in those letters.
             ("a lookalike directory", "see docs/old-decisions/OLD-ROW.yaml for history"),
+            // `next_word` used to scan PAST the sentence dot that ended the clause and read a
+            // citing noun from the next sentence -- so this redded as a hard error, and the
+            // `superseded` an author might add after it could not reach back to exempt it. The
+            // docstring names `narrower than the <KEY>` as a case that MUST stay green; it did,
+            // only because of what the next word happened to be (review #20).
+            (
+                "`the <KEY>` with a citing noun in the NEXT sentence",
+                "# the shape here is narrower than the OLD-ROW.\n# Decision rows are cheap, so open a new one.",
+            ),
+            // A BACKTICKED link's text. Both earlier controls used the unbackticked `[KEY]`, i.e.
+            // the spelling nobody writes -- every row key in this repo is backticked (review #20).
+            ("a backticked markdown link to somewhere else", "see [`OLD-ROW`](https://example.com/x) for context"),
+            ("a backticked link inside a bullet", "- [`OLD-ROW`](../adr/ADR-1.md) was the first attempt"),
             // THE TWO WRAP FAILURES, as controls. Both redded as HARD `make validate` errors
             // before the join, and neither had anything to do with what the author wrote --
             // only with where the ~100-column wrap happened to fall (review #13).
@@ -10111,6 +10137,41 @@ mod decision_ask_and_citations {
             "a planted citation of the superseded row `{}` was NOT caught against the real corpus",
             superseded_key
         );
+    }
+
+    /// An empty `key` must not make the rule spin forever.
+    ///
+    /// `line[from..].find("")` is `Some(0)` unconditionally and the advance is
+    /// `from = at + key.len()`, so a zero-length key never moves `from`: `make validate` produces
+    /// no output and hangs, locally and in CI until the six-hour job timeout, INSTEAD of reporting
+    /// the `decision-key-file-mismatch` already waiting in the same issue list. Reachable by a
+    /// template copy-paste — `parse_decision_rows` accepts an explicit `key: ""` (only a YAML null
+    /// is rejected) and `valid_key` is applied to the FILE STEM, not to this field (review #20).
+    ///
+    /// RUN IN A THREAD WITH A DEADLINE, because the failure mode is a hang: an ordinary assertion
+    /// cannot fail a test that never returns, and a hung `cargo test` reads as a slow machine.
+    #[test]
+    fn an_empty_key_cannot_hang_the_citation_rule() {
+        let rows_src: Vec<(String, String)> = vec![(
+            "docs/decisions/BLANK.yaml".to_string(),
+            "key: \"\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-01\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\nsuperseded_by: \"NEW-ROW\"\n".to_string(),
+        )];
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut sink = Vec::new();
+            let rows = parse_decision_rows(&rows_src, &mut sink);
+            let issues = validate_no_superseded_row_is_cited_as_authority(
+                &rows,
+                &[(".claude/x.md".to_string(), "Decided by row `NEW-ROW`.".to_string())],
+            );
+            let _ = tx.send(issues.len());
+        });
+        let got = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| {
+            panic!(
+                "the citation rule did not return within 10s on a superseded row with an empty `key` -- `find(\"\")` is Some(0) and `from` never advances, so `make validate` hangs instead of reporting"
+            )
+        });
+        assert_eq!(got, 0, "an empty key names nothing and must produce no finding, not a match on every line");
     }
 
     /// The rule must still be CALLED by `make validate`, not merely exist.
@@ -10535,11 +10596,43 @@ mod docs_only_ci_and_legacy_visibility {
         // 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string "on".
         // A lookup written for the wrong one returns None and the test passes VACUOUSLY, which is
         // this chain's signature defect. Accept either, so the assertion survives a parser change.
-        let trigger = doc
+        let trigger_val = doc
             .get(serde_yaml::Value::String("on".into()))
             .or_else(|| doc.get(serde_yaml::Value::Bool(true)))
-            .and_then(|t| t.as_mapping())
             .expect("ci.yml must declare `on:` (as the string \"on\" under YAML 1.2, or boolean true under 1.1)");
+        // `on:` HAS THREE LEGAL FORMS, and only the mapping one carries filters. `on: [push,
+        // pull_request]` and `on: push` are both `Some(..)`, so the `Bool(true)` fallback never
+        // fires; `.and_then(as_mapping)` then yielded `None` and the `.expect()` panicked with
+        // "ci.yml must declare `on:`" -- about a workflow that declares it and, in the sequence
+        // case, triggers on strictly MORE than the current filtered mapping does. That is the
+        // false-red instrument this file has now retracted five times (`CARGO_TERM_COLOR`,
+        // `steps.len() == 4`, the `['**','!badges']` equality, `types` key-presence, the null
+        // `push:` body), with a message accusing the author of the opposite of what they did and an
+        // obvious "fix" of reverting to a filtered mapping. The paragraph below makes exactly this
+        // argument for `push:`/`pull_request:` and stopped one level up. (Review #20 of PR #679.)
+        //
+        // A sequence still has to name BOTH events -- a fork PR produces no push, so dropping
+        // `pull_request` is a real narrowing however it is spelled -- but it carries no filters, so
+        // there is nothing else to check.
+        if let Some(seq) = trigger_val.as_sequence() {
+            let events: Vec<&str> = seq.iter().filter_map(|v| v.as_str()).collect();
+            for required in ["push", "pull_request"] {
+                assert!(
+                    events.contains(&required),
+                    "`on:` is a list ({:?}) that omits `{}` -- {} then stops covering a whole class of change. The list form carries no filters and is otherwise strictly wider than the mapping form, so it is fine",
+                    events, required, what
+                );
+            }
+            return;
+        }
+        assert!(
+            !matches!(trigger_val, serde_yaml::Value::String(_)),
+            "`on:` is a single scalar event -- whichever it is, one of `push`/`pull_request` is missing, and {} then never runs on that half. A fork PR produces no push, so `pull_request` is not redundant",
+            what
+        );
+        let trigger = trigger_val
+            .as_mapping()
+            .expect("`on:` must be a mapping, a sequence, or a scalar -- got none of those");
         // ABSENT AND NULL ARE THE WIDEST CASES, not violations. `push:` with a null body is the
         // commonest spelling of "every push", and `.as_mapping()` on it is None -- so `.expect()`
         // panicked with "must run on push" about a workflow that does run on push. Likewise an
