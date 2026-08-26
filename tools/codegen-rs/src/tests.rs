@@ -10945,7 +10945,7 @@ mod docs_only_ci_and_legacy_visibility {
         // What caught it today was an ACCIDENT IN A DIFFERENT TEST -- the trigger plants anchor on
         // `"  push:\n"`, which disappears, so `assert_ne!` fired with a message pointing at the
         // PLANTS. The obvious repair is to re-anchor or drop those plants, after which both pins
-        // are silently vacuous forever. Shape #1 from this branch's own list ("a corpus-size floor
+        // are silently vacuous forever. Shape #1 in `docs/claude/sessions/gates.md` §19 ("a corpus-size floor
         // counts plants, not coverage") reproduced in the helper the list was written for, one
         // round after writing it. Now the sequence arm skips only the trigger section, and a plant
         // covers the class. (Review #22 of PR #679.)
@@ -11012,7 +11012,17 @@ mod docs_only_ci_and_legacy_visibility {
         // halves (same validator command, and the aggregator asserting docs-validate BY NAME).
         // Guarding it here is the half that was missing: the job carrying the rule on that lane
         // was as unbounded as `specs` was.
-        for job in ["build-test", "specs", "docs-validate"] {
+        //
+        // `codegen` IS THE FOURTH, AND ITS CONSEQUENCE IS THE WIDEST IN THE FILE. It is the
+        // REQUIRED status check on `main`; the other three only carry pins. A job-scope
+        // `defaults:\n  run:\n    shell: bash -c "exit 0" {0}` under `codegen:` makes its single
+        // aggregation step pass the script as $0 and never execute it -- the step exits 0 having
+        // asserted nothing, the job succeeds, and the required check is GREEN WITH EVERY GATE JOB
+        // RED, while every mutant and every pin in this file stay green because none of them
+        // ever looked at that job. Three sites in this file reasoned about `codegen` in prose
+        // ("`changes` green and `codegen` aggregates green") without a single assertion over it --
+        // the "held up by a sentence" shape, in the guard that names it. (Review of PR #679.)
+        for job in ["build-test", "specs", "docs-validate", "codegen"] {
             if let Some(j) = doc.get("jobs").and_then(|jobs| jobs.get(job)) {
                 shell_ok(j, &format!("the `{}` job's", job));
                 env_ok(j, &format!("the `{}` job's", job));
@@ -11057,6 +11067,48 @@ mod docs_only_ci_and_legacy_visibility {
                                 );
                             }
                         }
+                    }
+                }
+            }
+        }
+        // THE REQUIRED CHECK'S OWN ESCAPES. The loop above bounds how `codegen`'s step EXECUTES;
+        // these bound whether it reports. `continue-on-error: true` at job scope makes GitHub
+        // report the job `success` no matter what the step did, and at STEP scope it does the same
+        // for the step -- either way the required check on `main` is green with the aggregation
+        // failed. A step-level `if:` skips the assertion entirely, and a skipped step leaves the
+        // job successful. `if:` and `needs:` are NOT banned at job scope here, unlike `changes`:
+        // `if: always()` and the six-job `needs:` list are what make the aggregator work at all.
+        //
+        // `if: always()` is asserted rather than merely allowed, because dropping it is the
+        // one-word version of the same disarm: GitHub SKIPS a job whose `needs:` dependency
+        // failed, and branch protection ACCEPTS `skipped` (the property the whole docs-only design
+        // rests on). `contains("always()")` rather than an equality, so an author may legitimately
+        // widen the expression; narrowing it to `!cancelled()` or a ref test reds, by name.
+        if let Some(codegen) = doc.get("jobs").and_then(|j| j.get("codegen")).and_then(|c| c.as_mapping()) {
+            for key in ["continue-on-error", "strategy"] {
+                assert!(
+                    !codegen.contains_key(serde_yaml::Value::String(key.into())),
+                    "the `codegen` job must carry no `{}` -- it is the REQUIRED status check on `main`, and either key makes it report `success` while its aggregation step failed, so the check goes green with every gate job red",
+                    key
+                );
+            }
+            let cond = codegen
+                .get(serde_yaml::Value::String("if".into()))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            assert!(
+                cond.contains("always()"),
+                "the `codegen` job's `if:` is `{}` -- it must still contain `always()`. GitHub SKIPS a job whose `needs:` dependency failed, and branch protection ACCEPTS `skipped`, so without it the aggregator never runs on exactly the runs it exists to fail",
+                cond
+            );
+            if let Some(steps) = codegen.get(serde_yaml::Value::String("steps".into())).and_then(|s| s.as_sequence()) {
+                for st in steps {
+                    for key in ["if", "continue-on-error"] {
+                        assert!(
+                            st.get(key).is_none(),
+                            "a `codegen` step carries `{}` -- the aggregation step is the entire content of the required check; skipping it or swallowing its failure leaves the job green with every gate job red",
+                            key
+                        );
                     }
                 }
             }
@@ -11343,6 +11395,181 @@ mod docs_only_ci_and_legacy_visibility {
         }
     }
 
+    /// The docs-only detector, EXECUTED against real diffs — not read.
+    ///
+    /// `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` above inspects the `case`
+    /// arms, which is shape #4 in `docs/claude/sessions/gates.md` §19: it reads the allowlist as
+    /// DECLARED and is blind to the same widening done imperatively. Appending one bare `docs_only=true` line before the
+    /// `GITHUB_OUTPUT` echo satisfies both of that test's assertions — the `case` text is
+    /// untouched and no arm names a forbidden path — while classifying EVERY push as docs-only.
+    /// That skips `lint`, `specs`, `build-test` and `db-test`, so the required check goes green
+    /// with every pin in this file unexecuted, in one commit.
+    ///
+    /// No shape test can close that, because the disarm is a legal rewrite of a shell script. So
+    /// this one RUNS the step's `run:` body — extracted from the parsed workflow, never a copy —
+    /// against a throwaway git repository, and asserts the VALUE it writes to `$GITHUB_OUTPUT`.
+    /// Any rewrite that misclassifies reds here whatever it looks like.
+    #[test]
+    fn the_docs_only_detector_classifies_by_behaviour_not_by_shape() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&ci).expect("ci.yml must parse as YAML");
+        let script = doc
+            .get("jobs")
+            .and_then(|j| j.get("changes"))
+            .and_then(|c| c.get("steps"))
+            .and_then(|s| s.as_sequence())
+            .and_then(|steps| steps.iter().find(|st| st.get("id").and_then(|i| i.as_str()) == Some("detect")))
+            .and_then(|st| st.get("run"))
+            .and_then(|r| r.as_str())
+            .expect("the `changes` job's `detect` step has moved or been renamed -- re-point this test, do not delete it")
+            .to_string();
+
+        // HOST CAPABILITY, LOUD BUT GREEN (the suite-completeness rule the ci.yml comment states):
+        // no `git` or no `bash` means this case cannot be built, not that the detector is wrong.
+        let have = |bin: &str| {
+            std::process::Command::new(bin)
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        if !have("git") || !have("bash") {
+            eprintln!("SKIP the_docs_only_detector_classifies_by_behaviour_not_by_shape: git or bash unavailable on this host");
+            return;
+        }
+
+        let sandbox = std::env::temp_dir().join(format!("cf-docsonly-{}", std::process::id()));
+        let tmp = sandbox.join("repo");
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(&tmp).expect("create the fixture repo dir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+
+        let git = |args: &[&str]| -> String {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                // The gate scripts' own discipline: a stray GIT_* or a global config in the
+                // developer's HOME must not reach the fixture.
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+            assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        let commit = |paths: &[&str], msg: &str| -> String {
+            for rel in paths {
+                let f = tmp.join(rel);
+                if let Some(dir) = f.parent() {
+                    fs::create_dir_all(dir).expect("mkdir");
+                }
+                fs::write(&f, format!("{}\n", msg)).expect("write fixture file");
+            }
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", msg]);
+            git(&["rev-parse", "HEAD"])
+        };
+        let base = commit(&["README.md", "docs/a.md", "crates/x.rs", ".github/workflows/ci.yml", ".claude/hooks/h.sh", "specs/s.yaml"], "base");
+
+        // Run the REAL step body with the same environment GitHub gives it.
+        let run = |base_sha: &str, head_sha: &str| -> String {
+            // OUTSIDE THE WORKTREE, deliberately. It sat in `tmp` first, and the next case's
+            // `git add -A` committed it -- so `README.md` came back `false` for a path the
+            // allowlist covers, and the four cases after it were passing on the PREVIOUS case's
+            // leaked file rather than their own. Shape #3 in both directions in one fixture.
+            let out_file = sandbox.join("gh-output");
+            let _ = fs::remove_file(&out_file);
+            fs::write(&out_file, "").expect("seed $GITHUB_OUTPUT");
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .current_dir(&tmp)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("EVENT_NAME", "push")
+                .env("BASE_SHA", base_sha)
+                .env("HEAD_SHA", head_sha)
+                .env("GITHUB_OUTPUT", &out_file)
+                .output()
+                .expect("run the detect step body");
+            assert!(
+                out.status.success(),
+                "the `detect` step body exited {:?} on base={} head={} -- stderr: {}",
+                out.status.code(), base_sha, head_sha, String::from_utf8_lossy(&out.stderr)
+            );
+            let written = fs::read_to_string(&out_file).expect("read $GITHUB_OUTPUT");
+            let last = written
+                .lines()
+                .filter_map(|l| l.strip_prefix("docs_only="))
+                .next_back()
+                .unwrap_or_else(|| panic!("the step wrote no `docs_only=` to $GITHUB_OUTPUT (got {:?})", written));
+            last.to_string()
+        };
+
+        // (changed paths, expected docs_only, why this case exists)
+        let cases: Vec<(Vec<&str>, &str, &str)> = vec![
+            (vec!["docs/a.md"], "true", "the whole point of the fast path"),
+            (vec!["README.md"], "true", "the root allowlist"),
+            (vec!["crates/x.rs"], "false", "code must never take the fast path"),
+            // THE THREE THAT MAKE THIS TEST LOAD-BEARING: each one, classified docs-only, skips
+            // `build-test` -- the job that runs every pin in this file -- on exactly the change
+            // able to disarm them.
+            (vec![".github/workflows/ci.yml"], "false", "the workflow carrying the gate steps"),
+            (vec![".claude/hooks/h.sh"], "false", "a gate script"),
+            (vec!["specs/s.yaml"], "false", "spec markdown participates in drift checking"),
+            (vec!["docs/a.md", "crates/x.rs"], "false", "one non-doc file is enough"),
+        ];
+        let mut wrong = Vec::new();
+        for (i, (paths, expected, why)) in cases.iter().enumerate() {
+            // EACH CASE BRANCHES OFF `base`. Stacked commits made the diff CUMULATIVE, so once
+            // `crates/x.rs` had been touched every later case saw it and reported `false` for a
+            // reason that had nothing to do with the path under test -- four plants passing for
+            // the wrong reason, which is worse than not having them.
+            git(&["checkout", "-q", "-B", &format!("case{}", i), &base]);
+            let head = commit(paths, &format!("touch {:?}", paths));
+            let got = run(&base, &head);
+            if got != *expected {
+                wrong.push(format!("{:?} -> docs_only={} (expected {}; {})", paths, got, expected, why));
+            }
+        }
+        // FAIL-OPEN, the header's stated contract: anything ambiguous runs the full gate.
+        git(&["checkout", "-q", "-B", "failopen", &base]);
+        let head = commit(&["docs/a.md"], "fail-open head");
+        for (label, base_sha, head_sha) in [
+            ("an empty diff", head.as_str(), head.as_str()),
+            ("an all-zeros base (a branch's first push)", "0000000000000000000000000000000000000000", head.as_str()),
+            ("an unresolvable base (force-pushed away)", "1111111111111111111111111111111111111111", head.as_str()),
+            ("an absent base", "", head.as_str()),
+        ] {
+            let got = run(base_sha, head_sha);
+            if got != "false" {
+                wrong.push(format!("{} -> docs_only={} (expected false: the header promises fail-open)", label, got));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "the docs-only detector misclassified: {:#?}\nA `true` where `false` is expected skips `lint`, `specs`, `build-test` and `db-test` while the required check stays green -- and one appended `docs_only=true` line does it without touching a single `case` arm, which is all the shape test above can see.",
+            wrong
+        );
+    }
+
     /// The scope guards, PLANTED RED **from the repo**, not from a reviewer's scratchpad.
     ///
     /// This test exists because review #9 grepped for the name a comment two screens up promised
@@ -11407,7 +11634,7 @@ mod docs_only_ci_and_legacy_visibility {
             // swallowed the workflow's `permissions: {contents: read}` block, which sits between
             // them -- so both plants using this helper silently dropped it. `assert_ne!` was
             // satisfied and nothing reads `permissions` today, so neither plant was proving
-            // anything false YET. That is shape #2 from this branch's own list: a mutation that
+            // anything false YET. That is shape #2 in `docs/claude/sessions/gates.md` §19: a mutation that
             // applies somewhere other than where its label says. The moment a `permissions`
             // assertion is added -- an over-broad `permissions: write-all` on `changes` is the
             // obvious next hardening here -- the GREEN CONTROL `on: as a list of events` would red
@@ -11629,6 +11856,30 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n          fetch-depth: 0",
                 1)),
             ("a self-hosted pool labelled to look hosted", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
+            // ── THE REQUIRED CHECK ITSELF ──────────────────────────────────────────────────────
+            // Every plant above disarms a job that CARRIES a pin. These eight disarm the job that
+            // REPORTS -- `codegen`, the required status check on `main`. Each one leaves every
+            // plant above green and every assertion in this file untouched, and each one makes
+            // the check green with every gate job red. That job had no assertion over it at all
+            // until this round, while three comments in this file reasoned about it in prose.
+            ("codegen job shell drops the script", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n    runs-on: ubuntu-latest")),
+            ("codegen job BASH_ENV", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on: ubuntu-latest")),
+            ("codegen job continue-on-error", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            ("codegen job strategy", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    strategy:\n      matrix:\n        x: []\n    runs-on: ubuntu-latest")),
+            // Losing `always()` is the one-WORD version: the aggregator is then skipped on exactly
+            // the runs it exists to fail, and branch protection accepts `skipped`.
+            ("codegen loses if: always()", in_job("codegen", "    if: always()\n", "")),
+            ("codegen if narrowed away from always()", in_job("codegen", "    if: always()", "    if: \"!cancelled()\"")),
+            ("codegen step gains continue-on-error", in_job("codegen", "      - name: Every gate job must have succeeded",
+                "      - continue-on-error: true\n        name: Every gate job must have succeeded")),
+            ("codegen step gains a step-level if", in_job("codegen", "      - name: Every gate job must have succeeded",
+                "      - if: github.ref == 'refs/heads/never'\n        name: Every gate job must have succeeded")),
+            ("codegen step shell drops the script", in_job("codegen", "        run: |\n          set -euo pipefail",
+                "        shell: bash -c \"exit 0\" {0}\n        run: |\n          set -euo pipefail")),
         ];
         let mut survived = Vec::new();
         for (name, mutated) in &must_red {
@@ -11670,6 +11921,19 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - name: decision-lookup hermetic stub suite",
                 "      - name: Print the toolchain\n        run: rustc --version\n      - name: decision-lookup hermetic stub suite",
                 1)),
+            // `codegen` must tolerate the same ordinary work as every other job: a conventional
+            // env var, a WIDENED `if:` that still contains `always()`, and an extra step that
+            // names nothing sensitive. Without these three the new guards are the key-presence
+            // instrument this file has retracted three times, aimed at the required check.
+            ("codegen job CARGO_TERM_COLOR", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    env:\n      CARGO_TERM_COLOR: always\n    runs-on: ubuntu-latest")),
+            // THE EXPLICIT-EXPRESSION SPELLING, not a "widening": `if: always() && <x>` reads like
+            // one and NARROWS, which is the mislabelled-plant shape one control over. `${{ }}` is
+            // the same condition written the way GitHub's own docs write it, and an equality
+            // assertion would have redded it.
+            ("codegen if in the ${{ }} spelling", in_job("codegen", "    if: always()", "    if: ${{ always() }}")),
+            ("an ordinary extra codegen step", in_job("codegen", "      - name: Every gate job must have succeeded",
+                "      - name: Print the runner\n        run: uname -a\n      - name: Every gate job must have succeeded")),
             ("a reordering that keeps both gate steps", ci.replacen(
                 "      - name: decision-lookup hermetic stub suite",
                 "      - name: Cache warm\n        run: echo warm\n      - name: decision-lookup hermetic stub suite",
@@ -11681,7 +11945,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 56 && must_stay_green.len() >= 13,
+            must_red.len() >= 72 && must_stay_green.len() >= 16,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

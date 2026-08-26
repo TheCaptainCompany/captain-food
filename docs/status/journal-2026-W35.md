@@ -681,7 +681,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **What caught it today was an accident in a different test.** The trigger plants anchor on
 > `"  push:"`, which disappears under that mutation, so `assert_ne!` fired — with a message pointing
 > at the PLANTS. The obvious repair is to re-anchor or drop them, after which both pins are silently
-> vacuous forever. **Shape #1 from this branch's own list — "a corpus-size floor counts plants, not
+> vacuous forever. **Shape #1 from `docs/claude/sessions/gates.md` §19 — "a corpus-size floor counts plants, not
 > coverage" — reproduced in the helper the list was written for, one round after writing it.**
 >
 > A related trap in the plant itself: replacing just the `on:` LINE leaves the old mapping body
@@ -855,7 +855,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `with_trigger` spliced from `on:` all the way to `jobs:` — and in this `ci.yml` that span also
 > contains `permissions: {contents: read}`, so both plants using it silently dropped the workflow's
 > permissions block. `assert_ne!` was satisfied and nothing reads `permissions` today, so neither
-> plant was proving anything false **yet**. **That is shape #2 from this branch's own list — a
+> plant was proving anything false **yet**. **That is shape #2 of `docs/claude/sessions/gates.md` §19 — a
 > mutation that applies somewhere other than where its label says — in the helper written three
 > rounds earlier to close exactly that class.**
 >
@@ -946,3 +946,45 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > retraction is the signal to derive it, not to write the new number more carefully — this branch
 > has now spent three rounds proving that on one sentence, after proving it on the mutant corpus and
 > on the citation corpus.
+>
+> **Round 34 — every guard on this branch bounds a job that CARRIES a pin. None bounded the job
+> that REPORTS.** `codegen` is the required status check on `main`, and it was the one job the
+> scope guards skipped: `build-test`, `specs` and `docs-validate` were added over rounds 12, 23 and
+> 27, and the aggregator was never in the list. A job-scope `defaults.run.shell: bash -c "exit 0"
+> {0}` under `codegen:` makes its single aggregation step pass the script as `$0` and never execute
+> it — the step exits 0 having asserted nothing, the job succeeds, and **the required check is green
+> with every gate job red**, while every mutant and every pin in the file stays green because none
+> of them ever looked at that job. `continue-on-error` at job or step scope does the same; so does
+> dropping `if: always()`, because GitHub skips a job whose `needs:` dependency failed and branch
+> protection accepts `skipped` — the property the whole docs-only design rests on, turned around.
+>
+> **Three comments in `tests.rs` reasoned about `codegen` in prose** (*"`changes` green and
+> `codegen` aggregates green"*) with not one assertion over it. That is the "held up by a sentence"
+> shape, in the file that names it. Nine plants now cover the job — and removing the guards leaves
+> all nine green, which is how they were measured.
+>
+> **Round 34b — the docs-only allowlist test reads the `case` arms, and one appended line overrides
+> every arm.** `docs_only=true` inserted before the `GITHUB_OUTPUT` echo touches no arm, so
+> `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` stays green — verified by
+> planting it — while classifying every push as docs-only, skipping `lint`, `specs`, `build-test`
+> and `db-test`. That is shape #4 (a guard that inspects declared configuration is blind to the same
+> thing done imperatively) landing on the guard written to protect the pins from exactly that class.
+>
+> **No shape test can close it, because the disarm is a legal rewrite of a shell script.** So the
+> new `the_docs_only_detector_classifies_by_behaviour_not_by_shape` EXTRACTS the step's `run:` body
+> from the parsed workflow and RUNS it against a throwaway git repository, asserting the value
+> written to `$GITHUB_OUTPUT` over eleven cases — four fail-open, and three (`.github/**`,
+> `.claude/**`, `specs/**`) that are the coupling the older test was written for. The planted
+> disarm reds nine of the eleven.
+>
+> **Its own fixture reproduced shape #3 twice in one sitting**, which is why the cases are isolated
+> now: `$GITHUB_OUTPUT` lived inside the worktree, so the next case's `git add -A` committed it and
+> `README.md` came back `false` for a path the allowlist covers; and the cases stacked commits, so
+> once `crates/x.rs` had been touched every later case reported `false` for a reason unrelated to
+> the path under test — four plants passing for the wrong reason. Each case now branches off `base`.
+>
+> **Round 34c — the seven shapes existed only in the PR body**, while four committed sites cited
+> them by number. CLAUDE.md says GitHub is never the record. They are now
+> [`docs/claude/sessions/gates.md` §19](../claude/sessions/gates.md), with the two record-side rules
+> (a count retracted twice will be retracted a third time; a verification recipe is itself a derived
+> claim) beside them, and all four citations re-pointed at the section.

@@ -610,3 +610,50 @@ question; the review caught it post-merge, and the fix ([#453](https://github.co
 was to extract the gate to a serde-only crate whose cold build is seconds. **The durable proof of
 "cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
 wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.
+
+## 19. Seven shapes a gate test keeps reproducing
+
+From [#679 "RETRIEVAL-QMD-CI decided: the decision-lookup stub suite runs in
+CI"](https://github.com/TheCaptainCompany/captain-food/pull/679) — thirty-three independent review
+passes, all FAIL before the state that merged. **The recurring defect was never the mutants: it was
+that every round's completeness claim was written before it was checked.** Roughly a third of the
+last eighteen rounds were regressions introduced while fixing the previous round's finding.
+
+These seven are not derivable from the code, each cost a round, and **several of them reappeared
+inside the very guard written to close them** — which is why they are here rather than in a comment
+next to one instance.
+
+1. **A corpus-size floor counts plants, not coverage.** `must_red.len() >= N` says nothing about
+   *which* assertions have a plant. The only way to know an assertion is pinned is to delete it and
+   watch something go red. Measured: eight assertion families in one helper were each held up by a
+   sentence — delete any one and every mutant and control stayed exactly as it was.
+2. **`assert_ne!(mutated, original)` proves a mutation applied, never that it applied where the
+   label says.** `replacen(anchor, .., 1)` rewrites the FIRST match in the whole file, and CI job
+   bodies are near-identical: one anchor occurred in five jobs, so a plant labelled `build-test …`
+   silently mutated `lint`, satisfied `assert_ne!`, and pinned nothing.
+3. **A plant that fails for the wrong reason is worse than none** — it reports the guard working
+   while proving nothing. Two spellings: a mutant that reds on a YAML *parse* rather than on the
+   property, and a fixture whose cases leak into each other (stacked commits made a diff
+   cumulative, so four later cases were passing on an earlier case's file).
+4. **A guard that inspects declared configuration is blind to the same thing done imperatively.**
+   `env:` is a mapping a test can read; `echo "PATH=…" >> "$GITHUB_ENV"` needs no `env:` key at all.
+   A `case`-arm allowlist is text a test can read; one appended `docs_only=true` overrides every arm
+   without touching one. **The answer is to execute the thing and assert its output**, not to read
+   it harder.
+5. **A fixture set drawn from the shape you were thinking about proves only that shape.** The same
+   hard-wrap defect returned three times wearing `-`, `1.` and `#`.
+6. **A token that carries the exempting word is not evidence of an explanation.** Blank the citing
+   token before testing the clause around it.
+7. **A helper that constructs test inputs needs the same scrutiny as the assertions it feeds.**
+   Three rounds of "is this plant pinning what it claims" all pointed at the plant *list*; none at
+   the function building them — which was itself mislabelled, and swallowed a `permissions:` block.
+
+Two more from the same branch, about the records rather than the tests:
+
+- **A count retracted twice will be retracted a third time — derive it.** A derived number stated in
+  prose is consumed as established fact and nothing re-derives it
+  ([ADR-20260817-105845](../../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)).
+  A citation defect reads as correct whenever someone checks the *value* instead of the antecedent.
+- **A verification recipe is itself a derived claim.** "Read its last three lines" was written from
+  the intended shape and not from a log; the step prints one line. Read it off a real run, or state
+  a property that cannot drift.
