@@ -58,8 +58,13 @@ jobs:
     # failure modes. Compose that with peak (CLAUDE.md: Friday/Saturday 19:00-21:30) and a runner
     # image bump has a path to "no checkout, dispatch or payments fix merges for six hours", at the
     # hours where a paid order nobody is told about is the failure that costs most.
-    # 10 minutes is orders of magnitude above anything this job legitimately does (it is seconds of
-    # shell and a shallow diff), so it bounds a HANG AND NOTHING ELSE -- the multiplier this line
+    # 10 minutes is orders of magnitude above anything this job legitimately does -- seconds of
+    # shell, plus the checkout. That checkout is `fetch-depth: 0`, i.e. a FULL-HISTORY clone, and
+    # this line said "a shallow diff" for a round: it is the one cost in this job that grows with
+    # the REPOSITORY rather than with the diff, which is worth naming inside the justification for
+    # a cap whose failure blocks every merge. It holds comfortably at today's size (~15s observed
+    # for the whole job); if the clone ever dominates, that is a capacity signal, not a hang.
+    # So the cap bounds a HANG AND NOTHING ELSE -- the multiplier this line
     # used to state was a bare derived number, and review #45 measured it as ~43x where the line
     # said ~30x. Right in the conservative direction and still the shape ADR-20260817-105845
     # governs, so the figure is gone rather than corrected. And what the cap DOES cover is worth

@@ -120,7 +120,7 @@ fn main() {
         // the correct order, because `docs/decisions/README.md` requires both halves of a
         // supersession in ONE commit and a stale citation is exactly the other half.
         {
-            let (cited, readable, unread) = validate::decisions::claude_citation_corpus(&root);
+            let (cited, readable, unread, unread_tree) = validate::decisions::claude_citation_corpus(&root);
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
                 //
@@ -149,9 +149,26 @@ fn main() {
                     "decision-citation-corpus-unreadable",
                     "tools/codegen-rs".to_string(),
                     format!(
-                        "{} tracked file(s) in the superseded-citation corpus could not be read, so `decision-superseded-authority` did not scan them: {}. Not an error, and outside the section 17 ratchet (the cause is the HOST -- a sparse checkout, a dangling symlink, a permission drop or non-UTF-8 content -- not this tree). Reported because a partial scan must not print like a clean one.",
+                        "{} tracked file(s) in the superseded-citation corpus could not be read, so `decision-superseded-authority` did not scan them: {}. Not an error, and outside the section 17 ratchet (the cause is the HOST -- a sparse checkout, a dangling symlink, a permission drop -- not this tree, so the count has no stable value to commit). Reported because a partial scan must not print like a clean one.",
                         unread.len(),
                         unread.join(", ")
+                    ),
+                ));
+            }
+            // TREE-CAUSED, SO IT RATCHETS. Non-UTF-8 bytes make `read_to_string` fail identically
+            // on every host, so unlike the host causes above this one HAS a stable committable
+            // value -- and lumping the two under one kind gave the deterministic case the
+            // host-only exemption, which would have hidden a committed latin-1 byte in a
+            // `.claude/**` file forever. A separate kind keeps the fail-open posture and puts the
+            // signal back where a `make validate` reader meets it. (Review #60.)
+            if !unread_tree.is_empty() {
+                dec_issues.push(model::warn(
+                    "decision-citation-file-not-utf8",
+                    "tools/codegen-rs".to_string(),
+                    format!(
+                        "{} tracked file(s) in the superseded-citation corpus are not valid UTF-8, so `decision-superseded-authority` cannot scan them: {}. This is a property of the TREE, not the host -- it fails the same way everywhere -- so it stays inside the section 17 ratchet: fix the encoding, or accept it deliberately with `make warning-baseline` in the same commit.",
+                        unread_tree.len(),
+                        unread_tree.join(", ")
                     ),
                 ));
             }

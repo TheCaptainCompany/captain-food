@@ -8468,6 +8468,15 @@ fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
 /// counts warnings, so growing it is a decision. A new entry reds here until it is stated.
 #[test]
 fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
+    // AND THE TREE-CAUSED SIBLING IS NOT ON IT. `decision-citation-file-not-utf8` reports the same
+    // outcome -- a corpus file that went unscanned -- from a DETERMINISTIC cause, so it has a
+    // stable committable value and belongs inside the ratchet. Lumping the two under one kind gave
+    // the deterministic case the host-only exemption. Asserted, because "these two kinds look
+    // alike and one is exempt" is exactly the pair a later refactor merges. (Review #60.)
+    assert!(
+        !RATCHET_EXEMPT.contains(&"decision-citation-file-not-utf8"),
+        "the tree-caused unreadable kind must NOT be ratchet-exempt: non-UTF-8 bytes fail identically on every host, so the count has a stable value to commit, and exempting it hides a committed latin-1 byte in the corpus forever"
+    );
     assert_eq!(
         RATCHET_EXEMPT.to_vec(),
         vec!["decision-citation-corpus-unreadable"],
@@ -10368,7 +10377,7 @@ mod decision_ask_and_citations {
             );
             return;
         }
-        let (corpus_files, corpus_readable, _unread) = claude_citation_corpus(&root);
+        let (corpus_files, corpus_readable, _unread, _unread_tree) = claude_citation_corpus(&root);
         assert!(corpus_readable, "git reported usable above, so the corpus walk must not have failed");
         // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
         // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
@@ -11313,8 +11322,13 @@ mod docs_only_ci_and_legacy_visibility {
         // the lane CLAUDE.md itself routes straight to `main` with no PR -- it is the ONLY job
         // that runs the citation rule over a corpus that includes `CLAUDE.md`. Review #24 read
         // that lane as uncovered because it looked at `specs` alone; it is covered, and
-        // `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` already pins both
-        // halves (same validator command, and the aggregator asserting docs-validate BY NAME).
+        // `the_docs_only_ci_path_runs_the_canonical_validator` already pins both halves (same
+        // validator command, and the aggregator asserting docs-validate BY NAME). That sentence
+        // named `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` for a round --
+        // a similarly-named test that reads the `detect` step's `case` arms and carries neither
+        // half -- so the recorded ANSWER to review #24 pointed at a test that does not contain its
+        // evidence, and a future reader re-running #24's check against it reaches #24's wrong
+        // conclusion again. Second site of the misattribution corrected in review #59.
         // Guarding it here is the half that was missing: the job carrying the rule on that lane
         // was as unbounded as `specs` was.
         //

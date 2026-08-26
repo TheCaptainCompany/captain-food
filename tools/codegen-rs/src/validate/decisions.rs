@@ -634,7 +634,7 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
 /// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
 /// corpus it may judge.
-pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool, Vec<String>) {
+pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool, Vec<String>, Vec<String>) {
     let out = match std::process::Command::new("git")
         .args([
             "ls-files",
@@ -658,10 +658,11 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
         // and "did not look" printed identically. The `readable` flag lets the caller say which
         // one happened; the posture is unchanged. (Review #27 of PR #679.)
         Ok(o) if o.status.success() => o.stdout,
-        _ => return (Vec::new(), false, Vec::new()),
+        _ => return (Vec::new(), false, Vec::new(), Vec::new()),
     };
     let mut cited = Vec::new();
     let mut unread: Vec<String> = Vec::new();
+    let mut unread_tree: Vec<String> = Vec::new();
     for rel in String::from_utf8_lossy(&out).split('\0').filter(|s| !s.is_empty()) {
         let tracked_ext = std::path::Path::new(rel)
             .extension()
@@ -684,12 +685,24 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
         // content, which `read_to_string` also rejects and which this repo's own T15g fixture
         // builds deliberately. Fail open -- the posture is unchanged -- but SAY SO, because "did
         // not look" and "found nothing" must not print identically. (Review #52 of PR #679.)
+        //
+        // CLASSIFIED BY CAUSE, because the two have different postures. `InvalidData` is
+        // `read_to_string` rejecting non-UTF-8 bytes -- DETERMINISTIC, identical on every host,
+        // i.e. a property of THIS TREE: a committed `.claude/**` file with one latin-1 byte leaves
+        // the corpus permanently. Everything else (a sparse checkout's absent worktree file, a
+        // dangling symlink, a permission drop) is the host. Lumping them made the tree case
+        // inherit the host case's ratchet exemption, so a committed non-UTF-8 file would have gone
+        // unread forever with `make validate` green at 0 errors and the ratchet unmoved -- "did
+        // not look" printing like "found nothing" for that file, which is the shape reviews #27
+        // and #52 closed at the two levels above it, re-entering through the exemption.
+        // (Review #60 of PR #679.)
         match std::fs::read_to_string(root.join(rel)) {
             Ok(text) => cited.push((rel.to_string(), text)),
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => unread_tree.push(rel.to_string()),
             Err(_) => unread.push(rel.to_string()),
         }
     }
-    (cited, true, unread)
+    (cited, true, unread, unread_tree)
 }
 
 /// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
@@ -939,11 +952,22 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                 while let Some(i) = line[from..].find(*key) {
                     let at = from + i;
                     from = at + key.len();
-                    // Not a prefix of a longer key (`RETRIEVAL-QMD` inside `RETRIEVAL-QMD-CI`).
-                    if matches!(
-                        line[at + key.len()..].chars().next(),
-                        Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_'
-                    ) {
+                    // NOT A SUBSTRING OF A LONGER KEY, IN EITHER DIRECTION. This checked only the
+                    // character AFTER the key -- `RETRIEVAL-QMD` inside `RETRIEVAL-QMD-CI`, which
+                    // is the direction today's chain happens to grow. A superseded key that is a
+                    // SUFFIX of a live one matched inside it, and nothing looked at `line[..at]`.
+                    // Benign on this corpus only because the `cites` arms reject what the trim loop
+                    // leaves behind, i.e. by luck. The register is explicitly a chain-growing
+                    // structure, so the next key containing an older one is the expected state --
+                    // and "the guard was written in one direction only" is the class rounds 8, 14,
+                    // 18, 27, 38 and 42 spent themselves removing. This was the one surviving
+                    // instance. (Review #60 of PR #679.)
+                    let key_boundary = |c: Option<char>| {
+                        !matches!(c, Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    };
+                    if !key_boundary(line[at + key.len()..].chars().next())
+                        || !key_boundary(line[..at].chars().next_back())
+                    {
                         continue;
                     }
                     // AN EXPLANATION IS NOT A CITATION -- but scope the exemption to the CLAUSE

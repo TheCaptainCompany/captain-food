@@ -1720,3 +1720,35 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > it will conclude the space was enumerated. The row's question is widened to **which `docs/**`
 > subtrees are instruction surfaces**, because naming exceptions one subtree at a time is how the next
 > one goes unnamed.
+>
+> **Round 60 — a host-only exemption swallowed a tree-caused failure.** The unreadable-corpus warning
+> listed **`non-UTF-8 content`** among its causes under a clause saying *"the cause is the HOST … not
+> this tree"*. `read_to_string` rejects invalid UTF-8 **deterministically, on every host**: a
+> committed `.claude/**` file with one latin-1 byte leaves the corpus permanently. And because it
+> reused the exempt kind, `RATCHET_EXEMPT` — justified *solely* on host-dependence — made it
+> invisible: `make validate` green at 0 errors, ratchet unmoved, *"did not look"* printing like
+> *"found nothing"* for that file. **The shape reviews #27 and #52 closed at the two levels above it,
+> re-entering through the exemption.**
+>
+> Split by cause, which `std::io::ErrorKind` can actually decide: `InvalidData` → the tree →
+> `decision-citation-file-not-utf8`, **inside** the ratchet, because a deterministic signal has a
+> stable committable value. Everything else (sparse checkout, dangling symlink, permission drop) →
+> the host → still exempt. And the boundary is asserted, because *"these two kinds look alike and one
+> is exempt"* is exactly the pair a later refactor merges.
+>
+> **Round 60b — the longer-key guard was one-sided.** It checked the character *after* the key
+> (`RETRIEVAL-QMD` inside `RETRIEVAL-QMD-CI`) and never the one before, so a superseded key that is a
+> **suffix** of a live one matched inside it. Benign on today's corpus only because the `cites` arms
+> reject what the trim loop leaves — i.e. **by luck** — and the register is explicitly a chain-growing
+> structure, so a key containing an older one is the expected next state. *"The guard was written in
+> one direction only"* is the class rounds 8, 14, 18, 27, 38 and 42 spent themselves removing; this
+> was the one surviving instance.
+>
+> **Round 60c — two corrections to my own prose.** The recorded answer to review #24 credited
+> `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` with evidence it does not carry —
+> **second site of the misattribution fixed in round 59**, and it matters more here because a reader
+> re-running #24's check against the named test reaches #24's *wrong* conclusion again. And the
+> `changes` cap's justification said *"a shallow diff"* when that job is the one with
+> `fetch-depth: 0` — a full-history clone, the only cost in it that grows with the **repository**
+> rather than the diff. The conclusion holds at today's size; the sentence inside a cap's
+> justification should still be true.
