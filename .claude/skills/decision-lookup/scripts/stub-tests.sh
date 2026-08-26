@@ -852,9 +852,39 @@ else
   # case-sensitive and alias-blind ("UTF-8" on glibc, musl/Alpine's C locale), so the guard could
   # declare an ASCII locale reached while the case ran under UTF-8 — passing vacuously with the
   # encoding= fix removed. This probe cannot be aliased away.
-  if env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
+  # AN ASCII CONTROL DECIDES WHY THE PROBE DID NOT RAISE, exactly as T15g's control decides why a
+  # mkdir failed -- and for the same reason, one class over. "No genuine ASCII locale on this host"
+  # is a HOST CAPABILITY, not a harness defect, and it used to `verdict bad`: a hard FAIL, in the
+  # one always-run job that `lint`, `specs`, `build-test`, `db-test` and `docs-validate` all
+  # `needs:`. So a runner-image bump would red `changes`, skip all five, red the required `codegen`
+  # check, and block every PR and every docs-only push to `main` -- the lane CLAUDE.md routes
+  # spec/doc work down with no PR to fall back on -- with no validator, build or test signal, for a
+  # reason unrelated to any diff.
+  #
+  # It is a WHEN, not an IF: PEP 686 makes UTF-8 mode the default from Python 3.15, so `PYTHONUTF8=0`
+  # stops restoring an ASCII locale by this route and the probe stops raising. Same on any
+  # musl/Alpine image. T15g already resolves its filesystem-encoding case with `skipped()` on the
+  # stated grounds that "a hard red on every Mac would train readers to discount reds"; this is that
+  # rule, applied to the locale. (Review #23 of PR #679.)
+  #
+  # THE SIBLING PRECONDITIONS WERE LOOKED AT AND KEPT LOUD, stated so the next reader knows this
+  # was a decision and not a sweep that stopped here: T3/T3b/T3c ("controlled PATH not
+  # constructible", "stub bun + symlinks unavailable") and T15g's own ASCII control are all
+  # "the harness could not build its setup", which is the class that must stay a FAIL -- a skip
+  # there would swallow ENOSPC/EROFS/EACCES and lose the case silently. T16's locale branch is the
+  # one precondition whose failure is a documented, dated property of a future interpreter rather
+  # than a broken host, which is what moves it and only it.
+  #
+  # The control keeps the skip honest: a PURE-ASCII read under the SAME env must succeed. If even
+  # that fails, python3 is broken here rather than merely UTF-8 by default, and THAT stays loud --
+  # otherwise a broken interpreter would be laundered into a skip and the coverage would vanish
+  # while the suite still exits 0, which is the swallow T15g's control exists to prevent.
+  printf 'ascii-only control\n' > "$S/t16-ascii-control.lock"
+  if ! env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-ascii-control.lock" >/dev/null 2>&1; then
+    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition HOST: the pure-ASCII control read FAILED under the probe env — python3 is broken here, not merely UTF-8 by default; LOUD by design, never adapt it away)"
+  elif env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
     enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
-    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition HOST: locale-dependent open did NOT raise; enc='$enc' — no genuine ASCII locale on this host)"
+    skipped "T16 non-ASCII lockfile on ASCII locale — host has NO genuine ASCII locale (enc='$enc'); the ASCII control read fine, so this is the interpreter's default, not a broken host. Expected from Python 3.15 (PEP 686) and on musl."
   else
     enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
     ( eval "export $ascii_locale"; qmd_lock_binding_ok "$S/t16-utf8.lock" "$PIN16" "$INTEG16" ); rc=$?

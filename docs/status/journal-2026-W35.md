@@ -697,3 +697,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > measurement green over a violation of the invariant the file's own header names FIRST. The
 > headline now carries it. **A lesson applied to the instance that taught it, and not to its
 > siblings, is the half-applied sweep this branch keeps landing — the fourth time.**
+>
+> **Round 24 — a host-capability precondition that FAILS instead of skipping, in the one job every
+> other job `needs:`.** T16's ASCII-locale probe ended `verdict bad` when the locale-dependent
+> `open()` did not raise — i.e. when the host has no genuine ASCII locale. That is a host capability,
+> and **PEP 686 makes UTF-8 mode the default from Python 3.15**, so `PYTHONUTF8=0` stops restoring
+> an ASCII locale by that route and the probe stops raising. A *when*, not an *if* — and the trigger
+> is a runner-image bump that touches nothing in the repo. Consequence: `changes` reds, `lint`,
+> `specs`, `build-test`, `db-test` and `docs-validate` all skip on `needs: changes`, the required
+> `codegen` check reds, and **every PR and every docs-only push to `main` is blocked with no
+> validator, build or test signal.**
+>
+> The suite's own T15g already resolves the analogous filesystem-encoding case with `skipped()`, on
+> the stated grounds that *"a hard red on every Mac would train readers to discount reds"*. Same rule,
+> one class over. Routed through `skipped()` **with T15g's control discipline**: a pure-ASCII read
+> under the same env must succeed first, so a genuinely broken interpreter still fails loudly rather
+> than being laundered into a skip — which is the swallow T15g's control exists to prevent. Verified
+> both ways: UTF-8-default host → `SKIP`, 54/54 accounted, exit 0; missing control file → `FAIL`.
+>
+> **And the sibling preconditions were looked at and deliberately KEPT loud** — T3/T3b/T3c and
+> T15g's own control are all "the harness could not build its setup", where a skip would swallow
+> ENOSPC/EROFS/EACCES. Written down in the script, because the previous four rounds each landed a
+> lesson on the instance that taught it and not on its siblings, and *"I checked the others"* is
+> worth nothing unless the next reader can see it.
