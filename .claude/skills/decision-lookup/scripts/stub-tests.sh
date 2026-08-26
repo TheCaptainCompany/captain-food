@@ -903,6 +903,16 @@ echo "----"
 # then `repo .qmd/ CHANGED during the suite -- VIOLATION`. The exit status was right; the line every
 # record quotes as the measurement was green over a violation of the invariant this file's own
 # header names FIRST ("never creates or modifies the real repo .qmd/ cache"). (Review #22.)
+# COUNT THE CASE VERDICTS BEFORE THE FINGERPRINT VERDICT, because a hermeticity violation is NOT a
+# case verdict. It used to `fail=$((fail + 1))` above this sum, and `fail` is one of the three terms
+# -- so 54 green cases plus a dirtied cache printed `55/54 cases accounted for` and then
+# `INCOMPLETE: ... the harness broke, or EXPECTED_CASES is stale`, which is false twice over. The
+# triage comment in ci.yml offers three classes and none of them is "the suite wrote to the real
+# cache", so the repair it invites is bumping EXPECTED_CASES to 55 -- which would hide the violation
+# permanently AND break the SKILL.md pin. The invariant stated 30 lines below says exactly why:
+# "a FAILURE IS A VERDICT, so real failures keep the count balanced" -- true of `verdict bad`, which
+# consumes a declared case, and false of this increment, which does not. (Review #25.)
+accounted=$((pass + fail + skip))
 AFTER="$(fingerprint)"
 if [ "$BEFORE" = "$AFTER" ]; then
   hermetic="repo .qmd/ untouched"
@@ -918,7 +928,6 @@ fi
 # turned on itself. It now carries `<accounted>/<EXPECTED_CASES>`, so no quotable line is green on
 # an incomplete run. (Review #17 of PR #679.)
 EXPECTED_CASES=54
-accounted=$((pass + fail + skip))
 if [ "$skip" -gt 0 ]; then
   echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability) -- $accounted/$EXPECTED_CASES cases accounted for -- $hermetic"
 else

@@ -951,9 +951,26 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     };
                     // `--` is two bytes wide; every other boundary is one char.
                     let boundary_width = |c: char| if c == '-' { 2 } else { c.len_utf8() };
+                    // A DASH IS A BOUNDARY LOOKING BACK, NOT LOOKING FORWARD, and the asymmetry is
+                    // the point rather than a shortcut. `;` and a sentence dot separate independent
+                    // statements; a dash introduces an APPOSITIVE about the thing just named. So:
+                    //
+                    //   `KEY` — superseded by the chain head        <- the dash EXPLAINS `KEY`
+                    //   the old row is superseded -- and per row `KEY`, do X   <- it does NOT
+                    //
+                    // Treating a dash as a boundary in both directions made the first spelling --
+                    // the most idiomatic explanation in this repo -- a hard `make validate` error
+                    // with rewording as the only escape, because the clause ended at the dash before
+                    // `superseded` was ever seen. Treating it as a boundary in NEITHER direction
+                    // reopens review #21, where one `superseded` written earlier silenced a live
+                    // citation five joined lines later. Backward-only keeps both: an explanation
+                    // that FOLLOWS the key still exempts it, and one that PRECEDES a dash no longer
+                    // reaches past it. Every green control separated its explanation with `;`,
+                    // ` -- ` or a dot, and those three behave identically -- which is why the
+                    // control set was silent about the em-dash spelling specifically (review #25).
                     let clause_end = line[at..]
                         .char_indices()
-                        .find(|&(i, c)| is_boundary(at + i, c))
+                        .find(|&(i, c)| !matches!(c, '-' | '—') && is_boundary(at + i, c))
                         .map_or(line.len(), |(i, _)| at + i);
                     // `i + 1` would land INSIDE the em-dash: `—` is three bytes, and slicing a
                     // str on a non-boundary panics. The corpus contains em-dashes, so the

@@ -761,3 +761,46 @@ Current state: [`../STATUS.md`](../STATUS.md).
 >
 > **The rule: a wrong finding can still name a real gap.** Refuting the claim is not the end of the
 > work — the question is what the claim was reaching for, and whether that part holds.
+>
+> **Round 27 — five findings, and the sharpest is that my own hermeticity fix broke the arithmetic
+> it was folded into.** Round 23 hoisted the `.qmd/` fingerprint above the headline so the quotable
+> line could carry its verdict — and put `fail=$((fail + 1))` above `accounted=$((pass + fail +
+> skip))`. A hermeticity violation is **not a case verdict**, so 54 green cases plus a dirtied cache
+> printed `55/54 cases accounted for` followed by `INCOMPLETE: … the harness broke, or
+> EXPECTED_CASES is stale` — **false twice over**, double-counted into `fail`, and inviting the one
+> repair that would hide the violation permanently *and* break the SKILL.md pin. The invariant
+> stated thirty lines below says exactly why: *"a FAILURE IS A VERDICT, so real failures keep the
+> count balanced"* — true of `verdict bad`, which consumes a declared case; false of this increment,
+> which does not. Now `54/54 … VIOLATION` with `INCOMPLETE` silent, verified by forcing a mismatch.
+>
+> **A dash is a clause boundary looking BACK, not looking FORWARD**, and the asymmetry is principled
+> rather than a patch. `;` and a sentence dot separate independent statements; a dash introduces an
+> **appositive about the thing just named**. Round 21 made `--` a boundary because one `superseded`
+> written earlier was silencing a live citation five lines later — correct, and it also made the most
+> idiomatic explanation in this repo (`` - `KEY` — superseded by the chain head ``) a hard error with
+> rewording as the only escape. Backward-only keeps both. **Every green control had separated its
+> explanation with `;`, ` -- ` or a dot — three separators that behave identically — so the control
+> set was structurally silent about this spelling.**
+>
+> **Two green controls could not fail**: they cited `NEW-ROW`, which is not a row in the fixture,
+> only `OLD-ROW`'s `superseded_by` VALUE — so the scanned key set never contained it. One carried a
+> comment claiming it pinned the list-marker drop in `logical_units`; **deleting that drop left it
+> green** while a numbered-item citation silently stopped being detected. Rewritten against the row
+> that is actually scanned, with the RED plant that dies when the marker-drop goes.
+>
+> **And the corpus test redded on a HOST condition with a message blaming the author** — the same
+> class as round 24's locale probe, one file over. `git ls-files` failing (`dubious ownership`, the
+> ordinary shape of a bind-mounted container checkout) yields an empty corpus, and the loop then
+> reported *"the citation corpus no longer reaches … Got 0 files"*, sending the reader after a
+> pathspec nobody narrowed. Worse, the inversion: in that environment `make validate` goes
+> deliberately quiet while `cargo test` screams about the wrong cause. Git usability is probed and
+> skipped now; the hard assertions are kept for when git WORKS, because **an empty corpus from a
+> broken git and a shrunken corpus from an edited pathspec are different claims, and only the second
+> is coverage.**
+>
+> **`GATE-STEP-LOCUS` was under-priced.** Its cascade enumeration stopped at four jobs and omitted
+> `docs-validate` — the sharpest edge, because GitHub skips a job whose dependency FAILED without
+> evaluating its `if:`, and `docs-validate` is the only validator on the docs-only push lane. So
+> option (b) is not free on the lane this team ships down most often. Added to the row's `evidence:`,
+> since the row is the artifact whoever closes it will price from, and **an enumeration that stops at
+> four reads as complete.**

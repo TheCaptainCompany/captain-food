@@ -9958,6 +9958,11 @@ mod decision_ask_and_citations {
                 "an unrelated numbered item supplying the exemption word",
                 "1. Per row OLD-ROW, open a reversal decision\n2. (that row is superseded)",
             ),
+            // THE MARKER-DROP, PLANTED. Without it `before` becomes `"1."` (a `.` is not in the
+            // trim set), `last` is empty, and no arm fires -- so a numbered item pointing at a dead
+            // row goes green. The control that claimed to cover this was scanning a key the fixture
+            // does not declare (review #25).
+            ("a numbered item opening with the key", "1. `OLD-ROW` still governs the rollback path."),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -9970,7 +9975,11 @@ mod decision_ask_and_citations {
 
         // GREEN: prose ABOUT the supersession, and words that merely end in the trigger letters.
         for (label, body) in [
+            // `NEW-ROW` is not a row in this fixture, so this case cannot fail on its own. Kept as
+            // the SHAPE control it was always meant to be, and paired below with the same sentence
+            // written against the row that IS scanned (review #25).
             ("the chain head", "Decided by row `NEW-ROW` (the chain head)."),
+            ("the chain head, naming the dead row in an explaining clause", "Decided by row `NEW-ROW`, which supersedes `OLD-ROW`."),
             (
                 "possessive clause explaining the supersession",
                 "Decided by row `NEW-ROW`, which carries `OLD-ROW`'s content forward in full.",
@@ -10033,7 +10042,18 @@ mod decision_ask_and_citations {
             ),
             // The list marker must still be dropped, or a backticked key opening a bullet stops
             // reading as the citation form `SKILL.md:193` uses.
-            ("a bullet opening with the key is still a citation form", "- `NEW-ROW` is the head."),
+            // REWRITTEN AGAINST `OLD-ROW`, THE ONLY ROW THIS FIXTURE SCANS. This control used to
+            // read `- \`NEW-ROW\` is the head.` -- and `NEW-ROW` is not a row here, it is only
+            // `OLD-ROW`'s `superseded_by` VALUE, so the scanned key set never contained it and the
+            // case was green by construction whatever the code did. Its comment claimed to pin the
+            // list-marker drop in `logical_units`; deleting that drop left it green (review #25).
+            // The RED plant below is the one that actually dies when the marker-drop goes.
+            ("a bullet opening with the key, explained", "- `OLD-ROW` is superseded; name the head."),
+            // THE IDIOMATIC EXPLANATION IN THIS REPO, and a hard error until review #25: the dash
+            // closed the clause before `superseded` was reached. Both dashes, since both are
+            // boundaries looking backward.
+            ("an em-dash appositive explaining the row", "- `OLD-ROW` — superseded by the chain head, kept for history"),
+            ("an ASCII-dash appositive explaining the row", "- `OLD-ROW` -- superseded by the chain head, kept for history"),
             // `opens_a_parenthetical` used to accept ANY `(` or `[`, which made a markdown link's
             // TEXT and an ordinary parenthetical mention into hard `make validate` errors with
             // rewording as the only escape -- on `CLAUDE.md` among others (review #16).
@@ -10095,6 +10115,33 @@ mod decision_ask_and_citations {
         // without the pruning or the symlink guard, so `cargo test` reddened on any machine with a
         // leftover `.claude/worktrees/` while CI stayed green -- the divergence introduced in the
         // very commit that fixed the other copy.
+        // A HOST CONDITION IS A SKIP, NOT A RED THAT BLAMES THE AUTHOR. `claude_citation_corpus`
+        // returns an empty Vec on EVERY git failure -- binary absent, not a repository, or
+        // `git ls-files` exiting non-zero, which is what `fatal: detected dubious ownership in
+        // repository` produces on a bind-mounted or differently-owned checkout, i.e. the ordinary
+        // shape of `cargo test --workspace` in a container. The `must_reach` loop below then reds
+        // with "the citation corpus no longer reaches ... Got 0 files", sending the reader to hunt
+        // a narrowed pathspec nobody narrowed. And the inversion is the awkward half: in that same
+        // environment `make validate` goes deliberately QUIET, while `cargo test` screams about the
+        // wrong cause. `the_gate_self_verification_reds_on_a_tampered_script` next door already
+        // skips on this condition, and `stub-tests.sh`'s T15g rule says a host capability is a loud
+        // skip and never a red (review #25).
+        //
+        // The two claims are separable, which is the whole point: an empty corpus from a broken git
+        // and a shrunken corpus from an edited pathspec are different things, and only the second
+        // is coverage. Probe git first; keep the hard assertions for when git WORKS.
+        let git_usable = std::process::Command::new("git")
+            .args(["ls-files", "-z", "--", "CLAUDE.md"])
+            .current_dir(&root)
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+        if !git_usable {
+            eprintln!(
+                "SKIP: git is unusable here (absent, not a repo, or refusing this checkout), so the citation corpus is empty for a HOST reason -- the fixture cases above still ran"
+            );
+            return;
+        }
         let corpus_files = claude_citation_corpus(&root);
         // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
         // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
