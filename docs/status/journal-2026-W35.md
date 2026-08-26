@@ -1900,3 +1900,42 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > constructing a layout nobody had written down — round 63's own shape #8, arriving one round later
 > from the outside. And its proposed fix was falsified by grepping the corpus, which is the same
 > lesson pointing the other way: a reviewer's antecedent is a claim too.**
+>
+> **Round 65 — a warning that named a cause two of its three producers do not have, and two caps
+> still carrying no antecedent.**
+>
+> **(1) `decision-citation-corpus-unreadable` asserted `` `git ls-files` failed `` as fact.** But
+> `readable == false` has **two** producers: the `status.success()` guard, and round 61's
+> empty-corpus early return — which is reached **with git having exited 0**. Both of that return's
+> non-tamper spellings are named in its own comment (an index with no matching entries; every listed
+> file outside the extension allowlist, which is exactly why round 63 made it preserve
+> `skipped_ext`). So on a `git archive` extraction — the case that comment itself calls *"the MORE
+> mundane"* one — an operator met a message sending them to debug git, ownership and
+> `safe.directory`, **none of which was the cause**, while the actual remedy sat in the sibling
+> `decision-citation-file-out-of-corpus` line they had no reason to connect to it.
+>
+> Now it reports what was **observed** rather than what was inferred, and points at the discriminator
+> it already computes. **A gate reporting the wrong thing is not better than a gate reporting
+> nothing — it is worse, because it spends the reader's time.** Pinned behaviourally: a throwaway
+> repo where every tracked corpus file is out of allowlist now asserts `readable == false` **and**
+> `skipped_ext` non-empty, so the state the message must describe is constructed rather than reasoned
+> about.
+>
+> **(2) `specs` and `docs-validate` were the last two caps with no stated antecedent** — the same
+> defect rounds 57 and 61 corrected one job at a time. Both shipped in the seconds-of-work bucket
+> with `changes` and `codegen`, while both **build `tools/codegen-rs` and its tree from scratch on a
+> cold cache** — which `docs-validate`'s own header already admitted.
+>
+> **Measured instead of guessed, and the measurement changed the answer.** From an empty
+> `CARGO_TARGET_DIR` on a 4-core container: **36s** to build, **~1s** per validator invocation, two
+> per job — ~40s of cold compute, so 20 minutes is **~30×** it. The review's offered remedy was to
+> bucket them with the heavy jobs at that value; **declined, with the reason**: the heavy bucket
+> exists for an *unmeasured* cold workspace build where being wrong low cancels the job and
+> `rust-cache` saves nothing. Copying a number chosen for a different job's uncertainty is the
+> bare-derived-number defect one step removed. The measurement is **local, not a runner**, and
+> `ci.yml` says so beside it.
+>
+> **Cost that earned the rule: the reviewer was right about the gap and wrong about the fix, for the
+> second round running.** Round 64's ` | ` boundary was falsified by grepping the corpus; here the
+> proposed raise was falsified by taking the measurement nobody had taken. **A finding and its
+> proposed remedy are two claims, and the second is not carried by the first.**

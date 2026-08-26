@@ -263,7 +263,26 @@ jobs:
     # and both test suites first.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 20   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
+    # 20 -- AND UNLIKE THE HEAVY JOBS THIS ONE HAS A MEASURED ANTECEDENT. Review #65 was right that
+    # it had none: it shipped in the "seconds of work" bucket with `changes` and `codegen` on
+    # nothing but a comment saying why a cap exists, while both `specs` and `docs-validate` build
+    # `tools/codegen-rs` and its tree (guppy, determinator, petgraph, cargo_metadata, target-spec,
+    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- and `docs-validate`'s own
+    # header admits "cold first run pays the codegen build".
+    #
+    # MEASURED 2026-08-26, from an empty CARGO_TARGET_DIR on a 4-core container: 36s to build, then
+    # ~1s per validator invocation (this job runs two). Call it ~40s of compute cold, so 20 minutes
+    # is ~30x it. LOCAL, NOT A RUNNER: a GitHub standard runner is also 4 vCPU but has slower disk
+    # and pays checkout, toolchain install and cache restore on top, so treat the multiplier as the
+    # order of magnitude and not the number.
+    #
+    # NOT raised to the heavy jobs' value, which is what the review offered as the alternative. That
+    # bucket exists for an UNMEASURED cold workspace build where being wrong low cancels the job,
+    # reds the required check, and leaves rust-cache with nothing saved. This one is measured and
+    # the headroom is an order of magnitude; copying a number chosen for a different job's
+    # uncertainty would be the bare-derived-number defect this branch keeps retracting, one step
+    # removed. Bounds a HANG; `codegen` waits on `needs:` even under `if: always()`.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -469,7 +488,26 @@ jobs:
     # generic skipped-acceptance below would let a mis-gated skip slide.
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
-    timeout-minutes: 20   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
+    # 20 -- AND UNLIKE THE HEAVY JOBS THIS ONE HAS A MEASURED ANTECEDENT. Review #65 was right that
+    # it had none: it shipped in the "seconds of work" bucket with `changes` and `codegen` on
+    # nothing but a comment saying why a cap exists, while both `specs` and `docs-validate` build
+    # `tools/codegen-rs` and its tree (guppy, determinator, petgraph, cargo_metadata, target-spec,
+    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- and `docs-validate`'s own
+    # header admits "cold first run pays the codegen build".
+    #
+    # MEASURED 2026-08-26, from an empty CARGO_TARGET_DIR on a 4-core container: 36s to build, then
+    # ~1s per validator invocation (this job runs two). Call it ~40s of compute cold, so 20 minutes
+    # is ~30x it. LOCAL, NOT A RUNNER: a GitHub standard runner is also 4 vCPU but has slower disk
+    # and pays checkout, toolchain install and cache restore on top, so treat the multiplier as the
+    # order of magnitude and not the number.
+    #
+    # NOT raised to the heavy jobs' value, which is what the review offered as the alternative. That
+    # bucket exists for an UNMEASURED cold workspace build where being wrong low cancels the job,
+    # reds the required check, and leaves rust-cache with nothing saved. This one is measured and
+    # the headroom is an order of magnitude; copying a number chosen for a different job's
+    # uncertainty would be the bare-derived-number defect this branch keeps retracting, one step
+    # removed. Bounds a HANG; `codegen` waits on `needs:` even under `if: always()`.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

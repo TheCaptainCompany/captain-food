@@ -10628,6 +10628,56 @@ mod decision_ask_and_citations {
             ],
             "the in-corpus set must be exactly the allowlisted extensions plus the four named root files -- `docs/**` and `src/**` are outside the pathspec and must reach neither vector"
         );
+
+        // THE STATE THE `corpus-unreadable` MESSAGE HAS TO DESCRIBE, constructed rather than
+        // reasoned about. `readable == false` has TWO producers -- `git ls-files` failing, and
+        // review #61's empty-corpus early return -- and the second is reached with git having
+        // EXITED 0. This builds that second state in its allowlist spelling: git works, it lists
+        // files, and every one of them is outside the extension allowlist.
+        //
+        // Pinned because the warning beside it asserted "`git ls-files` failed" as fact, which is
+        // wrong on exactly this path and sends an operator to debug git, ownership and
+        // `safe.directory` while the remedy sits in the sibling out-of-corpus line. The two halves
+        // asserted here are what makes the honest message honest: the flag says NOTHING WAS READ,
+        // and `skipped_ext` carries the DISCRIMINATOR that says why. (Review #65 of PR #679.)
+        {
+            let empty = sandbox.join("allowlist-empty");
+            fs::create_dir_all(empty.join(".claude/hooks")).expect("mkdir");
+            fs::write(empty.join(".claude/hooks/preflight"), "Per row RETRIEVAL-QMD-CI, out of corpus.\n").expect("write");
+            fs::write(empty.join(".claude/notes.txt"), "also out of corpus\n").expect("write");
+            let git2 = |args: &[&str]| {
+                let out = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&empty)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .env("GIT_AUTHOR_NAME", "t")
+                    .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                    .env("GIT_COMMITTER_NAME", "t")
+                    .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                    .output()
+                    .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+                assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+            };
+            git2(&["init", "-q", "-b", "main", "."]);
+            git2(&["add", "-A"]);
+            git2(&["commit", "-q", "-m", "only out-of-corpus files"]);
+
+            let (c2, readable2, u2, ut2, skipped2) = claude_citation_corpus(&empty);
+            assert!(
+                c2.is_empty() && u2.is_empty() && ut2.is_empty() && !readable2,
+                "a corpus where every tracked file is outside the allowlist must report NOT READABLE -- the rule scanned nothing, and `readable == true` here would print a clean green over an unscanned corpus"
+            );
+            let mut got2: Vec<&str> = skipped2.iter().map(|s| s.as_str()).collect();
+            got2.sort_unstable();
+            assert_eq!(
+                got2,
+                vec![".claude/hooks/preflight", ".claude/notes.txt"],
+                "`skipped_ext` must SURVIVE the empty-corpus early return: it is the only thing that distinguishes `git ls-files failed` from `git worked and the allowlist dropped everything`, and the warning printed for this state points the reader at it"
+            );
+        }
     }
 
     /// An empty `key` must not make the rule spin forever.

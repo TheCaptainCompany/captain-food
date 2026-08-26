@@ -133,10 +133,24 @@ fn main() {
                 // that this gate checked nothing, which then reds in the opposite direction on
                 // every host where git works. `RATCHET_EXEMPT` in `validate/warning_baseline.rs`
                 // carries the reasoning and the assertion; the claim is true now. (Review #35.)
+                //
+                // AND IT SAYS WHAT WAS OBSERVED, NOT WHAT WAS INFERRED. The message asserted
+                // "`git ls-files` failed" while `readable == false` has TWO producers: the
+                // `status.success()` guard, and review #61's empty-corpus early return -- which is
+                // reached with git having exited 0. Both of that return's non-tamper spellings are
+                // named in its own comment (an index with no matching entries; every listed file
+                // outside the extension allowlist, which is why it deliberately preserves
+                // `skipped_ext`). So on a `git archive` extraction -- the case that comment calls
+                // "the MORE mundane" one -- an operator met a message telling them to debug git,
+                // ownership and `safe.directory`, none of which was the cause, while the actual
+                // remedy sat in the sibling `decision-citation-file-out-of-corpus` line they had no
+                // reason to connect to it. That is review #35's class one attribution over: a gate
+                // reporting the wrong thing is not better than a gate reporting nothing, it is
+                // worse, because it spends the reader's time. (Review #65 of PR #679.)
                 dec_issues.push(model::warn(
                     "decision-citation-corpus-unreadable",
                     "tools/codegen-rs".to_string(),
-                    "`git ls-files` failed, so the superseded-citation corpus is EMPTY and `decision-superseded-authority` checked nothing. Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+                    "The superseded-citation corpus came back EMPTY, so `decision-superseded-authority` checked nothing. Reported as OBSERVED rather than diagnosed, because this flag has more than one producer: `git ls-files` may have failed (git absent, not a repository, a dubious-ownership refusal on a bind-mounted checkout), OR it exited 0 and listed nothing this rule can read -- an index with no matching entries (a `git archive` extraction re-`git init`ed but never `git add`ed), or every listed file falling outside the extension allowlist. THE DISCRIMINATOR IS ALREADY COMPUTED and prints beside this line: a `decision-citation-file-out-of-corpus` warning names the files the allowlist dropped, and its absence means git itself did not answer. Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
                 ));
             }
             // TRACKED, LISTED, AND NEVER OPENED. Same posture and same reason as the unreadable
