@@ -61,7 +61,7 @@ fn main() {
     // Declared at FUNCTION scope on purpose: the §17 ratchet at the bottom needs it, and the walk
     // that sets it runs inside a nested block several sections up. A corpus the walk could not read
     // leaves the two tree-caused warning kinds UNMEASURED rather than zero. (Review #80.)
-    let mut corpus_unreadable = false;
+    let mut corpus_incomplete = false;
     let specs = arg_value(&args, "--specs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("specs"));
@@ -127,7 +127,15 @@ fn main() {
             let (cited, readable, unread, unread_tree, skipped_ext) = validate::decisions::claude_citation_corpus(&root);
             // The §17 ratchet needs this: on an unreadable corpus the two tree-caused kinds below
             // are UNMEASURED, not zero. See `CORPUS_DERIVED_KINDS`. (Review #80.)
-            corpus_unreadable = !readable;
+            // NOT READABLE **OR** PARTIALLY READ, and the second disjunct is the one review #84
+            // added. `readable == false` is git refusing outright; `unread` is non-empty when git
+            // listed a file the filesystem would not hand back -- a sparse checkout, a dangling
+            // tracked symlink, a permission drop. Both are HOST causes, so both make the corpus
+            // counts unstable across machines, which is the whole predicate. The two TREE-caused
+            // vectors are deliberately NOT disjuncts here: `skipped_ext` and `unread_tree` drop the
+            // same files on every host, so they narrow the corpus without destabilising it, and
+            // including them would suppress the ratchet permanently the moment one file qualifies.
+            corpus_incomplete = !readable || !unread.is_empty();
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
                 //
@@ -359,9 +367,9 @@ fn main() {
         // as comparing against it, one step earlier and permanent, because the file is committed.
         // Same shape as the errors guard above: a baseline is only meaningful for a run that saw
         // what it is describing. (Review #80.)
-        if corpus_unreadable {
+        if corpus_incomplete {
             eprintln!(
-                "\n✗ refusing to write {} — the superseded-citation corpus was UNREADABLE on this run, so {:?} were not measured.\n  A baseline minted here would commit 0 for kinds this host cannot count, and then red on every host where git works.\n  Fix git (ownership, a missing .git, an unreadable index) and re-run.",
+                "\n✗ refusing to write {} — the superseded-citation corpus was NOT FULLY READ on this run (git refused, or it listed files the filesystem would not hand back), so {:?} were not measured.\n  A baseline minted here would commit 0 for kinds this host cannot count, and then red on every host that can.\n  Fix the checkout (ownership, a missing .git, a sparse checkout, a dangling symlink, a permission drop) and re-run.",
                 WARNING_BASELINE_PATH, CORPUS_DERIVED_KINDS
             );
             std::process::exit(1);
@@ -380,7 +388,7 @@ fn main() {
         return;
     }
     // UNMEASURED IS NOT ZERO, one level below where §17 already says so. See `CORPUS_DERIVED_KINDS`.
-    let unmeasured: &[&str] = if corpus_unreadable { &CORPUS_DERIVED_KINDS } else { &[] };
+    let unmeasured: &[&str] = if corpus_incomplete { &CORPUS_DERIVED_KINDS } else { &[] };
     let baseline_failure = check_warning_baseline(&root, &live_profile, unmeasured).err();
     if let Some(msg) = &baseline_failure {
         eprint!("{}", msg);

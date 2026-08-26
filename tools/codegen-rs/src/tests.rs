@@ -8551,7 +8551,29 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
             check_warning_baseline(&sandbox, &live, &CORPUS_DERIVED_KINDS).is_ok(),
             "`check_warning_baseline` must carry an unmeasured kind forward from the committed artifact. This is the call `main.rs` makes; the arithmetic being right in `diff_warning_baseline` proves nothing if this function ignores its `unmeasured` argument"
         );
+
+        // EVERY KIND ON THE LIST, not just the one this fixture happened to use. Review #84 added a
+        // third entry (`decision-superseded-authority`, the rule that CONSUMES the corpus rather
+        // than reporting on it) and a one-kind fixture would have proved nothing about it -- the
+        // corpus-size-floor shape from §19 #1, in a list rather than in a plant set.
+        for kind in CORPUS_DERIVED_KINDS {
+            let committed_k: WarningProfile = [(kind.to_string(), 2usize)].into_iter().collect();
+            fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&committed_k))
+                .expect("rewrite the fixture baseline");
+            let empty: WarningProfile = BTreeMap::new();
+            assert!(
+                check_warning_baseline(&sandbox, &empty, &[]).is_err(),
+                "`{}` baselined at 2 and absent from a run must red when nothing is declared unmeasured -- otherwise the case below cannot distinguish the guard from its absence",
+                kind
+            );
+            assert!(
+                check_warning_baseline(&sandbox, &empty, &CORPUS_DERIVED_KINDS).is_ok(),
+                "`{}` is in CORPUS_DERIVED_KINDS but the carry-forward does not cover it",
+                kind
+            );
+        }
     }
+
 
     // The two kinds are exactly the corpus-derived ones, and neither is on the exempt list -- the
     // two mechanisms are complementary and must not be collapsed into one.
@@ -8559,14 +8581,58 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
     kinds.sort_unstable();
     assert_eq!(
         kinds,
-        vec!["decision-citation-file-not-utf8", "decision-citation-file-out-of-corpus"],
-        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on git answering; adding one is a decision, and removing one reopens the `kind eliminated` trap for it"
+        vec![
+            "decision-citation-file-not-utf8",
+            "decision-citation-file-out-of-corpus",
+            "decision-superseded-authority",
+        ],
+        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on the corpus being fully read; adding one is a decision, and removing one reopens the `kind eliminated` trap for it. `decision-superseded-authority` is the rule that CONSUMES the corpus rather than reporting on it, and it is the one most likely to carry a baselined N>0 -- shipping it at `warn` exists so a false positive can be accepted with `make warning-baseline`"
     );
     for k in CORPUS_DERIVED_KINDS {
         assert!(
             !RATCHET_EXEMPT.contains(&k),
             "`{}` is both corpus-derived and ratchet-exempt. These are different mechanisms: exemption says the COUNT has no stable value anywhere, carry-forward says THIS RUN could not take it. Collapsing them drops the kind out of the only gate that counts warnings",
             k
+        );
+    }
+}
+
+    /// The PREDICATE that decides `unmeasured` must include the partial-read disjunct.
+///
+/// Review #84's second half: `readable == false` is git refusing outright, but a corpus can also
+/// be PARTIALLY read -- `unread` is non-empty when git listed a file the filesystem would not
+/// hand back (sparse checkout, dangling tracked symlink, permission drop). Both are HOST causes,
+/// so both destabilise the counts across machines; keying only on the first left `N -> N-1` on
+/// the second, landing in `better` and redding the same way with `unmeasured` empty.
+///
+/// A TEXT ASSERTION, AND ITS LIMIT STATED: the predicate is one expression in `main.rs`, not a
+/// separable unit, so this reads the source rather than executing it — the weaker instrument
+/// this file prefers to avoid. It catches the disjunct being DELETED, which is the regression
+/// that actually happened once; it cannot catch it being rewritten to something wrong. Kept
+/// because the alternative was nothing. (Review #84 of PR #679.)
+#[test]
+fn the_unmeasured_predicate_covers_a_partially_read_corpus() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let src = fs::read_to_string(root.join("tools/codegen-rs/src/main.rs")).expect("main.rs");
+    let line = src
+        .lines()
+        .find(|l| l.trim_start().starts_with("corpus_incomplete ="))
+        .expect("main.rs must assign `corpus_incomplete` -- if that name moved, re-point this test rather than deleting it");
+    assert!(
+        line.contains("!readable"),
+        "the unmeasured predicate lost the git-refused disjunct: {}",
+        line.trim()
+    );
+    assert!(
+        line.contains("unread.is_empty()"),
+        "the unmeasured predicate lost the PARTIAL-read disjunct. `unread` is non-empty when git listed a file the filesystem would not hand back, which is a HOST cause exactly like git refusing -- so the corpus counts are unstable across machines and a baselined kind reds `N -> N-1` on the host that dropped the file. The two TREE-caused vectors (`unread_tree`, `skipped_ext`) are deliberately absent: they drop the same files everywhere, so they narrow the corpus without destabilising it. Got: {}",
+        line.trim()
+    );
+    for tree_caused in ["unread_tree", "skipped_ext"] {
+        assert!(
+            !line.contains(tree_caused),
+            "the unmeasured predicate gained `{}`, which is TREE-caused: it drops the same files on every host, so it narrows the corpus without making the count host-dependent. Including it suppresses the ratchet permanently the moment one file qualifies -- which is the gate quietly switching itself off. Got: {}",
+            tree_caused, line.trim()
         );
     }
 }

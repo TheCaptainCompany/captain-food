@@ -2500,3 +2500,43 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > two claims the later rounds retracted but the body still carried — *"the comparison is pre-merge,
 > not in-session"* and *"the caps bound a hang and nothing else"* (they bound it **at the cap's
 > duration of repository-wide merge block**, since `codegen` waits under `always()`).
+>
+> **Round 84 — round 80's list held the two kinds that REPORT on the corpus and not the one that
+> CONSUMES it, and round 81 made that the likeliest one to bite.**
+>
+> `CORPUS_DERIVED_KINDS` named `decision-citation-file-not-utf8` and `-out-of-corpus`. But
+> `main.rs` feeds `cited` to `validate_no_superseded_row_is_cited_as_authority`, and `cited` is
+> **empty on every host where `git ls-files` did not answer** — so the rule scans nothing and emits
+> nothing, exactly like the two that were listed.
+>
+> **And it matters more for this kind, because round 81 made N>0 the expected state rather than an
+> accident.** Shipping at `warn` exists *precisely* so an author who judges a finding wrong accepts
+> it with `make warning-baseline` in the same commit. The moment anyone does, the baseline carries
+> `decision-superseded-authority: N`, and the next git-unanswering host reds `N -> 0 (kind
+> eliminated)` on a tree nobody touched. **Round 80's own `--write-warning-baseline` refusal makes
+> that end state worse than the reporters':** the reader can no longer commit the bad 0, so they are
+> left with a red they cannot clear. **Two of my own fixes composing into a trap neither had alone.**
+>
+> **(2) The predicate was half the condition.** It keyed on `readable == false` — git refusing
+> outright — while a corpus can also be **partially** read: `unread` is non-empty when git listed a
+> file the filesystem would not hand back (sparse checkout, dangling tracked symlink, permission
+> drop). Both are **host** causes, so both destabilise the counts across machines; keying on the
+> first left `N -> N-1` on the second, in `better`, redding the same way with `unmeasured` empty.
+>
+> **The cut is host-vs-tree, and it is precise rather than generous.** `unread_tree` and
+> `skipped_ext` are deliberately **not** disjuncts: they drop the same files on every host, so they
+> narrow the corpus without making the count host-dependent — and including them would **suppress
+> the ratchet permanently the moment one file qualifies**, which is the gate quietly switching itself
+> off. Planted in all three directions: disjunct removed, third kind removed, and a tree-caused
+> disjunct **added**.
+>
+> **One instrument is weaker than this file likes and says so.** The predicate is a single
+> expression in `main.rs`, so the test reads the source rather than executing it. It catches the
+> disjunct being **deleted** — the regression that actually happened — and cannot catch it being
+> rewritten to something wrong. Kept because the alternative was nothing, with the limit written
+> into the docstring rather than left for a reader to discover.
+>
+> **Shape: a list of "things affected by X" written while fixing X will name the things that
+> RESEMBLE each other, not the things that share X.** Both reporters emit a count *about* the corpus;
+> the consumer emits findings *from* it — different shape, same dependency, and the shape is what the
+> eye groups by.

@@ -87,13 +87,30 @@ pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadab
 /// `0 -> N` on every host where git works: a false red AND a trap for the reader who obeys it,
 /// verbatim the sentence above, arriving through the kinds it excluded.
 ///
-/// Latent when written (the committed artifact carries neither kind), which is why it is closed
+/// Latent when written (the committed artifact carries none of these kinds), which is why it is closed
 /// now: it arms itself on a later, unrelated commit, and the run that trips it looks like a
 /// validator regression on a tree nobody touched. The fix is this file's own vocabulary applied one
 /// level down — "did not look" is not "found nothing", so on such a run these kinds are neither
 /// compared nor rewritten. (Review #80 of PR #679.)
-pub(crate) const CORPUS_DERIVED_KINDS: [&str; 2] =
-    ["decision-citation-file-not-utf8", "decision-citation-file-out-of-corpus"];
+pub(crate) const CORPUS_DERIVED_KINDS: [&str; 3] = [
+    "decision-citation-file-not-utf8",
+    "decision-citation-file-out-of-corpus",
+    // THE RULE THAT CONSUMES THE CORPUS, not merely one that reports on it -- and the first version
+    // of this list held only the two REPORTERS, which is the narrower half of its own argument.
+    // `main.rs` feeds `validate_no_superseded_row_is_cited_as_authority` the `cited` vector, which
+    // is EMPTY on every host where `git ls-files` did not answer, so the rule scans nothing and
+    // emits nothing.
+    //
+    // IT MATTERS MORE HERE THAN FOR THE TWO REPORTERS, because N>0 is not an accident for this kind
+    // -- it is the state the LEVEL CHOICE was made for. Shipping at `warn` rather than `err` exists
+    // precisely so an author who judges a finding wrong accepts it with `make warning-baseline` in
+    // the same commit; the moment anyone does, the baseline carries `decision-superseded-authority:
+    // N` and the next git-unanswering host reds `N -> 0 (kind eliminated)` on a tree nobody touched.
+    // And the `--write-warning-baseline` refusal added beside this constant makes that end state
+    // WORSE than the reporters': the reader can no longer commit the bad 0, so they are left with a
+    // red they cannot clear. (Review #84 of PR #679.)
+    "decision-superseded-authority",
+];
 
 /// The live profile of a validation run. Takes ALL issues (the spec validator's plus §13 proposal
 /// hygiene, exactly what `checks: N error(s), M warning(s)` counts) and keeps the warnings that
