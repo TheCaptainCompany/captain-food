@@ -2247,3 +2247,32 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **The shape worth keeping: "two occurrences earns a gate" is a heuristic, not a law — and its
 > failure mode is building an instrument that cannot be trusted on the path it guards. Declining to
 > gate is a legitimate outcome when the decline is recorded with what was ruled out.**
+>
+> **Round 75 — the fourth stale count in `gates.md`, and this one earned a gate where round 74's
+> class did not.**
+>
+> *"Two more from the same branch"* introduced **three** bullets — in the paragraph whose own first
+> bullet is *derive it or drop it*. My round-66 measurement bullet made it three; round 74 left it.
+> The numbered heading above had already been dropped for the identical reason one round earlier.
+> Fourth application of the same remedy on one branch, which is itself the argument: **a list that
+> grows has no business stating its own length.** Dropped rather than corrected.
+>
+> **And this one IS gated, where round 74's doc-comment class deliberately was not — the two look
+> inconsistent side by side, so the reason is written in place.** #10 has no precise instrument, only
+> heuristics that false-red on this file's own prose. This one bans a **spelling**, and a spelling is
+> exactly checkable: `gates_md_does_not_state_the_length_of_a_list_it_introduces` matches a spelled
+> cardinal immediately followed by a list-noun (`more`, `shapes`, `bullets`, `items`, `entries`,
+> `additions`, `clauses`). It cannot fire on an **occurrence** count — *"four times on this branch"*,
+> *"the first thirteen rounds"* — because those nouns are deliberately absent from the list. Planted
+> with all three shapes that actually happened (`Two more`, `eight shapes`, `Three additions`); all
+> three red, and the occurrence-count control stays green.
+>
+> **The first version of the guard redded on the retraction itself**, which necessarily quotes the
+> phrase it is retracting. That would have forced the silent edit this branch's whole practice exists
+> to prevent — every retraction stays in place rather than being quietly dropped. Fixed with §19 #6's
+> own remedy one file over: **blank the quoted spans before testing the text around them.** A genuine
+> list-length claim is never inside quotes or backticks.
+>
+> **Shape: "is it gateable?" is a different question from "has it happened twice?", and the answer
+> can differ for two classes filed one round apart. Write the reason next to both, or the pair reads
+> as inconsistency.**

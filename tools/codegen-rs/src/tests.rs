@@ -10895,6 +10895,77 @@ mod decision_ask_and_citations {
         }
     }
 
+    /// `gates.md` MAY NOT STATE THE LENGTH OF A LIST IT INTRODUCES.
+    ///
+    /// Four times on one branch a spelled count in that file went stale by the list growing under
+    /// it: the §19 heading said "Seven shapes" and gained an eighth; the ride-along enumeration said
+    /// FIVE with six clauses (gated separately, over the decision row); "Two more from the same
+    /// branch" introduced three, twice — once when a measurement bullet landed and again a round
+    /// later. Every one was in the section whose own bullet reads *derive it or drop it*, and the
+    /// remedy was the same every time: drop the number.
+    ///
+    /// WHY THIS ONE IS GATED WHERE §19 #10 IS NOT, since the two decisions look inconsistent
+    /// side by side: the doc-comment class has no precise instrument, only heuristics that false-red
+    /// on this file's own prose. This one has a precise one — it bans a SPELLING, and a spelling is
+    /// exactly checkable. It cannot fire on an occurrence count ("Four times on this branch", "the
+    /// first thirteen rounds"), because those are not followed by a list-noun.
+    ///
+    /// WHAT IT DOES NOT DO, so "gated" does not read wider than it is: it guards ONE FILE, and it
+    /// bans the spelling rather than the concept. `N items below`, a digit, or a count in an ADR or
+    /// a PR body all pass. It catches the four shapes that actually happened, in the file CLAUDE.md
+    /// routes a session to before it works. (Review #75 of PR #679.)
+    #[test]
+    fn gates_md_does_not_state_the_length_of_a_list_it_introduces() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let path = "docs/claude/sessions/gates.md";
+        let text = fs::read_to_string(root.join(path)).expect("gates.md");
+        const CARDINALS: [&str; 11] = [
+            "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+        ];
+        // The nouns a list-length claim attaches to. An OCCURRENCE count ("four times", "three
+        // rounds") is legitimate and antecedent-bearing, so those nouns are deliberately absent.
+        const LIST_NOUNS: [&str; 7] = ["more", "shapes", "bullets", "items", "entries", "additions", "clauses"];
+        // BLANK QUOTED SPANS FIRST. The first run of this guard redded on the sentence RETRACTING
+        // the phrase, which necessarily quotes it (`This line said *"Two more"* while introducing
+        // three`). A record that cannot narrate its own correction is worse than the drift: this
+        // branch keeps every retraction in place rather than quietly dropping it, so a rule that
+        // forbids quoting the mistake would force exactly the silent edit the practice exists to
+        // prevent. §19 #6's own remedy -- blank the citing token before testing the text around it
+        // -- applied one file over. A genuine list-length claim is never inside quotes or backticks.
+        let unquoted = |line: &str| -> String {
+            let mut out = String::with_capacity(line.len());
+            let (mut in_dq, mut in_tick) = (false, false);
+            for c in line.chars() {
+                match c {
+                    '"' if !in_tick => { in_dq = !in_dq; out.push(' '); }
+                    '`' if !in_dq => { in_tick = !in_tick; out.push(' '); }
+                    _ if in_dq || in_tick => out.push(' '),
+                    _ => out.push(c),
+                }
+            }
+            out
+        };
+        let mut hits: Vec<(usize, String)> = Vec::new();
+        for (i, raw) in text.lines().enumerate() {
+            let line = &unquoted(raw)[..];
+            let words: Vec<String> = line
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .filter(|w| !w.is_empty())
+                .map(|w| w.to_lowercase())
+                .collect();
+            for pair in words.windows(2) {
+                if CARDINALS.contains(&pair[0].as_str()) && LIST_NOUNS.contains(&pair[1].as_str()) {
+                    hits.push((i + 1, raw.trim().to_string()));
+                }
+            }
+        }
+        assert!(
+            hits.is_empty(),
+            "{} states the length of a list it introduces, which is the defect its own bullet (`a count retracted twice will be retracted a third time -- derive it`) names. That number has gone stale four times on one branch, always by the list growing under it. DROP it -- this file is the durable record CLAUDE.md routes a session to before it works, and a reader who counts and finds a different number stops trusting the section. An OCCURRENCE count (`four times`, `three rounds`) is fine and is not what this matches. Hits: {:?}",
+            path, hits
+        );
+    }
+
     /// A SUBSTANTIAL `timeout-minutes` JUSTIFICATION MAY NOT BE SHARED BY TWO JOBS.
     ///
     /// Twice now a cap's reasoning has been inherited rather than re-derived at the site it governs:

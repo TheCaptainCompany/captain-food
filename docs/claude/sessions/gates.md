@@ -707,7 +707,11 @@ the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
    costs more than a latent miss. So it stays a **reading** rule: when you insert an item above an
    existing one, look at what is now directly above the item below you.
 
-Two more from the same branch, about the records rather than the tests:
+And from the same branch, about the records rather than the tests — **uncounted on purpose**. This
+line said *"Two more"* while introducing three, in the paragraph whose own first bullet is *derive it
+or drop it*; the numbered heading above was dropped for the identical reason one round earlier, and
+the list grew again the round after that. Fourth application of the same remedy on one branch, which
+is itself the argument: **a list that grows has no business stating its own length.**
 
 - **A count retracted twice will be retracted a third time — derive it.** A derived number stated in
   prose is consumed as established fact and nothing re-derives it
