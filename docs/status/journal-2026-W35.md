@@ -2396,3 +2396,43 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Shape: an exemption is about whether a COUNT has a stable value; a carry-forward is about whether
 > THIS RUN could take it. Collapsing the two drops the kind out of the only gate that counts
 > warnings** — asserted, so the pair cannot be merged by a later refactor.
+>
+> **Round 81 — the rule's LEVEL was a standing directive, not a preference, and I had the burden of
+> proof backwards.**
+>
+> Two independent reviews reached the same correction: shipping `decision-superseded-authority` at
+> `err(...)` in the same commit that wires the CI step **inverts** CLAUDE.md's **gate-then-stabilize**
+> (founder-approved 2026-07-31) — *behaviour changing a critical path ships BEHIND a gate, and
+> flipping the default is a SEPARATE recorded decision*. A new blocking validator rule on the job
+> feeding the required check is exactly that. **So shipping at `err` was the deviation needing
+> sign-off; shipping at `warn` needed none.** `CITATION-RULE-LEVEL` had it backwards — filing the row
+> *inside the change it would gate*, with the gated form and the default landing together.
+>
+> Now `warn(...)`. **Detection is unchanged, verified rather than argued**: a planted stale citation
+> in `.claudeignore` still produces `decision-superseded-authority: 0 -> 1 (NEW warning kind)` and
+> `make validate` still fails on the §17 ratchet. What changed is the **escape** from a false
+> positive — rewording prose becomes accepting the finding with `make warning-baseline` in the same
+> commit, which is visible, reviewable and recorded. That asymmetry is why a hand-rolled
+> English-clause parser belongs at warning level and the two deterministic sibling kinds could have
+> gone either way.
+>
+> **The level was unpinned.** Every assertion in
+> `a_superseded_row_may_not_be_cited_as_live_authority` passed identically at `err` and at `warn` —
+> so both the flip and the flip back were invisible to the suite. Pinned now, planted red.
+>
+> **And two comments argued their arm's shape FROM the level** (*"`decision-superseded-authority` is
+> an ERROR, so that reds `specs`, `docs-validate` and the required check"*). Their argument survives
+> at warning level — §17 still exits 1 — but the sentence stating the level had to move with it, or
+> it becomes the stale cross-reference this branch catalogues. Past tense now, direction visible.
+>
+> **A fourth prose site carried the un-swept claim: `docs/STATUS.md`** — the file CLAUDE.md sends a
+> session to for live state. Rounds 77 and 79 swept the two gate scripts and `workflow.md` and missed
+> it, so three sites said one thing and STATUS.md the other. **The half-applied sweep, landing in the
+> durable record.** Now states round 79's precise property.
+>
+> **One repair declined, with the reason recorded in the code.** Both reviews propose closing the
+> named residual (edit script A, overwrite script B, same turn) with a per-FILE predicate. It needs a
+> new variable carrying a skip-list into the scripts — **a new opt-out lever on the gate surface**,
+> which `env_ok` would then have to ban in CI. Every lever is a disarm route, and eighty rounds here
+> have been about levers that did not do what their sentence said. **Closing a narrow residual by
+> widening the disarm surface is the wrong trade on the gate set guarding the required check.**

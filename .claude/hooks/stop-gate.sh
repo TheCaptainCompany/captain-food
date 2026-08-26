@@ -127,6 +127,16 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # Pinned by `the_stop_gate_predicate_discriminates_a_hidden_tamper` -- both directions, against a
 # throwaway repo -- because this rationale has now been wrong once and a sentence is what carried it.
 #
+# THE RESIDUAL, AND THE REPAIR DELIBERATELY NOT TAKEN. A session that legitimately edits ONE gate
+# script and overwrites ANOTHER in the same turn is opted out for both. Reviews #81/#82 propose the
+# obvious close: make the predicate per-FILE and keep the comparison armed over the clean ones.
+# NOT DONE, and the reason is this branch's own subject: the scripts refuse wholesale, so per-file
+# needs a new variable carrying a skip-list into them -- a NEW OPT-OUT LEVER on the gate surface.
+# Every lever is a disarm route, `env_ok` would have to learn to ban it in CI, and eighty rounds
+# here have been about levers that did not do what their sentence said. Closing a narrow residual by
+# widening the disarm surface is the wrong trade on the gate set that guards the required check.
+# Recorded so the next author meets it as a decision rather than an oversight.
+#
 # THE PREDICATE IS THE WORKING TREE, NOT THE BRANCH DIFF, and the difference decides whether this
 # is a no-op. `$changed` above folds in `diff "$base"...HEAD`, so on THIS branch -- which edits all
 # four gate scripts -- a branch-scoped predicate would opt out on every turn forever and the guard

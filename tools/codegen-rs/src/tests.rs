@@ -10277,6 +10277,18 @@ mod decision_ask_and_citations {
                 label, body
             );
             assert_eq!(issues[0].rule, "decision-superseded-authority");
+            // THE LEVEL IS PINNED, because nothing pinned it and it is a DIRECTIVE rather than a
+            // preference. Every assertion in this test passed identically at `err` and at `warn`,
+            // so the flip that CLAUDE.md's gate-then-stabilize requires -- and the flip BACK, which
+            // is `CITATION-RULE-LEVEL`'s open question -- were both invisible to the suite. A
+            // hand-rolled English-clause parser on the path that feeds the required check ships
+            // non-blocking; §17 still exits 1 on the first occurrence, so detection is intact and
+            // what changes is only the ESCAPE from a false positive. Flipping this to `err` closes
+            // that row and must be a recorded decision, not an edit. (Review #81.)
+            assert!(
+                matches!(issues[0].level, Level::Warning),
+                "`decision-superseded-authority` must emit at WARNING. It reaches the required check through the section 17 ratchet either way, so detection is unchanged -- but at ERROR the only escape from a false positive is rewording prose, and this rule decides by abbreviation lists and a parenthetical word window. Raising it to ERROR closes `CITATION-RULE-LEVEL`, which is founder-owned and open"
+            );
         }
 
         // GREEN: prose ABOUT the supersession, and words that merely end in the trigger letters.

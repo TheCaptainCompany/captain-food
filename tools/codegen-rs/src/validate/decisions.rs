@@ -1288,10 +1288,10 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // parentheses stays green, because `last == "the"` and `experiment` is not a
                     // citing noun. The docstring names `the <KEY> experiment was contaminated` as a
                     // case that MUST stay green; punctuation the author did not think they were
-                    // choosing decided it. `decision-superseded-authority` is an ERROR, so that
-                    // reds `specs` AND `docs-validate`, and the required `codegen` check with them:
-                    // nothing merges until the sentence is reworded or the word `superseded` is
-                    // injected into it -- "a red whose escape is silence", from the arm added to
+                    // choosing decided it. `decision-superseded-authority` WAS an ERROR when this
+                    // was written, so a false positive redded `specs` AND `docs-validate` and the
+                    // required `codegen` check with them, with rewording as the only escape -- "a
+                    // red whose escape is silence", from the arm added to
                     // close a MISS. And the backtick is not a distinguisher here: the records state
                     // that every row key in `CLAUDE.md`, `SKILL.md` and the register IS backticked,
                     // so bare containment fires on the house style. (Review #40.)
@@ -1331,9 +1331,9 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // FALSE-REDS the spelling this file's docstring names as one that must stay
                     // green: `(decided 2026-08-24 by ADR-... (the `KEY` experiment was
                     // contaminated))` picks up `decided` from the OUTER group and reds a sentence
-                    // that is prose about the row. `decision-superseded-authority` is an ERROR, so
-                    // that reds `specs`, `docs-validate` and the required check, with rewording as
-                    // the only escape -- "a red whose escape is silence", through the arm added to
+                    // that is prose about the row. `decision-superseded-authority` WAS an ERROR when this was
+                    // written, so that redded `specs`, `docs-validate` and the required check, with
+                    // rewording as the only escape -- "a red whose escape is silence", through the arm added to
                     // close a miss. `last()` gives the identical verdict on #51's case and the
                     // right one here, because the intent -- "some citing word has to appear inside
                     // IT before the key" -- is about the parenthetical the key is actually in.
@@ -1537,7 +1537,40 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     if exempt_text.contains("superseded") {
                         continue;
                     }
-                    issues.push(err(
+                    // WARNING, NOT ERROR -- and the level is a directive, not a preference.
+                    //
+                    // CLAUDE.md's GATE-THEN-STABILIZE (founder-approved 2026-07-31): behaviour
+                    // changing a critical path ships BEHIND a gate, and flipping the default is a
+                    // SEPARATE recorded decision after the gated form has been smoked. A new
+                    // BLOCKING validator rule on the job that feeds the required check is that, so
+                    // shipping it at `err` in the same commit that wires it is the deviation
+                    // needing approval -- not shipping it at `warn`. `CITATION-RULE-LEVEL` is filed
+                    // OPEN and founder-owned, and it would have been decided by merging: the gated
+                    // form and the default landing together, with the row that should have gated it
+                    // filed inside the change it would gate. (Reviews #81 and #82 of PR #679,
+                    // reached independently.)
+                    //
+                    // THE DETECTION VALUE IS ESSENTIALLY UNCHANGED, which is what makes this cheap:
+                    // §17 is exact per-kind in BOTH directions, so the first stale citation scores
+                    // `0 -> 1 (NEW warning kind)` and `make validate` still exits 1. What changes is
+                    // the ESCAPE: at `err` the only way past a false positive is rewording the
+                    // prose; at `warn` an author who judges the finding wrong accepts it with
+                    // `make warning-baseline` in the same commit -- visible, reviewable, recorded.
+                    // That asymmetry is why a HAND-ROLLED ENGLISH-CLAUSE PARSER belongs here and the
+                    // two deterministic sibling kinds could have gone either way.
+                    //
+                    // WHAT IT COSTS, stated rather than glossed: the one-commit supersession
+                    // coupling `docs/decisions/README.md` requires is no longer enforced absolutely
+                    // -- a baselined stale citation can land. That cost, and the argument for
+                    // flipping back, are in `CITATION-RULE-LEVEL`, which stays open.
+                    //
+                    // TWO COMMENTS ABOVE ARE IN THE PAST TENSE FOR THIS REASON (~1291, ~1334): each
+                    // argued an arm's shape from "this rule is an ERROR". The argument they make is
+                    // UNCHANGED at warning level -- §17 still exits 1 on a new kind, so a false
+                    // positive still stops the commit -- but the sentence stating the level had to
+                    // move with the level, or it becomes the stale cross-reference this branch
+                    // catalogues. Kept rather than deleted so the direction is visible.
+                    issues.push(warn(
                         "decision-superseded-authority",
                         path.clone(),
                         format!(
