@@ -964,13 +964,37 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // extend clauses past real sentence ends, which is the permissive direction and
                     // the one that makes a live stale citation exempt. A miss here costs a
                     // reword; a false accept costs the gate. (Review #35.)
+                    // AN INTERIOR DOT IS NOT ENOUGH, AND THE COMMENT ABOVE STATED THE PREMISE IT
+                    // FAILS ON: "a sentence-final word never [contains a dot]". False of exactly
+                    // this corpus. `rsplit` splits on anything outside `[A-Za-z0-9.]`, so the token
+                    // before the dot in `... live in decision-lookup.sh.` is `lookup.sh` -- and so
+                    // are `ci.yml`, `SKILL.md`, `index.sqlite`, `qmd 2.8.3`, `README.md`, i.e. the
+                    // vocabulary of every file `claude_citation_corpus` scans. A sentence ending in
+                    // one stopped being a clause boundary, so the `superseded` exemption LEAKED
+                    // BACKWARDS ACROSS IT: a comment block whose first line says "the predecessor
+                    // is superseded, and the notes live in decision-lookup.sh." followed by a live
+                    // `Per row <DEAD-ROW>, ...` went GREEN -- and the identical text with `the
+                    // wrapper` in place of the filename reds correctly. The verdict decided by a
+                    // word the author did not think they were choosing, in the permissive
+                    // direction, through the arm added to fix `i.e.`. Same class as the
+                    // adjacent-bullet join (review #14) and the comment-then-code join (#18).
+                    //
+                    // So an interior-dot token must LOOK like an abbreviation: every dot-separated
+                    // segment is one or two ASCII letters. `i.e`, `e.g`, `a.k.a`, `U.S` qualify;
+                    // `lookup.sh`, `ci.yml`, `index.sqlite` and `2.8.3` do not (a digit is not a
+                    // letter, and `sh`/`yml` fail on the segment before them). Structural, not a
+                    // list. (Review #51 of PR #679.)
                     const ABBREVIATIONS: [&str; 5] = ["cf", "vs", "viz", "resp", "approx"];
                     let ends_an_abbreviation = |i: usize| {
                         let word = line[..i]
                             .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
                             .next()
                             .unwrap_or("");
-                        word.contains('.') || ABBREVIATIONS.contains(&word.to_lowercase().as_str())
+                        let dotted_initialism = word.contains('.')
+                            && word.split('.').all(|seg| {
+                                (1..=2).contains(&seg.len()) && seg.chars().all(|c| c.is_ascii_alphabetic())
+                            });
+                        dotted_initialism || ABBREVIATIONS.contains(&word.to_lowercase().as_str())
                     };
                     let is_boundary = |i: usize, c: char| match c {
                         ';' | '—' => true,
@@ -1081,23 +1105,25 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     const PARENTHETICAL_CITES: [&str; 8] = [
                         "row", "rows", "per", "see", "decided", "decided_by", "reconsiders", "superseded_by",
                     ];
-                    let mut open_paren = None;
-                    let mut depth = 0i32;
+                    // A STACK, SO `open_paren` IS THE OUTERMOST ONE STILL OPEN. Overwriting it on
+                    // every `(` and clearing it only at depth 0 left it pointing at an INNER paren
+                    // that had already closed: for `` (see (the wrapper) `KEY`) `` the window
+                    // searched for a citing word was `the wrapper) `, which does not contain `see`,
+                    // so the citation went unreported. Permissive, and the intent -- "some citing
+                    // word has to appear inside the parenthetical before the key" -- describes the
+                    // enclosing one. (Review #51.)
+                    let mut open_stack: Vec<usize> = Vec::new();
                     for (i, c) in line[clause_start..at].char_indices() {
                         match c {
-                            '(' => {
-                                depth += 1;
-                                open_paren = Some(clause_start + i);
-                            }
+                            '(' => open_stack.push(clause_start + i),
                             ')' => {
-                                depth = (depth - 1).max(0);
-                                if depth == 0 {
-                                    open_paren = None;
-                                }
+                                open_stack.pop();
                             }
                             _ => {}
                         }
                     }
+                    let depth = open_stack.len() as i32;
+                    let open_paren = open_stack.first().copied();
                     let in_a_citing_parenthetical = backticked
                         && depth > 0
                         && open_paren.is_some_and(|o| {

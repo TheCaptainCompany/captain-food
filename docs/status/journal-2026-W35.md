@@ -1458,3 +1458,43 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > no fingerprint conjunct at all — so on a non-GNU host it would have announced a measurement it
 > never attempts. Shape #2, in the fix for a scope error: a mutation applied where its label does not
 > say. Caught by listing the ten sites and asking which nine were supposed to be there.
+>
+> **Round 51 — `word.contains('.')` made every filename an abbreviation, and the comment stated the
+> premise it fails on.** Round 35 stopped `i.e.` from ending a clause by treating an interior-dot
+> token as an abbreviation, and wrote *"a sentence-final word never [contains a dot]"*. **False of
+> exactly this corpus**: `rsplit` splits on anything outside `[A-Za-z0-9.]`, so the token before the
+> dot in `… live in decision-lookup.sh.` is `lookup.sh` — as are `ci.yml`, `SKILL.md`,
+> `index.sqlite`, `qmd 2.8.3`, `README.md`, the vocabulary of every file the rule scans. A sentence
+> ending in one stopped bounding the clause, so **the `superseded` exemption leaked backwards across
+> it**: a comment block saying *"the predecessor is superseded, and the notes live in
+> decision-lookup.sh."* followed by a live `Per row <DEAD-ROW>` went **green** — and the identical
+> text with *"the wrapper"* in place of the filename reds correctly. The verdict decided by a word
+> the author did not think they were choosing, in the permissive direction, **through the arm added
+> to fix `i.e.`**. Same class as the adjacent-bullet join (#14) and the comment-then-code join (#18).
+>
+> Narrowed structurally: an interior-dot token qualifies only when **every dot-separated segment is
+> one or two ASCII letters** — `i.e`, `e.g`, `a.k.a`, `U.S` do; `lookup.sh`, `ci.yml`,
+> `index.sqlite` and `2.8.3` do not. **Every control in the set ended its explanatory sentence on a
+> plain word**, which is why the class was invisible; two now end on a filename and a version.
+>
+> **Round 51b — nested parentheticals lost the enclosing open paren**, so `(see (the wrapper)
+> \`KEY\`)` searched `the wrapper) ` for a citing word, found none, and missed the citation. A stack
+> now, and the two plants discriminate different halves of it — **measured, not assumed**: the
+> CLOSED-nested case pins the pop (it reds under the original overwrite-without-pop and not under
+> `last()`), and the OPEN-nested case pins `first()` (it reds under `last()` and not under the
+> original). One plant would have proved half of it.
+>
+> **Round 51c — two things said out loud rather than left to read wider than they are.** The
+> gate-set comparison is **pre-merge, not in-session**: every interactive caller opts out
+> (`stop-gate.sh`, `make hooks-test`, `make stub-tests`) because editing a gate script and re-running
+> it is otherwise impossible, so CI is the only armed caller and `env_ok` is what stops CI being
+> talked out of it. "Default-on" is still the right shape; it is narrower than it reads. And the
+> citation rule sits **outside `if check`** unlike the index-sync rule, which was asked about: the
+> asymmetry is deliberate, because generation is the index rule's repair and nothing regenerates a
+> citation — so it locks no key in the room, and a commit flipping a row to `superseded` fixing its
+> citations before regenerating is the order `docs/decisions/README.md` already requires.
+>
+> **Noted, not acted on**: the `precondition HOST:` / `precondition WRAPPER:` tags reach 8 of ~17
+> precondition sites. Nothing is broken — `ci.yml`'s triage comment tells the reader to classify by
+> which disjunct actually fired, not by a tag — but a convention applied to half its sites reads as a
+> distinction the untagged ones do not have.

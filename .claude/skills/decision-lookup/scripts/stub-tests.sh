@@ -59,6 +59,15 @@ pass=0; fail=0; skip=0
 # the check defends against. Now it always runs and an editor opts out BY NAME. Both opt-out names
 # are forbidden as CI `env:` keys at every scope.
 #
+# WHEN IT IS ARMED, said plainly because "default-on" reads wider than it is: every INTERACTIVE
+# caller opts out. `stop-gate.sh` and `make hooks-test` pass REGISTER_CHECK_ALLOW_DIRTY=1, and
+# `make stub-tests` passes DECISION_LOOKUP_ALLOW_DIRTY=1 -- they have to, or editing a gate script
+# and re-running it is impossible. CI is the only caller that runs this armed, and `env_ok` is what
+# stops CI being talked out of it. So the protection is PRE-MERGE, not in-session. Default-on is
+# still the right shape (the safe state needs no cooperation, and an opt-out is a visible argument
+# in a Makefile), but a session-local overwrite is caught on push and not before. (Review #51 of
+# PR #679.)
+#
 # WHAT THIS DOES NOT DO: it DETECTS the named overwrite routes. It is not a defence against
 # arbitrary code running before it. Closed so far, each because a review demonstrated it: a `git`
 # shell function via `env: BASH_ENV` (hence `unset -f`), a PATH shim (hence the fixed `_vpath`),

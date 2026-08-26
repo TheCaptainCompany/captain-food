@@ -110,6 +110,15 @@ fn main() {
         // NAMED IN ONE PLACE ONLY (`claude_citation_corpus`'s SCOPE section); this comment used to
         // say "anywhere under `.claude/**`", which had already stopped being true of the walk it
         // describes.
+        // OUTSIDE `if check`, UNLIKE `validate_decisions_index_sync`, and the asymmetry is
+        // deliberate (asked by the independent review of PR #679). The index-sync rule is
+        // check-only because GENERATION IS ITS REPAIR -- a fatal staleness error in generate mode
+        // would deadlock `make generate` against the very staleness it exists to fix. Nothing
+        // regenerates a citation, so this rule locks no key in the room: the repair is an edit the
+        // author is making anyway. What it does mean is that a commit flipping a row to
+        // `superseded` cannot regenerate the index until its citations are fixed too -- which is
+        // the correct order, because `docs/decisions/README.md` requires both halves of a
+        // supersession in ONE commit and a stale citation is exactly the other half.
         {
             let (cited, readable) = validate::decisions::claude_citation_corpus(&root);
             if !readable {

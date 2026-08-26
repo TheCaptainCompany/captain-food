@@ -9998,6 +9998,33 @@ mod decision_ask_and_citations {
             // this control was found by trying six spellings against both implementations, not by
             // reasoning about one. (Review #49.)
             ("superseded_by after two length-changing capitals", "İİ superseded_by: OLD-ROW"),
+            // A SENTENCE ENDING IN A FILENAME IS STILL A SENTENCE. `word.contains('.')` made every
+            // filename and version number an abbreviation, so the dot after `decision-lookup.sh`
+            // stopped bounding the clause and the `superseded` written a sentence EARLIER leaked
+            // forward to exempt a live instruction. Every control in this set ended its explanatory
+            // sentence on a plain word, which is why the class was invisible. (Review #51.)
+            (
+                "an explanation ending in a filename must not exempt the next sentence",
+                "# The predecessor is superseded, and the notes live in decision-lookup.sh.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
+            (
+                "an explanation ending in a version number must not exempt the next sentence",
+                "# That row is superseded; the pin was qmd 2.8.3.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
+            // NESTED PARENTHETICAL: the citing word sits in the OUTER group, and `open_paren` used
+            // to point at the inner one after it closed, so the window missed `see` entirely.
+            (
+                "a citing word in the enclosing parenthetical of a CLOSED nested one",
+                "the pin was rewritten (see (the wrapper) `OLD-ROW`) in round 4",
+            ),
+            // AND WITH THE INNER GROUP STILL OPEN, which is what distinguishes `first()` from
+            // `last()`: the citing word is in the OUTER group and the innermost open paren's window
+            // does not contain it. The closed-nested case above is caught by the pop alone, so this
+            // is the one that pins the choice of `first()` -- measured, not assumed.
+            (
+                "a citing word in the enclosing parenthetical of an OPEN nested one",
+                "the pin was rewritten (see (the wrapper `OLD-ROW`)) in round 4",
+            ),
             ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
             // THE ENVELOPE FORMAT this repo mandates, enforced by register-check.sh as
             // `ENVELOPE='Decision row:'`. A trailing colon killed the match, so the most
