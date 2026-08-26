@@ -634,7 +634,7 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
 /// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
 /// corpus it may judge.
-pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool) {
+pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool, Vec<String>) {
     let out = match std::process::Command::new("git")
         .args([
             "ls-files",
@@ -658,9 +658,10 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
         // and "did not look" printed identically. The `readable` flag lets the caller say which
         // one happened; the posture is unchanged. (Review #27 of PR #679.)
         Ok(o) if o.status.success() => o.stdout,
-        _ => return (Vec::new(), false),
+        _ => return (Vec::new(), false, Vec::new()),
     };
     let mut cited = Vec::new();
+    let mut unread: Vec<String> = Vec::new();
     for rel in String::from_utf8_lossy(&out).split('\0').filter(|s| !s.is_empty()) {
         let tracked_ext = std::path::Path::new(rel)
             .extension()
@@ -672,11 +673,23 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
         if !(tracked_ext || is_root_file) {
             continue;
         }
-        if let Ok(text) = std::fs::read_to_string(root.join(rel)) {
-            cited.push((rel.to_string(), text));
+        // TRACKED BUT UNREADABLE IS NOT "CLEAN". `readable` distinguishes "git refused to look"
+        // from "looked"; it says nothing about "read ALL of it" versus "read SOME of it". A path
+        // the index lists but the filesystem cannot hand back was dropped here with no counter and
+        // no warning, so `make validate` printed an identical green whether the corpus was six
+        // files or sixty -- the same shape review #27 closed one level up, one level down.
+        // Reachable with no tampering at all: a SPARSE CHECKOUT keeps index rows for `.claude/**`
+        // while the worktree files are absent; a tracked symlink whose target is gone; a file the
+        // current user cannot read (a root-created file in a container stage); and non-UTF-8
+        // content, which `read_to_string` also rejects and which this repo's own T15g fixture
+        // builds deliberately. Fail open -- the posture is unchanged -- but SAY SO, because "did
+        // not look" and "found nothing" must not print identically. (Review #52 of PR #679.)
+        match std::fs::read_to_string(root.join(rel)) {
+            Ok(text) => cited.push((rel.to_string(), text)),
+            Err(_) => unread.push(rel.to_string()),
         }
     }
-    (cited, true)
+    (cited, true, unread)
 }
 
 /// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.

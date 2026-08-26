@@ -1498,3 +1498,45 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > precondition sites. Nothing is broken — `ci.yml`'s triage comment tells the reader to classify by
 > which disjunct actually fired, not by a tag — but a convention applied to half its sites reads as a
 > distinction the untagged ones do not have.
+>
+> **Round 52 — round 36's fix destroyed the one hermeticity signal that still worked, and its own
+> comment said so three lines up.** The capability probe went ABOVE the `[ -e ]` test, so a macOS
+> maintainer with no `.qmd/` yet went from `BEFORE=absent` / `AFTER=""` → **`CHANGED -- VIOLATION`,
+> fail+1, exit non-zero** to `unmeasurable` both times → `NOT MEASURED`, exit 0. **The invariant this
+> file's header names FIRST** — *"never creates or modifies the real repo `.qmd/` cache"* — went from
+> detected-and-red to silently unmeasured. `[ -e ]` is POSIX; **creation needs no hasher.**
+>
+> **And fixing `fingerprint()` alone was not enough** — the headline still tested `unmeasurable`
+> before comparing, so `absent → unmeasurable` (a real creation) still printed `NOT MEASURED`.
+> Compare first, classify second: a DIFFERENCE is a violation whichever side is unmeasurable, because
+> it can only mean the cache appeared or vanished. `NOT MEASURED` now means what it says — the cache
+> existed before *and* after and this host cannot tell whether its contents moved. Measured against a
+> throwaway `REPO_ROOT` with the probe forced false: creation reports the violation, an existing
+> cache reports NOT MEASURED.
+>
+> **Round 52b — `the_ride_along_count_matches_the_clauses_named` was a booby trap on the required
+> check.** The CLAUSE half was defended against `CLAUSE HISTORY`; the **word** half scanned the whole
+> row in array order. This row's house style is verbatim quotation, so the next retraction written
+> the way the rest of the row writes them (*an earlier version said "THREE ADDITIONS RIDE ALONG"*)
+> reads the number out of **history**, and because that match sits after the `CLAUSE HISTORY` marker
+> the window search returns `None` and `end` silently becomes the whole tail — **exactly the prose
+> the comment beneath it says must not be counted.** Cost: `cargo test` → `build-test` → `codegen`
+> reds, **from a records-only YAML edit**, accusing the author of a rider they did not add. Anchored
+> on the phrase and read backwards, so history is unreachable by construction. Reproduced on the old
+> implementation with the reviewer's exact predicted message; green on the new one.
+>
+> **Round 52c — `readable` says "git looked", not "we read all of it".** A path the index lists but
+> the filesystem cannot return was dropped silently, so `make validate` printed an identical green
+> over six files or sixty. No tampering needed: a **sparse checkout** keeps index rows for
+> `.claude/**` while the worktree files are absent; a dangling tracked symlink; a permission drop in
+> a container stage; non-UTF-8 content, which this branch builds deliberately one directory over.
+> Reported now, same posture and same ratchet exemption as the unreadable corpus — because a partial
+> scan must not print like a clean one.
+>
+> **Round 52d — the rename sweep made a provenance false.** `.claudeignore` said *"the
+> RETRIEVAL-QMD-CI decision forbids settings.json changes (recorded on #671)"* — but that row was
+> opened *and* decided 2026-08-24 on #679. The constraint was right and the pointer sent a reader to
+> a row about wiring a suite into CI. **This is the mechanical consequence of the new rule, not a
+> slip**: the old line was a hard error and `s/OLD/NEW/` was the shortest green — while the rule
+> ships a clause-scoped escape precisely so a sentence ABOUT a superseded row can stay accurate. Both
+> now: the head carries it forward *from the superseded predecessor, recorded on #671*.

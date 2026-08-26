@@ -10330,7 +10330,7 @@ mod decision_ask_and_citations {
             );
             return;
         }
-        let (corpus_files, corpus_readable) = claude_citation_corpus(&root);
+        let (corpus_files, corpus_readable, _unread) = claude_citation_corpus(&root);
         assert!(corpus_readable, "git reported usable above, so the corpus walk must not have failed");
         // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
         // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
@@ -10487,18 +10487,40 @@ mod decision_ask_and_citations {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let row = fs::read_to_string(root.join("docs/decisions/RETRIEVAL-QMD-CI.yaml"))
             .expect("RETRIEVAL-QMD-CI.yaml");
+        // BOUND THE WINDOW FIRST, THEN READ BOTH THE NUMBER AND THE CLAUSES OUT OF IT.
+        //
+        // The CLAUSE half of this test was defended against `CLAUSE HISTORY` (which quotes `(c)`
+        // and `(d)` when narrating past misses); the WORD half was not, and it is the half that
+        // fails hard. `find_map` scanned the WHOLE ROW in ARRAY order, so the first spelled number
+        // anywhere won -- and this row's house style is verbatim quotation. The moment a future
+        // retraction is written the way the rest of the row writes them (`an earlier version said
+        // "THREE ADDITIONS RIDE ALONG" while four had landed`), `stated` is read out of HISTORY
+        // rather than out of the live sentence; worse, that match sits AFTER the `CLAUSE HISTORY`
+        // marker, so `row[start..].find("CLAUSE HISTORY")` returns None, `end` silently becomes
+        // `row.len()`, and the counting window is the whole tail -- exactly the prose the comment
+        // below says must not be counted.
+        //
+        // Cost when it fires: `cargo test` reds, `build-test` reds, `codegen` -- the required check
+        // -- reds, FROM A RECORDS-ONLY EDIT TO A YAML FILE, with a message accusing the author of an
+        // unnamed rider they did not add. Anchoring on the phrase and reading the number from the
+        // text immediately before it makes history unreachable by construction. (Review #52.)
+        let sentence_start = row
+            .find("ADDITIONS RIDE ALONG")
+            .expect("the row must state `<N> ADDITIONS RIDE ALONG` in words");
+        let end = row[sentence_start..]
+            .find("CLAUSE HISTORY")
+            .map_or(row.len(), |i| sentence_start + i);
         let (stated_word, stated) = ["TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT"]
             .iter()
             .enumerate()
             .find_map(|(i, w)| {
-                row.contains(&format!("{} ADDITIONS RIDE ALONG", w)).then_some((*w, i + 2))
+                row[..sentence_start].ends_with(&format!("{} ", w)).then_some((*w, i + 2))
             })
-            .expect("the row must state `<N> ADDITIONS RIDE ALONG` in words");
+            .expect("the row must state `<N> ADDITIONS RIDE ALONG` in words, immediately before the phrase");
         // The enumerated clauses, `(a)`..`(z)`, counted only inside the ride-along sentence -- the
         // CLAUSE HISTORY quotes `(c)` and `(d)` when narrating past misses, and counting those
         // would make this assertion drift with the prose it exists to pin.
-        let start = row.find(&format!("{} ADDITIONS RIDE ALONG", stated_word)).expect("just found");
-        let end = row[start..].find("CLAUSE HISTORY").map_or(row.len(), |i| start + i);
+        let start = sentence_start;
         let enumerated = ('a'..='z')
             .filter(|c| row[start..end].contains(&format!("({})", c)))
             .count();

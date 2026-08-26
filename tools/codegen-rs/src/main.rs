@@ -120,7 +120,7 @@ fn main() {
         // the correct order, because `docs/decisions/README.md` requires both halves of a
         // supersession in ONE commit and a stale citation is exactly the other half.
         {
-            let (cited, readable) = validate::decisions::claude_citation_corpus(&root);
+            let (cited, readable, unread) = validate::decisions::claude_citation_corpus(&root);
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
                 //
@@ -137,6 +137,22 @@ fn main() {
                     "decision-citation-corpus-unreadable",
                     "tools/codegen-rs".to_string(),
                     "`git ls-files` failed, so the superseded-citation corpus is EMPTY and `decision-superseded-authority` checked nothing. Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+                ));
+            }
+            // TRACKED, LISTED, AND NEVER OPENED. Same posture and same reason as the unreadable
+            // CORPUS above: fail open, report loudly, stay outside the §17 ratchet because the
+            // cause is the host (a sparse checkout, a dangling tracked symlink, a permission drop,
+            // non-UTF-8 content) and not this tree. Without it, `readable == true` reported the
+            // same green whether the rule scanned six files or sixty. (Review #52.)
+            if !unread.is_empty() {
+                dec_issues.push(model::warn(
+                    "decision-citation-corpus-unreadable",
+                    "tools/codegen-rs".to_string(),
+                    format!(
+                        "{} tracked file(s) in the superseded-citation corpus could not be read, so `decision-superseded-authority` did not scan them: {}. Not an error, and outside the section 17 ratchet (the cause is the HOST -- a sparse checkout, a dangling symlink, a permission drop or non-UTF-8 content -- not this tree). Reported because a partial scan must not print like a clean one.",
+                        unread.len(),
+                        unread.join(", ")
+                    ),
                 ));
             }
             dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));

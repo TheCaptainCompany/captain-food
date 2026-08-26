@@ -274,11 +274,23 @@ fingerprint() { # the real cache must be untouched by this suite, whether presen
   # one gates NINE case verdicts, this one gates the headline hermeticity clause every record
   # quotes), so a disagreement is review #42's finding re-created in the other direction: cases
   # printing `cache untouched` under a headline saying `NOT MEASURED`, or the reverse. (Review #49.)
+  #
+  # CHEAP TEST FIRST: CREATION NEEDS NO HASHER. Putting the capability probe above the existence
+  # test threw away the one hermeticity signal that still worked on a non-GNU host, and the comment
+  # three screens up says so in as many words -- "the `.qmd/`-absent case still caught CREATION
+  # (`absent` is not the empty string)". True of the code before round 36 and false after it: a
+  # macOS maintainer with no `.qmd/` yet went from `BEFORE=absent` / `AFTER=""` -> `CHANGED --
+  # VIOLATION`, fail+1, exit non-zero, to `unmeasurable` both times -> `NOT MEASURED`, exit 0. The
+  # invariant this file's HEADER NAMES FIRST -- "never creates or modifies the real repo .qmd/
+  # cache" -- went from detected-and-red to silently unmeasured. `[ -e ]` is POSIX; only
+  # MODIFICATION of an existing cache needs GNU find + md5sum, and only that case may degrade.
+  # (Review #52 of PR #679, on a regression review #36 introduced while fixing the other half.)
+  if [ ! -e "$REPO_ROOT/.qmd" ]; then echo absent; return; fi
   if ! can_fingerprint; then
     echo unmeasurable
     return
   fi
-  if [ -e "$REPO_ROOT/.qmd" ]; then find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum; else echo absent; fi
+  find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum
 }
 BEFORE="$(fingerprint)"
 
@@ -1002,15 +1014,23 @@ echo "----"
 # consumes a declared case, and false of this increment, which does not. (Review #25.)
 accounted=$((pass + fail + skip))
 AFTER="$(fingerprint)"
-if [ "$BEFORE" = unmeasurable ] || [ "$AFTER" = unmeasurable ]; then
+# COMPARE FIRST, CLASSIFY SECOND. Testing `unmeasurable` before the comparison threw the creation
+# signal away a second time, one function up from where review #52 restored it: with no hasher,
+# `absent` -> `unmeasurable` is a REAL transition (the suite created the cache) and the
+# unmeasurable-first branch reported `NOT MEASURED` over it. A DIFFERENCE is a violation whichever
+# side is unmeasurable -- it can only mean the cache appeared or vanished, which needs no hashing to
+# see. `NOT MEASURED` is then reserved for what it actually means: the cache existed before AND
+# after, and this host cannot tell whether its contents moved. Measured with `can_fingerprint`
+# forced false against a throwaway REPO_ROOT: `absent` -> created now reports the violation.
+if [ "$BEFORE" != "$AFTER" ]; then
+  hermetic="repo .qmd/ CHANGED -- VIOLATION"
+  fail=$((fail + 1))
+elif [ "$BEFORE" = unmeasurable ]; then
   # Not a failure and not a pass: the question was never asked. Said out loud in the clause every
   # record quotes, so nobody reads a green headline as a hermeticity guarantee it did not make.
   hermetic="repo .qmd/ hermeticity NOT MEASURED (needs GNU find -printf + md5sum)"
-elif [ "$BEFORE" = "$AFTER" ]; then
-  hermetic="repo .qmd/ untouched"
 else
-  hermetic="repo .qmd/ CHANGED -- VIOLATION"
-  fail=$((fail + 1))
+  hermetic="repo .qmd/ untouched"
 fi
 # THE COMPLETENESS ARITHMETIC IS COMPUTED BEFORE THE HEADLINE, because the headline is the line
 # everything quotes. `RESULT:` used to print above the check, so an incomplete run emitted
