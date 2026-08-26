@@ -9987,6 +9987,12 @@ mod decision_ask_and_citations {
             // The list marker must still be dropped, or a backticked key opening a bullet stops
             // reading as the citation form `SKILL.md:193` uses.
             ("a bullet opening with the key is still a citation form", "- `NEW-ROW` is the head."),
+            // `opens_a_parenthetical` used to accept ANY `(` or `[`, which made a markdown link's
+            // TEXT and an ordinary parenthetical mention into hard `make validate` errors with
+            // rewording as the only escape -- on `CLAUDE.md` among others (review #16).
+            ("a bare parenthetical mention", "(OLD-ROW was the first attempt)"),
+            ("a bracket that is not a citation", "[OLD-ROW] in the old numbering"),
+            ("a markdown link's TEXT", "see [OLD-ROW] for the history of this decision"),
         ] {
             let issues = check(".claude/x.md", body);
             assert!(
@@ -10998,6 +11004,38 @@ mod docs_only_ci_and_legacy_visibility {
         // Job scope: insert directly under `  changes:`. Workflow scope: before `jobs:`.
         let at_job = |body: &str| ci.replacen("  changes:\n", &format!("  changes:\n    env:\n      {}\n", body), 1);
         let at_workflow = |body: &str| ci.replacen("\njobs:\n", &format!("\nenv:\n  {}\njobs:\n", body), 1);
+        // MUTATE INSIDE ONE NAMED JOB. `ci.replacen(anchor, .., 1)` rewrites the FIRST match in
+        // the whole file, and job bodies here are near-identical: the anchor
+        // `steps:\n      - uses: actions/checkout@v5\n      - uses: dtolnay/rust-toolchain@stable`
+        // occurs in FIVE jobs, so a plant labelled `build-test ...` silently mutated `lint`,
+        // satisfied `assert_ne!` (the file did change) and pinned nothing. Review #16 caught the
+        // label/mutation mismatch on that entry; this closure is why fixing the label alone would
+        // not have fixed the plant. `runs-on: ubuntu-latest` appears SEVEN times and its two
+        // plants land in `changes` only because `changes` happens to be the first job -- exactly
+        // the kind of accident that stops being true when a job is reordered. Slicing to the job
+        // makes the class unspellable instead of asking every future author to check uniqueness,
+        // and the `contains` assertion turns a drifted anchor into a red rather than a silent
+        // no-op somewhere else.
+        let in_job = |job: &str, from: &str, to: &str| -> String {
+            let header = format!("\n  {}:\n", job);
+            let start = ci
+                .find(&header)
+                .unwrap_or_else(|| panic!("ci.yml has no `{}` job", job))
+                + 1;
+            // The next line indented by exactly two spaces is the next job header; job-level keys
+            // are indented four and step lines six or more.
+            let end = ci[start..]
+                .match_indices("\n  ")
+                .find(|(i, _)| !ci[start + i + 3..].starts_with(' '))
+                .map_or(ci.len(), |(i, _)| start + i + 1);
+            let slice = &ci[start..end];
+            assert!(
+                slice.contains(from),
+                "the `{}` job does not contain the anchor {:?} -- this plant would have mutated another job, or nothing",
+                job, from
+            );
+            format!("{}{}{}", &ci[..start], slice.replacen(from, to, 1), &ci[end..])
+        };
 
         let must_red: Vec<(&str, String)> = vec![
             ("job BASH_ENV", at_job("BASH_ENV: /tmp/preamble.sh")),
@@ -11051,7 +11089,18 @@ mod docs_only_ci_and_legacy_visibility {
             // in this file vacuous while `changes` stays green.
             ("build-test job LD_PRELOAD", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      LD_PRELOAD: /tmp/x.so\n", 1)),
             ("build-test job BASH_ENV", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      BASH_ENV: /tmp/preamble.sh\n", 1)),
-            ("build-test decoy checkout", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      GIT_DIR: /tmp/decoy/.git\n", 1)),
+            ("build-test job GIT_DIR", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      GIT_DIR: /tmp/decoy/.git\n", 1)),
+            // NAMED AFTER THE GUARD IT EXERCISES. This entry was labelled `build-test decoy
+            // checkout` while inserting a job-level `env: {GIT_DIR: ...}` -- a third copy of the
+            // `env_ok` plants beside it, so the checkout `repository`/`ref` assertions it was
+            // supposed to pin had NO plant and deleting them stayed green (review #16). A label is
+            // not coverage; the mutation is.
+            ("build-test checkout re-points ref", in_job("build-test",
+                "      - uses: actions/checkout@v5\n",
+                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/decoy\n")),
+            ("build-test checkout re-points repository", in_job("build-test",
+                "      - uses: actions/checkout@v5\n",
+                "      - uses: actions/checkout@v5\n        with:\n          repository: someone/else\n")),
             // The oracle's OTHER config route: global config -> core.attributesFile -> a
             // filter.<x>.clean driver that re-emits the committed blob (review #15).
             ("job XDG_CONFIG_HOME", at_job("XDG_CONFIG_HOME: /tmp/x")),
@@ -11128,7 +11177,7 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
                 "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n          fetch-depth: 0",
                 1)),
-            ("a self-hosted pool labelled to look hosted", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom", 1)),
+            ("a self-hosted pool labelled to look hosted", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
         ];
         let mut survived = Vec::new();
         for (name, mutated) in &must_red {
@@ -11142,7 +11191,7 @@ mod docs_only_ci_and_legacy_visibility {
         // retracted twice; these are the controls that keep it honest.
         let must_stay_green: Vec<(&str, String)> = vec![
             ("job CARGO_TERM_COLOR", at_job("CARGO_TERM_COLOR: always")),
-            ("a pinned GitHub-hosted runner image", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04", 1)),
+            ("a pinned GitHub-hosted runner image", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04")),
             ("workflow CARGO_TERM_COLOR", at_workflow("CARGO_TERM_COLOR: always")),
             ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
             ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),
@@ -11178,7 +11227,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 43 && must_stay_green.len() >= 9,
+            must_red.len() >= 45 && must_stay_green.len() >= 12,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

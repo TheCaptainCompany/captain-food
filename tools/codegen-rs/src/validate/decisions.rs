@@ -879,8 +879,23 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // Strip quoting marks first, THEN look for an opening bracket, because the
                     // bracket is itself the citing signal in `(\`KEY\`, decided ...)`. Stripping
                     // it away before testing is what made that form invisible.
-                    let quoted = line[..at].trim_end().trim_end_matches(['`', '"', '\'']).trim_end();
-                    let opens_a_parenthetical = quoted.ends_with('(') || quoted.ends_with('[');
+                    let raw_before = line[..at].trim_end();
+                    // THE BACKTICK IS THE CITING SIGNAL, and `[` is not one at all. Accepting any
+                    // `(` or `[` made a markdown LINK to the row's file -- `[KEY](path)`, the
+                    // ordinary way a doc points at a record -- and any parenthetical that merely
+                    // MENTIONS the key (`(KEY was the first attempt)`) into hard `make validate`
+                    // errors, on `CLAUDE.md` among others, with rewording as the only escape. That
+                    // is the "a red whose escape is silence" shape this file argues against
+                    // everywhere. The form the arm was added for is SKILL.md's `` (`KEY`, decided
+                    // ... `` -- a BACKTICKED key immediately inside a paren -- so require exactly
+                    // that. `[` goes entirely: a link's TARGET is a path, and the
+                    // `docs/decisions/<KEY>.yaml` arm below reaches it with the right semantics
+                    // (pointing a session at a dead row's file IS the defect); the link's TEXT is
+                    // not a citation on its own. Review #16 of PR #679; no green control covered
+                    // either spelling, which is why the class was invisible.
+                    let backticked = raw_before.ends_with('`');
+                    let quoted = raw_before.trim_end_matches(['`', '"', '\'']).trim_end();
+                    let opens_a_parenthetical = backticked && quoted.ends_with('(');
                     let mut before = quoted;
                     loop {
                         let next = before.trim_end().trim_end_matches([':', '(', '[', '*', '_', '-']);

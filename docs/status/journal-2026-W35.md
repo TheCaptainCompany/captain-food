@@ -490,3 +490,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > so it grows monotonically while the uncovered set grows with it. The question a mutation corpus
 > has to answer is not "how many mutants" but "which assertion does each one pin, and which
 > assertion has none" — and the only way to answer it is to delete an assertion and watch.
+>
+> **Round 17 — a plant can apply, change the file, and still pin nothing.** The entry labelled
+> `build-test decoy checkout` inserted a job-level `env: {GIT_DIR: …}`: a third copy of the `env_ok`
+> plants beside it, not a `with: {repository|ref}` on a checkout. So the assertions it was named for
+> had no plant at all. Correcting the label was not enough — the corrected mutation ALSO pinned
+> nothing, because `ci.replacen(anchor, .., 1)` rewrites the FIRST match in the whole file and
+> `steps: / - uses: actions/checkout@v5 / - uses: dtolnay/rust-toolchain@stable` occurs in **five**
+> jobs. The plant mutated `lint`, satisfied `assert_ne!(mutated, &ci)` — the file *did* change — and
+> was vacuous. `runs-on: ubuntu-latest` appears **seven** times and its two plants land in `changes`
+> only because `changes` happens to be the first job, which stops being true the moment a job is
+> reordered. Closed with an `in_job(job, from, to)` slicer that mutates inside one named job and
+> asserts the anchor is present there, so a drifted anchor reds instead of silently mutating
+> somewhere else. **The rule: `assert_ne!(mutated, original)` proves a mutation APPLIED, never that
+> it applied WHERE THE LABEL SAYS. In a file of near-identical job bodies those are different
+> claims, and only the second is coverage.**
+>
+> **`opens_a_parenthetical` accepted any `(` or `[`**, which made a markdown link's TEXT
+> (`[KEY](path)`) and any parenthetical mention (`(KEY was the first attempt)`) into hard
+> `make validate` errors — on `CLAUDE.md` among others, with rewording as the only escape. The form
+> the arm exists for is `SKILL.md`'s `` (`KEY`, decided … `` — a BACKTICKED key inside a paren — so
+> it now requires exactly that, and `[` is dropped entirely: a link's TARGET is a path, which the
+> `docs/decisions/<KEY>.yaml` arm reaches with the right semantics, and its TEXT is not a citation.
+> Three green controls added; **no control covered either spelling, which is the third time in this
+> chain that a class was invisible because the fixtures did not contain it.**
