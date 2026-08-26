@@ -8452,6 +8452,57 @@ fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
     assert_eq!(p.get("ref-unresolved"), None, "errors are not part of the warning ratchet");
 }
 
+/// A HOST-DEPENDENT warning is reported and never ratcheted, and the exempt list stays exactly one.
+///
+/// The ratchet's contract is byte-stability: the artifact claims what THIS TREE produces. A signal
+/// that fires on one machine and not another has no stable value to commit, so routing one in makes
+/// the gate fail in whichever direction the author's machine pointed. Measured on
+/// `decision-citation-corpus-unreadable` (review #35 of PR #679): absent from the baseline, its
+/// first appearance scored `0 -> 1 (NEW warning kind)` and `make validate` EXITED 1 — with a
+/// message naming the warning baseline rather than git, under a code comment that said "Not an
+/// error", and printing a remedy (`make warning-baseline`) that would have committed a baseline
+/// asserting the citation gate checked nothing, which then reds in the opposite direction wherever
+/// git works.
+///
+/// The list is asserted, not merely written: every entry removes a kind from the only gate that
+/// counts warnings, so growing it is a decision. A new entry reds here until it is stated.
+#[test]
+fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
+    assert_eq!(
+        RATCHET_EXEMPT.to_vec(),
+        vec!["decision-citation-corpus-unreadable"],
+        "the ratchet exemption list changed. Each entry removes a warning kind from the ONLY gate that counts warnings, so it is a decision, not a refactor: state why the kind depends on the HOST rather than on this tree, in `RATCHET_EXEMPT`'s doc comment, and update this assertion deliberately"
+    );
+    // The exemption is about the KIND, not about the level: an exempt kind still counts as a
+    // warning everywhere else, and a NON-exempt warning must still ratchet beside it.
+    let issues = vec![
+        warn("decision-citation-corpus-unreadable", "tools/codegen-rs".into(), String::new()),
+        warn("command-no-mutation", "a".into(), String::new()),
+    ];
+    let p = warning_profile(&issues);
+    assert_eq!(
+        p.get("decision-citation-corpus-unreadable"),
+        None,
+        "an exempt kind entered the ratchet -- on any tree where `git ls-files` fails (a bind-mounted checkout, a `git archive` extraction, a container stage without `.git`) `make validate` then exits 1 with a message about the warning baseline, and the remedy it prints commits a baseline that says this gate checked nothing"
+    );
+    assert_eq!(
+        p.get("command-no-mutation"),
+        Some(&1),
+        "the exemption widened past its list -- ordinary warnings must still ratchet"
+    );
+    // AND THE COMMITTED ARTIFACT MUST NOT ALREADY CARRY ONE. If a previous run blessed the kind
+    // into the baseline, this exemption turns that entry into a permanent `1 -> 0` red instead.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let committed = fs::read_to_string(root.join(WARNING_BASELINE_PATH)).expect("warning-baseline.json");
+    for kind in RATCHET_EXEMPT {
+        assert!(
+            !committed.contains(kind),
+            "`{}` is exempt from the ratchet but is COMMITTED in {} -- the live profile can never contain it again, so the baseline reds `{} : 1 -> 0 (kind eliminated)` on every host forever. Run `make warning-baseline` and commit the result",
+            kind, WARNING_BASELINE_PATH, kind
+        );
+    }
+}
+
 /// Round-trip, and the self-consistency check that makes a hand-edit visible: `total` is not an
 /// independent field you can nudge — it must equal the histogram sum.
 #[test]
@@ -9988,6 +10039,19 @@ mod decision_ask_and_citations {
             // row goes green. The control that claimed to cover this was scanning a key the fixture
             // does not declare (review #25).
             ("a numbered item opening with the key", "1. `OLD-ROW` still governs the rollback path."),
+            // `SKILL.md:193`'S ACTUAL SPELLING -- a backticked key at the END of a parenthetical,
+            // not adjacent to its `(`. `opens_a_parenthetical` required adjacency, so the one site
+            // the records NAME as proof the corpus is covered was the site still missed; it redded
+            // only by luck, because three other lines in the same file do. The wrapped form is the
+            // one that ships: `logical_units` joins it, which is what put the key mid-unit.
+            (
+                "a backticked key closing a parenthetical",
+                "pinned there by the codegen test (decided 2026-08-24,\n`OLD-ROW`). Re-run it locally.",
+            ),
+            (
+                "a backticked key mid-parenthetical",
+                "the step is authorized (see `OLD-ROW` and the ADR) and nothing else.",
+            ),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -10058,6 +10122,36 @@ mod decision_ask_and_citations {
             (
                 "a wrapped bullet whose explanation lands on the next line",
                 "- row `OLD-ROW` no longer governs, having been\n  superseded by the chain head.",
+            ),
+            // AN ABBREVIATION DOT IS NOT A SENTENCE DOT. `.` was a boundary whenever the next
+            // char was whitespace, which is true of the final dot of `i.e.` / `e.g.` -- so the
+            // clause was truncated INSIDE the explanation and the `superseded` exemption could
+            // never see it. `Per row \`OLD-ROW\`, i.e. the row superseded by ...` was a hard
+            // `make validate` error whose only escape was rewording, in the sentence the docstring
+            // says is legal. Invisible to this set because every control above separates its
+            // explanation with `;`, ` -- ` or a plain sentence dot (review #35).
+            (
+                "an i.e. explanation after the citation",
+                "Per row `OLD-ROW`, i.e. the row superseded by `NEW-ROW`.",
+            ),
+            (
+                "an e.g. explanation before the citation",
+                "Rows go stale, e.g. `OLD-ROW` is superseded; name the head.",
+            ),
+            (
+                "a single-segment abbreviation, cf.",
+                "cf. row `OLD-ROW`, superseded by the chain head.",
+            ),
+            // THE PARENTHETICAL WIDENING MUST NOT BECOME THE NEXT FALSE-RED INSTRUMENT. The
+            // BACKTICK still carries the whole distinction, so a link whose TARGET is inside the
+            // parens (no backtick immediately before the key) and an unbackticked mention both
+            // stay green -- the two spellings review #16 named when it narrowed `[` out of the
+            // original arm.
+            ("a link target inside parens", "see [the predecessor](../decisions/notes/OLD-ROW-history.md) for why"),
+            ("an unbackticked parenthetical mention", "the pin was rewritten (OLD-ROW was the first attempt) in round 4"),
+            (
+                "a backticked key inside a parenthetical that explains the supersession",
+                "the pin was rewritten (`OLD-ROW`, superseded by the head) in round 4",
             ),
             // A markdown continuation is INDENTED, not re-marked -- which is exactly what lets the
             // block rule tell this apart from the two reds above.
@@ -10147,8 +10241,13 @@ mod decision_ask_and_citations {
         // shape of `cargo test --workspace` in a container. The `must_reach` loop below then reds
         // with "the citation corpus no longer reaches ... Got 0 files", sending the reader to hunt
         // a narrowed pathspec nobody narrowed. And the inversion is the awkward half: in that same
-        // environment `make validate` goes deliberately QUIET, while `cargo test` screams about the
-        // wrong cause. `the_gate_self_verification_reds_on_a_tampered_script` next door already
+        // environment `make validate` reports a WARNING and passes
+        // (`decision-citation-corpus-unreadable`, ratchet-exempt since review #35), while
+        // `cargo test` screams about the wrong cause. This sentence said `make validate` "goes
+        // deliberately QUIET", which was true when written, stopped being true when review #27
+        // added the warning -- at which point it FAILED, on the §17 ratchet, about the wrong
+        // artifact -- and is corrected here rather than left as the argument for the branch below.
+        // `the_gate_self_verification_reds_on_a_tampered_script` next door already
         // skips on this condition, and `stub-tests.sh`'s T15g rule says a host capability is a loud
         // skip and never a red (review #25).
         //
@@ -11856,6 +11955,28 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n          fetch-depth: 0",
                 1)),
             ("a self-hosted pool labelled to look hosted", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
+            // ── THE FIVE ASSERTIONS THAT HAD NO PLANT ─────────────────────────────────────────
+            // Review #35 measured what the corpus still leaves standing on a sentence: of the
+            // job-level key ban `["if", "continue-on-error", "strategy", "needs"]` only two
+            // elements were planted, of `["container", "services"]` only one, and neither the
+            // non-string `runs-on` arm nor the must-check-the-repository-out assertion had
+            // anything. Deleting `"needs"` from that array -- the element whose own comment calls
+            // it load-bearing -- was a one-character edit that left every mutant and every control
+            // in this test behaving identically. That is the round-8 shape (a guard lost in a
+            // refactor, measured green two rounds later) reproduced inside the harness written to
+            // stop it, and `must_red.len() >= N` cannot see it: shape #1, again.
+            //
+            // `needs: lint` is a load-time CYCLE on GitHub (`lint` needs `changes`), which is the
+            // comment's reason for calling the real exploit awkward -- but this test parses YAML,
+            // and the assertion under test is about the KEY, so the cycle is irrelevant to what is
+            // being pinned. The exploitable spelling adds a job; this is the same key.
+            ("changes job gains strategy", ci.replacen("  changes:\n", "  changes:\n    strategy:\n      matrix:\n        x: [1]\n", 1)),
+            ("changes job gains needs", ci.replacen("  changes:\n", "  changes:\n    needs: lint\n", 1)),
+            ("changes job gains services", ci.replacen("  changes:\n", "  changes:\n    services:\n      pg:\n        image: postgres:16-alpine\n", 1)),
+            ("changes runs-on as a label list", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: [self-hosted, linux]")),
+            ("the changes job loses its checkout", in_job("changes",
+                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0   # need the base commit to diff against\n",
+                "")),
             // ── THE REQUIRED CHECK ITSELF ──────────────────────────────────────────────────────
             // Every plant above disarms a job that CARRIES a pin. These eight disarm the job that
             // REPORTS -- `codegen`, the required status check on `main`. Each one leaves every
@@ -11945,7 +12066,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 72 && must_stay_green.len() >= 16,
+            must_red.len() >= 77 && must_stay_green.len() >= 16,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

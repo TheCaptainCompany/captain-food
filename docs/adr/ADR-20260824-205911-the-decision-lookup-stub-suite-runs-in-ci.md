@@ -116,8 +116,17 @@ cache.
 ## Consequences
 
 - Every push now proves the wrapper's 54 cases on a machine that is not the author's. A host
-  assumption that drifts (python3, bash, PATH) reds a cheap job instead of silently un-verifying the
-  supply-chain gate.
+  assumption that drifts (python3, bash, PATH) reds instead of silently un-verifying the
+  supply-chain gate — **and the cost of that red is the whole pipeline, not one job.** This line
+  first said *"reds a cheap job"*, which
+  [`GATE-STEP-LOCUS`](../decisions/GATE-STEP-LOCUS.yaml) — filed in this same change — contradicts
+  in its own words: every other job carries `needs: changes`, so the red skips `lint`, `specs`,
+  `build-test` and `db-test`, and `codegen` reds on `failure` in `needs.*.result`. On the docs-only
+  lane it costs `docs-validate`, the only gate that lane has, because GitHub skips a job whose
+  dependency FAILED without evaluating its `if:`. Read that row for the sizing and the options; it
+  is the record that prices this, and the two must not read as disagreeing. (The claim written
+  before its antecedent was checked — this branch's own recurring defect — landing in the record
+  that closes it. Corrected by the independent review, round 35.)
 - `tools/codegen-rs` gains one more artifact it pins. That is the accepted shape of this repo's
   CI-pinning rule and mirrors an existing precedent.
 - The decision chain for QMD retrieval now has two links. A reader resolving `RETRIEVAL-QMD` is

@@ -946,9 +946,38 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     //
                     // Whitespace on BOTH sides, so `--no-filters` and `--depth=1` are not
                     // boundaries: the dash-dash has to be a dash, not the head of a flag.
+                    // AN ABBREVIATION DOT IS INSIDE A SENTENCE AND IS FOLLOWED BY A SPACE, so the
+                    // whitespace test alone calls it a boundary and truncates the clause there.
+                    // `Per row \`OLD-ROW\`, i.e. the row superseded by \`NEW-ROW\`.` redded as a hard
+                    // error: `cites` fires on `row`, the forward scan stops at the dot in `e.`, and
+                    // the `superseded` that EXPLAINS the citation is outside the clause -- the "a
+                    // red whose escape is silence" shape this file argues against in five places,
+                    // with rewording or re-wrapping as the author's only move. Invisible to the
+                    // control set for the same reason review #25 gives for the em-dash: every green
+                    // control separates its explanation with `;`, ` -- ` or a plain sentence dot.
+                    //
+                    // Two rules, both structural rather than a taste call. INTERIOR DOTS: the token
+                    // ending at this dot itself contains one (`i.e`, `e.g`, `a.k.a`, `U.S`) -- a
+                    // sentence-final word never does. NAMED SINGLE-SEGMENT ABBREVIATIONS: a short
+                    // closed list. `no.`, `etc.` and `al.` are deliberately NOT on it -- each is
+                    // also an ordinary sentence-final word in this corpus, and admitting them would
+                    // extend clauses past real sentence ends, which is the permissive direction and
+                    // the one that makes a live stale citation exempt. A miss here costs a
+                    // reword; a false accept costs the gate. (Review #35.)
+                    const ABBREVIATIONS: [&str; 5] = ["cf", "vs", "viz", "resp", "approx"];
+                    let ends_an_abbreviation = |i: usize| {
+                        let word = line[..i]
+                            .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
+                            .next()
+                            .unwrap_or("");
+                        word.contains('.') || ABBREVIATIONS.contains(&word.to_lowercase().as_str())
+                    };
                     let is_boundary = |i: usize, c: char| match c {
                         ';' | '—' => true,
-                        '.' => line[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace),
+                        '.' => {
+                            !ends_an_abbreviation(i)
+                                && line[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace)
+                        }
                         '-' => {
                             line[i..].starts_with("--")
                                 && line[..i].chars().next_back().is_none_or(char::is_whitespace)
@@ -1013,7 +1042,31 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // either spelling, which is why the class was invisible.
                     let backticked = raw_before.ends_with('`');
                     let quoted = raw_before.trim_end_matches(['`', '"', '\'']).trim_end();
-                    let opens_a_parenthetical = backticked && quoted.ends_with('(');
+                    // ADJACENCY WAS AN ACCIDENT OF THE ONE SITE THE ARM WAS WRITTEN FOR.
+                    // `quoted.ends_with('(')` catches `` (`KEY`, decided ... `` -- SKILL.md:326 --
+                    // and misses `` (decided 2026-08-24, `KEY`) ``, which is SKILL.md:193, the
+                    // line the comment three screens up NAMES as the form the marker-only-line fix
+                    // restores. It is a wrapped markdown continuation, so `logical_units` joins it,
+                    // the key lands mid-unit, `,` is not in the trim set (so `before` is non-empty)
+                    // and `last` is a separator (so no citing token fires either): the site the
+                    // records cite to prove the corpus is covered was the one still missed. It was
+                    // caught in practice only because three OTHER SKILL.md lines red, so an author
+                    // fixing those passes over it -- coverage by accident, which is the property
+                    // this file spends thirty rounds removing from its neighbours. (Review #35.)
+                    //
+                    // So the test is CONTAINMENT, not adjacency: a backticked key anywhere inside
+                    // an open parenthetical within this clause. That does not widen the class the
+                    // adjacent form already accepted -- `` (`KEY` was the first attempt) `` was
+                    // already a citation under it -- and the BACKTICK still carries the whole
+                    // distinction, so a markdown link's target (`[text](docs/.../KEY.yaml)`, no
+                    // backtick before the key) and an unbackticked mention `(KEY was ...)` both
+                    // stay green. Green controls for both live beside the red.
+                    let depth = line[clause_start..at].chars().fold(0i32, |d, c| match c {
+                        '(' => d + 1,
+                        ')' => (d - 1).max(0),
+                        _ => d,
+                    });
+                    let opens_a_parenthetical = backticked && (quoted.ends_with('(') || depth > 0);
                     let mut before = quoted;
                     loop {
                         let next = before.trim_end().trim_end_matches([':', '(', '[', '*', '_', '-']);

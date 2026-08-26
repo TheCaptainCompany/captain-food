@@ -43,11 +43,43 @@ line in the PR body saying why the warning is accepted.";
 /// without catching anything a per-kind count misses at this granularity.
 pub(crate) type WarningProfile = BTreeMap<String, usize>;
 
+/// Warning kinds DELIBERATELY OUTSIDE the ratchet, because their presence depends on the HOST
+/// rather than on the repository.
+///
+/// The ratchet's whole contract is byte-stability: the artifact is a claim about what THIS TREE
+/// produces, and exact-match-both-ways is what makes it un-stale-able. A signal that fires on one
+/// machine and not another has no stable value to commit, and routing one in makes the artifact
+/// lie in whichever direction the author's machine happened to point.
+///
+/// `decision-citation-corpus-unreadable` is the case that earned this list, and it earned it by
+/// being wrong in both directions at once (review #35 of PR #679). It fires when `git ls-files`
+/// exits non-zero — `fatal: detected dubious ownership in repository` on a bind-mounted or
+/// differently-owned tree, a `git archive` extraction, a container stage that drops `.git`. Before
+/// this list: the kind was absent from the baseline, so the first such run scored it
+/// `0 -> 1 (NEW warning kind)` and `make validate` FAILED — a comment two files over saying "Not
+/// an error" over a code path that exits 1, with a message naming neither git nor the corpus. And
+/// the remedy that message prints (`make warning-baseline`, which CLAUDE.md also prescribes)
+/// commits a baseline asserting *the citation gate checked nothing*, which then reds in the
+/// opposite direction (`kind eliminated`) on every host where git works. Both a false red and a
+/// trap for the reader who obeys it.
+///
+/// The posture is fail-OPEN and LOUD: the warning still prints in the `checks:` listing, so "did
+/// not look" and "found nothing" still read differently. It just does not enter an artifact whose
+/// value it cannot stably have. Adding a kind here is a decision — it removes that kind from the
+/// only gate that counts warnings — so the list is asserted by
+/// `only_host_dependent_warnings_are_exempt_from_the_ratchet` rather than merely written.
+pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadable"];
+
 /// The live profile of a validation run. Takes ALL issues (the spec validator's plus §13 proposal
-/// hygiene, exactly what `checks: N error(s), M warning(s)` counts) and keeps the warnings.
+/// hygiene, exactly what `checks: N error(s), M warning(s)` counts) and keeps the warnings that
+/// the ratchet governs — see `RATCHET_EXEMPT` for the ones it deliberately does not.
 pub(crate) fn warning_profile(issues: &[Issue]) -> WarningProfile {
     let mut out: WarningProfile = BTreeMap::new();
-    for i in issues.iter().filter(|i| i.level == Level::Warning) {
+    for i in issues
+        .iter()
+        .filter(|i| i.level == Level::Warning)
+        .filter(|i| !RATCHET_EXEMPT.contains(&i.rule))
+    {
         *out.entry(i.rule.to_string()).or_insert(0) += 1;
     }
     out

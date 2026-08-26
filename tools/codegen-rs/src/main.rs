@@ -114,10 +114,20 @@ fn main() {
             let (cited, readable) = validate::decisions::claude_citation_corpus(&root);
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
+                //
+                // WARNING-LEVEL AND RATCHET-EXEMPT, and the second half is not a detail: §17 is
+                // exact-match in BOTH directions, so a kind absent from the baseline scores
+                // `0 -> 1 (NEW warning kind)` and exits 1. This comment used to say "Not an error"
+                // over exactly that path -- `make validate` FAILED the first time `git ls-files`
+                // did, with a message naming the warning baseline rather than git, and the remedy
+                // it printed (`make warning-baseline`) would have committed a baseline asserting
+                // that this gate checked nothing, which then reds in the opposite direction on
+                // every host where git works. `RATCHET_EXEMPT` in `validate/warning_baseline.rs`
+                // carries the reasoning and the assertion; the claim is true now. (Review #35.)
                 dec_issues.push(model::warn(
                     "decision-citation-corpus-unreadable",
                     "tools/codegen-rs".to_string(),
-                    "`git ls-files` failed, so the superseded-citation corpus is EMPTY and `decision-superseded-authority` checked nothing. Not an error -- a corpus this cannot read is not a corpus it may judge -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+                    "`git ls-files` failed, so the superseded-citation corpus is EMPTY and `decision-superseded-authority` checked nothing. Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
                 ));
             }
             dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));

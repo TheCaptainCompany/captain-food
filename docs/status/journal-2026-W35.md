@@ -988,3 +988,61 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > [`docs/claude/sessions/gates.md` §19](../claude/sessions/gates.md), with the two record-side rules
 > (a count retracted twice will be retracted a third time; a verification recipe is itself a derived
 > claim) beside them, and all four citations re-pointed at the section.
+>
+> **Round 35 — a warning that says "Not an error" over a code path that exits 1, and a fix whose
+> printed remedy poisons the artifact it names.** `decision-citation-corpus-unreadable` was added in
+> round 27 at `Level::Warning`, and §17 is exact-match **in both directions**: a kind absent from
+> `warning-baseline.json` scores `0 -> 1 (NEW warning kind)` and `make validate` **fails**. So on the
+> first tree where `git ls-files` exits non-zero — `fatal: detected dubious ownership` on a
+> bind-mounted checkout, a `git archive` extraction, a container stage without `.git` — the gate reds
+> with a message naming neither git nor the corpus. **And the remedy that message prints is a trap in
+> both directions**: `make warning-baseline` (which CLAUDE.md also prescribes) commits a baseline
+> asserting *the citation gate checked nothing*, and that baseline then reds `1 -> 0 (kind
+> eliminated)` on every host where git works, where the next reader's remedy is to put it back.
+>
+> **A signal that depends on the HOST has no stable value to commit**, and the ratchet's whole
+> contract is byte-stability. `RATCHET_EXEMPT` in `warning_baseline.rs` carries exactly one kind,
+> with the reasoning, and `only_host_dependent_warnings_are_exempt_from_the_ratchet` asserts both the
+> list and that the committed artifact does not already carry the kind — because if a previous
+> `make warning-baseline` had blessed it, the exemption would turn that entry into a permanent red.
+> The posture is fail-open and **loud**: the warning still prints, so "did not look" and "found
+> nothing" still read differently. Two prose sites that had gone false with it are corrected in
+> place, including `tests.rs`'s *"`make validate` goes deliberately QUIET"* — the stated argument for
+> the `SKIP:` branch beside it.
+>
+> **Round 35b — the site the records cite to prove the corpus is covered was the site still missed.**
+> `opens_a_parenthetical` required the backticked key to be ADJACENT to its `(`, which is
+> `SKILL.md:326`'s spelling. `SKILL.md:193` — the line the code comment NAMES as the form the
+> marker-only-line fix restores — is `` (decided 2026-08-24,\n`RETRIEVAL-QMD-CI`) ``: a wrapped
+> continuation, so the join puts the key mid-unit behind a comma that is not in the trim set. It
+> redded only because three other lines in the same file do, so an author fixing those passes over
+> it. **Coverage by accident**, in the one site named as evidence. The test is containment now, and
+> the backtick still carries the whole distinction — a link target inside parens and an unbackticked
+> mention both have green controls beside the red.
+>
+> **Round 35c — an abbreviation dot is inside a sentence and is followed by a space.** So
+> ``Per row `OLD-ROW`, i.e. the row superseded by `NEW-ROW`.`` was a hard error: the forward scan
+> stopped at the dot in `e.`, and the `superseded` that explains the citation fell outside the
+> clause. The docstring calls that sentence legal. Two structural rules — a token containing an
+> interior dot (`i.e`, `e.g`, `a.k.a`), and a five-name closed list (`cf`, `vs`, `viz`, `resp`,
+> `approx`). **`no.`, `etc.` and `al.` are deliberately excluded**: each is also an ordinary
+> sentence-final word here, and admitting them extends clauses past real sentence ends — the
+> permissive direction, where a live stale citation gets exempted. A miss costs a reword; a false
+> accept costs the gate. Invisible to the control set for the same reason review #25 gives for the
+> em-dash: every green control separated its explanation with `;`, ` -- ` or a plain sentence dot.
+>
+> **Round 35d — five assertions with no plant, one of them the element whose own comment calls it
+> load-bearing.** Of the job-key ban `["if", "continue-on-error", "strategy", "needs"]` only two were
+> planted; of `["container", "services"]` only one; the non-string `runs-on` arm and the
+> must-check-the-repository-out assertion had none. **Deleting `"needs"` was a one-character edit
+> that left every mutant and every control behaving identically.** Five plants added, and each was
+> measured against its own assertion — remove the assertion, that plant and only that plant survives
+> — because a plant that reds for the wrong reason is worse than none.
+>
+> **Round 35e — two records corrected.** The ADR's Consequences said a host drift *"reds a cheap
+> job"*, which `GATE-STEP-LOCUS`, filed in the same commit, contradicts in its own words. And that
+> row's `timeout-minutes` deferral cited `RETRIEVAL-QMD-CI` as though it governed the whole workflow
+> file, which the row explicitly disclaims (*"says nothing about unrelated CI work"*). The honest
+> reason is scope discipline — this PR's verified claim is one non-comment line pair in `ci.yml` —
+> and it now says so, next to the note that the new pin permits `timeout-minutes` and that after this
+> PR it is the only mitigation left.
