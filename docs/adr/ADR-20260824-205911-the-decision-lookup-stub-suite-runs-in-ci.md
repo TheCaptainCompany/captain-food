@@ -127,6 +127,15 @@ cache.
   is the record that prices this, and the two must not read as disagreeing. (The claim written
   before its antecedent was checked — this branch's own recurring defect — landing in the record
   that closes it. Corrected by the independent review, round 35.)
+- **And the cost is a MERGE BLOCK, not only lost signal** (round 37): `codegen` is the required
+  check, it reds on `needs.changes.result == failure`, and the posture is auto-merge-on-green — so
+  a red here stops anything merging, on any branch, for any diff. With no `timeout-minutes` that
+  window was GitHub's 360-minute default, in the job that now runs a python3-heavy suite whose own
+  step comment names three host-drift classes as expected failure modes; at peak
+  (Friday/Saturday 19:00–21:30) that is a path to "no checkout, dispatch or payments fix merges for
+  six hours". **This change therefore also sets `timeout-minutes: 10` on `changes`** — ~30× its
+  observed duration, so it bounds a hang and nothing else — pinned by `assert_pinned_in_changes_job`
+  (the key is required and capped at 30). It does **not** settle `GATE-STEP-LOCUS`.
 - `tools/codegen-rs` gains one more artifact it pins. That is the accepted shape of this repo's
   CI-pinning rule and mirrors an existing precedent.
 - The decision chain for QMD retrieval now has two links. A reader resolving `RETRIEVAL-QMD` is

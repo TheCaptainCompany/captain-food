@@ -11244,6 +11244,27 @@ mod docs_only_ci_and_legacy_visibility {
                 }
             }
         }
+        // A BOUND ON THE HANG, ASSERTED. Every other job `needs:` this one and `codegen` -- the
+        // REQUIRED check -- reds on `needs.changes.result == failure`, so a hang here stops
+        // ANYTHING merging, on any branch, for any diff. Without `timeout-minutes` that window is
+        // GitHub's 360-minute default, and this job runs a suite whose own step comment names three
+        // host-drift classes as expected failure modes. Raised twice by review of PR #679 and
+        // applied there; `GATE-STEP-LOCUS` (in-job vs sibling job) stays open and is not settled
+        // by it. The CAP is the half that matters as much as the key: `timeout-minutes: 600` is
+        // the 360-minute default with extra steps, so a value is required AND bounded. 30 minutes
+        // is far above anything this job legitimately does (~20s observed) and far below "a shift".
+        let timeout = changes_val
+            .get("timeout-minutes")
+            .and_then(|t| t.as_u64())
+            .unwrap_or_else(|| panic!(
+                "the `changes` job must declare a `timeout-minutes` INTEGER -- every other job `needs:` it and `codegen` reds on its failure, so a hung step here blocks every merge in the repository for GitHub's 360-minute default while {} reports nothing at all",
+                what
+            ));
+        assert!(
+            (1..=30).contains(&timeout),
+            "the `changes` job's `timeout-minutes` is {} -- it must be in 1..=30. A large value is the 360-minute default with extra steps: a hung probe in this job blocks every merge in the repository for that long, including a peak-hour fix to checkout, dispatch or payments",
+            timeout
+        );
         for key in ["container", "services"] {
             assert!(
                 changes_val.get(key).is_none(),
@@ -12008,6 +12029,8 @@ mod docs_only_ci_and_legacy_visibility {
             ("changes job gains needs", ci.replacen("  changes:\n", "  changes:\n    needs: lint\n", 1)),
             ("changes job gains services", ci.replacen("  changes:\n", "  changes:\n    services:\n      pg:\n        image: postgres:16-alpine\n", 1)),
             ("changes runs-on as a label list", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: [self-hosted, linux]")),
+            ("the changes job loses its timeout", in_job("changes", "    timeout-minutes: 10\n", "")),
+            ("the changes job's timeout is the default with extra steps", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 360")),
             ("the changes job loses its checkout", in_job("changes",
                 "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0   # need the base commit to diff against\n",
                 "")),
@@ -12049,6 +12072,9 @@ mod docs_only_ci_and_legacy_visibility {
         let must_stay_green: Vec<(&str, String)> = vec![
             ("job CARGO_TERM_COLOR", at_job("CARGO_TERM_COLOR: always")),
             ("a pinned GitHub-hosted runner image", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04")),
+            // The cap must not become a second false-red instrument: any sane bound is fine.
+            ("a tighter timeout", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 5")),
+            ("a looser but still bounded timeout", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 25")),
             ("workflow CARGO_TERM_COLOR", at_workflow("CARGO_TERM_COLOR: always")),
             ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
             // THE INERT HALF OF THE `PYTHON*` FAMILY. `k.starts_with("PYTHON")` banned these, so
@@ -12107,7 +12133,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 79 && must_stay_green.len() >= 19,
+            must_red.len() >= 81 && must_stay_green.len() >= 21,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

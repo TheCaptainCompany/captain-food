@@ -49,6 +49,20 @@ jobs:
     # when the diff is non-empty, the base commit is resolvable, and EVERY changed file is
     # documentation - any doubt means false, so the full gate runs (fail-open).
     runs-on: ubuntu-latest
+    # EVERY OTHER JOB `needs:` THIS ONE, AND `codegen` -- the REQUIRED check on `main` -- reds on
+    # `needs.changes.result == failure`. So a hang here does not merely lose signal: nothing in the
+    # repository can merge until it clears, on any branch, for any diff. With no `timeout-minutes`
+    # that window is GitHub's 360-minute default, and this job now runs a suite that drives python3
+    # at ~14 sites and builds non-UTF-8 paths, symlink PATH fixtures, an ASCII-locale probe and a
+    # poisoned sqlite file -- whose own step comment enumerates three host-drift classes as EXPECTED
+    # failure modes. Compose that with peak (CLAUDE.md: Friday/Saturday 19:00-21:30) and a runner
+    # image bump has a path to "no checkout, dispatch or payments fix merges for six hours", at the
+    # hours where a paid order nobody is told about is the failure that costs most.
+    # 10 minutes is ~30x the observed duration of this job, so it bounds a HANG and nothing else.
+    # It does NOT settle `GATE-STEP-LOCUS` (in-job vs sibling job); that row stays open, and this is
+    # the interim mitigation it names. Pinned by `assert_pinned_in_changes_job`, which requires the
+    # key and caps it -- removing it or setting it to hours reds, by name.
+    timeout-minutes: 10
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
     steps:

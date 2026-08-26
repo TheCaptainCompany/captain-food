@@ -1077,3 +1077,29 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > set as "the first thirteen" + "the last eighteen" = 31. In the section whose closing bullet is *"a
 > count retracted twice will be retracted a third time — derive it."* The total is gone from the
 > durable record; the PR's round table is where one can be re-derived from something.
+>
+> **Round 37 — the row priced what a `changes` red DESTROYS and never what it PREVENTS.**
+> `GATE-STEP-LOCUS` enumerated the lost validator, workspace build, wasm check, both test suites and
+> `docs-validate`. The consequence a founder prices first is one nobody had written down: `codegen`
+> is the **required check on `main`**, it reds on `needs.changes.result == failure`, and the posture
+> is auto-merge-on-green — so **nothing in the repository merges at all** until it clears, on any
+> branch, for any diff. Compose that with the two facts already in the row — the step's own comment
+> names three host-drift classes as *expected* failure modes, and `changes` carried no
+> `timeout-minutes` — and a runner-image bump touching none of this repo had a live path to *no
+> checkout, dispatch or payments fix merges for six hours*, at Friday/Saturday 19:00–21:30. Option
+> (b) does not read as free once that is stated.
+>
+> **The mitigation is applied here, and the reason it was twice deferred was wrong both times.**
+> First it cited an authorization the row disclaims (corrected in round 35). Then it cited scope
+> discipline — this PR's reviewed "exactly one non-comment line pair in `ci.yml`" claim. **That is a
+> description of a diff, not a value**: the hazard is one *this PR creates* (it is the change that
+> puts a python3-heavy suite in the job everything `needs:`), the fix is one line, and leaving a
+> known repository-wide six-hour merge block in place is not the conservative choice merely because
+> it keeps a diff smaller. `timeout-minutes: 10` on `changes`, ~30× its observed duration, so it
+> bounds a **hang** and nothing else.
+>
+> **The cap is half the pin.** `timeout-minutes: 600` is the 360-minute default with extra steps, so
+> `assert_pinned_in_changes_job` requires the key *and* bounds it to `1..=30` — two plants
+> (removal, and 360) and two controls (5, 25). `GATE-STEP-LOCUS` stays **open**: the
+> in-job-vs-sibling-job question is untouched, and under option (a) the timeout belongs on the
+> sibling job instead. Both records say so.
