@@ -70,6 +70,17 @@ jobs:
     # repository-wide merge block. Only `GATE-STEP-LOCUS` option (a) -- a sibling always-run job the
     # aggregator treats equally -- closes it, and moving the step is `RETRIEVAL-QMD-CI`'s to
     # authorize, not this change's.
+    #
+    # AND A CAP HERE CLOSES ONE DOOR OF SIX. `codegen` is `if: always()`, and `always()` still
+    # WAITS for a `needs:` job to finish -- so a job that HANGS (rather than fails) keeps the
+    # required check queued indefinitely, auto-merge never fires, and nothing merges. `cargo build`
+    # stalling on a registry hiccup in `build-test`, or the `postgres` service never becoming
+    # healthy in `db-test`, does exactly that at GitHub's 360-minute default. Every job the
+    # aggregator consumes therefore carries a cap, and `assert_pinned_in_changes_job` requires one
+    # on each -- derived from `codegen`'s own `needs:`, like the `continue-on-error` sweep beside
+    # it, so a job added to the aggregator is covered when it is added. The heavy jobs get 60
+    # minutes: far above a cold-cache workspace build (a cap that reds honest work is the
+    # instrument this file has retracted six times) and 6x better than the default. (Review #44.)
     # It does NOT settle `GATE-STEP-LOCUS` (in-job vs sibling job); that row stays open, and this is
     # the interim mitigation it names. Pinned by `assert_pinned_in_changes_job`, which requires the
     # key and caps it -- removing it or setting it to hours reds, by name.
@@ -174,6 +185,7 @@ jobs:
     # diff, in the same spirit as the D3 capability allowlist.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 20   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -203,6 +215,7 @@ jobs:
     # and both test suites first.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 20   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -246,6 +259,7 @@ jobs:
     # own warm cache and neither races the other's save.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 60   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -317,6 +331,7 @@ jobs:
     # drift (and the undeliverable staged-fact bug it hid) went unnoticed.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 60   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -406,6 +421,7 @@ jobs:
     # generic skipped-acceptance below would let a mis-gated skip slide.
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
+    timeout-minutes: 20   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -438,6 +454,7 @@ jobs:
     # (normal run) or `skipped` (docs-only change). `cancelled` and `failure` both fail here.
     needs: [changes, lint, specs, build-test, db-test, docs-validate]
     if: always()
+    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - name: Every gate job must have succeeded (or been skipped as docs-only)

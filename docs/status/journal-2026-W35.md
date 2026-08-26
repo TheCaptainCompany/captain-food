@@ -1248,3 +1248,55 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > not a deletion: a superseded ROW is a dead end (its `reconsiders:` is rejected, citing it is
 > gate-rejected), its deciding RECORD is not. Both now, successor first, and the test that pinned the
 > drop (`!line.contains("PROP-OLD")`) is re-pointed to assert the order instead.
+>
+> **Round 43 — the two trigger halves disagreed again, in the half nobody revisited.** Review #27
+> taught the `push.branches` arm that GitHub applies `!` patterns as **removals**; the
+> `pull_request.branches` arm never learned it, so `['**', '!main']` passed an assertion whose own
+> message says *"must still admit PRs targeting `main`"*. It fails **closed** (a fork produces no
+> push, so that trigger is a fork PR's only coverage — the PR then stalls on "Expected — waiting for
+> status" forever), which makes it narrower than the push-side hole, but an assertion claiming a
+> property it does not test is the class this file spends forty rounds removing. One matcher now,
+> used by both halves.
+>
+> **And the matcher only ever asked about `main`**, while the comment three lines above justifies the
+> check on the `NN-slug` branches too — `!*` was caught **incidentally**, because `*` also matches
+> `main`. `!*-*` and `!2*` leave `main` alone, remove every feature branch, and went green, silently
+> dropping the pre-PR validation `ci.yml`'s header states as the reason `on.push` exists at all.
+>
+> **Round 43b — the tamper fixture inherited the developer's git config.** `the_docs_only_detector…`
+> sets `GIT_CONFIG_GLOBAL=/dev/null` and says why; the two fixture repos in
+> `the_gate_self_verification_reds_on_a_tampered_script` did not. On a maintainer host
+> `commit.gpgsign` panics the test with a GPG error where the reader expects a tamper verdict,
+> `core.hooksPath` runs arbitrary local hooks inside the fixture, and `core.autocrlf` CR-strips the
+> committed blobs — **reintroducing, in the harness, the exact smudge class review #13 rewrote the
+> block under test to remove.** Worse than a red: the guard's CR-strip fallback probably absorbs it,
+> so the test would pass for a reason nobody chose. Invisible in CI, which is Linux with a clean
+> `HOME`.
+>
+> **Round 44 — `hides_main` closed its class by enumeration, the instrument this file retracts two
+> screens away.** GitHub branch filters accept `?` and `[...]`, not just `*`: `!mai?` and `!m[a]in`
+> both remove `main` while a trailing-`*` special case says otherwise. The matcher now **fails
+> closed** on either metacharacter — a deliberate narrow exclusion is argued in a comment rather than
+> by growing a special case, which is the `LD_*`/`GIT_*` prefix reasoning applied to globs.
+>
+> **Round 44b — round 37's timeout closed one door of six.** `codegen` is `if: always()`, and
+> **`always()` still WAITS for a `needs:` job to finish** — so a job that *hangs* keeps the required
+> check queued indefinitely, auto-merge never fires, and nothing merges. That is the identical
+> end-state the `changes` cap was added for, and `build-test`/`db-test` — far longer-running, with a
+> workspace build and a service container — were still sitting at the 360-minute default, where a
+> registry stall or a postgres container that never becomes healthy produces it. Every aggregated job
+> now carries a cap, asserted over the list **derived from `codegen`'s own `needs:`** like the
+> `continue-on-error` sweep beside it. The heavy jobs get 60 minutes: far above a cold-cache
+> workspace build, because a cap that reds honest work is the instrument this file has retracted six
+> times. **The hang class is now bounded workflow-wide; the RED class is not**, and only
+> `GATE-STEP-LOCUS` option (a) closes that.
+>
+> **Round 44c — a new open row, `DISPATCH-CARD-CITATION`.** The citation rule excludes `docs/**` on
+> the argument that *"a record ABOUT a supersession must name the superseded row"* — true of ADRs and
+> proposals, whose job is to narrate history, and **not true of `docs/dispatch/**`**, which is an
+> instruction surface a session executes. That is the same property that puts `.claude/**` in the
+> corpus. So a card may point a session at a dead row with `make validate` green;
+> `validate_dispatch_card_rows` checks that the reference *resolves* and says in as many words that
+> status is deliberately not checked. Latent (no card carries a `Decision row:` line today, and the
+> ask-gate reads the row file at the point of need), and narrowing a recorded exclusion is a decision
+> about the rule's scope rather than a bug fix — so it is a row, not a rider.

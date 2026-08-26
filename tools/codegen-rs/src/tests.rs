@@ -10931,6 +10931,53 @@ mod docs_only_ci_and_legacy_visibility {
         // 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string "on".
         // A lookup written for the wrong one returns None and the test passes VACUOUSLY, which is
         // this chain's signature defect. Accept either, so the assertion survives a parser change.
+        // DOES THIS `!` PATTERN REMOVE `name` FROM THE TRIGGER? Shared by BOTH trigger arms, which
+        // is the point: the `pull_request` half did not look at exclusions AT ALL, so
+        // `branches: ['**', '!main']` passed an assertion whose own message says "must still admit
+        // PRs targeting `main`" -- the two-halves-disagree shape this file retracts by name at
+        // review #27, in the half nobody revisited. A fork produces no push, so `pull_request` is
+        // a fork PR's ONLY coverage; after that edit a fork PR to `main` runs nothing and the PR
+        // stalls on "Expected -- waiting for status" forever. (Review #43.)
+        //
+        // AND IT TESTS TWO NAMES, not one. The comment below justifies this check on the `NN-slug`
+        // branches as well as on `main`, and `!*` was caught only INCIDENTALLY -- because `*` also
+        // matches `main`. `!*-*` and `!2*` remove every feature branch, leave `main` alone, and
+        // went green, silently dropping the pre-PR validation `ci.yml`'s header states as the
+        // reason `on.push` exists.
+        //
+        // FAIL CLOSED ON THE GLOB METACHARACTERS IT CANNOT REASON ABOUT. GitHub branch filters
+        // accept `?` (one char, not `/`) and `[...]` classes, so `!mai?` and `!m[a]in` both remove
+        // `main` while a trailing-`*` special case says otherwise. Growing that special case is
+        // enumeration -- the instrument this file already retracted for the `LD_*` and `GIT_*`
+        // families two screens up -- so any exclusion containing `?` or `[` is treated as hiding,
+        // and a deliberate one is argued in a comment rather than by loosening this. (Review #44.)
+        let hides = |pat: &str, name: &str| -> bool {
+            pat == name
+                || pat == "*"
+                || pat == "**"
+                || pat.contains('?')
+                || pat.contains('[')
+                || (pat.ends_with('*') && name.starts_with(pat.trim_end_matches('*')))
+                // `a*b` and `*-*`: `*` matches any run without `/`, so split on `*` and require
+                // each literal segment to appear in order. One segment means no interior `*` and
+                // the arms above already decided it.
+                || (pat.contains('*') && {
+                    let mut rest = name;
+                    let segs: Vec<&str> = pat.split('*').collect();
+                    let first_ok = rest.starts_with(segs[0]);
+                    rest = &rest[segs[0].len().min(rest.len())..];
+                    let last = segs[segs.len() - 1];
+                    first_ok
+                        && segs[1..].iter().all(|seg| match rest.find(*seg) {
+                            Some(i) => {
+                                rest = &rest[i + seg.len()..];
+                                true
+                            }
+                            None => false,
+                        })
+                        && (last.is_empty() || name.ends_with(last))
+                })
+        };
         let trigger_val = doc
             .get(serde_yaml::Value::String("on".into()))
             .or_else(|| doc.get(serde_yaml::Value::Bool(true)))
@@ -11034,13 +11081,10 @@ mod docs_only_ci_and_legacy_visibility {
             );
             for excluded in branches.iter().filter(|b| b.starts_with('!')) {
                 let pat = &excluded[1..];
-                let hides_main = pat == "main"
-                    || pat == "*"
-                    || pat == "**"
-                    || (pat.ends_with('*') && "main".starts_with(pat.trim_end_matches('*')));
+                let hides_main = hides(pat, "main") || hides(pat, "21-slug");
                 assert!(
                     !hides_main,
-                    "`on.push.branches` excludes `{}`, which removes `main` from the branches {} runs on -- and the docs-only lane reaches `main` as a PUSH with no PR, so nothing else covers it. `**` being present does not save you: GitHub applies `!` patterns as removals",
+                    "`on.push.branches` excludes `{}`, which removes `main` -- the docs-only lane reaches it as a PUSH with no PR, so nothing else covers it -- or removes the `NN-slug` feature branches, which is the pre-PR validation this file's header states as the reason `push` exists at all. `**` being present does not save you: GitHub applies `!` patterns as removals. If the exclusion is deliberate and narrower than it looks, say so here rather than loosening `hides` ({})",
                     excluded, what
                 );
             }
@@ -11092,6 +11136,19 @@ mod docs_only_ci_and_legacy_visibility {
                     "`on.pull_request.branches` ({:?}) must still admit PRs targeting `main` -- otherwise {} stops guarding the only branch that matters",
                     got, what
                 );
+                // AND THE EXCLUSIONS, which this half did not look at at all: `['**', '!main']`
+                // satisfied the containment test above whose message claims the opposite. It fails
+                // CLOSED (a fork PR to `main` then runs nothing and stalls on "Expected -- waiting
+                // for status") rather than green, so it is narrower than the push-side hole review
+                // #27 closed -- but an assertion claiming a property it does not test is the class
+                // this file spends forty rounds removing. Same matcher as the push half now.
+                for excluded in got.iter().filter(|b| b.starts_with('!')) {
+                    assert!(
+                        !hides(&excluded[1..], "main"),
+                        "`on.pull_request.branches` excludes `{}`, which removes `main` -- a fork produces no push, so this trigger is a fork PR's ONLY coverage, and `codegen` then never reports at all. GitHub applies `!` patterns as removals",
+                        excluded
+                    );
+                }
             }
         }
 
@@ -11292,6 +11349,28 @@ mod docs_only_ci_and_legacy_visibility {
                     j.get("continue-on-error").is_none(),
                     "the `{}` job carries `continue-on-error` -- it reports `success` to `needs` whatever happened, `codegen` accepts `success`, and the REQUIRED check on `main` goes green with the gate red. A step that may legitimately fail is written `run: <cmd> || true` here, which keeps the failure visible in the step",
                     job
+                );
+                // AND EVERY ONE OF THEM MUST BE BOUNDED. `codegen` is `if: always()`, and
+                // `always()` still WAITS for a `needs:` job to finish -- so a job that HANGS keeps
+                // the required check queued forever, auto-merge never fires and nothing merges,
+                // which is the same end-state the timeout on `changes` was added for. That cap
+                // closed one door of six: `cargo build` stalling on a registry hiccup, or the
+                // `postgres` service never becoming healthy, sat at GitHub's 360-minute default.
+                // Derived from `codegen`'s own `needs:` for the same reason as the guard above.
+                // The BOUND matters as much as the key -- 600 is the default with extra steps --
+                // and 60 is generous enough for a cold-cache workspace build that it cannot red
+                // honest work. (Review #44 of PR #679.)
+                let cap = j
+                    .get("timeout-minutes")
+                    .and_then(|t| t.as_u64())
+                    .unwrap_or_else(|| panic!(
+                        "the `{}` job declares no `timeout-minutes` -- `codegen` is `if: always()` and still WAITS on `needs:`, so a hang here keeps the required check queued for GitHub's 360-minute default and nothing in the repository merges",
+                        job
+                    ));
+                assert!(
+                    (1..=60).contains(&cap),
+                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=60. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long",
+                    job, cap
                 );
                 if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
                     for st in steps {
@@ -11996,6 +12075,19 @@ mod docs_only_ci_and_legacy_visibility {
             // reaches main as a PUSH with no PR, so nothing else covers it.
             ("push.branches EXCLUDES main", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!main']", 1)),
             ("push.branches excludes every single-segment branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*']", 1)),
+            // THE THREE CLASSES `hides_main` DECIDED BY A TRAILING `*` ALONE (reviews #43/#44).
+            // `!*-*` and `!2*` leave `main` untouched and remove every `NN-slug` branch, i.e. the
+            // pre-PR validation `ci.yml`'s header states as the reason `push` exists at all -- the
+            // `!*` plant above caught its class only incidentally, because `*` also matches `main`.
+            // `!mai?` and `!m[a]in` remove `main` itself through glob metacharacters a trailing-`*`
+            // special case cannot see, which is why the matcher now fails CLOSED on `?` and `[`.
+            ("push.branches drops every NN-slug branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*-*']", 1)),
+            ("push.branches drops the 2-prefixed feature branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!2*']", 1)),
+            ("push.branches hides main through a ? wildcard", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!mai?']", 1)),
+            ("push.branches hides main through a character class", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!m[a]in']", 1)),
+            // THE `pull_request` HALF, WHICH DID NOT LOOK AT EXCLUSIONS AT ALL. A fork produces no
+            // push, so this trigger is a fork PR's only coverage.
+            ("pull_request.branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['**', '!main']\n", 1)),
             // `branches-ignore` needs no `branches` key, so the containment check above never
             // looked at it; `tags` alone makes the trigger tag-only. Both removed BOTH gate steps
             // from the push lane with every assertion green (review of PR #679).
@@ -12157,6 +12249,13 @@ mod docs_only_ci_and_legacy_visibility {
             ("changes job gains services", ci.replacen("  changes:\n", "  changes:\n    services:\n      pg:\n        image: postgres:16-alpine\n", 1)),
             ("changes runs-on as a label list", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: [self-hosted, linux]")),
             ("the changes job loses its timeout", in_job("changes", "    timeout-minutes: 10\n", "")),
+            // AND THE FIVE OTHER JOBS THE AGGREGATOR WAITS ON. `always()` does not mean "do not
+            // wait": a hang in any of them keeps the required check queued at the 360-minute
+            // default. The two heavy jobs are the realistic ones (a registry stall, a service
+            // container that never becomes healthy).
+            ("build-test loses its timeout", in_job("build-test", "    timeout-minutes: 60   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
+            ("db-test timeout is the default with extra steps", in_job("db-test", "    timeout-minutes: 60", "    timeout-minutes: 360")),
+            ("codegen loses its timeout", in_job("codegen", "    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
             ("the changes job's timeout is the default with extra steps", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 360")),
             ("the changes job loses its checkout", in_job("changes",
                 "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0   # need the base commit to diff against\n",
@@ -12259,6 +12358,9 @@ mod docs_only_ci_and_legacy_visibility {
             // the fifth spelling of the false-red instrument this file has retracted (review #20).
             ("on: as a list of events", with_trigger("on: [push, pull_request]\n")),
             ("push tags ALONGSIDE branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges']\n    tags: ['v*']", 1)),
+            // The matcher must not become the next false-red instrument: `!badges` is the real
+            // exclusion this file ships, and an added narrow one must stay green.
+            ("a second narrow branch exclusion", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!gh-pages']", 1)),
             ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
             // to red on an innocent step addition (`steps.len() == 4`). An ordinary extra step
@@ -12292,7 +12394,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 90 && must_stay_green.len() >= 21,
+            must_red.len() >= 98 && must_stay_green.len() >= 22,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
@@ -12434,6 +12536,18 @@ mod docs_only_ci_and_legacy_visibility {
             let out = std::process::Command::new("git")
                 .args(args)
                 .current_dir(&tmp)
+                // FENCE THE FIXTURE OFF THE DEVELOPER'S GIT CONFIG, as the docs-only detector's
+                // fixture already does and comments. Without these two, a maintainer host's
+                // `commit.gpgsign` fails the commit and this test panics with a GPG error where
+                // the reader expects a tamper verdict; `core.hooksPath` runs arbitrary local
+                // hooks inside the fixture; and `core.autocrlf` CR-strips the committed blobs
+                // while the worktree copies keep CRLF -- reintroducing, in the harness, the exact
+                // smudge class review #13 rewrote the block under test to remove. Worse than a
+                // red: the guard's CR-strip fallback probably absorbs it, so the test would pass
+                // for a reason nobody chose. CI is Linux with a clean HOME, so none of it shows
+                // up there. (Review #43.)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
                 .env("GIT_AUTHOR_NAME", "t")
                 .env("GIT_AUTHOR_EMAIL", "t@t")
                 .env("GIT_COMMITTER_NAME", "t")
@@ -12575,6 +12689,10 @@ mod docs_only_ci_and_legacy_visibility {
                 let out = std::process::Command::new("git")
                     .args(args)
                     .current_dir(&decoy)
+                    // Same fencing as the fixture above: the decoy repo is the ORACLE this case
+                    // redirects the guard at, so a host config reaching it is a harness defect.
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
                     .env("GIT_AUTHOR_NAME", "t")
                     .env("GIT_AUTHOR_EMAIL", "t@t")
                     .env("GIT_COMMITTER_NAME", "t")
