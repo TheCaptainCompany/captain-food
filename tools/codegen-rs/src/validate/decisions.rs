@@ -664,6 +664,20 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
             // they cost more than a latent miss; here there is not even a miss to trade away,
             // because a telemetry note cannot carry a live instruction by construction.
             //
+            // AND IT CLOSES A SECOND HOLE THAT WAS NOT THE REASON FOR IT (review #69, arriving
+            // after the change and naming a consequence the change had not argued):
+            // `decision-citation-file-out-of-corpus` is TREE-caused and therefore inside the §17
+            // ratchet, on the stated reasoning that adding an out-of-corpus `.claude/**` file is
+            // "a deliberate, baseline-moving act". A file under `.claude/loop-budget/**` is not an
+            // act by an author at all -- the LOOP writes it. So a ledger sidecar with a different
+            // extension (a `.log`, a `.txt`, a `.lock`) would have exited `make validate` 1 with
+            // `0 -> 1 (NEW warning kind)` on a run nobody edited, printing a remedy that commits a
+            // baseline entry about a file that could never carry a citation. Excluded files never
+            // reach `skipped_ext`, so the ratchet cannot be moved by the loop. The corpus goes from
+            // 139 tracked files to 50; the three `loop-budget` NAMES that remain
+            // (`hooks/loop-budget.sh`, `hooks/loop-budget-selftest.sh`, `loop-budget.json`) are
+            // script and config, i.e. agent surface, and are correctly still in.
+            //
             // A GIT PATHSPEC, NOT A NAME CHECK IN THE LOOP: the corpus is git's, not the disk's
             // (the lesson an untracked worktree taught this rule), so the exclusion belongs in the
             // same list the records and `the_records_state_the_same_citation_corpus_as_the_code`

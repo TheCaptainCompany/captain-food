@@ -2059,3 +2059,30 @@ Current state: [`../STATUS.md`](../STATUS.md).
 >
 > The review's second finding (`.claude/loop-budget/**` in the corpus) was already closed in round 67
 > — same conclusion, same pathspec, arrived at independently.
+>
+> **Round 69 — a change that was right for a reason it had not argued, and a sizing input the row was
+> missing.**
+>
+> The review arrived after round 67 had already excluded `.claude/loop-budget/**` and proposed the
+> **same pathspec** as its alternative — but it named a consequence round 67 did not:
+> **`decision-citation-file-out-of-corpus` ratchets over a directory the LOOP writes.** That clause is
+> tree-caused and inside §17 on the reasoning that adding an out-of-corpus `.claude/**` file is *"a
+> deliberate, baseline-moving act"*. A ledger sidecar with a different extension — a `.log`, a
+> `.txt`, a `.lock` — is not an act by an author at all, and would have exited `make validate` 1 with
+> `0 -> 1 (NEW warning kind)` on a run nobody edited, printing a remedy that commits a baseline entry
+> about a file that could never carry a citation. Excluded files never reach `skipped_ext`, so the
+> exclusion closes it — **by accident, which is worth writing down rather than claiming as foresight.**
+> Corpus: 139 tracked files → **50**. The three surviving `loop-budget` *names* are script and config,
+> correctly still in.
+>
+> **And `GATE-STEP-LOCUS` was missing the one number that sizes its own precedent argument.** Option
+> (b) says the shape *"hardens into precedent the moment a third gate step lands there"* — without
+> saying **this PR is the second**. The register-check selftest was the first. So (b) is one step from
+> the precedent it names, and whoever adds the third finds two already there and no row closed, which
+> is exactly how a default sets itself. Added, along with the review's other missing input: the cost
+> side of (a) is one extra runner start on a repo whose own `ci.yml` header records Actions as free
+> and unlimited. Neither decides the row; both were absent from it.
+>
+> **Nothing else in the review was a finding**, and it said so — the second item is the reviewer
+> recording *weight* on an open row rather than reporting a defect, which is the right use of a
+> review pass on a `HOLD: human` PR.
