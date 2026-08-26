@@ -720,3 +720,24 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > ENOSPC/EROFS/EACCES. Written down in the script, because the previous four rounds each landed a
 > lesson on the instance that taught it and not on its siblings, and *"I checked the others"* is
 > worth nothing unless the next reader can see it.
+>
+> **Round 25 — a step-level `shell:` is not a `defaults.run` key, so `shell_ok` could never see one.**
+> Round 12 extended the guards to `build-test` precisely because *"nothing bounded the job the pins
+> RUN in"* — and that extension covered `env:` and `defaults.run` and stopped at the step boundary.
+> `shell: bash -e -c "exit 0" {0}` on the `cargo test --workspace` step makes GitHub pass the script
+> as `$0`, so it never runs, the step exits 0, and `assert_gate_script_self_verifies`,
+> `the_gate_self_verification_reds_on_a_tampered_script`, the stub-suite pin and the citation rule
+> **all go vacuous in one commit** with `changes` green and `codegen` aggregating green. The twelfth
+> mutant, one scope below where it was closed.
+>
+> **And `specs` — the job that actually runs `make validate`, i.e. the new citation rule — had no
+> guard at all**, at any scope. Both closed, three plants, each verified to red by name when its
+> guard is removed.
+>
+> **Fenced code is deliberately NOT exempt, and it is now written down.** The sibling
+> `decision-card-row` rule tracks fences and skips them, so the two disagree on purpose. A card's
+> fenced block ILLUSTRATES a form; a `.claude/**` doc's fenced block is the thing a session COPIES —
+> and the motivating incident was a session doing exactly what a doc showed it. So a fenced
+> `reconsiders: <dead row>` is the most dangerous spelling in the corpus, not the safest, and the
+> exemption that is right for cards would be backwards here. Recorded because it was previously true
+> by accident, and *"the next author should not have to derive which is which."*

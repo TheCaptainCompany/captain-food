@@ -703,6 +703,14 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
 ///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
 ///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
 ///     the scope is a caller decision rather than a walk from the repo root.
+///   * FENCED CODE IS **NOT** EXEMPT, and that is a decision, not an oversight. The sibling
+///     `decision-card-row` rule tracks fences and skips them, so the two rules disagree on purpose
+///     and the next author should not have to derive which is which (review #23). A card's fenced
+///     block is an ILLUSTRATION of a form; a `.claude/**` doc's fenced block is the thing a session
+///     COPIES — the motivating incident was a session doing exactly what a doc showed it. A fenced
+///     `reconsiders: <dead row>` is therefore the most dangerous spelling in the corpus, not the
+///     safest, so the exemption that is right for cards would be backwards here. Prose *about* a
+///     supersession still has the clause-scoped escape; a copyable example does not need one.
 /// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
 /// unit — with each line's leading comment or quote marker stripped so the join reads as the
 /// sentence the author actually wrote. `spans` maps a byte offset in the joined text back to the

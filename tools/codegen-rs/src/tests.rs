@@ -10809,12 +10809,45 @@ mod docs_only_ci_and_legacy_visibility {
         // upload-artifact) and a step-level `env: {DB_TESTS_REQUIRED: '0'}`, so only the
         // execution-altering CONTENT guards are extended here -- not the `{name, run}` key-set
         // pin, which is about a single gate step and would red every one of those.
+        // A STEP-LEVEL `shell:` IS NOT A `defaults.run` KEY, so `shell_ok` -- which only ever reads
+        // `defaults.run` -- cannot see one at either scope it is called at. That left the TWELFTH
+        // mutant open one scope down from where it was closed: `shell: bash -e -c "exit 0" {0}` on
+        // the `cargo test --workspace` step makes GitHub pass the script as `$0`, so it never runs,
+        // the step exits 0, and `assert_gate_script_self_verifies`,
+        // `the_gate_self_verification_reds_on_a_tampered_script`,
+        // `the_stub_suite_runs_in_the_always_run_changes_job` and the citation rule all go vacuous
+        // in one commit -- with `changes` green and `codegen` aggregating green. Review #12
+        // extended the guards to this job precisely because "nothing bounded the job the pins RUN
+        // in", and the extension covered `env:` and `defaults.run` and stopped at the step
+        // boundary (review #23).
+        let step_shell_ok = |st: &serde_yaml::Value, scope: &str| {
+            if let Some(sh) = st.get("shell").and_then(|s| s.as_str()) {
+                assert!(
+                    matches!(sh, "bash" | "sh" | "pwsh" | "powershell" | "cmd" | "python"),
+                    "{} sets `shell: {}` -- a custom shell form (`command [options] {{0}}`) passes the step script as $0 and never executes it, so the step exits 0 having run nothing while {} reports green",
+                    scope, sh, what
+                );
+            }
+        };
+        // THE JOBS THAT EXECUTE THE PINS, not just the job under test. `build-test` runs every
+        // assertion in this file; `specs` runs `make validate`, which is where the new
+        // `decision-superseded-authority` rule actually executes -- and `specs` carried no
+        // job- or step-scope guard at all (review #23).
+        for job in ["build-test", "specs"] {
+            if let Some(j) = doc.get("jobs").and_then(|jobs| jobs.get(job)) {
+                shell_ok(j, &format!("the `{}` job's", job));
+                env_ok(j, &format!("the `{}` job's", job));
+                if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
+                    for st in steps {
+                        env_ok(st, &format!("a `{}` step's", job));
+                        step_shell_ok(st, &format!("a `{}` step", job));
+                    }
+                }
+            }
+        }
         if let Some(bt) = doc.get("jobs").and_then(|j| j.get("build-test")) {
-            shell_ok(bt, "the `build-test` job's");
-            env_ok(bt, "the `build-test` job's");
             if let Some(steps) = bt.get("steps").and_then(|s| s.as_sequence()) {
                 for st in steps {
-                    env_ok(st, "a `build-test` step's");
                     // `env_ok` READS THE `env:` MAPPING; it cannot see a variable EXPORTED AT
                     // RUNTIME. Two lines with no `env:` key anywhere --
                     // `run: echo "PATH=/tmp/shim:$PATH" >> "$GITHUB_ENV"` (or `LD_PRELOAD=`,
@@ -11298,6 +11331,16 @@ mod docs_only_ci_and_legacy_visibility {
             ("build-test step prepends through GITHUB_PATH", in_job("build-test",
                 "      - uses: dtolnay/rust-toolchain@stable\n",
                 "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
+            // THE TWELFTH MUTANT AT STEP SCOPE. `shell_ok` reads `defaults.run` only, so a
+            // step-level `shell:` was invisible at every scope it is called at (review #23).
+            ("build-test step shell drops the script", in_job("build-test",
+                "      - uses: dtolnay/rust-toolchain@stable\n",
+                "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: dtolnay/rust-toolchain@stable\n")),
+            // `specs` RUNS `make validate`, i.e. the new citation rule, and had no guard at all.
+            ("specs job BASH_ENV", in_job("specs", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
+            ("specs step shell drops the script", in_job("specs",
+                "      - uses: actions/checkout@v5\n",
+                "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: actions/checkout@v5\n")),
             // The oracle's OTHER config route: global config -> core.attributesFile -> a
             // filter.<x>.clean driver that re-emits the committed blob (review #15).
             ("job XDG_CONFIG_HOME", at_job("XDG_CONFIG_HOME: /tmp/x")),
@@ -11427,7 +11470,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 49 && must_stay_green.len() >= 13,
+            must_red.len() >= 52 && must_stay_green.len() >= 13,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
