@@ -10808,58 +10808,6 @@ mod decision_ask_and_citations {
     /// Prose cannot be made to track prose by intention — this repo has now proved that twice on
     /// one branch. So the pathspecs are READ OUT OF THE SOURCE and each is required to appear in
     /// both records. Adding a sixth pathspec reds this until the records say so too.
-    /// A SUBSTANTIAL `timeout-minutes` JUSTIFICATION MAY NOT BE SHARED BY TWO JOBS.
-    ///
-    /// Twice now a cap's reasoning has been inherited rather than re-derived at the site it governs:
-    /// round 58 bucketed `lint` with the cheap jobs on an argument about jobs that do no compiling,
-    /// and round 70 found `docs-validate`'s paragraph pasted verbatim onto `specs` -- where its
-    /// permissive half is FALSE, because `specs` carries `if: docs_only != 'true'` and never runs on
-    /// the lane the argument is about. Both were written by an author arguing, in the same comment,
-    /// against inheriting a number from a different job.
-    ///
-    /// Two occurrences is this repo's threshold for turning a lesson into a gate, and prose cannot
-    /// hold it: the next paste looks exactly like the last one. A SHORT pointer is fine and common
-    /// (`build-test`/`db-test` both say "see the `changes` job comment"), so the rule bites only on
-    /// blocks long enough to BE a justification.
-    #[test]
-    fn no_two_jobs_share_a_substantial_timeout_justification() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
-        let lines: Vec<&str> = ci.lines().collect();
-        // The comment block immediately above each job-level `timeout-minutes:`, in file order.
-        let mut blocks: Vec<Vec<&str>> = Vec::new();
-        for (i, l) in lines.iter().enumerate() {
-            if !l.trim_start().starts_with("timeout-minutes:") || !l.starts_with("    timeout-minutes:") {
-                continue;
-            }
-            let mut j = i;
-            while j > 0 && lines[j - 1].trim_start().starts_with('#') {
-                j -= 1;
-            }
-            blocks.push(lines[j..i].iter().map(|l| l.trim()).collect());
-        }
-        assert!(
-            blocks.len() >= 5,
-            "found {} job-level `timeout-minutes:` keys -- this test reads them by an exact four-space indent, so a reindent makes it vacuous rather than red. Re-point it",
-            blocks.len()
-        );
-        // Long enough to be an ARGUMENT rather than a pointer. `build-test`/`db-test` share a
-        // one-line "see the `changes` job comment", which is the correct way to not repeat one.
-        const SUBSTANTIAL: usize = 5;
-        for a in 0..blocks.len() {
-            for b in (a + 1)..blocks.len() {
-                if blocks[a].len() < SUBSTANTIAL || blocks[b].len() < SUBSTANTIAL {
-                    continue;
-                }
-                assert_ne!(
-                    blocks[a], blocks[b],
-                    "two jobs carry a byte-identical {}-line `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other",
-                    blocks[a].len()
-                );
-            }
-        }
-    }
-
     #[test]
     fn the_records_state_the_same_citation_corpus_as_the_code() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -10944,6 +10892,65 @@ mod decision_ask_and_citations {
                 "{} ({}) does not state the extension allowlist as `{}`. `claude_citation_corpus` filters the pathspecs down to exactly those, and a record naming the pathspecs alone describes the corpus WIDER than the code applies it -- the permissive direction, and the one that reads as coverage the reader does not have. Spell it contiguously: five separate mentions are satisfied by ordinary filenames",
                 label, rel, joined
             );
+        }
+    }
+
+    /// A SUBSTANTIAL `timeout-minutes` JUSTIFICATION MAY NOT BE SHARED BY TWO JOBS.
+    ///
+    /// Twice now a cap's reasoning has been inherited rather than re-derived at the site it governs:
+    /// round 58 bucketed `lint` with the cheap jobs on an argument about jobs that do no compiling,
+    /// and round 70 found `docs-validate`'s paragraph pasted verbatim onto `specs` -- where its
+    /// permissive half is FALSE, because `specs` carries `if: docs_only != 'true'` and never runs on
+    /// the lane the argument is about. Both were written by an author arguing, in the same comment,
+    /// against inheriting a number from a different job.
+    ///
+    /// Two occurrences is this repo's threshold for turning a lesson into a gate, and prose cannot
+    /// hold it: the next paste looks exactly like the last one. A SHORT pointer is fine and common
+    /// (`build-test`/`db-test` both say "see the `changes` job comment"), so the rule bites only on
+    /// blocks long enough to BE a justification.
+    ///
+    /// WHAT IT DOES NOT CATCH, stated because "now gated" reads wider than this is. It is a
+    /// BYTE-IDENTITY check: `assert_ne!` over trimmed line vectors stops a VERBATIM paste and
+    /// nothing else. A paste with one word changed — the likelier next form, since an author who
+    /// pastes is usually adapting — passes. Both known occurrences were verbatim, so this catches
+    /// the shape that actually happened twice; it does not decide whether a justification is TRUE of
+    /// the job it sits on, which no textual rule can. Keep reading them. (Review #73 of PR #679.)
+    #[test]
+    fn no_two_jobs_share_a_substantial_timeout_justification() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let lines: Vec<&str> = ci.lines().collect();
+        // The comment block immediately above each job-level `timeout-minutes:`, in file order.
+        let mut blocks: Vec<Vec<&str>> = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            if !l.trim_start().starts_with("timeout-minutes:") || !l.starts_with("    timeout-minutes:") {
+                continue;
+            }
+            let mut j = i;
+            while j > 0 && lines[j - 1].trim_start().starts_with('#') {
+                j -= 1;
+            }
+            blocks.push(lines[j..i].iter().map(|l| l.trim()).collect());
+        }
+        assert!(
+            blocks.len() >= 5,
+            "found {} job-level `timeout-minutes:` keys -- this test reads them by an exact four-space indent, so a reindent makes it vacuous rather than red. Re-point it",
+            blocks.len()
+        );
+        // Long enough to be an ARGUMENT rather than a pointer. `build-test`/`db-test` share a
+        // one-line "see the `changes` job comment", which is the correct way to not repeat one.
+        const SUBSTANTIAL: usize = 5;
+        for a in 0..blocks.len() {
+            for b in (a + 1)..blocks.len() {
+                if blocks[a].len() < SUBSTANTIAL || blocks[b].len() < SUBSTANTIAL {
+                    continue;
+                }
+                assert_ne!(
+                    blocks[a], blocks[b],
+                    "two jobs carry a byte-identical {}-line `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other",
+                    blocks[a].len()
+                );
+            }
         }
     }
 
@@ -13026,6 +13033,19 @@ mod docs_only_ci_and_legacy_visibility {
                 "unset -f git tr command",
                 "unset \"${!GIT_@}\"",
                 "PATH=\"$_vpath\" command -v git",
+                // AND `tr`, WHICH REVIEW #46's FIX LEFT UNPINNED -- its own finding, one binary
+                // over. Dropping the PATH prefix from the `tr` line ALONE kept `cargo test
+                // --workspace` green, because `_vpath=` survives for `_git` and both needles above
+                // still match. And `tr` is not a symmetric afterthought: it is the binary that
+                // TRANSFORMS THE BYTES BEING COMPARED. On a tampered script the first `hash-object`
+                // mismatches, so the CRLF fallback runs `"$_tr" -d '\r' < file | "$_git"
+                // hash-object --no-filters --stdin`; a `tr` earlier on an inherited PATH that
+                // ignores stdin and emits the pristine content makes `_have == _want`, and the step
+                // prints `all 4 gate scripts are byte-identical` over a disarmed gate set -- with no
+                // `git` shim anywhere. `unset -f git tr command` covers the shell-FUNCTION spelling
+                // only, and `env_ok`'s PATH ban covers `ci.yml` only, which is the same separation
+                // this list already draws for `GIT_*`. (Review #73 of PR #679.)
+                "PATH=\"$_vpath\" command -v tr",
                 "_vpath=\"/usr/bin:/bin:/usr/local/bin\"",
             ] {
                 assert!(

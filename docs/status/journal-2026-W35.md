@@ -2191,3 +2191,38 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > docstring said the block *"is unreachable on every path anyone runs: locally it is opted out by
 > stop-gate.sh"*. Now past tense, with which way it moved — the block runs in-session on an ordinary
 > turn, which changes how often it is **exercised**, not whether it is **pinned**.
+>
+> **Round 73 — two real defects, one overclaim, and one reviewer assertion that the file falsifies.**
+>
+> **(1) A doc-comment mis-binding, third occurrence of a class this branch retracts twice.** Round
+> 70's insert put the new test's docstring immediately after an existing one with **no item between**,
+> so the whole `///` run bound to `no_two_jobs_share_a_substantial_timeout_justification` and
+> `the_records_state_the_same_citation_corpus_as_the_code` shipped **undocumented**. `cargo doc` and
+> rust-analyzer then attribute *"adding a sixth pathspec reds this until the records say so too"* —
+> the governing sentence for the citation corpus — to a test that reads `ci.yml` timeouts and never
+> opens `decisions.rs`. Same failure as the two this diff already corrects (`struct Unit`,
+> `validate_decisions_index_sync`) and the one `stop-gate.sh` corrects for a test *name*. Moved.
+>
+> **(2) The PATH pin covered `git` and not `tr` — review #46's own finding, one binary over, in the
+> fix for it.** Dropping the PATH prefix from the `tr` line **alone** kept the suite green, because
+> `_vpath=` survives for `_git` and both existing needles still match. And `tr` is not a symmetric
+> afterthought: **it is the binary that transforms the bytes being compared.** On a tampered script
+> the first `hash-object` mismatches, so the CRLF fallback pipes the file through `tr` before
+> re-hashing — a `tr` on an inherited PATH that ignores stdin and emits the pristine content makes
+> `_have == _want` and the step prints *"all 4 gate scripts are byte-identical"* over a disarmed gate
+> set, **with no `git` shim anywhere**. Needle added; planted red on both scripts.
+>
+> **(3) "Now gated" claimed more than the gate does.** `no_two_jobs_share_…` is a **byte-identity**
+> check — `assert_ne!` over trimmed line vectors — so it stops a *verbatim* paste and nothing else. A
+> paste with one word changed, the likelier next form since a pasting author is usually adapting,
+> passes. Both known occurrences were verbatim, so it catches the shape that actually happened; it
+> cannot decide whether a justification is TRUE of the job it sits on, and no textual rule can.
+> Stated in the docstring and in §19 #9 rather than left to be discovered. **A gate's docstring is a
+> derived claim too.**
+>
+> **(4) One reviewer assertion checked and FALSE.** *"ADR-20260824-205911 carries no `Consulted:`
+> block"* — it does, at line 168, and an earlier reviewer had verified the same thing. Checked
+> against the file rather than taken on relay, which is what the notification envelope asks for.
+> **Fourth round running where a reviewer's supporting fact did not hold** (the ` | ` separator, the
+> cold-build antecedent, the loop-budget free-text claim, now this) — and, as before, still
+> net-positive: the two defects above were real and I would have shipped past both.

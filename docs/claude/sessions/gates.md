@@ -686,8 +686,10 @@ the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
    `specs`, whose `if: docs_only != 'true'` means it never runs on the lane that argument turns on.
    Both were written by an author arguing, in the same comment, against inheriting a number from a
    different job — which is why prose cannot hold it: the next paste looks exactly like the last.
-   Now gated (`no_two_jobs_share_a_substantial_timeout_justification`); a short pointer to another
-   site is fine and is the correct way not to repeat one.
+   Gated against the shape that happened — `no_two_jobs_share_a_substantial_timeout_justification`
+   is a **byte-identity** check, so it stops a verbatim paste and not a paste with one word changed;
+   no textual rule can decide whether a justification is *true* of the job it sits on. A short
+   pointer to another site is fine and is the correct way not to repeat one.
 
 Two more from the same branch, about the records rather than the tests:
 
