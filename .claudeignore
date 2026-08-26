@@ -61,7 +61,12 @@ wt*/
 # this file deliberately with an offset when a verdict needs its surrounding context.
 target/quiet-gate.log
 
-# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD).
-# Deliberately NOT mirrored in settings.json permissions.deny: the RETRIEVAL-QMD decision forbids
-# settings.json changes without separate approval (recorded on #671).
+# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD-CI).
+# Deliberately NOT mirrored in settings.json permissions.deny: `RETRIEVAL-QMD-CI` (the chain head)
+# carries that non-authorization forward from the superseded `RETRIEVAL-QMD`, recorded on #671.
+# The rename sweep that pointed this line at the head made the PROVENANCE false -- RETRIEVAL-QMD-CI
+# was opened AND decided 2026-08-24 on #679, so it cannot have been recorded on #671 -- and the
+# constraint was right while the pointer sent a reader to a row about wiring a suite into CI. The
+# citation rule ships a clause-scoped escape precisely so a sentence ABOUT a superseded row can stay
+# accurate; s/OLD/NEW/ was merely the shortest green.
 .qmd/

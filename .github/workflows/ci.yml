@@ -49,6 +49,85 @@ jobs:
     # when the diff is non-empty, the base commit is resolvable, and EVERY changed file is
     # documentation - any doubt means false, so the full gate runs (fail-open).
     runs-on: ubuntu-latest
+    # EVERY OTHER JOB `needs:` THIS ONE, AND `codegen` -- the REQUIRED check on `main` -- reds on
+    # `needs.changes.result == failure`. So a hang here does not merely lose signal: nothing in the
+    # repository can merge until it clears, on any branch, for any diff. With no `timeout-minutes`
+    # that window is GitHub's 360-minute default, and this job now runs a suite that drives python3
+    # at ~14 sites and builds non-UTF-8 paths, symlink PATH fixtures, an ASCII-locale probe and a
+    # poisoned sqlite file -- whose own step comment enumerates three host-drift classes as EXPECTED
+    # failure modes. Compose that with peak (CLAUDE.md: Friday/Saturday 19:00-21:30) and a runner
+    # image bump has a path to "no checkout, dispatch or payments fix merges for six hours", at the
+    # hours where a paid order nobody is told about is the failure that costs most.
+    # 10 minutes is orders of magnitude above anything this job legitimately does -- seconds of
+    # shell, plus the checkout. That checkout is `fetch-depth: 0`, i.e. a FULL-HISTORY clone, and
+    # this line said "a shallow diff" for a round: it is the one cost in this job that grows with
+    # the REPOSITORY rather than with the diff, which is worth naming inside the justification for
+    # a cap whose failure blocks every merge. It holds comfortably at today's size (~15s observed
+    # for the whole job); if the clone ever dominates, that is a capacity signal, not a hang.
+    # So the cap bounds a HANG AND NOTHING ELSE -- the multiplier this line
+    # used to state was a bare derived number, and review #45 measured it as ~43x where the line
+    # said ~30x. Right in the conservative direction and still the shape ADR-20260817-105845
+    # governs, so the figure is gone rather than corrected. And what the cap DOES cover is worth
+    # saying out loud, because the far likelier event is a RED, and a red has the SAME blast
+    # radius: `changes` fails, all five downstream jobs are skipped, `codegen` reds on
+    # `needs.*.result`, nothing merges. The timeout turns a six-hour worst case into ten minutes and
+    # does nothing at all for the case where the suite runs to completion and fails. That case is
+    # DESIGNED IN: T3/T3b/T3c ("controlled PATH not constructible", "stub bun + symlinks
+    # unavailable") and T15g's ASCII control are deliberately hard `verdict bad` rather than skips,
+    # on the stated reasoning that a harness which cannot build its own setup must not be laundered
+    # into a green. That is right for the CASE and it is what makes a runner-image bump a
+    # repository-wide merge block.
+    #
+    # AND OPTION (a) DOES NOT CLOSE THAT MERGE BLOCK -- this line said it did, and the row it cites
+    # says the opposite in its own words: a sibling always-run job is "EQUALLY BLOCKING". Trace it:
+    # the sibling job is in `codegen`'s `needs:`, it reds on host drift, `join(needs.*.result)`
+    # carries `failure`, the `case` arm sets `status=1`, the required check reds, nothing merges.
+    # Identical blast radius. What option (a) DOES close is the SKIP CASCADE -- the other five jobs
+    # keep running, so their signal survives, and on the docs-only lane `docs-validate` still runs,
+    # which is the direction where the failure INVERTS (a docs-only push is a push to `main` with no
+    # PR, so a red blocks nothing and the change lands with the one validator that lane has skipped).
+    # That is worth having and it is a different property. Whoever closes the row on (a) believing
+    # they bought back "a host-drift red cannot stop shipping at peak" would not have.
+    #
+    # WHAT ACTUALLY CLOSES THE RED CLASS is not on this diff: making the suite's host-CAPABILITY
+    # preconditions `skipped` rather than `verdict bad` -- the treatment T16's ASCII-locale branch
+    # already gets and T3/T3b/T3c and T15g's control deliberately do not -- or keeping the suite out
+    # of the aggregator's assertion entirely. Both are `RETRIEVAL-QMD-CI`'s to authorize, not this
+    # change's, as is moving the step. (Review #91 of PR #679.)
+    #
+    # AND A CAP HERE CLOSES ONE DOOR OF SIX. `codegen` is `if: always()`, and `always()` still
+    # WAITS for a `needs:` job to finish -- so a job that HANGS (rather than fails) keeps the
+    # required check queued indefinitely, auto-merge never fires, and nothing merges. `cargo build`
+    # stalling on a registry hiccup in `build-test`, or the `postgres` service never becoming
+    # healthy in `db-test`, does exactly that at GitHub's 360-minute default. Every job the
+    # aggregator consumes therefore carries a cap, and `assert_pinned_in_changes_job` requires one
+    # on each -- derived from `codegen`'s own `needs:`, like the `continue-on-error` sweep beside
+    # it, so a job added to the aggregator is covered when it is added. The heavy jobs get 60
+    # minutes -- and THAT FIGURE WAS A BARE DERIVED NUMBER with no antecedent, in the branch about
+    # bare derived numbers (review #57). What is measured: `build-test` ~4m17s and `db-test` ~3m54s
+    # WARM, read off real runs on this branch. What is NOT measured, and could not be here, is the
+    # COLD-cache duration -- `cargo build --workspace` over ~200 deps, then a SECOND full target
+    # (`rustup target add wasm32-unknown-unknown` + `make wasm`), then `cargo test --workspace`
+    # recompiling with cfg(test) and linking a binary per crate, on a 4-core hosted runner.
+    #
+    # THE FAILURE DIRECTIONS ARE NOT SYMMETRIC, which is what decides the value. Too HIGH costs a
+    # hang some extra minutes. Too LOW cancels the job, `codegen` fails on `cancelled` BY DESIGN,
+    # the required check reds and nothing in the repository merges -- and `Swatinem/rust-cache`
+    # does not save on a cancelled job, so every re-run is cold again and hits the same wall. Cold
+    # cache is routine, not exotic: the key is `Cargo.lock` + toolchain, so an ordinary dependency
+    # bump or a `dtolnay/rust-toolchain@stable` roll invalidates it. The escape is a two-file
+    # cross-language edit authored while the repo cannot merge.
+    #
+    # So the heavy jobs are bounded at 120 -- deliberately well above any cold build this workspace
+    # plausibly produces, and still 3x better than GitHub's 360-minute default. It bounds a HANG.
+    # It is NOT a duration budget, and it is not claimed to be sized against a measurement that was
+    # never taken. If a cold run ever approaches it, that is a CAPACITY signal: read the duration
+    # off that run, state it here, and raise both this value and the bound in `tests.rs` in the
+    # same commit. (Review #44 set 60; review #57 named it unantecedented and it was raised.)
+    # It does NOT settle `GATE-STEP-LOCUS` (in-job vs sibling job); that row stays open, and this is
+    # the interim mitigation it names. Pinned by `assert_pinned_in_changes_job`, which requires the
+    # key and caps it -- removing it or setting it to hours reds, by name.
+    timeout-minutes: 10
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
     steps:
@@ -88,6 +167,69 @@ jobs:
       # `the_hook_selftest_runs_in_the_always_run_changes_job` codegen test (2026-08-21 hardening).
       - name: Register-check hook selftest (the ask-gate must never be disarmed silently)
         run: bash .claude/hooks/register-check-selftest.sh
+      # The decision-lookup wrapper carries a supply-chain gate (pinned + scriptless install,
+      # structural bun.lock version-integrity binding, delete-wholesale corrupt-index handling) and
+      # SKILL.md declares this suite its authority - so it must run somewhere that is not the
+      # author's machine. It is hermetic: stubs only, no network, no install, and it never touches a
+      # real .qmd/ cache. Pure bash + python3, seconds, no Rust, so it belongs in this always-run
+      # job rather than behind the docs-only skip. Authorized by decision row RETRIEVAL-QMD-CI
+      # (ADR-20260824-205911) - that row authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI.
+      # Pinned by the `the_stub_suite_runs_in_the_always_run_changes_job` codegen test, which
+      # asserts over PARSED YAML: this step is located by its `run` VALUE and its key set must be
+      # exactly {name, run}, so `|| true`, a trailing `; exit 0`, a step-level `if:` in ANY
+      # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
+      # `continue-on-error` / `strategy`, and, at BOTH workflow and job scope (the job half was
+      # deleted once by a refactor and measured green again by review #8), a `defaults.run.shell`
+      # that is not a bare shell name, or an `env` key that changes how scripts EXECUTE (PATH,
+      # BASH_ENV, LD_PRELOAD, ...) or names a gate script's self-verification opt-out. No non-gate
+      # step may mention `.claude`, `GITHUB_ENV` or `GITHUB_PATH` anywhere in its definition, only
+      # `actions/checkout` may be `uses:`d here. On the TRIGGERS the pin checks CONTAINMENT, not
+      # absence: no `paths`/`paths-ignore`/`branches-ignore`; `push.branches` must still contain
+      # `**` (so `!badges` and future exclusions are fine); `pull_request.types`, if set, must still
+      # cover opened/synchronize/reopened (widening is fine); `pull_request.branches` must still
+      # admit `main`. A fork PR produces no push, so that trigger is its only coverage. (An earlier
+      # version of this line said "no path, branch or type filter", which would have had a reader
+      # delete `!badges` from line 40 to satisfy a rule the pin does not have -- key-presence vs
+      # dangerous content, the instrument this file has retracted three times.)
+      # What that does NOT reach is written in the test's own comment; it is not restated here,
+      # because three copies of a residual statement is how the last one came to be wrong.
+      # READ THE MESSAGE, read this before "fixing" a red: the suite asserts COMPLETENESS -- every
+      # declared case must reach a verdict (pass + fail + skip == EXPECTED_CASES). A legitimate
+      # host-capability SKIP is loud but GREEN; what reds is a case that stops running at all.
+      #
+      # A `precondition` in a red message names the disjuncts that could have produced it, for THAT
+      # case. Classify by which one actually fired, not by a rule stated here:
+      #   * a seeded build, a seeded cache, or the wrapper's own format ("PIN/INTEGRITY not
+      #     extractable from wrapper") => a WRAPPER DEFECT. The thing this step exists to protect
+      #     is broken. Investigate; never adapt around it.
+      #   * a host capability (locale, filesystem, python3, a controlled PATH) => usually drift,
+      #     fixed by ADAPTING THE CASE to the host -- EXCEPT where the message says the failure is
+      #     loud by design (T15g's ASCII-control mkdir exists to stop ENOSPC/EROFS/EACCES being
+      #     swallowed, so it is investigated, not adapted).
+      #   * a HARNESS-CONSTRUCTION disjunct -- "sqlite3 poisoning failed", "exit-7 poisoning
+      #     failed", "TypeError / attribute-less / non-class Error shim failed", "sitecustomize
+      #     noise failed" -- is a THIRD case, and six of the seventeen sites carry one. The fixture
+      #     the case needs could not be built: the harness is broken. Investigate it; adapting the
+      #     case would delete the coverage rather than restore it. (An earlier version of this
+      #     comment claimed two classes sufficed and that the exceptions announced themselves --
+      #     true of T15g only, which is why the third class is named here instead.)
+      #   * NO CASE RAN AT ALL => a FOURTH class, and the three above do not fit it. `stub-tests.sh`
+      #     `exit 1`s BEFORE the first case on its own gate-set self-verification: `git` or `tr` not
+      #     under the pinned `/usr/bin:/bin:/usr/local/bin`, a gate-script blob that differs from
+      #     the committed one, an unresolvable `GITHUB_SHA`. Those are properties of the RUNNER
+      #     IMAGE and of the gate set, not of the wrapper, the host capabilities a case needs, or a
+      #     fixture -- so a reader handed the three classes above would classify a FATAL that means
+      #     "the suite refused to report on scripts it could not verify" as one of them and go
+      #     looking in the wrong place. The tell is that there is no `precondition` and no case id:
+      #     READ THE FATAL, it is about the gate set. A blob mismatch specifically is the disarm
+      #     shape the block exists to DETECT and is never adapted around. (Review #92 of PR #679;
+      #     the enumeration above priced the suite's blast radius as three classes while this diff
+      #     added a fourth in the same file.)
+      #
+      # Never delete a case and never weaken an assertion to recover green: this step is the only
+      # thing standing behind the wrapper's supply-chain gate.
+      - name: decision-lookup hermetic stub suite (the wrapper's supply-chain gate must stay proven)
+        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 
   lint:
     # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
@@ -98,6 +240,33 @@ jobs:
     # diff, in the same spirit as the D3 capability allowlist.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    # 60, NOT 20, AND THE JOB'S OWN COMMENTS SAY WHY: cargo-machete is static analysis, but this
+    # job also runs `cargo clippy --workspace --all-targets`, which the rust-cache step below calls
+    # "a full check-build of the workspace" -- and `--all-targets` compiles the test targets too. It
+    # was bucketed with `specs`/`docs-validate`, which genuinely build only `tools/codegen-rs`. The
+    # cap fires only on a cold cache, and cold is routine: `dtolnay/rust-toolchain@stable` rolls
+    # every ~6 weeks and rekeys every job at once, a `Cargo.lock` bump does the same, and GitHub
+    # evicts at 7 days / 10 GB. Before this change a slow cold `lint` was slow; now it FAILS,
+    # `codegen` reds on `needs.lint.result`, and nothing in the repository merges. That is the
+    # "a cap that reds honest work" instrument landing on the one job in the cheap bucket that is
+    # not seconds of work. (Review #58.)
+    #
+    # 120, NOT 60, AND THE FIRST VALUE REPEATED ROUND 57'S DEFECT ONE JOB OVER (review #61). Round
+    # 58 argued at length why `lint` must not be 20 and then picked 60 with no antecedent -- while
+    # `build-test`, whose work this job's own justification calls the same class, got 120 on the
+    # stated reasoning that its cold duration was never measured. No cold `lint` duration is cited
+    # anywhere on this branch either. The asymmetry above applies with ONE HALF CORRECTED (review #83):
+    # this comment said too high "costs a hang a few minutes", which is FALSE of any job in
+    # `codegen`'s `needs:` -- `always()` still WAITS, so a hung `lint` holds the required check for
+    # the full value and nothing in the repository merges. `specs` states that correctly at its own
+    # site and this block did not: the round-70 sweep reached two of the three jobs in the same
+    # `needs:` list. The honest asymmetry is between TWO MERGE BLOCKS: too high blocks merges for the
+    # cap's duration on a hang; too low CANCELS, `codegen` fails on `cancelled` by design, the
+    # required check reds, and rust-cache saves nothing on a cancel so the re-run is cold and hits
+    # the same wall -- which does not self-heal, and that is why the value errs high --
+    # reached by a `Cargo.lock` bump or a toolchain roll, which rekey EVERY job at once, so the run
+    # where `lint` is cold is the run where the runner is most contended.
+    timeout-minutes: 120    # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -127,6 +296,47 @@ jobs:
     # and both test suites first.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    # 120 -- and the route to this number matters more than the number, because round 65 put 20 here
+    # with a measurement that was WRONG ABOUT WHAT IT MEASURED.
+    #
+    # Review #65 was right that these two caps had no antecedent: they shipped in the "seconds of
+    # work" bucket with `changes` and `codegen`, while both `specs` and `docs-validate` build
+    # `tools/codegen-rs` and its tree (guppy, determinator, petgraph, cargo_metadata, target-spec,
+    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- which `docs-validate`'s own
+    # header already admitted.
+    #
+    # THE RETRACTED MEASUREMENT: "empty CARGO_TARGET_DIR, 36s, so 20 minutes is ~30x". The target
+    # dir was empty; `CARGO_HOME` WAS NOT. That measured compile-from-a-warm-registry, which is half
+    # the cold path -- a cold CI runner also fetches every crate in the tree. The number was true and
+    # the sentence built on it was not, and the omission was in the permissive direction. The
+    # re-measurement with an isolated CARGO_HOME could not be completed here (the session's disk
+    # allowance ran out mid-build), so THE COLD PATH REMAINS UNMEASURED and this comment says so
+    # rather than quoting the half of it that happened to be cheap. Review #64's lesson pointing at
+    # its author: a measurement is defined by what it excludes.
+    #
+    # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- AND THE ASYMMETRY IS DERIVED HERE
+    # RATHER THAN COPIED. Round 66 pasted `docs-validate`'s paragraph into this job, and its
+    # permissive half is FALSE of `specs`: that argument turns on the docs-only lane blocking no
+    # merge (a push with no PR, the change already landed), and `specs` carries
+    # `if: docs_only != 'true'` two lines up -- it NEVER RUNS on that lane. Round 58's
+    # `lint`-in-the-cheap-bucket defect, one job over, committed in the comment that argues against
+    # inheriting a number from a different job. (Review #70.)
+    #
+    # WHAT IS ACTUALLY TRUE HERE, both directions on the code lane, which is the only lane `specs`
+    # runs on. Too LOW cancels the job; `codegen` fails on `cancelled` by design, the required check
+    # reds, and `Swatinem/rust-cache` saves nothing on a cancellation, so the re-run is cold and hits
+    # the same wall -- reached by an ordinary `Cargo.lock` or toolchain bump, which rekeys every
+    # cache at once. Too HIGH is NOT free here, unlike on `docs-validate`: `specs` is in `codegen`'s
+    # `needs:`, `always()` still WAITS, so a hung `specs` keeps the required check queued for the
+    # full value with auto-merge never firing -- the repository-wide block `GATE-STEP-LOCUS` prices,
+    # and the reason `changes` is capped at 10 rather than at this value.
+    #
+    # So this number is a genuine trade rather than a cheap direction, and it is set at the same
+    # value as the other unmeasured jobs deliberately: one number across them is one fewer figure to
+    # drift, which is the defect rounds 57, 61 and 62 were spent on. Bounds a HANG. WHEN A COLD RUN
+    # IS ACTUALLY OBSERVED: read its duration off that run, state it here as the antecedent, and move
+    # this value deliberately -- do not lower it to fit a warm one.
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -170,6 +380,7 @@ jobs:
     # own warm cache and neither races the other's save.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 120  # see the `changes` job comment: bounds a HANG, set ABOVE an unmeasured cold build on purpose
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -241,6 +452,7 @@ jobs:
     # drift (and the undeliverable staged-fact bug it hid) went unnoticed.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 120  # see the `changes` job comment: bounds a HANG, set ABOVE an unmeasured cold build on purpose
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -330,6 +542,33 @@ jobs:
     # generic skipped-acceptance below would let a mis-gated skip slide.
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
+    # 120 -- how this number was arrived at, and the measurement retracted on the way, is on the
+    # `specs` job above; it is the same story for both and is deliberately told once (review #76).
+    # What is NOT shared is the asymmetry below, which is what actually decides the value and is
+    # different for these two jobs.
+    #
+    # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- and for `docs-validate` the
+    # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang and,
+    # ON THE DOCS-ONLY PUSH SPELLING, blocks no merge at all, because CLAUDE.md routes that work
+    # straight to `main` with no PR -- the change has already landed. THE PUSH SPELLING IS NOT THE
+    # WHOLE LANE (review #83): `docs_only` is computed from the DIFF, not from how the change
+    # arrived, so a docs-only PULL REQUEST also lands here -- and that is the only route open to a
+    # FORK contributor, who cannot push to `main` at all. For that PR a hang does hold `codegen` for
+    # the full value. So the too-high side is cheap on the lane this team uses and not free in
+    # general; it is still by far the cheaper direction, which is what decides the value. Too LOW cancels the job, `codegen`
+    # fails on `cancelled` by design, and the change sits on `main` WITH NO VALIDATOR HAVING RUN,
+    # because this is the only gate that lane has. It does not self-heal either: `Swatinem/rust-cache`
+    # saves nothing on a cancellation, so every re-run is cold and hits the same wall. Reached by an
+    # ordinary `Cargo.lock` or toolchain bump, which rekeys every cache at once.
+    #
+    # THIS ARGUMENT IS TRUE OF `docs-validate` AND OF NO OTHER JOB -- it turns on the docs-only
+    # lane, and every other aggregated job carries `if: docs_only != 'true'`. `specs` states its own,
+    # different asymmetry at its own site; do not paste this one back over it (review #70). The value
+    # matches the other unmeasured jobs deliberately: one number across them is one fewer figure to
+    # drift, the defect rounds 57, 61 and 62 were spent on. Bounds a HANG; `codegen` waits on
+    # `needs:` even under `if: always()`. WHEN A COLD RUN IS ACTUALLY OBSERVED: read its duration off that run, state it
+    # here as the antecedent, and move this value deliberately -- do not lower it to fit a warm one.
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -362,6 +601,7 @@ jobs:
     # (normal run) or `skipped` (docs-only change). `cancelled` and `failure` both fail here.
     needs: [changes, lint, specs, build-test, db-test, docs-validate]
     if: always()
+    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - name: Every gate job must have succeeded (or been skipped as docs-only)

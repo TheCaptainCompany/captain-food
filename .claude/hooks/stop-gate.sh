@@ -90,7 +90,135 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # is a PreToolUse hook that is silent-when-broken by shape (a matcher typo or a dropped settings
 # entry disarms it with no signal -- ADR-20260810-231300's defect class), so its selftest runs
 # every turn: hook verdicts, settings wiring, and the agent files' citation blocks.
-step bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+# REGISTER_CHECK_ALLOW_DIRTY: the selftest compares ALL FOUR gate scripts (both hooks and both
+# decision-lookup scripts) against their committed
+# blobs and refuses to report otherwise (the overwrite class the eighth review of PR #679 planted
+# green). Editing a hook and re-running is the normal interactive loop, so `make hooks-test` opts
+# out unconditionally and THIS caller opts out only when a gate script is actually dirty -- see the
+# block below, which is where that condition is computed and argued. CI invokes the
+# script directly and verifies. Those two are the whole list. The CI path cannot be talked out of
+# verifying because `env_ok`, inside `assert_pinned_in_changes_job`, forbids both opt-out names as
+# `env:` keys at every scope -- planted red by `both_scopes_reject_execution_altering_env`. This
+# line used to credit `assert_gate_script_self_verifies`, which never opens `ci.yml` at all: it
+# asserts things about the two SHELL SCRIPTS. A maintainer following the wrong name would have
+# found no `env:` handling there and concluded the ban was refactored away -- round 9's own finding
+# ("a comment named a test as the thing preventing the regression; that test did not exist") one
+# file over, in a sentence written after it. (Review #17.)
+#
+# THE OPT-OUT IS CONDITIONAL, AND WHAT THAT BUYS IS NARROWER THAN REVIEW #72 CLAIMED FOR IT.
+#
+# THE CLAIM, RETRACTED: "an in-session `cp exit0.sh <gate script>` is now caught on the next turn
+# rather than on push." FALSE, and it cannot be made true by any working-tree predicate. The two
+# tests are COMPLEMENTS: `git status --porcelain` over these paths is non-empty exactly when the
+# worktree bytes differ from HEAD, which is exactly when the selftest's `hash-object` comparison
+# would mismatch. So dirty implies opted out -- the comparison is skipped in precisely the state
+# where it could fail -- and clean implies it runs and passes by construction. Measured, not
+# reasoned: an ordinary `cp` over `register-check.sh` yields OPTED OUT. Nothing in the working tree
+# separates "the maintainer is editing a gate script" from "a gate script was overwritten", because
+# at the byte level they are the same state. (Review #79 of PR #679, correcting review #72.)
+#
+# WHAT IT DOES DELIVER, and it is not nothing: the tamper that HIDES FROM `git status`. A
+# `git update-index --assume-unchanged` or `--skip-worktree` on a gate script leaves the status
+# clean while the bytes differ -- this block then ARMS, and the selftest reds with
+# `differs from the committed blob at HEAD`. Measured too. That is the stealthier class and the one
+# an attacker who has read this file would reach for, so the coverage is inverted from the naive
+# reading: the CLUMSY overwrite is caught at push, the CAREFUL one on the next turn.
+#
+# Pinned by `the_stop_gate_predicate_discriminates_a_hidden_tamper` -- both directions, against a
+# throwaway repo -- because this rationale has now been wrong once and a sentence is what carried it.
+#
+# THE RESIDUAL, AND THE REPAIR DELIBERATELY NOT TAKEN. A session that legitimately edits ONE gate
+# script and overwrites ANOTHER in the same turn is opted out for both. Reviews #81/#82 propose the
+# obvious close: make the predicate per-FILE and keep the comparison armed over the clean ones.
+# NOT DONE, and the reason is this branch's own subject: the scripts refuse wholesale, so per-file
+# needs a new variable carrying a skip-list into them -- a NEW OPT-OUT LEVER on the gate surface.
+# Every lever is a disarm route, `env_ok` would have to learn to ban it in CI, and eighty rounds
+# here have been about levers that did not do what their sentence said. Closing a narrow residual by
+# widening the disarm surface is the wrong trade on the gate set that guards the required check.
+# Recorded so the next author meets it as a decision rather than an oversight.
+#
+# THE PREDICATE IS THE WORKING TREE, NOT THE BRANCH DIFF, and the difference decides whether this
+# is a no-op. `$changed` above folds in `diff "$base"...HEAD`, so on THIS branch -- which edits all
+# four gate scripts -- a branch-scoped predicate would opt out on every turn forever and the guard
+# would arm only where it was never needed. What actually needs the opt-out is an UNCOMMITTED edit:
+# a committed script matches its blob at HEAD and verifies fine. `git status --porcelain` alone is
+# therefore the right question, and it makes the guard live on the branch that wrote it.
+#
+# FAIL SAFE TOWARD THE GUARD, AND THE INITIALISER IS WHERE THAT IS DECIDED. The first version of
+# this block claimed exactly this and then reversed it for one of the two disjuncts: it initialised
+# to 1, so `git rev-parse --git-dir` failing (no `.git` at all -- a container stage that drops it, a
+# `git archive` extraction, `git` off PATH) skipped the `if` body entirely and left the value at
+# "dirty", DISARMING the comparison silently on every turn, while printing the ordinary dirty-tree
+# line. That is the silent-disarm shape V3 exists to remove, reintroduced by a default rather than
+# by an edit anyone would notice -- and the comment above it asserted the opposite. (Review #77.)
+#
+# So the default is ARMED, and both failure disjuncts now reach it: no git, and a `git status` that
+# errors (the pipeline takes `grep`'s status, which is 1 on empty output). A git-less host therefore
+# gets the block's loud `FATAL`, whose message names the opt-out and is recoverable in one command
+# -- which is what "fail safe toward the guard" has to mean if it means anything. Editing a gate
+# script and re-running is still the normal loop: that turn is dirty and opts out, this one is not.
+#
+# AND ARMING IS THE RIGHT SEMANTICS HERE, not merely the cautious one: the comparison's ORACLE IS
+# THE REPOSITORY. A checkout without one has nothing to compare against, so the selftest's own
+# refusal is the honest answer rather than a nuisance -- it says the gate set cannot be verified,
+# which is true, and names the opt-out, so a host that genuinely has no git is one command from a
+# green. Disarming would have answered "cannot verify" with "verified".
+#
+# THIS IS THE FILE'S OWN CONVENTION, stated at the `crates/UNKNOWN` sentinel ~75 lines up: "Fail
+# SAFE, like the no-git path below: scope cannot be computed, so do not guess -- run the suite."
+# That sentence names THIS block, and it was FALSE for four rounds -- between the block landing
+# (review #72) and this fix, the path below it did the opposite of what the path above claimed of
+# it. An existing comment silently falsified by a new block, with nothing pointing at it: the
+# half-applied-sweep class from the other end, where the stale site is the one you did not write.
+#
+# ONE CASE IS NOT A TAMPER AND MUST NOT BLOCK THE TURN: the selftest builds its oracle on a PINNED
+# PATH (`/usr/bin:/bin:/usr/local/bin`) so it cannot be sent to a shim, and FATALs when `git` or
+# `tr` is not there. On NixOS (`/run/current-system/sw/bin`) or a slim container that keeps busybox
+# elsewhere, that fires with a CLEAN tree and no gate script touched -- and from THIS caller the
+# FATAL is `step`'s `fail=1`, i.e. `exit 2`, i.e. EVERY TURN BLOCKED. The message names
+# `REGISTER_CHECK_ALLOW_DIRTY=1`, which works for the two Makefile targets that pass it and NOT for
+# this one, because the hook picks the branch itself: the only escape is exporting the variable into
+# the session, which disarms the comparison PERMANENTLY AND SILENTLY for every later turn -- the end
+# state the V3 header argues against ("an armed-only entrypoint gets DELETED rather than opted out
+# of"). So the caller detects the CAPABILITY miss itself and opts out loudly, once, for that turn.
+#
+# THIS IS NOT THE `no git at all` CASE ABOVE, and conflating them is what hid it: there
+# `rev-parse` fails, the tree is unknowable and arming is the honest answer. Here `rev-parse`
+# SUCCEEDS on the ambient PATH, the dirty check works, the selftest is armed -- and then cannot
+# build its oracle. Nor is it a weakening: the comparison is IMPOSSIBLE on such a host, so the
+# choice is between saying so per turn and a permanent silent disarm. A tamperer cannot reach this
+# branch either, because it is decided by what is present under a fixed absolute PATH, which no
+# in-repo edit and no inherited environment can change -- that is the whole point of pinning it.
+# (Review #91 of PR #679.)
+_vpath="/usr/bin:/bin:/usr/local/bin"
+_oracle_missing=""
+PATH="$_vpath" command -v git >/dev/null 2>&1 || _oracle_missing="git"
+PATH="$_vpath" command -v tr  >/dev/null 2>&1 || _oracle_missing="${_oracle_missing:+$_oracle_missing and }tr"
+
+_gate_scripts_dirty=0
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  if git -C "$ROOT" status --porcelain --untracked-files=all -- \
+       .claude/hooks/register-check.sh \
+       .claude/hooks/register-check-selftest.sh \
+       .claude/skills/decision-lookup/scripts/decision-lookup.sh \
+       .claude/skills/decision-lookup/scripts/stub-tests.sh 2>/dev/null | grep -q .
+  then _gate_scripts_dirty=1; else _gate_scripts_dirty=0; fi
+fi
+# --- END OF THE DIRTY PREDICATE --- (anchor: `the_stop_gate_predicate_discriminates_a_hidden_tamper`
+# lifts everything above this line out of the shipped script and runs it, rather than
+# re-implementing it here. An explicit marker rather than "the next `if`", because the dispatch
+# below grew a branch and the test's end anchor silently swallowed half of it -- the lifted snippet
+# became an unterminated `if`, bash printed nothing, and the assertion read as "a clean tree does
+# not arm" when the predicate was fine. Move this marker with the predicate, never past a branch.)
+if [ -n "$_oracle_missing" ]; then
+  echo "-> register-check selftest ($_oracle_missing not under $_vpath -- the comparison's oracle CANNOT BE BUILT on this host, so it is opted out for this turn rather than blocking it; the gate set is NOT verified here and an overwrite is caught at push)"
+  step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+elif [ "$_gate_scripts_dirty" = "1" ]; then
+  echo "-> register-check selftest (a gate script is dirty in the working tree -- comparison opted out; an overwrite in this state is caught at push, not here)"
+  step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+else
+  step bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+fi
 
 # WHEN THE HOOK ITSELF CHANGES: the full guard suite (~2s, hermetic git fixture). Diff-scoped for
 # the same reason as the workspace suite above -- it proves the budget hook, so it runs when the

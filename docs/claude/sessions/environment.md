@@ -251,6 +251,17 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   still run out. Symptom that
   sent this session looking: `fatal: … index.lock write error. Out of diskspace` from `git commit`
   while `df` still reported 2.3G free — §2's "writes fail while the numbers still look fine".
+- **Timing a "cold" build with a second `CARGO_TARGET_DIR` costs a full second copy — and it does
+  not measure what it looks like (2026-08-26, #679).** An empty target dir plus the session's warm
+  `CARGO_HOME` measures COMPILE FROM A WARM REGISTRY, not the cold path a CI runner takes, which
+  also fetches every crate in the tree. Setting `CARGO_HOME` too is the fix and doubles the cost
+  again: a `tools/codegen-rs`-sized tree wanted more than the ~800M left after the first attempt,
+  so the re-measurement died with `No space left on device` mid-build and the finding had to be
+  recorded as UNMEASURED. Two lessons, and the second is the expensive one: **delete the scratch
+  target dir in the same command that reports the timing** — an abandoned one is exactly the stale
+  build dir the sweep above exists for, only self-inflicted — and **before quoting a build duration,
+  say which caches were warm**, because a measurement is defined by what it excludes and the
+  omission runs in the permissive direction.
 - **A fresh worktree starts with an EMPTY `target/`, and a cold workspace build does not fit the
   allowance (2026-08-13, #516):** `<wt>/target` was 4.0K against ~1G free. Point the build at the main
   checkout's cache instead — `CARGO_TARGET_DIR=/home/user/captain-food/target make rust` — which reuses
@@ -275,3 +286,13 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   build therefore never terminates — it is waiting on itself. Cost here: two 10-minute background
   waits that outlived the build they watched. Match on the process name instead (`pgrep -x cargo`,
   `ps -eo comm`), which cannot see the wrapper's arguments.
+
+- **`git stash pop` after a no-op `git stash` pops SOMEONE ELSE'S ENTRY.** Wrapping a command in
+  `git stash` / `git stash pop` is a reflex from a dirty tree; on a CLEAN tree the `stash` is a
+  silent no-op and the `pop` then takes the top of a stack that may belong to another branch or
+  another session. This repo's stash held `HELD: PR670 amendment (founder decision form + C2/C3
+  fixes) — awaiting founder approval`, from a different branch; the pop conflicted, which is the
+  only reason the entry survived — git keeps an entry whose pop failed, and drops one whose pop
+  succeeded. A clean pop would have silently applied held work into an unrelated branch AND deleted
+  it from the stack, with no signal in either direction. **Check `git stash list` before any pop, or
+  simply do not stash**: a clean tree needs no stash, and a dirty one is better committed.

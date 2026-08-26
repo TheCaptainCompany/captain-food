@@ -610,3 +610,181 @@ question; the review caught it post-merge, and the fix ([#453](https://github.co
 was to extract the gate to a serde-only crate whose cold build is seconds. **The durable proof of
 "cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
 wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.
+
+## 19. Shapes a gate test keeps reproducing
+
+From [#679 "RETRIEVAL-QMD-CI decided: the decision-lookup stub suite runs in
+CI"](https://github.com/TheCaptainCompany/captain-food/pull/679) — many independent review passes,
+all FAIL before the state that merged. **The recurring defect was never the mutants: it was that
+every round's completeness claim was written before it was checked.** The early rounds found holes
+in the gate; most of the later ones were about the tests FOR the gate, and a large share of those
+were regressions introduced while fixing the previous round's finding.
+
+*No total is stated here on purpose.* The first version of this paragraph said **thirty-three**
+while the PR body said **thirty-one**, and both then split the same set as "the first thirteen"
+plus "the last eighteen" — 31, not 33 — in the section whose own closing bullet says a derived
+number stated in prose is consumed as established fact and must be derived instead. The round entries in
+`docs/status/journal-2026-W35.md`, and the `(Review #NN)` citations in `tools/codegen-rs/src/**`,
+are where a count can be re-derived from something **committed**. (Review #36.)
+
+*The first version of this sentence pointed at the PR's round table instead — which is the same
+defect one level up: CLAUDE.md says **GitHub is never the record**, this section exists because the
+shapes were living only in a PR body, and a body is editable, unversioned and invisible to
+`make validate`. It was also already stale by seven rounds when it was caught. A repo record may not
+delegate its antecedent to a surface that disappears with the branch. (Review #58.)*
+
+These are not derivable from the code, each cost a round, and **several of them reappeared inside
+the very guard written to close them** — which is why they are here rather than in a comment next to
+one instance. *The heading counted them for one round, which is this section's own closing bullet
+committed in its title: the list grows, nothing derives the number, and the first addition made it
+wrong. Dropped rather than corrected — the third application of that remedy on this branch, after
+the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
+
+1. **A corpus-size floor counts plants, not coverage.** `must_red.len() >= N` says nothing about
+   *which* assertions have a plant. The only way to know an assertion is pinned is to delete it and
+   watch something go red. Measured: eight assertion families in one helper were each held up by a
+   sentence — delete any one and every mutant and control stayed exactly as it was.
+2. **`assert_ne!(mutated, original)` proves a mutation applied, never that it applied where the
+   label says** — and a plant that does not apply *at all* is the sharper version of the same
+   defect, because it yields a false conclusion **about the code** rather than a weak one about the
+   test. A mutation driven from a shell one-liner whose escaping mangled an `&` made `str.replace`
+   match nothing and change no bytes; the test stayed green, which reads identically to "the guard
+   does not discriminate here" — and that inference got acted on, rewriting a control that was
+   fine. **Assert the plant applied, in the same command that runs it.** `replacen(anchor, .., 1)` rewrites the FIRST match in the whole file, and CI job
+   bodies are near-identical: one anchor occurred in five jobs, so a plant labelled `build-test …`
+   silently mutated `lint`, satisfied `assert_ne!`, and pinned nothing.
+3. **A plant that fails for the wrong reason is worse than none** — it reports the guard working
+   while proving nothing. Two spellings: a mutant that reds on a YAML *parse* rather than on the
+   property, and a fixture whose cases leak into each other (stacked commits made a diff
+   cumulative, so four later cases were passing on an earlier case's file).
+4. **A guard that inspects declared configuration is blind to the same thing done imperatively.**
+   `env:` is a mapping a test can read; `echo "PATH=…" >> "$GITHUB_ENV"` needs no `env:` key at all.
+   A `case`-arm allowlist is text a test can read; one appended `docs_only=true` overrides every arm
+   without touching one. **The answer is to execute the thing and assert its output**, not to read
+   it harder.
+5. **A fixture set drawn from the shape you were thinking about proves only that shape.** The same
+   hard-wrap defect returned three times wearing `-`, `1.` and `#`.
+6. **A token that carries the exempting word is not evidence of an explanation.** Blank the citing
+   token before testing the clause around it.
+7. **A helper that constructs test inputs needs the same scrutiny as the assertions it feeds.**
+   Three rounds of "is this plant pinning what it claims" all pointed at the plant *list*; none at
+   the function building them — which was itself mislabelled, and swallowed a `permissions:` block.
+8. **A fix verified by READING is verified against the tree you have.** Three rounds closed three
+   silent ways for a file to leave the citation corpus, each checked by reading the code, and each
+   missed the fourth — because the property under test is *what happens to a shape this tree does
+   not contain*, and the tree contains zero such files. Reading proved the code did what it says;
+   it could not show what the code does to an input nobody had written down. **Build the fixture
+   that has the shape.** "I closed the other three by reading" is the reason the fourth survived,
+   not evidence against it. Corollary, from the same round: **a test that checks one half of a
+   description cannot detect that the other half overstates** — the records described the corpus by
+   its *pathspecs*, the guard compared pathspecs, and the unstated extension filter made both
+   records silently wider than the code.
+
+9. **A justification inherited by copy is not a justification at the site it now governs.** Twice
+   on this branch a `timeout-minutes` cap's reasoning was reused for a job it was not true of —
+   `lint` bucketed with jobs that compile nothing, then `docs-validate`'s paragraph pasted onto
+   `specs`, whose `if: docs_only != 'true'` means it never runs on the lane that argument turns on.
+   Both were written by an author arguing, in the same comment, against inheriting a number from a
+   different job — which is why prose cannot hold it: the next paste looks exactly like the last.
+   Gated against the shape that happened — `no_two_jobs_share_a_substantial_timeout_justification`
+   is a **byte-identity** check, so it stops a verbatim paste and not a paste with one word changed;
+   no textual rule can decide whether a justification is *true* of the job it sits on. A short
+   pointer to another site is fine and is the correct way not to repeat one.
+
+10. **A `///` run binds to the following ITEM, and nothing between two paragraphs says "new
+   docstring".** Four times on this branch a doc comment ended up on the wrong item: twice in
+   `validate/decisions.rs` (a paragraph left two functions up; `struct Unit`), once on
+   `validate_decisions_index_sync`, once when a new test was inserted directly under an existing
+   test's docstring with no item between — so both bound to the new test and the old one shipped
+   undocumented. The damage is always the same shape: **the governing rationale for X is displayed
+   as the rationale for Y**, and the reader looking for "which test enforces this" finds one that
+   never opens the file in question. A blank line does not break the run.
+
+   **Deliberately NOT gated, which is the point of the entry.** Every instrument available is
+   heuristic — "a paragraph that looks like an opening" false-reds on this file's own mid-docstring
+   ALL-CAPS headings — and `missing_docs` does not reach private items, so the compiler-first lever
+   is absent. On a gate guarding the required check, this file's standing rule is that a false red
+   costs more than a latent miss. So it stays a **reading** rule: when you insert an item above an
+   existing one, look at what is now directly above the item below you.
+
+- **An edit to a surface outside the repo has no diff, so "I updated it" is a claim with no
+  antecedent.** A PR body, an issue, a project field: `git diff` proves a file edit landed; nothing
+  proves one of those landed except re-reading it. On this branch a "what decides this merge" box was
+  drafted to a scratchpad, announced as live in two replies, and never posted — hiding the diff's one
+  **founder-owned** open row from the person the body is written for, where no gate could see it.
+  **Re-read the surface after writing it, and prefer stating what a reader can verify** ("the box
+  names three rows") **over what only the author can** ("I updated the box"). This is the concrete
+  reason CLAUDE.md says GitHub is never the record.
+
+And from the same branch, about the records rather than the tests — **uncounted on purpose**. This
+line said *"Two more"* while introducing three, in the paragraph whose own first bullet is *derive it
+or drop it*; the numbered heading above was dropped for the identical reason one round earlier, and
+the list grew again the round after that. Fourth application of the same remedy on one branch, which
+is itself the argument: **a list that grows has no business stating its own length.**
+
+- **A count retracted twice will be retracted a third time — derive it.** A derived number stated in
+  prose is consumed as established fact and nothing re-derives it
+  ([ADR-20260817-105845](../../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)).
+  A citation defect reads as correct whenever someone checks the *value* instead of the antecedent.
+- **A verification recipe is itself a derived claim.** "Read its last three lines" was written from
+  the intended shape and not from a log; the step prints one line. Read it off a real run, or state
+  a property that cannot drift.
+- **An edit to a surface outside the repo has no diff, so "I updated it" is a claim with no
+  antecedent.** A PR body, an issue, a project field: `git diff` proves a file edit landed; nothing
+  proves one of those landed except re-reading it. On this branch a "what decides this merge" box was
+  drafted to a scratchpad, announced as live in two replies, and never posted — hiding the diff's one
+  **founder-owned** open row from the person the body is written for, on a surface no gate can see.
+  **Re-read the surface after writing it, and prefer stating what a reader can verify** ("the box
+  names three rows") **over what only the author can** ("I updated the box"). This is the concrete
+  reason CLAUDE.md says GitHub is never the record.
+- **A measurement is defined by what it excludes, and the omission runs permissive.** Taking a
+  number is not the end of the antecedent problem — it relocates it. A "cold build, 36s" measured an
+  empty target dir against a *warm* registry, which is half the path a cold CI runner walks; the
+  figure was true and the multiplier built on it was not. **Say which caches were warm, in the same
+  sentence as the number.** And when the honest re-measurement cannot be taken, "unmeasured" is a
+  publishable answer — decide on the asymmetry instead, and say that is what you did. This one
+  landed on the author, one round after writing the rule it breaks.
+- **When a comment names a CLASS and the code stores a BOOLEAN, the code sees only the class's
+  edges.** `logical_units` described one of its unit boundaries as a *"marker-class change"* and
+  computed `marked = starts_with('#') || starts_with("//") || starts_with('>')`, then tested
+  `marked != prev_marked` — marker PRESENT, not marker CLASS. A `>` block followed by a `#` block
+  never ended a unit, so the earlier fix for that exact defect survived one marker over. The
+  docstring, the code comment and four reviews all read past it. **A prose name for a predicate is
+  not a test of it: read the representation, not the label.** The tell is a boolean (or an
+  `is_foo()`) standing where the sentence beside it says *kind*, *class* or *type*.
+- **Making an input VISIBLE to a guard is not the same as making its METRIC sensitive to that
+  input.** An anti-paste gate read only the comment block *above* a key, so justifications written
+  as a trailing comment were invisible. Collecting them fixed the blindness — and the bound counted
+  LINES, while a trailing comment is one physical line however long, so a shared 400-character
+  inline justification still scored 1 and stayed green. The fix did exactly what the finding asked
+  and closed none of the hole. **When you widen what a check reads, re-derive what it measures over
+  the new input**, and write the plant before believing either half. This is the widen-the-trigger
+  shape one level in: there the action went unrevised, here the metric did.
+- **A test that LIFTS code out of a shipped script by textual bounds breaks when the script grows a
+  branch — and it fails with a message about the subject, not the extraction.** The end anchor was
+  "the next `if [ "$_gate_scripts_dirty" = "1" ]`"; a new branch in front of it turned that into an
+  `elif`, the anchor matched inside it, and the lifted snippet became an unterminated `if`. Bash
+  printed nothing and the assertion failed as *"a clean tree must ARM the comparison"* — a sentence
+  about the predicate, for a defect in the slicing. Lifting beats re-implementing (a copy drifts),
+  so keep it — but **anchor on an explicit marker the script carries for that purpose**, and read a
+  lifted-code failure as "did the extraction still work?" before believing what it says about the
+  code.
+- **"Only X closes it" — name what "it" is, in the same sentence.** A decision row and the file it
+  governed both said *"a runner-image bump is a repository-wide merge block; only option (a) closes
+  it"*, while the same field said option (a) is *"EQUALLY BLOCKING"*. The pronoun had drifted from
+  the merge block to the skip cascade between drafts, and the surviving sentence licensed a choice
+  its own evidence refutes. **In a record, a consequence claim carries the consequence's name, not a
+  pronoun** — a record is read years later, by someone who will act on it, in an order you did not
+  write it in. The same reason a stale premise must be corrected AT the claim rather than retracted
+  a thousand words later: on a founder-owned row a reader who stops early decides against a premise
+  the diff already falsified.
+- **A range splice bounded by two SEARCHED anchors deletes everything between them — including work
+  added since the bounds were reasoned about.** `s[..start] + new + s[end..]` to retire one test
+  also removed every test inserted into that region earlier in the same round. **The suite
+  went green: a deleted test fails nothing.** The round then reported "N tests green" as evidence for
+  assertions that no longer existed — a total is exactly the wrong instrument for *did what I wrote
+  survive*, because it moves for four reasons at once. Prefer a single-occurrence exact replacement;
+  when a range must go, **assert what the range contains before replacing it**, verify new tests
+  individually by name, and read the DELETION side of `git diff` before committing. The executable
+  half is `every_test_name_cited_in_a_doc_comment_still_exists` — this repo's tests carry their
+  reasoning by citing each other, so a dangling citation is the one trace a silent deletion leaves.

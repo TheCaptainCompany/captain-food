@@ -58,6 +58,10 @@ fn main() {
     // §17: refresh the committed warning ratchet instead of asserting it (`make warning-baseline`).
     // The ONLY way the artifact changes, so "the number moved" is always a deliberate, reviewable act.
     let write_baseline = args.iter().any(|a| a == "--write-warning-baseline");
+    // Declared at FUNCTION scope on purpose: the §17 ratchet at the bottom needs it, and the walk
+    // that sets it runs inside a nested block several sections up. A corpus the walk could not read
+    // leaves the two tree-caused warning kinds UNMEASURED rather than zero. (Review #80.)
+    let mut corpus_shortfall = CorpusShortfall::None;
     let specs = arg_value(&args, "--specs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("specs"));
@@ -104,6 +108,39 @@ fn main() {
         if check {
             let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
             dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
+        }
+        // A superseded row may not be cited as live authority anywhere in the agent surface — the
+        // grep CLAUDE.md prescribes after a reshape, executed instead of remembered. The corpus is
+        // NAMED IN ONE PLACE ONLY (`claude_citation_corpus`'s SCOPE section); this comment used to
+        // say "anywhere under `.claude/**`", which had already stopped being true of the walk it
+        // describes.
+        // OUTSIDE `if check`, UNLIKE `validate_decisions_index_sync`, and the asymmetry is
+        // deliberate (asked by the independent review of PR #679). The index-sync rule is
+        // check-only because GENERATION IS ITS REPAIR -- a fatal staleness error in generate mode
+        // would deadlock `make generate` against the very staleness it exists to fix. Nothing
+        // regenerates a citation, so this rule locks no key in the room: the repair is an edit the
+        // author is making anyway. What it does mean is that a commit flipping a row to
+        // `superseded` cannot regenerate the index until its citations are fixed too -- which is
+        // the correct order, because `docs/decisions/README.md` requires both halves of a
+        // supersession in ONE commit and a stale citation is exactly the other half.
+        {
+            let (cited, readable, unread, unread_tree, skipped_ext) = validate::decisions::claude_citation_corpus(&root);
+            // The §17 ratchet needs this: on an unreadable corpus the two tree-caused kinds below
+            // are UNMEASURED, not zero. See `CORPUS_DERIVED_KINDS`. (Review #80.)
+            // NOT READABLE **OR** PARTIALLY READ, and the second disjunct is the one review #84
+            // added. `readable == false` is git refusing outright; `unread` is non-empty when git
+            // listed a file the filesystem would not hand back -- a sparse checkout, a dangling
+            // tracked symlink, a permission drop. Both are HOST causes, so both make the corpus
+            // counts unstable across machines, which is the whole predicate. The two TREE-caused
+            // vectors are deliberately NOT disjuncts here: `skipped_ext` and `unread_tree` drop the
+            // same files on every host, so they narrow the corpus without destabilising it, and
+            // including them would suppress the ratchet permanently the moment one file qualifies.
+            corpus_shortfall = CorpusShortfall::from_scan(readable, unread.is_empty());
+            // Every way a file leaves the corpus -- the kinds, their ratchet postures and their
+            // per-file granularity -- lives in ONE function so it can be asserted by execution
+            // rather than by reading this file's source. (Review #92.)
+            dec_issues.extend(corpus_scan_issues(readable, &unread, &unread_tree, &skipped_ext));
+            dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));
         }
         // §22c — the decision-form template anchors questions to rows (requirement 6; published
         // form copies are uncommitted and NOT mechanically validated — recorded in the ADR).
@@ -249,20 +286,62 @@ fn main() {
             );
             std::process::exit(1);
         }
+        // AND ONLY FROM A HOST THAT MEASURED SOMETHING. Minting with the corpus UNREADABLE bakes a
+        // 0 into the artifact for kinds this run never counted -- the same trap as comparing
+        // against it, one step earlier and permanent, because the file is committed. Same shape as
+        // the errors guard above: a baseline is only meaningful for a run that saw what it is
+        // describing. (Review #80.)
+        //
+        // THE REFUSAL IS NARROWED TO THAT CASE, and it used to fire on a PARTIAL read too, because
+        // the two shortfalls were one bool. There the counts are computed -- lower bounds, not
+        // absent -- so refusing blocked `make warning-baseline` on that host for ANY change,
+        // including one made for an unrelated warning kind, while CLAUDE.md requires the refreshed
+        // artifact in the SAME commit and the printed remedy ("fix the checkout") may be outside the
+        // author's control. The compare path already had the right answer one function over; the
+        // write path now takes the SAME floor rather than a second opinion. (Review #91.)
+        if !corpus_shortfall.may_mint_a_baseline() {
+            eprintln!(
+                "\n✗ refusing to write {} — `git ls-files` did not answer on this run, so the superseded-citation corpus was EMPTY and {:?} were not measured at all.\n  A baseline minted here would commit 0 for kinds this host never counted, and then red on every host that can count them.\n  Fix the checkout (ownership, a missing .git, an index with no entries) and re-run.\n  A PARTIALLY read corpus does NOT reach this refusal: there the counts are lower bounds and are floored at the committed values instead.",
+                WARNING_BASELINE_PATH, CORPUS_DERIVED_KINDS
+            );
+            std::process::exit(1);
+        }
+        let unmeasured = corpus_shortfall.unmeasured();
+        let minted = if unmeasured.is_empty() {
+            live_profile.clone()
+        } else {
+            // A lower-bound count must not be written down as the truth. Same correction the
+            // compare path applies, from the same function, so the two cannot drift apart.
+            match read_committed_baseline(&root) {
+                Ok(committed) => floor_unmeasured(&live_profile, &committed, unmeasured),
+                // No readable baseline to floor against -- `make warning-baseline` is also how the
+                // artifact is CREATED, so this is the legitimate first-run path. Mint the live
+                // profile and say which kinds went in unfloored rather than failing the create.
+                Err(_) => {
+                    eprintln!(
+                        "  note: {:?} could not be floored against a committed baseline (none readable), and this run read the corpus only PARTIALLY — re-check those counts on a host that can read every file.",
+                        unmeasured
+                    );
+                    live_profile.clone()
+                }
+            }
+        };
         let path = root.join(WARNING_BASELINE_PATH);
-        if let Err(e) = fs::write(&path, render_warning_baseline(&live_profile)) {
+        if let Err(e) = fs::write(&path, render_warning_baseline(&minted)) {
             eprintln!("✗ write {}: {}", path.display(), e);
             std::process::exit(1);
         }
         eprintln!(
             "✓ wrote {} ({} warning(s), {} kind(s)) — commit it with the change that moved it.",
             path.display(),
-            live_profile.values().sum::<usize>(),
-            live_profile.len()
+            minted.values().sum::<usize>(),
+            minted.len()
         );
         return;
     }
-    let baseline_failure = check_warning_baseline(&root, &live_profile).err();
+    // UNMEASURED IS NOT ZERO, one level below where §17 already says so. See `CORPUS_DERIVED_KINDS`.
+    let unmeasured: &[&str] = corpus_shortfall.unmeasured();
+    let baseline_failure = check_warning_baseline(&root, &live_profile, unmeasured).err();
     if let Some(msg) = &baseline_failure {
         eprint!("{}", msg);
     }
