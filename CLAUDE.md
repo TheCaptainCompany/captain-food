@@ -283,6 +283,21 @@ re-enables it**. Auth, keys, query discipline:
   reshapes something, grep the OLD term across `specs/**`, `docs/**` and open issue/PR bodies before
   the turn ends. Prefer ONE SESSION PER WORK CHUNK: the repo carries the state, fresh context is
   cheap, long-context error rates are real.
+- **A review round ends in a decision, not another round** (founder directive 2026-08-26, verbatim in
+  [ADR-20260826-084500](docs/adr/ADR-20260826-084500-one-review-pass-per-presentation-and-findings-are-triaged-not-chased.md)):
+  *"I'm worried that we cannot finish the work we are in an infinite loop."* A review always finds
+  something — that is what it is for — so review-on-every-push is a cycle with **no terminating
+  condition**, and on #679 it ran a night and 114 commits for a one-step deliverable while the last
+  four passes each found no blocking defect and the rounds themselves introduced three regressions.
+  The trigger is now `opened`/`ready_for_review`/`reopened` — **a pass fires on PRESENTATION, not on
+  push**; a fresh look after a rewrite costs one deliberate act (draft → ready). Findings are
+  **triaged, never chased**: blocking (fix here) · non-blocking (one linked issue) · not-a-finding
+  (reply, change nothing), and **a PR ships when no BLOCKING finding remains**, never "when the
+  reviewer is satisfied". **Three rounds is a CEILING**: at a third, stop and bring the founder what
+  shipped, what is open and a recommendation. Procedure and buckets:
+  [.claude/skills/review-triage/SKILL.md](.claude/skills/review-triage/SKILL.md). This changes the
+  review's CADENCE and never its existence — the rule above stands, `HOLD: human` is untouched, and
+  no gate is weakened.
 - **Every session records what it learned** (ADR-20260730-034635), in the SAME change as the work —
   not just failures, not only on the second occurrence. Operational findings →
   [docs/claude/sessions.md](docs/claude/sessions.md) or the topic file; decisions → an ADR; option

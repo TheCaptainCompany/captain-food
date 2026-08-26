@@ -3,6 +3,50 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🛑 **2026-08-26 — #679 merged, and the review loop it exposed is closed at the trigger.** The
+> founder stopped a session that had not stopped itself: *"You have worked on the night on the same
+> pr and create a lot of issues. I'm worried that we cannot finish the work we are in an infinite
+> loop. Is it a good thing that you stop working and tell me what to do ?"* The answer was **yes**,
+> and the session had to be told.
+>
+> **The mechanism, in one word.** `claude-code-review.yml` fired on `pull_request: [opened,
+> synchronize, ...]`, and **`synchronize` is every push**. A review always finds something — that is
+> what it is for — so: review lands, author pushes the fix, push fires the next review. **No
+> terminating condition anywhere in the cycle.** Not a defect in the reviewer and not laziness in the
+> author; a loop that runs until something outside it intervenes. Here that was the founder, at
+> breakfast, after 114 commits on a deliverable authorized as *one CI step and one test pinning it*.
+>
+> **What the loop was actually producing by the end.** The last four review passes each concluded *no
+> blocking defect in the shipped behaviour* — findings were latent, gate-quality or record wording.
+> Over the same stretch the rounds introduced **three regressions the author then had to fix**: a
+> half-fix that made an input visible without making the metric sensitive to it (round 90); a range
+> splice that silently deleted three tests while the suite reported green (round 91); and an
+> unclearable-red bug introduced *by the fix for the previous round's finding* (round 91, now
+> [#685](https://github.com/TheCaptainCompany/captain-food/issues/685)). **Past some point the loop
+> stopped catching defects and started manufacturing them.**
+>
+> **Closed at the mechanism rather than by discipline**, which is CLAUDE.md's compiler-first rule
+> applied to a process: `synchronize` is gone, so there is no path from a push to a review and the
+> cycle cannot close however the author behaves. A fresh look after a rewrite still costs one
+> deliberate act — draft → ready. Findings are **triaged, not chased** (blocking / non-blocking /
+> not-a-finding), a PR ships when no **blocking** finding remains rather than when the reviewer is
+> satisfied, and **three rounds is a ceiling** that escalates to the founder.
+> [ADR-20260826-084500](../adr/ADR-20260826-084500-one-review-pass-per-presentation-and-findings-are-triaged-not-chased.md)
+> · [`.claude/skills/review-triage/SKILL.md`](../../.claude/skills/review-triage/SKILL.md).
+>
+> **What #679 shipped**, merged `089a13b3` after the founder's explicit go: the stub suite runs in
+> the always-run `changes` job with a codegen pin; `decision-superseded-authority` gates stale
+> citations of superseded rows at `warn`; gate-script self-verification; `timeout-minutes` on every
+> aggregated job. `GATE-STEP-LOCUS` stays open and merging selected option (b), recorded in the row
+> rather than inherited. `CITATION-RULE-LEVEL` stays open and founder-owned.
+>
+> **The lesson is about the shape of the failure, not the size of the diff.** Every individual round
+> was defensible — a real finding, a real fix, a green gate. The defect was only visible from
+> outside, in the *sequence*. **A process whose termination depends on a participant noticing it
+> should stop does not terminate**, because the participant is the one thing guaranteed to be
+> looking at the current round rather than the count of them.
+
+
 > **Week boundary, recorded once so the next reader does not hunt**: 2026-08-24 is ISO week **35**,
 > but several entries dated 2026-08-24 sit in [`journal-2026-W34.md`](journal-2026-W34.md) — earlier
 > sessions filed them there before this file existed. They are left where they are rather than
