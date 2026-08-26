@@ -619,16 +619,34 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 ///     index every session loads before anything else -- and the `Makefile`.
 ///   * `docs/**` is deliberately OUT: a record ABOUT a supersession must name the superseded row,
 ///     and redding those would make the rule unusable.
-///   * `.github/workflows/**` is OUT because its row references are provenance comments on decided
-///     work, not instructions to follow. Stated rather than left to fall through the list, which is
-///     what happened to `CLAUDE.md`.
+///   * `.github/workflows/**` is IN, and the argument for excluding it was falsified by the diff
+///     that shipped it. The bullet used to say workflow row references are "provenance comments on
+///     decided work, not instructions to follow" -- while THIS change added, to `ci.yml`, directly
+///     above the step it governs: *"Authorized by decision row RETRIEVAL-QMD-CI ... that row
+///     authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI."* That is a normative instruction
+///     to the next author, in the `row <KEY>` form this rule recognises everywhere else. Supersession
+///     on this chain is routine, not hypothetical -- `RETRIEVAL-QMD` was superseded two days after
+///     being decided -- so a session adding a second CI step would follow a dead row into
+///     `reconsiders: <superseded row>` and hit `decision-reconsiders-shape`, with `make validate`
+///     green the whole way. `SKILL.md` and `decision-lookup.sh` were fixed by hand for exactly that
+///     shape and put in corpus; `ci.yml` carried it and was not. (Review #21 of PR #679.)
 ///
 /// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
 /// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
 /// corpus it may judge.
 pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, String)> {
     let out = match std::process::Command::new("git")
-        .args(["ls-files", "-z", "--", ".claude", ".claudeignore", ".gitignore", "CLAUDE.md", "Makefile"])
+        .args([
+            "ls-files",
+            "-z",
+            "--",
+            ".claude",
+            ".claudeignore",
+            ".gitignore",
+            "CLAUDE.md",
+            "Makefile",
+            ".github/workflows",
+        ])
         .current_dir(root)
         .output()
     {
@@ -938,9 +956,7 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         .filter(|&(i, c)| is_boundary(i, c))
                         .next_back()
                         .map_or(0, |(i, c)| i + boundary_width(c));
-                    if line[clause_start..clause_end].to_lowercase().contains("superseded") {
-                        continue;
-                    }
+
                     // TRIM TRAILING PUNCTUATION BEFORE LOOKING AT THE LAST TOKEN. A trailing colon
                     // survived, which made `Decision row: <KEY>` invisible -- THE ENVELOPE FORMAT
                     // this repo mandates and `.claude/hooks/register-check.sh` enforces as
@@ -1061,6 +1077,31 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                                 .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
                         });
                     if !cites {
+                        continue;
+                    }
+                    // THE CITING TOKEN MAY NOT SUPPLY ITS OWN EXEMPTION. `superseded_by` contains
+                    // "superseded", and this test runs BEFORE `cites` -- so the `superseded_by` arm
+                    // added below could never fire: `last == "superseded_by"` guarantees the
+                    // substring sits in the clause, which guarantees `continue`. A `.claude/**`
+                    // file mirroring a row's fields as `superseded_by: <KEY>` therefore stayed
+                    // green after `<KEY>` was itself superseded further down the chain -- and this
+                    // change creates the register's FIRST two-link chain, so "the successor is
+                    // superseded later" is the next state, not a corner case. An arm dead by
+                    // construction reads as coverage it never provided (review #21).
+                    //
+                    // So the exempting word is looked for in the clause with the citing token
+                    // blanked out: an explanation still exempts, a field name no longer exempts
+                    // itself.
+                    let token_start = before.len().saturating_sub(last.len());
+                    let mut exempt_text = line[clause_start..clause_end].to_lowercase();
+                    if token_start >= clause_start && before.len() <= clause_end {
+                        let lo = token_start - clause_start;
+                        let hi = before.len() - clause_start;
+                        if lo <= hi && hi <= exempt_text.len() && exempt_text.is_char_boundary(lo) && exempt_text.is_char_boundary(hi) {
+                            exempt_text.replace_range(lo..hi, &" ".repeat(hi - lo));
+                        }
+                    }
+                    if exempt_text.contains("superseded") {
                         continue;
                     }
                     issues.push(err(

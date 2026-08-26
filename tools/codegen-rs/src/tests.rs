@@ -9895,6 +9895,14 @@ mod decision_ask_and_citations {
             ("Per row, in a runtime message", "echo \"Per row OLD-ROW: record this failure\""),
             ("Per <KEY>", "See Per OLD-ROW for the rollback path."),
             ("decided_by field", "decided_by: OLD-ROW"),
+            // THE OTHER TWO FIELD FORMS IN THE SAME ARM, neither of which had a control: one was
+            // reachable-but-unexercised and the other was DEAD BY CONSTRUCTION, because
+            // `superseded_by` contains "superseded" and the clause exemption ran first. Of three
+            // field forms, one could never fire and two were held up by the comment above them
+            // rather than by anything that reds when they are removed -- round 9's own lesson,
+            // recurring in the arm added to satisfy it (review #21).
+            ("reconsiders field", "reconsiders: OLD-ROW"),
+            ("superseded_by field naming a row that is ITSELF superseded", "superseded_by: OLD-ROW"),
             ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
             // THE ENVELOPE FORMAT this repo mandates, enforced by register-check.sh as
             // `ENVELOPE='Decision row:'`. A trailing colon killed the match, so the most
@@ -10102,6 +10110,9 @@ mod decision_ask_and_citations {
             ".claude/skills/decision-lookup/scripts/decision-lookup.sh",
             "CLAUDE.md",
             "Makefile",
+            // Workflows carry LIVE scope instructions, not provenance -- `ci.yml`'s own gate-step
+            // comment names the row that authorizes it and what else may be added (review #21).
+            ".github/workflows/ci.yml",
         ] {
             assert!(
                 corpus_files.iter().any(|(p, _)| p == must_reach),

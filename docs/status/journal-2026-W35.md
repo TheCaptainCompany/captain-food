@@ -635,4 +635,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **The through-line of rounds 14, 19 and 21, stated once: every green control was written from the
 > shape the author had in mind.** Same-marker wraps, unbackticked brackets, `the` without a following
 > sentence break, `—` and not `--`. A control set proves the cases it contains, and its silence about
-> everything else reads exactly like coverage.**
+> everything else reads exactly like coverage.
+>
+> **Round 22 — a scope exclusion falsified by the diff that shipped it, and an arm dead by
+> construction.**
+>
+> The corpus excluded `.github/workflows/**` on the stated ground that workflow row references are
+> *"provenance comments on decided work, not instructions to follow"* — while **this same change**
+> added to `ci.yml`, directly above the step it governs: *"Authorized by decision row
+> RETRIEVAL-QMD-CI … that row authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI."* That is a
+> normative instruction to the next author, in the `row <KEY>` form the rule recognises everywhere
+> else. And supersession on this chain is routine, not hypothetical: `RETRIEVAL-QMD` was superseded
+> **two days** after being decided. So a session adding a second CI step would follow a dead row into
+> `reconsiders: <superseded row>` and hit `decision-reconsiders-shape` — with `make validate` green
+> the whole way, because the file was out of corpus. `SKILL.md` and `decision-lookup.sh` were fixed
+> by hand for exactly that shape and put in corpus; `ci.yml` carried it and was not. Workflows are in
+> now (green today, so it is a pure widening), and the reach is pinned.
+>
+> **The `superseded_by` arm could never fire.** The clause exemption ran before `cites`, and
+> `superseded_by` *contains* "superseded" — so `last == "superseded_by"` guaranteed the exempting
+> substring was in the clause, which guaranteed `continue`. A `.claude/**` file mirroring a row's
+> fields stayed green after that successor was itself superseded further down the chain, which is
+> the register's next state now that this change builds its first two-link chain. Of the three field
+> forms in that arm, **one was dead and two had no control at all** — held up by the comment above
+> them rather than by anything that reds when they are removed. Round 9's own lesson, recurring in
+> the arm added to satisfy it. Fixed by blanking the citing token before testing for the exempting
+> word: an explanation still exempts, **a field name no longer exempts itself**.
+>
+> **The rule worth keeping: a token that carries the exempting word is not evidence of an
+> explanation.** Any escape hatch keyed on a substring will eventually be satisfied by the very
+> construct it is meant to catch, and the arm then reads as coverage for as long as nobody plants
+> it.**
