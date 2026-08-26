@@ -1608,3 +1608,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 >
 > That review's one filed finding (`first()` vs `last()`) was closed in round 54 — **two independent
 > reviewers reached it separately**, which is the first time on this branch that has happened.
+>
+> **Round 56 — a sample is enumeration, and mine was disjoint from the branches this repo makes.**
+> `hides` was evaluated against exactly two literals, `main` and `21-slug` — widened from one to two
+> in round 43 *because* `!*` had been caught only incidentally. Two is still a sample. `!6*` leaves
+> `main` alone, removes every `6NN-slug` branch — **the live issue range, including the branch this
+> very change is on** — and passed. So did `!1*`, `!3*`, `!5*`, `!7*`. Each silently removes the
+> pre-PR validation `ci.yml`'s header states as the reason `on.push` exists, and a same-repo branch
+> has no `pull_request` event covering the gap.
+>
+> **§19 shape #5 — "a fixture set drawn from the shape you were thinking about proves only that
+> shape" — reproduced inside the matcher written to close shape #5**, in the same file that publishes
+> the list.
+>
+> The fix is the one already applied one arm up for `?` and `[`: **fail closed on any wildcard.** The
+> only benign exclusion is a literal branch name (`!badges` ships, `!gh-pages` is the obvious next),
+> and `main` is not benign even literally, because the docs-only lane reaches it as a push with no PR
+> and has no other coverage. That also **retires the hand-rolled glob engine** — the surface most
+> likely to grow the next hole, and the third form this one predicate has taken. Planted with the
+> reviewer's exact case: `!6*` survives the two-sample matcher and reds now.
+>
+> **The rule: when a guard's third form is still a sample, stop sampling and narrow what is legal.**
+> Trailing-`*` special case → glob engine + two names → literal-only. Each of the first two was an
+> attempt to *match* the dangerous set; the third defines the benign one, which is small, closed and
+> spellable.

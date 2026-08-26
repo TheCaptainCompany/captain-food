@@ -11037,52 +11037,31 @@ mod docs_only_ci_and_legacy_visibility {
         // 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string "on".
         // A lookup written for the wrong one returns None and the test passes VACUOUSLY, which is
         // this chain's signature defect. Accept either, so the assertion survives a parser change.
-        // DOES THIS `!` PATTERN REMOVE `name` FROM THE TRIGGER? Shared by BOTH trigger arms, which
-        // is the point: the `pull_request` half did not look at exclusions AT ALL, so
-        // `branches: ['**', '!main']` passed an assertion whose own message says "must still admit
-        // PRs targeting `main`" -- the two-halves-disagree shape this file retracts by name at
-        // review #27, in the half nobody revisited. A fork produces no push, so `pull_request` is
-        // a fork PR's ONLY coverage; after that edit a fork PR to `main` runs nothing and the PR
-        // stalls on "Expected -- waiting for status" forever. (Review #43.)
+        // DOES THIS `!` PATTERN NARROW THE TRIGGER? Shared by BOTH arms, which is the point: the
+        // `pull_request` half did not look at exclusions AT ALL, so `branches: ['**', '!main']`
+        // passed an assertion whose own message says "must still admit PRs targeting `main`" -- the
+        // two-halves-disagree shape this file retracts by name at review #27, in the half nobody
+        // revisited. A fork produces no push, so `pull_request` is a fork PR's ONLY coverage; after
+        // that edit a fork PR to `main` runs nothing and the PR stalls on "Expected -- waiting for
+        // status" forever. (Review #43.)
         //
-        // AND IT TESTS TWO NAMES, not one. The comment below justifies this check on the `NN-slug`
-        // branches as well as on `main`, and `!*` was caught only INCIDENTALLY -- because `*` also
-        // matches `main`. `!*-*` and `!2*` remove every feature branch, leave `main` alone, and
-        // went green, silently dropping the pre-PR validation `ci.yml`'s header states as the
-        // reason `on.push` exists.
+        // FAIL CLOSED ON ANY WILDCARD, and this is the third form of this predicate. It began as a
+        // trailing-`*` special case (missed `!mai?` and `!m[a]in`), became a hand-rolled glob
+        // engine sampled against two names, `main` and `21-slug` -- and a SAMPLE IS ENUMERATION.
+        // The sample was disjoint from the branch space this repo actually generates: `!6*` removes
+        // every `6NN-slug` branch, WHICH IS THE LIVE ISSUE RANGE AND INCLUDES THE BRANCH THIS VERY
+        // CHANGE IS ON, and it passed. So did `!1*`, `!3*`, `!5*`, `!7*`. That is §19 shape #5
+        // ("a fixture set drawn from the shape you were thinking about proves only that shape")
+        // reproduced inside the matcher written to close shape #5.
         //
-        // FAIL CLOSED ON THE GLOB METACHARACTERS IT CANNOT REASON ABOUT. GitHub branch filters
-        // accept `?` (one char, not `/`) and `[...]` classes, so `!mai?` and `!m[a]in` both remove
-        // `main` while a trailing-`*` special case says otherwise. Growing that special case is
-        // enumeration -- the instrument this file already retracted for the `LD_*` and `GIT_*`
-        // families two screens up -- so any exclusion containing `?` or `[` is treated as hiding,
-        // and a deliberate one is argued in a comment rather than by loosening this. (Review #44.)
-        let hides = |pat: &str, name: &str| -> bool {
-            pat == name
-                || pat == "*"
-                || pat == "**"
-                || pat.contains('?')
-                || pat.contains('[')
-                || (pat.ends_with('*') && name.starts_with(pat.trim_end_matches('*')))
-                // `a*b` and `*-*`: `*` matches any run without `/`, so split on `*` and require
-                // each literal segment to appear in order. One segment means no interior `*` and
-                // the arms above already decided it.
-                || (pat.contains('*') && {
-                    let mut rest = name;
-                    let segs: Vec<&str> = pat.split('*').collect();
-                    let first_ok = rest.starts_with(segs[0]);
-                    rest = &rest[segs[0].len().min(rest.len())..];
-                    let last = segs[segs.len() - 1];
-                    first_ok
-                        && segs[1..].iter().all(|seg| match rest.find(*seg) {
-                            Some(i) => {
-                                rest = &rest[i + seg.len()..];
-                                true
-                            }
-                            None => false,
-                        })
-                        && (last.is_empty() || name.ends_with(last))
-                })
+        // The only benign exclusion is a LITERAL branch name -- `!badges` is the one this repo
+        // ships, `!gh-pages` the obvious next -- and `main` is not benign even literally, because
+        // the docs-only lane reaches it as a push with no PR and has no other coverage. Everything
+        // with a `*`, `?` or `[` in it reds, and a deliberate one is argued in a comment rather
+        // than matched. That also retires the glob engine, which was the surface most likely to
+        // grow the next hole. (Review #56.)
+        let hides = |pat: &str| -> bool {
+            pat == "main" || pat.contains('*') || pat.contains('?') || pat.contains('[')
         };
         let trigger_val = doc
             .get(serde_yaml::Value::String("on".into()))
@@ -11187,7 +11166,7 @@ mod docs_only_ci_and_legacy_visibility {
             );
             for excluded in branches.iter().filter(|b| b.starts_with('!')) {
                 let pat = &excluded[1..];
-                let hides_main = hides(pat, "main") || hides(pat, "21-slug");
+                let hides_main = hides(pat);
                 assert!(
                     !hides_main,
                     "`on.push.branches` excludes `{}`, which removes `main` -- the docs-only lane reaches it as a PUSH with no PR, so nothing else covers it -- or removes the `NN-slug` feature branches, which is the pre-PR validation this file's header states as the reason `push` exists at all. `**` being present does not save you: GitHub applies `!` patterns as removals. If the exclusion is deliberate and narrower than it looks, say so here rather than loosening `hides` ({})",
@@ -11250,7 +11229,7 @@ mod docs_only_ci_and_legacy_visibility {
                 // this file spends forty rounds removing. Same matcher as the push half now.
                 for excluded in got.iter().filter(|b| b.starts_with('!')) {
                     assert!(
-                        !hides(&excluded[1..], "main"),
+                        !hides(&excluded[1..]),
                         "`on.pull_request.branches` excludes `{}`, which removes `main` -- a fork produces no push, so this trigger is a fork PR's ONLY coverage, and `codegen` then never reports at all. GitHub applies `!` patterns as removals",
                         excluded
                     );
@@ -12193,6 +12172,10 @@ mod docs_only_ci_and_legacy_visibility {
             ("push.branches drops the 2-prefixed feature branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!2*']", 1)),
             ("push.branches hides main through a ? wildcard", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!mai?']", 1)),
             ("push.branches hides main through a character class", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!m[a]in']", 1)),
+            // THE ONE THAT NAMES THIS BRANCH. `!6*` leaves `main` alone and removes every
+            // `6NN-slug` branch -- the live issue range, including `678-qmd-stub-suite-in-ci` --
+            // and it passed the two-sample matcher. Same for `!1*`, `!3*`, `!5*`, `!7*`.
+            ("push.branches drops the live issue range", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!6*']", 1)),
             // THE `pull_request` HALF, WHICH DID NOT LOOK AT EXCLUSIONS AT ALL. A fork produces no
             // push, so this trigger is a fork PR's only coverage.
             ("pull_request.branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['**', '!main']\n", 1)),
@@ -12502,7 +12485,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 98 && must_stay_green.len() >= 22,
+            must_red.len() >= 99 && must_stay_green.len() >= 22,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
