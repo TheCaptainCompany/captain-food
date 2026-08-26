@@ -95,11 +95,20 @@ pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadab
 pub(crate) const CORPUS_DERIVED_KINDS: [&str; 3] = [
     "decision-citation-file-not-utf8",
     "decision-citation-file-out-of-corpus",
-    // THE RULE THAT CONSUMES THE CORPUS, not merely one that reports on it -- and the first version
-    // of this list held only the two REPORTERS, which is the narrower half of its own argument.
-    // `main.rs` feeds `validate_no_superseded_row_is_cited_as_authority` the `cited` vector, which
-    // is EMPTY on every host where `git ls-files` did not answer, so the rule scans nothing and
-    // emits nothing.
+    // THE RULE THAT CONSUMES THE CORPUS, not merely one that reports on it. `main.rs` feeds
+    // `validate_no_superseded_row_is_cited_as_authority` the `cited` vector, which is EMPTY on every
+    // host where `git ls-files` did not answer, so the rule scans nothing and emits nothing.
+    //
+    // WHY IT WAS MISSING, checked against the history rather than inferred from the shape: THIS LIST
+    // WAS COMPLETE WHEN IT WAS WRITTEN. At review #80 the citation rule emitted at `err(...)`, and
+    // an ERROR never enters `warning_profile` at all -- so it could not have been a member. Reviews
+    // #81/#82 then moved it to `warn(...)` IN THE SAME PR, which put it inside the §17 ratchet, and
+    // the list was not revisited. A sequencing defect, not a grouping one: no amount of care while
+    // writing the list would have caught it, because the member did not exist yet.
+    //
+    // Hence the coupling asserted in `a_superseded_row_may_not_be_cited_as_live_authority`: if this
+    // rule emits at WARNING it must be on this list. That is the edge that actually broke, and it
+    // is the one thing a test can hold. (Reviews #84 and #86 of PR #679.)
     //
     // IT MATTERS MORE HERE THAN FOR THE TWO REPORTERS, because N>0 is not an accident for this kind
     // -- it is the state the LEVEL CHOICE was made for. Shipping at `warn` rather than `err` exists

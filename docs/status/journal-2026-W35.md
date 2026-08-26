@@ -2567,3 +2567,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > value ABOVE the documented maximum — never on a raise within it. If a cold run ever approaches 120
 > there is no signal until the cancellation, which is the direction that does not self-heal. **The
 > guard asserts the values are SANE, not that they are ADEQUATE, and nothing measures the second.**
+>
+> **Round 86 — round 84 fixed the right thing for the wrong stated reason, and the wrong reason was
+> the part I recorded as a lesson.**
+>
+> The finding itself (`decision-superseded-authority` missing from `CORPUS_DERIVED_KINDS`) landed in
+> `4c5d108d`. But round 84's journal explained it as a **grouping** error — *"a list of things
+> affected by X names the things that RESEMBLE each other rather than the things that share X"* — and
+> asserted that as the shape. **Checked against the history, that is false.**
+>
+> **The list was COMPLETE when it was written.** At round 80 the citation rule emitted at `err(...)`,
+> and an error never enters `warning_profile` at all — so it could not have been a member. **Round
+> 81's own flip to `warn(...)`, two rounds later in the same PR, is what created the member.** A
+> **sequencing** defect, not a grouping one: no amount of care while writing the list would have
+> caught it, because the thing to enumerate did not exist yet.
+>
+> **That distinction changes the remedy, which is why it is worth a round.** A grouping error says
+> "look harder at the list". A sequencing error says the list cannot be trusted to stay complete at
+> all, and the only durable instrument is the **coupling** — asserted now: *if this rule emits at
+> WARNING it must be on that list*. That is the edge that actually broke, it is checkable, and it is
+> the one thing that would have fired at round 81. Planted red by removing the entry.
+>
+> **Cost that earned the rule: I diagnosed from the diff in front of me instead of from the history
+> of the file, and then wrote the diagnosis into the durable record as a shape. A wrong cause is
+> worse than no cause — a missing lesson leaves the next reader looking; a wrong one stops them.**
+> This branch has spent eighty rounds on antecedents that were not checked, and round 84's was one of
+> them, in the entry describing the fix for one.
+>
+> **The corrected shape: a list enumerating "everything affected by X" is invalidated by any later
+> change that adds a member — and in a long-lived branch that change is often your own, two rounds
+> on. Deriving the list is best; failing that, assert the COUPLING that makes a new member a member,
+> not the membership.**

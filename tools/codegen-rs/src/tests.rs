@@ -10351,6 +10351,19 @@ mod decision_ask_and_citations {
             // non-blocking; §17 still exits 1 on the first occurrence, so detection is intact and
             // what changes is only the ESCAPE from a false positive. Flipping this to `err` closes
             // that row and must be a recorded decision, not an edit. (Review #81.)
+            // AND THE LEVEL IS COUPLED TO THE RATCHET LIST, because that edge is what broke. The
+            // moment this rule became a WARNING it entered `warning_profile`, and its count is
+            // gated on the corpus being readable -- so it belongs in `CORPUS_DERIVED_KINDS` or a
+            // git-unanswering host reds `N -> 0 (kind eliminated)` on a baselined finding. The list
+            // was COMPLETE when written (review #80: the rule was `err`, and errors never enter the
+            // profile); reviews #81/#82 flipped the level two rounds later and did not revisit it.
+            // Asserting the coupling is the only instrument that would have caught that, because
+            // the member did not exist when the list was reviewed. (Review #86.)
+            assert!(
+                !matches!(issues[0].level, Level::Warning)
+                    || CORPUS_DERIVED_KINDS.contains(&issues[0].rule),
+                "`decision-superseded-authority` emits at WARNING, so it is inside the section 17 ratchet -- but its count comes from a corpus that is empty whenever `git ls-files` does not answer. It must be in CORPUS_DERIVED_KINDS, or a host that cannot read the corpus reds `N -> 0 (kind eliminated)` against a baselined finding, with the printed remedy refused. If you are flipping this rule back to `err`, the assertion below reds first and this one goes quiet on its own"
+            );
             assert!(
                 matches!(issues[0].level, Level::Warning),
                 "`decision-superseded-authority` must emit at WARNING. It reaches the required check through the section 17 ratchet either way, so detection is unchanged -- but at ERROR the only escape from a false positive is rewording prose, and this rule decides by abbreviation lists and a parenthetical word window. Raising it to ERROR closes `CITATION-RULE-LEVEL`, which is founder-owned and open"
