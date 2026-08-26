@@ -2119,3 +2119,41 @@ Current state: [`../STATUS.md`](../STATUS.md).
 >
 > **Shape, for [`gates.md` §19](../claude/sessions/gates.md) #9: a justification inherited by copy is
 > not a justification at the site it now governs.**
+>
+> **Round 71 — two decisions the first implementation settled by default, both filed rather than
+> shipped past.** No code defect in this round; nothing in the review was one, and it said so.
+>
+> **(1) `decision-superseded-authority` ships as a hard ERROR, and its trigger is a hand-rolled
+> English-clause parser over prose.** Filed as `CITATION-RULE-LEVEL`. The sharpest form of the
+> argument is an **internal asymmetry in this very PR**: `decision-citation-file-not-utf8` and
+> `decision-citation-file-out-of-corpus` are ratcheted **warnings** for conditions that are perfectly
+> deterministic — a byte is or is not UTF-8 — while the condition decided by an abbreviation list, a
+> `PARENTHETICAL_CITES` word list and markdown-table detection is an **error**. A false positive reds
+> `specs`, `docs-validate` and `codegen`; on the docs-only lane a prose edit to `CLAUDE.md` that trips
+> the heuristic **lands on `main` red**, with rewording as the only escape.
+>
+> `validate/decisions.rs` argues in five places that a red whose escape is silence is the worse
+> instrument — applied to individual **arms** (`the`, `[KEY](link)`, `first()` vs `last()`, the
+> em-dash, the same-class join) and **never to the rule's level**, which is where it bites hardest.
+> And CLAUDE.md's **gate, then stabilize** points the same way: the §17 ratchet is precisely this
+> repo's *loud but non-blocking* mechanism. The counter is in the row too: an error is what makes
+> *both halves of a supersession in one commit* enforceable, and the ratchet is per-kind and exact in
+> both directions, so a second stale citation still reds after the first is baselined.
+>
+> The row's second half is the one I'd have missed entirely: **the exemption is an implicit magic
+> word**, and the acknowledged residual is not incidental to that — *it is* the heuristic. An
+> explicit marker on the citing line has no leak by construction, cannot be tripped by prose, cannot
+> be missed by a hard wrap, and **would retire most of the clause machinery** the last twenty rounds
+> built.
+>
+> **(2) `GATE-STEP-LOCUS` gained the only argument in it that bears on TIMING**: CLAUDE.md's *final
+> vision first* — "always put in place the final step", gating decides *when*, never licenses a shim.
+> Option (b) is a shim with a known repository-wide blast radius, and **merging it is the choice**.
+> Stated with its counter (the step's locus is not the executor's to move) and with the honest
+> framing: the cost of (b) is paid continuously until the row closes, so the question is not whether
+> to decide it but whether that interval is long. The row's closing line changed from *"not blocking
+> #679"* to **"it IS the decision #679 is held for."**
+>
+> **Shape: a rule's LEVEL is a decision, not an implementation detail — and it is the one property
+> that never gets reviewed, because every round argues about the arms.** Both rows note that option
+> (b) is chosen by default the moment #679 merges, which is the whole reason they are filed now.
