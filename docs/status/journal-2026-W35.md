@@ -542,4 +542,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > in `env_ok` inside `assert_pinned_in_changes_job`. A maintainer following the name would have
 > found no `env:` handling and concluded the ban was refactored away. **Round 9's own finding — "a
 > comment named a test as the thing preventing the regression; that test did not exist" — recurring
-> one file over, in a sentence written after it.****
+> one file over, in a sentence written after it.**
+>
+> **Round 19 — round 14's defect, one marker over.** The bullet rule ended a unit on a list marker;
+> nothing ended it when a COMMENT marker stopped. So a `#` block and the executable line beneath it
+> became one scanning unit and the clause exemption read straight across the prose/code boundary:
+>
+> ```sh
+> # kept for history: the old row is superseded
+> echo "Per row OLD-ROW: open a reversal decision"
+> ```
+>
+> No `;`, `—` or sentence dot anywhere in the join, so the whole thing was one clause, it contained
+> `superseded`, and the **live citation in the code went green** — where line-scoped scanning had
+> redded it. `decision-lookup.sh`'s `activation_fail` has exactly that layout and stayed caught only
+> because its comment happens to end in a sentence dot: **a guard that depends on nobody reflowing a
+> comment is not a guard.** Closed by treating a change of marker CLASS (comment/quote ↔ none) as a
+> block start, planted red, with a same-marker wrapped control so genuine wraps still join.
+>
+> **Three times now the same defect has come back wearing a different marker** — `-`/`*` (round 14),
+> `1.` (round 14), `#` (round 19) — and each time the controls were all *same-marker*, so the class
+> was invisible. The lesson is not "add the next marker": it is that **a fixture set drawn from the
+> shape you were thinking about proves only that shape.** Where a rule keys on a lexical feature,
+> the controls have to vary that feature deliberately, not incidentally.**

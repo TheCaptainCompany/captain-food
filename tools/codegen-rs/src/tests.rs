@@ -9914,6 +9914,14 @@ mod decision_ask_and_citations {
             // line-scoping class was invisible to this test (review #13). A citation split across
             // a wrap was MISSED before the join and is caught now.
             ("a citation split across a wrap", "Decided by row\n`OLD-ROW` (founder)."),
+            // ROUND 14'S DEFECT, ONE MARKER OVER (review #18): a `#` comment block joined with the
+            // executable line beneath it, so the clause exemption read across the prose/code
+            // boundary and a LIVE citation in the code went green. Every wrapped control here was
+            // same-marker, which is why it was invisible.
+            (
+                "a comment's explanation must not exempt the code beneath it",
+                "# kept for history: the old row is superseded\necho \"Per row OLD-ROW: open a reversal decision\"",
+            ),
             // THE DIRECTION THE JOIN CHANGED, and the one the three wrapped controls below do not
             // cover: they are all false-red cases. Joining grew the window the `superseded`
             // exemption searches, so an ADJACENT BULLET -- with nothing to do with the citation --
@@ -9973,6 +9981,11 @@ mod decision_ask_and_citations {
             (
                 "the escape hatch reached across a wrap",
                 "`OLD-ROW` is\nsuperseded; name `NEW-ROW` instead.",
+            ),
+            // Same marker on both lines is a genuine wrap and must still join.
+            (
+                "a wrapped COMMENT whose explanation lands on the next line",
+                "# row `OLD-ROW` no longer governs, having been\n# superseded by the chain head.",
             ),
             (
                 "a wrapped bullet whose explanation lands on the next line",

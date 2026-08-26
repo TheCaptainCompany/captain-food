@@ -754,6 +754,9 @@ fn logical_units(content: &str) -> Vec<Unit> {
 
     let mut out: Vec<Unit> = Vec::new();
     let mut cur: Option<Unit> = None;
+    // Whether the previous non-blank line carried a comment/quote marker. A CHANGE in that class
+    // ends the unit -- see below.
+    let mut prev_marked = false;
     for (i, raw) in content.lines().enumerate() {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -763,10 +766,28 @@ fn logical_units(content: &str) -> Vec<Unit> {
             continue;
         }
         // Comment and quote markers repeat on every wrapped line, so they are stripped and joined.
+        let marked = trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with('>');
         let after_marker = trimmed
             .trim_start_matches(|c: char| matches!(c, '#' | '/' | '>'))
             .trim_start();
-        let opens = starts_a_block(after_marker);
+        // A MARKER CLASS CHANGE ALSO ENDS A UNIT, and leaving it out was review #14's bullet defect
+        // reproduced one marker over. `#`/`//`/`>` are continuation markers on purpose (a shell
+        // comment block repeats them on every wrapped line), but nothing ended the unit when the
+        // marker STOPPED -- so a comment block and the executable line beneath it became one unit
+        // and the clause exemption read across the prose/code boundary:
+        //
+        // ```sh
+        // # kept for history: the old row is superseded
+        // echo "Per row OLD-ROW: open a reversal decision"
+        // ```
+        //
+        // No `;`, `—` or sentence dot anywhere in that join, so the whole thing was one clause, it
+        // contained `superseded`, and the LIVE citation in the `echo` went green -- where
+        // line-scoped it had redded. `decision-lookup.sh`'s `activation_fail` has exactly that
+        // layout, and stayed caught only because its comment happens to end in a sentence dot.
+        // A guard that depends on someone not reflowing a comment is not a guard. (Review #18.)
+        let opens = starts_a_block(after_marker) || marked != prev_marked;
+        prev_marked = marked;
         // The list marker itself is dropped from the text: `- \`KEY\`` must still read as a key
         // opening the unit, which is one of the citation forms.
         let body = if opens {
