@@ -11008,18 +11008,46 @@ mod decision_ask_and_citations {
             "found {} job-level `timeout-minutes:` keys -- this test reads them by an exact four-space indent, so a reindent makes it vacuous rather than red. Re-point it",
             blocks.len()
         );
-        // Long enough to be an ARGUMENT rather than a pointer. `build-test`/`db-test` share a
-        // one-line "see the `changes` job comment", which is the correct way to not repeat one.
+        // THE LONGEST SHARED CONSECUTIVE RUN, NOT WHOLE-BLOCK EQUALITY -- and the first version of
+        // this gate got that wrong in the direction that made it VACUOUS ON THE FILE IT SHIPPED
+        // WITH. `assert_ne!(blocks[a], blocks[b])` fires only on a byte-identical whole block, and
+        // that is the one spelling of this defect that has never occurred here: both real ones were
+        // PARTIAL. Round 70's remedy rewrote the TAIL of `docs-validate`'s paste onto `specs` and
+        // left the head, so the two blocks shared 18 consecutive lines and differed only in the
+        // closing paragraph -- unequal, therefore green, in the same commit that added the gate.
+        // The next author copying those 18 lines plus one bespoke sentence onto a new aggregated
+        // job reproduces rounds 58 and 70 exactly, with this test's message never printed.
+        // (Review #76 of PR #679.)
+        //
+        // The duplication itself is gone too -- `docs-validate` now points at `specs` for the shared
+        // history, the way `build-test`/`db-test` point at `changes` -- so this bound has real
+        // headroom: the worst shared run across all seven pairs is ONE line.
+        //
+        // FIVE is the threshold because a SHORT pointer is the correct way not to repeat a
+        // justification and must stay legal. Below it, a shared line or two is boilerplate; at or
+        // above it, enough reasoning is being carried across that it needs to be true of both jobs.
         const SUBSTANTIAL: usize = 5;
+        let longest_shared = |x: &[&str], y: &[&str]| -> usize {
+            let mut best = 0;
+            for i in 0..x.len() {
+                for j in 0..y.len() {
+                    let mut k = 0;
+                    while i + k < x.len() && j + k < y.len() && x[i + k] == y[j + k] {
+                        k += 1;
+                    }
+                    best = best.max(k);
+                }
+            }
+            best
+        };
         for a in 0..blocks.len() {
             for b in (a + 1)..blocks.len() {
-                if blocks[a].len() < SUBSTANTIAL || blocks[b].len() < SUBSTANTIAL {
-                    continue;
-                }
-                assert_ne!(
-                    blocks[a], blocks[b],
-                    "two jobs carry a byte-identical {}-line `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other",
-                    blocks[a].len()
+                let run = longest_shared(&blocks[a], &blocks[b]);
+                assert!(
+                    run < SUBSTANTIAL,
+                    "two jobs share {} consecutive lines of `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on under `always()` cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other. Shared run starts: {:?}",
+                    run,
+                    blocks[a].iter().find(|l| blocks[b].contains(l))
                 );
             }
         }

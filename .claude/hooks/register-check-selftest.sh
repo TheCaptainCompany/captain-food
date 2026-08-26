@@ -58,14 +58,25 @@ HOOK="$ROOT/.claude/hooks/register-check.sh"
 # the check defends against. Now it always runs and an editor opts out BY NAME. Both opt-out names
 # are forbidden as CI `env:` keys at every scope.
 #
-# WHEN IT IS ARMED, said plainly because "default-on" reads wider than it is: every INTERACTIVE
-# caller opts out. `stop-gate.sh` and `make hooks-test` pass REGISTER_CHECK_ALLOW_DIRTY=1, and
-# `make stub-tests` passes DECISION_LOOKUP_ALLOW_DIRTY=1 -- they have to, or editing a gate script
-# and re-running it is impossible. CI is the only caller that runs this armed, and `env_ok` is what
-# stops CI being talked out of it. So the protection is PRE-MERGE, not in-session. Default-on is
-# still the right shape (the safe state needs no cooperation, and an opt-out is a visible argument
-# in a Makefile), but a session-local overwrite is caught on push and not before. (Review #51 of
-# PR #679.)
+# WHEN IT IS ARMED, said plainly because "default-on" reads wider than it is -- AND REWRITTEN,
+# because the change that made it wrong shipped in this same branch and the sweep for it reached
+# `tests.rs` and not these three prose sites (review #77). What this paragraph used to say: "every
+# INTERACTIVE caller opts out ... CI is the only caller that runs this armed ... the protection is
+# PRE-MERGE, not in-session ... a session-local overwrite is caught on push and not before." All
+# four clauses were falsified by review #72.
+#
+# WHAT IS TRUE NOW. `make hooks-test` and `make stub-tests` opt out unconditionally -- they exist
+# for the edit-and-re-run loop, and an armed-only entrypoint gets DELETED rather than opted out of.
+# `stop-gate.sh` opts out ONLY when a gate script is dirty in the working tree, so on an ordinary
+# turn it runs this comparison ARMED: an in-session `cp exit0.sh <gate script>` is caught on the
+# NEXT TURN, not on push. That is the every-turn cross-guard V3 was written for, and it was
+# decorative until #72 because the only caller that runs every turn disarmed it every time.
+#
+# CI is still the caller that CANNOT be talked out of it -- `env_ok` forbids both opt-out names as
+# `env:` keys at every scope, which no local shell can. Default-on remains the right shape: the safe
+# state needs no cooperation, and an opt-out is a visible argument in a Makefile. The residual is
+# now narrow rather than total: a session that edits a gate script legitimately, and overwrites
+# another one in the same turn, is still only caught on push. (Reviews #51, #72 and #77 of PR #679.)
 #
 # WHAT THIS DOES NOT DO: it DETECTS the named overwrite routes. It is not a defence against
 # arbitrary code running before it. Closed so far, each because a review demonstrated it: a `git`

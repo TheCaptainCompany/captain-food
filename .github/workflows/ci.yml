@@ -509,23 +509,10 @@ jobs:
     # generic skipped-acceptance below would let a mis-gated skip slide.
     needs: changes
     if: needs.changes.outputs.docs_only == 'true'
-    # 120 -- and the route to this number matters more than the number, because round 65 put 20 here
-    # with a measurement that was WRONG ABOUT WHAT IT MEASURED.
-    #
-    # Review #65 was right that these two caps had no antecedent: they shipped in the "seconds of
-    # work" bucket with `changes` and `codegen`, while both `specs` and `docs-validate` build
-    # `tools/codegen-rs` and its tree (guppy, determinator, petgraph, cargo_metadata, target-spec,
-    # semver, regex, serde_yaml, sha2) from scratch on a cold cache -- which `docs-validate`'s own
-    # header already admitted.
-    #
-    # THE RETRACTED MEASUREMENT: "empty CARGO_TARGET_DIR, 36s, so 20 minutes is ~30x". The target
-    # dir was empty; `CARGO_HOME` WAS NOT. That measured compile-from-a-warm-registry, which is half
-    # the cold path -- a cold CI runner also fetches every crate in the tree. The number was true and
-    # the sentence built on it was not, and the omission was in the permissive direction. The
-    # re-measurement with an isolated CARGO_HOME could not be completed here (the session's disk
-    # allowance ran out mid-build), so THE COLD PATH REMAINS UNMEASURED and this comment says so
-    # rather than quoting the half of it that happened to be cheap. Review #64's lesson pointing at
-    # its author: a measurement is defined by what it excludes.
+    # 120 -- how this number was arrived at, and the measurement retracted on the way, is on the
+    # `specs` job above; it is the same story for both and is deliberately told once (review #76).
+    # What is NOT shared is the asymmetry below, which is what actually decides the value and is
+    # different for these two jobs.
     #
     # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- and for `docs-validate` the
     # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang, and

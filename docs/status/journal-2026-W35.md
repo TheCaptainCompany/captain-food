@@ -2276,3 +2276,43 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Shape: "is it gateable?" is a different question from "has it happened twice?", and the answer
 > can differ for two classes filed one round apart. Write the reason next to both, or the pair reads
 > as inconsistency.**
+>
+> **Round 76/77 — three defects, all mine, and the sharpest is that a gate added two rounds ago was
+> VACUOUS ON THE FILE IT SHIPPED WITH.**
+>
+> **(1) `no_two_jobs_share_a_substantial_timeout_justification` could not fire on the state of
+> `ci.yml` in its own commit.** It asserted whole-block inequality — and round 70's remedy had
+> rewritten the **tail** of `docs-validate`'s paste onto `specs` while leaving the head, so the two
+> blocks shared **18 consecutive lines** and differed only in the closing paragraph. Unequal,
+> therefore green. **A byte-identical whole block is the one spelling of this defect that has never
+> occurred here; both real ones were partial.** Fixed in both directions: the duplication is gone
+> (`docs-validate` now points at `specs` for the shared history, the way `build-test`/`db-test` point
+> at `changes`), and the gate compares the **longest shared consecutive run** with a threshold of
+> five. Worst run across all seven pairs is now **one** line. Planted by restoring the 18-line head —
+> reds naming the shared run.
+>
+> **Round 73 narrowed this gate's claim in its docstring ("byte-identity, so a paste with one word
+> changed passes") and that was the honest half of the truth. The dishonest half was that the paste
+> it was written for was sitting in the file, green.** Stating a limit is not the same as checking
+> whether the limit already bites.
+>
+> **(2) `stop-gate.sh`'s fail-safe comment was reversed by its own initialiser.** The block says *"No
+> git, or a status that cannot be read, arms it"*. `_gate_scripts_dirty=1` meant `git rev-parse
+> --git-dir` failing — no `.git` at all: a container stage that drops it, a `git archive` extraction,
+> `git` off PATH — skipped the `if` body and left the value at *dirty*, **disarming the comparison
+> silently on every turn** while printing the ordinary dirty-tree line. The silent-disarm shape V3
+> exists to remove, reintroduced by a default rather than by an edit anyone would notice. Default is
+> `0` now; verified behaviourally that a non-repo yields *armed*.
+>
+> **(3) Round 72's change falsified four clauses of the "WHEN IT IS ARMED" paragraph, and the sweep
+> reached `tests.rs` only.** *"Every interactive caller opts out"*, *"CI is the only caller that runs
+> this armed"*, *"the protection is PRE-MERGE, not in-session"*, *"a session-local overwrite is caught
+> on push and not before"* — all four inverted by the change made two rounds earlier, in **both** gate
+> scripts (which `assert_gate_script_self_verifies` keeps in lockstep, so they were wrong together)
+> and in `workflow.md`. Half-applied sweep, the class this branch now catalogues ten times. Rewritten
+> with what is true, and with the residual that remains: a session that legitimately edits one gate
+> script and overwrites another in the same turn is still only caught on push.
+>
+> **Shape: a gate's own commit is a test input. Run the gate against the file it ships with and ask
+> whether it CAN fire — "it would catch X" is a claim about a hypothetical; "it does not fire on the
+> diff beside it" is a fact you can check in one command.**

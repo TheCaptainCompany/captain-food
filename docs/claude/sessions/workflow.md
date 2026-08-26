@@ -545,10 +545,12 @@ by the citation block every `.claude/agents/*.md` carries, whose presence (with 
 existence, the settings wiring, and the live row gate) is asserted by
 `.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). That script
 also compares all four gate scripts against their committed blobs before reporting, and REFUSES to
-report if one drifted; the interactive callers (`stop-gate.sh`, `make hooks-test`, and
-`make stub-tests` for the sibling decision-lookup suite) pass the matching
-`REGISTER_CHECK_ALLOW_DIRTY=1` / `DECISION_LOOKUP_ALLOW_DIRTY=1` so editing a gate script and
-re-running still works, while CI invokes both directly and gets the comparison. **A local green from
+report if one drifted. `make hooks-test` and `make stub-tests` pass the matching
+`REGISTER_CHECK_ALLOW_DIRTY=1` / `DECISION_LOOKUP_ALLOW_DIRTY=1` unconditionally, so editing a gate
+script and re-running still works. **`stop-gate.sh` opts out only when a gate script is DIRTY in the
+working tree** — on an ordinary turn it runs the comparison armed, so an in-session overwrite of a
+gate script is caught on the next turn rather than on push. CI invokes both directly and cannot be
+talked out of the comparison at all (`env_ok` forbids both opt-out names as `env:` keys). **A local green from
 either `make` target therefore EXCLUDES the gate-set comparison** — that is the point of the opt-out,
 and it is the one thing those targets do not prove. If you run either script by hand mid-edit, pass
 the variable; run it clean-tree without one to see what CI sees. The hook

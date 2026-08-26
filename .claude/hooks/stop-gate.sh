@@ -119,11 +119,20 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # a committed script matches its blob at HEAD and verifies fine. `git status --porcelain` alone is
 # therefore the right question, and it makes the guard live on the branch that wrote it.
 #
-# FAIL SAFE TOWARD THE GUARD. No git, or a status that cannot be read, arms it: the failure is a
-# loud exit whose message names the opt-out, which is recoverable in one command, while the other
-# direction is silence. Editing a gate script and re-running is still the normal loop -- that turn
-# opts out, this one does not.
-_gate_scripts_dirty=1
+# FAIL SAFE TOWARD THE GUARD, AND THE INITIALISER IS WHERE THAT IS DECIDED. The first version of
+# this block claimed exactly this and then reversed it for one of the two disjuncts: it initialised
+# to 1, so `git rev-parse --git-dir` failing (no `.git` at all -- a container stage that drops it, a
+# `git archive` extraction, `git` off PATH) skipped the `if` body entirely and left the value at
+# "dirty", DISARMING the comparison silently on every turn, while printing the ordinary dirty-tree
+# line. That is the silent-disarm shape V3 exists to remove, reintroduced by a default rather than
+# by an edit anyone would notice -- and the comment above it asserted the opposite. (Review #77.)
+#
+# So the default is ARMED, and both failure disjuncts now reach it: no git, and a `git status` that
+# errors (the pipeline takes `grep`'s status, which is 1 on empty output). A git-less host therefore
+# gets the block's loud `FATAL`, whose message names the opt-out and is recoverable in one command
+# -- which is what "fail safe toward the guard" has to mean if it means anything. Editing a gate
+# script and re-running is still the normal loop: that turn is dirty and opts out, this one is not.
+_gate_scripts_dirty=0
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   if git -C "$ROOT" status --porcelain --untracked-files=all -- \
        .claude/hooks/register-check.sh \
@@ -133,7 +142,7 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   then _gate_scripts_dirty=1; else _gate_scripts_dirty=0; fi
 fi
 if [ "$_gate_scripts_dirty" = "1" ]; then
-  echo "-> register-check selftest (gate scripts dirty or unreadable -- comparison opted out for this turn)"
+  echo "-> register-check selftest (a gate script is dirty in the working tree -- comparison opted out for this turn)"
   step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
 else
   step bash "$ROOT/.claude/hooks/register-check-selftest.sh"
