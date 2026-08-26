@@ -9829,6 +9829,31 @@ mod decision_ask_and_citations {
         ]);
         assert!(orphan.is_empty(), "a supersession without a challenge edge is legal by design, got {:?}", orphan);
 
+        // THE SAME BOUNDARY WITH AN **OPEN** SUCCESSOR, pinned HERE and not only in
+        // `supersession_is_a_dag_walked_by_identity`, because review #29 read the coupling arm and
+        // concluded this state was an oversight. It is not: `A superseded_by B` with `B` open and
+        // no `reconsiders` edge is the shape that test calls "a chain terminating in a live row is
+        // legal", and it is what a MIGRATION produces -- a row replaced by a successor that never
+        // formally challenged it, whose own question is still being settled. Redding it would put
+        // the invariant on the `superseded_by` edge and break two pre-existing tests, and CLAUDE.md
+        // is explicit that a failing behaviour test means fix the generator, never the test.
+        //
+        // What the review WAS right about is the claim, not the code: the row and this comment said
+        // the arm closes "the direction the ADR wrongly claimed was already total", and it closes
+        // the direction WHERE A CHALLENGE EDGE EXISTS. Both records now say which. The reader
+        // routed to an open head is told the successor question is open -- that is information, not
+        // a dead end; the dead end this chain actually fixed was an index arrow pointing at the
+        // predecessor's own deciding record.
+        let open_successor = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", orphan_sup),
+            ("docs/decisions/ROW-B.yaml", "key: \"ROW-B\"\nstatus: \"open\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n"),
+        ]);
+        assert!(
+            open_successor.is_empty(),
+            "a supersession whose successor is still OPEN, with no challenge edge, is legal by design -- see the comment above before 'fixing' it, got {:?}",
+            open_successor
+        );
+
         let chain = check_rows(&[
             ("docs/decisions/ROW-A.yaml", a_sup),
             ("docs/decisions/ROW-B.yaml", b_sup),

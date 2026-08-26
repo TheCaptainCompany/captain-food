@@ -897,3 +897,28 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > conflicted. `git stash` is a no-op on a clean tree but `pop` is not; it takes the top of a stack
 > that may not be yours. The entry survived only because the conflict made the pop fail. **Never
 > pair a bare `stash`/`stash pop` around a command: check `git stash list` first, or don't stash.**
+>
+> **Round 32 — a finding I DECLINED, and the part of it that was right.** The review held that the
+> supersession-coupling mirror closes one spelling rather than the direction: it sits inside the
+> `reconsiders` loop, so `X superseded_by Y` with `Y` open and no challenge edge is green — and
+> proposed moving the invariant onto the `superseded_by` edge.
+>
+> **Declined, with evidence.** That state is legal by a PRE-EXISTING test:
+> `supersession_is_a_dag_walked_by_identity` asserts *"a chain terminating in a live row is legal"*,
+> and it is what a MIGRATION produces — a row replaced by a successor that never formally challenged
+> it, whose own question is still being settled. Redding it breaks that test and
+> `a_fully_valid_corpus_is_green`, and CLAUDE.md is explicit: a failing behaviour test means fix the
+> generator, never the test. **This is the second time a review has asked for this same widening**
+> (round 2 asked for the no-`reconsiders` case), which is itself the signal: the boundary was
+> recorded only in the DAG test and in a comment beside the rule, so each reader rediscovers it as
+> an oversight.
+>
+> **What the review was right about is the CLAIM, not the code.** Clause (a) said the arm closes
+> *"the direction the ADR wrongly claimed was already total"* — and it closes that direction **in the
+> `reconsiders:` spelling of it**. My own record overclaimed, in the clause describing a rule added
+> to fix an overclaim. Corrected, and the boundary is now pinned by a green control **beside the
+> rule** rather than only in a test two hundred lines away.
+>
+> **The rule: when a reviewer proposes the same widening twice, the defect is usually that the
+> boundary is undiscoverable from where they are reading.** Moving the control next to the rule costs
+> nothing and is the difference between a decision and an apparent oversight.
