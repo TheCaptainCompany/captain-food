@@ -133,9 +133,19 @@ cache.
   window was GitHub's 360-minute default, in the job that now runs a python3-heavy suite whose own
   step comment names three host-drift classes as expected failure modes; at peak
   (Friday/Saturday 19:00–21:30) that is a path to "no checkout, dispatch or payments fix merges for
-  six hours". **This change therefore also sets `timeout-minutes: 10` on `changes`** — ~30× its
-  observed duration, so it bounds a hang and nothing else — pinned by `assert_pinned_in_changes_job`
-  (the key is required and capped at 30). It does **not** settle `GATE-STEP-LOCUS`.
+  six hours". **This change therefore also sets a `timeout-minutes` on every job the aggregator
+  consumes** (`changes` 10; `lint`/`specs`/`docs-validate` 20; `build-test`/`db-test` 60;
+  `codegen` 10), because `codegen` is `if: always()` and `always()` still **waits** on `needs:` — so
+  a hang anywhere in that set keeps the required check queued and nothing merges. Each is orders of
+  magnitude above what its job legitimately does, so they bound a **hang and nothing else**; pinned
+  by `assert_pinned_in_changes_job`, which requires the key on every aggregated job and caps it.
+  It does **not** settle `GATE-STEP-LOCUS`, and it does nothing for a **red**, which is the likelier
+  event and has the same blast radius. *(This paragraph stated `~30×` its observed duration. The
+  multiplier was a bare derived number and was measured wrong — the `changes` job runs ~14s, so it
+  is nearer 43× — and it was retracted from `ci.yml` in one commit while surviving here, in
+  `GATE-STEP-LOCUS` and in the journal: the half-applied sweep this branch catalogues at rounds 33,
+  36 and 42, landing on the retraction itself. The figure is gone rather than corrected; the
+  argument was never the multiplier. Review #48.)*
 - `tools/codegen-rs` gains one more artifact it pins. That is the accepted shape of this repo's
   CI-pinning rule and mirrors an existing precedent.
 - The decision chain for QMD retrieval now has two links. A reader resolving `RETRIEVAL-QMD` is

@@ -1095,8 +1095,9 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > description of a diff, not a value**: the hazard is one *this PR creates* (it is the change that
 > puts a python3-heavy suite in the job everything `needs:`), the fix is one line, and leaving a
 > known repository-wide six-hour merge block in place is not the conservative choice merely because
-> it keeps a diff smaller. `timeout-minutes: 10` on `changes`, ~30× its observed duration, so it
-> bounds a **hang** and nothing else.
+> it keeps a diff smaller. `timeout-minutes: 10` on `changes`, orders of magnitude above what that
+> job legitimately does, so it bounds a **hang** and nothing else. *(This line said `~30×` and the
+> multiplier was measured wrong — see round 48.)*
 >
 > **The cap is half the pin.** `timeout-minutes: 600` is the 360-minute default with extra steps, so
 > `assert_pinned_in_changes_job` requires the key *and* bounds it to `1..=30` — two plants
@@ -1362,3 +1363,35 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > predates this branch — widening the set is a change to the set's boundary, not a fix to anything
 > here. The omission is now written down at the `GATE_SET` declaration itself, because **a set whose
 > omissions are undocumented is how the next omission gets argued from silence.**
+>
+> **Round 48 — the retraction of a bare number was itself half-applied, and it landed on the one
+> site that is not the record.** Round 45 removed `~30×` from the `ci.yml` comment and said why. The
+> identical figure stayed live in the **ADR**, in **`GATE-STEP-LOCUS`** and in the **journal** — and
+> CLAUDE.md is explicit that GitHub is never the record and that decisions live in the ADR and the
+> row. So the fix reached a source comment, which carries no authority, and missed the three that
+> do. `GATE-STEP-LOCUS` is **open**, and its sizing paragraph — where the number is doing the
+> arguing between options (a) and (b) — is exactly what whoever closes it reads.
+>
+> Measured again independently: the `changes` job runs **14s**, so 10 minutes is nearer **43×**. The
+> figure is gone from all three rather than corrected, because the argument was never the multiplier.
+> **This is the half-applied-sweep class this branch catalogues at rounds 33, 36 and 42, landing on
+> the retraction of a half-applied claim.**
+>
+> **Round 48b — the PR body's `ci.yml` scope statement was three rounds behind its own diff.** It
+> said *"Two things … everything else added to that file is comment"*; the diff adds
+> `timeout-minutes` to **seven** jobs plus a standing assertion that every job the aggregator
+> consumes declares one in `1..=60` — a repo-wide constraint on all future jobs. The six extra caps
+> *are* recorded in `GATE-STEP-LOCUS` by value with the `always()`-still-waits argument, so this was
+> a body↔diff gap rather than an unrecorded rider — but on a branch whose thesis is that every
+> completeness claim was written before it was checked, the first artifact an independent reviewer
+> reads should not be narrower than the diff. Corrected in the body and in the row's sentence that
+> asserted the body was accurate.
+>
+> **Round 48c — two smaller things named rather than left implied.** The `1..=60` ceiling is one
+> `build-test`/`db-test` sit *at*, so the assertion's message now names the intended move (raise the
+> bound **and** the job's value in the same commit, with the observed duration that justifies it)
+> instead of leaving the reader to invent the one-character edit this file retracts elsewhere. And
+> the clean-run assertion in the tamper test reads the self-verification **verdict**, not the exit
+> status — that fixture has no `.claude/settings.json` and no wrapper, so both guards exit non-zero
+> for unrelated reasons. **A green assertion that proves less than it reads as is how the next one
+> gets written**, so it now says so.

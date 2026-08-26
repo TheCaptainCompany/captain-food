@@ -11369,7 +11369,7 @@ mod docs_only_ci_and_legacy_visibility {
                     ));
                 assert!(
                     (1..=60).contains(&cap),
-                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=60. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long",
+                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=60. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. `build-test` and `db-test` sit AT this ceiling, so if a cold-cache run legitimately needs more: raise BOTH this bound and that job's value in the SAME commit, with the observed duration that justifies it -- do not edit the job down to fit, and do not widen this silently",
                     job, cap
                 );
                 if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
@@ -12665,6 +12665,14 @@ mod docs_only_ci_and_legacy_visibility {
                 String::from_utf8_lossy(&clean.stdout),
                 String::from_utf8_lossy(&clean.stderr)
             );
+            // WHAT THIS ASSERTION DOES AND DOES NOT PROVE. It reads the self-verification VERDICT
+            // out of a clean run, which is the property it is for. It does NOT prove the guard
+            // exits 0: this fixture repo has no `.claude/settings.json` and no `.claude/agents/**`,
+            // so `register-check-selftest.sh` exits non-zero for a reason that has nothing to do
+            // with the gate set -- and `stub-tests.sh` exits non-zero too, having no wrapper for
+            // its 54 cases. Reading exit status here would be the vacuous assertion the tamper case
+            // above already got wrong twice (review #46). Stated rather than implied, because a
+            // green assertion that proves less than it reads as is how the next one gets written.
             assert!(
                 clean_out.contains("self-verification: OK"),
                 "{} must report its comparison PASSING out loud on an untouched tree -- a silent skip and a silent pass look identical in a green log. Got:\n{}",
