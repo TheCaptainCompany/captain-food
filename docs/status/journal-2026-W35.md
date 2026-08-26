@@ -472,3 +472,21 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > supply-chain gate on a host where it runs fine — **the exact false refusal removing `cmp` was
 > justified by, re-entering through the doc.** Same paragraph said the comparison is "at `HEAD`"
 > when in CI it is at `$GITHUB_SHA`, so the FATAL string it quoted did not match what a reader sees.
+>
+> **Round 16 — the corpus proved four assertion families and the helper had twelve.** Every plant in
+> `both_scopes_reject_execution_altering_env` mutated an `env:` key, `defaults.run`, an `on:` filter
+> or `runs-on`. Everything else in `assert_pinned_in_changes_job` was held up by a SENTENCE: the
+> `{name, run}` key-set lock — *the "make it unspellable" property the whole helper was rewritten
+> around* — the `run` equality, the job-level `if`/`continue-on-error`/`strategy`/`needs` ban, the
+> `container`/`services` ban, the `.claude`/`GITHUB_ENV`/`GITHUB_PATH` needle scan (which had only a
+> GREEN control, for the mutant that motivated it), the `uses:` restriction, both checkout
+> `repository`/`ref` bans, and the JOB-scope `working-directory`. **Delete any one and every red and
+> control stayed exactly as it was** — the round-8 regression verbatim, where `env_ok(changes_val,…)`
+> vanished in a refactor and was measured green again two rounds later. Fourteen plants added; with
+> the key-set assertion removed the suite now reds naming exactly the three mutants that need it.
+>
+> **The rule this earns, and it is the one that keeps recurring in a new costume: a corpus-size
+> floor counts PLANTS, not COVERAGE.** `must_red.len() >= N` cannot see which assertions have one,
+> so it grows monotonically while the uncovered set grows with it. The question a mutation corpus
+> has to answer is not "how many mutants" but "which assertion does each one pin, and which
+> assertion has none" — and the only way to answer it is to delete an assertion and watch.

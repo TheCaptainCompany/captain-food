@@ -11057,6 +11057,77 @@ mod docs_only_ci_and_legacy_visibility {
             ("job XDG_CONFIG_HOME", at_job("XDG_CONFIG_HOME: /tmp/x")),
             ("job HOME", at_job("HOME: /tmp/x")),
             ("workflow XDG_CONFIG_HOME", at_workflow("XDG_CONFIG_HOME: /tmp/x")),
+            // ── THE OTHER EIGHT ASSERTION FAMILIES IN THIS HELPER ──────────────────────────────
+            // Every plant above mutates an `env:` key, `defaults.run`, an `on:` filter or
+            // `runs-on`. Review #16 measured what that leaves: the `{name, run}` key-set lock, the
+            // `run` equality, the job-level `if`/`continue-on-error`/`strategy`/`needs` ban, the
+            // `container`/`services` ban, the `.claude`/`GITHUB_ENV`/`GITHUB_PATH` needle scan,
+            // the `uses:` restriction, the checkout `repository`/`ref` bans and the JOB-scope
+            // `defaults.run.working-directory` were each held up by a sentence -- delete any one
+            // and every red and control here stayed exactly as it was. That is the round-8
+            // regression shape verbatim (`env_ok(changes_val, ...)` lost in a refactor, measured
+            // green again two rounds later), and `must_red.len() >= N` cannot see it: it counts
+            // plants, not which assertions have one.
+            //
+            // The `{name, run}` key set, which is the "make it unspellable" property the whole
+            // helper was rewritten around (mutants 11 and 12). Both spellings of the step-level
+            // `if:` that defeated the indentation-matching version.
+            ("gate step gains a step-level if", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - if: github.event_name == 'push' && github.ref == 'refs/heads/never'\n        name: decision-lookup hermetic stub suite",
+                1)),
+            ("gate step gains continue-on-error", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        continue-on-error: true\n        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                1)),
+            ("gate step gains a step-level env", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        env:\n          FOO: bar\n        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                1)),
+            // `run` EQUALITY: the two disarms a substring scan cannot see.
+            ("gate step run gains || true", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh || true",
+                1)),
+            ("gate step run gains ; exit 0", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh ; exit 0",
+                1)),
+            // The JOB may not gate or matrix itself out of existence.
+            ("changes job gains an if", ci.replacen("  changes:\n", "  changes:\n    if: github.ref == 'refs/heads/never'\n", 1)),
+            ("changes job gains continue-on-error", ci.replacen("  changes:\n", "  changes:\n    continue-on-error: true\n", 1)),
+            ("changes job gains a container", ci.replacen("  changes:\n", "  changes:\n    container: alpine:3\n", 1)),
+            // JOB-scope `working-directory`: only the workflow-scope spelling was planted, and the
+            // one-scope-up miss is how mutants twelve and thirteen both got in.
+            ("job defaults.run.working-directory", ci.replacen(
+                "  changes:\n",
+                "  changes:\n    defaults:\n      run:\n        working-directory: /tmp/decoy\n",
+                1)),
+            // MUTANT FOURTEEN -- two lines INSIDE a sibling step that overwrite a gate script. The
+            // comment 100 lines up calls this the reason `steps.len() == 4` was replaced, and the
+            // needle scan that closed it had only a GREEN control.
+            ("a sibling step overwrites a gate script", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Warm\n        run: printf 'exit 0' > .claude/hooks/register-check.sh\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            ("a sibling step exports through GITHUB_ENV", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Warm\n        run: echo \"BASH_ENV=/tmp/p.sh\" >> \"$GITHUB_ENV\"\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            // The `github-script` payload from review #6: an action with no `run:` at all.
+            ("a non-checkout uses in the changes job", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - uses: actions/github-script@v7\n        with:\n          script: |\n            require('fs').writeFileSync('x', '')\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            // A checkout re-pointed at another tree puts someone else's scripts under the gates.
+            ("changes checkout re-points repository", ci.replacen(
+                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
+                "      - uses: actions/checkout@v5\n        with:\n          repository: someone/else\n          fetch-depth: 0",
+                1)),
+            ("changes checkout re-points ref", ci.replacen(
+                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
+                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n          fetch-depth: 0",
+                1)),
             ("a self-hosted pool labelled to look hosted", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom", 1)),
         ];
         let mut survived = Vec::new();
@@ -11107,7 +11178,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 29 && must_stay_green.len() >= 9,
+            must_red.len() >= 43 && must_stay_green.len() >= 9,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
