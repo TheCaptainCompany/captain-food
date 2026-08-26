@@ -213,6 +213,18 @@ jobs:
       #     case would delete the coverage rather than restore it. (An earlier version of this
       #     comment claimed two classes sufficed and that the exceptions announced themselves --
       #     true of T15g only, which is why the third class is named here instead.)
+      #   * NO CASE RAN AT ALL => a FOURTH class, and the three above do not fit it. `stub-tests.sh`
+      #     `exit 1`s BEFORE the first case on its own gate-set self-verification: `git` or `tr` not
+      #     under the pinned `/usr/bin:/bin:/usr/local/bin`, a gate-script blob that differs from
+      #     the committed one, an unresolvable `GITHUB_SHA`. Those are properties of the RUNNER
+      #     IMAGE and of the gate set, not of the wrapper, the host capabilities a case needs, or a
+      #     fixture -- so a reader handed the three classes above would classify a FATAL that means
+      #     "the suite refused to report on scripts it could not verify" as one of them and go
+      #     looking in the wrong place. The tell is that there is no `precondition` and no case id:
+      #     READ THE FATAL, it is about the gate set. A blob mismatch specifically is the disarm
+      #     shape the block exists to DETECT and is never adapted around. (Review #92 of PR #679;
+      #     the enumeration above priced the suite's blast radius as three classes while this diff
+      #     added a fourth in the same file.)
       #
       # Never delete a case and never weaken an assertion to recover green: this step is the only
       # thing standing behind the wrapper's supply-chain gate.

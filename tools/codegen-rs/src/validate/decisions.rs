@@ -802,6 +802,140 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
     (cited, true, unread, unread_tree, skipped_ext)
 }
 
+/// Every way a file leaves the citation corpus, reported as issues -- ONE FUNCTION so the kinds,
+/// their ratchet postures and their GRANULARITY sit together and can be asserted by execution.
+///
+/// It was four inline blocks in `main.rs`, where the only instrument available was a test reading
+/// the source text -- and the property that broke is invisible to one: `warning_profile` counts
+/// ISSUES per rule, so an aggregated warn naming twelve files scores 1. The two TREE-caused kinds
+/// are inside the section 17 ratchet precisely so that adding a `.claude/**` file the rule cannot
+/// see "becomes a deliberate, baseline-moving act", and at granularity 1 that held for the FIRST
+/// such file only: once anyone legitimately accepted one with `make warning-baseline`, a second
+/// scored `1 -> 1` -- clean and silent. `decision-superseded-authority` never had the defect,
+/// because it pushes one issue per CITING SITE; the two reporters were the odd ones out and five
+/// separate comments asserted the stronger property of them. (Review #92 of PR #679.)
+pub(crate) fn corpus_scan_issues(
+    readable: bool,
+    unread: &[String],
+    unread_tree: &[String],
+    skipped_ext: &[String],
+) -> Vec<Issue> {
+    let mut issues: Vec<Issue> = Vec::new();
+    if !readable {
+        // A gate that cannot look must not read as a gate that looked and found nothing.
+        //
+        // WARNING-LEVEL AND RATCHET-EXEMPT, and the second half is not a detail: §17 is
+        // exact-match in BOTH directions, so a kind absent from the baseline scores
+        // `0 -> 1 (NEW warning kind)` and exits 1. This comment used to say "Not an error"
+        // over exactly that path -- `make validate` FAILED the first time `git ls-files`
+        // did, with a message naming the warning baseline rather than git, and the remedy
+        // it printed (`make warning-baseline`) would have committed a baseline asserting
+        // that this gate checked nothing, which then reds in the opposite direction on
+        // every host where git works. `RATCHET_EXEMPT` in `validate/warning_baseline.rs`
+        // carries the reasoning and the assertion; the claim is true now. (Review #35.)
+        //
+        // AND IT SAYS WHAT WAS OBSERVED, NOT WHAT WAS INFERRED. The message asserted
+        // "`git ls-files` failed" while `readable == false` has TWO producers: the
+        // `status.success()` guard, and review #61's empty-corpus early return -- which is
+        // reached with git having exited 0. Both of that return's non-tamper spellings are
+        // named in its own comment (an index with no matching entries; every listed file
+        // outside the extension allowlist, which is why it deliberately preserves
+        // `skipped_ext`). So on a `git archive` extraction -- the case that comment calls
+        // "the MORE mundane" one -- an operator met a message telling them to debug git,
+        // ownership and `safe.directory`, none of which was the cause, while the actual
+        // remedy sat in the sibling `decision-citation-file-out-of-corpus` line they had no
+        // reason to connect to it. That is review #35's class one attribution over: a gate
+        // reporting the wrong thing is not better than a gate reporting nothing, it is
+        // worse, because it spends the reader's time. (Review #65 of PR #679.)
+        issues.push(warn(
+            "decision-citation-corpus-unreadable",
+            "tools/codegen-rs".to_string(),
+            "The superseded-citation corpus came back EMPTY, so `decision-superseded-authority` checked nothing. Reported as OBSERVED rather than diagnosed, because this flag has more than one producer: `git ls-files` may have failed (git absent, not a repository, a dubious-ownership refusal on a bind-mounted checkout), OR it exited 0 and listed nothing this rule can read -- an index with no matching entries (a `git archive` extraction re-`git init`ed but never `git add`ed), or every listed file falling outside the extension allowlist. THE DISCRIMINATOR IS ALREADY COMPUTED and prints beside this line, under THIS SAME KIND: a second `decision-citation-corpus-unreadable` warning names the files the allowlist dropped, and its absence means git itself did not answer. (It is emitted under this kind rather than `decision-citation-file-out-of-corpus` precisely because that kind ratchets and this path scanned nothing -- see the emission site.) Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+        ));
+    }
+    // TRACKED, LISTED, AND NEVER OPENED. Same posture and same reason as the unreadable
+    // CORPUS above: fail open, report loudly, stay outside the §17 ratchet because the
+    // cause is the host (a sparse checkout, a dangling tracked symlink, a permission drop,
+    // non-UTF-8 content) and not this tree. Without it, `readable == true` reported the
+    // same green whether the rule scanned six files or sixty. (Review #52.)
+    if !unread.is_empty() {
+        issues.push(warn(
+            "decision-citation-corpus-unreadable",
+            "tools/codegen-rs".to_string(),
+            format!(
+                "{} tracked file(s) in the superseded-citation corpus could not be read, so `decision-superseded-authority` did not scan them: {}. Not an error, and outside the section 17 ratchet (the cause is the HOST -- a sparse checkout, a dangling symlink, a permission drop -- not this tree, so the count has no stable value to commit). Reported because a partial scan must not print like a clean one.",
+                unread.len(),
+                unread.join(", ")
+            ),
+        ));
+    }
+    // ONE ISSUE PER FILE FOR THE RATCHETED KINDS BELOW, and this aggregated one is the
+    // CONTRAST rather than an inconsistency: `warning_profile` counts ISSUES per rule, so an
+    // aggregated warn scores 1 whether it names one file or twelve. That is fine HERE --
+    // `decision-citation-corpus-unreadable` is `RATCHET_EXEMPT`, so its count never reaches
+    // the baseline at all -- and it was NOT fine for the two tree-caused kinds, which are
+    // inside the ratchet precisely so that "adding a `.claude/**` file the rule cannot see
+    // becomes a deliberate, baseline-moving act". At granularity 1 that property held for
+    // the FIRST such file and evaporated the moment anyone legitimately accepted one with
+    // `make warning-baseline`: from then on a second extensionless hook carrying
+    // `Per row <DEAD-ROW>, ...` scored `1 -> 1` -- clean, silent, the motivating incident
+    // class walking back in through the door the ratchet was built to close.
+    //
+    // `decision-superseded-authority` never had this defect: it pushes one issue per CITING
+    // SITE, so its count is already N, which is what makes `CITATION-RULE-LEVEL`'s claim
+    // that "a SECOND stale citation still reds after the first is baselined" true. The two
+    // reporters were the odd ones out and nothing said so. (Review #92 of PR #679.)
+    // TREE-CAUSED, SO IT RATCHETS. Non-UTF-8 bytes make `read_to_string` fail identically
+    // on every host, so unlike the host causes above this one HAS a stable committable
+    // value -- and lumping the two under one kind gave the deterministic case the
+    // host-only exemption, which would have hidden a committed latin-1 byte in a
+    // `.claude/**` file forever. A separate kind keeps the fail-open posture and puts the
+    // signal back where a `make validate` reader meets it. (Review #60.)
+    for rel in unread_tree {
+        issues.push(warn(
+            "decision-citation-file-not-utf8",
+            rel.clone(),
+            "is a tracked file in the superseded-citation corpus that is not valid UTF-8, so `decision-superseded-authority` cannot scan it. This is a property of the TREE, not the host -- it fails the same way everywhere -- so it stays inside the section 17 ratchet: fix the encoding, or accept it deliberately with `make warning-baseline` in the same commit. ONE ISSUE PER FILE, so the baseline carries the COUNT and a second such file still reds after the first is accepted.".to_string(),
+        ));
+    }
+    // THE EXTENSION FILTER, WHICH WAS THE LAST SILENT WAY OUT OF THE CORPUS. Deterministic
+    // and tree-caused, so it ratchets like `not-utf8` rather than being exempt like the
+    // host causes: adding a `.claude/**` file the rule cannot see becomes a deliberate act
+    // with a baseline diff, not a quiet one. Zero such files today. (Review #63.)
+    //
+    // BUT IT IS TREE-CAUSED ONLY WHEN THE TREE IS THIS REPO'S TREE, and on `!readable` it
+    // is not -- which is why the KIND is chosen here rather than fixed. `skipped_ext`
+    // deliberately survives review #61's empty-corpus early return, where it is the
+    // EXPLANATION for the empty corpus. That return also sets `readable = false`, and the
+    // caller turns that into `CorpusShortfall::Nothing`, which makes `--write-warning-baseline`
+    // REFUSE. Emitting the ratcheted kind there produced `0 -> N (NEW warning kind)` out of
+    // a run that, by that return's own statement, scanned nothing -- with the printed remedy
+    // (`make warning-baseline`) exiting 1 as well. That is verbatim the end state
+    // `CORPUS_DERIVED_KINDS` calls "WORSE than the reporters': the reader can no longer
+    // commit the bad 0, so they are left with a red they cannot clear", reached through the
+    // one vector that return keeps alive. The ratchet's whole justification is that the kind
+    // fails identically on every host BECAUSE it is a property of this tree; when not one
+    // corpus file was readable, the checkout is not this repo (`CLAUDE.md` and the
+    // `Makefile` are in the pathspec and tracked in every legitimate one), so that premise
+    // is false and the names are a DIAGNOSTIC, not a finding. They are reported under the
+    // exempt kind instead -- same information, same fail-open posture, no unclearable red.
+    // Latent today for the same reason the premise fails, and closed anyway on this file's
+    // own stated grounds: it arms itself on a later, unrelated commit, and the run that
+    // trips it looks like a validator regression on a tree nobody touched. (Review #90.)
+    let (skipped_kind, skipped_posture) = out_of_corpus_warning_kind(readable);
+    for rel in skipped_ext {
+        issues.push(warn(
+            skipped_kind,
+            rel.clone(),
+            format!(
+                "is a tracked file in the citation corpus' pathspecs but outside its extension allowlist, so `decision-superseded-authority` does not scan it. {} ONE ISSUE PER FILE, so the baseline carries the COUNT and a second such file still reds after the first is accepted.",
+                skipped_posture
+            ),
+        ));
+    }
+    issues
+}
+
 /// WHICH KIND REPORTS THE FILES THE EXTENSION ALLOWLIST DROPPED, and it depends on whether the
 /// corpus was readable at all. A FUNCTION rather than an `if` at the emission site so the property
 /// is assertable by execution: the sibling predicate in `main.rs` could only ever be checked by

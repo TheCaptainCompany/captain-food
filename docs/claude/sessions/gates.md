@@ -778,3 +778,13 @@ is itself the argument: **a list that grows has no business stating its own leng
   write it in. The same reason a stale premise must be corrected AT the claim rather than retracted
   a thousand words later: on a founder-owned row a reader who stops early decides against a premise
   the diff already falsified.
+- **A range splice bounded by two SEARCHED anchors deletes everything between them — including work
+  added since the bounds were reasoned about.** `s[..start] + new + s[end..]` to retire one test
+  also removed every test inserted into that region earlier in the same round. **The suite
+  went green: a deleted test fails nothing.** The round then reported "N tests green" as evidence for
+  assertions that no longer existed — a total is exactly the wrong instrument for *did what I wrote
+  survive*, because it moves for four reasons at once. Prefer a single-occurrence exact replacement;
+  when a range must go, **assert what the range contains before replacing it**, verify new tests
+  individually by name, and read the DELETION side of `git diff` before committing. The executable
+  half is `every_test_name_cited_in_a_doc_comment_still_exists` — this repo's tests carry their
+  reasoning by citing each other, so a dangling citation is the one trace a silent deletion leaves.

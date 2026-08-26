@@ -2828,3 +2828,81 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > words later — on a **founder-owned** row whose whole subject is that level. Opening restated in the
 > past tense, options list rewritten against the current state. `RETRIEVAL-QMD-CI` clause (d) still
 > said the rule "fails"; it warns.
+>
+> **Round 92 — and the first thing in it is a correction to round 91, because round 91 deleted three
+> of its own tests and reported the suite green over the hole.**
+>
+> **WHAT HAPPENED.** Round 91 retired one test (a text assertion the compiler subsumed) with a range
+> splice — `s[..start] + new + s[end..]`, both bounds located by searching for a phrase. The bounds
+> were chosen when the region between them held that one test. By the time the splice ran, three more
+> had been inserted into that same region earlier in the round. **All four were replaced by one.**
+>
+> The suite went green. **A deleted test fails nothing**, so nothing could tell me. I then reported
+> *"286 tests green"* — a true statement about a number I was not tracking, offered as evidence for
+> assertions that no longer existed, and repeated the same claim to the PR. The commit message
+> describes `an_unreadable_corpus_cannot_mint_a_ratcheted_warning` (round 90),
+> `the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly` and
+> `a_partial_read_may_still_mint_a_baseline` (round 91) as pinning the fixes. **They were not in the
+> commit.** The fixes themselves were, and are correct; what was missing is everything that holds
+> them.
+>
+> All three are restored, verified individually by name rather than by a total, and planted red.
+>
+> **THE GATE, because prose would not have caught it.** What actually surfaced this was a doc comment
+> on a *neighbouring* test citing one of the deleted ones by name — this file carries its reasoning
+> between tests that way constantly. So: `every_test_name_cited_in_a_doc_comment_still_exists` reds
+> when a backticked test-shaped name in a `///` line resolves to nothing in the crate's code. Planted
+> by deleting the cited test, which is the defect verbatim. It is deliberately **not** a test-count
+> ratchet — retiring a test on purpose stays legal — but deleting a test *and* the sentences pointing
+> at it is then a visible diff rather than an accident of slicing. (The first version red on two
+> honest cross-references, a `let` binding and a function one module over; the declared set is the
+> whole crate's code lines, not this file's `fn` lines.)
+>
+> **Cost that earned the rule: I have spent this entire branch telling other people that a
+> completeness claim must be checked before it ships, and then shipped one.** The specific failure is
+> that `cargo test` reports a total, and a total is exactly the wrong instrument for "did the things
+> I wrote survive" — it moves for four reasons and I was not tracking any of them.
+>
+> **Shape: a range splice bounded by two SEARCHED anchors deletes everything between them, including
+> work added since the bounds were reasoned about.** The anchors were correct when chosen and wrong
+> when used, and nothing in between is visible to the splice. Prefer a single-occurrence exact
+> replacement; when a range must go, assert what the range CONTAINS before replacing it — and read
+> the deletion side of `git diff` before committing, because a removed test is invisible to every
+> other gate.
+>
+> **The round's own findings**, all three confirmed:
+>
+> **(1) The §17 ratchet on the two tree-caused corpus kinds had granularity 1, not N.**
+> `warning_profile` counts *issues* per rule, and both reporters pushed ONE aggregated warn naming N
+> files — so the profile was `1` whether the allowlist dropped one file or twelve. Those kinds sit
+> inside the ratchet on the stated ground that adding a `.claude/**` file the rule cannot see
+> "becomes a deliberate, baseline-moving act", and at granularity 1 **that held for the first file
+> only**: once anyone legitimately accepts one with `make warning-baseline` — an *expected* state at
+> `warn` level, and the whole argument for `CITATION-RULE-LEVEL` option (a) — a second scored
+> `1 -> 1`, clean and silent. `decision-superseded-authority` never had the defect (one issue per
+> citing site), which is what makes its "a second stale citation still reds" claim true; **the two
+> reporters were the odd ones out and five separate comments asserted the stronger property of all
+> three.** Now one issue per file, each naming its own path. The exempt host kind stays aggregated —
+> its count never reaches the baseline — and that asymmetry is now asserted so the next reader does
+> not "fix" it and conclude the ratchet covers it.
+>
+> The four inline emission blocks moved into `corpus_scan_issues`, because in `main.rs` the only
+> available instrument was a test reading source text, and **granularity is invisible to one**.
+>
+> **(2) The `ci.yml` triage block enumerated three failure classes and the suite has four.**
+> `stub-tests.sh` `exit 1`s *before the first case* on its own gate-set verification — `git`/`tr` off
+> the pinned PATH, a blob mismatch, an unresolvable `GITHUB_SHA`. Runner-image and gate-set
+> properties, none of which fits "wrapper defect / host capability / harness construction". A reader
+> meeting that FATAL was handed three wrong places to look. Fourth class named, with its tell (no
+> `precondition`, no case id).
+>
+> **(3) The stop-gate capability trap** was already fixed in round 91 — this review read an older
+> head — but it named more hosts than I did: Homebrew-only macOS (`/opt/homebrew/bin`) and Git Bash
+> (`git.exe` in `/mingw64/bin`), and pointed out `stop-gate.sh` carries a `CYGWIN*` branch, so
+> Windows is a *declared* dev host here. The fix covers all of them (it probes the same pinned path),
+> but the enumeration in the comment was narrower than the reachable set.
+>
+> Also recorded in `GATE-STEP-LOCUS`: the diff is choosing the interim under **final-vision-first**
+> (ADR-20260808-235113), which normally forbids one. Legitimate — the locus is `RETRIEVAL-QMD-CI`'s
+> to authorize and the final step is designed and recorded in that very row — but the row now says so
+> rather than letting whoever closes it believe the interim was neutral.

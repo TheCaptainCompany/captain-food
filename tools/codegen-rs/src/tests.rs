@@ -8674,6 +8674,311 @@ fn the_shortfall_classifier_separates_git_refusing_from_a_partial_read() {
     );
 }
 
+/// THE FLOOR MAY ONLY COVER KINDS THIS RUN COULD UNDER-COUNT.
+///
+/// `corpus_incomplete` collapsed two different shortfalls into one bool and sent all three
+/// corpus-derived kinds through the floor on both. On the PARTIAL-read path
+/// (`readable == true`, `unread` non-empty) `decision-citation-file-out-of-corpus` is **exact** --
+/// `skipped_ext` is pushed BEFORE the `read_to_string` attempt, so an unreadable file never leaves
+/// it -- and `check_warning_baseline`'s own docstring says so while the code floored it anyway.
+///
+/// Concrete failure once that kind is legitimately baselined at N>0: an author FIXES one of those
+/// files (renames it onto the allowlist), live goes 2 -> 1, and on any host with a single dangling
+/// tracked symlink the floor restores 2, the diff is clean and `make validate` is GREEN. CI, which
+/// can read every file, reds on the change they were told was clean -- and before review #91 they
+/// could not clear it locally either, because the write path refused on the same collapsed bool.
+///
+/// THE DISCRIMINATING CASE IS A DECREASE ON THE PARTIAL PATH. Every other assertion in this file
+/// exercises the floor where flooring is correct, so deleting the discrimination leaves them all
+/// green. (Review #91 of PR #679.)
+#[test]
+fn the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly() {
+    use crate::validate::warning_baseline::CorpusShortfall;
+
+    const EXACT: &str = "decision-citation-file-out-of-corpus";
+    const LOWER_BOUND: &str = "decision-citation-file-not-utf8";
+
+    assert!(
+        !CorpusShortfall::Partial.unmeasured().contains(&EXACT),
+        "`{}` is floored on the PARTIAL-read path, where it is EXACT: the extension filter runs before the read attempt, so an unreadable file never leaves `skipped_ext` and every decrease in this kind is genuine. Flooring it turns a real `N -> N-1` elimination into a clean diff on any host with one unreadable corpus file, and CI then reds on a change the author was told was green",
+        EXACT
+    );
+    assert!(
+        CorpusShortfall::Partial.unmeasured().contains(&LOWER_BOUND),
+        "`{}` dropped off the PARTIAL-read floor. It IS a lower bound there -- a file that could not be read cannot be tested for UTF-8 -- so without the floor a host that drops one corpus file scores `N -> N-1` and reds on a tree nobody touched",
+        LOWER_BOUND
+    );
+    assert!(
+        CorpusShortfall::Partial.unmeasured().contains(&"decision-superseded-authority"),
+        "the rule that CONSUMES the corpus dropped off the PARTIAL-read floor: it scans fewer files, so its count is a lower bound and a decrease is not evidence of a fix"
+    );
+
+    // NOTHING measured -- every kind is absent rather than low, so all three are floored.
+    let mut nothing = CorpusShortfall::Nothing.unmeasured().to_vec();
+    nothing.sort_unstable();
+    let mut all = CORPUS_DERIVED_KINDS.to_vec();
+    all.sort_unstable();
+    assert_eq!(
+        nothing, all,
+        "`Nothing` means `git ls-files` did not answer and every vector came back cleared, so EVERY corpus-derived kind is absent rather than low and all of them must be floored"
+    );
+    assert!(
+        CorpusShortfall::None.unmeasured().is_empty(),
+        "a complete corpus floors nothing -- every count is the truth and every change in it is real"
+    );
+
+    // AND THE FLOOR ITSELF STILL SUPPRESSES ONLY A DECREASE, asserted here over the exact/lower-
+    // bound split rather than trusted from the other tests, which all run with `Nothing`.
+    let committed: WarningProfile = [(EXACT.to_string(), 2usize), (LOWER_BOUND.to_string(), 2usize)]
+        .into_iter()
+        .collect();
+    let live: WarningProfile = [(EXACT.to_string(), 1usize), (LOWER_BOUND.to_string(), 1usize)]
+        .into_iter()
+        .collect();
+    let floored = floor_unmeasured(&live, &committed, CorpusShortfall::Partial.unmeasured());
+    assert_eq!(
+        floored.get(EXACT).copied(),
+        Some(1),
+        "the exact kind's genuine `2 -> 1` was floored back to 2, so the ratchet reports clean on a real elimination"
+    );
+    assert_eq!(
+        floored.get(LOWER_BOUND).copied(),
+        Some(2),
+        "the lower-bound kind's `2 -> 1` survived the floor, so a host that could not read one file reds on a tree nobody touched"
+    );
+}
+
+/// A PARTIAL READ MAY NOT BLOCK `make warning-baseline`.
+///
+/// The refusal fired on `!readable || !unread.is_empty()`. The second disjunct is one tracked file
+/// under `.claude/**` the filesystem would not hand back -- a dangling symlink, a permission drop,
+/// a sparse-checkout gap. On such a host EVERY `make warning-baseline` exited 1, including one run
+/// for a spec change that moved a completely unrelated warning kind, while CLAUDE.md requires the
+/// refreshed artifact in the SAME commit and the printed remedy ("fix the checkout") may be outside
+/// the author's control. Composed with the floor defect above, that is the "left with a red they
+/// cannot clear" end state `CORPUS_DERIVED_KINDS` names, reached from both directions at once.
+/// (Review #91 of PR #679.)
+#[test]
+fn a_partial_read_may_still_mint_a_baseline() {
+    use crate::validate::warning_baseline::CorpusShortfall;
+
+    assert!(
+        CorpusShortfall::Partial.may_mint_a_baseline(),
+        "a PARTIALLY read corpus refuses to mint a baseline. The counts are computed there -- lower bounds, not absent -- so the floor is the correction they need and refusing blocks the author's only remedy for every unrelated warning move on that host"
+    );
+    assert!(
+        !CorpusShortfall::Nothing.may_mint_a_baseline(),
+        "a run where `git ls-files` did not answer minted a baseline. Nothing was measured, so this commits a permanent 0 for kinds this host never counted, and every host that CAN count them then reds"
+    );
+    assert!(
+        CorpusShortfall::None.may_mint_a_baseline(),
+        "a complete corpus refuses to mint a baseline, which leaves no way to move the artifact at all"
+    );
+}
+
+/// AN UNREADABLE CORPUS MAY NOT MINT A RATCHETED WARNING.
+///
+/// `skipped_ext` deliberately survives review #61's empty-corpus early return, where it is the
+/// EXPLANATION for the empty corpus. That return also sets `readable = false`, the caller turns
+/// that into `CorpusShortfall::Nothing`, and `--write-warning-baseline` REFUSES on it. So emitting
+/// those names under the tree-caused, ratcheted kind produced `0 -> N (NEW warning kind)` out of a
+/// run that -- by that return's own statement -- scanned nothing, with the printed remedy
+/// (`make warning-baseline`) exiting 1 as well: verbatim the end state `CORPUS_DERIVED_KINDS`
+/// calls "WORSE than the reporters': the reader can no longer commit the bad 0, so they are left
+/// with a red they cannot clear".
+///
+/// ASSERTED BY EXECUTION, not by reading `main.rs`: the choice was extracted into
+/// `out_of_corpus_warning_kind` rather than left as an `if` at the emission site.
+/// (Review #90 of PR #679.)
+#[test]
+fn an_unreadable_corpus_cannot_mint_a_ratcheted_warning() {
+    use crate::validate::decisions::out_of_corpus_warning_kind;
+
+    let (readable_kind, _) = out_of_corpus_warning_kind(true);
+    assert_eq!(
+        readable_kind, "decision-citation-file-out-of-corpus",
+        "on a READABLE corpus the allowlist drop is a property of this tree and must keep ratcheting -- adding a `.claude/**` file the rule cannot see is a deliberate, baseline-moving act, which is the whole reason the kind exists"
+    );
+    assert!(
+        !RATCHET_EXEMPT.contains(&readable_kind),
+        "`{}` became ratchet-exempt on the readable path, which switches the gate off in the case it was built for",
+        readable_kind
+    );
+
+    let (unreadable_kind, _) = out_of_corpus_warning_kind(false);
+    assert!(
+        RATCHET_EXEMPT.contains(&unreadable_kind),
+        "`{}` is emitted when NOT ONE corpus file was readable, and it is inside the section 17 ratchet. That run scanned nothing, so a kind absent from the baseline scores `0 -> N (NEW warning kind)` and `make validate` exits 1 -- while `--write-warning-baseline` refuses on the same shortfall, so the printed remedy exits 1 too. A red the reader cannot clear, over a tree that is not this repository",
+        unreadable_kind
+    );
+
+    // AND THE TWO PATHS MUST NOT COLLAPSE INTO ONE. Reporting both under the exempt kind would
+    // close this trap by disabling the gate; reporting both under the ratcheted kind is the bug.
+    assert_ne!(
+        readable_kind, unreadable_kind,
+        "the two paths report the same kind, so one of them is wrong: the readable path must ratchet (the count is a stable property of this tree) and the unreadable path must not (nothing was scanned, and the remedy is blocked)"
+    );
+}
+
+/// THE RATCHETED CORPUS KINDS MUST COUNT FILES, NOT PRESENCE.
+///
+/// `warning_profile` counts ISSUES per rule, and both tree-caused reporters used to push ONE
+/// aggregated warn listing N files -- so the live profile was `1` whether the allowlist dropped one
+/// file or twelve. Those two kinds are inside the section 17 ratchet on the stated ground that
+/// adding a `.claude/**` file the rule cannot see "becomes a deliberate, baseline-moving act", and
+/// at granularity 1 that held for the FIRST such file only. The moment anyone legitimately accepted
+/// one with `make warning-baseline` -- which at `warn` level is an EXPECTED state, and is the whole
+/// argument for `CITATION-RULE-LEVEL` option (a) -- a second extensionless hook carrying
+/// `Per row <DEAD-ROW>, ...` scored `1 -> 1`: clean, silent, and exactly the motivating incident
+/// class walking back in through the door the ratchet was built to close.
+///
+/// `decision-superseded-authority` never had the defect (one issue per CITING SITE), which is what
+/// makes `CITATION-RULE-LEVEL`'s "a SECOND stale citation still reds after the first is baselined"
+/// true of it. Five comments asserted that property of all three. (Review #92 of PR #679.)
+#[test]
+fn the_ratcheted_corpus_kinds_count_files_not_presence() {
+    use crate::validate::decisions::corpus_scan_issues;
+
+    let two = |a: &str, b: &str| vec![a.to_string(), b.to_string()];
+
+    let issues = corpus_scan_issues(true, &[], &[], &two(".claude/hooks/preflight", ".claude/notes.txt"));
+    assert_eq!(
+        warning_profile(&issues).get("decision-citation-file-out-of-corpus").copied(),
+        Some(2),
+        "two files outside the extension allowlist scored as one in the ratchet profile. At granularity 1 the baseline cannot tell one from twelve, so once the first is accepted with `make warning-baseline` every later one lands `1 -> 1` -- clean and silent, which is the property this kind's ratchet membership is justified by. Issues: {:?}",
+        issues.iter().map(|i| i.location.clone()).collect::<Vec<_>>()
+    );
+
+    let issues_utf8 = corpus_scan_issues(true, &[], &two(".claude/a.md", ".claude/b.md"), &[]);
+    assert_eq!(
+        warning_profile(&issues_utf8).get("decision-citation-file-not-utf8").copied(),
+        Some(2),
+        "two non-UTF-8 corpus files scored as one. Same defect, same consequence: a second committed latin-1 file citing a dead row lands silently once the first is baselined"
+    );
+
+    // AND EACH ISSUE NAMES ITS OWN FILE, which is what makes the count meaningful rather than
+    // merely numerous -- one aggregated message repeated N times would satisfy the counts above.
+    let mut locations: Vec<String> = issues.iter().map(|i| i.location.clone()).collect();
+    locations.sort();
+    assert_eq!(
+        locations,
+        vec![".claude/hooks/preflight".to_string(), ".claude/notes.txt".to_string()],
+        "the per-file issues do not carry the per-file LOCATION, so `make validate` prints the same line twice and the reader cannot tell which file is new"
+    );
+
+    // THE EXEMPT KIND IS DELIBERATELY STILL AGGREGATED, and that is not an inconsistency: it never
+    // reaches the baseline, so its granularity cannot hide anything. Asserted so the next reader
+    // does not "fix" it into the ratchet's shape and conclude the ratchet covers it.
+    let host = corpus_scan_issues(true, &two(".claude/x.md", ".claude/y.md"), &[], &[]);
+    assert_eq!(
+        host.len(),
+        1,
+        "the host-caused kind was split per file. It is `RATCHET_EXEMPT`, so the count never reaches the baseline and one message naming every unreadable file is the more useful report"
+    );
+    assert!(
+        warning_profile(&host).is_empty(),
+        "the host-caused kind entered the ratchet profile -- it is exempt precisely because its count has no stable value across hosts"
+    );
+}
+
+/// EVERY TEST NAME A DOC COMMENT IN THIS FILE CITES MUST STILL EXIST IN IT.
+///
+/// A DELETED TEST FAILS NOTHING, which is why this class is invisible to the suite it damages. It
+/// happened here, to the author, in the round that fixed the previous round's finding: a range
+/// splice bounded by two SEARCHED anchors (`s[..start] + new + s[end..]`) was written when the
+/// region between them held one test, and by the time it ran three more had been inserted there.
+/// All four were replaced by one. `cargo test` went green, the count moved by a number nobody was
+/// tracking, and the round reported "N tests green" as if that verified something -- while two of
+/// the assertions the same commit's message described no longer existed.
+///
+/// The surviving evidence was a doc comment on a NEIGHBOURING test naming one of the deleted ones,
+/// which is what eventually surfaced it. That is the property gated here: this file cites its own
+/// tests by name constantly (a docstring saying "the discriminating case is pinned in X" is how the
+/// reasoning is carried between them), so a dangling citation means either the test is gone or it
+/// was renamed and the reference rotted. Both are worth a red.
+///
+/// It is NOT a test-count ratchet: retiring a test deliberately is legitimate and this branch has
+/// done it (a text assertion the compiler subsumed). Deleting a test AND the sentences that point
+/// at it is still silent -- but it is then a visible, reviewable diff rather than an accident of
+/// slicing. (Review #92 of PR #679, on the author's own defect.)
+#[test]
+fn every_test_name_cited_in_a_doc_comment_still_exists() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let src = fs::read_to_string(root.join("tools/codegen-rs/src/tests.rs")).expect("tests.rs");
+
+    // DECLARED = every identifier the CRATE's real code carries, not just `fn` lines in this
+    // file. The first version scanned `fn ` in tests.rs alone and red on two honest citations: a
+    // `let` binding inside a test, and `out_of_corpus_warning_kind`, which is a function one module
+    // over -- exactly the kind of cross-reference these doc comments SHOULD make. What a deleted
+    // test's name has that those do not is that it appears nowhere in any code line at all.
+    let mut declared: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut stack = vec![root.join("tools/codegen-rs/src")];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).expect("read src").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    assert!(
+        files.len() > 5,
+        "only {} .rs files found under tools/codegen-rs/src -- the walk broke rather than the tree, so this would pass vacuously. Re-point it",
+        files.len()
+    );
+    for path in &files {
+        let text = fs::read_to_string(path).expect("read a crate source file");
+        for line in text.lines() {
+            // Code lines only: a name that survives ONLY inside prose is precisely the dangling case.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let mut token = String::new();
+            for c in line.chars() {
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                    token.push(c);
+                } else {
+                    if token.len() > 12 {
+                        declared.insert(std::mem::take(&mut token));
+                    } else {
+                        token.clear();
+                    }
+                }
+            }
+            if token.len() > 12 {
+                declared.insert(token);
+            }
+        }
+    }
+
+    // Cited names are the `snake_case_identifiers` inside backticks in `///` lines. Restricted to
+    // backticks so ordinary prose cannot produce a hit, and to names that LOOK like tests in this
+    // file (three or more underscore-separated lowercase words) so rule kinds, field names and
+    // shell variables are not swept in.
+    let mut dangling: Vec<(usize, &str)> = Vec::new();
+    for (i, line) in src.lines().enumerate() {
+        let Some(doc) = line.trim_start().strip_prefix("///") else { continue };
+        for cited in doc.split('`').skip(1).step_by(2) {
+            let looks_like_a_test_name = cited.len() > 12
+                && cited.matches('_').count() >= 3
+                && cited.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && !cited.starts_with('_')
+                && !cited.ends_with('_');
+            if looks_like_a_test_name && !declared.contains(cited) {
+                dangling.push((i + 1, cited));
+            }
+        }
+    }
+    assert!(
+        dangling.is_empty(),
+        "a doc comment in tests.rs cites a test that no longer exists: {:?}. Either the test was DELETED -- which fails nothing, so the suite cannot tell you -- or it was renamed and the sentence carrying its reasoning now points at nothing. If the removal was deliberate, remove the sentences that point at it in the same change",
+        dangling
+    );
+}
+
 #[test]
 fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
     // AND THE TREE-CAUSED SIBLINGS ARE NOT ON IT. Both report the same OUTCOME as the exempt kind
