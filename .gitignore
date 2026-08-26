@@ -27,7 +27,7 @@ wt*/
 # `git add` (review #8 of PR #679). Kept for the reason PR #679 landed it, and the reason is now
 # WIDER than it was: that PR's comment said "Nothing in-tree runs a .py FILE today: every call site
 # passes the program on the COMMAND LINE (`python3 -c`) or on STDIN", which was true of `main` and
-# is FALSE of this tree. `.github/scripts/assert_review_marker.py`, its 73-case battery and the
+# is FALSE of this tree. `.github/scripts/assert_review_marker.py`, its checked-in battery and the
 # differential harness are .py FILES, invoked as files, and the battery runs in CI — so the
 # interpreter can write bytecode for the imported module rather than only into a `mktemp -d`
 # fixture some EXIT trap removes. Merging the branch that adds them is exactly when that sentence

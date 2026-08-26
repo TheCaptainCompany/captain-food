@@ -49,7 +49,13 @@ jobs:
         id: claude-review
         # The code-review action bails out on DRAFT pull requests by design, and this repo opens a
         # draft PR at claim time (docs/BACKLOG.md) and pushes to it for the whole life of the work.
-        # Every one of those pushes was paying for a review that could not produce anything.
+        # Every one of those pushes WAS paying for a review that could not produce anything -- past
+        # tense on purpose: `synchronize` is gone from the trigger above, so a push to a draft no
+        # longer starts this workflow at all. What this `if:` saves now is one action invocation per
+        # `opened`/`reopened`-while-draft, which is a fraction of what it saved when it was written.
+        # It stays because the reason it moved OFF the job is unchanged and is the load-bearing
+        # half: a skipped JOB reports `skipped`, and branch protection accepts that for a required
+        # check.
         if: github.event.pull_request.draft == false
         uses: anthropics/claude-code-action@v1
         with:
