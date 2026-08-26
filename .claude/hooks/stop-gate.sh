@@ -93,8 +93,9 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # REGISTER_CHECK_ALLOW_DIRTY: the selftest compares ALL FOUR gate scripts (both hooks and both
 # decision-lookup scripts) against their committed
 # blobs and refuses to report otherwise (the overwrite class the eighth review of PR #679 planted
-# green). Editing a hook and re-running is the normal interactive loop, so the two INTERACTIVE
-# callers -- this one and `make hooks-test` -- opt out, visibly and in the repo. CI invokes the
+# green). Editing a hook and re-running is the normal interactive loop, so `make hooks-test` opts
+# out unconditionally and THIS caller opts out only when a gate script is actually dirty -- see the
+# block below, which is where that condition is computed and argued. CI invokes the
 # script directly and verifies. Those two are the whole list. The CI path cannot be talked out of
 # verifying because `env_ok`, inside `assert_pinned_in_changes_job`, forbids both opt-out names as
 # `env:` keys at every scope -- planted red by `both_scopes_reject_execution_altering_env`. This
@@ -103,7 +104,40 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # found no `env:` handling there and concluded the ban was refactored away -- round 9's own finding
 # ("a comment named a test as the thing preventing the regression; that test did not exist") one
 # file over, in a sentence written after it. (Review #17.)
-step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+#
+# THE OPT-OUT IS NOW CONDITIONAL, because unconditional it gave up the exact property V3 exists
+# for. V3's rationale is that a guard cannot detect its own wholesale replacement and only the
+# OTHER guard can -- yet this is the only caller that runs every turn, and it disarmed the
+# comparison on every one of them. So an in-session `cp exit0.sh
+# .claude/hooks/register-check-selftest.sh` was silent until push: the cross-guard existed and was
+# never consulted on the path where it would fire first. (Review #72 of PR #679.)
+#
+# THE PREDICATE IS THE WORKING TREE, NOT THE BRANCH DIFF, and the difference decides whether this
+# is a no-op. `$changed` above folds in `diff "$base"...HEAD`, so on THIS branch -- which edits all
+# four gate scripts -- a branch-scoped predicate would opt out on every turn forever and the guard
+# would arm only where it was never needed. What actually needs the opt-out is an UNCOMMITTED edit:
+# a committed script matches its blob at HEAD and verifies fine. `git status --porcelain` alone is
+# therefore the right question, and it makes the guard live on the branch that wrote it.
+#
+# FAIL SAFE TOWARD THE GUARD. No git, or a status that cannot be read, arms it: the failure is a
+# loud exit whose message names the opt-out, which is recoverable in one command, while the other
+# direction is silence. Editing a gate script and re-running is still the normal loop -- that turn
+# opts out, this one does not.
+_gate_scripts_dirty=1
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  if git -C "$ROOT" status --porcelain --untracked-files=all -- \
+       .claude/hooks/register-check.sh \
+       .claude/hooks/register-check-selftest.sh \
+       .claude/skills/decision-lookup/scripts/decision-lookup.sh \
+       .claude/skills/decision-lookup/scripts/stub-tests.sh 2>/dev/null | grep -q .
+  then _gate_scripts_dirty=1; else _gate_scripts_dirty=0; fi
+fi
+if [ "$_gate_scripts_dirty" = "1" ]; then
+  echo "-> register-check selftest (gate scripts dirty or unreadable -- comparison opted out for this turn)"
+  step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+else
+  step bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+fi
 
 # WHEN THE HOOK ITSELF CHANGES: the full guard suite (~2s, hermetic git fixture). Diff-scoped for
 # the same reason as the workspace suite above -- it proves the budget hook, so it runs when the

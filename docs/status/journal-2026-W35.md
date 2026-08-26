@@ -2157,3 +2157,37 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Shape: a rule's LEVEL is a decision, not an implementation detail — and it is the one property
 > that never gets reviewed, because every round argues about the arms.** Both rows note that option
 > (b) is chosen by default the moment #679 merges, which is the whole reason they are filed now.
+>
+> **Round 72 — the cross-guard was decorative on the one path it would fire first, and the guard
+> written to fix that was vacuous for one round.**
+>
+> **V3's whole rationale is that a script cannot detect its own wholesale replacement, so only the
+> OTHER guard can.** `stop-gate.sh` is the only caller that runs every turn — and it passed
+> `REGISTER_CHECK_ALLOW_DIRTY=1` on **all** of them. So an in-session
+> `cp exit0.sh .claude/hooks/register-check-selftest.sh` was **silent until push**: the cross-guard
+> existed and was consulted on no path where it would fire first. The header stated the boundary
+> honestly (*"pre-merge, not in-session"*), which is why this was a gap and not a false claim.
+>
+> **The opt-out is now conditional on a gate script being DIRTY IN THE WORKING TREE — and that
+> predicate choice is what decides whether the change is a no-op.** `$changed`, the scope variable
+> already in `stop-gate.sh`, folds in `diff "$base"...HEAD`. On **this** branch — which edits all
+> four gate scripts — a branch-scoped predicate would opt out on every turn forever, arming the guard
+> only where it was never needed. What actually needs the opt-out is an **uncommitted** edit: a
+> committed script matches its blob and verifies fine. So `git status --porcelain` alone is the right
+> question, and it makes the guard live on the branch that wrote it. Verified both ways: armed and
+> passing on the clean tree, and a planted byte in `register-check.sh` reds with the tamper message
+> while the predicate correctly flips to opted-out.
+>
+> **Then the pin for it was vacuous, and the plant caught it.** The first filter took every
+> non-comment line naming the script — which includes the **pathspec list in the dirtiness predicate
+> itself**, where the script appears as a `git status -- <paths>` argument with no env var on it.
+> That line alone satisfied *"an armed invocation exists"*, so putting the opt-out back on the real
+> call left the test **green**. §19 shape #7 — *the helper building the test inputs needs the
+> scrutiny of the assertion it feeds* — reproduced inside the guard written this round, and caught
+> only because round 68's rule was followed: **assert the plant applied**. Filter is `step ` now;
+> both directions planted red.
+>
+> One stale claim corrected as a consequence: `the_gate_self_verification_reds_on_a_tampered_script`'s
+> docstring said the block *"is unreachable on every path anyone runs: locally it is opted out by
+> stop-gate.sh"*. Now past tense, with which way it moved — the block runs in-session on an ordinary
+> turn, which changes how often it is **exercised**, not whether it is **pinned**.

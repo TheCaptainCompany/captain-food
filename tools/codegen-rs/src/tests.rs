@@ -13063,10 +13063,62 @@ mod docs_only_ci_and_legacy_visibility {
         }
     }
 
+    /// `stop-gate.sh` MAY NOT DISARM THE COMPARISON UNCONDITIONALLY.
+    ///
+    /// V3's rationale is that a guard cannot detect its own wholesale replacement and only the OTHER
+    /// guard can. `stop-gate.sh` is the only caller that runs every turn, and it passed
+    /// `REGISTER_CHECK_ALLOW_DIRTY=1` on all of them -- so an in-session overwrite of a gate script
+    /// was silent until push, and the cross-guard was consulted on no path where it would fire
+    /// first. The opt-out is now conditional on a gate script being dirty in the working tree.
+    ///
+    /// Pinned because the regression is one character: putting `env REGISTER_CHECK_ALLOW_DIRTY=1`
+    /// back on the unconditional line restores the old behaviour with every other assertion green,
+    /// and it is the edit a maintainer reaches for the first time the armed path reds on them.
+    /// (Review #72 of PR #679.)
+    #[test]
+    fn stop_gate_arms_the_comparison_when_the_gate_scripts_are_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = fs::read_to_string(root.join(".claude/hooks/stop-gate.sh")).expect("stop-gate.sh");
+        // INVOCATIONS ONLY. The first version of this filter took every non-comment line naming the
+        // script -- which includes the PATHSPEC LIST in the dirtiness predicate a few lines above,
+        // where the script appears as a `git status --porcelain -- <paths>` argument with no
+        // `REGISTER_CHECK_ALLOW_DIRTY` on it. That line alone satisfied "an armed invocation
+        // exists", so the plant (putting the opt-out back on the real call) applied and the test
+        // stayed GREEN. §19 shape #7 -- the helper building the inputs needs the scrutiny of the
+        // assertion it feeds -- reproduced in the guard written for review #72, in the same round.
+        // `step ` is what actually runs something here.
+        let calls: Vec<&str> = src
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with('#') && l.starts_with("step ") && l.contains("register-check-selftest.sh"))
+            .collect();
+        assert!(
+            !calls.is_empty(),
+            "stop-gate.sh no longer invokes register-check-selftest.sh at all -- the ask-gate discipline lost its every-turn caller. Re-point this test only if that moved somewhere that still runs every turn"
+        );
+        assert!(
+            calls.iter().any(|l| !l.contains("REGISTER_CHECK_ALLOW_DIRTY")),
+            "every stop-gate.sh invocation of register-check-selftest.sh passes REGISTER_CHECK_ALLOW_DIRTY. That disarms the four-way gate-script comparison on the ONLY path that runs every turn, so an in-session overwrite of a gate script is silent until push -- and the cross-guard, whose whole rationale is that a script cannot detect its own replacement, is then consulted nowhere it would fire first. Keep an ARMED invocation for the clean-tree case; the opt-out belongs on the dirty-tree branch. Got: {:?}",
+            calls
+        );
+        assert!(
+            calls.iter().any(|l| l.contains("REGISTER_CHECK_ALLOW_DIRTY")),
+            "stop-gate.sh has no opted-out invocation left. Editing a gate script and re-running is the normal interactive loop, and an armed-only caller makes that turn a hard failure with deletion of the block as the tempting escape -- which the block's own header asks readers not to do. Got: {:?}",
+            calls
+        );
+    }
+
     /// The self-verification, PLANTED RED. A block never seen to fire is an unverified claim, and
-    /// this one is unreachable on every path anyone runs: locally it is opted out by stop-gate.sh
-    /// and by developers editing scripts, and in CI it only fires against a tampered tree — which
-    /// nothing else in the repo ever constructs. So construct it.
+    /// this one was unreachable on every path anyone ran: `stop-gate.sh` opted out on EVERY turn,
+    /// `make hooks-test` opts out by necessity, and in CI it only fires against a tampered tree —
+    /// which nothing else in the repo ever constructs. So construct it.
+    ///
+    /// `stop-gate.sh`'s opt-out is now CONDITIONAL on a gate script being dirty in the working tree
+    /// (review #72), so the block does run in-session on an ordinary turn — but that changes how
+    /// often it is *exercised*, not whether it is *pinned*: a clean tree takes the OK path, and only
+    /// this test constructs the tamper. The sentence above is kept in the past tense rather than
+    /// deleted, because "locally it is opted out" is the claim that stopped being true and the next
+    /// reader should see which way it moved.
     #[test]
     fn the_gate_self_verification_reds_on_a_tampered_script() {
         // Needs a real git; skip rather than red where the toolchain is absent (a HOST condition,
