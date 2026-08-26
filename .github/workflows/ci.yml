@@ -83,8 +83,27 @@ jobs:
     # aggregator consumes therefore carries a cap, and `assert_pinned_in_changes_job` requires one
     # on each -- derived from `codegen`'s own `needs:`, like the `continue-on-error` sweep beside
     # it, so a job added to the aggregator is covered when it is added. The heavy jobs get 60
-    # minutes: far above a cold-cache workspace build (a cap that reds honest work is the
-    # instrument this file has retracted six times) and 6x better than the default. (Review #44.)
+    # minutes -- and THAT FIGURE WAS A BARE DERIVED NUMBER with no antecedent, in the branch about
+    # bare derived numbers (review #57). What is measured: `build-test` ~4m17s and `db-test` ~3m54s
+    # WARM, read off real runs on this branch. What is NOT measured, and could not be here, is the
+    # COLD-cache duration -- `cargo build --workspace` over ~200 deps, then a SECOND full target
+    # (`rustup target add wasm32-unknown-unknown` + `make wasm`), then `cargo test --workspace`
+    # recompiling with cfg(test) and linking a binary per crate, on a 4-core hosted runner.
+    #
+    # THE FAILURE DIRECTIONS ARE NOT SYMMETRIC, which is what decides the value. Too HIGH costs a
+    # hang some extra minutes. Too LOW cancels the job, `codegen` fails on `cancelled` BY DESIGN,
+    # the required check reds and nothing in the repository merges -- and `Swatinem/rust-cache`
+    # does not save on a cancelled job, so every re-run is cold again and hits the same wall. Cold
+    # cache is routine, not exotic: the key is `Cargo.lock` + toolchain, so an ordinary dependency
+    # bump or a `dtolnay/rust-toolchain@stable` roll invalidates it. The escape is a two-file
+    # cross-language edit authored while the repo cannot merge.
+    #
+    # So the heavy jobs are bounded at 120 -- deliberately well above any cold build this workspace
+    # plausibly produces, and still 3x better than GitHub's 360-minute default. It bounds a HANG.
+    # It is NOT a duration budget, and it is not claimed to be sized against a measurement that was
+    # never taken. If a cold run ever approaches it, that is a CAPACITY signal: read the duration
+    # off that run, state it here, and raise both this value and the bound in `tests.rs` in the
+    # same commit. (Review #44 set 60; review #57 named it unantecedented and it was raised.)
     # It does NOT settle `GATE-STEP-LOCUS` (in-job vs sibling job); that row stays open, and this is
     # the interim mitigation it names. Pinned by `assert_pinned_in_changes_job`, which requires the
     # key and caps it -- removing it or setting it to hours reds, by name.
@@ -263,7 +282,7 @@ jobs:
     # own warm cache and neither races the other's save.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 60   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
+    timeout-minutes: 120  # see the `changes` job comment: bounds a HANG, set ABOVE an unmeasured cold build on purpose
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -335,7 +354,7 @@ jobs:
     # drift (and the undeliverable staged-fact bug it hid) went unnoticed.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 60   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
+    timeout-minutes: 120  # see the `changes` job comment: bounds a HANG, set ABOVE an unmeasured cold build on purpose
     runs-on: ubuntu-latest
     services:
       postgres:

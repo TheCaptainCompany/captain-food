@@ -1632,3 +1632,30 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > Trailing-`*` special case → glob engine + two names → literal-only. Each of the first two was an
 > attempt to *match* the dangerous set; the third defines the benign one, which is small, closed and
 > spellable.
+>
+> **Round 57 — the cap I added to bound a hang was itself a bare derived number.** `build-test` and
+> `db-test` shipped at `timeout-minutes: 60` with the justification *"generous enough for a
+> cold-cache workspace build that it cannot red honest work"* — **and no cold-cache duration had ever
+> been measured.** Warm is ~4m, read off real runs. Cold is `cargo build --workspace` over ~200 deps,
+> then a **second full target** (`rustup target add wasm32-unknown-unknown` + `make wasm`), then
+> `cargo test --workspace` recompiling with `cfg(test)` and linking a binary per crate, on a 4-core
+> hosted runner. That figure was never taken. **ADR-20260817-105845's exact shape, in the branch
+> about it**, on the one cap where being wrong *low* causes what the cap exists to prevent.
+>
+> **The failure directions are not symmetric, and that is what decides the value.** Too high costs a
+> hang some extra minutes. Too low cancels the job → `codegen` fails on `cancelled` **by design** →
+> the required check reds → nothing in the repository merges — and `Swatinem/rust-cache` **does not
+> save on a cancelled job**, so every re-run is cold again and hits the same wall. Cold cache is
+> routine, not exotic: the key is `Cargo.lock` + toolchain, so an ordinary dependency bump
+> invalidates it. And the escape is a two-file cross-language edit authored while the repo cannot
+> merge. **A second, independent path to the end-state `GATE-STEP-LOCUS` prices** — reached by a
+> dependency bump instead of a runner-image bump.
+>
+> Raised to 120: deliberately above any cold build this workspace plausibly produces, still 3× better
+> than the 360 default, and stated as a **hang bound, not a duration budget**, with the missing
+> measurement admitted rather than implied. If a cold run ever approaches it, that is a capacity
+> signal — read the duration off that run and raise both values with it as the antecedent.
+>
+> **And `in_job`'s anchor assertion caught the drift**: changing the ci.yml values redded the two
+> timeout plants with *"this plant would have mutated another job, or nothing"* rather than silently
+> mutating nothing. That is the guard review #16 asked for, doing its job on the author.

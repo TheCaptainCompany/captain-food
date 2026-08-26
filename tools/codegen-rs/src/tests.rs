@@ -11443,8 +11443,13 @@ mod docs_only_ci_and_legacy_visibility {
                 // `postgres` service never becoming healthy, sat at GitHub's 360-minute default.
                 // Derived from `codegen`'s own `needs:` for the same reason as the guard above.
                 // The BOUND matters as much as the key -- 600 is the default with extra steps --
-                // and 60 is generous enough for a cold-cache workspace build that it cannot red
-                // honest work. (Review #44 of PR #679.)
+                // and the heavy jobs are bounded above any cold build this workspace plausibly
+                // produces. The FIRST version of this said "60 is generous enough for a cold-cache
+                // workspace build that it cannot red honest work" -- a bare derived number with no
+                // antecedent, in the branch about bare derived numbers, on the one cap where being
+                // wrong LOW causes exactly what the cap prevents. Warm durations are measured
+                // (~4m); the cold ones were never taken. The reasoning and the asymmetry live in
+                // ci.yml beside the values. (Review #44 set it; review #57 named it.)
                 let cap = j
                     .get("timeout-minutes")
                     .and_then(|t| t.as_u64())
@@ -11453,8 +11458,8 @@ mod docs_only_ci_and_legacy_visibility {
                         job
                     ));
                 assert!(
-                    (1..=60).contains(&cap),
-                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=60. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. `build-test` and `db-test` sit AT this ceiling, so if a cold-cache run legitimately needs more: raise BOTH this bound and that job's value in the SAME commit, with the observed duration that justifies it -- do not edit the job down to fit, and do not widen this silently",
+                    (1..=120).contains(&cap),
+                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=120. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. The heavy jobs are set well below it on purpose: a cap that is too HIGH costs a hang some extra minutes, while one that is too LOW cancels the job, reds the required check on an ordinary dependency bump, and does not converge on re-run because a cancelled job saves no cache. If a cold-cache run ever approaches its value: read the duration off that run, state it in ci.yml as the antecedent, and raise BOTH this bound and that job's value in the SAME commit -- do not edit the job down to fit",
                     job, cap
                 );
                 if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
@@ -12344,8 +12349,8 @@ mod docs_only_ci_and_legacy_visibility {
             // wait": a hang in any of them keeps the required check queued at the 360-minute
             // default. The two heavy jobs are the realistic ones (a registry stall, a service
             // container that never becomes healthy).
-            ("build-test loses its timeout", in_job("build-test", "    timeout-minutes: 60   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
-            ("db-test timeout is the default with extra steps", in_job("db-test", "    timeout-minutes: 60", "    timeout-minutes: 360")),
+            ("build-test loses its timeout", in_job("build-test", "    timeout-minutes: 120  # see the `changes` job comment: bounds a HANG, set ABOVE an unmeasured cold build on purpose\n", "")),
+            ("db-test timeout is the default with extra steps", in_job("db-test", "    timeout-minutes: 120", "    timeout-minutes: 360")),
             ("codegen loses its timeout", in_job("codegen", "    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
             ("the changes job's timeout is the default with extra steps", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 360")),
             ("the changes job loses its checkout", in_job("changes",
