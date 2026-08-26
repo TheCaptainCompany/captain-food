@@ -10634,8 +10634,7 @@ mod docs_only_ci_and_legacy_visibility {
                     events, required, what
                 );
             }
-            return;
-        }
+        } else {
         assert!(
             !matches!(trigger_val, serde_yaml::Value::String(_)),
             "`on:` is a single scalar event -- whichever it is, one of `push`/`pull_request` is missing, and {} then never runs on that half. A fork PR produces no push, so `pull_request` is not redundant",
@@ -10762,6 +10761,23 @@ mod docs_only_ci_and_legacy_visibility {
             }
         }
 
+        }
+        // THE SEQUENCE ARM USED TO `return`, WHICH EXITED THE WHOLE HELPER. Its comment said "it
+        // carries no filters, so there is nothing else to check" -- true of the TRIGGER, and this
+        // function is not only the trigger. Everything below was skipped: both `shell_ok`/`env_ok`
+        // scopes, the entire `build-test` block, `runs-on`, `container`/`services`, the job-level
+        // escape ban, the per-step scan, and the `{name, run}` key-set lock plus `run` equality --
+        // i.e. the one property the helper was rewritten around. So `on: [push, pull_request]` on
+        // line 37 made BOTH gate pins pass vacuously: the steps could carry `|| true`, a step-level
+        // `if:`, or be deleted outright, unseen.
+        //
+        // What caught it today was an ACCIDENT IN A DIFFERENT TEST -- the trigger plants anchor on
+        // `"  push:\n"`, which disappears, so `assert_ne!` fired with a message pointing at the
+        // PLANTS. The obvious repair is to re-anchor or drop those plants, after which both pins
+        // are silently vacuous forever. Shape #1 from this branch's own list ("a corpus-size floor
+        // counts plants, not coverage") reproduced in the helper the list was written for, one
+        // round after writing it. Now the sequence arm skips only the trigger section, and a plant
+        // covers the class. (Review #22 of PR #679.)
         shell_ok(&doc, "ci.yml workflow-level");
         env_ok(&doc, "ci.yml workflow-level");
 
@@ -11169,6 +11185,16 @@ mod docs_only_ci_and_legacy_visibility {
         // makes the class unspellable instead of asking every future author to check uniqueness,
         // and the `contains` assertion turns a drifted anchor into a red rather than a silent
         // no-op somewhere else.
+        // SWAP THE WHOLE `on:` BLOCK. Replacing just the `on:` LINE leaves the old mapping body
+        // dangling under a sequence, which is invalid YAML -- the mutant then reds on the parse
+        // rather than on the property, and the green control for a legitimate list trigger reds
+        // with it. A plant that fails for the wrong reason is worse than none: it reports the
+        // guard working while proving nothing (review #22).
+        let with_trigger = |replacement: &str| -> String {
+            let start = ci.find("\non:\n").expect("ci.yml declares `on:` at column 0") + 1;
+            let end = ci.find("\njobs:\n").expect("ci.yml declares `jobs:`") + 1;
+            format!("{}{}{}", &ci[..start], replacement, &ci[end..])
+        };
         let in_job = |job: &str, from: &str, to: &str| -> String {
             let header = format!("\n  {}:\n", job);
             let start = ci
@@ -11238,6 +11264,17 @@ mod docs_only_ci_and_legacy_visibility {
             // from the push lane with every assertion green (review of PR #679).
             ("push branches-ignore excludes main", ci.replacen("    branches: ['**', '!badges']", "    branches-ignore: ['main']", 1)),
             ("push tags-only trigger", ci.replacen("    branches: ['**', '!badges']", "    tags: ['v*']", 1)),
+            // THE SEQUENCE `on:` FORM, COMBINED WITH A DISARMED GATE STEP. The sequence arm is a
+            // legitimate widening and must not red on its own -- the control below says so -- but
+            // it must not become a bypass either. Before review #22 this pair was GREEN: the arm
+            // returned from the whole helper, so `|| true` on the gate step was never looked at.
+            ("a sequence trigger must not skip the step checks", with_trigger("on: [push, pull_request]\n")
+                .replacen(
+                    "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                    "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh || true",
+                    1)),
+            // A scalar `on:` drops one of the two events outright.
+            ("on: as a single scalar event", with_trigger("on: push\n")),
             // THE JOB THE PINS RUN IN. Ungoverned until review #12: these two make every assertion
             // in this file vacuous while `changes` stays green.
             ("build-test job LD_PRELOAD", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      LD_PRELOAD: /tmp/x.so\n", 1)),
@@ -11366,6 +11403,9 @@ mod docs_only_ci_and_legacy_visibility {
             // `build-test` carries `uses:` steps and a step-level `DB_TESTS_REQUIRED` today; the
             // guards extended to it must not red any of that.
             ("build-test job CARGO_TERM_COLOR", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      CARGO_TERM_COLOR: always\n", 1)),
+            // A list `on:` carries no filters at all -- strictly wider than the mapping form, and
+            // the fifth spelling of the false-red instrument this file has retracted (review #20).
+            ("on: as a list of events", with_trigger("on: [push, pull_request]\n")),
             ("push tags ALONGSIDE branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges']\n    tags: ['v*']", 1)),
             ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
@@ -11387,7 +11427,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 47 && must_stay_green.len() >= 12,
+            must_red.len() >= 49 && must_stay_green.len() >= 13,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

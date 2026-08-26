@@ -865,6 +865,21 @@ else
 fi
 
 echo "----"
+# THE HERMETICITY VERDICT IS COMPUTED BEFORE THE HEADLINE TOO, for exactly the reason the next
+# paragraph gives about completeness -- and it was left below for one round after that lesson was
+# learned, which is the half-applied sweep this branch keeps landing. The `.qmd/` fingerprint
+# comparison used to increment `fail` AFTER `RESULT:` had already printed, so a run that dirtied
+# the real repo cache emitted `RESULT: 54 passed, 0 failed -- 54/54 cases accounted for` and only
+# then `repo .qmd/ CHANGED during the suite -- VIOLATION`. The exit status was right; the line every
+# record quotes as the measurement was green over a violation of the invariant this file's own
+# header names FIRST ("never creates or modifies the real repo .qmd/ cache"). (Review #22.)
+AFTER="$(fingerprint)"
+if [ "$BEFORE" = "$AFTER" ]; then
+  hermetic="repo .qmd/ untouched"
+else
+  hermetic="repo .qmd/ CHANGED -- VIOLATION"
+  fail=$((fail + 1))
+fi
 # THE COMPLETENESS ARITHMETIC IS COMPUTED BEFORE THE HEADLINE, because the headline is the line
 # everything quotes. `RESULT:` used to print above the check, so an incomplete run emitted
 # `RESULT: 30 passed, 0 failed` and only then `INCOMPLETE: 30 of 54` -- and the PR body, the ADR and
@@ -875,9 +890,9 @@ echo "----"
 EXPECTED_CASES=54
 accounted=$((pass + fail + skip))
 if [ "$skip" -gt 0 ]; then
-  echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability) -- $accounted/$EXPECTED_CASES cases accounted for"
+  echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability) -- $accounted/$EXPECTED_CASES cases accounted for -- $hermetic"
 else
-  echo "RESULT: $pass passed, $fail failed -- $accounted/$EXPECTED_CASES cases accounted for"
+  echo "RESULT: $pass passed, $fail failed -- $accounted/$EXPECTED_CASES cases accounted for -- $hermetic"
 fi
 # A verdict that can say "pass" without having asked the question is the defect class this suite
 # exists to catch, so it must not have it itself. `skipped()` is deliberately NOT a failure (see
@@ -905,6 +920,4 @@ fi
 # diagnosis, with no "cases missing" line pointing the reader at the host. (If the count is ALSO
 # stale, both fire and INCOMPLETE does add one to `fail`; the exit status is then a count of
 # problems, not of failed cases, which is the honest reading of that state.)
-AFTER="$(fingerprint)"
-if [ "$BEFORE" = "$AFTER" ]; then echo "repo .qmd/ untouched by this suite — confirmed"; else echo "repo .qmd/ CHANGED during the suite — VIOLATION"; fail=$((fail+1)); fi
 exit "$fail"
