@@ -1781,3 +1781,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > trusting the record and editing `ci.yml` down to match reintroduces a repository-wide merge block
 > reachable from an ordinary dependency bump. Half-applied sweep — rounds 33, 36, 42, 48b — landing
 > on the record the change is decided by.
+>
+> **Round 62 — the third occurrence, so the numbers stopped being prose.** The finding itself was
+> closed in round 61; what it added was the **better fix**. The ADR's enumeration of the seven caps
+> drifted **twice in three rounds** — `build-test`/`db-test` 60 after round 57 raised them, `lint` 20
+> after round 58 raised it — each time carrying the justification round 57 had already retracted.
+> **Nothing derives them**: `assert_pinned_in_changes_job` asserts a *range*, not the per-job values,
+> so ADR prose cannot self-correct against `ci.yml`.
+>
+> **And the drift is dangerous in exactly one direction.** A maintainer reconciling the workflow
+> *against the record* edits a cap **down**; on a cold cache that job is cancelled, `codegen` reds on
+> `cancelled` by design, and `Swatinem/rust-cache` saves nothing on a cancellation — the
+> repository-wide merge block the caps exist to prevent, **reintroduced by following the record
+> rather than by ignoring it.**
+>
+> So the figures are **dropped rather than corrected a third time**, as the `~30×` multiplier was in
+> round 45. The ADR's job is *why* the caps exist; `ci.yml` is where *what they are* belongs, beside
+> the reasoning for each value. `GATE-STEP-LOCUS` loses its enumeration too — what prices that row is
+> the property (*every aggregated job is bounded*), not the numbers.
+>
+> **This branch's own rule, applied for the third time and now to a list rather than a count:** a
+> number retracted twice will be retracted a third time — derive it, or stop stating it. The two
+> earlier applications were `the_ride_along_count_matches_the_clauses_named` (derive) and the `~30×`
+> multiplier (drop). A list that no test can derive takes the second remedy.
