@@ -1150,3 +1150,44 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > pin the `.expect` it sits beside — it pins that *some* assertion still sees the rename. That is
 > stated in the comment rather than left for the label to imply, which is shape #2 landing on a
 > plant added to close shape #1, one round after the same thing happened in round 34's fixture.
+>
+> **Round 40 — the fix for a MISS became a false red, and its comment claimed the opposite.**
+> Round 35 replaced the parenthetical arm's adjacency test with bare containment (`depth > 0`) and
+> shipped a sentence saying it *"does not widen the class the adjacent form already accepted"*. **It
+> does.** `the pin was rewritten (the `KEY` experiment was contaminated) in round 4` became a hard
+> `make validate` error — while the **identical clause without the parentheses stays green**, because
+> `last == "the"` and `experiment` is not a citing noun. The docstring names that exact sentence as
+> a case that must stay green; punctuation the author did not think they were choosing decided it.
+> `decision-superseded-authority` is an ERROR, so it reds `specs` *and* `docs-validate` and the
+> required check with them: nothing merges until the sentence is reworded or the word `superseded`
+> is injected into it. **A red whose escape is silence, from the arm added to close a miss** — and
+> the backtick is no distinguisher, because every row key in `CLAUDE.md`, `SKILL.md` and the register
+> is backticked, so containment fires on the house style.
+>
+> **A parenthetical must CITE, not merely CONTAIN**: a citing word must appear inside it before the
+> key. Measured both ways — restore bare containment and the plain mention reds; keep adjacency only
+> and `SKILL.md:193` goes missing again. **And the first green control I wrote for it was itself
+> wrong**: `` (`KEY` and its successor differ here) `` reds on the *adjacency* arm, pre-existing
+> behaviour with nothing to do with containment. Shape #3, caught by the suite in the same minute —
+> which is the argument for adding controls rather than reasoning about them.
+>
+> **Round 40b — the mob roster was sized on the wrong axis, and every checkpoint attribution below
+> it inherits the defect.** The ADR sized its briefing from the reversibility class (*reversible*,
+> 2–3 lenses); the PR declares **`HOLD: human`** — CI gate machinery, and this change now guards the
+> required status check itself. CLAUDE.md's tiebreaker is explicit that **the `HOLD: human` axis wins
+> when the two disagree**, so the briefing should have been the full mob. Both checkpoint banks
+> attribute their misses to *"invited-lens depth, not roster width"* — **and each was made from
+> inside the narrow roster**, which cannot rule out what a lens never briefed would have seen. Since
+> only a roster-width attribution returns to the founder, an incorrectly sized roster ruling out
+> width from within itself is the loop ADR-20260816-134352 exists to close. Recorded as an open
+> correction rather than repaired by a late briefing: banking a roster after the diff exists is not
+> the same act as briefing one before any code, and pretending otherwise is the divergence this
+> branch retracts five times elsewhere. **The next change to this surface briefs the full mob.**
+>
+> **Round 40c — `timeout-minutes: 10` bounds a HANG and nothing else.** The likelier event is a RED,
+> with the identical blast radius: `changes` fails, five jobs skip, `codegen` reds, nothing merges.
+> And that case is **designed in** — T3/T3b/T3c and T15g's ASCII control are deliberately hard
+> `verdict bad` rather than skips, because a harness that cannot build its own setup must not be
+> laundered into a green. Right for the case; it is also what makes a runner-image bump a
+> repository-wide merge block at 19:00 on a Friday. Said out loud in both records so nobody prices
+> the timeout as covering both — only `GATE-STEP-LOCUS` option (a) closes the red case.

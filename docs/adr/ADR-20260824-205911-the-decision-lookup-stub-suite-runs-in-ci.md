@@ -143,10 +143,34 @@ cache.
 
 ## Consulted
 
+> ⚠️ **THE ROSTER WAS SIZED ON THE WRONG AXIS, AND THE RECORD SAYS SO RATHER THAN QUIETLY
+> RE-BANKING** (independent review, round 40). This block sized the briefing from the reversibility
+> class; the PR for the same change declares **`HOLD: human`** — CI gate machinery, which
+> ADR-20260815-115220 names in the held class, and this change now guards the required status check
+> itself. CLAUDE.md's tiebreaker is explicit: *"full mob for money movement, stored event shapes,
+> legal surfaces and anything Tours-facing (**the `HOLD: human` axis, which wins when the two
+> disagree**)"*. The two axes disagree here, the held axis wins, and the briefing should have been
+> the **full mob**. It was not.
+>
+> **What that costs is not bookkeeping.** Every checkpoint below attributes its misses to
+> *"invited-lens depth, not roster width"* — and each of those attributions was made **from inside
+> the narrow roster**, which cannot rule out what a lens that was never briefed would have seen.
+> ADR-20260816-134352 sends only a **roster-width** attribution back to the founder, so an
+> incorrectly-sized roster that then rules out width from within itself is precisely the loop that
+> record exists to close. **The attributions below are therefore not evidence that width was not the
+> problem**; they are evidence that the invited lenses did not catch it.
+>
+> This is recorded as an open correction rather than repaired by a late briefing, because banking a
+> roster after the diff exists is not the same act as briefing one before any code — and a record
+> that pretended otherwise would be the "two statements of one thing diverge" defect this branch
+> retracts in five other places. **The next change to this surface briefs the full mob.**
+
 Records created from a founder directive carry one line per lens (ADR-20260812-143619). Reversibility
-class: **reversible** — a CI step, a codegen pin and two register rows; no money movement, no stored
-event shape, no legal surface, nothing Tours-facing. Briefing roster sized to the class (2–3 lenses,
-ADR-20260816-134352), with the full-diff independent review still to come as the third look.
+class as recorded at the time: **reversible** — a CI step, a codegen pin and two register rows; no
+money movement, no stored event shape, no legal surface, nothing Tours-facing. Briefing roster sized
+to that class (2–3 lenses, ADR-20260816-134352) — **wrongly, see the correction above** — with the
+full-diff independent review still to come as the third look. That third look is what has run, forty
+times.
 
 - **beck** — briefed on the gate's own verification: what mutant must redden the new codegen pin, and
   whether the precedent test it mirrors is itself vacuous-green in any way that should not be copied.

@@ -58,7 +58,18 @@ jobs:
     # failure modes. Compose that with peak (CLAUDE.md: Friday/Saturday 19:00-21:30) and a runner
     # image bump has a path to "no checkout, dispatch or payments fix merges for six hours", at the
     # hours where a paid order nobody is told about is the failure that costs most.
-    # 10 minutes is ~30x the observed duration of this job, so it bounds a HANG and nothing else.
+    # 10 minutes is ~30x the observed duration of this job, so it bounds a HANG AND NOTHING ELSE --
+    # say that out loud, because the far likelier event is a RED, and a red has the SAME blast
+    # radius: `changes` fails, all five downstream jobs are skipped, `codegen` reds on
+    # `needs.*.result`, nothing merges. The timeout turns a six-hour worst case into ten minutes and
+    # does nothing at all for the case where the suite runs to completion and fails. That case is
+    # DESIGNED IN: T3/T3b/T3c ("controlled PATH not constructible", "stub bun + symlinks
+    # unavailable") and T15g's ASCII control are deliberately hard `verdict bad` rather than skips,
+    # on the stated reasoning that a harness which cannot build its own setup must not be laundered
+    # into a green. That is right for the CASE and it is what makes a runner-image bump a
+    # repository-wide merge block. Only `GATE-STEP-LOCUS` option (a) -- a sibling always-run job the
+    # aggregator treats equally -- closes it, and moving the step is `RETRIEVAL-QMD-CI`'s to
+    # authorize, not this change's.
     # It does NOT settle `GATE-STEP-LOCUS` (in-job vs sibling job); that row stays open, and this is
     # the interim mitigation it names. Pinned by `assert_pinned_in_changes_job`, which requires the
     # key and caps it -- removing it or setting it to hours reds, by name.

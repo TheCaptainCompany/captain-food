@@ -1054,19 +1054,59 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // fixing those passes over it -- coverage by accident, which is the property
                     // this file spends thirty rounds removing from its neighbours. (Review #35.)
                     //
-                    // So the test is CONTAINMENT, not adjacency: a backticked key anywhere inside
-                    // an open parenthetical within this clause. That does not widen the class the
-                    // adjacent form already accepted -- `` (`KEY` was the first attempt) `` was
-                    // already a citation under it -- and the BACKTICK still carries the whole
-                    // distinction, so a markdown link's target (`[text](docs/.../KEY.yaml)`, no
-                    // backtick before the key) and an unbackticked mention `(KEY was ...)` both
-                    // stay green. Green controls for both live beside the red.
-                    let depth = line[clause_start..at].chars().fold(0i32, |d, c| match c {
-                        '(' => d + 1,
-                        ')' => (d - 1).max(0),
-                        _ => d,
-                    });
-                    let opens_a_parenthetical = backticked && (quoted.ends_with('(') || depth > 0);
+                    // BUT BARE CONTAINMENT WAS TOO WIDE, AND THE COMMENT THAT SHIPPED WITH IT WAS
+                    // FALSE. It said containment "does not widen the class the adjacent form
+                    // already accepted"; it does, and it re-admitted the exact sentence the
+                    // `the`-plus-citing-noun narrowing exists to keep green. `the pin was rewritten
+                    // (the `KEY` experiment was contaminated) in round 4` has `depth == 1` and a
+                    // backtick, so it became a HARD error -- while the identical clause WITHOUT the
+                    // parentheses stays green, because `last == "the"` and `experiment` is not a
+                    // citing noun. The docstring names `the <KEY> experiment was contaminated` as a
+                    // case that MUST stay green; punctuation the author did not think they were
+                    // choosing decided it. `decision-superseded-authority` is an ERROR, so that
+                    // reds `specs` AND `docs-validate`, and the required `codegen` check with them:
+                    // nothing merges until the sentence is reworded or the word `superseded` is
+                    // injected into it -- "a red whose escape is silence", from the arm added to
+                    // close a MISS. And the backtick is not a distinguisher here: the records state
+                    // that every row key in `CLAUDE.md`, `SKILL.md` and the register IS backticked,
+                    // so bare containment fires on the house style. (Review #40.)
+                    //
+                    // So a parenthetical must CITE, not merely CONTAIN: some citing word has to
+                    // appear inside it before the key. `(decided 2026-08-24, `KEY`)` and
+                    // `(see `KEY` and the ADR)` do; `(the `KEY` experiment was contaminated)` does
+                    // not. Adjacency keeps its own arm, so `` (`KEY`, decided ... `` -- where there
+                    // is nothing between the paren and the key to carry a signal -- is unaffected.
+                    // Green controls for the plain mention live beside the reds; there was none on
+                    // either side, which is why the class was invisible for a round.
+                    const PARENTHETICAL_CITES: [&str; 8] = [
+                        "row", "rows", "per", "see", "decided", "decided_by", "reconsiders", "superseded_by",
+                    ];
+                    let mut open_paren = None;
+                    let mut depth = 0i32;
+                    for (i, c) in line[clause_start..at].char_indices() {
+                        match c {
+                            '(' => {
+                                depth += 1;
+                                open_paren = Some(clause_start + i);
+                            }
+                            ')' => {
+                                depth = (depth - 1).max(0);
+                                if depth == 0 {
+                                    open_paren = None;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    let in_a_citing_parenthetical = backticked
+                        && depth > 0
+                        && open_paren.is_some_and(|o| {
+                            line[o + 1..at]
+                                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                                .any(|w| PARENTHETICAL_CITES.contains(&w.to_lowercase().as_str()))
+                        });
+                    let opens_a_parenthetical =
+                        (backticked && quoted.ends_with('(')) || in_a_citing_parenthetical;
                     let mut before = quoted;
                     loop {
                         let next = before.trim_end().trim_end_matches([':', '(', '[', '*', '_', '-']);

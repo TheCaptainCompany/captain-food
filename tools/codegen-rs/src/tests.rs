@@ -10153,6 +10153,24 @@ mod decision_ask_and_citations {
                 "a backticked key inside a parenthetical that explains the supersession",
                 "the pin was rewritten (`OLD-ROW`, superseded by the head) in round 4",
             ),
+            // THE CLASS BARE CONTAINMENT RE-ADMITTED, with no control on either side for a round.
+            // `depth > 0` alone made this a HARD error, while the identical clause WITHOUT the
+            // parentheses stays green -- the docstring names `the <KEY> experiment was
+            // contaminated` as a case that must stay green, and punctuation decided it. A
+            // parenthetical must CITE, not merely CONTAIN. (Review #40.)
+            (
+                "a backticked key in a plain parenthetical mention",
+                "the pin was rewritten (the `OLD-ROW` experiment was contaminated) in round 4",
+            ),
+            // NOT ADJACENT TO THE `(`. The first draft of this control was
+            // `(\`OLD-ROW\` and its successor differ here)`, which reds on the ADJACENCY arm --
+            // pre-existing, accepted behaviour that has nothing to do with containment. A control
+            // that fails for the wrong reason is shape #3; the suite caught it immediately, which
+            // is the argument for adding controls rather than reasoning about them.
+            (
+                "a backticked key mid-parenthetical with no citing word",
+                "the shape changed (its successor and `OLD-ROW` differ here) in round 4",
+            ),
             // A markdown continuation is INDENTED, not re-marked -- which is exactly what lets the
             // block rule tell this apart from the two reds above.
             (
