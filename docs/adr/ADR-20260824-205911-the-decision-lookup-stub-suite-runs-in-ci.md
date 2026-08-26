@@ -248,8 +248,11 @@ change remains a code review's job. **The recurring defect is not the mutants; i
 that each round's completeness claim was written before it was checked** — round 7's was the
 fourth, and it was wrong in two independent ways at once. TWO register-machinery
 rules land here, not one: the supersession-coupling mirror arm, and
-`decision-superseded-authority`, which fails when any file under `.claude/**` or the root ignore
-files cites a row whose status is `superseded` as live authority — the executable form of
+`decision-superseded-authority`, which fails when any file **in the corpus named by
+`claude_citation_corpus`** — the one place that set is stated, and deliberately wider than the
+`.claude/** plus the ignore files` this paragraph first claimed: it is a `git ls-files` walk that
+also reads `CLAUDE.md`, the resident index, and the `Makefile` — cites a row whose status is
+`superseded` as live authority. It is the executable form of
 CLAUDE.md's grep-the-old-term rule, earned because this change flipped `RETRIEVAL-QMD` to
 `superseded` and left EIGHT sites citing it, one of them the wrapper's runtime failure message on
 the rollback path. Both are governed by `docs/decisions/README.md`, not by this row's QMD surface — it is

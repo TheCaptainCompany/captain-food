@@ -9904,6 +9904,12 @@ mod decision_ask_and_citations {
             ("plural rows", "See rows `OLD-ROW` for the rollback path."),
             ("a parenthetical, as SKILL.md writes it", "**The one CI change that IS authorized** (`OLD-ROW`, decided 2026-08-01 by"),
             ("the key opening a line", "`OLD-ROW`). Re-run it locally after any wrapper change."),
+            // THE FORM THE REGISTER MANDATES, and the one the rule shipped without: `SKILL.md`
+            // and `CLAUDE.md` both route resolution through "exact `docs/decisions/<KEY>.yaml`
+            // resolution", so the highest-authority pointer at a dead row was the one arm the
+            // predicate could not see, while `row X` and `the X decision` were caught (review #12).
+            ("the mandated path form", "read docs/decisions/OLD-ROW.yaml before asking"),
+            ("the path form, backticked", "resolve `docs/decisions/OLD-ROW.yaml` directly"),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -9933,6 +9939,11 @@ mod decision_ask_and_citations {
             // escape is silence, on exactly the prose the rule wants people to write.
             ("prose explaining the supersession", "row `OLD-ROW` is superseded; name the head instead"),
             ("a retraction quoting the bad form", "# it used to say `Per row OLD-ROW`, now superseded"),
+            // The path arm must not become the next false-red instrument: a path naming the row in
+            // a clause that says it is superseded is prose about the supersession, not a pointer.
+            ("the path form, explained", "docs/decisions/OLD-ROW.yaml is superseded -- read the head"),
+            // `decisions/` must be the DIRECTORY, not any word ending in those letters.
+            ("a lookalike directory", "see docs/old-decisions/OLD-ROW.yaml for history"),
         ] {
             let issues = check(".claude/x.md", body);
             assert!(
@@ -10504,6 +10515,39 @@ mod docs_only_ci_and_legacy_visibility {
         // sentence pointing at a test nobody had written. It exists now; deleting either `env_ok`
         // call reds it, by name.
         env_ok(changes_val, "the `changes` job's");
+        // THE JOB THE PIN ITSELF RUNS IN. Everything above bounds `changes`; `build-test` -- the
+        // job that actually executes THIS function and the three gate-script tests beside it --
+        // had no assertion over its own `env:` or `defaults.run` at all. A `build-test`-scope
+        // `env: {LD_PRELOAD: ...}` or `{BASH_ENV: ...}` (for the `bash` those tests spawn) makes
+        // every pin in this file vacuous while `changes` stays green and `codegen` aggregates
+        // green -- mutants twelve and thirteen, one job over, and the NEXT commit is then free to
+        // disarm the gate step itself. Review #12 of PR #679; the residual note below used to say
+        // build-test was "outside the blast radius", which is true of the `changes` job's runtime
+        // and was read as stronger than it is.
+        //
+        // `build-test` legitimately carries `uses:` steps (checkout, toolchain, rust-cache,
+        // upload-artifact) and a step-level `env: {DB_TESTS_REQUIRED: '0'}`, so only the
+        // execution-altering CONTENT guards are extended here -- not the `{name, run}` key-set
+        // pin, which is about a single gate step and would red every one of those.
+        if let Some(bt) = doc.get("jobs").and_then(|j| j.get("build-test")) {
+            shell_ok(bt, "the `build-test` job's");
+            env_ok(bt, "the `build-test` job's");
+            if let Some(steps) = bt.get("steps").and_then(|s| s.as_sequence()) {
+                for st in steps {
+                    env_ok(st, "a `build-test` step's");
+                    // A decoy checkout in build-test swaps the tree the pins are read from.
+                    if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout")) {
+                        for key in ["repository", "ref"] {
+                            assert!(
+                                st.get("with").and_then(|w| w.get(key)).is_none(),
+                                "a `build-test` checkout sets `{}` -- that points the job running {} at a different tree, so the pins would be read from a decoy",
+                                key, what
+                            );
+                        }
+                    }
+                }
+            }
+        }
         for key in ["container", "services"] {
             assert!(
                 changes_val.get(key).is_none(),
@@ -10610,6 +10654,17 @@ mod docs_only_ci_and_legacy_visibility {
         //   after the previous fix was declared complete.
         // - Out of reach of BOTH: a commit that changes the gate scripts in the same change. That
         //   is a code review's job, and always was.
+        // - NAMED RESIDUAL, `build-test`'s STEPS. Review #12 pointed out that everything here
+        //   bounds `changes` while nothing bounded the job the pins RUN in. Its `env:` and
+        //   `defaults.run` are now guarded at job and step scope, and a decoy checkout there is
+        //   rejected -- but a `build-test` step that REWRITES `tools/codegen-rs/src/tests.rs`
+        //   before `cargo test` is not closed and cannot be by a YAML scan: banning the path is
+        //   the enumeration instrument this file has retracted three times, and it would red
+        //   ordinary work (`cargo test --manifest-path tools/codegen-rs/Cargo.toml` names it).
+        //   That is the same code-review residual as the line above, stated separately because
+        //   the previous version of this paragraph did not mention this job at all and
+        //   `register-check-selftest.sh:29` calls build-test "outside the blast radius" -- true of
+        //   the `changes` job's runtime, and read as stronger than it is.
         let gate_cmds = [
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
@@ -10851,6 +10906,11 @@ mod docs_only_ci_and_legacy_visibility {
             // from the push lane with every assertion green (review of PR #679).
             ("push branches-ignore excludes main", ci.replacen("    branches: ['**', '!badges']", "    branches-ignore: ['main']", 1)),
             ("push tags-only trigger", ci.replacen("    branches: ['**', '!badges']", "    tags: ['v*']", 1)),
+            // THE JOB THE PINS RUN IN. Ungoverned until review #12: these two make every assertion
+            // in this file vacuous while `changes` stays green.
+            ("build-test job LD_PRELOAD", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      LD_PRELOAD: /tmp/x.so\n", 1)),
+            ("build-test job BASH_ENV", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      BASH_ENV: /tmp/preamble.sh\n", 1)),
+            ("build-test decoy checkout", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      GIT_DIR: /tmp/decoy/.git\n", 1)),
             ("a self-hosted pool labelled to look hosted", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom", 1)),
         ];
         let mut survived = Vec::new();
@@ -10877,6 +10937,9 @@ mod docs_only_ci_and_legacy_visibility {
             ("push.branches removed entirely", ci.replacen("    branches: ['**', '!badges']\n", "", 1)),
             // The control that keeps the tag rule about the PAIR rather than the key: adding a
             // tag filter NEXT TO the branch list is ordinary release plumbing and widens nothing.
+            // `build-test` carries `uses:` steps and a step-level `DB_TESTS_REQUIRED` today; the
+            // guards extended to it must not red any of that.
+            ("build-test job CARGO_TERM_COLOR", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      CARGO_TERM_COLOR: always\n", 1)),
             ("push tags ALONGSIDE branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges']\n    tags: ['v*']", 1)),
             ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
@@ -10898,7 +10961,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 23 && must_stay_green.len() >= 8,
+            must_red.len() >= 26 && must_stay_green.len() >= 9,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

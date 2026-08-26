@@ -22,7 +22,10 @@ pass=0; fail=0; skip=0
 # GATE-SELF-VERIFICATION-V3 -- pinned by `assert_gate_script_self_verifies` in
 # tools/codegen-rs/src/tests.rs, which runs under `cargo test --workspace` in the **build-test**
 # job: a DIFFERENT job with its own checkout, outside the blast radius of anything the `changes`
-# job does at runtime. (Four sites on this branch said "the `codegen` job". That job is a pure
+# job does at runtime. THAT IS THE ONLY THING IT SAYS -- review #12 read it as claiming build-test
+# is itself governed, which it was not: its `env:`/`defaults.run` are now guarded at job and step
+# scope by the same helper, and a `build-test` step that rewrites the pin's own source before
+# `cargo test` remains a code-review residual, named in `tests.rs` beside the others. (Four sites on this branch said "the `codegen` job". That job is a pure
 # AGGREGATOR -- one step, no checkout, no cargo -- so the sentence named the wrong job, a
 # non-existent checkout and the wrong `if:`. Review #10. build-test carries
 # `if: needs.changes.outputs.docs_only != 'true'`, and a `.claude/**` change can never be
@@ -98,11 +101,21 @@ else
   # "someone overwrote a gate script" from "the merge ref moved" is not. A re-run recomputes both
   # and self-heals, which is why the message says so. (Review of PR #679, on a defect this branch
   # introduced two commits earlier by pinning the oracle to GITHUB_SHA.)
+  # RECOVER BEFORE REFUSING. Telling the operator to re-run is a supervision interrupt on a PR
+  # whose diff is untouched, and the lane that hits this race is the DOMINANT one here: every
+  # docs- or spec-only push goes straight to main (CLAUDE.md), so any PR open at that moment can
+  # lose its merge object. GitHub's upload-pack serves fetch-by-SHA, so one fetch usually turns
+  # the refusal back into a verification. Fail-closed is preserved exactly: if the object still
+  # cannot be resolved afterwards, the refusal below stands unchanged. (Review of PR #679.)
   if ! "$_git" -C "$REPO_ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
-    echo "FATAL: commit ${_ref} is not present in this checkout -- cannot verify the gate set." >&2
+    "$_git" -C "$REPO_ROOT" fetch --no-tags --depth=1 origin "$_ref" >/dev/null 2>&1 || true
+  fi
+  if ! "$_git" -C "$REPO_ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
+    echo "FATAL: commit ${_ref} is not present in this checkout and could not be fetched -- cannot verify the gate set." >&2
     echo "  This is NOT a tamper signal. On a pull_request run GITHUB_SHA is the merge commit as of" >&2
-    echo "  queue time, and the merge ref can be recomputed before checkout fetches it. RE-RUN the" >&2
-    echo "  job: that recomputes both and self-heals." >&2
+    echo "  queue time, and the merge ref can be recomputed before checkout fetches it; the direct" >&2
+    echo "  fetch-by-SHA above is the recovery, and it did not succeed. RE-RUN the job: that" >&2
+    echo "  recomputes both and self-heals." >&2
     exit 1
   fi
   for rel in \

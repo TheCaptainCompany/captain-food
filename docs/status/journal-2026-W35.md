@@ -304,4 +304,48 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > the very incident that motivated the rule did not inherit it, so the wrapper's own retraction
 > comment redded. The prose was corrected to name the row as superseded in the citing clause,
 > which is what it always meant — recorded because the next author of a multi-line comment about a
-> dead row will hit exactly this.
+> dead row will hit exactly this.>
+> **Rounds 11 and 12 — the reviewer found the half of the CI surface nobody had pointed a guard at,
+> twice in a row, and the shape is the same both times.** Round 10 was `on.push` sitting three lines
+> above six rounds of `on.pull_request` hardening. Round 12 was **`build-test`** — the job that
+> actually RUNS `assert_pinned_in_changes_job`, `assert_gate_script_self_verifies` and the mutant
+> corpus — with no assertion over its own `env:` or `defaults.run` at all, while the `changes` job it
+> polices was governed at three scopes. A `build-test`-scope `env: {LD_PRELOAD: …}` or `{BASH_ENV: …}`
+> makes **every pin in the file vacuous** with `changes` green and `codegen` aggregating green, and
+> the next commit is then free to disarm the gate step itself: mutants twelve and thirteen, one job
+> over. The guards are extended there and planted red; a `build-test` step that rewrites the pin's
+> own SOURCE before `cargo test` is named as a residual instead, because banning the path is the
+> enumeration instrument this file has retracted three times and would red
+> `cargo test --manifest-path tools/codegen-rs/Cargo.toml`. **Generalisable: the guard goes where the
+> author was looking. Ask what runs the guard.**
+>
+> **The citation rule could not see the citation form the register mandates.** `docs/decisions/<KEY>.yaml`
+> — the exact-row-resolution path `SKILL.md` and `CLAUDE.md` both prescribe as *the* authority path —
+> matched no arm, so the HIGHEST-authority way to point a session at a dead row walked past the gate
+> while the weaker prose forms (`row X`, `the X decision`) were caught. One arm closes it, and adding
+> it immediately exposed that **the new arm and the existing clause exemption did not compose**: the
+> `.yaml` extension put a `.` right after the key, and `.` was an unconditional clause boundary, so
+> the clause truncated to the path and the `superseded` exemption could never be reached. A `.` now
+> ends a clause only when it ends a SENTENCE (followed by whitespace or nothing). **Both of those were
+> found by GREEN CONTROLS, not by reading the code** — which is the argument for writing the control
+> in the same commit as the arm, every time.
+>
+> **`GITHUB_SHA` as the oracle: recover before refusing.** Pinning the gate scripts' oracle to
+> `GITHUB_SHA` (round 10's own fix) made an ordinary push to `main` able to red an unrelated PR — on
+> `pull_request` that sha is the merge commit as of QUEUE time, `actions/checkout` resolves
+> `refs/pull/N/merge` at FETCH time, and CLAUDE.md makes docs- and spec-only pushes straight to `main`
+> the dominant lane, so the window is hit routinely. Because `changes` is the always-run job that
+> everything else `needs:`, the consequence was the whole pipeline red on an untouched diff. Both
+> scripts now try `git fetch --no-tags --depth=1 origin "$_ref"` before refusing — GitHub's
+> upload-pack serves fetch-by-SHA — and the refusal is unchanged if that fails, so fail-closed is
+> intact. **Recorded because it is not derivable: a gate that pins an oracle to an event-time sha
+> inherits that event's races, and a fail-closed gate on an always-run job spends them at full
+> pipeline width.**
+>
+> **The blast radius is now a ROW, not a banked paragraph** — `GATE-STEP-LOCUS`, open: do executable
+> gate steps belong inside `changes`, or in a sibling always-run job that `codegen` aggregates
+> equally? Everything carries `needs: changes`, so a red there skips `lint`, `specs`, `build-test`
+> and `db-test` and loses all build and test signal for a reason unrelated to the diff — and the
+> stub suite's own step comment enumerates three host-drift classes as expected failure modes.
+> `RETRIEVAL-QMD-CI` authorizes that step IN THAT JOB, so #679 could not move it; a banked paragraph
+> is invisible to the next author and the precedent sets itself by default.

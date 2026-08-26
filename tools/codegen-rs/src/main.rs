@@ -105,8 +105,11 @@ fn main() {
             let register = fs::read_to_string(root.join("docs/proposals/DECISIONS.md")).unwrap_or_default();
             dec_issues.extend(validate_decisions_index_sync(&dec_rows, legacy_keys.len(), &register));
         }
-        // A superseded row may not be cited as live authority anywhere under `.claude/**` — the
-        // grep CLAUDE.md prescribes after a reshape, executed instead of remembered.
+        // A superseded row may not be cited as live authority anywhere in the agent surface — the
+        // grep CLAUDE.md prescribes after a reshape, executed instead of remembered. The corpus is
+        // NAMED IN ONE PLACE ONLY (`claude_citation_corpus`'s SCOPE section); this comment used to
+        // say "anywhere under `.claude/**`", which had already stopped being true of the walk it
+        // describes.
         {
             let cited = validate::decisions::claude_citation_corpus(&root);
             dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));

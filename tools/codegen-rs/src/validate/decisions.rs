@@ -665,17 +665,20 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
 /// WHAT IT DOES NOT REACH, because the first version of this docstring claimed to be "the grep"
 /// and review #11 measured otherwise:
 ///
-///   * Only the CITATION FORMS below are recognised — `row <KEY>`, `Per <KEY>`, `decided_by: <KEY>`
-///     and `the <KEY> decision`. Prose that names a row some other way is missed. This is a
-///     high-signal spot check, not an exhaustive grep.
-///   * It sees only the files the caller hands it. Today that is `.claude/**` plus the root files
-///     that carried citations (`.claudeignore`, `.gitignore`). `docs/**` is deliberately NOT in
-///     scope: records *about* a supersession necessarily name the superseded row, and redding
-///     those would make the rule unusable. That asymmetry is the reason the scope is a caller
-///     decision rather than a walk from the repo root.
-///   * `.claudeignore` is the case that proves the point: it is a ROOT file, it was one of the
-///     eight sites this PR fixed by hand, and the first version of this rule would not have seen
-///     it. It is in scope now.
+///   * Only the CITATION FORMS below are recognised — `row <KEY>`, `Per <KEY>`, `decided_by: <KEY>`,
+///     `the <KEY> decision` and the `docs/decisions/<KEY>.yaml` path. Prose that names a row some
+///     other way is missed. This is a high-signal spot check, not an exhaustive grep.
+///   * It sees only the files the caller hands it, and THE CALLER'S `SCOPE` SECTION IS THE ONLY
+///     STATEMENT OF WHAT THAT IS — see `claude_citation_corpus`. This bullet used to enumerate the
+///     set a second time and was already wrong in the commit that shipped it: it named
+///     `.claude/**`, `.claudeignore` and `.gitignore` while the corpus also read `CLAUDE.md` and
+///     the `Makefile`. Two lists of one scope diverge — the sentence this very change closes twice
+///     elsewhere — and the cost is specific: a superseded row named in `CLAUDE.md`, the resident
+///     index, reds `make validate` with a rule the reader has just been told does not reach that
+///     file. So there is now one list, and it is over there.
+///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
+///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
+///     the scope is a caller decision rather than a walk from the repo root.
 pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
     rows: &[DecisionRow],
     files: &[(String, String)],
@@ -714,16 +717,32 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // "never the superseded row" further along, so reverting that citation to the
                     // dead row would have stayed green -- in the file whose stale citations
                     // motivated this rule.
+                    // A `.` ENDS A CLAUSE ONLY WHEN IT ENDS A SENTENCE. The `docs/decisions/
+                    // <KEY>.yaml` arm added below puts a dot immediately AFTER the key, so an
+                    // unconditional `.` boundary truncated the clause to the path itself and the
+                    // `superseded` exemption could never see the rest of the line: the new arm and
+                    // the existing exemption did not compose, and `docs/decisions/OLD-ROW.yaml is
+                    // superseded -- read the head` redded. A sentence dot is followed by whitespace
+                    // or nothing; a filename dot is followed by a letter. `;` and `—` need no such
+                    // test. Found by the green control, not by reading the code.
+                    let is_boundary = |i: usize, c: char| match c {
+                        ';' | '—' => true,
+                        '.' => line[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace),
+                        _ => false,
+                    };
                     let clause_end = line[at..]
-                        .find(['.', ';', '—'])
-                        .map_or(line.len(), |i| at + i);
+                        .char_indices()
+                        .find(|&(i, c)| is_boundary(at + i, c))
+                        .map_or(line.len(), |(i, _)| at + i);
                     // `i + 1` would land INSIDE the em-dash: `—` is three bytes, and slicing a
                     // str on a non-boundary panics. The corpus contains em-dashes, so the
                     // round-trip test caught this immediately -- which is the argument for having
                     // run it against real content rather than fixtures alone.
-                    let clause_start = line[..at].rfind(['.', ';', '—']).map_or(0, |i| {
-                        i + line[i..].chars().next().map_or(1, char::len_utf8)
-                    });
+                    let clause_start = line[..at]
+                        .char_indices()
+                        .filter(|&(i, c)| is_boundary(i, c))
+                        .next_back()
+                        .map_or(0, |(i, c)| i + c.len_utf8());
                     if line[clause_start..clause_end].to_lowercase().contains("superseded") {
                         continue;
                     }
@@ -789,7 +808,25 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         // A BACKTICKED key opening a line is a citation (`SKILL.md:193`); a bare
                         // one is ordinary prose ("OLD-ROW was the predecessor."). The distinction
                         // is the backtick, and without it the green control for prose reds.
-                        || (before.is_empty() && line[..at].ends_with('`'));
+                        || (before.is_empty() && line[..at].ends_with('`'))
+                        // `docs/decisions/<KEY>.yaml` -- THE FORM THE REGISTER ITSELF MANDATES, and
+                        // the one arm this rule shipped without. `SKILL.md` and `CLAUDE.md` both
+                        // route resolution through "exact `docs/decisions/<KEY>.yaml` resolution",
+                        // so the HIGHEST-authority way for a `.claude/**` file to point a session
+                        // at a dead row -- a bare path, no verb, no backtick -- walked past a gate
+                        // whose whole subject is that pointer, while the weaker prose forms were
+                        // caught. `before` keeps its trailing `/` (the trim set is `:([*_-`), so
+                        // one arm closes it. Review #12 of PR #679.
+                        //
+                        // `decisions/` must be the DIRECTORY, not a suffix: a bare `ends_with`
+                        // also matched `docs/old-decisions/`, which is the suffix-not-token defect
+                        // this file already retracted once over `narrow`/`borrow`/`arrow`. The
+                        // preceding character decides, and the green control names the case.
+                        || before.strip_suffix("decisions/").is_some_and(|head| {
+                            head.chars()
+                                .next_back()
+                                .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                        });
                     if !cites {
                         continue;
                     }
