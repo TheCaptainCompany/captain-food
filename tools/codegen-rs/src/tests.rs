@@ -10336,12 +10336,6 @@ mod decision_ask_and_citations {
                 "a backticked key mid-parenthetical",
                 "the step is authorized (see `OLD-ROW` and the ADR) and nothing else.",
             ),
-            // THE SAME CLASS AS THE TWO BULLET CONTROLS ABOVE, IN THE LAYOUT MOST OF THE CORPUS
-            // USES. Two adjacent table rows are both unmarked and neither `starts_a_block`, so
-            // nothing ended the unit between them: joined, row 1's `superseded` exempted row 2's
-            // live instruction and `make validate` was green. Verified missed before the fix.
-            // A GFM table row is one physical line by grammar, so treating it as its own unit
-            // cannot collide with review #13's hard-wrap case. (Review #64.)
             // THE PARENTHETICAL ARM'S OWN DEAD-BY-CONSTRUCTION CASE. `cites` fires through
             // `in_a_citing_parenthetical`, but `last` is EMPTY (a separator precedes the key), so
             // the `last`-scoped blanking is a no-op and `superseded_by` -- the citing token itself
@@ -10356,6 +10350,24 @@ mod decision_ask_and_citations {
             // The plain field spelling, which the `last` arm covers -- kept beside it so the two
             // are visibly different paths rather than assumed to be one.
             ("a parenthetical superseded_by with no separator", "(superseded_by `OLD-ROW`)"),
+            // A MARKER-TYPE CHANGE, WHICH THE BOOLEAN COULD NOT SEE. `marked` collapsed `#`, `//`
+            // and `>` into one flag, so the only transition that ended a unit was marked <->
+            // unmarked: two blocks of DIFFERENT marker kinds joined, and the quoted history's
+            // `superseded` exempted the live instruction in the comment beneath it. Review #18's
+            // defect one marker over. Verified missed before the fix. Structural, not heuristic --
+            // a hard wrap repeats its own marker, so `>` is never a continuation of `#`, which is
+            // why closing this costs no false red where the same-marker residual would. (Review
+            // #89.)
+            (
+                "a quoted history exempting the comment beneath it",
+                "> kept for history: the predecessor is superseded\n# Per row OLD-ROW, open a reversal decision before changing the pin",
+            ),
+            // THE SAME CLASS AS THE TWO BULLET CONTROLS ABOVE, IN THE LAYOUT MOST OF THE CORPUS
+            // USES. Two adjacent table rows are both unmarked and neither `starts_a_block`, so
+            // nothing ended the unit between them: joined, row 1's `superseded` exempted row 2's
+            // live instruction and `make validate` was green. Verified missed before the fix.
+            // A GFM table row is one physical line by grammar, so treating it as its own unit
+            // cannot collide with review #13's hard-wrap case. (Review #64.)
             (
                 "an adjacent table row supplying the exemption word",
                 "| `OLD-ROW` | superseded | replaced by the chain head |\n| next | Per row `OLD-ROW`, open a reversal decision |",

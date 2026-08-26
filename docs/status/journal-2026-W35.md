@@ -2662,3 +2662,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > the branches from the CODE (`match` arms, `Option` cases, the zero/non-zero split), not from the
 > finding that prompted the fix** — a report describes what its author noticed, and the arm nobody
 > noticed is the one with no assertion on it.
+>
+> **Round 89 — the marker test was a BOOLEAN, so review #18's defect survived one marker over.**
+>
+> `logical_units` joins wrapped lines and ends a unit on three signals; one of them is described in
+> both the code comment and the `Unit` docstring as a **"marker-class change"**. The code computed
+> `let marked = trimmed.starts_with('#') || starts_with("//") || starts_with('>')` and tested
+> `marked != prev_marked` — i.e. **marker PRESENT**, not marker CLASS. The only transition it could
+> ever see was marked ↔ unmarked. A `>` quote block followed by a `#` comment block is two blocks of
+> different kinds that both set the flag, so nothing ended the unit between them, and the quoted
+> history's `superseded` exempted the LIVE instruction in the comment beneath it — exactly review
+> #18's defect, one marker over. Verified missed before the fix (the new control redded on the old
+> semantics and nothing else in the suite did).
+>
+> Fixed by keeping the marker as a **token** (`"//"` / `"#"` / `">"` / `""`) and testing
+> `marker != prev_marker`; `marked` survives only as `!marker.is_empty()` for the bare-marker
+> paragraph separator. **This one is structural, not heuristic** — which is why it is closed where
+> the same-marker residual is deliberately not: a hard wrap **repeats its own marker** (a wrapped
+> `#` comment continues with `#`, never with `>`), so a marker-TYPE change can never be a wrap
+> continuation, and `make validate` confirms it moves the ratchet in neither direction on the real
+> corpus. No false-red cost, unlike every candidate boundary for two adjacent same-marker lines.
+>
+> Also reunited an orphaned comment: the table-row control's six-line justification had drifted 20
+> lines above the entry it describes, with two unrelated cases in between — the shape §19 #1 names
+> (an assertion held up by the comment beside it) in its other direction, a comment held up beside
+> the wrong assertion.
+>
+> **Cost that earned the rule: the comment stated the stronger property and the code implemented the
+> weaker one, and I had read that comment several times while working on this very function.** A
+> prose name for a predicate (`marker-class change`) is not a test of it. **Shape: when a comment
+> names a CLASS and the code stores a BOOLEAN, the code can only see the class's edges — read the
+> collapse, not the name.**

@@ -744,3 +744,11 @@ is itself the argument: **a list that grows has no business stating its own leng
   sentence as the number.** And when the honest re-measurement cannot be taken, "unmeasured" is a
   publishable answer — decide on the asymmetry instead, and say that is what you did. This one
   landed on the author, one round after writing the rule it breaks.
+- **When a comment names a CLASS and the code stores a BOOLEAN, the code sees only the class's
+  edges.** `logical_units` described one of its unit boundaries as a *"marker-class change"* and
+  computed `marked = starts_with('#') || starts_with("//") || starts_with('>')`, then tested
+  `marked != prev_marked` — marker PRESENT, not marker CLASS. A `>` block followed by a `#` block
+  never ended a unit, so the earlier fix for that exact defect survived one marker over. The
+  docstring, the code comment and four reviews all read past it. **A prose name for a predicate is
+  not a test of it: read the representation, not the label.** The tell is a boolean (or an
+  `is_foo()`) standing where the sentence beside it says *kind*, *class* or *type*.
