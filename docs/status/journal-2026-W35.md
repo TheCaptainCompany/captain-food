@@ -2436,3 +2436,37 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > which `env_ok` would then have to ban in CI. Every lever is a disarm route, and eighty rounds here
 > have been about levers that did not do what their sentence said. **Closing a narrow residual by
 > widening the disarm surface is the wrong trade on the gate set guarding the required check.**
+>
+> **Round 82 — three inaccurate antecedents and a bound that contradicted its own file. All four mine.**
+>
+> **(1) The round-70 sweep reached two of the three jobs in the same `needs:` list.** `lint`'s block
+> still said too high *"costs a hang a few minutes"* — **false of any job in `codegen`'s `needs:`**,
+> because `always()` still **waits**: a hung `lint` holds the required check for the full 120 and
+> nothing in the repository merges. `specs` states this correctly at its own site; `lint` did not,
+> and the one-line comment on its own value contradicted the paragraph four lines above it. The
+> honest asymmetry is **between two merge blocks**, and the reason the value errs high is that only
+> the too-low one fails to self-heal.
+>
+> **(2) "blocks no merge at all" was true of a spelling, not of a lane.** `docs_only` is computed
+> from the **diff**, not from how the change arrived — so a docs-only **pull request** also runs
+> `docs-validate`, and a hang there does hold `codegen`. That route is the only one open to a **fork
+> contributor**, who cannot push to `main` at all. The conclusion is unaffected; the antecedent
+> over-claimed, which is this file's own standard for a defect.
+>
+> **(3) The `.gitignore` comment invented its cause a second time.** It said *"both Python call sites
+> here use `python3 -c`, which never writes `__pycache__`"*. There are ~20 across the gate scripts;
+> two are **stdin heredocs**; and the six `PYTHONPATH=` probes in `stub-tests.sh` **do** write
+> `__pycache__/sitecustomize.*.pyc` — into their `mktemp -d` fixture, which the EXIT trap removes.
+> **The conclusion held and every stated reason for it was wrong** — in the comment whose previous
+> version invented `.github/scripts/*.py`, a directory that does not exist.
+>
+> **(4) Round 79's floor made an existing bound self-contradictory.** `changes` is the first entry of
+> `codegen`'s `needs:`, so it is bound twice: `5..=120` from the aggregated loop and `1..=30` from its
+> own guard. **An author following the second message and setting `3` redded on the first** — whose
+> text talks about aggregated jobs and a 120 ceiling and never mentions 30. The `1..=4` band was dead
+> the moment the floor landed. Now `5..=30`, with the shared floor named. Planted at `3`: three tests
+> red.
+>
+> **Shape: adding a bound to a value that already has one changes the OTHER bound's message into a
+> lie.** A range is a claim about what is legal, and legality here is the intersection — so a second
+> guard has to be read as an edit to the first one's text, not as an addition beside it.

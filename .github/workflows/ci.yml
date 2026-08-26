@@ -228,9 +228,15 @@ jobs:
     # 58 argued at length why `lint` must not be 20 and then picked 60 with no antecedent -- while
     # `build-test`, whose work this job's own justification calls the same class, got 120 on the
     # stated reasoning that its cold duration was never measured. No cold `lint` duration is cited
-    # anywhere on this branch either. The asymmetry above applies unchanged: too high costs a hang
-    # a few minutes; too low CANCELS, `codegen` fails on `cancelled` by design, the required check
-    # reds, and rust-cache saves nothing on a cancel so the re-run is cold and hits the same wall --
+    # anywhere on this branch either. The asymmetry above applies with ONE HALF CORRECTED (review #83):
+    # this comment said too high "costs a hang a few minutes", which is FALSE of any job in
+    # `codegen`'s `needs:` -- `always()` still WAITS, so a hung `lint` holds the required check for
+    # the full value and nothing in the repository merges. `specs` states that correctly at its own
+    # site and this block did not: the round-70 sweep reached two of the three jobs in the same
+    # `needs:` list. The honest asymmetry is between TWO MERGE BLOCKS: too high blocks merges for the
+    # cap's duration on a hang; too low CANCELS, `codegen` fails on `cancelled` by design, the
+    # required check reds, and rust-cache saves nothing on a cancel so the re-run is cold and hits
+    # the same wall -- which does not self-heal, and that is why the value errs high --
     # reached by a `Cargo.lock` bump or a toolchain roll, which rekey EVERY job at once, so the run
     # where `lint` is cold is the run where the runner is most contended.
     timeout-minutes: 120    # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
@@ -515,9 +521,14 @@ jobs:
     # different for these two jobs.
     #
     # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- and for `docs-validate` the
-    # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang, and
-    # on the docs-only lane it blocks no merge at all, because CLAUDE.md routes that work straight to
-    # `main` as a push with no PR -- the change has already landed. Too LOW cancels the job, `codegen`
+    # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang and,
+    # ON THE DOCS-ONLY PUSH SPELLING, blocks no merge at all, because CLAUDE.md routes that work
+    # straight to `main` with no PR -- the change has already landed. THE PUSH SPELLING IS NOT THE
+    # WHOLE LANE (review #83): `docs_only` is computed from the DIFF, not from how the change
+    # arrived, so a docs-only PULL REQUEST also lands here -- and that is the only route open to a
+    # FORK contributor, who cannot push to `main` at all. For that PR a hang does hold `codegen` for
+    # the full value. So the too-high side is cheap on the lane this team uses and not free in
+    # general; it is still by far the cheaper direction, which is what decides the value. Too LOW cancels the job, `codegen`
     # fails on `cancelled` by design, and the change sits on `main` WITH NO VALIDATOR HAVING RUN,
     # because this is the only gate that lane has. It does not self-heal either: `Swatinem/rust-cache`
     # saves nothing on a cancellation, so every re-run is cold and hits the same wall. Reached by an

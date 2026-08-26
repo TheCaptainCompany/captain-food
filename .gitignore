@@ -24,9 +24,15 @@ wt*/
 .qmd/
 
 # Python bytecode caches — a .pyc with no source in this tree was committed once by an over-broad
-# `git add` (review #8 of PR #679). Nothing in-tree runs a .py FILE today: both Python call sites
-# here use `python3 -c`, which never writes __pycache__. So this is insurance, not a fix for an
-# observed dirtying — the first version of this comment invented the cause (`running
+# `git add` (review #8 of PR #679). Nothing in-tree runs a .py FILE today: every call site passes
+# the program on the COMMAND LINE (`python3 -c`) or on STDIN (`python3 - "$1" <<'PYEOF'`, twice in
+# `register-check-selftest.sh`), and the interpreter writes no bytecode for either. The
+# `PYTHONPATH=` probes in `stub-tests.sh` DO write `__pycache__/sitecustomize.*.pyc` -- but into
+# their `mktemp -d` fixture, which the EXIT trap removes, so nothing reaches this tree. An earlier
+# version of this sentence said "both Python call sites here use `python3 -c`": there are ~20 across
+# the gate scripts, two of them stdin heredocs, and the `PYTHONPATH` six do write bytecode -- the
+# conclusion held and every stated reason for it was wrong (review #83). So this is insurance, not a
+# fix for an observed dirtying — the first version of this comment invented the cause (`running
 # .github/scripts/*.py`, a directory that does not exist on this branch), which is the defect this
 # PR catalogues nine times, in the comment justifying the entry.
 __pycache__/

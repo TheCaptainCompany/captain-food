@@ -12211,8 +12211,8 @@ mod docs_only_ci_and_legacy_visibility {
                 what
             ));
         assert!(
-            (1..=30).contains(&timeout),
-            "the `changes` job's `timeout-minutes` is {} -- it must be in 1..=30. A large value is the 360-minute default with extra steps: a hung probe in this job blocks every merge in the repository for that long, including a peak-hour fix to checkout, dispatch or payments",
+            (5..=30).contains(&timeout),
+            "the `changes` job's `timeout-minutes` is {} -- it must be in 5..=30. TWO bounds apply to this job and this is the tighter one: `changes` is the first entry of `codegen`'s `needs:`, so the aggregated-job loop already asserts 5..=120 over it. The FLOOR is shared with that loop (review #79 added it to catch a dropped zero) and was stated here as 1, which told an author `timeout-minutes: 3` was legal and then redded them on the OTHER assertion, whose message talks about aggregated jobs and a 120 ceiling and never mentions this 30. The CEILING is this rule's own: a hung probe in the job every other job `needs:` blocks every merge in the repository for its duration, including a peak-hour fix to checkout, dispatch or payments",
             timeout
         );
         for key in ["container", "services"] {
