@@ -666,3 +666,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > explanation.** Any escape hatch keyed on a substring will eventually be satisfied by the very
 > construct it is meant to catch, and the arm then reads as coverage for as long as nobody plants
 > it.**
+>
+> **Round 23 — my fix for round 21's false red opened a total bypass, and the half-applied sweep
+> struck again one line over.**
+>
+> The sequence-`on:` arm I added last round ended with `return`, and its comment said *"it carries no
+> filters, so there is nothing else to check"* — true of the TRIGGER, and this function is not only
+> the trigger. Everything below was skipped: both `shell_ok`/`env_ok` scopes, the whole `build-test`
+> block, `runs-on`, `container`/`services`, the job-level escape ban, the per-step scan, **and the
+> `{name, run}` key-set lock plus `run` equality — the one property the helper was rewritten
+> around.** One line of `on: [push, pull_request]` and both gate pins pass vacuously: the steps could
+> carry `|| true`, a step-level `if:`, or be deleted outright, unseen.
+>
+> **What caught it today was an accident in a different test.** The trigger plants anchor on
+> `"  push:"`, which disappears under that mutation, so `assert_ne!` fired — with a message pointing
+> at the PLANTS. The obvious repair is to re-anchor or drop them, after which both pins are silently
+> vacuous forever. **Shape #1 from this branch's own list — "a corpus-size floor counts plants, not
+> coverage" — reproduced in the helper the list was written for, one round after writing it.**
+>
+> A related trap in the plant itself: replacing just the `on:` LINE leaves the old mapping body
+> dangling under a sequence, which is invalid YAML — so the mutant reds on the PARSE rather than on
+> the property, and the green control for a legitimate list trigger reds with it. **A plant that
+> fails for the wrong reason is worse than none: it reports the guard working while proving
+> nothing.** The whole `on:` block is swapped now.
+>
+> **And the hermeticity verdict was still below the headline** — one round after moving completeness
+> above it for exactly that reason. The `.qmd/` fingerprint incremented `fail` after `RESULT:` had
+> printed, so a run that dirtied the real repo cache emitted a clean headline and only then
+> `repo .qmd/ CHANGED -- VIOLATION`. Exit status right; the line every record nominates as the
+> measurement green over a violation of the invariant the file's own header names FIRST. The
+> headline now carries it. **A lesson applied to the instance that taught it, and not to its
+> siblings, is the half-applied sweep this branch keeps landing — the fourth time.**
