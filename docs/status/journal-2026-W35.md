@@ -2226,3 +2226,24 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Fourth round running where a reviewer's supporting fact did not hold** (the ` | ` separator, the
 > cold-build antecedent, the loop-budget free-text claim, now this) — and, as before, still
 > net-positive: the two defects above were real and I would have shipped past both.
+>
+> **Round 74 — no new defect; the finding was round 73's, read off an older head. What it added was
+> a fourth occurrence and the count that changes the response.**
+>
+> The doc-comment mis-binding is fixed at HEAD (`2a3f7e64`) — verified, not assumed: each test now
+> carries its own contiguous `///` run. But the review named an instance I had not counted,
+> `validate/decisions.rs` at review #53 (*"A DOC COMMENT BINDS TO THE FOLLOWING ITEM… This paragraph
+> was left two functions up"*), which makes **four** on this branch: that one, `struct Unit`,
+> `validate_decisions_index_sync`, and round 70's.
+>
+> **Four occurrences is twice this repo's threshold for a gate — and it is recorded as
+> deliberately NOT gated, with the reason.** Every available instrument is heuristic: "a paragraph
+> that looks like the start of a new docstring" false-reds on this file's own mid-docstring ALL-CAPS
+> headings, and `missing_docs` does not reach private items, so the compiler-first lever is absent.
+> On a gate guarding the required check the standing rule is that a false red costs more than a
+> latent miss. So §19 gains **#10** as a *reading* rule with the non-gating argued in place, rather
+> than a fifth instrument nobody can trust.
+>
+> **The shape worth keeping: "two occurrences earns a gate" is a heuristic, not a law — and its
+> failure mode is building an instrument that cannot be trusted on the path it guards. Declining to
+> gate is a legitimate outcome when the decline is recorded with what was ruled out.**

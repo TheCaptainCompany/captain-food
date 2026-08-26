@@ -691,6 +691,22 @@ the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
    no textual rule can decide whether a justification is *true* of the job it sits on. A short
    pointer to another site is fine and is the correct way not to repeat one.
 
+10. **A `///` run binds to the following ITEM, and nothing between two paragraphs says "new
+   docstring".** Four times on this branch a doc comment ended up on the wrong item: twice in
+   `validate/decisions.rs` (a paragraph left two functions up; `struct Unit`), once on
+   `validate_decisions_index_sync`, once when a new test was inserted directly under an existing
+   test's docstring with no item between — so both bound to the new test and the old one shipped
+   undocumented. The damage is always the same shape: **the governing rationale for X is displayed
+   as the rationale for Y**, and the reader looking for "which test enforces this" finds one that
+   never opens the file in question. A blank line does not break the run.
+
+   **Deliberately NOT gated, which is the point of the entry.** Every instrument available is
+   heuristic — "a paragraph that looks like an opening" false-reds on this file's own mid-docstring
+   ALL-CAPS headings — and `missing_docs` does not reach private items, so the compiler-first lever
+   is absent. On a gate guarding the required check, this file's standing rule is that a false red
+   costs more than a latent miss. So it stays a **reading** rule: when you insert an item above an
+   existing one, look at what is now directly above the item below you.
+
 Two more from the same branch, about the records rather than the tests:
 
 - **A count retracted twice will be retracted a third time — derive it.** A derived number stated in
