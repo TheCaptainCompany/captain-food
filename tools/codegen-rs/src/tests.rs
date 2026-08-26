@@ -9914,6 +9914,21 @@ mod decision_ask_and_citations {
             // line-scoping class was invisible to this test (review #13). A citation split across
             // a wrap was MISSED before the join and is caught now.
             ("a citation split across a wrap", "Decided by row\n`OLD-ROW` (founder)."),
+            // THE DIRECTION THE JOIN CHANGED, and the one the three wrapped controls below do not
+            // cover: they are all false-red cases. Joining grew the window the `superseded`
+            // exemption searches, so an ADJACENT BULLET -- with nothing to do with the citation --
+            // could silence a live stale instruction that redded before. Neither `(` nor `)` is a
+            // clause boundary, so it landed inside the citing clause. This is `activation_fail`'s
+            // shape, i.e. the motivating incident (review #14).
+            (
+                "an unrelated bullet supplying the exemption word",
+                "- Per row OLD-ROW, open a reversal decision before changing the pin\n- (that row is superseded)",
+            ),
+            // A NUMBERED item is a block start for the same reason.
+            (
+                "an unrelated numbered item supplying the exemption word",
+                "1. Per row OLD-ROW, open a reversal decision\n2. (that row is superseded)",
+            ),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -9963,12 +9978,38 @@ mod decision_ask_and_citations {
                 "a wrapped bullet whose explanation lands on the next line",
                 "- row `OLD-ROW` no longer governs, having been\n  superseded by the chain head.",
             ),
+            // A markdown continuation is INDENTED, not re-marked -- which is exactly what lets the
+            // block rule tell this apart from the two reds above.
+            (
+                "a wrapped NUMBERED item whose explanation lands on the next line",
+                "1. row `OLD-ROW` no longer governs, having been\n   superseded by the chain head.",
+            ),
+            // The list marker must still be dropped, or a backticked key opening a bullet stops
+            // reading as the citation form `SKILL.md:193` uses.
+            ("a bullet opening with the key is still a citation form", "- `NEW-ROW` is the head."),
         ] {
             let issues = check(".claude/x.md", body);
             assert!(
                 issues.is_empty(),
                 "`{}` must stay GREEN -- a guard that fires on ordinary prose trains readers to discount it. Body: {}, got {:?}",
                 label, body, issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        // THE REPORTED LINE IS THE CITING ONE, not the block's first. Joining made the finding's
+        // location the paragraph start, which on a 40-line comment block is a real step down from
+        // naming the line (review #14). `spans` maps the offset back; nothing pinned that until
+        // this case, and an unpinned improvement is what this PR keeps retracting.
+        {
+            let issues = check(
+                ".claude/x.md",
+                "A paragraph that\nruns on for a while and then\ncites row `OLD-ROW` at the end.",
+            );
+            assert_eq!(issues.len(), 1, "the citation must still be caught");
+            assert!(
+                issues[0].message.contains("From line 3,"),
+                "the finding must name the CITING line (3), not the block's first. Got: {}",
+                issues[0].message
             );
         }
 

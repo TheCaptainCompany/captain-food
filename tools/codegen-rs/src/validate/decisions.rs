@@ -679,8 +679,10 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
 ///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
 ///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
 ///     the scope is a caller decision rather than a walk from the repo root.
-/// Consecutive non-blank lines joined into ONE scanning unit, with each line's leading comment or
-/// list marker stripped so the join reads as the sentence the author actually wrote.
+/// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
+/// unit — with each line's leading comment or quote marker stripped so the join reads as the
+/// sentence the author actually wrote. `spans` maps a byte offset in the joined text back to the
+/// physical line it came from, so a finding still names the citing line and not the block's first.
 ///
 /// THE RULE BELOW IS CLAUSE-SCOPED AND THE CORPUS IS HARD-WRAPPED AT ~100 COLUMNS. Scanning
 /// `content.lines()` decided everything inside one physical line, which broke the rule in both
@@ -698,11 +700,60 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
 ///
 /// Today's corpus was green BY LUCK: two sites repeat "superseded" on both wrapped lines and one
 /// is a single long line. Every green control in the test was a single line, which is why the
-/// class was invisible to it. Joining also strictly IMPROVES detection — a citation split across a
-/// wrap (`Decided by row` / `` `KEY` ``) was missed before and is caught now.
-fn logical_units(content: &str) -> Vec<(usize, String)> {
-    let mut out: Vec<(usize, String)> = Vec::new();
-    let mut cur: Option<(usize, String)> = None;
+/// class was invisible to it.
+///
+/// A LIST ITEM STARTS A NEW UNIT, and the first version of this function got that wrong in the
+/// PERMISSIVE direction — the one that matters. It stripped `-`/`*` like a comment marker and
+/// joined bullets together, so the exemption window grew from a line to a whole paragraph and an
+/// ADJACENT BULLET could silence a live citation:
+///
+/// ```text
+/// - Per row OLD-ROW, open a reversal decision before changing the pin
+/// - (that row is superseded)
+/// ```
+///
+/// Neither `(` nor `)` is a clause boundary, so the joined unit put `superseded` inside the citing
+/// clause and the stale instruction went green — where scanning line 1 alone had redded it. That
+/// is `decision-lookup.sh`'s `activation_fail` shape, i.e. the motivating incident, and review #14
+/// caught it in the commit that introduced it. A markdown continuation is INDENTED, not re-marked,
+/// so treating `- `/`* `/`1. ` as a block start is both correct and what closes this. `#`, `//`
+/// and `>` stay continuation markers, because a shell comment block repeats them on every line.
+///
+/// So the honest statement of what joining buys: it fixes the two wrap failures above and catches
+/// a citation split across a wrap (`Decided by row` / `` `KEY` ``) that was missed before. It does
+/// NOT "strictly improve detection" — that claim was in the docstring one commit ago and this
+/// bullet rule is what makes it true.
+struct Unit {
+    text: String,
+    /// `(byte offset where this line's text starts in `text`, 1-based source line)`, ascending.
+    spans: Vec<(usize, usize)>,
+}
+
+impl Unit {
+    /// The physical line an offset in `text` came from.
+    fn line_at(&self, at: usize) -> usize {
+        self.spans
+            .iter()
+            .rev()
+            .find(|(start, _)| *start <= at)
+            .map_or(self.spans.first().map_or(1, |(_, l)| *l), |(_, l)| *l)
+    }
+}
+
+fn logical_units(content: &str) -> Vec<Unit> {
+    // `- foo`, `* foo`, `1. foo`, `2) foo` — and a bare marker on its own line.
+    fn starts_a_block(body: &str) -> bool {
+        if matches!(body, "-" | "*") || body.starts_with("- ") || body.starts_with("* ") {
+            return true;
+        }
+        let digits: String = body.chars().take_while(char::is_ascii_digit).collect();
+        !digits.is_empty()
+            && matches!(body[digits.len()..].chars().next(), Some('.') | Some(')'))
+            && body[digits.len() + 1..].starts_with(' ')
+    }
+
+    let mut out: Vec<Unit> = Vec::new();
+    let mut cur: Option<Unit> = None;
     for (i, raw) in content.lines().enumerate() {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -711,18 +762,39 @@ fn logical_units(content: &str) -> Vec<(usize, String)> {
             }
             continue;
         }
-        // `# `, `// `, `/// `, `> `, `- `, `* ` — the markers that repeat on every wrapped line of
-        // a comment block, a quote or a bullet. Stripping them is what makes the join read as one
-        // sentence instead of `# foo # bar`.
-        let body = trimmed
-            .trim_start_matches(|c: char| matches!(c, '#' | '/' | '>' | '*' | '-'))
+        // Comment and quote markers repeat on every wrapped line, so they are stripped and joined.
+        let after_marker = trimmed
+            .trim_start_matches(|c: char| matches!(c, '#' | '/' | '>'))
             .trim_start();
-        match cur.as_mut() {
-            Some((_, acc)) => {
-                acc.push(' ');
-                acc.push_str(body);
+        let opens = starts_a_block(after_marker);
+        // The list marker itself is dropped from the text: `- \`KEY\`` must still read as a key
+        // opening the unit, which is one of the citation forms.
+        let body = if opens {
+            after_marker
+                .trim_start_matches(|c: char| matches!(c, '-' | '*' | ')' | '.'))
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_start_matches(|c: char| matches!(c, ')' | '.'))
+                .trim_start()
+        } else {
+            after_marker
+        };
+        if opens {
+            if let Some(u) = cur.take() {
+                out.push(u);
             }
-            None => cur = Some((i + 1, body.to_string())),
+        }
+        match cur.as_mut() {
+            Some(u) => {
+                u.text.push(' ');
+                u.spans.push((u.text.len(), i + 1));
+                u.text.push_str(body);
+            }
+            None => {
+                cur = Some(Unit {
+                    text: body.to_string(),
+                    spans: vec![(0, i + 1)],
+                })
+            }
         }
     }
     if let Some(u) = cur {
@@ -742,8 +814,8 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
         .collect();
     let mut issues = Vec::new();
     for (path, content) in files {
-        for (first_line, line) in logical_units(content) {
-            let line = line.as_str();
+        for unit in logical_units(content) {
+            let line = unit.text.as_str();
             for key in &superseded {
                 // BIND TO THE CITING POSITION, not to the line. A first attempt flagged any line
                 // mentioning the key alongside the word "row", which false-redded the very sentence
@@ -889,7 +961,7 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         format!(
                             "cites `{}` as a live row, but that row is SUPERSEDED. Name the CHAIN HEAD instead: a `reconsiders:` pointing at a superseded row is rejected, so this sends the next session into a gate error on the path it is trying to help them down. From line {}, clause: {}",
                             key,
-                            first_line,
+                            unit.line_at(at),
                             line[clause_start..clause_end].trim()
                         ),
                     ));

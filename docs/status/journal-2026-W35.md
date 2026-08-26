@@ -394,3 +394,33 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > closes that half. And `SKILL.md`'s `**54 cases**` was a derived number with nothing re-deriving it:
 > the pin now parses `EXPECTED_CASES=` out of the script and asserts the doc states the same integer
 > (planted red at 55 before landing).
+>
+> **Round 14 — my own fix for round 13 was wrong in the PERMISSIVE direction, which is the one that
+> matters.** Joining wrapped lines fixed both false reds, and it also grew the window the
+> `superseded` exemption searches from a line to a whole paragraph. `logical_units` stripped `-` and
+> `*` like comment markers, so two adjacent BULLETS became one unit and an unrelated one could
+> silence a live citation:
+>
+> ```text
+> - Per row OLD-ROW, open a reversal decision before changing the pin
+> - (that row is superseded)
+> ```
+>
+> Neither `(` nor `)` is a clause boundary, so `superseded` landed inside the citing clause and the
+> stale instruction went **green** — where scanning line 1 alone had **redded** it. That is
+> `activation_fail`'s exact shape, i.e. the motivating incident, silenced by the commit written to
+> protect it. **All three new controls were in the false-red direction; there was no plant for the
+> direction the change actually moved.** A markdown continuation is INDENTED, not re-marked, so a
+> `- `/`* `/`1. ` line now starts a new unit while `#`, `//` and `>` stay continuations (a shell
+> comment block repeats them on every line). Two reds and two greens planted, and the block rule is
+> planted red by removing it.
+>
+> **The generalisable rule, and it is the sharpest one this chain produced: when a change loosens
+> and tightens at once, the controls you write will be for the direction you were thinking about.
+> Name the direction the change MOVED and plant that one.** The docstring also claimed joining
+> "strictly IMPROVES detection" — true of split citations, false of the exemption, and the bullet
+> rule is what finally makes the sentence true. Retracted in place.
+>
+> Minor, same round: the finding's location had become the paragraph's first line rather than the
+> citing one. `spans` maps the offset back, and a case pins it — an unpinned improvement is what
+> this PR keeps retracting.
