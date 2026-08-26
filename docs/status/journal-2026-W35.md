@@ -1689,3 +1689,34 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > these was introduced by the mitigation for a different failure mode, and each landed on a job
 > whose real work I had not looked at. A cap is safe only where the duration is known; where it is
 > not, the bound belongs far above the guess, and the guess belongs in the comment.
+>
+> **Round 59 — the generated index stated something false about the chain it exists to route.** The
+> superseded row's line read `-> superseded by \`RETRIEVAL-QMD-CI\` (decided by PROP-20260822-171212)`.
+> `closing` is *this* row's `decided_by`, and rendered bare inside parentheses immediately after the
+> successor's key it reads as **the successor's** deciding record — which is `ADR-20260824-205911`.
+> The PROP decided the row that is now dead. So the **one generated surface** a reader consults to
+> find the live authority sent them at the predecessor's record, on a chain where both of their other
+> moves (`reconsiders:` at the dead row, citing it under `.claude/**`) are gate-rejected. Round 42 got
+> the content right — *both, successor first* — and the **binding** wrong. `(this row decided by …)`
+> now, regenerated in the same change.
+>
+> **Round 59b — an assertion message named a test that does not pin what it says.** The
+> `aggregated.len() >= 5` floor told the reader the full `codegen` `needs:` list is pinned by
+> `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths`, which reads the `detect` step's
+> `case` arms and never touches `jobs.codegen.needs`. The literal is in
+> `the_docs_only_ci_path_runs_the_canonical_validator` — and a comment one screen up in the *same
+> helper* names it correctly, so the file stated one fact two ways with one of them wrong. It matters
+> because the floor passes at **five**: dropping exactly one job clears it and silently removes that
+> job from the derived sweep, and the reader sent to the wrong test finds nothing and concludes the
+> list is unpinned. **Review #9's own finding — *"a comment named a test as the thing preventing the
+> regression"* — one file over.**
+>
+> **Round 59c — the exception space read as enumerated when it was sampled.** `DISPATCH-CARD-CITATION`
+> was opened for `docs/dispatch/**` alone. `docs/claude/**` is the same exception **with more
+> weight**: CLAUDE.md names those files as the topic authorities to read *before working*, and marks
+> `sessions.md` operational; `docs/PLAYBOOK.md` sits in the same position. None carries a row citation
+> today, so nothing is wrong on this tree — but the `docs/**` bullet is the one statement of scope the
+> rest of the file defers to, and a reader who finds it excluded with a single named exception beside
+> it will conclude the space was enumerated. The row's question is widened to **which `docs/**`
+> subtrees are instruction surfaces**, because naming exceptions one subtree at a time is how the next
+> one goes unnamed.

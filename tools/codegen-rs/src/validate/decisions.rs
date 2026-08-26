@@ -880,7 +880,16 @@ fn logical_units(content: &str) -> Vec<Unit> {
 ///     file. So there is now one list, and it is over there.
 ///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
 ///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
-///     the scope is a caller decision rather than a walk from the repo root.
+///     the scope is a caller decision rather than a walk from the repo root. **The argument is
+///     about records that NARRATE HISTORY, and not every `docs/**` subtree is one** — `docs/claude/**`
+///     are the topic authorities CLAUDE.md routes every session to *before it works*
+///     (`sessions.md` is marked operational), `docs/PLAYBOOK.md` sits in the same position, and
+///     `docs/dispatch/**` is a card a session executes. Those are instruction surfaces, which is
+///     the property that puts `.claude/**` in scope at all. None carries a row citation today, so
+///     the exclusion is not wrong on this tree — but it is not the enumerated exception space it
+///     reads as, and `DISPATCH-CARD-CITATION` is the open row that holds the question. It was
+///     opened for `docs/dispatch/**` alone and widened to the class, because naming exceptions one
+///     subtree at a time is how the next one goes unnamed. (Review #59 of PR #679.)
 ///   * FENCED CODE IS **NOT** EXEMPT, and that is a decision, not an oversight. The sibling
 ///     `decision-card-row` rule tracks fences and skips them, so the two rules disagree on purpose
 ///     and the next author should not have to derive which is which (review #23). A card's fenced
@@ -1475,7 +1484,16 @@ pub(crate) fn emit_decisions_index(rows: &[DecisionRow], legacy_count: usize) ->
                 head
             ),
             (false, Some(head)) if status == "superseded" => format!(
-                "{} -> superseded by `{}` (decided by {})",
+                // "(this row decided by ...)", NOT "(decided by ...)". `closing` is THIS row's
+                // `decided_by`, and rendered bare inside parentheses immediately after the
+                // successor's key it reads as the SUCCESSOR's deciding record. The committed line
+                // said `superseded by `RETRIEVAL-QMD-CI` (decided by PROP-20260822-171212)` --
+                // false: the head was decided by `ADR-20260824-205911`, and the PROP decided the
+                // row that is now dead. On the one GENERATED surface a reader consults to find the
+                // live authority, on a chain where both of their other moves (`reconsiders:` at the
+                // dead row, citing it under `.claude/**`) are gate-rejected. Round 42 got the
+                // content right -- both, successor first -- and the binding wrong. (Review #59.)
+                "{} -> superseded by `{}` (this row decided by {})",
                 r.get("question").unwrap_or(""),
                 head,
                 closing

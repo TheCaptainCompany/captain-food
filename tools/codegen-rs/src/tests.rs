@@ -11422,7 +11422,7 @@ mod docs_only_ci_and_legacy_visibility {
                 .expect("the `codegen` job must declare a `needs:` LIST -- it is the required check, and this guard is derived from it");
             assert!(
                 aggregated.len() >= 5,
-                "`codegen` aggregates only {:?} -- the guard below is derived from that list, so a shrunken `needs:` silently narrows it. The full list is pinned by `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths`",
+                "`codegen` aggregates only {:?} -- the guard below is derived from that list, so a shrunken `needs:` silently narrows it (this floor passes at FIVE, so dropping exactly one job clears it). The full list is pinned by `the_docs_only_ci_path_runs_the_canonical_validator`, which asserts the literal `needs:` string -- this message named `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` for a round, which reads the `detect` step's `case` arms and never touches `jobs.codegen.needs`: review #9's own finding, one file over",
                 aggregated
             );
             for job in aggregated.iter().map(String::as_str).chain(std::iter::once("codegen")) {
