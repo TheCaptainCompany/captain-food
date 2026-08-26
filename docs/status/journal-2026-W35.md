@@ -804,3 +804,23 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > option (b) is not free on the lane this team ships down most often. Added to the row's `evidence:`,
 > since the row is the artifact whoever closes it will price from, and **an enumeration that stops at
 > four reads as complete.**
+>
+> **Round 28 — the same list diverged a third time, so it stopped being prose.** Round 22 added
+> `.github/workflows` to the citation corpus and updated the function and its SCOPE docstring — and
+> not `RETRIEVAL-QMD-CI` clause (d), nor the ADR paragraph. Both are restatements of the one list,
+> and both were wrong for a round. That matters more than a wording tidy: **the row is what a reader
+> consults to learn what `decision-superseded-authority` was allowed to cover**, so a row stating the
+> corpus short sends the next author hunting a red somewhere else — and `ci.yml` now carries
+> `Authorized by decision row RETRIEVAL-QMD-CI`, which becomes exactly that red the moment this row
+> is superseded, on a chain whose own evidence says supersession here is routine.
+>
+> **Prose cannot be made to track prose by intention, and this branch has now proved it twice on one
+> list.** So `the_records_state_the_same_citation_corpus_as_the_code` reads the pathspecs **out of
+> the source** and requires every one to appear in both records. Adding a seventh reds until the
+> records say so.
+>
+> **It paid for itself immediately: the new test caught a FOURTH omission in the same sentence** —
+> the ADR had never named `.claudeignore`, from the outset, and neither I nor three reviewers had
+> noticed while all of us were looking straight at the divergence. That is the whole argument for
+> preferring an executable check over a careful reading, stated better by the check than by this
+> paragraph.

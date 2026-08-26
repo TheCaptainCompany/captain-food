@@ -10232,6 +10232,57 @@ mod decision_ask_and_citations {
         assert_eq!(got, 0, "an empty key names nothing and must produce no finding, not a match on every line");
     }
 
+    /// The RECORDS' statement of the citation corpus must track the CODE's.
+    ///
+    /// `claude_citation_corpus`'s pathspec list is the one list. `RETRIEVAL-QMD-CI` clause (d) and
+    /// `ADR-20260824-205911` each restate it — and both were wrong for a round after review #21
+    /// added `.github/workflows` to the code, because that sweep updated the function and its
+    /// SCOPE docstring and stopped (review #26). That is the two-lists-of-one-scope divergence the
+    /// rule's own file retracts three times, in the records that AUTHORIZE the rule: the row is
+    /// what a reader consults to learn what `decision-superseded-authority` was allowed to cover,
+    /// so a row that under-states the corpus sends them hunting a red somewhere else.
+    ///
+    /// Prose cannot be made to track prose by intention — this repo has now proved that twice on
+    /// one branch. So the pathspecs are READ OUT OF THE SOURCE and each is required to appear in
+    /// both records. Adding a sixth pathspec reds this until the records say so too.
+    #[test]
+    fn the_records_state_the_same_citation_corpus_as_the_code() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = fs::read_to_string(root.join("tools/codegen-rs/src/validate/decisions.rs"))
+            .expect("decisions.rs");
+        // The `.args([...])` block that carries `"ls-files"`, up to its closing `])`.
+        let block = src
+            .split_once("\"ls-files\"")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(block, _)| block.to_string())
+            .expect("decisions.rs must build the corpus with a `git ls-files` arg list");
+        let pathspecs: Vec<String> = block
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|a| !matches!(*a, "-z" | "--"))
+            .map(str::to_string)
+            .collect();
+        assert!(
+            pathspecs.len() >= 6 && pathspecs.iter().any(|p| p == ".github/workflows"),
+            "could not read the corpus pathspecs out of `claude_citation_corpus` -- this test is then vacuous. Got {:?}",
+            pathspecs
+        );
+        for (label, rel) in [
+            ("the authorizing row", "docs/decisions/RETRIEVAL-QMD-CI.yaml"),
+            ("the ADR", "docs/adr/ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md"),
+        ] {
+            let text = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            for spec in &pathspecs {
+                assert!(
+                    text.contains(spec.as_str()),
+                    "{} ({}) does not name `{}`, which `claude_citation_corpus` actually scans. The records are what a reader consults to learn what the rule was allowed to cover; a corpus stated short sends them hunting a red somewhere else",
+                    label, rel, spec
+                );
+            }
+        }
+    }
+
     /// The rule must still be CALLED by `make validate`, not merely exist.
     ///
     /// Review #13: deleting the call site in `main.rs` left `cargo test --workspace` entirely
