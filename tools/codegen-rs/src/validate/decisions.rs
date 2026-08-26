@@ -646,6 +646,31 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
             "CLAUDE.md",
             "Makefile",
             ".github/workflows",
+            // TELEMETRY IS A RECORD OF WHAT HAPPENED, NOT AN INSTRUCTION TO THE NEXT SESSION --
+            // the same reason `docs/**` is out, applied to the one subtree under `.claude/**` that
+            // is retrospective narration rather than a surface a session reads before working.
+            // `.claude/loop-budget/**` is 89 of this corpus' 139 tracked files and grows by ONE PER
+            // LOOP RUN, and its `note` fields are long prose written in the records' own house
+            // style: today they name `ADP-1`, `RSO-1`, `MOB-COST-1a`, `HIGH-CONSEQUENCE` and full
+            // ADR ids. None is in a CITING form right now -- checked, every declared key against
+            // every citing spelling, zero hits -- so this closes nothing that is open.
+            //
+            // What it closes is the FALSE RED, on the one surface where a false red has no honest
+            // escape. A future note writing `per row X` is entirely plausible given who writes
+            // them, and if `X` is later superseded the gate becomes a hard `make validate` error
+            // inside a COMMITTED, APPEND-ONLY TELEMETRY FILE -- where the only fixes are editing a
+            // historical record to appease a gate, or exempting it. This branch has retracted two
+            // false reds already and its own rule is that on a gate guarding the required check
+            // they cost more than a latent miss; here there is not even a miss to trade away,
+            // because a telemetry note cannot carry a live instruction by construction.
+            //
+            // A GIT PATHSPEC, NOT A NAME CHECK IN THE LOOP: the corpus is git's, not the disk's
+            // (the lesson an untracked worktree taught this rule), so the exclusion belongs in the
+            // same list the records and `the_records_state_the_same_citation_corpus_as_the_code`
+            // read. The review that surfaced this said the files were safe because "only `branch`
+            // is free text", which the tree falsifies -- right conclusion, wrong antecedent, third
+            // round running. (Review #67 of PR #679.)
+            ":(exclude).claude/loop-budget",
         ])
         .current_dir(root)
         .output()

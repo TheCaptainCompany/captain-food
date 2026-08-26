@@ -1982,3 +1982,39 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > Operational finding recorded in [`sessions/environment.md`](../claude/sessions/environment.md): a
 > second `CARGO_TARGET_DIR` is a full second copy against a fixed allowance, and an abandoned one is
 > the self-inflicted version of the stale-build-dir sweep already on that list.
+>
+> **Round 67 — the citation corpus was mostly telemetry, and a comment's quotation marks could steer
+> the guard that describes it.**
+>
+> **The review's finding was right and its supporting fact was wrong, third round running.** It noted
+> that `.claude/loop-budget/**` dominates the corpus and dismissed it because *"only `branch` is free
+> text there"*. The tree falsifies that: those files carry long free-text `note` fields written in
+> the records' own house style, already naming `ADP-1`, `RSO-1`, `MOB-COST-1a`, `HIGH-CONSEQUENCE`
+> and full ADR ids. Its numbers were off too (**89 of 139**, not 117 of ~130). Checked properly —
+> every declared key against every citing spelling — **zero hits**, so the conclusion holds and
+> nothing open was closed.
+>
+> **What is closed is a false red with no honest escape.** Telemetry is a record of what happened,
+> not an instruction the next session reads — which is *exactly* why `docs/**` is already out of this
+> corpus. `.claude/loop-budget/**` grows one file per loop run, and a future note writing `per row X`
+> for an `X` later superseded turns `make validate` into a hard error **inside a committed,
+> append-only historical record**, fixable only by editing history to appease a gate. There is not
+> even a latent miss traded away: a telemetry note cannot carry a live instruction by construction.
+> Excluded as a **git pathspec** (`:(exclude).claude/loop-budget`), not a name check in the loop —
+> the corpus is git's, which is the lesson an untracked worktree already taught this rule.
+>
+> **Two things went red on their author, which is the whole point of having them.** The
+> records-vs-code guard fired the moment the pathspec changed and both records still described the
+> old corpus. And then it fired again for a *bad* reason: it scrapes quoted strings out of a text
+> block, so the new comment — which **quotes the review** — donated a phantom pathspec and the
+> assertion demanded the records name a fragment of prose. **The guard was at fault, not the
+> comment**: a rule about what the corpus covers must not be steerable by the wording of a comment
+> beside it. Comment lines are stripped before the scrape now. §19 shape #7, in the helper feeding
+> the assertion.
+>
+> **And the exclusion is pinned behaviourally, because "it is written down" is not "git honoured
+> it".** `:(exclude)` magic is exact, and a malformed prefix (`:(exclude)claude/...`) is treated as a
+> literal path matching nothing — it **adds the subtree back rather than erroring**. Planted red both
+> ways, plus a vacuity guard asserting the subtree is still tracked at all, without which the
+> assertion passes whether or not the pathspec works. Its failure message names both causes instead
+> of guessing one — the misattribution class round 65 fixed one file over.

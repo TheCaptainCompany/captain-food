@@ -10443,6 +10443,29 @@ mod decision_ask_and_citations {
         // stops seeing anything. This is the same defect the docstring above records as already
         // found once ("making the function return an empty Vec left `cargo test --workspace`
         // entirely green"), still open in the test written to close it.
+        // AND THE EXCLUSION MUST ACTUALLY EXCLUDE. `the_records_state_the_same_citation_corpus_as_
+        // the_code` proves the pathspec is WRITTEN and named in both records; it cannot prove git
+        // honoured it -- a typo (`:(exclude)claude/loop-budget`, a missing dot) is still a string
+        // both records can name. These files are tracked, numerous (89 of 139) and grow one per
+        // loop run, so their absence is a fact about behaviour with a loud signal if it regresses.
+        // The reverse direction matters more than it looks: if the exclusion silently stopped
+        // working, nothing would red until a row cited in a telemetry note was superseded, which is
+        // exactly the unfixable false red it exists to prevent. (Review #67 of PR #679.)
+        assert!(
+            corpus_files.iter().all(|(p, _)| !p.starts_with(".claude/loop-budget/")),
+            "{} `.claude/loop-budget/**` telemetry file(s) reached the citation corpus. Either `:(exclude).claude/loop-budget` was removed from the pathspec, or it is there and git did not honour it -- SAY WHICH BY LOOKING, because the two have different fixes and this message will not guess. If it is present, check the MAGIC spelling rather than the path: `:(exclude)` is exact, and a malformed prefix is treated as a literal path that matches nothing, so it ADDS the subtree back instead of erroring",
+            corpus_files.iter().filter(|(p, _)| p.starts_with(".claude/loop-budget/")).count()
+        );
+        assert!(
+            std::process::Command::new("git")
+                .args(["ls-files", "-z", "--", ".claude/loop-budget"])
+                .current_dir(&root)
+                .output()
+                .map(|o| o.status.success() && !o.stdout.is_empty())
+                .unwrap_or(false),
+            "`.claude/loop-budget` has no tracked files, so the exclusion assertion above is VACUOUS -- it passes whether or not git honours the pathspec. If that subtree was removed or untracked deliberately, delete the exclusion and this pair together"
+        );
+
         for must_reach in [
             ".claude/skills/decision-lookup/SKILL.md",
             ".claude/skills/decision-lookup/scripts/decision-lookup.sh",
@@ -10739,7 +10762,20 @@ mod decision_ask_and_citations {
             .and_then(|(_, rest)| rest.split_once("])"))
             .map(|(block, _)| block.to_string())
             .expect("decisions.rs must build the corpus with a `git ls-files` arg list");
-        let pathspecs: Vec<String> = block
+        // STRIP COMMENT LINES BEFORE READING QUOTED STRINGS. This scrapes quoted tokens out of a
+        // TEXT block, so any `//` comment inside the arg list that contains a double quote donates
+        // a phantom pathspec -- and the assertion below then demands the records name a fragment of
+        // prose. Found the moment a comment was added there quoting a review ("only `branch` is
+        // free text"): the guard redded with `does not name \`only \`branch\` is free text\``.
+        // The guard was at fault, not the comment; a rule about what the corpus covers must not be
+        // steerable by the wording of a comment beside it. §19 shape #7 -- the helper building the
+        // inputs needs the scrutiny of the assertion it feeds. (Review #67 of PR #679.)
+        let code_only: String = block
+            .lines()
+            .map(|l| l.split_once("//").map_or(l, |(code, _)| code))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let pathspecs: Vec<String> = code_only
             .split('"')
             .skip(1)
             .step_by(2)

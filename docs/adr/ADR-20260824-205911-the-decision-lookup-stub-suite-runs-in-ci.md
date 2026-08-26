@@ -322,7 +322,14 @@ rules land here, not one: the supersession-coupling mirror arm, and
 exactly six pathspecs — `.claude`, `.claudeignore`, `.gitignore`, `CLAUDE.md` (the resident index),
 `Makefile`, and `.github/workflows` — the last added by review #21, because `ci.yml`'s gate-step
 comment names the authorizing row as a live instruction to the next author rather than as
-provenance. **Under those pathspecs an EXTENSION ALLOWLIST then applies** —
+provenance — **minus one pathspec exclusion, `:(exclude).claude/loop-budget`**. That exclusion is
+the `docs/**` rule applied inside `.claude/`: telemetry is a record of what happened, not an
+instruction a session reads before working. It is 89 of the corpus' 139 tracked files and grows one
+per loop run, and its free-text `note` fields already name `ADP-1`, `RSO-1`, `MOB-COST-1a` and full
+ADR ids — none in a citing form today, so nothing open is closed. What it closes is the **false
+red** on the one surface with no honest escape: a note writing `per row X` for an `X` later
+superseded makes `make validate` a hard error inside a committed, append-only historical record
+(review #67). **Under those pathspecs an EXTENSION ALLOWLIST then applies** —
 `.md/.sh/.json/.yaml/.yml`, plus the four root files by name — which this paragraph omitted for
 three rounds —
 so both records stated the corpus **wider than the code applies it**, silently and in the
