@@ -1804,3 +1804,51 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > number retracted twice will be retracted a third time — derive it, or stop stating it. The two
 > earlier applications were `the_ride_along_count_matches_the_clauses_named` (derive) and the `~30×`
 > multiplier (drop). A list that no test can derive takes the second remedy.
+>
+> **Round 63 — the fourth way out of the citation corpus, and the only one that was still silent.**
+> Reviews [#27](https://github.com/TheCaptainCompany/captain-food/pull/679), #52 and #60 each closed
+> one route by which a tracked file leaves `claude_citation_corpus` unreported: `git ls-files`
+> failing sets `readable = false`, an unreadable path lands in `unread`, non-UTF-8 lands in
+> `unread_tree`. The **extension allowlist** was the fourth, and it `continue`d with no counter — so
+> `make validate` printed an identical green whether the filter dropped nothing or dropped a
+> `.claude/**` file citing a dead row. Now counted and warned as
+> `decision-citation-file-out-of-corpus`, **tree-caused and therefore inside the §17 ratchet** by
+> round 60's argument: adding an out-of-corpus `.claude/**` file becomes a deliberate, baseline-moving
+> act. Zero such files are tracked today, so the warning starts silent.
+>
+> **It was also a records-vs-code divergence the existing gate structurally cannot catch.**
+> `the_records_state_the_same_citation_corpus_as_the_code` asserts the *pathspecs* appear in the
+> records — and both records state the corpus as `git ls-files` over six paths with **no filter**,
+> i.e. **wider than the code applies it**. A test that checks one half of a description cannot
+> detect that the other half overstates.
+>
+> **And an inverted comment, in the direction that invites the wrong edit.** It said `.gitignore` and
+> `.claudeignore` *"are extensions rather than stems"* — the exact opposite of `Path::extension`,
+> which returns `None` for a dotfile. A reader who believes it concludes the allowlist already covers
+> them and deletes the `is_root_file` arm, or moves them into the extension list as
+> `"gitignore"`/`"claudeignore"`, where they match nothing. Either drops two files that carry live row
+> citations today, with `make validate` green.
+>
+> **Cost that earned the rule: three rounds of exactly this reasoning missed it, because each was
+> verified by READING the code — and the tree contains zero out-of-corpus files, so reading proved
+> nothing.** The remedy is the one this repo prefers: `every_way_out_of_the_citation_corpus_is_reported`
+> builds a **throwaway** repo containing the shapes this tree does not have (an extensionless hook, a
+> `.txt` note, a `.toml`), and asserts both halves — what the filter reports **and** what must never
+> appear in that list. Planted red **three** times before being trusted: dropping the push, replacing
+> `is_root_file` with `false`, and the *plausible* wrong edit rather than the obvious one — moving the
+> two ignore files into the extension allowlist, which drops exactly those two while `Makefile` stays,
+> reproducing the failure the corrected comment describes.
+>
+> **And the guard written to close it reproduced §19 shape #6 in the same round.** The first version
+> asserted each extension separately — `text.contains(".md")`, `".sh"`, `".yaml"`, `".yml"` — which
+> **every record satisfies without stating any filter at all**: `SKILL.md`, `decision-lookup.sh`,
+> `docs/decisions/<KEY>.yaml`, `ci.yml`. The plant that deleted the clause stayed **green**. It now
+> asserts one contiguous token **derived from the source list** (`.md/.sh/.json/.yaml/.yml`), and is
+> planted red three ways: clause removed from the row, from the ADR, and an extension added to the
+> code with neither record touched. *A token carrying the exempting word is not evidence — written
+> down as shape #6 on this branch, then reproduced inside the fix for shape #8.*
+>
+> **Shape, for [`gates.md` §19](../claude/sessions/gates.md): a fix verified by reading is verified
+> against the tree you have. When the property under test is what happens to a shape the tree does not
+> contain, only a constructed fixture can see it — and "I closed the other three by reading" is the
+> reason the fourth survived, not evidence against it.**

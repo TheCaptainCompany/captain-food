@@ -611,7 +611,7 @@ was to extract the gate to a serde-only crate whose cold build is seconds. **The
 "cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
 wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.
 
-## 19. Seven shapes a gate test keeps reproducing
+## 19. Shapes a gate test keeps reproducing
 
 From [#679 "RETRIEVAL-QMD-CI decided: the decision-lookup stub suite runs in
 CI"](https://github.com/TheCaptainCompany/captain-food/pull/679) — many independent review passes,
@@ -633,9 +633,12 @@ shapes were living only in a PR body, and a body is editable, unversioned and in
 `make validate`. It was also already stale by seven rounds when it was caught. A repo record may not
 delegate its antecedent to a surface that disappears with the branch. (Review #58.)*
 
-These seven are not derivable from the code, each cost a round, and **several of them reappeared
-inside the very guard written to close them** — which is why they are here rather than in a comment
-next to one instance.
+These are not derivable from the code, each cost a round, and **several of them reappeared inside
+the very guard written to close them** — which is why they are here rather than in a comment next to
+one instance. *The heading counted them for one round, which is this section's own closing bullet
+committed in its title: the list grows, nothing derives the number, and the first addition made it
+wrong. Dropped rather than corrected — the third application of that remedy on this branch, after
+the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
 
 1. **A corpus-size floor counts plants, not coverage.** `must_red.len() >= N` says nothing about
    *which* assertions have a plant. The only way to know an assertion is pinned is to delete it and
@@ -661,6 +664,16 @@ next to one instance.
 7. **A helper that constructs test inputs needs the same scrutiny as the assertions it feeds.**
    Three rounds of "is this plant pinning what it claims" all pointed at the plant *list*; none at
    the function building them — which was itself mislabelled, and swallowed a `permissions:` block.
+8. **A fix verified by READING is verified against the tree you have.** Three rounds closed three
+   silent ways for a file to leave the citation corpus, each checked by reading the code, and each
+   missed the fourth — because the property under test is *what happens to a shape this tree does
+   not contain*, and the tree contains zero such files. Reading proved the code did what it says;
+   it could not show what the code does to an input nobody had written down. **Build the fixture
+   that has the shape.** "I closed the other three by reading" is the reason the fourth survived,
+   not evidence against it. Corollary, from the same round: **a test that checks one half of a
+   description cannot detect that the other half overstates** — the records described the corpus by
+   its *pathspecs*, the guard compared pathspecs, and the unstated extension filter made both
+   records silently wider than the code.
 
 Two more from the same branch, about the records rather than the tests:
 

@@ -322,8 +322,18 @@ rules land here, not one: the supersession-coupling mirror arm, and
 exactly six pathspecs — `.claude`, `.claudeignore`, `.gitignore`, `CLAUDE.md` (the resident index),
 `Makefile`, and `.github/workflows` — the last added by review #21, because `ci.yml`'s gate-step
 comment names the authorizing row as a live instruction to the next author rather than as
-provenance. This paragraph then omitted it for a round, and omitted `.claudeignore` from the outset
-(review #26); `the_records_state_the_same_citation_corpus_as_the_code` now reads the list out of the
+provenance. **Under those pathspecs an EXTENSION ALLOWLIST then applies** —
+`.md/.sh/.json/.yaml/.yml`, plus the four root files by name — which this paragraph omitted for
+three rounds —
+so both records stated the corpus **wider than the code applies it**, silently and in the
+permissive direction. That divergence is structurally invisible to
+`the_records_state_the_same_citation_corpus_as_the_code`, which compares *pathspecs*: a guard that
+checks one half of a description cannot see the other half overstate. What the filter drops is now
+counted and warned (`decision-citation-file-out-of-corpus`, inside the §17 ratchet), so a
+`.claude/**` file the rule cannot see becomes a deliberate, baseline-moving act rather than a silent
+one — zero such files are tracked today (review #63). This paragraph also omitted
+`.github/workflows` for a round, and `.claudeignore` from the outset (review #26);
+`the_records_state_the_same_citation_corpus_as_the_code` now reads the pathspec list out of the
 source and reds until both records name every entry, because prose has twice failed to track prose
 here by intention alone. A file in that corpus that cites a row whose status is `superseded` as
 live authority reds the gate. It is the executable form of

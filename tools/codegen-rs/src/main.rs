@@ -120,7 +120,7 @@ fn main() {
         // the correct order, because `docs/decisions/README.md` requires both halves of a
         // supersession in ONE commit and a stale citation is exactly the other half.
         {
-            let (cited, readable, unread, unread_tree) = validate::decisions::claude_citation_corpus(&root);
+            let (cited, readable, unread, unread_tree, skipped_ext) = validate::decisions::claude_citation_corpus(&root);
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
                 //
@@ -169,6 +169,21 @@ fn main() {
                         "{} tracked file(s) in the superseded-citation corpus are not valid UTF-8, so `decision-superseded-authority` cannot scan them: {}. This is a property of the TREE, not the host -- it fails the same way everywhere -- so it stays inside the section 17 ratchet: fix the encoding, or accept it deliberately with `make warning-baseline` in the same commit.",
                         unread_tree.len(),
                         unread_tree.join(", ")
+                    ),
+                ));
+            }
+            // THE EXTENSION FILTER, WHICH WAS THE LAST SILENT WAY OUT OF THE CORPUS. Deterministic
+            // and tree-caused, so it ratchets like `not-utf8` rather than being exempt like the
+            // host causes: adding a `.claude/**` file the rule cannot see becomes a deliberate act
+            // with a baseline diff, not a quiet one. Zero such files today. (Review #63.)
+            if !skipped_ext.is_empty() {
+                dec_issues.push(model::warn(
+                    "decision-citation-file-out-of-corpus",
+                    "tools/codegen-rs".to_string(),
+                    format!(
+                        "{} tracked file(s) in the citation corpus' pathspecs are outside its extension allowlist, so `decision-superseded-authority` does not scan them: {}. If one of these is an instruction surface a session reads, it can point at a superseded row with `make validate` green -- widen the allowlist, or accept it deliberately with `make warning-baseline` in the same commit.",
+                        skipped_ext.len(),
+                        skipped_ext.join(", ")
                     ),
                 ));
             }

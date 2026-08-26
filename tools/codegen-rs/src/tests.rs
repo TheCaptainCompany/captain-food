@@ -8468,15 +8468,21 @@ fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
 /// counts warnings, so growing it is a decision. A new entry reds here until it is stated.
 #[test]
 fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
-    // AND THE TREE-CAUSED SIBLING IS NOT ON IT. `decision-citation-file-not-utf8` reports the same
-    // outcome -- a corpus file that went unscanned -- from a DETERMINISTIC cause, so it has a
-    // stable committable value and belongs inside the ratchet. Lumping the two under one kind gave
-    // the deterministic case the host-only exemption. Asserted, because "these two kinds look
-    // alike and one is exempt" is exactly the pair a later refactor merges. (Review #60.)
-    assert!(
-        !RATCHET_EXEMPT.contains(&"decision-citation-file-not-utf8"),
-        "the tree-caused unreadable kind must NOT be ratchet-exempt: non-UTF-8 bytes fail identically on every host, so the count has a stable value to commit, and exempting it hides a committed latin-1 byte in the corpus forever"
-    );
+    // AND THE TREE-CAUSED SIBLINGS ARE NOT ON IT. Both report the same OUTCOME as the exempt kind
+    // -- a corpus file that went unscanned -- from a DETERMINISTIC cause, so each has a stable
+    // committable value and belongs inside the ratchet: `decision-citation-file-not-utf8` (a
+    // committed latin-1 byte, review #60) and `decision-citation-file-out-of-corpus` (a tracked
+    // `.claude/**` file outside the extension allowlist, review #63). Lumping either with the host
+    // kind hands it the host-only exemption and the file goes unscanned forever at 0 errors with
+    // the ratchet unmoved. Asserted, because "these kinds look alike and one is exempt" is exactly
+    // the set a later refactor merges.
+    for tree_caused in ["decision-citation-file-not-utf8", "decision-citation-file-out-of-corpus"] {
+        assert!(
+            !RATCHET_EXEMPT.contains(&tree_caused),
+            "`{}` is TREE-caused, not host-caused: it fails identically on every host, so its count has a stable value to commit. Exempting it hides the unscanned file forever -- which is the whole defect the kind was added to surface",
+            tree_caused
+        );
+    }
     assert_eq!(
         RATCHET_EXEMPT.to_vec(),
         vec!["decision-citation-corpus-unreadable"],
@@ -10377,7 +10383,7 @@ mod decision_ask_and_citations {
             );
             return;
         }
-        let (corpus_files, corpus_readable, _unread, _unread_tree) = claude_citation_corpus(&root);
+        let (corpus_files, corpus_readable, _unread, _unread_tree, _skipped_ext) = claude_citation_corpus(&root);
         assert!(corpus_readable, "git reported usable above, so the corpus walk must not have failed");
         // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
         // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
@@ -10430,6 +10436,148 @@ mod decision_ask_and_citations {
             !validate_no_superseded_row_is_cited_as_authority(&real_rows, &planted).is_empty(),
             "a planted citation of the superseded row `{}` was NOT caught against the real corpus",
             superseded_key
+        );
+    }
+
+    /// THE FOURTH EXIT FROM THE CORPUS, MEASURED RATHER THAN ASSERTED. Reviews #27, #52 and #60
+    /// each closed one silent way for a tracked file to leave `claude_citation_corpus`, and each
+    /// was verified by reading the code. That is how the fourth one survived three rounds of
+    /// exactly this reasoning: the extension allowlist `continue`s with no counter, so a
+    /// `.claude/**` file the rule cannot see is indistinguishable from one it saw and cleared.
+    ///
+    /// Two claims are separable here and BOTH are planted, because the fix and the comment it
+    /// corrects fail in opposite directions:
+    ///   * an out-of-allowlist tracked file must APPEAR in `skipped_ext` (delete the push and this
+    ///     reds) -- the reporting the warning is built on;
+    ///   * `.gitignore` must NOT appear (delete the `is_root_file` arm and this reds) -- the
+    ///     control for the comment that until review #63 said `.gitignore` and `.claudeignore`
+    ///     "are extensions rather than stems", the exact opposite of what `Path::extension` does.
+    ///     A reader who believed it would delete that arm, or add `"gitignore"` to the extension
+    ///     list where it matches nothing, and drop two files carrying live citations today. Prose
+    ///     cannot hold that shut; this can.
+    ///
+    /// SEEN RED THREE TIMES before being trusted, because a gate never asked to be wrong is an
+    /// unverified claim: dropping the `skipped_ext.push` (`left: []`); replacing `is_root_file`
+    /// with `false` (`.gitignore`, `.claudeignore` AND `Makefile` fall out); and the plausible
+    /// wrong edit rather than the obvious one -- moving the two ignore files from the name arm to
+    /// the extension allowlist as `"gitignore"`/`"claudeignore"`, which matches nothing and drops
+    /// exactly those two while `Makefile` stays, i.e. the failure the corrected comment describes,
+    /// reproduced.
+    ///
+    /// Run against a THROWAWAY repo, not this one, because the property under test is "what the
+    /// filter does to a file shape that is not in this tree" -- and today this tree contains zero
+    /// such files, which is precisely why reading the code proved nothing. (Review #63 of PR #679.)
+    #[test]
+    fn every_way_out_of_the_citation_corpus_is_reported() {
+        let have_git = std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !have_git {
+            eprintln!("SKIP every_way_out_of_the_citation_corpus_is_reported: git unavailable on this host");
+            return;
+        }
+
+        let sandbox = std::env::temp_dir().join(format!("cf-corpus-exit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(&sandbox).expect("create the fixture repo dir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&sandbox)
+                // The fixture must not inherit the developer's git identity or config, the same
+                // discipline the gate scripts hold themselves to.
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+            assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+
+        // (path, why it is here)
+        let files: &[(&str, &str)] = &[
+            // IN CORPUS by extension. Also keeps `cited` non-empty, without which the
+            // empty-corpus arm (review #61) short-circuits and this test measures that instead.
+            (".claude/skills/s/SKILL.md", "in corpus: the .md the rule was written for"),
+            (".claude/hooks/h.sh", "in corpus: the .sh a hook is written in"),
+            // IN CORPUS by name, with NO extension between them -- the control for the comment
+            // review #63 corrected. `Makefile` has no dot at all; the two ignore files are
+            // dotfiles, whose whole name is the `file_stem` and whose `extension()` is `None`.
+            ("CLAUDE.md", "in corpus: the root instruction file"),
+            ("Makefile", "in corpus: extensionless, reached only by the is_root_file arm"),
+            (".gitignore", "in corpus: a DOTFILE, reached only by the is_root_file arm"),
+            (".claudeignore", "in corpus: a DOTFILE, reached only by the is_root_file arm"),
+            // OUT OF CORPUS, and until review #63 out of it silently. Every one of these shapes
+            // can carry `Per row <KEY>` as a live instruction to the next session.
+            (".claude/hooks/preflight", "out: an extensionless hook, the shape hooks already use"),
+            (".claude/notes.txt", "out: a plain-text note"),
+            (".claude/agents/a.toml", "out: a config the allowlist does not name"),
+            // OUTSIDE THE PATHSPEC ENTIRELY -- must appear in neither vector, or the test cannot
+            // tell "the filter dropped it" from "git never listed it".
+            ("docs/decisions/X.yaml", "outside: docs/** is deliberately not scanned"),
+            ("src/main.rs", "outside: not under any pathspec"),
+        ];
+        for (rel, why) in files {
+            let f = sandbox.join(rel);
+            if let Some(dir) = f.parent() {
+                fs::create_dir_all(dir).expect("mkdir");
+            }
+            // `.gitignore` must ignore NOTHING, or it removes the very files it is here to prove
+            // are scanned. A comment line is inert and still exercises the dotfile path.
+            let body = if *rel == ".gitignore" || *rel == ".claudeignore" {
+                format!("# {}\n", why)
+            } else {
+                format!("Per row RETRIEVAL-QMD-CI, {}.\n", why)
+            };
+            fs::write(&f, body).expect("write fixture file");
+        }
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "fixture"]);
+
+        let (cited, readable, unread, unread_tree, skipped_ext) = claude_citation_corpus(&sandbox);
+        assert!(readable, "git works here and the index is non-empty, so the corpus must report readable");
+        assert!(unread.is_empty() && unread_tree.is_empty(), "every fixture file is present and UTF-8: unread={:?} unread_tree={:?}", unread, unread_tree);
+
+        let mut got: Vec<&str> = skipped_ext.iter().map(|s| s.as_str()).collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            vec![".claude/agents/a.toml", ".claude/hooks/preflight", ".claude/notes.txt"],
+            "the extension filter must REPORT what it drops, and drop only that -- `.gitignore`, `.claudeignore` and `Makefile` reach the corpus through the is_root_file arm and must never appear here (deleting that arm, or believing the comment that once called dotfiles 'extensions', puts them in this list)"
+        );
+
+        // AND THE POSITIVE HALF, because "reported what it dropped" is satisfied by a filter
+        // that drops everything. The six names below are the corpus this rule actually scans.
+        let mut scanned: Vec<&str> = cited.iter().map(|(p, _)| p.as_str()).collect();
+        scanned.sort_unstable();
+        assert_eq!(
+            scanned,
+            vec![
+                ".claude/hooks/h.sh",
+                ".claude/skills/s/SKILL.md",
+                ".claudeignore",
+                ".gitignore",
+                "CLAUDE.md",
+                "Makefile",
+            ],
+            "the in-corpus set must be exactly the allowlisted extensions plus the four named root files -- `docs/**` and `src/**` are outside the pathspec and must reach neither vector"
         );
     }
 
@@ -10504,6 +10652,28 @@ mod decision_ask_and_citations {
             "could not read the corpus pathspecs out of `claude_citation_corpus` -- this test is then vacuous. Got {:?}",
             pathspecs
         );
+        // AND THE SECOND HALF OF THE DESCRIPTION, because comparing pathspecs alone let both
+        // records state the corpus WIDER than the code applies it for three rounds. Under those
+        // pathspecs an EXTENSION ALLOWLIST runs, and neither record mentioned it -- so a reader
+        // learned the rule covers all of `.claude/**` when it covers five extensions of it, and
+        // this test was green throughout. A guard that checks one half of a description cannot
+        // detect the other half overstating; it has to check both halves. (Review #63 of PR #679.)
+        let filter_line = src
+            .split_once(".is_some_and(|e| matches!(e,")
+            .and_then(|(_, rest)| rest.split_once("));"))
+            .map(|(block, _)| block.to_string())
+            .expect("decisions.rs must filter the corpus by an extension `matches!` -- if that moved, re-point this test rather than deleting it");
+        let extensions: Vec<String> = filter_line
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect();
+        assert!(
+            extensions.len() >= 5 && extensions.iter().any(|e| e == "md"),
+            "could not read the extension allowlist out of `claude_citation_corpus` -- the half of this test that closes review #63 is then vacuous. Got {:?}",
+            extensions
+        );
         for (label, rel) in [
             ("the authorizing row", "docs/decisions/RETRIEVAL-QMD-CI.yaml"),
             ("the ADR", "docs/adr/ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md"),
@@ -10516,6 +10686,20 @@ mod decision_ask_and_citations {
                     label, rel, spec
                 );
             }
+            // ONE CONTIGUOUS TOKEN, not five independent `contains`. The first spelling of this
+            // assertion checked each extension separately and was VACUOUS: `.md` occurs in
+            // `SKILL.md`, `.sh` in `decision-lookup.sh`, `.yaml` in `docs/decisions/<KEY>.yaml`,
+            // `.yml` in `ci.yml` -- every record satisfies it while stating no filter at all, and
+            // the plant that deleted the clause stayed GREEN. Shape #6 of `gates.md` §19,
+            // reproduced inside the guard written to close review #63 in the same round it was
+            // written. The joined form is DERIVED from the source list, so adding an extension
+            // reds both records until they are updated.
+            let joined = extensions.iter().map(|e| format!(".{}", e)).collect::<Vec<_>>().join("/");
+            assert!(
+                text.contains(&joined),
+                "{} ({}) does not state the extension allowlist as `{}`. `claude_citation_corpus` filters the pathspecs down to exactly those, and a record naming the pathspecs alone describes the corpus WIDER than the code applies it -- the permissive direction, and the one that reads as coverage the reader does not have. Spell it contiguously: five separate mentions are satisfied by ordinary filenames",
+                label, rel, joined
+            );
         }
     }
 

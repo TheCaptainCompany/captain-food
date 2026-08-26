@@ -634,7 +634,7 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
 /// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
 /// corpus it may judge.
-pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool, Vec<String>, Vec<String>) {
+pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool, Vec<String>, Vec<String>, Vec<String>) {
     let out = match std::process::Command::new("git")
         .args([
             "ls-files",
@@ -658,20 +658,46 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
         // and "did not look" printed identically. The `readable` flag lets the caller say which
         // one happened; the posture is unchanged. (Review #27 of PR #679.)
         Ok(o) if o.status.success() => o.stdout,
-        _ => return (Vec::new(), false, Vec::new(), Vec::new()),
+        _ => return (Vec::new(), false, Vec::new(), Vec::new(), Vec::new()),
     };
     let mut cited = Vec::new();
     let mut unread: Vec<String> = Vec::new();
     let mut unread_tree: Vec<String> = Vec::new();
+    let mut skipped_ext: Vec<String> = Vec::new();
     for rel in String::from_utf8_lossy(&out).split('\0').filter(|s| !s.is_empty()) {
         let tracked_ext = std::path::Path::new(rel)
             .extension()
             .and_then(|x| x.to_str())
             .is_some_and(|e| matches!(e, "md" | "sh" | "json" | "yaml" | "yml"));
         // The root files carry no extension filter -- `Makefile` has none, and `.gitignore` /
-        // `.claudeignore` are extensions rather than stems.
+        // `.claudeignore` are DOTFILES, which `Path::extension` reports as `None` (the whole name
+        // is the `file_stem`). This comment said they "are extensions rather than stems", the exact
+        // opposite, and in the direction that invites a wrong edit: a reader who believes it
+        // concludes the allowlist already covers them and deletes the `is_root_file` arm -- or adds
+        // `"gitignore"`/`"claudeignore"` to the extension list, which matches nothing. Either drops
+        // two files that carry live row citations today, with `make validate` green. (Review #63.)
         let is_root_file = matches!(rel, ".claudeignore" | ".gitignore" | "CLAUDE.md" | "Makefile");
+        // THE FOURTH CORPUS-NARROWING PATH, AND THE LAST SILENT ONE. Every other way a tracked
+        // file leaves this corpus is now reported: `git ls-files` failing sets `readable = false`
+        // (review #27), an unreadable path lands in `unread` (#52), non-UTF-8 in `unread_tree`
+        // (#60). This `continue` was silent, so `make validate` printed an identical green whether
+        // the filter dropped nothing or dropped a `.claude/**` file citing a dead row.
+        //
+        // Not hypothetical in shape: an extensionless hook (`.claude/hooks/preflight`), a `*.txt`
+        // note, a `*.toml`, a `*.mdx` command. Any of them carrying `Per row <DEAD-ROW>, ...` is
+        // invisible -- and that is verbatim the motivating incident this rule exists for
+        // (`decision-lookup.sh`'s `activation_fail` sending a session into
+        // `reconsiders: <superseded row>`), arriving through the one door the rule did not report.
+        //
+        // It was also a records-vs-code divergence `the_records_state_the_same_citation_corpus_as_
+        // the_code` structurally cannot catch: that test asserts the PATHSPECS appear in the
+        // records, and both records state the corpus as `git ls-files` over six paths with NO
+        // filter -- i.e. WIDER than the code applies it, silently and permissively. Counted and
+        // warned now, and TREE-CAUSED so it sits inside the §17 ratchet by round 60's argument:
+        // adding an out-of-corpus `.claude/**` file becomes a deliberate, baseline-moving act.
+        // Zero such files are tracked today, so the warning starts silent. (Review #63.)
         if !(tracked_ext || is_root_file) {
+            skipped_ext.push(rel.to_string());
             continue;
         }
         // TRACKED BUT UNREADABLE IS NOT "CLEAN". `readable` distinguishes "git refused to look"
@@ -716,9 +742,14 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
     // MORE mundane case while the less recoverable one (no `.git` at all) was the one that warned.
     // (Review #61 of PR #679.)
     if cited.is_empty() && unread.is_empty() && unread_tree.is_empty() {
-        return (Vec::new(), false, Vec::new(), Vec::new());
+        // `skipped_ext` SURVIVES this return while the rest is discarded, because here it is the
+        // EXPLANATION for the empty corpus rather than a footnote to it: if git listed files and
+        // every one of them fell outside the allowlist, the reader needs the names to see why the
+        // gate says it could not look. The other vectors are cleared because `readable = false`
+        // already says the scan is not to be trusted. (Review #63.)
+        return (Vec::new(), false, Vec::new(), Vec::new(), skipped_ext);
     }
-    (cited, true, unread, unread_tree)
+    (cited, true, unread, unread_tree, skipped_ext)
 }
 
 /// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
