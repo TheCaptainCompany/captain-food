@@ -254,3 +254,13 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   build therefore never terminates — it is waiting on itself. Cost here: two 10-minute background
   waits that outlived the build they watched. Match on the process name instead (`pgrep -x cargo`,
   `ps -eo comm`), which cannot see the wrapper's arguments.
+
+- **`git stash pop` after a no-op `git stash` pops SOMEONE ELSE'S ENTRY.** Wrapping a command in
+  `git stash` / `git stash pop` is a reflex from a dirty tree; on a CLEAN tree the `stash` is a
+  silent no-op and the `pop` then takes the top of a stack that may belong to another branch or
+  another session. This repo's stash held `HELD: PR670 amendment (founder decision form + C2/C3
+  fixes) — awaiting founder approval`, from a different branch; the pop conflicted, which is the
+  only reason the entry survived — git keeps an entry whose pop failed, and drops one whose pop
+  succeeded. A clean pop would have silently applied held work into an unrelated branch AND deleted
+  it from the stack, with no signal in either direction. **Check `git stash list` before any pop, or
+  simply do not stash**: a clean tree needs no stash, and a dirty one is better committed.

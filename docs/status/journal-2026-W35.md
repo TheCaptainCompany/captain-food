@@ -871,3 +871,29 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > assertions it feeds.** Three rounds of "is this plant pinning what it claims" all pointed at the
 > plant LIST; none pointed at the function building the plants. A mislabelled mutation is
 > indistinguishable from coverage whether the mislabelling is in the entry or in the machinery.
+>
+> **Round 31 — the VERIFICATION RECIPE was written from the intended shape, not from the log.** The
+> body told a reader to *"read its last three lines"* and promised a `RESULT:` line, then
+> `N/N cases accounted for`, then `repo .qmd/ untouched`, plus two `self-verification: OK` lines. What
+> the step actually prints on a green run is **one** line carrying all three clauses — because round
+> 27 folded them into it — and the `self-verification` lines are the **first** line of each gate
+> step, ~54 case lines earlier, with the register-check one in a *different step entirely*. A reader
+> following it literally finds one line where three were promised and no self-verification line, and
+> cannot tell whether the run is wrong or the instruction is.
+>
+> **That is the branch's own thesis one level up**: the paragraph exists *because* four run-id
+> citations went stale, and its replacement was itself unverified against the thing it describes.
+> Checked against a real run this time, and the recipe now names the step, the line position and the
+> exact text. **A verification recipe is a derived claim. It goes stale, and it needs the same
+> antecedent as any other.**
+>
+> Also raised and deliberately NOT applied: `changes` carries no `timeout-minutes`, so a hung
+> `python3` probe holds the pipeline for GitHub's 360-minute default. Real and cheap — and
+> `RETRIEVAL-QMD-CI` authorizes one step and its pin, not other changes to that job, so it went into
+> `GATE-STEP-LOCUS`'s evidence for whoever closes the row rather than into `ci.yml` here.
+>
+> **Operational, and it nearly cost more than the fix: `git stash pop` with nothing stashed popped
+> an UNRELATED entry** — held work from another branch, labelled *awaiting founder approval* — and
+> conflicted. `git stash` is a no-op on a clean tree but `pop` is not; it takes the top of a stack
+> that may not be yours. The entry survived only because the conflict made the pop fail. **Never
+> pair a bare `stash`/`stash pop` around a command: check `git stash list` first, or don't stash.**
