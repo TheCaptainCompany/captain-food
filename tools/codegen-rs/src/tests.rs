@@ -10941,6 +10941,15 @@ mod docs_only_ci_and_legacy_visibility {
     /// to printing `RESULT: n passed` on a host where cases had stopped running -- `claude-review`
     /// found it one screen from the fix. Two stripping policies that must agree WILL diverge, the
     /// same reason the two needle lists were collapsed into one.
+    /// WHAT IT DOES NOT REACH: a TRAILING comment. It drops whole-line comments only, so
+    /// `foo bar   # unset "${!GIT_@}"` still satisfies a needle. The pins that consume it state the
+    /// property as "a copy inside a comment does not count", which is stronger than what this
+    /// delivers -- corrected here rather than left implied (review #19). Closing it properly needs a
+    /// shell tokenizer (a `#` inside a quoted string is not a comment), and the exploit is already
+    /// covered by defence in depth: `the_gate_self_verification_reds_on_a_tampered_script` EXECUTES
+    /// both guards against a tampered fixture, so a block that is present-but-commented fails there
+    /// regardless of what this scan sees. Stating the boundary is the honest instrument; writing a
+    /// tokenizer to make a comment true is not.
     fn shell_code_only(src: &str) -> String {
         src.lines()
             .filter(|l| !l.trim_start().starts_with('#'))
@@ -11348,7 +11357,7 @@ mod docs_only_ci_and_legacy_visibility {
             ] {
                 assert!(
                     src.contains(needle),
-                    "{} is missing the EXECUTABLE `{}` (a copy inside a comment does not count). Without it a step in the `changes` job can overwrite a gate script, or redirect the oracle, and the whole gate reports green.",
+                    "{} is missing the EXECUTABLE `{}` (a copy on its own comment LINE does not count; see `shell_code_only` for the trailing-comment boundary). Without it a step in the `changes` job can overwrite a gate script, or redirect the oracle, and the whole gate reports green.",
                     rel, needle
                 );
             }

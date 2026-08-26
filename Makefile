@@ -39,6 +39,9 @@ help:
 	@echo "         (progress dropped, verdicts never; full log in target/quiet-gate.log)"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
+	@echo "         hooks-test / stub-tests = the two gate-script suites, run with their"
+	@echo "         self-verification opt-out so an edit-and-re-run loop works. CI runs both"
+	@echo "         WITHOUT the opt-out, so a local green here excludes the gate-set comparison."
 
 # Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/README.md.
 # Needs: STRIPE_SECRET_KEY (sk_test) and SUPABASE_SECRET_KEY.

@@ -564,4 +564,30 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `1.` (round 14), `#` (round 19) — and each time the controls were all *same-marker*, so the class
 > was invisible. The lesson is not "add the next marker": it is that **a fixture set drawn from the
 > shape you were thinking about proves only that shape.** Where a rule keys on a lexical feature,
-> the controls have to vary that feature deliberately, not incidentally.**
+> the controls have to vary that feature deliberately, not incidentally.
+>
+> **Round 20 — the same stale citation, a FOURTH time, in the sentence that retracted the third.**
+> The PR body said *"Measured on a GitHub runner, at THIS head: `RESULT: 54 passed, 0 failed` … run
+> X on `<sha>`"*, immediately after a sentence explaining that the PREVIOUS version of that line had
+> cited a run four commits behind and was therefore retracted. It went stale again at the same
+> distance, on the same script, and one of the intervening commits had rewritten the very block the
+> figure was evidence for. **The number was still right — the reviewer re-derived it — so this is a
+> citation defect, not a wrong measurement, which is exactly why it kept surviving.**
+>
+> **The rule, and it is structural rather than a resolution to be more careful: a run id plus a sha
+> pinned in prose goes stale on EVERY subsequent push, by construction.** Four occurrences on one
+> branch is not four lapses of attention; it is a format that cannot hold. The body now cites no run
+> and no sha — it names the check and the invariant (`the latest green `changes` job prints
+> `RESULT: n/n cases accounted for``), which is true at every head and re-derivable by anyone in one
+> click. Where a figure must be pinned to a commit, the pin belongs in something regenerated, never
+> in prose a later push invalidates silently.
+>
+> Also this round, all from the same review: `claude_citation_corpus`'s SCOPE bullet said `.claude/**`
+> while the code applied an undocumented `md|sh|json|yaml|yml` allowlist — latent today, and the
+> precise shape of the two-statements-of-one-scope divergences this file has already retracted twice;
+> `shell_code_only` drops whole-LINE comments only, while the pins consuming it claimed "a copy
+> inside a comment does not count" (boundary stated rather than a shell tokenizer written, since
+> the executed tamper test already covers the exploit); and neither `make help` nor `workflow.md`
+> named `make stub-tests` — the target that exists *because* a default-on block with no interactive
+> entrypoint gets deleted rather than opted out of. Both now also say what those targets do NOT
+> prove: a local green excludes the gate-set comparison, which is the whole point of the opt-out.**

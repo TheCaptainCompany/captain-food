@@ -607,7 +607,13 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// divergence unrepresentable over enumerating the ways it shows up.
 ///
 /// SCOPE, decided rather than defaulted:
-///   * `.claude/**` -- the agent surface.
+///   * `.claude/**` -- the agent surface, FILTERED BY EXTENSION to `md|sh|json|yaml|yml`. The
+///     filter is stated here because it is part of the scope, and this bullet used to say
+///     `.claude/**` flat while the code applied an allowlist the inline comment explained only for
+///     the ROOT files: a `.claude/**` file with no extension, or a `.txt`/`.toml`, sits outside a
+///     rule this section promised covered the whole tree. Nothing tracked under `.claude/` is
+///     excluded today, so it was latent -- which is exactly how the OTHER two-statements-of-one-
+///     scope divergences in this file started (review #19).
 ///   * The root files that carry row references in prose: `.claudeignore` (one of the eight sites
 ///     PR #679 fixed by hand, and NOT under `.claude/`), `.gitignore`, `CLAUDE.md` -- the resident
 ///     index every session loads before anything else -- and the `Makefile`.
