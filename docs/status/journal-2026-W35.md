@@ -1435,3 +1435,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **farley** (this change can stop every merge in the repository), **beck** (nine of ten
 > `can_fingerprint` sites had no control, and round 49's finding had none either), **dba**
 > (`db-test`'s 60-minute cap against a service container).
+>
+> **Round 50 — round 42's fix was the right answer at the wrong scope.** It wrapped all nine cases in
+> `if ! can_fingerprint; then skipped`, and **only one conjunct of each verdict depends on the
+> fingerprint.** Before round 42, on a non-GNU host both substitutions collapsed to the empty string,
+> the comparison held vacuously — **and the behavioural half still ran.** T15b still proved the named
+> python3-absent fallback; T15d/T15f/T15h/T15j/T15k still proved that an unavailable or malformed
+> probe is *not* a corruption verdict, which is the assertion standing between a broken `sqlite3`
+> shim and the wrapper's delete-wholesale path. Skipping the whole case turned *"behaviour proven,
+> hermeticity vacuous"* into **"nothing proven at all"** — on exactly the host the comment above it
+> names, and `make stub-tests` is the entrypoint this PR adds for that host.
+>
+> It was also **two answers to one question in one commit**: twenty lines down, `fingerprint()`
+> returns a sentinel and the headline still prints every verdict with `NOT MEASURED` as a named
+> clause. That is the answer, applied one scope down — `fp_ok` drops only the fingerprint conjunct
+> and the verdict text says `cache hermeticity NOT MEASURED`. Measured with the probe forced false:
+> **0 skips, all 54 cases run, every affected verdict carries the clause, and the headline agrees.**
+> A skip is back to meaning what this file says it means — a setup the host forbids (T15g's non-UTF-8
+> path) — not a missing instrument for one clause of an otherwise constructible case.
+>
+> **And the edit over-applied itself.** The regex that appended the clause reached **T15i**, which has
+> no fingerprint conjunct at all — so on a non-GNU host it would have announced a measurement it
+> never attempts. Shape #2, in the fix for a scope error: a mutation applied where its label does not
+> say. Caught by listing the ten sites and asking which nine were supposed to be there.

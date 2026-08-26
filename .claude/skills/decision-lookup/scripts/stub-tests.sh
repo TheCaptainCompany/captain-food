@@ -222,6 +222,24 @@ skipped() { skip=$((skip+1)); echo "SKIP  $1"; }
 can_fingerprint() {
   command -v md5sum >/dev/null 2>&1 && find . -maxdepth 0 -printf '' >/dev/null 2>&1
 }
+# DROP THE CLAUSE, NOT THE CASE. Round 42 wrapped all nine cases in `if ! can_fingerprint; then
+# skipped`, which is the wrong scope and was measured as such: only ONE conjunct of each verdict
+# depends on the fingerprint. Before round 42, on a non-GNU host both substitutions collapsed to the
+# empty string, the comparison held vacuously -- and THE BEHAVIOURAL HALF STILL RAN. T15b still
+# proved the named python3-absent fallback; T15d/T15f/T15h/T15j/T15k still proved that an
+# unavailable or malformed probe is NOT a corruption verdict, which is the assertion standing
+# between a broken `sqlite3` shim and the wrapper's delete-wholesale path. Skipping the whole case
+# turned "behaviour proven, hermeticity vacuous" into "nothing proven at all", on exactly the host
+# the comment above names -- and `make stub-tests` is the entrypoint this change adds for that host.
+#
+# It was also two answers to one question in one commit: twenty lines down, `fingerprint()` returns
+# a sentinel and the headline still prints every verdict with `NOT MEASURED` as a named clause.
+# This is that answer, applied one scope down. A SKIP is reserved for what this file says a skip is
+# for -- a setup the host forbids (T15g's non-UTF-8 path) -- not for a missing instrument for one
+# clause of an otherwise fully constructible case. (Review #50 of PR #679.)
+fp_ok() { ! can_fingerprint || [ "$1" = "$2" ]; }
+HERM=""
+can_fingerprint || HERM="; cache hermeticity NOT MEASURED (no GNU find -printf / md5sum)"
 
 
 # THE MEASUREMENT MUST DISTINGUISH "unchanged" FROM "could not look" -- the same distinction this
@@ -609,17 +627,15 @@ if [ -z "$BUN_REAL" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ] || [ ! -f "$Q/co
   || env PATH="$S/t15b-bin" /bin/bash -c 'command -v python3' >/dev/null 2>&1; then
   verdict bad "T15b no-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
 else
-  if ! can_fingerprint; then skipped "T15b no-python3 lookup (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(env PATH="$S/t15b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "seed" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
     && echo "$out" | grep -q "openability probe and the strict results parser" \
     && ! echo "$out" | grep -q '^candidate ' \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15b no-python3 lookup: named fallback, healthy cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15b no-python3 lookup: named fallback, healthy cache untouched, exit $rc$HERM" \
     || verdict bad "T15b no-python3 lookup (rc=$rc)"
-  fi
 fi
 
 # T15c the probe is a ZERO-WRITE observer: a garbage index.sqlite-wal planted beside a healthy
@@ -635,15 +651,13 @@ if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] || [ ! -s "$Q/corpus/.qmd/index.sq
   verdict bad "T15c probe read-only (precondition WRAPPER: healthy build failed)"
 else
   printf 'garbage-not-a-wal-header' > "$Q/corpus/.qmd/index.sqlite-wal"
-  if ! can_fingerprint; then skipped "T15c probe is read-only (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15c probe is read-only: planted -wal survives a hit byte-identical" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15c probe is read-only: planted -wal survives a hit byte-identical$HERM" \
     || verdict bad "T15c probe read-only (rc=$rc)"
-  fi
 fi
 
 # T15d probe UNAVAILABLE is not corruption: python3 present but the sqlite3 MODULE missing (a
@@ -662,17 +676,15 @@ if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || PYTHONPATH="$S/t15d-py" python3 -c 'import sqlite3' 2>/dev/null; then
   verdict bad "T15d probe-unavailable (precondition: seeded cache or sqlite3 poisoning failed)"
 else
-  if ! can_fingerprint; then skipped "T15d sqlite3-module-absent (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15d-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && ! echo "$out" | grep -q "qmd unavailable" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc$HERM" \
     || verdict bad "T15d probe-unavailable (rc=$rc)"
-  fi
 fi
 
 # T15e a python3 that RESOLVES but cannot start (broken venv shim, missing libpython) must hit
@@ -690,17 +702,15 @@ if [ -z "$BUN_REAL" ] || [ ! -f "$Q/corpus/.sha" ] \
   || ! ln -s "$(command -v dirname)" "$S/t15e-bin/dirname" 2>/dev/null || [ ! -x "$S/t15e-bin/dirname" ]; then
   verdict bad "T15e broken-python3 lookup (precondition: seeded cache or controlled PATH unavailable)"
 else
-  if ! can_fingerprint; then skipped "T15e broken python3 (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(env PATH="$S/t15e-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
     && ! echo "$out" | grep -q '^candidate ' \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15e broken python3: named preflight fallback, cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15e broken python3: named preflight fallback, cache untouched, exit $rc$HERM" \
     || verdict bad "T15e broken-python3 lookup (rc=$rc)"
-  fi
 fi
 
 # T15f an UNKNOWN probe exit is never a corruption verdict: only exit 1 — the probe's
@@ -716,16 +726,14 @@ if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || PYTHONPATH="$S/t15f-py" python3 -c 'import sqlite3' 2>/dev/null; then
   verdict bad "T15f unknown-probe-exit (precondition: seeded cache or exit-7 poisoning failed)"
 else
-  if ! can_fingerprint; then skipped "T15f unknown probe exit (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15f-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, cache untouched, exit $rc$HERM" \
     || verdict bad "T15f unknown-probe-exit (rc=$rc)"
-  fi
 fi
 
 # T15g URI construction failure is not a verdict: a cache path carrying a non-UTF-8 byte makes
@@ -753,16 +761,14 @@ else
   if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
     verdict bad "T15g non-utf8 path (precondition: seeded build under the non-UTF-8 path failed)"
   else
-    if ! can_fingerprint; then skipped "T15g non-utf8 cache path (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
     fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
     out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
     fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
     [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
       && ! echo "$out" | grep -q "rebuild failed" \
-      && [ "$fp_b" = "$fp_a" ] \
-      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
+      && fp_ok "$fp_b" "$fp_a" \
+      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc$HERM" \
       || verdict bad "T15g non-utf8 path (rc=$rc)"
-    fi
   fi
 fi
 
@@ -785,16 +791,14 @@ except TypeError:
 sys.exit(1)' 2>/dev/null; then
   verdict bad "T15h non-sqlite3 probe exception (precondition: seeded cache or TypeError shim failed)"
 else
-  if ! can_fingerprint; then skipped "T15h call-site TypeError (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15h-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched$HERM" \
     || verdict bad "T15h non-sqlite3 probe exception (rc=$rc)"
-  fi
 fi
 
 # T15j a sqlite3 module WITHOUT an `Error` attribute must not decide a wipe: with a bare
@@ -810,16 +814,14 @@ if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || PYTHONPATH="$S/t15j-py" python3 -c 'import sqlite3, sys; sys.exit(0 if hasattr(sqlite3, "Error") else 1)' 2>/dev/null; then
   verdict bad "T15j sqlite3 without Error (precondition: seeded cache or attribute-less shim failed)"
 else
-  if ! can_fingerprint; then skipped "T15j sqlite3 module without Error (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15j-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15j sqlite3 module without Error: not a verdict, cache untouched" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15j sqlite3 module without Error: not a verdict, cache untouched$HERM" \
     || verdict bad "T15j sqlite3 without Error (rc=$rc)"
-  fi
 fi
 
 # T15k an Error attribute that is PRESENT BUT NOT A CLASS must not decide a wipe either: with a
@@ -835,16 +837,14 @@ if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] \
   || ! PYTHONPATH="$S/t15k-py" python3 -c 'import sqlite3, sys; sys.exit(0 if not isinstance(getattr(sqlite3, "Error", ()), type) else 1)' 2>/dev/null; then
   verdict bad "T15k malformed Error attribute (precondition: seeded cache or non-class Error shim failed)"
 else
-  if ! can_fingerprint; then skipped "T15k Error present but not a class (host: no GNU find -printf / md5sum -- cache hermeticity not measurable)"; else
   fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   out="$(PYTHONPATH="$S/t15k-py" DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15k Error present but not a class: not a verdict, cache untouched" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15k Error present but not a class: not a verdict, cache untouched$HERM" \
     || verdict bad "T15k malformed Error attribute (rc=$rc)"
-  fi
 fi
 
 # T15i the verdict survives interpreter stdout NOISE: a genuinely corrupt index under a
