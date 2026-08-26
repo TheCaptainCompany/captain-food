@@ -70,6 +70,31 @@ pub(crate) type WarningProfile = BTreeMap<String, usize>;
 /// `only_host_dependent_warnings_are_exempt_from_the_ratchet` rather than merely written.
 pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadable"];
 
+/// The kinds whose CONDITION is tree-caused but whose MEASUREMENT is gated on git answering — so on
+/// a run where the citation corpus could not be read they are UNMEASURED, not zero.
+///
+/// This is the trap `RATCHET_EXEMPT` closes, re-entering one kind over. Both of these are
+/// deliberately NOT exempt, on the correct reasoning that non-UTF-8 bytes and an out-of-allowlist
+/// extension fail identically on every host and therefore have a stable value to commit. True of
+/// the condition; false of the emission. Whether they are computed at all depends on
+/// `git ls-files` succeeding — the exact host list `RATCHET_EXEMPT`'s own doc comment names: a
+/// dubious-ownership bind mount, a `git archive` extraction, a container stage with no `.git`.
+///
+/// So once either is legitimately baselined at N>0 — a tracked `.claude/**` file outside the
+/// allowlist, or a committed latin-1 byte accepted with `make warning-baseline` — the next run on
+/// such a host reports 0, the ratchet files it under `better`, and `make validate` exits 1 with
+/// `N -> 0 (kind eliminated)`. Obeying the printed remedy commits a baseline of 0, which then reds
+/// `0 -> N` on every host where git works: a false red AND a trap for the reader who obeys it,
+/// verbatim the sentence above, arriving through the kinds it excluded.
+///
+/// Latent when written (the committed artifact carries neither kind), which is why it is closed
+/// now: it arms itself on a later, unrelated commit, and the run that trips it looks like a
+/// validator regression on a tree nobody touched. The fix is this file's own vocabulary applied one
+/// level down — "did not look" is not "found nothing", so on such a run these kinds are neither
+/// compared nor rewritten. (Review #80 of PR #679.)
+pub(crate) const CORPUS_DERIVED_KINDS: [&str; 2] =
+    ["decision-citation-file-not-utf8", "decision-citation-file-out-of-corpus"];
+
 /// The live profile of a validation run. Takes ALL issues (the spec validator's plus §13 proposal
 /// hygiene, exactly what `checks: N error(s), M warning(s)` counts) and keeps the warnings that
 /// the ratchet governs — see `RATCHET_EXEMPT` for the ones it deliberately does not.
@@ -217,16 +242,34 @@ pub(crate) fn render_baseline_failure(diff: &BaselineDiff, live: &WarningProfile
 /// Load + compare in one step; `Ok(())` means the ratchet holds. A MISSING or malformed artifact is
 /// a gate failure too, not a silent pass — an absent ratchet is exactly the state this section exists
 /// to make impossible.
-pub(crate) fn check_warning_baseline(root: &std::path::Path, live: &WarningProfile) -> Result<(), String> {
+/// `unmeasured` names kinds this run could not count (see `CORPUS_DERIVED_KINDS`). They are carried
+/// forward from the committed artifact rather than compared, so an unmeasured zero cannot read as an
+/// elimination in either direction. Passing an empty slice is the ordinary case.
+pub(crate) fn check_warning_baseline(
+    root: &std::path::Path,
+    live: &WarningProfile,
+    unmeasured: &[&str],
+) -> Result<(), String> {
     let path = root.join(WARNING_BASELINE_PATH);
     let text = fs::read_to_string(&path)
         .map_err(|e| format!("\n✗ cannot read {}: {e}\n  run `make warning-baseline` to (re)create it.\n", path.display()))?;
     let committed = parse_warning_baseline(&text)
         .map_err(|e| format!("\n✗ {}: {e}\n  run `make warning-baseline` to rewrite it.\n", path.display()))?;
-    let diff = diff_warning_baseline(&committed, live);
+    let mut effective = live.clone();
+    for kind in unmeasured {
+        match committed.get(*kind) {
+            Some(n) => {
+                effective.insert((*kind).to_string(), *n);
+            }
+            None => {
+                effective.remove(*kind);
+            }
+        }
+    }
+    let diff = diff_warning_baseline(&committed, &effective);
     if diff.is_clean() {
         Ok(())
     } else {
-        Err(render_baseline_failure(&diff, live))
+        Err(render_baseline_failure(&diff, &effective))
     }
 }

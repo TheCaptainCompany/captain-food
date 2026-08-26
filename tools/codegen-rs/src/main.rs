@@ -58,6 +58,10 @@ fn main() {
     // §17: refresh the committed warning ratchet instead of asserting it (`make warning-baseline`).
     // The ONLY way the artifact changes, so "the number moved" is always a deliberate, reviewable act.
     let write_baseline = args.iter().any(|a| a == "--write-warning-baseline");
+    // Declared at FUNCTION scope on purpose: the §17 ratchet at the bottom needs it, and the walk
+    // that sets it runs inside a nested block several sections up. A corpus the walk could not read
+    // leaves the two tree-caused warning kinds UNMEASURED rather than zero. (Review #80.)
+    let mut corpus_unreadable = false;
     let specs = arg_value(&args, "--specs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("specs"));
@@ -121,6 +125,9 @@ fn main() {
         // supersession in ONE commit and a stale citation is exactly the other half.
         {
             let (cited, readable, unread, unread_tree, skipped_ext) = validate::decisions::claude_citation_corpus(&root);
+            // The §17 ratchet needs this: on an unreadable corpus the two tree-caused kinds below
+            // are UNMEASURED, not zero. See `CORPUS_DERIVED_KINDS`. (Review #80.)
+            corpus_unreadable = !readable;
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
                 //
@@ -347,6 +354,18 @@ fn main() {
             );
             std::process::exit(1);
         }
+        // AND ONLY FROM A HOST THAT COULD MEASURE EVERY KIND. Minting here with the corpus
+        // unreadable bakes a 0 into the artifact for kinds this run never counted -- the same trap
+        // as comparing against it, one step earlier and permanent, because the file is committed.
+        // Same shape as the errors guard above: a baseline is only meaningful for a run that saw
+        // what it is describing. (Review #80.)
+        if corpus_unreadable {
+            eprintln!(
+                "\n✗ refusing to write {} — the superseded-citation corpus was UNREADABLE on this run, so {:?} were not measured.\n  A baseline minted here would commit 0 for kinds this host cannot count, and then red on every host where git works.\n  Fix git (ownership, a missing .git, an unreadable index) and re-run.",
+                WARNING_BASELINE_PATH, CORPUS_DERIVED_KINDS
+            );
+            std::process::exit(1);
+        }
         let path = root.join(WARNING_BASELINE_PATH);
         if let Err(e) = fs::write(&path, render_warning_baseline(&live_profile)) {
             eprintln!("✗ write {}: {}", path.display(), e);
@@ -360,7 +379,9 @@ fn main() {
         );
         return;
     }
-    let baseline_failure = check_warning_baseline(&root, &live_profile).err();
+    // UNMEASURED IS NOT ZERO, one level below where §17 already says so. See `CORPUS_DERIVED_KINDS`.
+    let unmeasured: &[&str] = if corpus_unreadable { &CORPUS_DERIVED_KINDS } else { &[] };
+    let baseline_failure = check_warning_baseline(&root, &live_profile, unmeasured).err();
     if let Some(msg) = &baseline_failure {
         eprint!("{}", msg);
     }

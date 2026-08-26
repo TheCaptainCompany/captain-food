@@ -8467,6 +8467,111 @@ fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
 /// The list is asserted, not merely written: every entry removes a kind from the only gate that
 /// counts warnings, so growing it is a decision. A new entry reds here until it is stated.
 #[test]
+fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
+    // THE TRAP `RATCHET_EXEMPT` CLOSES, RE-ENTERING ONE KIND OVER. `decision-citation-file-not-utf8`
+    // and `-out-of-corpus` are correctly NOT exempt: their CONDITION is tree-caused. But their
+    // MEASUREMENT is gated on `git ls-files` answering, so on a dubious-ownership bind mount, a
+    // `git archive` extraction or a container stage with no `.git` they come back 0 -- and once
+    // either is legitimately baselined at N>0, that 0 reads as `kind eliminated`, exits 1, and the
+    // printed remedy commits a baseline of 0 that then reds on every host where git works.
+    //
+    // Asserted in BOTH directions against a committed baseline that carries the kind, because the
+    // artifact carries neither today: this is latent, arms itself on a later unrelated commit, and
+    // the run that trips it looks like a regression on a tree nobody touched. (Review #80.)
+    let committed: WarningProfile = [
+        ("decision-citation-file-out-of-corpus".to_string(), 2usize),
+        ("command-no-mutation".to_string(), 1usize),
+    ]
+    .into_iter()
+    .collect();
+    // What a run on such a host produces: the corpus kind absent (never counted), the rest normal.
+    let live: WarningProfile = [("command-no-mutation".to_string(), 1usize)].into_iter().collect();
+
+    let unguarded = diff_warning_baseline(&committed, &live);
+    assert!(
+        !unguarded.is_clean(),
+        "the fixture is not exercising anything -- an unmeasured corpus kind must differ from a baselined one, or this test proves nothing about the guard below"
+    );
+    assert!(
+        unguarded.better.iter().any(|d| d.rule == "decision-citation-file-out-of-corpus" && d.live == 0),
+        "the fixture must reproduce the `kind eliminated` shape specifically, not merely some drift. Got {:?}",
+        unguarded.better
+    );
+
+    // The guard: carrying the committed value forward for the unmeasured kind makes the run clean.
+    let mut effective = live.clone();
+    for kind in CORPUS_DERIVED_KINDS {
+        if let Some(n) = committed.get(kind) {
+            effective.insert(kind.to_string(), *n);
+        }
+    }
+    assert!(
+        diff_warning_baseline(&committed, &effective).is_clean(),
+        "carrying an UNMEASURED kind forward must make the ratchet neutral for it -- otherwise a host that cannot read the corpus reds `make validate` on a tree nobody touched, and the printed remedy makes it worse"
+    );
+
+    // AND THE GUARD MUST NOT SWALLOW A REAL MOVE. Same kind, measured, genuinely higher: still red.
+    let real_widening: WarningProfile = [
+        ("decision-citation-file-out-of-corpus".to_string(), 5usize),
+        ("command-no-mutation".to_string(), 1usize),
+    ]
+    .into_iter()
+    .collect();
+    assert!(
+        !diff_warning_baseline(&committed, &real_widening).is_clean(),
+        "the carry-forward is for runs that could not MEASURE the kind; a run that measured it and found more must still red, or the exemption swallows the signal it exists to preserve"
+    );
+
+    // AND THE WIRING, NOT ONLY THE ARITHMETIC. The two assertions above exercise
+    // `diff_warning_baseline` and the constant; deleting the carry-forward from
+    // `check_warning_baseline` -- the function `main.rs` actually calls -- left them both green.
+    // §19 shape #1 in the guard written this round: an assertion held up by the code beside it
+    // rather than by anything that reds when that code is removed. So call the real entry point,
+    // against a throwaway root carrying a real committed artifact. (Review #80.)
+    {
+        let sandbox = std::env::temp_dir().join(format!("cf-ratchet-unmeasured-{}", std::process::id()));
+        let dir = sandbox.join("tools/codegen-rs");
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(&dir).expect("mkdir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+        fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&committed))
+            .expect("write the fixture baseline");
+
+        assert!(
+            check_warning_baseline(&sandbox, &live, &[]).is_err(),
+            "with nothing declared unmeasured, a run that reports 0 for a baselined kind MUST red -- otherwise this fixture cannot tell the guard from its absence"
+        );
+        assert!(
+            check_warning_baseline(&sandbox, &live, &CORPUS_DERIVED_KINDS).is_ok(),
+            "`check_warning_baseline` must carry an unmeasured kind forward from the committed artifact. This is the call `main.rs` makes; the arithmetic being right in `diff_warning_baseline` proves nothing if this function ignores its `unmeasured` argument"
+        );
+    }
+
+    // The two kinds are exactly the corpus-derived ones, and neither is on the exempt list -- the
+    // two mechanisms are complementary and must not be collapsed into one.
+    let mut kinds = CORPUS_DERIVED_KINDS.to_vec();
+    kinds.sort_unstable();
+    assert_eq!(
+        kinds,
+        vec!["decision-citation-file-not-utf8", "decision-citation-file-out-of-corpus"],
+        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on git answering; adding one is a decision, and removing one reopens the `kind eliminated` trap for it"
+    );
+    for k in CORPUS_DERIVED_KINDS {
+        assert!(
+            !RATCHET_EXEMPT.contains(&k),
+            "`{}` is both corpus-derived and ratchet-exempt. These are different mechanisms: exemption says the COUNT has no stable value anywhere, carry-forward says THIS RUN could not take it. Collapsing them drops the kind out of the only gate that counts warnings",
+            k
+        );
+    }
+}
+
+#[test]
 fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
     // AND THE TREE-CAUSED SIBLINGS ARE NOT ON IT. Both report the same OUTCOME as the exempt kind
     // -- a corpus file that went unscanned -- from a DETERMINISTIC cause, so each has a stable
@@ -8638,7 +8743,7 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
         &load_span_source(&root),
     ));
     let live = warning_profile(&issues);
-    if let Err(msg) = check_warning_baseline(&root, &live) {
+    if let Err(msg) = check_warning_baseline(&root, &live, &[]) {
         panic!("{msg}");
     }
 }

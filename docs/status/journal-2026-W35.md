@@ -2359,3 +2359,40 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > bounds only the high side, while every comment argues too-LOW is what cancels a job, reds the
 > required check and does not converge on re-run. `build-test: timeout-minutes: 12` — a dropped zero
 > — passed the pin and every other assertion. Floor added at 5; planted with the dropped zero.
+>
+> **Round 80 — the trap `RATCHET_EXEMPT` closes, re-entering through the two kinds deliberately
+> excluded from it.**
+>
+> `decision-citation-file-not-utf8` and `-out-of-corpus` are correctly **not** exempt: a byte is or
+> is not UTF-8, an extension is or is not on a list. **That is true of the CONDITION and false of the
+> EMISSION.** Whether they are counted at all is gated on `git ls-files` answering — the exact host
+> list `RATCHET_EXEMPT`'s own doc comment names: a dubious-ownership bind mount, a `git archive`
+> extraction, a container stage with no `.git`.
+>
+> So the first time either is legitimately baselined at N>0 — a tracked `.claude/**` file outside the
+> allowlist, or a committed latin-1 byte accepted with `make warning-baseline` — the next run on such
+> a host reports **0**, the ratchet files it under `better`, and `make validate` exits 1 with
+> `N -> 0 (kind eliminated)`. **Obeying the printed remedy commits a baseline of 0, which then reds
+> `0 -> N` on every host where git works.** A false red *and* a trap for the reader who obeys it —
+> verbatim the sentence in `RATCHET_EXEMPT`'s doc comment, arriving through the kinds it excluded.
+>
+> Closed in this file's own vocabulary one level down: **on a run where the corpus was unreadable
+> those kinds are "did not look", not "found nothing"**, so they are neither compared nor rewritten.
+> `check_warning_baseline` carries the committed value forward for them, and `--write-warning-baseline`
+> **refuses to mint** on such a host — because baking a 0 into a committed artifact is the same trap,
+> one step earlier and permanent.
+>
+> **Latent today** (the artifact carries neither kind), which is exactly why it was worth closing
+> now: it arms itself on a later, unrelated commit, and the run that trips it looks like a validator
+> regression on a tree nobody touched.
+>
+> **And the guard I wrote for it was unpinned in its own round.** The first version asserted the
+> arithmetic (`diff_warning_baseline`) and the constant — deleting the carry-forward from
+> `check_warning_baseline`, the function `main.rs` actually calls, left it **green**. §19 shape #1
+> again, caught only because round 68's rule was followed: **assert the plant applied.** The test now
+> calls the real entry point against a throwaway root with a real committed artifact, and asserts the
+> guard does not swallow a *measured* widening either.
+>
+> **Shape: an exemption is about whether a COUNT has a stable value; a carry-forward is about whether
+> THIS RUN could take it. Collapsing the two drops the kind out of the only gate that counts
+> warnings** — asserted, so the pair cannot be merged by a later refactor.
