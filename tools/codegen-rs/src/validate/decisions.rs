@@ -1472,6 +1472,53 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                             exempt_text.replace_range(lo..hi, &" ".repeat(hi - lo));
                         }
                     }
+                    // AND THE SAME RULE FOR THE PARENTHETICAL ARM, WHICH REOPENED THE CLASS ONE
+                    // SPELLING OVER. The blanking above reaches `last` only -- the token
+                    // immediately before the key. `in_a_citing_parenthetical` finds its citing word
+                    // ANYWHERE in `line[open_paren + 1..at]`, so in
+                    //
+                    //     (superseded_by ADR-20260824-205911, `KEY`)
+                    //
+                    // `cites` is true via the parenthetical arm, `last` is EMPTY (a separator sits
+                    // before the key), `lo == hi`, and the blanking above is a no-op -- leaving
+                    // `superseded_by` in the clause to exempt the very citation it created. Exactly
+                    // review #21's defect, in the arm added after it, which is why the
+                    // `"superseded_by"` entry in `PARENTHETICAL_CITES` could never fire in any
+                    // spelling the `last` arm did not already cover: a decorative list member.
+                    //
+                    // Not a corner case on this chain: `RETRIEVAL-QMD -> RETRIEVAL-QMD-CI` is the
+                    // register's first two-link chain, and the row itself calls "the head is
+                    // superseded later" the next state.
+                    //
+                    // Blanks EVERY list member in the window, not just the ones containing
+                    // "superseded", so adding a future citing word that happens to contain it
+                    // cannot reintroduce this. Same original-slice-before-lowercase order as above,
+                    // for the same non-length-preserving reason. (Review #68 of PR #679.)
+                    if let Some(o) = open_paren.filter(|_| in_a_citing_parenthetical) {
+                        let window = &line[o + 1..at];
+                        let mut tok_start: Option<usize> = None;
+                        for (i, c) in window.char_indices().chain(std::iter::once((window.len(), ' '))) {
+                            let is_word = c.is_ascii_alphanumeric() || c == '_';
+                            match (is_word, tok_start) {
+                                (true, None) => tok_start = Some(i),
+                                (false, Some(st)) => {
+                                    if PARENTHETICAL_CITES.contains(&window[st..i].to_lowercase().as_str()) {
+                                        let lo = (o + 1 + st).saturating_sub(clause_start);
+                                        let hi = (o + 1 + i).saturating_sub(clause_start);
+                                        if lo <= hi
+                                            && hi <= exempt_text.len()
+                                            && exempt_text.is_char_boundary(lo)
+                                            && exempt_text.is_char_boundary(hi)
+                                        {
+                                            exempt_text.replace_range(lo..hi, &" ".repeat(hi - lo));
+                                        }
+                                    }
+                                    tok_start = None;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     let exempt_text = exempt_text.to_lowercase();
                     if exempt_text.contains("superseded") {
                         continue;

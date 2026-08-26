@@ -2018,3 +2018,44 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > ways, plus a vacuity guard asserting the subtree is still tracked at all, without which the
 > assertion passes whether or not the pathspec works. Its failure message names both causes instead
 > of guessing one — the misattribution class round 65 fixed one file over.
+>
+> **Round 68 — the `superseded_by` arm was dead by construction again, in the arm added to fix it
+> being dead by construction.**
+>
+> Review #21 established the rule: **the citing token may not supply its own exemption.**
+> `superseded_by` contains `superseded`, so a clause citing through it exempts itself. That was fixed
+> at the `last`-token arm. **The parenthetical arm, added later, reopened it in the spelling `last`
+> does not cover:**
+>
+> ```
+> (superseded_by ADR-20260824-205911, `OLD-ROW`)
+> ```
+>
+> `cites` fires through `in_a_citing_parenthetical` (which searches the whole window before the key),
+> but `last` is **empty** — a separator sits before the key — so `lo == hi` and the blanking is a
+> no-op. `superseded_by` stays in the clause and exempts the citation it created. Verified missed
+> before the fix. It also meant the `"superseded_by"` entry in `PARENTHETICAL_CITES` **could never
+> fire in any spelling the `last` arm did not already cover** — a decorative list member.
+>
+> Not hypothetical on this chain: `RETRIEVAL-QMD → RETRIEVAL-QMD-CI` is the register's first two-link
+> chain, and the row itself calls *"the head is superseded later"* the next state. Fixed by blanking
+> **every** `PARENTHETICAL_CITES` member in the window — not only the ones containing `superseded`,
+> so a future citing word that happens to contain it cannot reintroduce this.
+>
+> **The bound that matters is the window's upper end, and pinning it took three attempts.** The
+> citing side is before the key; everything after it is explanation and must survive. The first two
+> green controls did not discriminate that (they explain with the bare word `superseded`, not the
+> field spelling). The control that does has a citing word on **both** sides.
+>
+> **And two of those three attempts came back green for a reason that had nothing to do with the
+> code.** The mutation was driven from a shell one-liner whose escaping mangled an `&`, so
+> `str.replace` matched nothing and changed no bytes. A green then reads *identically* to "the guard
+> does not discriminate here" — **and I acted on that inference**, rewriting a control that was fine.
+>
+> **Shape, for [`gates.md` §19](../claude/sessions/gates.md) — sharpening #2 rather than adding a
+> tenth: a plant that does not APPLY is worse than a plant that applies in the wrong place, because
+> it yields a false conclusion about THE CODE rather than a weak one about the test. Assert the plant
+> applied, in the same command that runs it.**
+>
+> The review's second finding (`.claude/loop-budget/**` in the corpus) was already closed in round 67
+> — same conclusion, same pathspec, arrived at independently.

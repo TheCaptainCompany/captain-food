@@ -645,7 +645,12 @@ the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
    watch something go red. Measured: eight assertion families in one helper were each held up by a
    sentence — delete any one and every mutant and control stayed exactly as it was.
 2. **`assert_ne!(mutated, original)` proves a mutation applied, never that it applied where the
-   label says.** `replacen(anchor, .., 1)` rewrites the FIRST match in the whole file, and CI job
+   label says** — and a plant that does not apply *at all* is the sharper version of the same
+   defect, because it yields a false conclusion **about the code** rather than a weak one about the
+   test. A mutation driven from a shell one-liner whose escaping mangled an `&` made `str.replace`
+   match nothing and change no bytes; the test stayed green, which reads identically to "the guard
+   does not discriminate here" — and that inference got acted on, rewriting a control that was
+   fine. **Assert the plant applied, in the same command that runs it.** `replacen(anchor, .., 1)` rewrites the FIRST match in the whole file, and CI job
    bodies are near-identical: one anchor occurred in five jobs, so a plant labelled `build-test …`
    silently mutated `lint`, satisfied `assert_ne!`, and pinned nothing.
 3. **A plant that fails for the wrong reason is worse than none** — it reports the guard working

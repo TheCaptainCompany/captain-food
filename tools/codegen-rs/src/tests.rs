@@ -10137,6 +10137,20 @@ mod decision_ask_and_citations {
             // live instruction and `make validate` was green. Verified missed before the fix.
             // A GFM table row is one physical line by grammar, so treating it as its own unit
             // cannot collide with review #13's hard-wrap case. (Review #64.)
+            // THE PARENTHETICAL ARM'S OWN DEAD-BY-CONSTRUCTION CASE. `cites` fires through
+            // `in_a_citing_parenthetical`, but `last` is EMPTY (a separator precedes the key), so
+            // the `last`-scoped blanking is a no-op and `superseded_by` -- the citing token itself
+            // -- was left in the clause to exempt the citation it created. Review #21's defect
+            // inside the arm added after it, which is why `"superseded_by"` in
+            // `PARENTHETICAL_CITES` could never fire in any spelling the `last` arm did not already
+            // cover. Verified missed before the fix. (Review #68.)
+            (
+                "a parenthetical whose citing token is superseded_by",
+                "(superseded_by ADR-20260824-205911, `OLD-ROW`)",
+            ),
+            // The plain field spelling, which the `last` arm covers -- kept beside it so the two
+            // are visibly different paths rather than assumed to be one.
+            ("a parenthetical superseded_by with no separator", "(superseded_by `OLD-ROW`)"),
             (
                 "an adjacent table row supplying the exemption word",
                 "| `OLD-ROW` | superseded | replaced by the chain head |\n| next | Per row `OLD-ROW`, open a reversal decision |",
@@ -10312,6 +10326,49 @@ mod decision_ask_and_citations {
             // `opens_a_parenthetical` used to accept ANY `(` or `[`, which made a markdown link's
             // TEXT and an ordinary parenthetical mention into hard `make validate` errors with
             // rewording as the only escape -- on `CLAUDE.md` among others (review #16).
+            // THE BLANKING MUST NOT EAT THE EXPLANATION. Review #68 blanks every
+            // `PARENTHETICAL_CITES` member found BEFORE the key inside the enclosing parenthetical;
+            // an exemption that sits AFTER the key is untouched, which is where honest prose puts
+            // it. Both spellings pinned, because "I only blanked the citing side" is exactly the
+            // claim a later refactor widens.
+            (
+                "a citing parenthetical whose explanation follows the key",
+                "(see `OLD-ROW`, superseded by the chain head)",
+            ),
+            (
+                "a superseded_by parenthetical that also explains itself",
+                "(superseded_by ADR-1, `OLD-ROW` -- itself superseded since)",
+            ),
+            // THE CASE THAT PINS THE WINDOW'S UPPER BOUND, and the reason it exists: the first
+            // two green controls above did NOT discriminate it. Widening the blanking window from
+            // `at` to `clause_end` left them both green, because they explain with the bare word
+            // `superseded`, which is not a `PARENTHETICAL_CITES` member. This one explains with the
+            // FIELD spelling AFTER the key -- a `.claude/**` file mirroring a row's fields, which
+            // is the shape the whole `superseded_by` arm exists for -- so widening the window eats
+            // its exemption and reds honest prose. The citing side is before the key; everything
+            // after it is explanation and must survive. (Review #68.)
+            (
+                "a field-spelling explanation AFTER the key",
+                "(`OLD-ROW`, superseded_by ADR-20260824-205911)",
+            ),
+            // AND THE ONE THAT ACTUALLY PINS THE WINDOW'S UPPER BOUND. The case above does not:
+            // with no citing word BEFORE the key, `in_a_citing_parenthetical` is false, the
+            // blanking block never runs, and widening its window changes nothing there. This
+            // spelling has a citing word on BOTH sides -- `see` before the key arms the block, the
+            // field-spelling exemption after it must survive -- so widening the window to
+            // `clause_end` reds it. Verified by applying that mutation, not by reading.
+            //
+            // Worth the note because the first two attempts at this plant came back green for a
+            // reason that had nothing to do with the code: the mutation was driven from a shell
+            // one-liner whose escaping mangled the `&`, so `str.replace` matched nothing and
+            // silently changed no bytes. That reads exactly like "the guard does not discriminate"
+            // -- and it is worse than §19 shape #2, because a plant that fails to APPLY yields a
+            // false conclusion ABOUT THE CODE, which then gets acted on. A plant must assert it
+            // applied. (Review #68.)
+            (
+                "a citing parenthetical explained with the field spelling after the key",
+                "(see `OLD-ROW`, superseded_by ADR-20260824-205911)",
+            ),
             ("a bare parenthetical mention", "(OLD-ROW was the first attempt)"),
             ("a bracket that is not a citation", "[OLD-ROW] in the old numbering"),
             ("a markdown link's TEXT", "see [OLD-ROW] for the history of this decision"),
