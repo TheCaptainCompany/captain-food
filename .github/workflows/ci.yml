@@ -62,8 +62,8 @@ jobs:
     # shell and a shallow diff), so it bounds a HANG AND NOTHING ELSE -- the multiplier this line
     # used to state was a bare derived number, and review #45 measured it as ~43x where the line
     # said ~30x. Right in the conservative direction and still the shape ADR-20260817-105845
-    # governs, so the figure is gone rather than corrected. --
-    # say that out loud, because the far likelier event is a RED, and a red has the SAME blast
+    # governs, so the figure is gone rather than corrected. And what the cap DOES cover is worth
+    # saying out loud, because the far likelier event is a RED, and a red has the SAME blast
     # radius: `changes` fails, all five downstream jobs are skipped, `codegen` reds on
     # `needs.*.result`, nothing merges. The timeout turns a six-hour worst case into ten minutes and
     # does nothing at all for the case where the suite runs to completion and fails. That case is

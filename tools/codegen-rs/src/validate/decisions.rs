@@ -1217,8 +1217,21 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     // So the exempting word is looked for in the clause with the citing token
                     // blanked out: an explanation still exempts, a field name no longer exempts
                     // itself.
+                    // BLANK ON THE ORIGINAL SLICE, LOWERCASE AFTER. `lo`/`hi` are offsets into
+                    // `line`, and the first version applied them to `line[..].to_lowercase()` --
+                    // but Unicode lowercasing is NOT length-preserving (`ẞ` U+1E9E is 3 bytes and
+                    // lowercases to `ß` at 2; `İ` U+0130 is 2 and lowercases to `i̇` at 3), so one
+                    // such character anywhere before the citing token shifts every later offset.
+                    // `is_char_boundary` stops the panic and nothing else, so the blanking lands in
+                    // the wrong place or is skipped, SILENTLY -- and the permissive direction is
+                    // the one that bites: the guard is skipped, `superseded_by` is left intact, and
+                    // the arm this whole block exists to resurrect goes dead by construction again
+                    // (review #21's defect, reopened). Latent on today's ASCII-plus-em-dash corpus,
+                    // but the corpus includes `CLAUDE.md` and `.claude/**` prose by design, and no
+                    // control put a length-changing character before the token. Doing it in this
+                    // order makes the class unrepresentable rather than guarded. (Review #49.)
                     let token_start = before.len().saturating_sub(last.len());
-                    let mut exempt_text = line[clause_start..clause_end].to_lowercase();
+                    let mut exempt_text = line[clause_start..clause_end].to_string();
                     if token_start >= clause_start && before.len() <= clause_end {
                         let lo = token_start - clause_start;
                         let hi = before.len() - clause_start;
@@ -1226,6 +1239,7 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                             exempt_text.replace_range(lo..hi, &" ".repeat(hi - lo));
                         }
                     }
+                    let exempt_text = exempt_text.to_lowercase();
                     if exempt_text.contains("superseded") {
                         continue;
                     }

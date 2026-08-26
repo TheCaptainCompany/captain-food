@@ -9979,6 +9979,25 @@ mod decision_ask_and_citations {
             // recurring in the arm added to satisfy it (review #21).
             ("reconsiders field", "reconsiders: OLD-ROW"),
             ("superseded_by field naming a row that is ITSELF superseded", "superseded_by: OLD-ROW"),
+            // THE SAME ARM, WITH A LENGTH-CHANGING CHARACTER BEFORE THE TOKEN. `ẞ` (U+1E9E, 3
+            // bytes) lowercases to `ß` (2), so applying `line`-relative offsets to a lowercased
+            // copy shifted the blanking by one byte and it was skipped -- leaving `superseded_by`
+            // intact in the exempt text, which exempts itself and makes the arm dead by
+            // construction all over again (review #21's defect, reopened). No control in this set
+            // put such a character before the citing token, which is why the class was invisible.
+            // (Review #49.)
+            // THE SAME ARM, WITH LENGTH-CHANGING CHARACTERS BEFORE THE TOKEN. `İ` (U+0130, 2
+            // bytes) lowercases to `i̇` (3), so `line`-relative offsets applied to a lowercased copy
+            // drift by one byte per occurrence. TWO of them are needed: with one, the drifted
+            // offset still lands on a char boundary and the blanking merely lands beside the token,
+            // which reds for the wrong reason -- with two it lands INSIDE the combining mark,
+            // `is_char_boundary` fails, the blanking is SKIPPED, `superseded_by` exempts itself and
+            // the citation goes GREEN. That is the permissive direction, and it is review #21's
+            // "arm dead by construction" reopened. `ẞ`→`ß` (3→2) drifts the other way and does not
+            // reach the skip, so it is not the fixture even though it is the more obvious one --
+            // this control was found by trying six spellings against both implementations, not by
+            // reasoning about one. (Review #49.)
+            ("superseded_by after two length-changing capitals", "İİ superseded_by: OLD-ROW"),
             ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
             // THE ENVELOPE FORMAT this repo mandates, enforced by register-check.sh as
             // `ENVELOPE='Decision row:'`. A trailing colon killed the match, so the most

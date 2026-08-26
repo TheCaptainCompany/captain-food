@@ -1395,3 +1395,43 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > status — that fixture has no `.claude/settings.json` and no wrapper, so both guards exit non-zero
 > for unrelated reasons. **A green assertion that proves less than it reads as is how the next one
 > gets written**, so it now says so.
+>
+> **Round 49 — the one finding in twelve rounds that changes behaviour, and it was latent.**
+> `exempt_text` computed byte offsets from `line` and applied them to `line[..].to_lowercase()`.
+> **Unicode lowercasing is not length-preserving** (`ẞ` U+1E9E is 3 bytes → `ß` at 2; `İ` U+0130 is 2
+> → `i̇` at 3), so one such character before the citing token drifts every later offset.
+> `is_char_boundary` stops the panic and nothing else: the blanking lands beside the token, or is
+> skipped. **The skip is the direction that bites** — `superseded_by` is left intact, exempts itself,
+> and the arm that whole block exists to resurrect is dead by construction again. That is review
+> #21's defect reopened, and this change creates the register's **first two-link chain**, so "the
+> successor is superseded later" is the next state, not a corner case.
+>
+> Fixed by ordering: blank on the original slice, lowercase after — **unrepresentable rather than
+> guarded**. And the control that proves it took six spellings to find: with ONE `İ` the drifted
+> offset still lands on a char boundary and the blanking merely misses beside the token, which reds
+> for the wrong reason; **two** put it inside the combining mark, `is_char_boundary` fails, the
+> blanking is skipped, and the citation goes green. `ẞ` drifts the other way and never reaches the
+> skip — the obvious fixture is not the discriminating one. Found by trying candidates against both
+> implementations, not by reasoning about one.
+>
+> **Round 49b — `can_fingerprint` was stated twice, in the commit that introduced it.** `fingerprint()`
+> carried its own copy of the same host-capability test. One decides **nine case verdicts**, the other
+> decides the **headline hermeticity clause every record quotes** — so a disagreement is round 42's
+> finding re-created in the other direction: cases printing `cache untouched` under a headline saying
+> `NOT MEASURED`, or the reverse. One statement now.
+>
+> **Round 49c — my round-45 edit left a truncated sentence.** Deleting the multiplier took the clause
+> head with it: *"…gone rather than corrected. --" / "say that out loud, because…"*. In the rationale
+> block for the one line the body defends, on a branch whose thesis is that a comment is a claim a
+> reader can check.
+>
+> **On the owed full-mob briefing, stated plainly rather than left implied.** The review argues the
+> diff is still open, so the briefing that CLAUDE.md's tiebreaker owed could be held now, and that
+> merging with the correction open converts a recoverable process miss into precedent. That is
+> right. **This session cannot hold it** — it is operating under an explicit constraint against
+> convening the lens agents — so the correction stays open and this line is the record of why, not a
+> disagreement with the argument. It is a decision-queue item for the founder or for whoever runs the
+> next session on this surface, and the lenses whose absence is load-bearing were named by the review:
+> **farley** (this change can stop every merge in the repository), **beck** (nine of ten
+> `can_fingerprint` sites had no control, and round 49's finding had none either), **dba**
+> (`db-test`'s 60-minute cap against a service container).

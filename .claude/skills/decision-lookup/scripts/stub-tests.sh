@@ -241,7 +241,13 @@ can_fingerprint() {
 # quote that line as the evidence, and round 22 moved this verdict ABOVE `RESULT:` precisely so it
 # cannot be green over a violation. (Review #36 of PR #679.)
 fingerprint() { # the real cache must be untouched by this suite, whether present or absent
-  if ! command -v md5sum >/dev/null 2>&1 || ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
+  # ONE STATEMENT OF THE PREDICATE. This line carried its own copy of `can_fingerprint`'s test, in
+  # the same commit that introduced `can_fingerprint` -- two statements of one thing, which is the
+  # divergence class this branch retracts five times elsewhere. They decide different things (that
+  # one gates NINE case verdicts, this one gates the headline hermeticity clause every record
+  # quotes), so a disagreement is review #42's finding re-created in the other direction: cases
+  # printing `cache untouched` under a headline saying `NOT MEASURED`, or the reverse. (Review #49.)
+  if ! can_fingerprint; then
     echo unmeasurable
     return
   fi
