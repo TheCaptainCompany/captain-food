@@ -1313,3 +1313,29 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > *"no blocking correctness defect found"*, `HOLD: human` correctly declared, and the stated evidence
 > re-derived independently on the head (both gate steps' `self-verification: OK`, and
 > `54/54 cases accounted for`).
+>
+> **Round 46 — of the three routes the V3 header calls "closed, each because a review demonstrated
+> it", one was pinned by nothing.** `unset -f` (a `git` shell function) has a needle; `unset
+> "${!GIT_@}"` (the `GIT_DIR` decoy) has a needle *and* a behavioural plant; **the PATH shim had
+> neither.** Rewriting `_git="$(PATH="$_vpath" command -v git || true)"` to
+> `_git="$(command -v git || true)"` and deleting the `_vpath` line left `cargo test --workspace`
+> entirely green. `env_ok`'s `PATH` ban does not reach it — that ban is about `ci.yml`, and the
+> header scopes `_vpath` to an **inherited** environment (a composite action, a runner image, a local
+> invocation), which is the case `env_ok` structurally cannot see. Shape #1 in the needle list
+> written to close it, on the one route of the trio whose defence is a **value** rather than a
+> statement.
+>
+> **And my plant for it reproduced shape #3 twice before it was worth anything.** Version one used a
+> `#!/bin/sh\nexit 0` shim: with `_vpath` gone the guard still redded — an oracle that returns
+> *nothing* is caught by the empty-oid refusal, not by `_vpath`. Version two made the shim a faithful
+> attack (delegate to the real git, but answer `rev-parse <ref>:<path>` with the **worktree** file's
+> hash, so committed and live agree over the tamper) and **still** measured green, because the
+> assertion was `!out.status.success()` — and `stub-tests.sh` in that fixture exits non-zero anyway,
+> having no wrapper for its 54 cases. The assertion had never been about the shim.
+>
+> Version three asserts the **verdict** (`self-verification: OK` absent, `differs from the committed
+> blob` present), which is what the sibling cases beside it already read. Measured: delete `_vpath`
+> from both scripts and drop the two new needles, and the guard prints `self-verification: OK` over a
+> visibly tampered file while the test reds by name. **The rule: a plant against a defence-in-depth
+> value has to be checked against the state where only that value is missing** — anything else is
+> measuring the guard next door.

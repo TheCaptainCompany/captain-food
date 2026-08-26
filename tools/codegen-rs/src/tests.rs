@@ -12462,11 +12462,26 @@ mod docs_only_ci_and_legacy_visibility {
             // core.autocrlf checkout. It is object-id against object-id now, `hash-object` running
             // the same clean filter git runs on commit, and `cmp` is gone entirely -- a required
             // binary nothing called could only produce a false refusal.
+            // THE THIRD ROUTE THE HEADER CLAIMS CLOSED HAD NEITHER A NEEDLE NOR A PLANT. Both
+            // scripts' V3 header names three demonstrated routes: a `git` shell function (closed by
+            // `unset -f`), a PATH shim (closed by the fixed `_vpath`), and `GIT_DIR` at a decoy
+            // repo (closed by `unset "${!GIT_@}"`). Routes 1 and 3 were pinned here, and route 3
+            // is exercised behaviourally by the decoy block below. Route 2 was pinned by NOTHING:
+            // rewriting `_git="$(PATH="$_vpath" command -v git || true)"` to
+            // `_git="$(command -v git || true)"` and deleting the `_vpath` line left
+            // `cargo test --workspace` entirely green. `env_ok`'s `PATH` ban does not cover it --
+            // that is about `ci.yml`, and the header scopes `_vpath` to an INHERITED environment
+            // (a composite action, a runner image, a local invocation), which is the case `env_ok`
+            // structurally cannot see. It is the separation this file already makes for `GIT_*`.
+            // §19 shape #1, in the needle list written to close it, on the one route of the trio
+            // whose defence is a VALUE rather than a statement. (Review #46 of PR #679.)
             for needle in [
                 "hash-object --no-filters",
                 "rev-parse -q --verify \"${_ref}:$rel\"",
                 "unset -f git tr command",
                 "unset \"${!GIT_@}\"",
+                "PATH=\"$_vpath\" command -v git",
+                "_vpath=\"/usr/bin:/bin:/usr/local/bin\"",
             ] {
                 assert!(
                     src.contains(needle),
@@ -12731,6 +12746,88 @@ mod docs_only_ci_and_legacy_visibility {
                 out.status.code(), combined
             );
             fs::write(&target, original).expect("restore");
+        }
+
+        // ROUTE 2 OF THE THREE THE V3 HEADER CLAIMS CLOSED, EXERCISED RATHER THAN ASSERTED.
+        // `unset -f` (route 1) and `unset "${!GIT_@}"` (route 3) were both pinned by a needle, and
+        // route 3 is driven behaviourally by the decoy block above. The PATH shim -- route 2, whose
+        // defence is the fixed `_vpath` VALUE rather than a statement -- had neither until review
+        // #46: deleting `_vpath` and resolving `git` off the ambient PATH left the whole suite
+        // green. `env_ok`'s `PATH` ban does not reach this, because it is about `ci.yml` and the
+        // header scopes `_vpath` to an INHERITED environment.
+        //
+        // The shim here is the real attack in miniature: a `git` earlier on PATH that exits 0 and
+        // prints nothing, so every `rev-parse`/`hash-object` "succeeds" with empty output and a
+        // comparison of two empty strings reports the tampered file as byte-identical. The guard
+        // must red anyway, because it never asks this PATH for git.
+        {
+            // THE SHIM MUST BE THE REAL ATTACK, NOT A BROKEN GIT. The first version of this plant
+            // was `#!/bin/sh\nexit 0`: with `_vpath` deleted the guard still redded, because an
+            // oracle that returns NOTHING is caught by the empty-oid refusal, not by `_vpath`. It
+            // passed for the wrong reason -- §19 shape #3, in the plant added to close shape #1 --
+            // and the measurement said so: deleting `_vpath` from both scripts (and the needles
+            // above) left this case green.
+            //
+            // A shim that wants to hide a tampered file delegates to the real git for everything
+            // except the one question that matters, and answers THAT with the hash of the file on
+            // disk -- so committed and live agree and the guard reports OK over the tamper.
+            let real_git = String::from_utf8_lossy(
+                &std::process::Command::new("sh")
+                    .args(["-c", "command -v git"])
+                    .output()
+                    .expect("locate git")
+                    .stdout,
+            )
+            .trim()
+            .to_string();
+            let shim = tmp.join("shim-bin");
+            fs::create_dir_all(&shim).expect("shim dir");
+            let fake = shim.join("git");
+            fs::write(
+                &fake,
+                format!(
+                    "#!/bin/sh\n\
+                     # Answer `rev-parse -q --verify <ref>:<path>` with the WORKTREE file's hash,\n\
+                     # so the committed oid matches the tampered bytes. Everything else is real.\n\
+                     for a in \"$@\"; do\n\
+                     \x20 case \"$a\" in *:*) p=${{a#*:}}; if [ -f \"$p\" ]; then exec {g} hash-object --no-filters \"$p\"; fi ;; esac\n\
+                     done\n\
+                     exec {g} \"$@\"\n",
+                    g = real_git
+                ),
+            )
+            .expect("write shim");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).expect("chmod shim");
+            }
+            let target = tmp.join(GUARDS[1]);
+            let original = fs::read_to_string(&target).expect("read guard");
+            fs::write(&target, "#!/usr/bin/env bash\nexit 0\n").expect("tamper");
+            let out = guard_cmd(GUARDS[0])
+                .env("PATH", format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default()))
+                .output()
+                .expect("bash");
+            fs::write(&target, original).expect("restore");
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            // ASSERT THE VERDICT, NOT THE EXIT CODE. The first version of this assertion was
+            // `!out.status.success()` -- and `stub-tests.sh` in this fixture exits non-zero anyway,
+            // because the fixture provides no wrapper for its 54 cases. So the assertion held for a
+            // reason that had nothing to do with the shim, and deleting `_vpath` from both scripts
+            // left it green. That is §19 shape #3 landing a SECOND time in the same plant, after
+            // the `exit 0` shim was replaced for the same reason. What distinguishes the two states
+            // is the self-verification VERDICT, which is what the sibling cases above read.
+            assert!(
+                !combined.contains("self-verification: OK")
+                    && combined.contains("differs from the committed blob"),
+                "a `git` shim earlier on PATH -- one that answers the oracle with the WORKTREE file's hash -- made the guard report `self-verification: OK` over a visibly tampered script. The fixed `_vpath` is gone or bypassed, and route 2 of the three the V3 header claims closed is open. Got:\n{}",
+                combined
+            );
         }
 
         // FAIL CLOSED when the oracle names a commit this tree does not have. Found the hard way:
