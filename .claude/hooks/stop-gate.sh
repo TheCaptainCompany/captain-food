@@ -95,8 +95,14 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # blobs and refuses to report otherwise (the overwrite class the eighth review of PR #679 planted
 # green). Editing a hook and re-running is the normal interactive loop, so the two INTERACTIVE
 # callers -- this one and `make hooks-test` -- opt out, visibly and in the repo. CI invokes the
-# script directly and verifies. Those two are the whole list; `assert_gate_script_self_verifies`
-# forbids both opt-out names as CI `env:` keys, so the CI path cannot be talked out of verifying.
+# script directly and verifies. Those two are the whole list. The CI path cannot be talked out of
+# verifying because `env_ok`, inside `assert_pinned_in_changes_job`, forbids both opt-out names as
+# `env:` keys at every scope -- planted red by `both_scopes_reject_execution_altering_env`. This
+# line used to credit `assert_gate_script_self_verifies`, which never opens `ci.yml` at all: it
+# asserts things about the two SHELL SCRIPTS. A maintainer following the wrong name would have
+# found no `env:` handling there and concluded the ban was refactored away -- round 9's own finding
+# ("a comment named a test as the thing preventing the regression; that test did not exist") one
+# file over, in a sentence written after it. (Review #17.)
 step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
 
 # WHEN THE HOOK ITSELF CHANGES: the full guard suite (~2s, hermetic git fixture). Diff-scoped for

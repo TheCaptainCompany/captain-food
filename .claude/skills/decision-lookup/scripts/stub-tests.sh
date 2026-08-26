@@ -865,7 +865,20 @@ else
 fi
 
 echo "----"
-if [ "$skip" -gt 0 ]; then echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability)"; else echo "RESULT: $pass passed, $fail failed"; fi
+# THE COMPLETENESS ARITHMETIC IS COMPUTED BEFORE THE HEADLINE, because the headline is the line
+# everything quotes. `RESULT:` used to print above the check, so an incomplete run emitted
+# `RESULT: 30 passed, 0 failed` and only then `INCOMPLETE: 30 of 54` -- and the PR body, the ADR and
+# RETRIEVAL-QMD-CI's evidence all cite THE `RESULT:` LINE as the measurement. A summary line that
+# can say "0 failed" over a run where two dozen cases never executed is this suite's own thesis
+# turned on itself. It now carries `<accounted>/<EXPECTED_CASES>`, so no quotable line is green on
+# an incomplete run. (Review #17 of PR #679.)
+EXPECTED_CASES=54
+accounted=$((pass + fail + skip))
+if [ "$skip" -gt 0 ]; then
+  echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability) -- $accounted/$EXPECTED_CASES cases accounted for"
+else
+  echo "RESULT: $pass passed, $fail failed -- $accounted/$EXPECTED_CASES cases accounted for"
+fi
 # A verdict that can say "pass" without having asked the question is the defect class this suite
 # exists to catch, so it must not have it itself. `skipped()` is deliberately NOT a failure (see
 # T15g: a hard red on every Mac would train readers to discount reds), but that alone would let a
@@ -874,9 +887,8 @@ if [ "$skip" -gt 0 ]; then echo "RESULT: $pass passed, $fail failed, $skip skipp
 # So the invariant is COMPLETENESS, not passes: every declared case must reach a verdict of some
 # kind. pass + fail + skip == EXPECTED_CASES means no case silently vanished; it stays true when
 # T15g legitimately skips, and it goes false the moment cases stop running at all.
-# Adding or removing a case must move this number in the same diff.
-EXPECTED_CASES=54
-accounted=$((pass + fail + skip))
+# Adding or removing a case must move this number in the same diff. (`EXPECTED_CASES` and
+# `accounted` are set just above the headline, so the headline can carry them.)
 if [ "$accounted" -ne "$EXPECTED_CASES" ]; then
   echo "INCOMPLETE: $accounted of $EXPECTED_CASES declared cases reached a verdict ($pass passed, $fail failed, $skip skipped)."
   echo "  Cases stopped running rather than failing — the harness broke, or EXPECTED_CASES is stale."

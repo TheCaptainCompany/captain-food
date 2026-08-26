@@ -10682,6 +10682,28 @@ mod docs_only_ci_and_legacy_visibility {
             if let Some(steps) = bt.get("steps").and_then(|s| s.as_sequence()) {
                 for st in steps {
                     env_ok(st, "a `build-test` step's");
+                    // `env_ok` READS THE `env:` MAPPING; it cannot see a variable EXPORTED AT
+                    // RUNTIME. Two lines with no `env:` key anywhere --
+                    // `run: echo "PATH=/tmp/shim:$PATH" >> "$GITHUB_ENV"` (or `LD_PRELOAD=`,
+                    // `BASH_ENV=`) placed before `cargo test --workspace` -- put every pin in this
+                    // file under an attacker-chosen environment, with `changes` green and `codegen`
+                    // aggregating green. That is mutants twelve and thirteen arriving through a
+                    // door the `changes` scan already closes, and unlike the residual named below
+                    // it IS reachable by a YAML scan, so "banning the path is the enumeration
+                    // instrument" does not excuse leaving it open. Both names are single
+                    // unambiguous strings and no `build-test` step mentions either today.
+                    //
+                    // A future step that legitimately computes a value into `GITHUB_ENV` will red
+                    // here. That is deliberate: it makes widening this job's environment a stated
+                    // decision rather than a silent one. (Review #17 of PR #679.)
+                    let rendered = serde_yaml::to_string(st).unwrap_or_default();
+                    for needle in ["GITHUB_ENV", "GITHUB_PATH"] {
+                        assert!(
+                            !rendered.contains(needle),
+                            "a `build-test` step writes `{}` -- that exports into every LATER step, including the `cargo test` that runs {}, so it can poison the pins' own environment without any `env:` key for `env_ok` to see",
+                            needle, what
+                        );
+                    }
                     // A decoy checkout in build-test swaps the tree the pins are read from.
                     if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout")) {
                         for key in ["repository", "ref"] {
@@ -10803,8 +10825,13 @@ mod docs_only_ci_and_legacy_visibility {
         //   is a code review's job, and always was.
         // - NAMED RESIDUAL, `build-test`'s STEPS. Review #12 pointed out that everything here
         //   bounds `changes` while nothing bounded the job the pins RUN in. Its `env:` and
-        //   `defaults.run` are now guarded at job and step scope, and a decoy checkout there is
-        //   rejected -- but a `build-test` step that REWRITES `tools/codegen-rs/src/tests.rs`
+        //   `defaults.run` are now guarded at job and step scope, a decoy checkout there is
+        //   rejected, and no step may write `GITHUB_ENV`/`GITHUB_PATH` (review #17: `env_ok` reads
+        //   the `env:` MAPPING and cannot see a runtime export, so that door was open at
+        //   `build-test` while the `changes` scan already closed it). THIS LIST IS THE ROUTES
+        //   CLOSED, NOT A CLAIM THAT NO OTHERS EXIST -- an earlier version enumerated exactly one
+        //   remaining route, which reads as completeness. What remains is a `build-test` step that
+        //   REWRITES `tools/codegen-rs/src/tests.rs`
         //   before `cargo test` is not closed and cannot be by a YAML scan: banning the path is
         //   the enumeration instrument this file has retracted three times, and it would red
         //   ordinary work (`cargo test --manifest-path tools/codegen-rs/Cargo.toml` names it).
@@ -11101,6 +11128,13 @@ mod docs_only_ci_and_legacy_visibility {
             ("build-test checkout re-points repository", in_job("build-test",
                 "      - uses: actions/checkout@v5\n",
                 "      - uses: actions/checkout@v5\n        with:\n          repository: someone/else\n")),
+            // The runtime-export door `env_ok` structurally cannot see (review #17).
+            ("build-test step exports through GITHUB_ENV", in_job("build-test",
+                "      - uses: dtolnay/rust-toolchain@stable\n",
+                "      - run: echo \"LD_PRELOAD=/tmp/x.so\" >> \"$GITHUB_ENV\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
+            ("build-test step prepends through GITHUB_PATH", in_job("build-test",
+                "      - uses: dtolnay/rust-toolchain@stable\n",
+                "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
             // The oracle's OTHER config route: global config -> core.attributesFile -> a
             // filter.<x>.clean driver that re-emits the committed blob (review #15).
             ("job XDG_CONFIG_HOME", at_job("XDG_CONFIG_HOME: /tmp/x")),
@@ -11227,7 +11261,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 45 && must_stay_green.len() >= 12,
+            must_red.len() >= 47 && must_stay_green.len() >= 12,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

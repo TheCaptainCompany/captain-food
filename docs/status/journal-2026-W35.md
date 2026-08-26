@@ -513,4 +513,33 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > it now requires exactly that, and `[` is dropped entirely: a link's TARGET is a path, which the
 > `docs/decisions/<KEY>.yaml` arm reaches with the right semantics, and its TEXT is not a citation.
 > Three green controls added; **no control covered either spelling, which is the third time in this
-> chain that a class was invisible because the fixtures did not contain it.**
+> chain that a class was invisible because the fixtures did not contain it.
+>
+> **Round 18 — `env_ok` reads a MAPPING and cannot see a runtime export.** `build-test`'s `env:` was
+> guarded at job and step scope from round 12, but two lines with no `env:` key anywhere —
+> `run: echo "LD_PRELOAD=/tmp/x.so" >> "$GITHUB_ENV"` before `cargo test --workspace` — put **every
+> pin in the file** under an attacker-chosen environment with `changes` green and `codegen`
+> aggregating green. The `changes` job already banned any non-gate step from *mentioning*
+> `GITHUB_ENV`/`GITHUB_PATH`; `build-test`, the job that actually runs the pins, did not. Closed,
+> with two plants. **The generalisable shape: a guard that inspects DECLARED configuration is blind
+> to the same thing done imperatively, and the two scopes will not notice they disagree.**
+>
+> **The residual paragraph was a completeness claim again.** It enumerated exactly one remaining
+> `build-test` route, which reads as "and no others" — the shape ADR-20260817-105845 exists to stop,
+> and the reason this round found a second one. It now says it is *the routes closed, not a claim
+> that no others exist*.
+>
+> **The quotable evidence line could be green over an incomplete run.** `RESULT: n passed, 0 failed`
+> printed BEFORE the completeness check, so a run where two dozen cases never executed emitted a
+> clean-looking headline and only then `INCOMPLETE: 30 of 54` — and the PR body, the ADR and
+> `RETRIEVAL-QMD-CI`'s evidence all cite **the `RESULT:` line** as the measurement. This suite's own
+> thesis turned on itself. The headline now carries `<accounted>/<EXPECTED_CASES>`, so no quotable
+> line can be green on an incomplete run.
+>
+> **A comment credited a test that never opens the file it was credited for.**
+> `stop-gate.sh` said `assert_gate_script_self_verifies` forbids the opt-out names as CI `env:` keys;
+> that test asserts things about the two SHELL SCRIPTS and reads no workflow at all — the ban lives
+> in `env_ok` inside `assert_pinned_in_changes_job`. A maintainer following the name would have
+> found no `env:` handling and concluded the ban was refactored away. **Round 9's own finding — "a
+> comment named a test as the thing preventing the regression; that test did not exist" — recurring
+> one file over, in a sentence written after it.****
