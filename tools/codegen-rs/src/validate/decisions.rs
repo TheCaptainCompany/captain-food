@@ -1369,11 +1369,27 @@ pub(crate) fn emit_decisions_index(rows: &[DecisionRow], legacy_count: usize) ->
         // of the reader's next moves illegal: `reconsiders:` at a superseded row is rejected, and
         // so is citing it under `.claude/**`. Pointed out on PR #679; the data is already on the
         // row and `validate_decision_rows` guarantees it resolves.
+        //
+        // AND IT MUST NOT DROP THE DECIDING RECORD WHILE DOING SO. The first version REPLACED the
+        // `decided_by` arrow with the successor, which routed the reader correctly and deleted the
+        // only index reference to the predecessor's deciding record. For this chain that record is
+        // `PROP-20260822-171212` -- the option-space authority for the whole thing, rewritten in
+        // this same change to name the head -- and after the replacement it appeared NOWHERE in
+        // the register index. The routing argument justifies naming the successor FIRST, not
+        // dropping the record: a superseded ROW is a dead end (its `reconsiders:` is rejected and
+        // citing it under `.claude/**` is gate-rejected), but its deciding RECORD stays readable
+        // and is often the live design document. Both, successor first. (Review #42 of PR #679.)
         let question = match (closing.is_empty(), r.get("superseded_by")) {
-            (_, Some(head)) if status == "superseded" => format!(
+            (true, Some(head)) if status == "superseded" => format!(
                 "{} -> superseded by `{}`",
                 r.get("question").unwrap_or(""),
                 head
+            ),
+            (false, Some(head)) if status == "superseded" => format!(
+                "{} -> superseded by `{}` (decided by {})",
+                r.get("question").unwrap_or(""),
+                head,
+                closing
             ),
             (true, _) => r.get("question").unwrap_or("").to_string(),
             (false, _) => format!("{} -> {}", r.get("question").unwrap_or(""), closing),

@@ -1219,3 +1219,32 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > fail, `changes` fails, every sibling job skips and the required check reds — but that is
 > `actions/checkout`'s behaviour in *every* job in this workflow, not something the pin introduced,
 > and `GATE-STEP-LOCUS` option (a) is what bounds it. Recorded rather than patched.
+>
+> **Round 42 — round 36's hermeticity fix reached one site out of ten.** `fingerprint()` learned to
+> say `NOT MEASURED`; the identical GNU-only construct survived at **nine case sites** (T15b–T15h,
+> T15j, T15k), where `find -printf` and `md5sum` failures are swallowed by `2>/dev/null` and **both**
+> substitutions collapse to the empty string, so `[ "$fp_b" = "$fp_a" ]` holds unconditionally. And
+> there it is not a headline clause but **the verdict itself** — the clause each case name advertises
+> (*"… cache untouched"*). Nine cases printed `PASS` having measured nothing. Same file, same commit,
+> the half-applied sweep this branch keeps landing.
+>
+> The cases now `skipped()` on a `can_fingerprint` probe rather than passing, so the completeness
+> arithmetic stays balanced and the loss is loud: forced false, the suite prints
+> `45 passed, 0 failed, 9 skipped (host capability) -- 54/54 cases accounted for`. **CI is Linux, so
+> none of this ever skips there** — which is exactly why the class was invisible.
+>
+> **Round 42b — `step_shell_ok` was applied to four jobs and not to the one the helper is named
+> for.** Review #23 added it for `changes` and it ended up on `build-test`, `specs`, `docs-validate`
+> and `codegen` only. **Not exploitable today, and the reason matters**: the gate steps are key-set
+> locked so they cannot carry `shell:`, and on `detect` a script-dropping shell means
+> `$GITHUB_OUTPUT` is never written, `docs_only` is empty, and `!= 'true'` runs the FULL gate —
+> fail-open. But that property lives in `ci.yml`, not in the pin, and `GATE-STEP-LOCUS` option (a) is
+> precisely the change that would make a `changes` output consumed fail-CLOSED. Closed, with a plant.
+>
+> **Round 42c — the superseded row's index arrow deleted the option-space authority from the
+> register.** Replacing `-> {decided_by}` with `-> superseded by {head}` routed the reader correctly
+> and left **`PROP-20260822-171212` in no row of the index at all** — the design document for this
+> whole chain, rewritten in this same PR to name the head. The routing argument requires an **order**,
+> not a deletion: a superseded ROW is a dead end (its `reconsiders:` is rejected, citing it is
+> gate-rejected), its deciding RECORD is not. Both now, successor first, and the test that pinned the
+> drop (`!line.contains("PROP-OLD")`) is re-pointed to assert the order instead.

@@ -10523,9 +10523,23 @@ mod decision_ask_and_citations {
             "a superseded row's line must name its SUCCESSOR so the reader can reach the chain head -- every other route out of that row is now rejected by a gate. Got: {}",
             line
         );
+        // ...AND STILL NAME THE DECIDING RECORD, SUCCESSOR FIRST. This assertion used to be
+        // `!line.contains("PROP-OLD")` -- "following it is the dead end this line exists to
+        // prevent" -- which is true of the predecessor ROW and false of its deciding RECORD. The
+        // row is a dead end by construction now (a `reconsiders:` pointing at it is rejected, and
+        // citing it under `.claude/**` is gate-rejected); the record stays readable, and on the
+        // chain this change ships it is `PROP-20260822-171212`, the option-space authority for the
+        // whole thing, rewritten in this same PR to name the head. Dropping it left that proposal
+        // in NO row of the register index. What the routing argument actually requires is an
+        // ORDER, not a deletion. (Review #42 of PR #679.)
         assert!(
-            !line.contains("PROP-OLD"),
-            "a superseded row's line must NOT point at its own deciding record: that is the predecessor's authority, and following it is the dead end this line exists to prevent. Got: {}",
+            line.contains("PROP-OLD"),
+            "a superseded row's line dropped its deciding record. The row is a dead end; the RECORD that decided it is not, and is often the live design document -- dropping it can remove the option-space authority from the register index entirely. Got: {}",
+            line
+        );
+        assert!(
+            line.find("NEW-ROW") < line.find("PROP-OLD"),
+            "the successor must be named BEFORE the deciding record: the reader's next move is the chain head, and the predecessor's authority is context. Got: {}",
             line
         );
         // A DECIDED row still points at its deciding record -- the control that stops the fix
@@ -11486,6 +11500,23 @@ mod docs_only_ci_and_legacy_visibility {
         ];
         for (i, st) in steps.iter().enumerate() {
             env_ok(st, &format!("the `changes` job's step {}", i));
+            // AND THE JOB THIS HELPER IS NAMED FOR. `step_shell_ok` was added by review #23 with
+            // the reasoning that "a step-level `shell:` is not a `defaults.run` key, so `shell_ok`
+            // cannot see one at either scope it is called at" -- and was then called on every step
+            // of `build-test`, `specs`, `docs-validate` and `codegen` and on none of `changes`.
+            // Two guards extended to four jobs and one left at zero: the shape rounds 28-31
+            // retracted, reproduced inside the extension that closed it. (Review #42.)
+            //
+            // NOT EXPLOITABLE TODAY, and the reason is worth stating rather than implying: the two
+            // gate steps are key-set-locked to `{name, run}` so they cannot carry `shell:` at all,
+            // and on `detect` a script-dropping shell means `$GITHUB_OUTPUT` is never written,
+            // `docs_only` resolves to the empty string and `!= 'true'` runs the FULL gate --
+            // fail-open, so the disarm costs the attacker the point. What makes it worth closing
+            // is that the fail-open property lives in `ci.yml`, not here: the moment a `changes`
+            // step produces an output consumed fail-CLOSED -- which is exactly what
+            // `GATE-STEP-LOCUS` option (a) introduces if the gate steps move to a sibling job the
+            // aggregator asserts -- the hole is live and the pin meant to notice is one line short.
+            step_shell_ok(st, &format!("the `changes` job's step {}", i));
             // A checkout of a different tree puts someone else's scripts under the gate steps.
             if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.contains("actions/checkout")) {
                 if let Some(with) = st.get("with").and_then(|w| w.as_mapping()) {
@@ -12006,6 +12037,9 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
             // THE TWELFTH MUTANT AT STEP SCOPE. `shell_ok` reads `defaults.run` only, so a
             // step-level `shell:` was invisible at every scope it is called at (review #23).
+            ("changes step shell drops the script", in_job("changes",
+                "      - id: detect\n",
+                "      - id: detect\n        shell: bash -c \"exit 0\" {0}\n")),
             ("build-test step shell drops the script", in_job("build-test",
                 "      - uses: dtolnay/rust-toolchain@stable\n",
                 "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: dtolnay/rust-toolchain@stable\n")),
@@ -12258,7 +12292,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 89 && must_stay_green.len() >= 21,
+            must_red.len() >= 90 && must_stay_green.len() >= 21,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
