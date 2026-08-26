@@ -2313,6 +2313,15 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > with what is true, and with the residual that remains: a session that legitimately edits one gate
 > script and overwrites another in the same turn is still only caught on push.
 >
+> **And a coda on (2), from the review that arrived after the fix: the file's own convention already
+> said so.** The `crates/UNKNOWN` sentinel ~75 lines up reads *"Fail SAFE, like the no-git path
+> below: scope cannot be computed, so do not guess -- run the suite."* That sentence **names the
+> block I added**, and it was **false for four rounds** — between round 72 landing the block and
+> round 77 fixing it, the path below did the opposite of what the path above claimed of it. **The
+> half-applied-sweep class from the other end: the stale site is the one you did not write.** Nothing
+> points from a new block back to the older comments that now describe it, and grepping for the term
+> you introduced does not find them — they describe you in words you never chose.
+>
 > **Shape: a gate's own commit is a test input. Run the gate against the file it ships with and ask
 > whether it CAN fire — "it would catch X" is a claim about a hypothetical; "it does not fire on the
 > diff beside it" is a fact you can check in one command.**

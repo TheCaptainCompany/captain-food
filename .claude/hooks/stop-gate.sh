@@ -132,6 +132,19 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # gets the block's loud `FATAL`, whose message names the opt-out and is recoverable in one command
 # -- which is what "fail safe toward the guard" has to mean if it means anything. Editing a gate
 # script and re-running is still the normal loop: that turn is dirty and opts out, this one is not.
+#
+# AND ARMING IS THE RIGHT SEMANTICS HERE, not merely the cautious one: the comparison's ORACLE IS
+# THE REPOSITORY. A checkout without one has nothing to compare against, so the selftest's own
+# refusal is the honest answer rather than a nuisance -- it says the gate set cannot be verified,
+# which is true, and names the opt-out, so a host that genuinely has no git is one command from a
+# green. Disarming would have answered "cannot verify" with "verified".
+#
+# THIS IS THE FILE'S OWN CONVENTION, stated at the `crates/UNKNOWN` sentinel ~75 lines up: "Fail
+# SAFE, like the no-git path below: scope cannot be computed, so do not guess -- run the suite."
+# That sentence names THIS block, and it was FALSE for four rounds -- between the block landing
+# (review #72) and this fix, the path below it did the opposite of what the path above claimed of
+# it. An existing comment silently falsified by a new block, with nothing pointing at it: the
+# half-applied-sweep class from the other end, where the stale site is the one you did not write.
 _gate_scripts_dirty=0
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   if git -C "$ROOT" status --porcelain --untracked-files=all -- \
