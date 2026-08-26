@@ -850,3 +850,24 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > workflow anyway — the defect is that **the two halves disagree about a mistake one of them
 > catches**, which is exactly how the push half came to be six rounds behind the `pull_request` half
 > to begin with.
+>
+> **Round 30 — the mutation helper I wrote to stop mislabelled plants was itself mislabelled.**
+> `with_trigger` spliced from `on:` all the way to `jobs:` — and in this `ci.yml` that span also
+> contains `permissions: {contents: read}`, so both plants using it silently dropped the workflow's
+> permissions block. `assert_ne!` was satisfied and nothing reads `permissions` today, so neither
+> plant was proving anything false **yet**. **That is shape #2 from this branch's own list — a
+> mutation that applies somewhere other than where its label says — in the helper written three
+> rounds earlier to close exactly that class.**
+>
+> Latent, not harmless: the moment a `permissions` assertion lands (an over-broad
+> `permissions: write-all` on `changes` is the obvious next hardening on this file's trajectory) the
+> GREEN CONTROL `on: as a list of events` reds for a reason unrelated to the list form, and the
+> one-line repair a reader reaches for is loosening the new assertion — the false-red-with-an-
+> obvious-wrong-repair shape this helper has retracted five times. Bounded to the trigger block now,
+> with an assertion that the splice does not span `permissions:` so the bound cannot quietly widen
+> again.
+>
+> **The rule this earns: a helper that constructs test inputs needs the same scrutiny as the
+> assertions it feeds.** Three rounds of "is this plant pinning what it claims" all pointed at the
+> plant LIST; none pointed at the function building the plants. A mislabelled mutation is
+> indistinguishable from coverage whether the mislabelling is in the entry or in the machinery.

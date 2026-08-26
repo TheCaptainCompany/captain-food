@@ -11341,7 +11341,28 @@ mod docs_only_ci_and_legacy_visibility {
         // guard working while proving nothing (review #22).
         let with_trigger = |replacement: &str| -> String {
             let start = ci.find("\non:\n").expect("ci.yml declares `on:` at column 0") + 1;
-            let end = ci.find("\njobs:\n").expect("ci.yml declares `jobs:`") + 1;
+            // END AT THE NEXT TOP-LEVEL KEY, NOT AT `jobs:`. Splicing all the way to `jobs:` also
+            // swallowed the workflow's `permissions: {contents: read}` block, which sits between
+            // them -- so both plants using this helper silently dropped it. `assert_ne!` was
+            // satisfied and nothing reads `permissions` today, so neither plant was proving
+            // anything false YET. That is shape #2 from this branch's own list: a mutation that
+            // applies somewhere other than where its label says. The moment a `permissions`
+            // assertion is added -- an over-broad `permissions: write-all` on `changes` is the
+            // obvious next hardening here -- the GREEN CONTROL `on: as a list of events` would red
+            // for a reason unrelated to the list form, and the one-line repair a reader reaches for
+            // is loosening the new assertion. Bounded to the trigger block instead. (Review #28.)
+            let end = ci[start..]
+                .match_indices('\n')
+                .find(|(i, _)| {
+                    let after = &ci[start + i + 1..];
+                    after.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                })
+                .map(|(i, _)| start + i + 1)
+                .expect("ci.yml must declare another top-level key after `on:`");
+            assert!(
+                !ci[start..end].contains("\npermissions:"),
+                "the trigger splice still spans `permissions:` -- it would drop it from every mutant built with this helper"
+            );
             format!("{}{}{}", &ci[..start], replacement, &ci[end..])
         };
         let in_job = |job: &str, from: &str, to: &str| -> String {
