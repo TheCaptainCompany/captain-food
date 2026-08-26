@@ -1132,3 +1132,21 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > keeps the failure inside the step's exit status instead of hiding it from `needs`. The message
 > says so, because a ban whose escape is silence is the instrument this file spends thirty rounds
 > retracting.
+>
+> **Round 39 — the widest guard in the file hung off a locator that could silently find nothing.**
+> Both job-scope blocks used `if let Some(job)`, so renaming or deleting a job made every assertion
+> under it vanish **green, with no message** — shapes #1 and #3 of `gates.md` §19, in the block whose
+> own comment calls it the widest consequence in the file, two screens from a locator that already
+> uses `.expect("… has moved or been renamed — re-point this test, do not delete it")` for exactly
+> this reason. `specs`, `build-test` and `docs-validate` are pinned indirectly by another test's
+> literal `needs:` string; **`codegen` — the required check — is in no such list.** Branch protection
+> would eventually say "Expected — waiting for status" on a PR, but not on the docs-only lane, which
+> pushes straight to `main` with no required-check evaluation at push time.
+>
+> **And the measurement corrected the plant labels.** Reverting all three locators to the silent
+> form leaves only the `specs` rename surviving: the `codegen` rename is already caught by round
+> 38's `expect` on `codegen`'s `needs:` list, because that guard must read the job before it can
+> derive anything from it. So the plant labelled *"the codegen job is renamed away"* does **not**
+> pin the `.expect` it sits beside — it pins that *some* assertion still sees the rename. That is
+> stated in the comment rather than left for the label to imply, which is shape #2 landing on a
+> plant added to close shape #1, one round after the same thing happened in round 34's fixture.

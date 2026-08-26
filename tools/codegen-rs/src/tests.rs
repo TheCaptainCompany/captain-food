@@ -11154,7 +11154,18 @@ mod docs_only_ci_and_legacy_visibility {
         // ("`changes` green and `codegen` aggregates green") without a single assertion over it --
         // the "held up by a sentence" shape, in the guard that names it. (Review of PR #679.)
         for job in ["build-test", "specs", "docs-validate", "codegen"] {
-            if let Some(j) = doc.get("jobs").and_then(|jobs| jobs.get(job)) {
+            // `.expect`, NOT `if let Some(..)`. A locator that silently finds nothing is the
+            // vacuous-pass shape this file spends thirty rounds removing from its neighbours
+            // (`gates.md` §19 shapes #1 and #3), and it was sitting under the guards this very
+            // block calls the widest in the file: rename a job and every assertion below vanishes
+            // green, with no message. `specs`/`build-test`/`docs-validate` are pinned indirectly by
+            // `the_docs_only_ci_path_runs_the_canonical_validator`'s literal `needs:` string --
+            // `codegen` is in no such list and was pinned NOWHERE. (Review #38.)
+            {
+                let j = doc.get("jobs").and_then(|jobs| jobs.get(job)).unwrap_or_else(|| panic!(
+                    "ci.yml declares no `{}` job -- every assertion below it would pass vacuously. If the job was renamed, re-point this list; do not delete the entry",
+                    job
+                ));
                 shell_ok(j, &format!("the `{}` job's", job));
                 env_ok(j, &format!("the `{}` job's", job));
                 if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
@@ -11241,7 +11252,10 @@ mod docs_only_ci_and_legacy_visibility {
                 aggregated
             );
             for job in aggregated.iter().map(String::as_str).chain(std::iter::once("codegen")) {
-                let Some(j) = doc.get("jobs").and_then(|jobs| jobs.get(job)) else { continue };
+                    let j = doc.get("jobs").and_then(|jobs| jobs.get(job)).unwrap_or_else(|| panic!(
+                    "`codegen` declares `needs: {}` but ci.yml has no such job -- the guard below is derived from that list, so a name that resolves to nothing checks nothing",
+                    job
+                ));
                 assert!(
                     j.get("continue-on-error").is_none(),
                     "the `{}` job carries `continue-on-error` -- it reports `success` to `needs` whatever happened, `codegen` accepts `success`, and the REQUIRED check on `main` goes green with the gate red. A step that may legitimately fail is written `run: <cmd> || true` here, which keeps the failure visible in the step",
@@ -11271,7 +11285,12 @@ mod docs_only_ci_and_legacy_visibility {
         // failed, and branch protection ACCEPTS `skipped` (the property the whole docs-only design
         // rests on). `contains("always()")` rather than an equality, so an author may legitimately
         // widen the expression; narrowing it to `!cancelled()` or a ref test reds, by name.
-        if let Some(codegen) = doc.get("jobs").and_then(|j| j.get("codegen")).and_then(|c| c.as_mapping()) {
+        {
+            let codegen = doc
+                .get("jobs")
+                .and_then(|j| j.get("codegen"))
+                .and_then(|c| c.as_mapping())
+                .expect("ci.yml must declare a `codegen` job -- it is the REQUIRED status check on `main`, and the four guards below (its `continue-on-error`/`strategy` ban, `if: always()`, and the step-level bans) all hang off this locator. If it was renamed, re-point this test; do not delete it. Branch protection would eventually say \"Expected -- waiting for status\" on a PR, but NOT on the docs-only lane, which pushes straight to `main` with no required-check evaluation at push time");
             for key in ["continue-on-error", "strategy"] {
                 assert!(
                     !codegen.contains_key(serde_yaml::Value::String(key.into())),
@@ -12107,6 +12126,23 @@ mod docs_only_ci_and_legacy_visibility {
             // middle, so one line on any aggregated job reported `success` to `needs` and took the
             // required check green with every pin in this file red. Job scope and step scope are
             // separate spellings and both are planted. (Review #38.)
+            // THE LOCATORS THEMSELVES. Both job-scope blocks used `if let Some(..)`, so renaming a
+            // job made every assertion under it vanish GREEN with no message -- and `codegen`, the
+            // required check, is the one name no OTHER test pins (`specs`/`build-test`/
+            // `docs-validate` ride on `the_docs_only_ci_path_runs_the_canonical_validator`'s
+            // literal `needs:` string). Review #38.
+            //
+            // MEASURED, AND THE LABELS DO NOT BOTH MEAN WHAT THEY SAY. With all three locators
+            // reverted to the silent form, only the `specs` plant survives: the `codegen` rename is
+            // already caught by the `expect` on `codegen`'s `needs:` list (round 38), because that
+            // guard has to read the job before it can derive anything from it. So the `codegen`
+            // plant does NOT pin the `.expect` it sits next to -- it pins that SOME assertion still
+            // sees the rename, which is the property that matters, and the `.expect` is defence in
+            // depth behind it. Saying so here rather than letting the label imply otherwise is
+            // shape #2 of `gates.md` §19: a mutation applied is not a mutation applied where its
+            // label says. The `specs` plant is the one that makes the locators load-bearing.
+            ("the codegen job is renamed away", ci.replacen("\n  codegen:\n", "\n  aggregate:\n", 1)),
+            ("the specs job is renamed away", ci.replacen("\n  specs:\n", "\n  validate-specs:\n", 1)),
             ("build-test job continue-on-error", ci.replacen("  build-test:\n", "  build-test:\n    continue-on-error: true\n", 1)),
             ("build-test step continue-on-error", in_job("build-test",
                 "      - name: Build the workspace",
@@ -12204,7 +12240,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 87 && must_stay_green.len() >= 21,
+            must_red.len() >= 89 && must_stay_green.len() >= 21,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
