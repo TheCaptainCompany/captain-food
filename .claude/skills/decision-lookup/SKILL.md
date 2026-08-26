@@ -198,16 +198,20 @@ DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-t
 
 **The variable is not optional in that loop.** Before running a single case, the suite compares all
 FOUR gate scripts (`stub-tests.sh`, `decision-lookup.sh`, and the two `.claude/hooks/register-check*`
-scripts) against their committed blobs at `HEAD`, and refuses to report if any of them drifted — the
-overwrite class a review planted green twice. So the moment you edit the wrapper or this suite, a
-bare invocation exits 1 with `FATAL: ... differs from the committed blob at HEAD` and **zero cases
-run**. `DECISION_LOOKUP_ALLOW_DIRTY=1` opts out of that comparison for the edit-and-re-run loop and
+scripts) against their committed blobs — at `$GITHUB_SHA` in CI, at `HEAD` locally — and refuses to
+report if any of them drifted: the overwrite class a review planted green twice. So the moment you
+edit the wrapper or this suite, a bare invocation exits 1 with
+`FATAL: ... differs from the committed blob at <ref>` and **zero cases run**. `DECISION_LOOKUP_ALLOW_DIRTY=1` opts out of that comparison for the edit-and-re-run loop and
 nothing else. CI invokes the script with no opt-out, and the codegen pin forbids the variable as a
 CI `env:` key at every scope, so the CI path cannot be talked out of verifying.
 
-The same applies on a host that keeps `git` or `cmp` outside `/usr/bin:/bin:/usr/local/bin` — the
-block pins that PATH deliberately, so that it cannot be sent to a shim, and exits 1 if either tool
-is absent. Nix and some containers will need the opt-out for that reason alone.
+The same applies on a host that keeps `git` or `tr` outside `/usr/bin:/bin:/usr/local/bin` — the
+block pins that PATH deliberately, so that neither can be sent to a shim, and exits 1 if either is
+absent. Nix and some containers will need the opt-out for that reason alone. (`cmp` was required
+here until the comparison became object-id against object-id; the sentence outlived the dependency
+by two commits, which would have sent a maintainer on a `git`-but-no-`cmp` host to opt OUT of the
+supply-chain gate on a host where it runs fine — the exact false refusal removing `cmp` was
+justified by, re-entering through the doc. Review #15.)
 
 **`make stub-tests`** is the interactive entrypoint and passes the opt-out for you. It exists
 because the trap above was fixed for `make hooks-test` and `workflow.md` and left open for the very

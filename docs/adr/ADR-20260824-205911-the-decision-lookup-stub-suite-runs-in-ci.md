@@ -174,7 +174,9 @@ thirteenth mutant this ADR two paragraphs above records as closed. Four correcti
    something plants it red — that, not the mutant, is the finding.
 2. **Both gate scripts carry the block.**
 3. **The block is hardened and default-ON.** It was disarmed by a `git` shell function sourced via
-   job-level `env: BASH_ENV`; it now `unset -f`s and resolves `git`/`cmp` on a fixed PATH. And it
+   job-level `env: BASH_ENV`; it now `unset -f`s and resolves its tools on a fixed PATH (`git`/`cmp`
+   as of this round; `cmp` was dropped and `tr` added in review #15, when the comparison became
+   object-id against object-id). And it
    ran only when `GITHUB_ACTIONS=true` — an on-switch settable from the surface it defends against,
    i.e. fail-open. It is now always on, with a named opt-out that CI may not set.
 4. **It is pinned and planted red.**

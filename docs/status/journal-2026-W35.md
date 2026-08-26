@@ -424,3 +424,51 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > Minor, same round: the finding's location had become the paragraph's first line rather than the
 > citing one. `spans` maps the offset back, and a case pins it — an unpinned improvement is what
 > this PR keeps retracting.
+>
+> **Round 15 — my fix for the EOL false red opened a new route into the oracle, and my fix for the
+> merge-ref race was a sentence.** Both are the same failure: a remedy adopted faster than its
+> justification was checked.
+>
+> **`hash-object` applies CLEAN FILTERS, and that is the knob that makes the comparison lie.** Git
+> locates its global config through `$XDG_CONFIG_HOME/git/config` and `$HOME/.gitconfig` — neither is
+> a `GIT_*` name, so `unset "${!GIT_@}"` does not touch them and the `GIT_*` prefix ban does not
+> cover them. Global config sets `core.attributesFile`; an attributes file binds a
+> `filter.<x>.clean` driver; a driver that re-emits `cat-file blob <ref>:<path>` reproduces the
+> committed id for **every** path, so all four comparisons match over tampered scripts and both
+> guards print OK. That is review #9's `GIT_DIR` decoy, one config-lookup mechanism over. Closed
+> with `hash-object --no-filters` (which disables clean filters AND eol conversion, so no
+> configuration reachable from the environment, `.git/config` or an attributes file can affect the
+> hash) plus an **explicit** CR strip as the single translation this gate accepts, and `HOME`/
+> `XDG_CONFIG_HOME` banned as CI `env:` keys with three planted mutants. `GIT_CONFIG_GLOBAL=/dev/null`
+> was the tempting fix and is wrong: it also drops `core.autocrlf`, reinstating the false red the
+> previous round removed. **`tr` is now inside the oracle, so it is resolved on the same pinned PATH
+> and `unset -f`'d with `git`** — a tool the oracle calls is part of the oracle.
+>
+> **THE FETCH RECOVERY IS REMOVED, and the removal is the finding.** Round 11 asked for
+> `git fetch --no-tags --depth=1 origin "$_ref"` before refusing, and I landed it with the sentence
+> *"upload-pack serves fetch-by-SHA, so one fetch usually turns the refusal back into a
+> verification"* — **an antecedent-free claim of exactly the shape ADR-20260817-105845 governs, in a
+> branch whose thesis is that no completeness claim ships before it is checked.** The case it
+> targets is an ORPHANED merge commit, reachable from no ref once the base moves, which is precisely
+> the unadvertised-object case a server refuses; so the recovery most likely no-ops in the one
+> situation it exists for. **Nothing planted it**: the only test on that path uses a fixture repo
+> with no `origin`, so the fetch failed instantly on "no such remote" and proved only the refusal
+> that already existed — deleting the whole block redded nothing. And `--depth=1` against a checkout
+> deliberately fetched at `fetch-depth: 0` writes `.git/shallow` and shallows the workspace for every
+> later step. Removed rather than kept on a hope, with the reasoning in the script so the next
+> session does not re-add it. **A reviewer asking for a fix is not evidence the fix works.**
+>
+> **`make stub-tests` landed with no record moving** — and `PROP-20260822-171212`, rewritten in the
+> same PR, listed *"a Makefile target"* as an unqualified non-goal. The row handles this class by
+> NAMING it (clause (b) carries `make hooks-test` and the `stop-gate.sh` step); the sibling target
+> was not named anywhere. Third drift of the enumeration the row's own CLAUSE HISTORY exists to
+> track. Both amended: neither target carries QMD behaviour, both merely pass the opt-out to a
+> script already on the decided surface, and **a default-on self-verification block with no
+> interactive entrypoint gets DELETED rather than opted out of** — which is why the target is
+> ergonomics for a decided surface and not a widening of it.
+>
+> Also stale in the same commit that removed the dependency: `SKILL.md` still required `cmp` as a
+> host tool, which would have sent a maintainer on a `git`-but-no-`cmp` host to opt OUT of the
+> supply-chain gate on a host where it runs fine — **the exact false refusal removing `cmp` was
+> justified by, re-entering through the doc.** Same paragraph said the comparison is "at `HEAD`"
+> when in CI it is at `$GITHUB_SHA`, so the FATAL string it quoted did not match what a reader sees.

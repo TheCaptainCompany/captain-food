@@ -10482,6 +10482,16 @@ mod docs_only_ci_and_legacy_visibility {
                         // one `git commit`). Overriding GITHUB_SHA from `env:` would hand the
                         // oracle straight back.
                         || k == "GITHUB_SHA"
+                        // WHERE GIT FINDS ITS GLOBAL CONFIG, and neither name starts with `GIT_`,
+                        // so `unset "${!GIT_@}"` in the scripts does not touch them. Global config
+                        // sets `core.attributesFile`; an attributes file binds a `filter.<x>.clean`
+                        // driver; and a clean driver that re-emits the committed blob makes every
+                        // comparison match over tampered scripts. The scripts now hash with
+                        // `--no-filters`, which is the real closure -- this ban is the second layer,
+                        // because a config route into the oracle has been demonstrated twice
+                        // (GIT_DIR, review #9) and neither name has an innocent use in this job
+                        // (review #15).
+                        || matches!(k, "HOME" | "XDG_CONFIG_HOME")
                         // GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY and friends redirect the
                         // gate scripts' ORACLE, not their binary: `git cat-file blob HEAD:<path>`
                         // reads a decoy repo whose HEAD holds the tampered bytes and reports OK.
@@ -11042,6 +11052,11 @@ mod docs_only_ci_and_legacy_visibility {
             ("build-test job LD_PRELOAD", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      LD_PRELOAD: /tmp/x.so\n", 1)),
             ("build-test job BASH_ENV", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      BASH_ENV: /tmp/preamble.sh\n", 1)),
             ("build-test decoy checkout", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      GIT_DIR: /tmp/decoy/.git\n", 1)),
+            // The oracle's OTHER config route: global config -> core.attributesFile -> a
+            // filter.<x>.clean driver that re-emits the committed blob (review #15).
+            ("job XDG_CONFIG_HOME", at_job("XDG_CONFIG_HOME: /tmp/x")),
+            ("job HOME", at_job("HOME: /tmp/x")),
+            ("workflow XDG_CONFIG_HOME", at_workflow("XDG_CONFIG_HOME: /tmp/x")),
             ("a self-hosted pool labelled to look hosted", ci.replacen("    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom", 1)),
         ];
         let mut survived = Vec::new();
@@ -11092,7 +11107,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 26 && must_stay_green.len() >= 9,
+            must_red.len() >= 29 && must_stay_green.len() >= 9,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()
@@ -11159,9 +11174,9 @@ mod docs_only_ci_and_legacy_visibility {
             // the same clean filter git runs on commit, and `cmp` is gone entirely -- a required
             // binary nothing called could only produce a false refusal.
             for needle in [
-                "hash-object --",
+                "hash-object --no-filters",
                 "rev-parse -q --verify \"${_ref}:$rel\"",
-                "unset -f git command",
+                "unset -f git tr command",
                 "unset \"${!GIT_@}\"",
             ] {
                 assert!(

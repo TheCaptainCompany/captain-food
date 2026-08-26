@@ -71,15 +71,18 @@ else
   # functions shadowing the tools, a PATH pointing at a shim, and every GIT_* variable -- git
   # obeys GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY and friends, so the ORACLE itself is
   # redirectable even when the binary is not. The prefix form cannot be out-enumerated.
-  unset -f git command 2>/dev/null || true
+  unset -f git tr command 2>/dev/null || true
   unset "${!GIT_@}" 2>/dev/null || true
   _vpath="/usr/bin:/bin:/usr/local/bin"
   _git="$(PATH="$_vpath" command -v git || true)"
-  # `cmp` USED TO BE REQUIRED HERE and is not any more: the comparison is now object-id against
-  # object-id, so git is the only tool involved. Requiring a second binary that nothing calls is a
-  # host dependency that can only produce a false refusal.
-  if [ -z "$_git" ]; then
-    echo "FATAL: git not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
+  # `tr` IS PART OF THE ORACLE, so it is resolved on the same pinned PATH and `unset -f` above
+  # covers it: it performs the one translation this gate accepts (CR strip), and a `tr` function or
+  # shim could make a tampered file hash to the committed id. `cmp` used to be here and is gone --
+  # the comparison is object-id against object-id now, and requiring a binary nothing calls can
+  # only produce a false refusal.
+  _tr="$(PATH="$_vpath" command -v tr || true)"
+  if [ -z "$_git" ] || [ -z "$_tr" ]; then
+    echo "FATAL: git or tr not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
     echo "  The PATH is pinned on purpose so this cannot be sent to a shim. On NixOS or a slim" >&2
     echo "  container, re-run with REGISTER_CHECK_ALLOW_DIRTY=1 rather than deleting this block." >&2
     exit 1
@@ -107,21 +110,25 @@ else
   # "someone overwrote a gate script" from "the merge ref moved" is not. A re-run recomputes both
   # and self-heals, which is why the message says so. (Review of PR #679, on a defect this branch
   # introduced two commits earlier by pinning the oracle to GITHUB_SHA.)
-  # RECOVER BEFORE REFUSING. Telling the operator to re-run is a supervision interrupt on a PR
-  # whose diff is untouched, and the lane that hits this race is the DOMINANT one here: every
-  # docs- or spec-only push goes straight to main (CLAUDE.md), so any PR open at that moment can
-  # lose its merge object. GitHub's upload-pack serves fetch-by-SHA, so one fetch usually turns
-  # the refusal back into a verification. Fail-closed is preserved exactly: if the object still
-  # cannot be resolved afterwards, the refusal below stands unchanged. (Review of PR #679.)
+  # A `git fetch --no-tags --depth=1 origin "$_ref"` RECOVERY WAS ADDED HERE AND REMOVED AGAIN,
+  # and the reason is worth more than the code was. It was justified by the sentence "upload-pack
+  # serves fetch-by-SHA, so one fetch usually turns the refusal back into a verification" -- an
+  # antecedent-free claim of exactly the shape ADR-20260817-105845 governs, in a branch whose
+  # thesis is that no completeness claim ships before it is checked. The case it targeted is an
+  # ORPHANED merge commit: once the base moves, GitHub recomputes refs/pull/N/merge and the old
+  # commit is reachable from no ref, which is precisely the unadvertised-object case a server
+  # REFUSES. So the recovery most likely no-ops in the one situation it existed for. Nothing
+  # planted it either -- the only test on this path uses a fixture repo with no `origin` at all,
+  # so the fetch failed instantly on "no such remote" and proved only the refusal that already
+  # existed; deleting the whole block redded nothing. And `--depth=1` against a checkout
+  # deliberately fetched with `fetch-depth: 0` writes .git/shallow and shallows the workspace for
+  # every later step in the job. Removed rather than kept on a hope. (Reviews #11 and #15 of
+  # PR #679: #11 asked for it, #15 showed the argument for it did not hold.)
   if ! "$_git" -C "$ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
-    "$_git" -C "$ROOT" fetch --no-tags --depth=1 origin "$_ref" >/dev/null 2>&1 || true
-  fi
-  if ! "$_git" -C "$ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
-    echo "FATAL: commit ${_ref} is not present in this checkout and could not be fetched -- cannot verify the gate set." >&2
+    echo "FATAL: commit ${_ref} is not present in this checkout -- cannot verify the gate set." >&2
     echo "  This is NOT a tamper signal. On a pull_request run GITHUB_SHA is the merge commit as of" >&2
-    echo "  queue time, and the merge ref can be recomputed before checkout fetches it; the direct" >&2
-    echo "  fetch-by-SHA above is the recovery, and it did not succeed. RE-RUN the job: that" >&2
-    echo "  recomputes both and self-heals." >&2
+    echo "  queue time, and the merge ref can be recomputed before checkout fetches it. RE-RUN the" >&2
+    echo "  job: that recomputes both and self-heals." >&2
     exit 1
   fi
   for rel in \
@@ -143,9 +150,28 @@ else
     # tamper message, with nothing anywhere mentioning line endings. The remedy a reader reaches
     # for is deleting this block, which is exactly what the header asks them not to do. CI is
     # Linux-only, so the plant-red fixture builds and reads on one platform and is structurally
-    # blind to the class. `hash-object` runs the same clean filter git would run on commit, so the
-    # comparison is filter-aware and detects tampering identically. (Review #13 of PR #679.)
-    _have="$("$_git" -C "$ROOT" hash-object -- "$ROOT/$rel" 2>/dev/null || true)"
+    # blind to the class. (Review #13 of PR #679.)
+    #
+    # `--no-filters`, AND THE CR STRIP DONE HERE RATHER THAN BY CONFIG. The first fix for the
+    # above was a bare `hash-object`, which runs git's clean filters -- and that is the knob that
+    # makes the comparison LIE. Git locates its global config through $XDG_CONFIG_HOME/git/config
+    # and $HOME/.gitconfig, neither of which is a GIT_* name, so `unset "${!GIT_@}"` does not
+    # touch them; global config can set core.attributesFile, an attributes file can bind a
+    # filter.<x>.clean driver, and a driver that re-emits `cat-file blob <ref>:<path>` reproduces
+    # the committed id for EVERY path. All four comparisons then match over tampered scripts and
+    # both guards print OK -- the GIT_DIR decoy of review #9, one config-lookup mechanism over
+    # (review #15). `--no-filters` disables clean filters AND eol conversion together, so no git
+    # configuration reachable from the environment, .git/config or an attributes file can affect
+    # this hash. The single translation this gate accepts is then applied EXPLICITLY below: strip
+    # CR and re-hash. `GIT_CONFIG_GLOBAL=/dev/null` was the tempting alternative and is wrong --
+    # it also drops core.autocrlf, reinstating the Windows false red this block just removed.
+    _have="$("$_git" -C "$ROOT" hash-object --no-filters -- "$ROOT/$rel" 2>/dev/null || true)"
+    if [ "$_have" != "$_want" ]; then
+      # THE ONE ACCEPTED TRANSLATION: a CRLF worktree over an LF blob. Narrower than a filter --
+      # it can only ever turn a CRLF checkout into its committed form, and the result still has to
+      # equal the committed id exactly.
+      _have="$("$_tr" -d '\r' < "$ROOT/$rel" | "$_git" -C "$ROOT" hash-object --no-filters --stdin 2>/dev/null || true)"
+    fi
     if [ "$_have" != "$_want" ]; then
       echo "FATAL: $rel differs from the committed blob at ${_ref}." >&2
       echo "  Something modified a gate script between checkout and this run -- the disarm shape" >&2
