@@ -692,45 +692,6 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
     (cited, true, unread)
 }
 
-/// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.
-///
-/// PR #679 flipped `RETRIEVAL-QMD` to `superseded` and rewrote the proposal to say, verbatim,
-/// *"name the head, never `RETRIEVAL-QMD` ... the old wording sent the next session straight into a
-/// gate error on the rollback path"*. That correction reached the proposal and stopped: seven
-/// sites under `.claude/**` still named the superseded row, including
-/// `decision-lookup.sh`'s RUNTIME failure message -- the string an operator reads on the exact
-/// rollback path the row's FAILURE PROTOCOL governs. Doing what it said produced
-/// `reconsiders: <superseded row>`, which `decision-reconsiders-shape` rejects.
-///
-/// CLAUDE.md already says to grep the old term after any reshape; the term lived in `.claude/**`,
-/// It is derived from row STATUS, not a hard-coded key list, so it keeps working as the chain
-/// grows links.
-///
-/// WHAT IT DOES NOT REACH, because the first version of this docstring claimed to be "the grep"
-/// and review #11 measured otherwise:
-///
-///   * Only the CITATION FORMS below are recognised — `row <KEY>`, `Per <KEY>`, `decided_by: <KEY>`,
-///     `the <KEY> decision` and the `docs/decisions/<KEY>.yaml` path. Prose that names a row some
-///     other way is missed. This is a high-signal spot check, not an exhaustive grep.
-///   * It sees only the files the caller hands it, and THE CALLER'S `SCOPE` SECTION IS THE ONLY
-///     STATEMENT OF WHAT THAT IS — see `claude_citation_corpus`. This bullet used to enumerate the
-///     set a second time and was already wrong in the commit that shipped it: it named
-///     `.claude/**`, `.claudeignore` and `.gitignore` while the corpus also read `CLAUDE.md` and
-///     the `Makefile`. Two lists of one scope diverge — the sentence this very change closes twice
-///     elsewhere — and the cost is specific: a superseded row named in `CLAUDE.md`, the resident
-///     index, reds `make validate` with a rule the reader has just been told does not reach that
-///     file. So there is now one list, and it is over there.
-///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
-///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
-///     the scope is a caller decision rather than a walk from the repo root.
-///   * FENCED CODE IS **NOT** EXEMPT, and that is a decision, not an oversight. The sibling
-///     `decision-card-row` rule tracks fences and skips them, so the two rules disagree on purpose
-///     and the next author should not have to derive which is which (review #23). A card's fenced
-///     block is an ILLUSTRATION of a form; a `.claude/**` doc's fenced block is the thing a session
-///     COPIES — the motivating incident was a session doing exactly what a doc showed it. A fenced
-///     `reconsiders: <dead row>` is therefore the most dangerous spelling in the corpus, not the
-///     safest, so the exemption that is right for cards would be backwards here. Prose *about* a
-///     supersession still has the clause-scoped escape; a copyable example does not need one.
 /// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
 /// unit — with each line's leading comment or quote marker stripped so the join reads as the
 /// sentence the author actually wrote. `spans` maps a byte offset in the joined text back to the
@@ -889,6 +850,52 @@ fn logical_units(content: &str) -> Vec<Unit> {
     out
 }
 
+/// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.
+///
+/// PR #679 flipped `RETRIEVAL-QMD` to `superseded` and rewrote the proposal to say, verbatim,
+/// *"name the head, never `RETRIEVAL-QMD` ... the old wording sent the next session straight into a
+/// gate error on the rollback path"*. That correction reached the proposal and stopped: seven
+/// sites under `.claude/**` still named the superseded row, including
+/// `decision-lookup.sh`'s RUNTIME failure message -- the string an operator reads on the exact
+/// rollback path the row's FAILURE PROTOCOL governs. Doing what it said produced
+/// `reconsiders: <superseded row>`, which `decision-reconsiders-shape` rejects.
+///
+/// CLAUDE.md already says to grep the old term after any reshape; the term lived in `.claude/**`,
+/// It is derived from row STATUS, not a hard-coded key list, so it keeps working as the chain
+/// grows links.
+///
+/// WHAT IT DOES NOT REACH, because the first version of this docstring claimed to be "the grep"
+/// and review #11 measured otherwise:
+///
+///   * Only the CITATION FORMS below are recognised — `row <KEY>`, `Per <KEY>`, `decided_by: <KEY>`,
+///     `the <KEY> decision` and the `docs/decisions/<KEY>.yaml` path. Prose that names a row some
+///     other way is missed. This is a high-signal spot check, not an exhaustive grep.
+///   * It sees only the files the caller hands it, and THE CALLER'S `SCOPE` SECTION IS THE ONLY
+///     STATEMENT OF WHAT THAT IS — see `claude_citation_corpus`. This bullet used to enumerate the
+///     set a second time and was already wrong in the commit that shipped it: it named
+///     `.claude/**`, `.claudeignore` and `.gitignore` while the corpus also read `CLAUDE.md` and
+///     the `Makefile`. Two lists of one scope diverge — the sentence this very change closes twice
+///     elsewhere — and the cost is specific: a superseded row named in `CLAUDE.md`, the resident
+///     index, reds `make validate` with a rule the reader has just been told does not reach that
+///     file. So there is now one list, and it is over there.
+///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
+///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
+///     the scope is a caller decision rather than a walk from the repo root.
+///   * FENCED CODE IS **NOT** EXEMPT, and that is a decision, not an oversight. The sibling
+///     `decision-card-row` rule tracks fences and skips them, so the two rules disagree on purpose
+///     and the next author should not have to derive which is which (review #23). A card's fenced
+///     block is an ILLUSTRATION of a form; a `.claude/**` doc's fenced block is the thing a session
+///     COPIES — the motivating incident was a session doing exactly what a doc showed it. A fenced
+///     `reconsiders: <dead row>` is therefore the most dangerous spelling in the corpus, not the
+///     safest, so the exemption that is right for cards would be backwards here. Prose *about* a
+///     supersession still has the clause-scoped escape; a copyable example does not need one.
+/// (This block documented `struct Unit` for one round: it sits between the corpus reader and
+/// `logical_units`, so `cargo doc` and rust-analyzer attached the RULE's scope, its residual and
+/// the `docs/**` decision to a private helper struct, while the rule function itself carried no
+/// doc comment at all. That is the mis-binding the comment further down says was fixed by moving
+/// text, reproduced in mirror image by the move that fixed it -- and it matters because
+/// `DISPATCH-CARD-CITATION` is an open row whose whole subject is the scope sentence above.
+/// Review #53 of PR #679.)
 pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
     rows: &[DecisionRow],
     files: &[(String, String)],

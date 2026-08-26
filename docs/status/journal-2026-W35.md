@@ -1540,3 +1540,31 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > slip**: the old line was a hard error and `s/OLD/NEW/` was the shortest green — while the rule
 > ships a clause-scoped escape precisely so a sentence ABOUT a superseded row can stay accurate. Both
 > now: the head carries it forward *from the superseded predecessor, recorded on #671*.
+>
+> **Round 53 — a review two commits behind, and the three of its items that still stood.** Its lead
+> finding (a sentence ending in `stop-gate.sh.` not bounding the clause) was closed in round 51, and
+> the fix I had landed is **stronger than the one it proposed**: requiring the token to be
+> alphabetic-or-dot leaves `gate.sh` and `sync.json` classified as abbreviations, while the
+> segment-length rule releases them. But the reviewer named two spellings that are **live in the
+> corpus today** — `Makefile:196` and `render-config-sync.yml` — and no control used them, so they
+> are controls now, along with the nested-closed-group green the parenthetical arm never had.
+>
+> **The rule's normative docstring documented `struct Unit`.** Lines 682–733 — the recognised
+> citation forms, the residual, the `docs/**` exclusion, the decision that fenced code is not exempt
+> — sat immediately above a private helper struct, so `cargo doc` and rust-analyzer attached all of
+> it to `Unit` while the rule function carried **no doc comment at all**. That is the exact
+> mis-binding a comment further down the same file says was fixed by moving text, **reproduced in
+> mirror image by the move that fixed it.** It matters concretely: `DISPATCH-CARD-CITATION` is an
+> open row whose whole subject is that scope sentence, and a maintainer who follows it to the rule
+> found nothing.
+>
+> **And on the docs-only lane the cost is different in kind, not degree.** Every record so far prices
+> a `changes` red as a repository-wide **merge block**. On the lane CLAUDE.md routes spec- and
+> docs-only work down there is **no merge to block** — it is a push straight to `main`. The change
+> *lands*, with `codegen` red and **no validator having run at all**, because `docs-validate` was
+> skipped by the `needs: changes` cascade and is the only gate that lane has. Not "nothing gets in"
+> but **"this got in unchecked"**, which is worse and is now in the row.
+>
+> `STATUS.md` also gains the step itself: the precedent sentence already said the register-check
+> selftest runs in the always-run `changes` job, and this change adds a second gate step beside it —
+> durable state, so it belongs there and not only in the journal link.

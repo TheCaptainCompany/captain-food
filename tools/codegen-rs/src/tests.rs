@@ -10011,6 +10011,20 @@ mod decision_ask_and_citations {
                 "an explanation ending in a version number must not exempt the next sentence",
                 "# That row is superseded; the pin was qmd 2.8.3.\n# Per row OLD-ROW, open a reversal decision.",
             ),
+            // THE SPELLINGS THAT ARE LIVE IN THE CORPUS TODAY, not invented ones: `Makefile:196`
+            // reads "...visibly, like stop-gate.sh. CI invokes the script directly..." and
+            // `render-config-sync.yml` carries the `.json.` form. Both files are in the pathspec
+            // list. A reviewer proposed closing this by requiring the token to be alphabetic-or-dot,
+            // which `gate.sh` and `sync.json` both satisfy -- the segment-length rule releases them
+            // and that alternative would not have. (Review #53.)
+            (
+                "an explanation ending in a hyphenated script name",
+                "# The old row is superseded, so use the head -- visibly, like stop-gate.sh.\n# Per row OLD-ROW, re-run with the opt-out.",
+            ),
+            (
+                "an explanation ending in a dotted json filename",
+                "# That row is superseded. See render-config-sync.json.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
             // NESTED PARENTHETICAL: the citing word sits in the OUTER group, and `open_paren` used
             // to point at the inner one after it closed, so the window missed `see` entirely.
             (
@@ -10216,6 +10230,14 @@ mod decision_ask_and_citations {
             (
                 "a backticked key mid-parenthetical with no citing word",
                 "the shape changed (its successor and `OLD-ROW` differ here) in round 4",
+            ),
+            // AND THE SAME, WITH A CLOSED NESTED GROUP IN FRONT OF IT. Both green controls for the
+            // parenthetical arm were single-level, so nothing covered the direction the stack fixed
+            // -- an inner group that closes must not narrow the window the citing-word scan reads,
+            // in EITHER direction. (Review #53.)
+            (
+                "a nested closed group inside a plain parenthetical mention",
+                "the pin was rewritten (the (round 4) `OLD-ROW` experiment was contaminated) later",
             ),
             // A markdown continuation is INDENTED, not re-marked -- which is exactly what lets the
             // block rule tell this apart from the two reds above.
