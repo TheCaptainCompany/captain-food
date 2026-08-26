@@ -11202,6 +11202,62 @@ mod docs_only_ci_and_legacy_visibility {
                 }
             }
         }
+        // NO JOB THE AGGREGATOR CONSUMES MAY SWALLOW A FAILURE. `continue-on-error` makes GitHub
+        // report `success` for the step (step scope) or the job (job scope) whatever actually
+        // happened, so `needs.<job>.result` is `success`, `codegen`'s `case "$r" in success|skipped)`
+        // accepts it, and the REQUIRED CHECK ON `main` IS GREEN WITH THE GATE RED. This file's own
+        // comment on the `changes` key ban states that failure verbatim, and the `codegen` block
+        // below restates it -- and neither reached the four jobs in between. One line on
+        // `build-test`:
+        //
+        //     - name: Unit tests ...
+        //       continue-on-error: true
+        //       run: cargo test --workspace
+        //
+        // reds every assertion in this file and ships green. On `specs` it is the validator; on
+        // `docs-validate` it is worse still, because the aggregator's by-name assertion is
+        // `[ "$DOCS_VALIDATE" != "success" ]`, which a swallowed failure ALSO satisfies -- the
+        // docs-only lane's only validator reports success having validated nothing, and the check
+        // written to catch exactly that passes with it. (Review #38 of PR #679.)
+        //
+        // DERIVED FROM `codegen`'s OWN `needs:`, not from a hand-written list, so a job ADDED to
+        // the aggregator is covered the moment it is added. A hand-kept list here is the
+        // two-lists-of-one-scope divergence this file has now retracted four times.
+        //
+        // THE ESCAPE IS NOT SILENCE: a step that is legitimately allowed to fail is written
+        // `run: <cmd> || true` in this repo -- every `Evidence:` step in `ci.yml` already is. That
+        // keeps the failure inside the step's own exit status instead of hiding it from `needs`.
+        {
+            let aggregated: Vec<String> = doc
+                .get("jobs")
+                .and_then(|j| j.get("codegen"))
+                .and_then(|c| c.get("needs"))
+                .and_then(|n| n.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+                .expect("the `codegen` job must declare a `needs:` LIST -- it is the required check, and this guard is derived from it");
+            assert!(
+                aggregated.len() >= 5,
+                "`codegen` aggregates only {:?} -- the guard below is derived from that list, so a shrunken `needs:` silently narrows it. The full list is pinned by `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths`",
+                aggregated
+            );
+            for job in aggregated.iter().map(String::as_str).chain(std::iter::once("codegen")) {
+                let Some(j) = doc.get("jobs").and_then(|jobs| jobs.get(job)) else { continue };
+                assert!(
+                    j.get("continue-on-error").is_none(),
+                    "the `{}` job carries `continue-on-error` -- it reports `success` to `needs` whatever happened, `codegen` accepts `success`, and the REQUIRED check on `main` goes green with the gate red. A step that may legitimately fail is written `run: <cmd> || true` here, which keeps the failure visible in the step",
+                    job
+                );
+                if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
+                    for st in steps {
+                        assert!(
+                            st.get("continue-on-error").is_none(),
+                            "a `{}` step carries `continue-on-error` -- its failure is swallowed, the job concludes `success`, and the required check is green over it. Use `run: <cmd> || true` (as every `Evidence:` step here does) so the failure stays inside the step",
+                            job
+                        );
+                    }
+                }
+            }
+        }
         // THE REQUIRED CHECK'S OWN ESCAPES. The loop above bounds how `codegen`'s step EXECUTES;
         // these bound whether it reports. `continue-on-error: true` at job scope makes GitHub
         // report the job `success` no matter what the step did, and at STEP scope it does the same
@@ -12046,6 +12102,21 @@ mod docs_only_ci_and_legacy_visibility {
                 "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on: ubuntu-latest")),
             ("codegen job continue-on-error", in_job("codegen", "    runs-on: ubuntu-latest",
                 "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            // ── THE FOUR JOBS BETWEEN `changes` AND `codegen` ────────────────────────────────
+            // `continue-on-error` was banned at the two ends of the graph and nowhere in the
+            // middle, so one line on any aggregated job reported `success` to `needs` and took the
+            // required check green with every pin in this file red. Job scope and step scope are
+            // separate spellings and both are planted. (Review #38.)
+            ("build-test job continue-on-error", ci.replacen("  build-test:\n", "  build-test:\n    continue-on-error: true\n", 1)),
+            ("build-test step continue-on-error", in_job("build-test",
+                "      - name: Build the workspace",
+                "      - continue-on-error: true\n        name: Build the workspace")),
+            ("specs job continue-on-error", in_job("specs", "    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            ("docs-validate step continue-on-error", in_job("docs-validate",
+                "      - name: Validate (canonical validator",
+                "      - continue-on-error: true\n        name: Validate (canonical validator")),
+            ("lint job continue-on-error", in_job("lint", "    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            ("db-test job continue-on-error", in_job("db-test", "    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest")),
             ("codegen job strategy", in_job("codegen", "    runs-on: ubuntu-latest",
                 "    strategy:\n      matrix:\n        x: []\n    runs-on: ubuntu-latest")),
             // Losing `always()` is the one-WORD version: the aggregator is then skipped on exactly
@@ -12133,7 +12204,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 81 && must_stay_green.len() >= 21,
+            must_red.len() >= 87 && must_stay_green.len() >= 21,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

@@ -1103,3 +1103,32 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > (removal, and 360) and two controls (5, 25). `GATE-STEP-LOCUS` stays **open**: the
 > in-job-vs-sibling-job question is untouched, and under option (a) the timeout belongs on the
 > sibling job instead. Both records say so.
+>
+> **Round 38 — `continue-on-error` was banned at both ends of the job graph and nowhere in the
+> middle.** `changes` bans it in its key list; `codegen` gained a ban in round 34. The four jobs
+> between them — `lint`, `specs`, `build-test`, `db-test` — and `docs-validate` had none, and every
+> one of them is aggregated by `codegen`. One line on `build-test`:
+>
+> ```yaml
+>       - name: Unit tests ...
+>         continue-on-error: true
+>         run: cargo test --workspace
+> ```
+>
+> reds every assertion in this file, is swallowed, reports `success` to `needs`, and **the required
+> check on `main` is green with the gate red** — with every plant and every pin still passing,
+> because none of them looked at that key outside the two ends. **On `docs-validate` it is worse**:
+> the aggregator's by-name assertion is `[ "$DOCS_VALIDATE" != "success" ]`, which a swallowed
+> failure also satisfies — the docs-only lane's only validator reports success having validated
+> nothing, and the check written to catch exactly that passes with it.
+>
+> **The guard is derived from `codegen`'s own `needs:`**, not from a hand-written job list, so a job
+> ADDED to the aggregator is covered the moment it is added. A second hand-kept list here is the
+> two-lists-of-one-scope divergence this file has now retracted four times. Six plants, one per
+> spelling and scope; removing the guard leaves all six green.
+>
+> **And the red is actionable rather than a dead end**: a step legitimately allowed to fail is
+> written `run: <cmd> || true` in this repo — every `Evidence:` step in `ci.yml` already is — which
+> keeps the failure inside the step's exit status instead of hiding it from `needs`. The message
+> says so, because a ban whose escape is silence is the instrument this file spends thirty rounds
+> retracting.
