@@ -623,8 +623,15 @@ were regressions introduced while fixing the previous round's finding.
 *No total is stated here on purpose.* The first version of this paragraph said **thirty-three**
 while the PR body said **thirty-one**, and both then split the same set as "the first thirteen"
 plus "the last eighteen" — 31, not 33 — in the section whose own closing bullet says a derived
-number stated in prose is consumed as established fact and must be derived instead. The PR's round
-table enumerates the rounds; that is where a count can be re-derived from something. (Review #36.)
+number stated in prose is consumed as established fact and must be derived instead. The round entries in
+`docs/status/journal-2026-W35.md`, and the `(Review #NN)` citations in `tools/codegen-rs/src/**`,
+are where a count can be re-derived from something **committed**. (Review #36.)
+
+*The first version of this sentence pointed at the PR's round table instead — which is the same
+defect one level up: CLAUDE.md says **GitHub is never the record**, this section exists because the
+shapes were living only in a PR body, and a body is editable, unversioned and invisible to
+`make validate`. It was also already stale by seven rounds when it was caught. A repo record may not
+delegate its antecedent to a surface that disappears with the branch. (Review #58.)*
 
 These seven are not derivable from the code, each cost a round, and **several of them reappeared
 inside the very guard written to close them** — which is why they are here rather than in a comment

@@ -247,8 +247,15 @@ can_fingerprint() {
 # for -- a setup the host forbids (T15g's non-UTF-8 path) -- not for a missing instrument for one
 # clause of an otherwise fully constructible case. (Review #50 of PR #679.)
 fp_ok() { ! can_fingerprint || [ "$1" = "$2" ]; }
-HERM=""
-can_fingerprint || HERM="; cache hermeticity NOT MEASURED (no GNU find -printf / md5sum)"
+# ONE CLAUSE, REPLACED -- NOT TWO, APPENDED. The headline was deliberately restructured so that
+# `untouched` and `NOT MEASURED` are mutually exclusive; one scope down this was a SUFFIX, so nine
+# case lines read `... healthy cache untouched, exit 0; cache hermeticity NOT MEASURED`. The leading
+# clause asserts bytes that were never hashed, and the retraction only overrides it on a careful
+# read -- while the failure mode this suite exists for is a QUOTABLE line that reads green over an
+# unmeasured claim, and a case name is quoted at least as often as the headline (T15c's clause IS
+# the case's whole point). Same shape as the headline fix, applied where it belongs. (Review #58.)
+HERM="cache untouched"
+can_fingerprint || HERM="cache hermeticity NOT MEASURED (no GNU find -printf / md5sum)"
 
 
 # THE MEASUREMENT MUST DISTINGUISH "unchanged" FROM "could not look" -- the same distinction this
@@ -655,7 +662,7 @@ else
     && echo "$out" | grep -q "openability probe and the strict results parser" \
     && ! echo "$out" | grep -q '^candidate ' \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15b no-python3 lookup: named fallback, healthy cache untouched, exit $rc$HERM" \
+    && verdict ok "T15b no-python3 lookup: named fallback, $HERM, exit $rc" \
     || verdict bad "T15b no-python3 lookup (rc=$rc)"
 fi
 
@@ -677,7 +684,7 @@ else
   fp_a="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15c probe is read-only: planted -wal survives a hit byte-identical$HERM" \
+    && verdict ok "T15c probe is read-only: planted -wal survives a hit, $HERM" \
     || verdict bad "T15c probe read-only (rc=$rc)"
 fi
 
@@ -704,7 +711,7 @@ else
     && ! echo "$out" | grep -q "rebuild failed" \
     && ! echo "$out" | grep -q "qmd unavailable" \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc$HERM" \
+    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, $HERM, exit $rc" \
     || verdict bad "T15d probe-unavailable (rc=$rc)"
 fi
 
@@ -730,7 +737,7 @@ else
     && ! echo "$out" | grep -q '^candidate ' \
     && ! echo "$out" | grep -q "rebuild failed" \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15e broken python3: named preflight fallback, cache untouched, exit $rc$HERM" \
+    && verdict ok "T15e broken python3: named preflight fallback, $HERM, exit $rc" \
     || verdict bad "T15e broken-python3 lookup (rc=$rc)"
 fi
 
@@ -753,7 +760,7 @@ else
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, cache untouched, exit $rc$HERM" \
+    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, $HERM, exit $rc" \
     || verdict bad "T15f unknown-probe-exit (rc=$rc)"
 fi
 
@@ -788,7 +795,7 @@ else
     [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
       && ! echo "$out" | grep -q "rebuild failed" \
       && fp_ok "$fp_b" "$fp_a" \
-      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc$HERM" \
+      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, $HERM, exit $rc" \
       || verdict bad "T15g non-utf8 path (rc=$rc)"
   fi
 fi
@@ -818,7 +825,7 @@ else
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched$HERM" \
+    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, $HERM" \
     || verdict bad "T15h non-sqlite3 probe exception (rc=$rc)"
 fi
 
@@ -841,7 +848,7 @@ else
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15j sqlite3 module without Error: not a verdict, cache untouched$HERM" \
+    && verdict ok "T15j sqlite3 module without Error: not a verdict, $HERM" \
     || verdict bad "T15j sqlite3 without Error (rc=$rc)"
 fi
 
@@ -864,7 +871,7 @@ else
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && fp_ok "$fp_b" "$fp_a" \
-    && verdict ok "T15k Error present but not a class: not a verdict, cache untouched$HERM" \
+    && verdict ok "T15k Error present but not a class: not a verdict, $HERM" \
     || verdict bad "T15k malformed Error attribute (rc=$rc)"
 fi
 

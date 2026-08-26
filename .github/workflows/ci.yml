@@ -208,7 +208,17 @@ jobs:
     # diff, in the same spirit as the D3 capability allowlist.
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 20   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
+    # 60, NOT 20, AND THE JOB'S OWN COMMENTS SAY WHY: cargo-machete is static analysis, but this
+    # job also runs `cargo clippy --workspace --all-targets`, which the rust-cache step below calls
+    # "a full check-build of the workspace" -- and `--all-targets` compiles the test targets too. It
+    # was bucketed with `specs`/`docs-validate`, which genuinely build only `tools/codegen-rs`. The
+    # cap fires only on a cold cache, and cold is routine: `dtolnay/rust-toolchain@stable` rolls
+    # every ~6 weeks and rekeys every job at once, a `Cargo.lock` bump does the same, and GitHub
+    # evicts at 7 days / 10 GB. Before this change a slow cold `lint` was slow; now it FAILS,
+    # `codegen` reds on `needs.lint.result`, and nothing in the repository merges. That is the
+    # "a cap that reds honest work" instrument landing on the one job in the cheap bucket that is
+    # not seconds of work. (Review #58.)
+    timeout-minutes: 60    # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

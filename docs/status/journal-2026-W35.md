@@ -1659,3 +1659,33 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **And `in_job`'s anchor assertion caught the drift**: changing the ci.yml values redded the two
 > timeout plants with *"this plant would have mutated another job, or nothing"* rather than silently
 > mutating nothing. That is the guard review #16 asked for, doing its job on the author.
+>
+> **Round 58 — the durable record delegated its antecedent to a GitHub surface, which is the defect
+> it was written to fix, one level up.** §19 states no total and then routes the reader to *"the PR's
+> round table"* to re-derive one. That section exists **because the shapes were living only in a PR
+> body**, and CLAUDE.md says GitHub is never the record: a body is editable, unversioned, invisible
+> to `make validate`, and gone when the branch is. It was also **already stale by seven rounds** —
+> the table ended at 46–48 while the committed code cites `(Review #51)` through `(Review #55)` by
+> name. It now points at the journal's round entries and those code citations, which are committed.
+>
+> **Round 58b — `$HERM` appended where the headline replaces.** Rounds 36/52 restructured the
+> headline precisely so `untouched` and `NOT MEASURED` are mutually exclusive; one scope down the
+> same signal was a **suffix**, so nine case lines read *"… healthy cache untouched, exit 0; cache
+> hermeticity NOT MEASURED"*. The leading clause asserts bytes that were never hashed and the
+> retraction only overrides it on a careful read — while the failure mode this suite exists for is a
+> **quotable** line that reads green over an unmeasured claim, and a case name is quoted at least as
+> often as the headline (T15c's clause *is* the case's whole point). One clause, replaced. Verified
+> both ways.
+>
+> **Round 58c — `lint` was bucketed with the cheap jobs and does the same work as `build-test`.** Its
+> own rust-cache comment calls `cargo clippy --workspace --all-targets` *"a full check-build of the
+> workspace"*, and `--all-targets` compiles the test targets too; `specs` and `docs-validate`
+> genuinely build only `tools/codegen-rs`. **Before this branch a slow cold `lint` was slow; now it
+> FAILS** — `codegen` reds on `needs.lint.result` and nothing merges. Cold is routine: a
+> `dtolnay/rust-toolchain@stable` roll rekeys every job at once, a `Cargo.lock` bump does the same,
+> and GitHub evicts at 7 days / 10 GB. 20 → 60.
+>
+> **Three rounds, three caps, one lesson: adding a bound is adding a failure mode.** Every one of
+> these was introduced by the mitigation for a different failure mode, and each landed on a job
+> whose real work I had not looked at. A cap is safe only where the duration is known; where it is
+> not, the bound belongs far above the guess, and the guess belongs in the comment.
