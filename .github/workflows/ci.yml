@@ -281,20 +281,28 @@ jobs:
     # rather than quoting the half of it that happened to be cheap. Review #64's lesson pointing at
     # its author: a measurement is defined by what it excludes.
     #
-    # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- and for `docs-validate` the
-    # asymmetry is the most lopsided in this file. Too HIGH costs idle runner minutes on a hang, and
-    # on the docs-only lane it blocks no merge at all, because CLAUDE.md routes that work straight to
-    # `main` as a push with no PR -- the change has already landed. Too LOW cancels the job, `codegen`
-    # fails on `cancelled` by design, and the change sits on `main` WITH NO VALIDATOR HAVING RUN,
-    # because this is the only gate that lane has. It does not self-heal either: `Swatinem/rust-cache`
-    # saves nothing on a cancellation, so every re-run is cold and hits the same wall. Reached by an
-    # ordinary `Cargo.lock` or toolchain bump, which rekeys every cache at once.
+    # SO THE VALUE IS DECIDED ON THE ASYMMETRY, NOT ON A NUMBER -- AND THE ASYMMETRY IS DERIVED HERE
+    # RATHER THAN COPIED. Round 66 pasted `docs-validate`'s paragraph into this job, and its
+    # permissive half is FALSE of `specs`: that argument turns on the docs-only lane blocking no
+    # merge (a push with no PR, the change already landed), and `specs` carries
+    # `if: docs_only != 'true'` two lines up -- it NEVER RUNS on that lane. Round 58's
+    # `lint`-in-the-cheap-bucket defect, one job over, committed in the comment that argues against
+    # inheriting a number from a different job. (Review #70.)
     #
-    # `specs` carries the same value for the same unmeasured reason rather than a second guess: one
-    # number across the unmeasured jobs is one fewer figure to drift, which is the defect rounds 57,
-    # 61 and 62 spent three rounds on. Bounds a HANG; `codegen` waits on `needs:` even under
-    # `if: always()`. WHEN A COLD RUN IS ACTUALLY OBSERVED: read its duration off that run, state it
-    # here as the antecedent, and move this value deliberately -- do not lower it to fit a warm one.
+    # WHAT IS ACTUALLY TRUE HERE, both directions on the code lane, which is the only lane `specs`
+    # runs on. Too LOW cancels the job; `codegen` fails on `cancelled` by design, the required check
+    # reds, and `Swatinem/rust-cache` saves nothing on a cancellation, so the re-run is cold and hits
+    # the same wall -- reached by an ordinary `Cargo.lock` or toolchain bump, which rekeys every
+    # cache at once. Too HIGH is NOT free here, unlike on `docs-validate`: `specs` is in `codegen`'s
+    # `needs:`, `always()` still WAITS, so a hung `specs` keeps the required check queued for the
+    # full value with auto-merge never firing -- the repository-wide block `GATE-STEP-LOCUS` prices,
+    # and the reason `changes` is capped at 10 rather than at this value.
+    #
+    # So this number is a genuine trade rather than a cheap direction, and it is set at the same
+    # value as the other unmeasured jobs deliberately: one number across them is one fewer figure to
+    # drift, which is the defect rounds 57, 61 and 62 were spent on. Bounds a HANG. WHEN A COLD RUN
+    # IS ACTUALLY OBSERVED: read its duration off that run, state it here as the antecedent, and move
+    # this value deliberately -- do not lower it to fit a warm one.
     timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
@@ -528,10 +536,12 @@ jobs:
     # saves nothing on a cancellation, so every re-run is cold and hits the same wall. Reached by an
     # ordinary `Cargo.lock` or toolchain bump, which rekeys every cache at once.
     #
-    # `specs` carries the same value for the same unmeasured reason rather than a second guess: one
-    # number across the unmeasured jobs is one fewer figure to drift, which is the defect rounds 57,
-    # 61 and 62 spent three rounds on. Bounds a HANG; `codegen` waits on `needs:` even under
-    # `if: always()`. WHEN A COLD RUN IS ACTUALLY OBSERVED: read its duration off that run, state it
+    # THIS ARGUMENT IS TRUE OF `docs-validate` AND OF NO OTHER JOB -- it turns on the docs-only
+    # lane, and every other aggregated job carries `if: docs_only != 'true'`. `specs` states its own,
+    # different asymmetry at its own site; do not paste this one back over it (review #70). The value
+    # matches the other unmeasured jobs deliberately: one number across them is one fewer figure to
+    # drift, the defect rounds 57, 61 and 62 were spent on. Bounds a HANG; `codegen` waits on
+    # `needs:` even under `if: always()`. WHEN A COLD RUN IS ACTUALLY OBSERVED: read its duration off that run, state it
     # here as the antecedent, and move this value deliberately -- do not lower it to fit a warm one.
     timeout-minutes: 120
     runs-on: ubuntu-latest

@@ -2086,3 +2086,36 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Nothing else in the review was a finding**, and it said so — the second item is the reviewer
 > recording *weight* on an open row rather than reporting a defect, which is the right use of a
 > review pass on a `HOLD: human` PR.
+>
+> **Round 70 — a justification inherited by copy, committed in the comment arguing against exactly
+> that.**
+>
+> **Round 66 pasted `docs-validate`'s cap reasoning verbatim onto `specs`, and its permissive half is
+> false there.** That argument turns on the docs-only lane blocking no merge — a push with no PR, the
+> change already landed — and `specs` carries `if: docs_only != 'true'` two lines above the cap: **it
+> never runs on that lane.** Worse, the "too high is cheap" half does not transfer at all: `specs` is
+> in `codegen`'s `needs:`, `always()` still **waits**, so a hung `specs` keeps the required check
+> queued for the full value with auto-merge never firing — the repository-wide block
+> `GATE-STEP-LOCUS` prices, and the reason `changes` is capped at 10 rather than at this value.
+>
+> So `specs`' asymmetry is a **genuine trade in both directions**, not a cheap one, and it is now
+> derived at its own site. `docs-validate` keeps its own and says explicitly that it is true of that
+> job and no other.
+>
+> **This is round 58's `lint`-in-the-cheap-bucket defect, one job over — and I committed it inside a
+> comment arguing against inheriting a number from a different job.** Two occurrences is this repo's
+> threshold, and prose cannot hold it because the next paste looks exactly like the last one. Gated:
+> `no_two_jobs_share_a_substantial_timeout_justification` reds when two jobs carry a byte-identical
+> block of five or more comment lines above their cap. Planted by pasting the block back — reds with
+> the two jobs named. A **short pointer** stays legal (`build-test`/`db-test` both say *"see the
+> `changes` job comment"*), which is the correct way not to repeat one.
+>
+> **And the range assertion's message told its reader the opposite of the file's state.** It said
+> *"the heavy jobs are set well below it on purpose"* while **five of the seven** aggregated jobs sit
+> exactly at the 120 ceiling — so the guard can only fire above the documented ceiling, never on a
+> raise within it. That is a defensible design and now says so, including the direction the old
+> wording flattened: too-high is *not* cheap on a job the aggregator waits on under `always()`. The
+> person who meets that message is by definition editing these values.
+>
+> **Shape, for [`gates.md` §19](../claude/sessions/gates.md) #9: a justification inherited by copy is
+> not a justification at the site it now governs.**

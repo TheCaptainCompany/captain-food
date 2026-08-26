@@ -680,6 +680,15 @@ the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
    its *pathspecs*, the guard compared pathspecs, and the unstated extension filter made both
    records silently wider than the code.
 
+9. **A justification inherited by copy is not a justification at the site it now governs.** Twice
+   on this branch a `timeout-minutes` cap's reasoning was reused for a job it was not true of —
+   `lint` bucketed with jobs that compile nothing, then `docs-validate`'s paragraph pasted onto
+   `specs`, whose `if: docs_only != 'true'` means it never runs on the lane that argument turns on.
+   Both were written by an author arguing, in the same comment, against inheriting a number from a
+   different job — which is why prose cannot hold it: the next paste looks exactly like the last.
+   Now gated (`no_two_jobs_share_a_substantial_timeout_justification`); a short pointer to another
+   site is fine and is the correct way not to repeat one.
+
 Two more from the same branch, about the records rather than the tests:
 
 - **A count retracted twice will be retracted a third time — derive it.** A derived number stated in

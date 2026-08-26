@@ -10808,6 +10808,58 @@ mod decision_ask_and_citations {
     /// Prose cannot be made to track prose by intention — this repo has now proved that twice on
     /// one branch. So the pathspecs are READ OUT OF THE SOURCE and each is required to appear in
     /// both records. Adding a sixth pathspec reds this until the records say so too.
+    /// A SUBSTANTIAL `timeout-minutes` JUSTIFICATION MAY NOT BE SHARED BY TWO JOBS.
+    ///
+    /// Twice now a cap's reasoning has been inherited rather than re-derived at the site it governs:
+    /// round 58 bucketed `lint` with the cheap jobs on an argument about jobs that do no compiling,
+    /// and round 70 found `docs-validate`'s paragraph pasted verbatim onto `specs` -- where its
+    /// permissive half is FALSE, because `specs` carries `if: docs_only != 'true'` and never runs on
+    /// the lane the argument is about. Both were written by an author arguing, in the same comment,
+    /// against inheriting a number from a different job.
+    ///
+    /// Two occurrences is this repo's threshold for turning a lesson into a gate, and prose cannot
+    /// hold it: the next paste looks exactly like the last one. A SHORT pointer is fine and common
+    /// (`build-test`/`db-test` both say "see the `changes` job comment"), so the rule bites only on
+    /// blocks long enough to BE a justification.
+    #[test]
+    fn no_two_jobs_share_a_substantial_timeout_justification() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let lines: Vec<&str> = ci.lines().collect();
+        // The comment block immediately above each job-level `timeout-minutes:`, in file order.
+        let mut blocks: Vec<Vec<&str>> = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            if !l.trim_start().starts_with("timeout-minutes:") || !l.starts_with("    timeout-minutes:") {
+                continue;
+            }
+            let mut j = i;
+            while j > 0 && lines[j - 1].trim_start().starts_with('#') {
+                j -= 1;
+            }
+            blocks.push(lines[j..i].iter().map(|l| l.trim()).collect());
+        }
+        assert!(
+            blocks.len() >= 5,
+            "found {} job-level `timeout-minutes:` keys -- this test reads them by an exact four-space indent, so a reindent makes it vacuous rather than red. Re-point it",
+            blocks.len()
+        );
+        // Long enough to be an ARGUMENT rather than a pointer. `build-test`/`db-test` share a
+        // one-line "see the `changes` job comment", which is the correct way to not repeat one.
+        const SUBSTANTIAL: usize = 5;
+        for a in 0..blocks.len() {
+            for b in (a + 1)..blocks.len() {
+                if blocks[a].len() < SUBSTANTIAL || blocks[b].len() < SUBSTANTIAL {
+                    continue;
+                }
+                assert_ne!(
+                    blocks[a], blocks[b],
+                    "two jobs carry a byte-identical {}-line `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other",
+                    blocks[a].len()
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_records_state_the_same_citation_corpus_as_the_code() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -11849,7 +11901,7 @@ mod docs_only_ci_and_legacy_visibility {
                     ));
                 assert!(
                     (1..=120).contains(&cap),
-                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=120. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. The heavy jobs are set well below it on purpose: a cap that is too HIGH costs a hang some extra minutes, while one that is too LOW cancels the job, reds the required check on an ordinary dependency bump, and does not converge on re-run because a cancelled job saves no cache. If a cold-cache run ever approaches its value: read the duration off that run, state it in ci.yml as the antecedent, and raise BOTH this bound and that job's value in the SAME commit -- do not edit the job down to fit",
+                    "the `{}` job's `timeout-minutes` is {} -- it must be in 1..=120. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. THIS BOUND HAS NO HEADROOM AND THAT IS THE STATE OF THE FILE, not an oversight: five of the seven aggregated jobs sit EXACTLY at the ceiling, and only `changes` and `codegen` are below it -- so this check can only fire on a value ABOVE the documented ceiling, never on a raise within it. An earlier message here said the heavy jobs were set `well below it on purpose`, which was false of the file it guards and was read by the one person guaranteed to be editing these values (review #70). The direction to be careful about: a cap that is too HIGH costs a hang some extra minutes on most jobs -- but NOT on one the aggregator waits on with `always()`, where it queues the required check for the full value -- while one that is too LOW cancels the job, reds the required check on an ordinary dependency bump, and does not converge on re-run because a cancelled job saves no cache. If a cold-cache run ever approaches a job's value: read the duration off that run, state it in ci.yml as the antecedent, and raise BOTH this bound and that job's value in the SAME commit -- do not edit the job down to fit",
                     job, cap
                 );
                 if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
