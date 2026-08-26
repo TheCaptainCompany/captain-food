@@ -1339,3 +1339,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > visibly tampered file while the test reds by name. **The rule: a plant against a defence-in-depth
 > value has to be checked against the state where only that value is missing** — anything else is
 > measuring the guard next door.
+>
+> **Round 47 — the completeness invariant is an equality, so it ratchets DOWN silently.**
+> `pass + fail + skip == EXPECTED_CASES` catches a case that stops *running* (the round-17 defect)
+> and not one that is *removed*: delete a case, decrement the literal, and every gate in the repo is
+> green — **and the SKILL.md pin follows the decrement rather than resisting it**, because it derives
+> its number from that same literal. So the suite's own rule three lines from the invariant
+> (*"Never delete a case and never weaken an assertion to recover green"*) was the one thing in that
+> block that stayed **prose**, in a branch whose whole argument is that prose can be ignored and a
+> gate cannot. Shape #1 one direction over: an equality is a floor *and* a ceiling, and only the
+> ceiling was load-bearing.
+>
+> `MINIMUM_CASES` lives in the **Rust test, not next to `EXPECTED_CASES` in the shell** — the point
+> is that lowering it costs a second edit in another language and another file, with the reason
+> attached. Planted with the exact two-token erosion: `EXPECTED_CASES=53` plus the matching SKILL.md
+> edit now reds by name where it used to be green.
+>
+> **Also recorded, deliberately not taken**: `.claude/hooks/stop-gate.sh` is the only thing that runs
+> the ask-gate selftest on every *interactive* turn and is **not** in the four-file `GATE_SET`, so
+> emptying it disarms that gate locally with every pin green. CI catches the disarmed state on push
+> (the `changes` job invokes the selftest directly, not through stop-gate), and `stop-gate.sh`
+> predates this branch — widening the set is a change to the set's boundary, not a fix to anything
+> here. The omission is now written down at the `GATE_SET` declaration itself, because **a set whose
+> omissions are undocumented is how the next omission gets argued from silence.**

@@ -12432,6 +12432,15 @@ mod docs_only_ci_and_legacy_visibility {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         // THE GATE SET, named once here and required IN FULL in BOTH scripts. A script's own block
         // cannot survive that script being REPLACED wholesale, so each must verify the others.
+        // WHAT IS NOT IN THIS SET, recorded here because this is where the next person revising it
+        // will look. `.claude/hooks/stop-gate.sh` is the only thing that runs the ask-gate selftest
+        // on every INTERACTIVE turn, and it is not a member: emptying it disarms that gate locally
+        // with every pin in this file green. CI still catches the disarmed state on push, because
+        // the `changes` job invokes the selftest script directly rather than through stop-gate; and
+        // `stop-gate.sh` predates this branch, so widening the set is a change to the set's
+        // boundary rather than a fix to anything this PR introduced. Raised by the independent
+        // review of PR #679 and deliberately NOT taken here -- but a set whose omissions are
+        // undocumented is how the next omission gets argued from silence.
         const GATE_SET: [&str; 4] = [
             ".claude/hooks/register-check.sh",
             ".claude/hooks/register-check-selftest.sh",
@@ -12928,6 +12937,27 @@ mod docs_only_ci_and_legacy_visibility {
             skill.contains(&format!("**{} cases**", expected)),
             "SKILL.md must state `**{} cases**` to match stub-tests.sh's EXPECTED_CASES={} -- a derived number in the authority doc with nothing re-deriving it is the drift ADR-20260817-105845 governs",
             expected, expected
+        );
+        // A FLOOR, BECAUSE THE COMPLETENESS INVARIANT ONLY RATCHETS UP. `pass + fail + skip ==
+        // EXPECTED_CASES` catches a case that stops RUNNING (the round-17 defect) and not one that
+        // is REMOVED: delete a case, decrement the literal, and every gate in the repo is green --
+        // and the SKILL.md assertion above FOLLOWS the decrement rather than resisting it, because
+        // it derives its number from that same literal. So the suite's own rule three lines from
+        // the invariant ("Never delete a case and never weaken an assertion to recover green") was
+        // the one thing in that block that stayed PROSE, in a branch whose whole argument is that
+        // prose can be ignored and a gate cannot. Shape #1 one direction over: an equality is a
+        // floor AND a ceiling, and only the ceiling was load-bearing.
+        //
+        // The floor lives HERE, in Rust, deliberately -- not next to `EXPECTED_CASES` in the shell,
+        // where the same two-token edit would move both. Lowering it is a decision a diff has to
+        // argue with, in another language and another file, with this message attached. Raising it
+        // when cases are added is ordinary. (Review #47 of PR #679.)
+        const MINIMUM_CASES: u32 = 54;
+        let expected_n: u32 = expected.parse().expect("EXPECTED_CASES is an integer");
+        assert!(
+            expected_n >= MINIMUM_CASES,
+            "stub-tests.sh declares EXPECTED_CASES={} but this suite has committed to at least {}. The completeness invariant is an EQUALITY, so deleting a case and decrementing the literal is green in one edit and the SKILL.md pin follows it down. If a case is genuinely obsolete, say why here and lower this floor in the same change -- that is the whole point of it being in a different file",
+            expected_n, MINIMUM_CASES
         );
     }
 
