@@ -9910,6 +9910,10 @@ mod decision_ask_and_citations {
             // predicate could not see, while `row X` and `the X decision` were caught (review #12).
             ("the mandated path form", "read docs/decisions/OLD-ROW.yaml before asking"),
             ("the path form, backticked", "resolve `docs/decisions/OLD-ROW.yaml` directly"),
+            // WRAPPED. Every control here used to be a single line, which is why the whole
+            // line-scoping class was invisible to this test (review #13). A citation split across
+            // a wrap was MISSED before the join and is caught now.
+            ("a citation split across a wrap", "Decided by row\n`OLD-ROW` (founder)."),
         ] {
             let issues = check(".claude/x.md", body);
             assert_eq!(
@@ -9944,6 +9948,21 @@ mod decision_ask_and_citations {
             ("the path form, explained", "docs/decisions/OLD-ROW.yaml is superseded -- read the head"),
             // `decisions/` must be the DIRECTORY, not any word ending in those letters.
             ("a lookalike directory", "see docs/old-decisions/OLD-ROW.yaml for history"),
+            // THE TWO WRAP FAILURES, as controls. Both redded as HARD `make validate` errors
+            // before the join, and neither had anything to do with what the author wrote --
+            // only with where the ~100-column wrap happened to fall (review #13).
+            (
+                "a backticked key merely opening a wrapped line",
+                "The predecessor was\n`OLD-ROW` and it is gone.",
+            ),
+            (
+                "the escape hatch reached across a wrap",
+                "`OLD-ROW` is\nsuperseded; name `NEW-ROW` instead.",
+            ),
+            (
+                "a wrapped bullet whose explanation lands on the next line",
+                "- row `OLD-ROW` no longer governs, having been\n  superseded by the chain head.",
+            ),
         ] {
             let issues = check(".claude/x.md", body);
             assert!(
@@ -9983,12 +10002,83 @@ mod decision_ask_and_citations {
         // leftover `.claude/worktrees/` while CI stayed green -- the divergence introduced in the
         // very commit that fixed the other copy.
         let corpus_files = claude_citation_corpus(&root);
+        // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
+        // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
+        // failure path (git absent, not a repo, a non-zero `ls-files`). Review #13 named the
+        // consequence: narrowing the pathspec, or dropping `"md"` from the extension filter,
+        // silently removes `.claude/**/*.md` -- SKILL.md included, the file whose eight stale
+        // citations motivated the rule -- and every assertion below stays green while the rule
+        // stops seeing anything. This is the same defect the docstring above records as already
+        // found once ("making the function return an empty Vec left `cargo test --workspace`
+        // entirely green"), still open in the test written to close it.
+        for must_reach in [
+            ".claude/skills/decision-lookup/SKILL.md",
+            ".claude/skills/decision-lookup/scripts/decision-lookup.sh",
+            "CLAUDE.md",
+            "Makefile",
+        ] {
+            assert!(
+                corpus_files.iter().any(|(p, _)| p == must_reach),
+                "the citation corpus no longer reaches `{}` -- the rule then says nothing, green, everywhere. Got {} files",
+                must_reach,
+                corpus_files.len()
+            );
+        }
         let real = validate_no_superseded_row_is_cited_as_authority(&real_rows, &corpus_files);
         assert!(
             real.is_empty(),
             "the committed corpus cites a superseded row as live authority: {:?}",
             real.iter().map(|i| format!("{} {}", i.location, i.message)).collect::<Vec<_>>()
         );
+        // AND PLANT IT RED THROUGH THE CORPUS, not only through a hand-passed fixture: this is the
+        // only assertion here that fails if the walk stops producing readable content.
+        let superseded_key = real_rows
+            .iter()
+            .find(|r| r.get("status") == Some("superseded"))
+            .and_then(|r| r.get("key"))
+            .expect("a superseded row, asserted above")
+            .to_string();
+        let planted: Vec<(String, String)> = corpus_files
+            .iter()
+            .cloned()
+            .chain([(
+                ".claude/planted.md".to_string(),
+                format!("Decided by row `{}` (founder).", superseded_key),
+            )])
+            .collect();
+        assert!(
+            !validate_no_superseded_row_is_cited_as_authority(&real_rows, &planted).is_empty(),
+            "a planted citation of the superseded row `{}` was NOT caught against the real corpus",
+            superseded_key
+        );
+    }
+
+    /// The rule must still be CALLED by `make validate`, not merely exist.
+    ///
+    /// Review #13: deleting the call site in `main.rs` left `cargo test --workspace` entirely
+    /// green, so the rule could stop running inside the one gate that matters with no red
+    /// anywhere. A source assertion is the cheap half of the fix the reviewer named; the deeper
+    /// one (hoisting the call into an entry point a test can invoke) is a refactor of the
+    /// validator's shape and is deliberately NOT ridden along with a behaviour fix.
+    #[test]
+    fn the_citation_rule_is_wired_into_the_validator() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = fs::read_to_string(root.join("tools/codegen-rs/src/main.rs")).expect("main.rs");
+        let code = src
+            .lines()
+            .map(|l| l.split_once("//").map_or(l, |(before, _)| before))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for needle in [
+            "claude_citation_corpus(&root)",
+            "validate_no_superseded_row_is_cited_as_authority(",
+        ] {
+            assert!(
+                code.contains(needle),
+                "main.rs no longer contains the EXECUTABLE `{}` (a copy inside a comment does not count) -- `make validate` would stop running the superseded-citation rule with every test still green",
+                needle
+            );
+        }
     }
 
     /// A superseded row's index line must route the reader to its SUCCESSOR, not its predecessor.
@@ -11021,10 +11111,16 @@ mod docs_only_ci_and_legacy_visibility {
             // defect (`raw.contains` matching inside a comment) recurring for the one needle added
             // after round 9. Two lists that must agree WILL diverge; there is now one, and a needle
             // added here is automatically checked where it has to hold.
+            // THESE NEEDLES TRACK THE MECHANISM, and the mechanism changed in review #13: the
+            // comparison was `cat-file blob | cmp`, which put the RAW blob against a SMUDGED
+            // worktree file and so read git's own EOL translation as tampering on any
+            // core.autocrlf checkout. It is object-id against object-id now, `hash-object` running
+            // the same clean filter git runs on commit, and `cmp` is gone entirely -- a required
+            // binary nothing called could only produce a false refusal.
             for needle in [
-                "cat-file blob",
-                "\"$_cmp\" -s -",
-                "unset -f git cmp",
+                "hash-object --",
+                "rev-parse -q --verify \"${_ref}:$rel\"",
+                "unset -f git command",
                 "unset \"${!GIT_@}\"",
             ] {
                 assert!(
@@ -11352,6 +11448,28 @@ mod docs_only_ci_and_legacy_visibility {
                 code.contains("EXPECTED_CASES=") && code.contains("-ne \"$EXPECTED_CASES\"")
             },
             "stub-tests.sh must assert its case COUNT, not merely the absence of failures — a skipped case is not a covered case"
+        );
+
+        // AND SKILL.md MUST STATE THE SAME INTEGER. The suite's count is self-enforcing (adding a
+        // case is forced to move `EXPECTED_CASES`); the DOC copy was not, and the assertion above
+        // checked only that the guard exists, never its value. So the next case added left
+        // SKILL.md -- the document SKILL.md itself calls the wrapper's authority -- stating a
+        // count nobody re-derives: exactly ADR-20260817-105845, and exactly the drift this PR
+        // retracts twice in its own records (an invented `6 passed … 12 skipped`, a "34 to 54"
+        // growth reproducing at no commit). The number now lives in ONE place and the doc copy
+        // cannot drift from it. Review #13.
+        let expected = shell_code_only(&suite)
+            .split("EXPECTED_CASES=")
+            .nth(1)
+            .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+            .filter(|d| !d.is_empty())
+            .expect("stub-tests.sh must set EXPECTED_CASES to a literal integer");
+        let skill = fs::read_to_string(root.join(".claude/skills/decision-lookup/SKILL.md"))
+            .expect("SKILL.md");
+        assert!(
+            skill.contains(&format!("**{} cases**", expected)),
+            "SKILL.md must state `**{} cases**` to match stub-tests.sh's EXPECTED_CASES={} -- a derived number in the authority doc with nothing re-deriving it is the drift ADR-20260817-105845 governs",
+            expected, expected
         );
     }
 

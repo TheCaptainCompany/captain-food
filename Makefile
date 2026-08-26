@@ -26,7 +26,7 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: hooks-test typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
+.PHONY: hooks-test stub-tests typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
@@ -195,6 +195,13 @@ gate:
 # edit: a silent trap on the one loop the target exists for.
 hooks-test:
 	env REGISTER_CHECK_ALLOW_DIRTY=1 bash .claude/hooks/register-check-selftest.sh
+
+# The SAME entrypoint for the other gate script. `make hooks-test` was given the opt-out so an
+# edit-and-re-run loop stays possible; the decision-lookup stub suite -- the one PR #679 is about
+# -- was left with no interactive caller at all, so a maintainer editing the wrapper got
+# `FATAL: ... differs from the committed blob` and zero cases run (review #13).
+stub-tests:
+	env DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 
 # Night loop: validate the frozen DSL, regenerate, re-validate. NEVER edits specs/**.
 night-loop: validate generate

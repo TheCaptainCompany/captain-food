@@ -348,4 +348,49 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > and `db-test` and loses all build and test signal for a reason unrelated to the diff — and the
 > stub suite's own step comment enumerates three host-drift classes as expected failure modes.
 > `RETRIEVAL-QMD-CI` authorizes that step IN THAT JOB, so #679 could not move it; a banked paragraph
-> is invisible to the next author and the precedent sets itself by default.
+> is invisible to the next author and the precedent sets itself by default.>
+> **Round 13 — the rule was line-scoped in a corpus that hard-wraps at ~100 columns, and that broke
+> it in BOTH directions.** `decision-superseded-authority` decided everything inside one physical
+> line. So (a) a backticked key that merely happened to land at the start of a continuation line was
+> read as a citation opening a line, and (b) the documented escape — putting the word `superseded`
+> in the clause — stopped working the moment the wrap pushed that word to the next line. Both land
+> as a **hard `make validate` error** that blocks every push, and the author's only remaining moves
+> are rewording or re-wrapping: *a red whose escape is silence, on exactly the prose the rule wants
+> people to write.* **Today's corpus was green BY LUCK** — two sites repeat "superseded" on both
+> wrapped lines and one is a single long line. **Every green control in the test was a single line,
+> which is precisely why the class was invisible to it.** The scanner now joins consecutive non-blank
+> lines into one unit (leading `#`/`//`/`>`/`-`/`*` markers stripped) before scanning, which also
+> *improves* detection: a citation split across a wrap was missed before and is caught now. **The
+> generalisable rule: a line-scoped check over hard-wrapped prose has a defect wherever the wrap
+> falls, and single-line fixtures cannot see it.**
+>
+> **The gate compared a RAW blob against a SMUDGED worktree file.** `cat-file blob | cmp` reads git's
+> own EOL translation as tampering: the committed blobs are LF, `ci.yml`'s drift step records that
+> this repo is authored on Windows, `stop-gate.sh` carries a Cygwin branch, Git for Windows defaults
+> to `core.autocrlf=true` and there is no `.gitattributes`. A **completely clean** Windows checkout
+> therefore failed all four comparisons and printed *"Something modified a gate script … A green here
+> would be a lie"* — with nothing in the message, `SKILL.md` or `workflow.md` mentioning line
+> endings, so the remedy a reader reaches for is deleting the block the header begs them not to
+> delete. **CI is Linux-only, so the plant-red fixture builds and reads on one platform and is
+> structurally blind to the class.** Now object-id against object-id (`git hash-object` runs the
+> same clean filter git runs on commit), which detects tampering identically and removed the `cmp`
+> dependency outright — a required binary nothing calls can only produce a false refusal.
+>
+> **`make stub-tests` exists now, and the sentence that hid its absence is retracted.** The header of
+> `stub-tests.sh` said *"SKILL.md, workflow.md, the Makefile and stop-gate.sh all carry this"* about
+> `DECISION_LOOKUP_ALLOW_DIRTY`. **Three of the four carried nothing of the sort** — they name
+> `REGISTER_CHECK_ALLOW_DIRTY`, a different variable for the other script, and none of them invokes
+> this suite. The sentence hid the real gap: the hook selftest got `make hooks-test` and a stop-gate
+> step so its edit-and-re-run loop kept working, and **the suite this entire change is about got
+> neither**. Same shape as the round-9 `make hooks-test` trap, in the comment written to close it.
+>
+> **Two guards that could not fail, both closed by asserting what they were about.**
+> `assert!(real.is_empty())` over the citation corpus is *satisfied* by an empty corpus, and
+> `claude_citation_corpus` returns `Vec::new()` on every failure path — so narrowing the pathspec or
+> dropping `"md"` from the extension filter removed `SKILL.md` from the walk with every test green.
+> It now asserts four named files are reached AND plants a citation red **through the real corpus**.
+> Separately, deleting the `main.rs` call site left `cargo test --workspace` green, so the rule could
+> stop running inside `make validate` with no red anywhere — `the_citation_rule_is_wired_into_the_validator`
+> closes that half. And `SKILL.md`'s `**54 cases**` was a derived number with nothing re-deriving it:
+> the pin now parses `EXPECTED_CASES=` out of the script and asserts the doc states the same integer
+> (planted red at 55 before landing).

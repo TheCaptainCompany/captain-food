@@ -679,6 +679,58 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
 ///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
 ///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
 ///     the scope is a caller decision rather than a walk from the repo root.
+/// Consecutive non-blank lines joined into ONE scanning unit, with each line's leading comment or
+/// list marker stripped so the join reads as the sentence the author actually wrote.
+///
+/// THE RULE BELOW IS CLAUSE-SCOPED AND THE CORPUS IS HARD-WRAPPED AT ~100 COLUMNS. Scanning
+/// `content.lines()` decided everything inside one physical line, which broke the rule in both
+/// directions at a wrap (review #13 of PR #679), and both failures land as a HARD `make validate`
+/// error that blocks every push:
+///
+///   * FALSE RED. `cites` accepts a backticked key that OPENS a line. Wrap an ordinary sentence so
+///     that ``` `KEY` ``` lands at the start of the continuation line and it reds, though nothing
+///     on that line cites anything.
+///   * THE ESCAPE HATCH BECOMES UNREACHABLE. The exemption needs the word `superseded` in the
+///     clause around the occurrence. Write the sentence the docstring calls legal, wrap it so
+///     `superseded` falls to the next line, and the exemption never sees it. The author's only
+///     remaining moves are rewording or re-wrapping — a red whose escape is silence, on exactly
+///     the prose the rule wants people to write.
+///
+/// Today's corpus was green BY LUCK: two sites repeat "superseded" on both wrapped lines and one
+/// is a single long line. Every green control in the test was a single line, which is why the
+/// class was invisible to it. Joining also strictly IMPROVES detection — a citation split across a
+/// wrap (`Decided by row` / `` `KEY` ``) was missed before and is caught now.
+fn logical_units(content: &str) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = Vec::new();
+    let mut cur: Option<(usize, String)> = None;
+    for (i, raw) in content.lines().enumerate() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            if let Some(u) = cur.take() {
+                out.push(u);
+            }
+            continue;
+        }
+        // `# `, `// `, `/// `, `> `, `- `, `* ` — the markers that repeat on every wrapped line of
+        // a comment block, a quote or a bullet. Stripping them is what makes the join read as one
+        // sentence instead of `# foo # bar`.
+        let body = trimmed
+            .trim_start_matches(|c: char| matches!(c, '#' | '/' | '>' | '*' | '-'))
+            .trim_start();
+        match cur.as_mut() {
+            Some((_, acc)) => {
+                acc.push(' ');
+                acc.push_str(body);
+            }
+            None => cur = Some((i + 1, body.to_string())),
+        }
+    }
+    if let Some(u) = cur {
+        out.push(u);
+    }
+    out
+}
+
 pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
     rows: &[DecisionRow],
     files: &[(String, String)],
@@ -690,7 +742,8 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
         .collect();
     let mut issues = Vec::new();
     for (path, content) in files {
-        for line in content.lines() {
+        for (first_line, line) in logical_units(content) {
+            let line = line.as_str();
             for key in &superseded {
                 // BIND TO THE CITING POSITION, not to the line. A first attempt flagged any line
                 // mentioning the key alongside the word "row", which false-redded the very sentence
@@ -834,9 +887,10 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         "decision-superseded-authority",
                         path.clone(),
                         format!(
-                            "cites `{}` as a live row, but that row is SUPERSEDED. Name the CHAIN HEAD instead: a `reconsiders:` pointing at a superseded row is rejected, so this sends the next session into a gate error on the path it is trying to help them down. Line: {}",
+                            "cites `{}` as a live row, but that row is SUPERSEDED. Name the CHAIN HEAD instead: a `reconsiders:` pointing at a superseded row is rejected, so this sends the next session into a gate error on the path it is trying to help them down. From line {}, clause: {}",
                             key,
-                            line.trim()
+                            first_line,
+                            line[clause_start..clause_end].trim()
                         ),
                     ));
                     break;

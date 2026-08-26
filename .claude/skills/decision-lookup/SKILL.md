@@ -209,9 +209,11 @@ The same applies on a host that keeps `git` or `cmp` outside `/usr/bin:/bin:/usr
 block pins that PATH deliberately, so that it cannot be sent to a shim, and exits 1 if either tool
 is absent. Nix and some containers will need the opt-out for that reason alone.
 
-(This paragraph exists because `claude-review` caught the authority doc instructing a command that
-could not succeed on the one occasion it told you to run it — the same trap that was fixed for
-`make hooks-test` and `workflow.md` in the same change, and left open here.)
+**`make stub-tests`** is the interactive entrypoint and passes the opt-out for you. It exists
+because the trap above was fixed for `make hooks-test` and `workflow.md` and left open for the very
+suite this skill is about: a maintainer editing the wrapper ran the bare command, got
+`FATAL: … differs from the committed blob` with zero cases run, and had to have read this section
+to know why. Use the target while editing; CI runs the bare command, default-on, on purpose.
 
 **54 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the

@@ -71,13 +71,15 @@ else
   # functions shadowing the tools, a PATH pointing at a shim, and every GIT_* variable -- git
   # obeys GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY and friends, so the ORACLE itself is
   # redirectable even when the binary is not. The prefix form cannot be out-enumerated.
-  unset -f git cmp command 2>/dev/null || true
+  unset -f git command 2>/dev/null || true
   unset "${!GIT_@}" 2>/dev/null || true
   _vpath="/usr/bin:/bin:/usr/local/bin"
   _git="$(PATH="$_vpath" command -v git || true)"
-  _cmp="$(PATH="$_vpath" command -v cmp || true)"
-  if [ -z "$_git" ] || [ -z "$_cmp" ]; then
-    echo "FATAL: git or cmp not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
+  # `cmp` USED TO BE REQUIRED HERE and is not any more: the comparison is now object-id against
+  # object-id, so git is the only tool involved. Requiring a second binary that nothing calls is a
+  # host dependency that can only produce a false refusal.
+  if [ -z "$_git" ]; then
+    echo "FATAL: git not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
     echo "  The PATH is pinned on purpose so this cannot be sent to a shim. On NixOS or a slim" >&2
     echo "  container, re-run with REGISTER_CHECK_ALLOW_DIRTY=1 rather than deleting this block." >&2
     exit 1
@@ -128,11 +130,23 @@ else
     .claude/skills/decision-lookup/scripts/decision-lookup.sh \
     .claude/skills/decision-lookup/scripts/stub-tests.sh
   do
-    if ! "$_git" -C "$ROOT" cat-file -e "${_ref}:$rel" 2>/dev/null; then
+    _want="$("$_git" -C "$ROOT" rev-parse -q --verify "${_ref}:$rel" 2>/dev/null || true)"
+    if [ -z "$_want" ]; then
       echo "FATAL: $rel is not tracked at ${_ref} -- refusing to report on a gate set CI cannot verify." >&2
       exit 1
     fi
-    if ! "$_git" -C "$ROOT" cat-file blob "${_ref}:$rel" 2>/dev/null | "$_cmp" -s - "$ROOT/$rel"; then
+    # COMPARE OBJECT IDS, NOT BYTES. `cat-file blob | cmp` puts the RAW blob against a SMUDGED
+    # worktree file, so git's own EOL translation reads as tampering: the committed blobs are LF,
+    # this repo is authored on Windows (ci.yml's drift step says so, and stop-gate.sh carries a
+    # Cygwin branch), Git for Windows defaults to core.autocrlf=true and there is no
+    # .gitattributes -- so a COMPLETELY CLEAN checkout failed all four comparisons and printed the
+    # tamper message, with nothing anywhere mentioning line endings. The remedy a reader reaches
+    # for is deleting this block, which is exactly what the header asks them not to do. CI is
+    # Linux-only, so the plant-red fixture builds and reads on one platform and is structurally
+    # blind to the class. `hash-object` runs the same clean filter git would run on commit, so the
+    # comparison is filter-aware and detects tampering identically. (Review #13 of PR #679.)
+    _have="$("$_git" -C "$ROOT" hash-object -- "$ROOT/$rel" 2>/dev/null || true)"
+    if [ "$_have" != "$_want" ]; then
       echo "FATAL: $rel differs from the committed blob at ${_ref}." >&2
       echo "  Something modified a gate script between checkout and this run -- the disarm shape" >&2
       echo "  this check exists to DETECT. A green here would be a lie." >&2
