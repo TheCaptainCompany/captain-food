@@ -8631,90 +8631,46 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
     }
 }
 
-    /// The PREDICATE that decides `unmeasured` must include the partial-read disjunct.
+/// THE PREDICATE THAT DECIDES `unmeasured` MUST DISTINGUISH THE TWO SHORTFALLS.
 ///
-/// Review #84's second half: `readable == false` is git refusing outright, but a corpus can also
-/// be PARTIALLY read -- `unread` is non-empty when git listed a file the filesystem would not
-/// hand back (sparse checkout, dangling tracked symlink, permission drop). Both are HOST causes,
-/// so both destabilise the counts across machines; keying only on the first left `N -> N-1` on
-/// the second, landing in `better` and redding the same way with `unmeasured` empty.
+/// Review #84's half: `readable == false` is git refusing outright, but a corpus can also be
+/// PARTIALLY read -- `unread` is non-empty when git listed a file the filesystem would not hand
+/// back (sparse checkout, dangling tracked symlink, permission drop). Keying only on the first left
+/// `N -> N-1` on the second, landing in `better` and redding on a tree nobody touched.
 ///
-/// A TEXT ASSERTION, AND ITS LIMIT STATED: the predicate is one expression in `main.rs`, not a
-/// separable unit, so this reads the source rather than executing it — the weaker instrument
-/// this file prefers to avoid. It catches the disjunct being DELETED, which is the regression
-/// that actually happened once; it cannot catch it being rewritten to something wrong. Kept
-/// because the alternative was nothing. (Review #84 of PR #679.)
+/// Review #91's half: they are also not the SAME shortfall, and collapsing them into one bool was
+/// the defect `the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly` pins.
+///
+/// THIS USED TO BE A TEXT ASSERTION over `main.rs`, and said so: "it catches the disjunct being
+/// DELETED, which is the regression that actually happened once; it cannot catch it being rewritten
+/// to something wrong". The classification is now `CorpusShortfall::from_scan`, so it is asserted
+/// by EXECUTION -- and the tree-caused vectors it must never consult are excluded by the function's
+/// SIGNATURE rather than by a check, which is the level CLAUDE.md's compiler-first rule asks for
+/// before a gate is written. The weaker instrument is retired because the compiler subsumes it,
+/// which that rule calls a correct outcome. (Reviews #84 and #91 of PR #679.)
 #[test]
-fn the_unmeasured_predicate_covers_a_partially_read_corpus() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-    let src = fs::read_to_string(root.join("tools/codegen-rs/src/main.rs")).expect("main.rs");
-    let line = src
-        .lines()
-        .find(|l| l.trim_start().starts_with("corpus_incomplete ="))
-        .expect("main.rs must assign `corpus_incomplete` -- if that name moved, re-point this test rather than deleting it");
-    assert!(
-        line.contains("!readable"),
-        "the unmeasured predicate lost the git-refused disjunct: {}",
-        line.trim()
-    );
-    assert!(
-        line.contains("unread.is_empty()"),
-        "the unmeasured predicate lost the PARTIAL-read disjunct. `unread` is non-empty when git listed a file the filesystem would not hand back, which is a HOST cause exactly like git refusing -- so the corpus counts are unstable across machines and a baselined kind reds `N -> N-1` on the host that dropped the file. The two TREE-caused vectors (`unread_tree`, `skipped_ext`) are deliberately absent: they drop the same files everywhere, so they narrow the corpus without destabilising it. Got: {}",
-        line.trim()
-    );
-    for tree_caused in ["unread_tree", "skipped_ext"] {
-        assert!(
-            !line.contains(tree_caused),
-            "the unmeasured predicate gained `{}`, which is TREE-caused: it drops the same files on every host, so it narrows the corpus without making the count host-dependent. Including it suppresses the ratchet permanently the moment one file qualifies -- which is the gate quietly switching itself off. Got: {}",
-            tree_caused, line.trim()
-        );
-    }
-}
+fn the_shortfall_classifier_separates_git_refusing_from_a_partial_read() {
+    use crate::validate::warning_baseline::CorpusShortfall;
 
-/// AN UNREADABLE CORPUS MAY NOT MINT A RATCHETED WARNING.
-///
-/// `skipped_ext` deliberately survives review #61's empty-corpus early return, where it is the
-/// EXPLANATION for the empty corpus. That return also sets `readable = false`, the caller turns
-/// that into `corpus_incomplete`, and `--write-warning-baseline` REFUSES on it. So emitting those
-/// names under the tree-caused, ratcheted kind produced `0 -> N (NEW warning kind)` out of a run
-/// that — by that return's own statement — scanned nothing, with the printed remedy
-/// (`make warning-baseline`) exiting 1 as well: verbatim the end state `CORPUS_DERIVED_KINDS`
-/// calls "WORSE than the reporters': the reader can no longer commit the bad 0, so they are left
-/// with a red they cannot clear".
-///
-/// Latent, and closed anyway on this branch's own stated grounds — it arms itself on a later,
-/// unrelated commit and the run that trips it reads as a validator regression on a tree nobody
-/// touched. ASSERTED BY EXECUTION, not by reading `main.rs`: the sibling predicate test says out
-/// loud that a text assertion catches a deletion and not a rewrite, which is why the choice was
-/// extracted into `out_of_corpus_warning_kind` rather than left as an `if` at the emission site.
-/// (Review #90 of PR #679.)
-#[test]
-fn an_unreadable_corpus_cannot_mint_a_ratcheted_warning() {
-    use crate::validate::decisions::out_of_corpus_warning_kind;
-
-    let (readable_kind, _) = out_of_corpus_warning_kind(true);
     assert_eq!(
-        readable_kind, "decision-citation-file-out-of-corpus",
-        "on a READABLE corpus the allowlist drop is a property of this tree and must keep ratcheting -- adding a `.claude/**` file the rule cannot see is a deliberate, baseline-moving act, which is the whole reason the kind exists"
+        CorpusShortfall::from_scan(false, true),
+        CorpusShortfall::Nothing,
+        "git refused (or the empty-corpus early return fired) and this did not classify as `Nothing`. Every vector comes back cleared there, so no count was taken at all"
     );
-    assert!(
-        !RATCHET_EXEMPT.contains(&readable_kind),
-        "`{}` became ratchet-exempt on the readable path, which switches the gate off in the case it was built for",
-        readable_kind
+    assert_eq!(
+        CorpusShortfall::from_scan(false, false),
+        CorpusShortfall::Nothing,
+        "git refusing must dominate: with the corpus empty there is nothing for a partial-read reading to be partial ABOUT"
     );
-
-    let (unreadable_kind, _) = out_of_corpus_warning_kind(false);
-    assert!(
-        RATCHET_EXEMPT.contains(&unreadable_kind),
-        "`{}` is emitted when NOT ONE corpus file was readable, and it is inside the section 17 ratchet. That run scanned nothing, so a kind absent from the baseline scores `0 -> N (NEW warning kind)` and `make validate` exits 1 -- while `--write-warning-baseline` refuses on the same `corpus_incomplete` flag, so the printed remedy exits 1 too. A red the reader cannot clear, over a tree that is not this repository. Report the names under a ratchet-exempt kind on this path",
-        unreadable_kind
+    assert_eq!(
+        CorpusShortfall::from_scan(true, false),
+        CorpusShortfall::Partial,
+        "the PARTIAL-read disjunct was lost. `unread` is non-empty when git listed a file the filesystem would not hand back -- a HOST cause exactly like git refusing -- so the read-dependent counts are lower bounds and a baselined kind reds `N -> N-1` on the host that dropped the file"
     );
-
-    // AND THE TWO PATHS MUST NOT COLLAPSE INTO ONE. Reporting both under the exempt kind would
-    // close this trap by disabling the gate; reporting both under the ratcheted kind is the bug.
-    assert_ne!(
-        readable_kind, unreadable_kind,
-        "the two paths report the same kind, so one of them is wrong: the readable path must ratchet (the count is a stable property of this tree) and the unreadable path must not (nothing was scanned, and the remedy is blocked)"
+    assert_eq!(
+        CorpusShortfall::from_scan(true, true),
+        CorpusShortfall::None,
+        "a complete scan classified as short. Nothing may be floored there: every count is the truth and every change in it is real"
     );
 }
 
@@ -13598,6 +13554,114 @@ mod docs_only_ci_and_legacy_visibility {
     /// Both directions are asserted here rather than argued, because a sentence carried this claim
     /// for one round and was false. Runs the REAL predicate, lifted out of `stop-gate.sh`, against a
     /// throwaway repo. (Review #79 of PR #679.)
+    /// A HOST THAT CANNOT BUILD THE ORACLE MUST OPT OUT, NOT BLOCK THE TURN.
+    ///
+    /// The selftest resolves `git` and `tr` on a PINNED PATH so it cannot be sent to a shim, and
+    /// FATALs when they are not there. `stop-gate.sh` runs it ARMED whenever the four gate scripts
+    /// are clean — the ordinary state — and its `step()` turns a non-zero exit into the hook's
+    /// `exit 2`. So on NixOS (`/run/current-system/sw/bin`) or a slim container, EVERY TURN was
+    /// blocked with a clean tree and no gate script touched. The printed remedy
+    /// (`REGISTER_CHECK_ALLOW_DIRTY=1`) works for the two Makefile targets that pass it and not for
+    /// this caller, which picks the branch itself: the only escape was exporting the variable into
+    /// the session, disarming the comparison permanently and silently — the end state the V3 header
+    /// argues against.
+    ///
+    /// NOT A WEAKENING, which is why it is closed rather than recorded: the comparison is
+    /// IMPOSSIBLE on such a host, so the choice is between saying so once per turn and a permanent
+    /// silent disarm. The branch is decided by what exists under a fixed ABSOLUTE path, which no
+    /// in-repo edit and no inherited environment can move — that is what pinning it buys.
+    /// (Review #91 of PR #679.)
+    #[test]
+    fn a_host_without_the_oracle_opts_out_instead_of_blocking_every_turn() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let hook = fs::read_to_string(root.join(".claude/hooks/stop-gate.sh")).expect("stop-gate.sh");
+
+        // LIFTED FROM THE SHIPPED SCRIPT, never re-implemented here.
+        let start = hook
+            .find("_vpath=")
+            .expect("stop-gate.sh must resolve the oracle on a pinned `_vpath` -- if that moved, re-point this test rather than deleting it");
+        let end = hook[start..]
+            .find("_gate_scripts_dirty=0")
+            .map(|i| start + i)
+            .expect("the oracle check must sit above the dirty predicate");
+        let probe = &hook[start..end];
+        assert!(
+            probe.contains("_oracle_missing"),
+            "the lifted slice is not the oracle check: {}",
+            probe
+        );
+
+        let run = |src: &str| -> String {
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(format!("{}\nprintf '%s' \"$_oracle_missing\"\n", src))
+                .output()
+                .expect("run the lifted oracle probe");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        // On this host `git` and `tr` ARE under the pinned path, so the probe must find nothing and
+        // the hook must stay ARMED. Without this half the fix would read as "always opt out".
+        assert_eq!(
+            run(probe),
+            "",
+            "the oracle probe reports a miss on a host where `git` and `tr` resolve under the pinned PATH -- that opts the comparison out on every ordinary machine, which is the gate switching itself off"
+        );
+
+        // AND THE MISS IS DETECTED. The pinned path is absolute, so the only way to exercise this
+        // is to repoint it -- and the substitution is ASSERTED to have applied, because a plant
+        // that silently fails to apply reads exactly like a guard that does not discriminate.
+        let empty = std::env::temp_dir().join(format!("cf-no-oracle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&empty);
+        fs::create_dir_all(&empty).expect("mkdir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(empty.clone());
+        let repointed = probe.replace(
+            "_vpath=\"/usr/bin:/bin:/usr/local/bin\"",
+            &format!("_vpath={:?}", empty.to_string_lossy()),
+        );
+        assert_ne!(
+            repointed, probe,
+            "the `_vpath` substitution did not apply, so the assertion below would pass on the UNMODIFIED probe and prove nothing. The pinned value in stop-gate.sh changed spelling -- re-point this substitution"
+        );
+        let missing = run(&repointed);
+        for tool in ["git", "tr"] {
+            assert!(
+                missing.contains(tool),
+                "with the pinned PATH repointed at an empty directory, `{}` was not reported missing (got {:?}). The hook would then run the selftest ARMED, the selftest would FATAL on the same resolution, `step` would set fail=1 and the hook would exit 2 -- every turn blocked on a host where the comparison is simply impossible",
+                tool, missing
+            );
+        }
+
+        // AND THE DISPATCH MUST ACT ON IT: the capability branch runs the selftest with the opt-out
+        // rather than armed, and it is evaluated FIRST so its message (which explains the host, not
+        // a dirty tree) is the one the operator sees.
+        let dispatch = &hook[hook
+            .find("# --- END OF THE DIRTY PREDICATE ---")
+            .expect("the predicate marker must exist")..];
+        let oracle_at = dispatch
+            .find("if [ -n \"$_oracle_missing\" ]; then")
+            .expect("the dispatch must branch on `_oracle_missing` -- detecting the miss and then running armed anyway blocks the turn exactly as before");
+        let dirty_at = dispatch
+            .find("[ \"$_gate_scripts_dirty\" = \"1\" ]")
+            .expect("the dispatch must still branch on `_gate_scripts_dirty`");
+        assert!(
+            oracle_at < dirty_at,
+            "the dirty-tree branch is evaluated before the oracle-capability branch. Both opt out, so the VERDICT is the same -- but the message is not, and on a host with no oracle the operator would be told a gate script is dirty when none is"
+        );
+        let branch = &dispatch[oracle_at..dirty_at];
+        assert!(
+            branch.contains("REGISTER_CHECK_ALLOW_DIRTY=1"),
+            "the oracle-capability branch does not pass the opt-out, so the selftest still FATALs and the hook still exits 2: {}",
+            branch
+        );
+    }
+
     #[test]
     fn the_stop_gate_predicate_discriminates_a_hidden_tamper() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -13618,10 +13682,17 @@ mod docs_only_ci_and_legacy_visibility {
         let start = hook
             .find("_gate_scripts_dirty=0")
             .expect("stop-gate.sh must initialise `_gate_scripts_dirty` -- the predicate moved, re-point this test rather than deleting it");
+        // END ON AN EXPLICIT MARKER, not on "the next `if`". The end anchor used to be the
+        // dispatch's `if [ "$_gate_scripts_dirty" = "1" ]`; when that dispatch grew a branch in
+        // front of it (the oracle-capability opt-out), the anchor matched INSIDE the new `elif`
+        // and the lifted snippet became an unterminated `if`. Bash printed nothing, and this
+        // test's first assertion failed as "a clean tree must ARM the comparison" -- a message
+        // about the predicate, for a defect in the extraction. A guard whose FAILURE MESSAGE
+        // misidentifies the subject is the class this branch keeps closing. (Review #91.)
         let end = hook[start..]
-            .find("if [ \"$_gate_scripts_dirty\" = \"1\" ]")
+            .find("# --- END OF THE DIRTY PREDICATE ---")
             .map(|i| start + i)
-            .expect("stop-gate.sh must branch on `_gate_scripts_dirty`");
+            .expect("stop-gate.sh must carry the `# --- END OF THE DIRTY PREDICATE ---` marker -- this test lifts the predicate out of the shipped script by it, so moving the marker without moving this anchor lifts the wrong lines");
         let predicate = &hook[start..end];
 
         let sandbox = std::env::temp_dir().join(format!("cf-stopgate-pred-{}", std::process::id()));

@@ -760,3 +760,21 @@ is itself the argument: **a list that grows has no business stating its own leng
   and closed none of the hole. **When you widen what a check reads, re-derive what it measures over
   the new input**, and write the plant before believing either half. This is the widen-the-trigger
   shape one level in: there the action went unrevised, here the metric did.
+- **A test that LIFTS code out of a shipped script by textual bounds breaks when the script grows a
+  branch — and it fails with a message about the subject, not the extraction.** The end anchor was
+  "the next `if [ "$_gate_scripts_dirty" = "1" ]`"; a new branch in front of it turned that into an
+  `elif`, the anchor matched inside it, and the lifted snippet became an unterminated `if`. Bash
+  printed nothing and the assertion failed as *"a clean tree must ARM the comparison"* — a sentence
+  about the predicate, for a defect in the slicing. Lifting beats re-implementing (a copy drifts),
+  so keep it — but **anchor on an explicit marker the script carries for that purpose**, and read a
+  lifted-code failure as "did the extraction still work?" before believing what it says about the
+  code.
+- **"Only X closes it" — name what "it" is, in the same sentence.** A decision row and the file it
+  governed both said *"a runner-image bump is a repository-wide merge block; only option (a) closes
+  it"*, while the same field said option (a) is *"EQUALLY BLOCKING"*. The pronoun had drifted from
+  the merge block to the skip cascade between drafts, and the surviving sentence licensed a choice
+  its own evidence refutes. **In a record, a consequence claim carries the consequence's name, not a
+  pronoun** — a record is read years later, by someone who will act on it, in an order you did not
+  write it in. The same reason a stale premise must be corrected AT the claim rather than retracted
+  a thousand words later: on a founder-owned row a reader who stops early decides against a premise
+  the diff already falsified.

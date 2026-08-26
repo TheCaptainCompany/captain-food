@@ -2753,3 +2753,78 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > to it.** When you widen what a check reads, re-derive what it *measures* over the new input — a
 > line-counting bound over a form that is always one line is a guard that sees everything and
 > concludes nothing.
+>
+> **Round 91 — two independent review passes, five findings, four of them mine to fix.**
+>
+> **(1) The ratchet floor covered a kind the partial read measures EXACTLY.** `corpus_incomplete` was
+> `!readable || !unread.is_empty()` — one bool for two different shortfalls — and fed the union to
+> both the floor and the `--write-warning-baseline` refusal. On the partial-read path
+> `decision-citation-file-out-of-corpus` is **exact**: `skipped_ext` is pushed *before* the
+> `read_to_string` attempt, so an unreadable file never leaves it. **`check_warning_baseline`'s own
+> docstring states that invariant, and the code floored the kind anyway** — the review quoted my
+> docstring back at me as the evidence against my code.
+>
+> The concrete failure, once that kind is legitimately baselined at N>0 (the state
+> `claude_citation_corpus` calls "a deliberate, baseline-moving act"): an author *fixes* one of those
+> files, live goes `2 -> 1`, and on any host with one dangling tracked symlink the floor restores 2,
+> the diff is clean and `make validate` is **green** — then CI reds on the change they were told was
+> clean. And they could not clear it locally either, because the write path refused on the same
+> collapsed bool.
+>
+> Now a `CorpusShortfall { None, Partial, Nothing }`. `Partial` floors only the two kinds that really
+> are lower bounds; `Nothing` floors all three; only `Nothing` refuses to mint a baseline, and
+> `Partial` **floors** the minted profile through the same function the compare path uses, so the two
+> cannot drift. Pinned by the discriminating case — *a decrease on the partial path* — which every
+> earlier assertion in the file missed, because they all exercise the floor where flooring is right.
+>
+> **(2) `--write-warning-baseline` refused on a partial read.** Same root. One unreadable file under
+> `.claude/**` made **every** `make warning-baseline` on that host exit 1 — including one run for a
+> spec change that moved an unrelated kind, while CLAUDE.md requires the refreshed artifact in the
+> *same* commit and the printed remedy ("fix the checkout") may be outside the author's control.
+>
+> **A gate the compiler subsumes was deleted, which CLAUDE.md calls a correct outcome.**
+> `the_unmeasured_predicate_covers_a_partially_read_corpus` read `main.rs`'s source text and said so
+> in its own docstring: *"it catches the disjunct being DELETED … it cannot catch it being rewritten
+> to something wrong."* The classification is now `CorpusShortfall::from_scan(readable,
+> unread_is_empty)` — the tree-caused vectors it must never consult are excluded by the **signature**,
+> so it cannot be rewritten to consult them. Text assertion retired, executable one in its place.
+>
+> **(3) "Only option (a) closes it" was false, in `ci.yml` and in `GATE-STEP-LOCUS` both.** Option (a)
+> is a sibling always-run job the aggregator treats equally — and the row says so itself: *"EQUALLY
+> BLOCKING"*. Traced through the aggregator: sibling job reds → `join(needs.*.result)` carries
+> `failure` → `status=1` → required check red → nothing merges. **Identical blast radius.** What (a)
+> closes is the **skip cascade**, and with it the docs-only inversion (`docs-validate` keeps running,
+> so a docs-only push does not land on `main` with its only validator skipped) — real, and a
+> different property. The row prices its deciding consequence as *"a host-drift red can stop shipping
+> during an incident"*; whoever closed it on (a) would have believed they bought that back. What
+> actually closes the red class is named now: the suite's host-capability preconditions becoming
+> `skipped` rather than hard `verdict bad`, or the suite leaving the aggregator's assertion — neither
+> on this diff, both `RETRIEVAL-QMD-CI`'s to authorize.
+>
+> **(4) The selftest's printed remedy was unreachable from the caller that now runs it armed every
+> turn.** It resolves `git`/`tr` on a pinned PATH and FATALs when they are absent; `stop-gate.sh`
+> arms it whenever the gate scripts are clean, and `step()` + `exit 2` turn that into a **blocked
+> turn**. On NixOS or a slim container: every turn blocked, clean tree, nothing touched. The message
+> names `REGISTER_CHECK_ALLOW_DIRTY=1`, which works for the two Makefile targets and **not** for this
+> caller, which picks the branch itself — the only escape was exporting it into the session, i.e. a
+> permanent silent disarm, the end state the V3 header argues against. The caller now detects the
+> capability miss on the same pinned PATH and opts out loudly for that turn. Not a weakening: the
+> comparison is *impossible* there, and the branch is decided by what exists under a fixed absolute
+> path, which no in-repo edit or inherited environment can move. Also split the HEAD-missing
+> diagnosis by whether `GITHUB_SHA` supplied the ref — the merge-ref story was being told to local
+> macOS users whose actual cause is the Command Line Tools not being installed.
+>
+> **Cost that earned the rule: fixing (4) broke an unrelated test, and its failure message pointed at
+> the wrong thing entirely.** `the_stop_gate_predicate_discriminates_a_hidden_tamper` lifts the
+> predicate out of the shipped script between two textual anchors. The end anchor was the dispatch's
+> `if [ "$_gate_scripts_dirty" = "1" ]`; my new branch turned that into an `elif`, the anchor matched
+> **inside** it, the lifted snippet became an unterminated `if`, bash printed nothing — and the
+> assertion failed as *"a clean tree must ARM the comparison"*. I spent the first minutes reading a
+> predicate that was fine. Now anchored on an explicit `# --- END OF THE DIRTY PREDICATE ---` marker
+> the script carries for that purpose.
+>
+> Records corrected in the same change: `CITATION-RULE-LEVEL` stated the level as `err(...)` in the
+> present tense for its first third and priced the blast radius on it, with the correction ~1,200
+> words later — on a **founder-owned** row whose whole subject is that level. Opening restated in the
+> past tense, options list rewritten against the current state. `RETRIEVAL-QMD-CI` clause (d) still
+> said the rule "fails"; it warns.

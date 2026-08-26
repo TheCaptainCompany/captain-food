@@ -126,6 +126,83 @@ pub(crate) const CORPUS_DERIVED_KINDS: [&str; 3] = [
     "decision-superseded-authority",
 ];
 
+/// HOW SHORT THIS RUN'S CORPUS SCAN FELL, which is not a boolean and was one for four rounds.
+///
+/// `main.rs` collapsed the two causes into `corpus_incomplete = !readable || !unread.is_empty()`
+/// and fed the union to both the ratchet floor and the `--write-warning-baseline` refusal. They are
+/// different shortfalls and the difference is per-KIND:
+///
+/// * `Nothing` — `readable == false`. `claude_citation_corpus` returns with every vector cleared,
+///   so NOTHING was measured and all three corpus-derived kinds are absent rather than low.
+/// * `Partial` — git answered, but at least one tracked file could not be read (a sparse checkout,
+///   a dangling tracked symlink, a permission drop). The counts ARE computed. Two of them are lower
+///   bounds — `decision-citation-file-not-utf8` and the citation findings lose exactly the files
+///   that could not be read — but `decision-citation-file-out-of-corpus` is **EXACT**, because
+///   `skipped_ext` is pushed BEFORE the `read_to_string` attempt. An unreadable file never leaves
+///   it.
+///
+/// FLOORING THE EXACT KIND SUPPRESSES A REAL ELIMINATION, and this file's own docstring below
+/// states the invariant that makes it wrong while the code did it anyway. Once that kind is
+/// legitimately baselined at N>0 — the state `claude_citation_corpus` calls "a deliberate,
+/// baseline-moving act" — an author who FIXES one of those files sees `N -> N-1` floored back to
+/// `N` and `make validate` GREEN on any host with a single unreadable corpus file, then CI reds on
+/// the change they were told was clean. And they cannot clear it locally, because the write path
+/// refused on the same collapsed bool. (Review #91 of PR #679.)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CorpusShortfall {
+    None,
+    Partial,
+    Nothing,
+}
+
+impl CorpusShortfall {
+    /// Classify a corpus scan. The two arguments are the only inputs that may decide this, and
+    /// that is enforced by the SIGNATURE rather than by a gate: `unread_tree` and `skipped_ext` are
+    /// TREE-caused -- they drop the same files on every host, so they narrow the corpus without
+    /// making its counts host-dependent, and including one would suppress the ratchet permanently
+    /// the moment a single file qualified. That was previously held by a test reading the
+    /// predicate's SOURCE TEXT in `main.rs`, whose own docstring admitted it "catches the disjunct
+    /// being DELETED ... it cannot catch it being rewritten to something wrong". A function that
+    /// cannot see the tree vectors cannot be rewritten to consult them, which is CLAUDE.md's
+    /// compiler-first rule applied to the gate that was standing in for it. (Review #91.)
+    pub(crate) fn from_scan(readable: bool, unread_is_empty: bool) -> Self {
+        match (readable, unread_is_empty) {
+            // `git ls-files` refused, or review #61's empty-corpus early return -- every vector
+            // comes back cleared, so nothing was measured.
+            (false, _) => Self::Nothing,
+            // Git answered and listed everything, but the filesystem would not hand back at least
+            // one tracked file: a sparse checkout, a dangling tracked symlink, a permission drop.
+            // HOST-caused, so the counts that depend on reading are lower bounds on this machine
+            // and complete on another.
+            (true, false) => Self::Partial,
+            (true, true) => Self::None,
+        }
+    }
+
+    /// The kinds this run could not count FULLY. The floor may only ever raise a spuriously low
+    /// count, so a kind belongs here exactly when this shortfall can depress it.
+    pub(crate) fn unmeasured(self) -> &'static [&'static str] {
+        match self {
+            Self::None => &[],
+            // Everything the unread files could have contributed to -- but NOT the extension
+            // filter, which ran before the read attempt and is therefore exact.
+            Self::Partial => &["decision-citation-file-not-utf8", "decision-superseded-authority"],
+            Self::Nothing => &CORPUS_DERIVED_KINDS,
+        }
+    }
+
+    /// Whether a baseline may be MINTED from this run. Only `Nothing` refuses: with the counts
+    /// absent, `render_warning_baseline` would commit a 0 for kinds this host never took, and the
+    /// artifact is permanent. On a PARTIAL read the counts exist and the floor gives the right
+    /// answer, so refusing there blocks `make warning-baseline` for work that has nothing to do
+    /// with the corpus -- on a host condition the author may not control, with no opt-out, while
+    /// CLAUDE.md requires the refreshed artifact in the SAME commit as the change that moved the
+    /// surface. (Review #91.)
+    pub(crate) fn may_mint_a_baseline(self) -> bool {
+        self != Self::Nothing
+    }
+}
+
 /// The live profile of a validation run. Takes ALL issues (the spec validator's plus §13 proposal
 /// hygiene, exactly what `checks: N error(s), M warning(s)` counts) and keeps the warnings that
 /// the ratchet governs — see `RATCHET_EXEMPT` for the ones it deliberately does not.
@@ -291,16 +368,17 @@ pub(crate) fn render_baseline_failure(diff: &BaselineDiff, live: &WarningProfile
 /// promise in `claude_citation_corpus` that doing so "becomes a deliberate, baseline-moving act" —
 /// and a genuinely new stale citation would have landed with the ratchet quiet. The hazard is
 /// one-directional, so the remedy is too. (Review #87 of PR #679, on the fix from review #84.)
-pub(crate) fn check_warning_baseline(
-    root: &std::path::Path,
-    live: &WarningProfile,
-    unmeasured: &[&str],
-) -> Result<(), String> {
-    let path = root.join(WARNING_BASELINE_PATH);
-    let text = fs::read_to_string(&path)
-        .map_err(|e| format!("\n✗ cannot read {}: {e}\n  run `make warning-baseline` to (re)create it.\n", path.display()))?;
-    let committed = parse_warning_baseline(&text)
-        .map_err(|e| format!("\n✗ {}: {e}\n  run `make warning-baseline` to rewrite it.\n", path.display()))?;
+/// Raise `live`'s entries for `unmeasured` to the committed baseline's values, so a count this run
+/// could only under-take is not written down as the truth.
+///
+/// SHARED BY THE COMPARE AND WRITE PATHS ON PURPOSE. The write path used to REFUSE outright on any
+/// shortfall, which is right where nothing was measured and wrong on a partial read: there the
+/// counts exist as lower bounds, the floor is exactly the correction they need, and refusing
+/// instead blocked `make warning-baseline` on that host for ANY change -- including one made for an
+/// unrelated warning kind, with CLAUDE.md requiring the refreshed artifact in the same commit and
+/// the printed remedy ("fix the checkout") outside the author's control. Two call sites deriving
+/// the same correction separately is how they drift; one function is the fix. (Review #91.)
+pub(crate) fn floor_unmeasured(live: &WarningProfile, committed: &WarningProfile, unmeasured: &[&str]) -> WarningProfile {
     let mut effective = live.clone();
     for kind in unmeasured {
         // FLOOR, not replace: `max(live, committed)`. Where nothing was measured the live value is
@@ -317,6 +395,25 @@ pub(crate) fn check_warning_baseline(
             }
         }
     }
+    effective
+}
+
+/// Read and parse the committed baseline, with the two failure messages the callers print.
+pub(crate) fn read_committed_baseline(root: &std::path::Path) -> Result<WarningProfile, String> {
+    let path = root.join(WARNING_BASELINE_PATH);
+    let text = fs::read_to_string(&path)
+        .map_err(|e| format!("\n✗ cannot read {}: {e}\n  run `make warning-baseline` to (re)create it.\n", path.display()))?;
+    parse_warning_baseline(&text)
+        .map_err(|e| format!("\n✗ {}: {e}\n  run `make warning-baseline` to rewrite it.\n", path.display()))
+}
+
+pub(crate) fn check_warning_baseline(
+    root: &std::path::Path,
+    live: &WarningProfile,
+    unmeasured: &[&str],
+) -> Result<(), String> {
+    let committed = read_committed_baseline(root)?;
+    let effective = floor_unmeasured(live, &committed, unmeasured);
     let diff = diff_warning_baseline(&committed, &effective);
     if diff.is_clean() {
         Ok(())

@@ -170,6 +170,31 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # (review #72) and this fix, the path below it did the opposite of what the path above claimed of
 # it. An existing comment silently falsified by a new block, with nothing pointing at it: the
 # half-applied-sweep class from the other end, where the stale site is the one you did not write.
+#
+# ONE CASE IS NOT A TAMPER AND MUST NOT BLOCK THE TURN: the selftest builds its oracle on a PINNED
+# PATH (`/usr/bin:/bin:/usr/local/bin`) so it cannot be sent to a shim, and FATALs when `git` or
+# `tr` is not there. On NixOS (`/run/current-system/sw/bin`) or a slim container that keeps busybox
+# elsewhere, that fires with a CLEAN tree and no gate script touched -- and from THIS caller the
+# FATAL is `step`'s `fail=1`, i.e. `exit 2`, i.e. EVERY TURN BLOCKED. The message names
+# `REGISTER_CHECK_ALLOW_DIRTY=1`, which works for the two Makefile targets that pass it and NOT for
+# this one, because the hook picks the branch itself: the only escape is exporting the variable into
+# the session, which disarms the comparison PERMANENTLY AND SILENTLY for every later turn -- the end
+# state the V3 header argues against ("an armed-only entrypoint gets DELETED rather than opted out
+# of"). So the caller detects the CAPABILITY miss itself and opts out loudly, once, for that turn.
+#
+# THIS IS NOT THE `no git at all` CASE ABOVE, and conflating them is what hid it: there
+# `rev-parse` fails, the tree is unknowable and arming is the honest answer. Here `rev-parse`
+# SUCCEEDS on the ambient PATH, the dirty check works, the selftest is armed -- and then cannot
+# build its oracle. Nor is it a weakening: the comparison is IMPOSSIBLE on such a host, so the
+# choice is between saying so per turn and a permanent silent disarm. A tamperer cannot reach this
+# branch either, because it is decided by what is present under a fixed absolute PATH, which no
+# in-repo edit and no inherited environment can change -- that is the whole point of pinning it.
+# (Review #91 of PR #679.)
+_vpath="/usr/bin:/bin:/usr/local/bin"
+_oracle_missing=""
+PATH="$_vpath" command -v git >/dev/null 2>&1 || _oracle_missing="git"
+PATH="$_vpath" command -v tr  >/dev/null 2>&1 || _oracle_missing="${_oracle_missing:+$_oracle_missing and }tr"
+
 _gate_scripts_dirty=0
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   if git -C "$ROOT" status --porcelain --untracked-files=all -- \
@@ -179,7 +204,16 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
        .claude/skills/decision-lookup/scripts/stub-tests.sh 2>/dev/null | grep -q .
   then _gate_scripts_dirty=1; else _gate_scripts_dirty=0; fi
 fi
-if [ "$_gate_scripts_dirty" = "1" ]; then
+# --- END OF THE DIRTY PREDICATE --- (anchor: `the_stop_gate_predicate_discriminates_a_hidden_tamper`
+# lifts everything above this line out of the shipped script and runs it, rather than
+# re-implementing it here. An explicit marker rather than "the next `if`", because the dispatch
+# below grew a branch and the test's end anchor silently swallowed half of it -- the lifted snippet
+# became an unterminated `if`, bash printed nothing, and the assertion read as "a clean tree does
+# not arm" when the predicate was fine. Move this marker with the predicate, never past a branch.)
+if [ -n "$_oracle_missing" ]; then
+  echo "-> register-check selftest ($_oracle_missing not under $_vpath -- the comparison's oracle CANNOT BE BUILT on this host, so it is opted out for this turn rather than blocking it; the gate set is NOT verified here and an overwrite is caught at push)"
+  step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
+elif [ "$_gate_scripts_dirty" = "1" ]; then
   echo "-> register-check selftest (a gate script is dirty in the working tree -- comparison opted out; an overwrite in this state is caught at push, not here)"
   step env REGISTER_CHECK_ALLOW_DIRTY=1 bash "$ROOT/.claude/hooks/register-check-selftest.sh"
 else

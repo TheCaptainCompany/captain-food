@@ -108,8 +108,15 @@ else
   _tr="$(PATH="$_vpath" command -v tr || true)"
   if [ -z "$_git" ] || [ -z "$_tr" ]; then
     echo "FATAL: git or tr not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
-    echo "  The PATH is pinned on purpose so this cannot be sent to a shim. On NixOS or a slim" >&2
-    echo "  container, re-run with REGISTER_CHECK_ALLOW_DIRTY=1 rather than deleting this block." >&2
+    echo "  The PATH is pinned on purpose so this cannot be sent to a shim. This is a HOST" >&2
+    echo "  CAPABILITY miss, not a tamper: on NixOS (/run/current-system/sw/bin) or a slim" >&2
+    echo "  container the tools are simply elsewhere." >&2
+    echo "  For a DIRECT run (make hooks-test, make stub-tests): re-run with" >&2
+    echo "  REGISTER_CHECK_ALLOW_DIRTY=1 rather than deleting this block." >&2
+    echo "  The Stop hook does NOT need that: stop-gate.sh resolves git and tr on this same" >&2
+    echo "  pinned PATH and opts out for the turn on its own, so a host like this is not" >&2
+    echo "  blocked and nobody has to export the variable into the session -- which would" >&2
+    echo "  disarm the comparison permanently and silently, for every later turn." >&2
     exit 1
   fi
   # WHICH COMMIT THE ORACLE READS is itself part of the defence. Comparing against `HEAD` lets a
@@ -169,9 +176,28 @@ else
   # PR #679: #11 asked for it, #15 showed the argument for it did not hold.)
   if ! "$_git" -C "$ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
     echo "FATAL: commit ${_ref} is not present in this checkout -- cannot verify the gate set." >&2
-    echo "  This is NOT a tamper signal. On a pull_request run GITHUB_SHA is the merge commit as of" >&2
-    echo "  queue time, and the merge ref can be recomputed before checkout fetches it. RE-RUN the" >&2
-    echo "  job: that recomputes both and self-heals." >&2
+    echo "  This is NOT a tamper signal." >&2
+    # THE DIAGNOSIS DEPENDS ON WHERE `_ref` CAME FROM, and one message covered both for a round.
+    # The merge-ref story is only true when GITHUB_SHA supplied it; on a LOCAL run `_ref` is
+    # literally `HEAD`, there is no job to re-run, and the reader was sent to look for a race that
+    # cannot happen there. The reachable local cause is a git that resolves but cannot read this
+    # repository -- macOS WITHOUT the Command Line Tools installed is the common one: /usr/bin/git
+    # is a stub that exists, so `command -v` finds it on the pinned PATH and the capability check
+    # above passes, and it then fails here. An empty repository with no commit yet does the same.
+    # "A gate reporting the wrong thing is worse than a gate reporting nothing, because it spends
+    # the reader's time" -- this branch's own words, applied to itself. (Review #91 of PR #679.)
+    if [ -n "${GITHUB_SHA:-}" ]; then
+      echo "  On a pull_request run GITHUB_SHA is the merge commit as of queue time, and the merge" >&2
+      echo "  ref can be recomputed before checkout fetches it. RE-RUN the job: that recomputes" >&2
+      echo "  both and self-heals." >&2
+    else
+      echo "  This is a LOCAL run (no GITHUB_SHA), so there is no job to re-run and no merge-ref" >&2
+      echo "  race to wait out: git resolved but cannot read this repository at HEAD. On macOS" >&2
+      echo "  that is usually the Command Line Tools not being installed -- /usr/bin/git is a stub" >&2
+      echo "  that exists, so the PATH check above passes and this is where it surfaces. Run" >&2
+      echo "  'git status' yourself: if it prompts to install the CLT, that is the cause. A" >&2
+      echo "  repository with no commits yet fails here identically." >&2
+    fi
     exit 1
   fi
   for rel in \

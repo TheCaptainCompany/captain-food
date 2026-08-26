@@ -61,7 +61,7 @@ fn main() {
     // Declared at FUNCTION scope on purpose: the §17 ratchet at the bottom needs it, and the walk
     // that sets it runs inside a nested block several sections up. A corpus the walk could not read
     // leaves the two tree-caused warning kinds UNMEASURED rather than zero. (Review #80.)
-    let mut corpus_incomplete = false;
+    let mut corpus_shortfall = CorpusShortfall::None;
     let specs = arg_value(&args, "--specs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("specs"));
@@ -135,7 +135,7 @@ fn main() {
             // vectors are deliberately NOT disjuncts here: `skipped_ext` and `unread_tree` drop the
             // same files on every host, so they narrow the corpus without destabilising it, and
             // including them would suppress the ratchet permanently the moment one file qualifies.
-            corpus_incomplete = !readable || !unread.is_empty();
+            corpus_shortfall = CorpusShortfall::from_scan(readable, unread.is_empty());
             if !readable {
                 // A gate that cannot look must not read as a gate that looked and found nothing.
                 //
@@ -210,7 +210,7 @@ fn main() {
             // is not -- which is why the KIND is chosen here rather than fixed. `skipped_ext`
             // deliberately survives review #61's empty-corpus early return, where it is the
             // EXPLANATION for the empty corpus. That return also sets `readable = false`, and the
-            // caller turns that into `corpus_incomplete`, which makes `--write-warning-baseline`
+            // caller turns that into `CorpusShortfall::Nothing`, which makes `--write-warning-baseline`
             // REFUSE. Emitting the ratcheted kind there produced `0 -> N (NEW warning kind)` out of
             // a run that, by that return's own statement, scanned nothing -- with the printed remedy
             // (`make warning-baseline`) exiting 1 as well. That is verbatim the end state
@@ -226,7 +226,7 @@ fn main() {
             // own stated grounds: it arms itself on a later, unrelated commit, and the run that
             // trips it looks like a validator regression on a tree nobody touched. (Review #90.)
             if !skipped_ext.is_empty() {
-                let (kind, posture) = validate::decisions::out_of_corpus_warning_kind(readable);
+                let (kind, posture) = out_of_corpus_warning_kind(readable);
                 dec_issues.push(model::warn(
                     kind,
                     "tools/codegen-rs".to_string(),
@@ -384,33 +384,61 @@ fn main() {
             );
             std::process::exit(1);
         }
-        // AND ONLY FROM A HOST THAT COULD MEASURE EVERY KIND. Minting here with the corpus
-        // unreadable bakes a 0 into the artifact for kinds this run never counted -- the same trap
-        // as comparing against it, one step earlier and permanent, because the file is committed.
-        // Same shape as the errors guard above: a baseline is only meaningful for a run that saw
-        // what it is describing. (Review #80.)
-        if corpus_incomplete {
+        // AND ONLY FROM A HOST THAT MEASURED SOMETHING. Minting with the corpus UNREADABLE bakes a
+        // 0 into the artifact for kinds this run never counted -- the same trap as comparing
+        // against it, one step earlier and permanent, because the file is committed. Same shape as
+        // the errors guard above: a baseline is only meaningful for a run that saw what it is
+        // describing. (Review #80.)
+        //
+        // THE REFUSAL IS NARROWED TO THAT CASE, and it used to fire on a PARTIAL read too, because
+        // the two shortfalls were one bool. There the counts are computed -- lower bounds, not
+        // absent -- so refusing blocked `make warning-baseline` on that host for ANY change,
+        // including one made for an unrelated warning kind, while CLAUDE.md requires the refreshed
+        // artifact in the SAME commit and the printed remedy ("fix the checkout") may be outside the
+        // author's control. The compare path already had the right answer one function over; the
+        // write path now takes the SAME floor rather than a second opinion. (Review #91.)
+        if !corpus_shortfall.may_mint_a_baseline() {
             eprintln!(
-                "\n✗ refusing to write {} — the superseded-citation corpus was NOT FULLY READ on this run (git refused, or it listed files the filesystem would not hand back), so {:?} were not measured.\n  A baseline minted here would commit 0 for kinds this host cannot count, and then red on every host that can.\n  Fix the checkout (ownership, a missing .git, a sparse checkout, a dangling symlink, a permission drop) and re-run.",
+                "\n✗ refusing to write {} — `git ls-files` did not answer on this run, so the superseded-citation corpus was EMPTY and {:?} were not measured at all.\n  A baseline minted here would commit 0 for kinds this host never counted, and then red on every host that can count them.\n  Fix the checkout (ownership, a missing .git, an index with no entries) and re-run.\n  A PARTIALLY read corpus does NOT reach this refusal: there the counts are lower bounds and are floored at the committed values instead.",
                 WARNING_BASELINE_PATH, CORPUS_DERIVED_KINDS
             );
             std::process::exit(1);
         }
+        let unmeasured = corpus_shortfall.unmeasured();
+        let minted = if unmeasured.is_empty() {
+            live_profile.clone()
+        } else {
+            // A lower-bound count must not be written down as the truth. Same correction the
+            // compare path applies, from the same function, so the two cannot drift apart.
+            match read_committed_baseline(&root) {
+                Ok(committed) => floor_unmeasured(&live_profile, &committed, unmeasured),
+                // No readable baseline to floor against -- `make warning-baseline` is also how the
+                // artifact is CREATED, so this is the legitimate first-run path. Mint the live
+                // profile and say which kinds went in unfloored rather than failing the create.
+                Err(_) => {
+                    eprintln!(
+                        "  note: {:?} could not be floored against a committed baseline (none readable), and this run read the corpus only PARTIALLY — re-check those counts on a host that can read every file.",
+                        unmeasured
+                    );
+                    live_profile.clone()
+                }
+            }
+        };
         let path = root.join(WARNING_BASELINE_PATH);
-        if let Err(e) = fs::write(&path, render_warning_baseline(&live_profile)) {
+        if let Err(e) = fs::write(&path, render_warning_baseline(&minted)) {
             eprintln!("✗ write {}: {}", path.display(), e);
             std::process::exit(1);
         }
         eprintln!(
             "✓ wrote {} ({} warning(s), {} kind(s)) — commit it with the change that moved it.",
             path.display(),
-            live_profile.values().sum::<usize>(),
-            live_profile.len()
+            minted.values().sum::<usize>(),
+            minted.len()
         );
         return;
     }
     // UNMEASURED IS NOT ZERO, one level below where §17 already says so. See `CORPUS_DERIVED_KINDS`.
-    let unmeasured: &[&str] = if corpus_incomplete { &CORPUS_DERIVED_KINDS } else { &[] };
+    let unmeasured: &[&str] = corpus_shortfall.unmeasured();
     let baseline_failure = check_warning_baseline(&root, &live_profile, unmeasured).err();
     if let Some(msg) = &baseline_failure {
         eprint!("{}", msg);

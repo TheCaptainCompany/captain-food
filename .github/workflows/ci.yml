@@ -76,9 +76,24 @@ jobs:
     # unavailable") and T15g's ASCII control are deliberately hard `verdict bad` rather than skips,
     # on the stated reasoning that a harness which cannot build its own setup must not be laundered
     # into a green. That is right for the CASE and it is what makes a runner-image bump a
-    # repository-wide merge block. Only `GATE-STEP-LOCUS` option (a) -- a sibling always-run job the
-    # aggregator treats equally -- closes it, and moving the step is `RETRIEVAL-QMD-CI`'s to
-    # authorize, not this change's.
+    # repository-wide merge block.
+    #
+    # AND OPTION (a) DOES NOT CLOSE THAT MERGE BLOCK -- this line said it did, and the row it cites
+    # says the opposite in its own words: a sibling always-run job is "EQUALLY BLOCKING". Trace it:
+    # the sibling job is in `codegen`'s `needs:`, it reds on host drift, `join(needs.*.result)`
+    # carries `failure`, the `case` arm sets `status=1`, the required check reds, nothing merges.
+    # Identical blast radius. What option (a) DOES close is the SKIP CASCADE -- the other five jobs
+    # keep running, so their signal survives, and on the docs-only lane `docs-validate` still runs,
+    # which is the direction where the failure INVERTS (a docs-only push is a push to `main` with no
+    # PR, so a red blocks nothing and the change lands with the one validator that lane has skipped).
+    # That is worth having and it is a different property. Whoever closes the row on (a) believing
+    # they bought back "a host-drift red cannot stop shipping at peak" would not have.
+    #
+    # WHAT ACTUALLY CLOSES THE RED CLASS is not on this diff: making the suite's host-CAPABILITY
+    # preconditions `skipped` rather than `verdict bad` -- the treatment T16's ASCII-locale branch
+    # already gets and T3/T3b/T3c and T15g's control deliberately do not -- or keeping the suite out
+    # of the aggregator's assertion entirely. Both are `RETRIEVAL-QMD-CI`'s to authorize, not this
+    # change's, as is moving the step. (Review #91 of PR #679.)
     #
     # AND A CAP HERE CLOSES ONE DOOR OF SIX. `codegen` is `if: always()`, and `always()` still
     # WAITS for a `needs:` job to finish -- so a job that HANGS (rather than fails) keeps the
