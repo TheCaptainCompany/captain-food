@@ -8452,6 +8452,585 @@ fn the_warning_profile_counts_warnings_per_rule_and_ignores_errors() {
     assert_eq!(p.get("ref-unresolved"), None, "errors are not part of the warning ratchet");
 }
 
+/// A HOST-DEPENDENT warning is reported and never ratcheted, and the exempt list stays exactly one.
+///
+/// The ratchet's contract is byte-stability: the artifact claims what THIS TREE produces. A signal
+/// that fires on one machine and not another has no stable value to commit, so routing one in makes
+/// the gate fail in whichever direction the author's machine pointed. Measured on
+/// `decision-citation-corpus-unreadable` (review #35 of PR #679): absent from the baseline, its
+/// first appearance scored `0 -> 1 (NEW warning kind)` and `make validate` EXITED 1 — with a
+/// message naming the warning baseline rather than git, under a code comment that said "Not an
+/// error", and printing a remedy (`make warning-baseline`) that would have committed a baseline
+/// asserting the citation gate checked nothing, which then reds in the opposite direction wherever
+/// git works.
+///
+/// The list is asserted, not merely written: every entry removes a kind from the only gate that
+/// counts warnings, so growing it is a decision. A new entry reds here until it is stated.
+#[test]
+fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
+    // THE TRAP `RATCHET_EXEMPT` CLOSES, RE-ENTERING ONE KIND OVER. `decision-citation-file-not-utf8`
+    // and `-out-of-corpus` are correctly NOT exempt: their CONDITION is tree-caused. But their
+    // MEASUREMENT is gated on `git ls-files` answering, so on a dubious-ownership bind mount, a
+    // `git archive` extraction or a container stage with no `.git` they come back 0 -- and once
+    // either is legitimately baselined at N>0, that 0 reads as `kind eliminated`, exits 1, and the
+    // printed remedy commits a baseline of 0 that then reds on every host where git works.
+    //
+    // Asserted in BOTH directions against a committed baseline that carries the kind, because the
+    // artifact carries neither today: this is latent, arms itself on a later unrelated commit, and
+    // the run that trips it looks like a regression on a tree nobody touched. (Review #80.)
+    let committed: WarningProfile = [
+        ("decision-citation-file-out-of-corpus".to_string(), 2usize),
+        ("command-no-mutation".to_string(), 1usize),
+    ]
+    .into_iter()
+    .collect();
+    // What a run on such a host produces: the corpus kind absent (never counted), the rest normal.
+    let live: WarningProfile = [("command-no-mutation".to_string(), 1usize)].into_iter().collect();
+
+    let unguarded = diff_warning_baseline(&committed, &live);
+    assert!(
+        !unguarded.is_clean(),
+        "the fixture is not exercising anything -- an unmeasured corpus kind must differ from a baselined one, or this test proves nothing about the guard below"
+    );
+    assert!(
+        unguarded.better.iter().any(|d| d.rule == "decision-citation-file-out-of-corpus" && d.live == 0),
+        "the fixture must reproduce the `kind eliminated` shape specifically, not merely some drift. Got {:?}",
+        unguarded.better
+    );
+
+    // The guard: carrying the committed value forward for the unmeasured kind makes the run clean.
+    let mut effective = live.clone();
+    for kind in CORPUS_DERIVED_KINDS {
+        if let Some(n) = committed.get(kind) {
+            effective.insert(kind.to_string(), *n);
+        }
+    }
+    assert!(
+        diff_warning_baseline(&committed, &effective).is_clean(),
+        "carrying an UNMEASURED kind forward must make the ratchet neutral for it -- otherwise a host that cannot read the corpus reds `make validate` on a tree nobody touched, and the printed remedy makes it worse"
+    );
+
+    // AND THE GUARD MUST NOT SWALLOW A REAL MOVE. Same kind, measured, genuinely higher: still red.
+    let real_widening: WarningProfile = [
+        ("decision-citation-file-out-of-corpus".to_string(), 5usize),
+        ("command-no-mutation".to_string(), 1usize),
+    ]
+    .into_iter()
+    .collect();
+    assert!(
+        !diff_warning_baseline(&committed, &real_widening).is_clean(),
+        "the carry-forward is for runs that could not MEASURE the kind; a run that measured it and found more must still red, or the exemption swallows the signal it exists to preserve"
+    );
+
+    // AND THE WIRING, NOT ONLY THE ARITHMETIC. The two assertions above exercise
+    // `diff_warning_baseline` and the constant; deleting the carry-forward from
+    // `check_warning_baseline` -- the function `main.rs` actually calls -- left them both green.
+    // §19 shape #1 in the guard written this round: an assertion held up by the code beside it
+    // rather than by anything that reds when that code is removed. So call the real entry point,
+    // against a throwaway root carrying a real committed artifact. (Review #80.)
+    {
+        let sandbox = std::env::temp_dir().join(format!("cf-ratchet-unmeasured-{}", std::process::id()));
+        let dir = sandbox.join("tools/codegen-rs");
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(&dir).expect("mkdir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+        fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&committed))
+            .expect("write the fixture baseline");
+
+        assert!(
+            check_warning_baseline(&sandbox, &live, &[]).is_err(),
+            "with nothing declared unmeasured, a run that reports 0 for a baselined kind MUST red -- otherwise this fixture cannot tell the guard from its absence"
+        );
+        assert!(
+            check_warning_baseline(&sandbox, &live, &CORPUS_DERIVED_KINDS).is_ok(),
+            "`check_warning_baseline` must carry an unmeasured kind forward from the committed artifact. This is the call `main.rs` makes; the arithmetic being right in `diff_warning_baseline` proves nothing if this function ignores its `unmeasured` argument"
+        );
+
+        // EVERY KIND ON THE LIST, not just the one this fixture happened to use. Review #84 added a
+        // third entry (`decision-superseded-authority`, the rule that CONSUMES the corpus rather
+        // than reporting on it) and a one-kind fixture would have proved nothing about it -- the
+        // corpus-size-floor shape from §19 #1, in a list rather than in a plant set.
+        for kind in CORPUS_DERIVED_KINDS {
+            let committed_k: WarningProfile = [(kind.to_string(), 2usize)].into_iter().collect();
+            fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&committed_k))
+                .expect("rewrite the fixture baseline");
+            let empty: WarningProfile = BTreeMap::new();
+            assert!(
+                check_warning_baseline(&sandbox, &empty, &[]).is_err(),
+                "`{}` baselined at 2 and absent from a run must red when nothing is declared unmeasured -- otherwise the case below cannot distinguish the guard from its absence",
+                kind
+            );
+            assert!(
+                check_warning_baseline(&sandbox, &empty, &CORPUS_DERIVED_KINDS).is_ok(),
+                "`{}` is in CORPUS_DERIVED_KINDS but the floor does not cover it",
+                kind
+            );
+
+            // AND A GENUINE INCREASE MUST STILL RED, WITH THE KIND DECLARED UNMEASURED. This is the
+            // case that separates a FLOOR from a REPLACEMENT, and nothing pinned it: every earlier
+            // assertion here used live = 0, where the two are identical. A replacement suppresses
+            // the increase too, which on the partial-read path (`readable == true`, `unread`
+            // non-empty — a dangling tracked symlink, a sparse-checkout gap, one root-owned file)
+            // makes the ratchet SILENTLY NON-BLOCKING: an added out-of-allowlist `.claude/**` file
+            // scores clean, against `claude_citation_corpus`'s promise that it "becomes a
+            // deliberate, baseline-moving act". Unread files can only UNDER-count, so only the
+            // decrease is spurious and only the decrease may be suppressed. (Review #87.)
+            // AND THE ARM THAT MATTERS MOST: a kind ABSENT from the baseline, found on a partial
+            // read. That is a NEW stale citation (or a new out-of-corpus file) on a host with one
+            // unreadable path -- committed is `None`, so the replacement took the `remove` branch
+            // and scored clean, while the floor takes `max(0, 1) = 1` and reds `0 -> 1 (NEW warning
+            // kind)`. It is a different branch from the increase below and was not covered by it;
+            // at `warn` level this red IS the enforcement, so the two arms are the whole gate.
+            // (Review #88 of PR #679.)
+            fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&BTreeMap::new()))
+                .expect("rewrite the fixture baseline as empty");
+            let first_hit: WarningProfile = [(kind.to_string(), 1usize)].into_iter().collect();
+            assert!(
+                check_warning_baseline(&sandbox, &first_hit, &CORPUS_DERIVED_KINDS).is_err(),
+                "`{}` was FOUND once on a run where the corpus was only partly read, and the ratchet stayed clean because the kind is absent from the baseline. A finding the run actually observed was measured -- declaring the kind unmeasured may only raise a spuriously low count, never erase a hit",
+                kind
+            );
+            fs::write(sandbox.join(WARNING_BASELINE_PATH), render_warning_baseline(&committed_k))
+                .expect("restore the fixture baseline");
+
+            let higher: WarningProfile = [(kind.to_string(), 5usize)].into_iter().collect();
+            assert!(
+                check_warning_baseline(&sandbox, &higher, &CORPUS_DERIVED_KINDS).is_err(),
+                "`{}` went 2 -> 5 and the ratchet stayed clean because the kind was declared unmeasured. Declaring a kind unmeasured must FLOOR it at the committed value, never REPLACE it: a partially-read corpus still counts, it just under-counts, so an increase is real and must block",
+                kind
+            );
+        }
+    }
+
+
+    // The two kinds are exactly the corpus-derived ones, and neither is on the exempt list -- the
+    // two mechanisms are complementary and must not be collapsed into one.
+    let mut kinds = CORPUS_DERIVED_KINDS.to_vec();
+    kinds.sort_unstable();
+    assert_eq!(
+        kinds,
+        vec![
+            "decision-citation-file-not-utf8",
+            "decision-citation-file-out-of-corpus",
+            "decision-superseded-authority",
+        ],
+        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on the corpus being fully read; adding one is a decision, and removing one reopens the `kind eliminated` trap for it. `decision-superseded-authority` is the rule that CONSUMES the corpus rather than reporting on it, and it is the one most likely to carry a baselined N>0 -- shipping it at `warn` exists so a false positive can be accepted with `make warning-baseline`"
+    );
+    for k in CORPUS_DERIVED_KINDS {
+        assert!(
+            !RATCHET_EXEMPT.contains(&k),
+            "`{}` is both corpus-derived and ratchet-exempt. These are different mechanisms: exemption says the COUNT has no stable value anywhere, carry-forward says THIS RUN could not take it. Collapsing them drops the kind out of the only gate that counts warnings",
+            k
+        );
+    }
+}
+
+/// THE PREDICATE THAT DECIDES `unmeasured` MUST DISTINGUISH THE TWO SHORTFALLS.
+///
+/// Review #84's half: `readable == false` is git refusing outright, but a corpus can also be
+/// PARTIALLY read -- `unread` is non-empty when git listed a file the filesystem would not hand
+/// back (sparse checkout, dangling tracked symlink, permission drop). Keying only on the first left
+/// `N -> N-1` on the second, landing in `better` and redding on a tree nobody touched.
+///
+/// Review #91's half: they are also not the SAME shortfall, and collapsing them into one bool was
+/// the defect `the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly` pins.
+///
+/// THIS USED TO BE A TEXT ASSERTION over `main.rs`, and said so: "it catches the disjunct being
+/// DELETED, which is the regression that actually happened once; it cannot catch it being rewritten
+/// to something wrong". The classification is now `CorpusShortfall::from_scan`, so it is asserted
+/// by EXECUTION -- and the tree-caused vectors it must never consult are excluded by the function's
+/// SIGNATURE rather than by a check, which is the level CLAUDE.md's compiler-first rule asks for
+/// before a gate is written. The weaker instrument is retired because the compiler subsumes it,
+/// which that rule calls a correct outcome. (Reviews #84 and #91 of PR #679.)
+#[test]
+fn the_shortfall_classifier_separates_git_refusing_from_a_partial_read() {
+    use crate::validate::warning_baseline::CorpusShortfall;
+
+    assert_eq!(
+        CorpusShortfall::from_scan(false, true),
+        CorpusShortfall::Nothing,
+        "git refused (or the empty-corpus early return fired) and this did not classify as `Nothing`. Every vector comes back cleared there, so no count was taken at all"
+    );
+    assert_eq!(
+        CorpusShortfall::from_scan(false, false),
+        CorpusShortfall::Nothing,
+        "git refusing must dominate: with the corpus empty there is nothing for a partial-read reading to be partial ABOUT"
+    );
+    assert_eq!(
+        CorpusShortfall::from_scan(true, false),
+        CorpusShortfall::Partial,
+        "the PARTIAL-read disjunct was lost. `unread` is non-empty when git listed a file the filesystem would not hand back -- a HOST cause exactly like git refusing -- so the read-dependent counts are lower bounds and a baselined kind reds `N -> N-1` on the host that dropped the file"
+    );
+    assert_eq!(
+        CorpusShortfall::from_scan(true, true),
+        CorpusShortfall::None,
+        "a complete scan classified as short. Nothing may be floored there: every count is the truth and every change in it is real"
+    );
+}
+
+/// THE FLOOR MAY ONLY COVER KINDS THIS RUN COULD UNDER-COUNT.
+///
+/// `corpus_incomplete` collapsed two different shortfalls into one bool and sent all three
+/// corpus-derived kinds through the floor on both. On the PARTIAL-read path
+/// (`readable == true`, `unread` non-empty) `decision-citation-file-out-of-corpus` is **exact** --
+/// `skipped_ext` is pushed BEFORE the `read_to_string` attempt, so an unreadable file never leaves
+/// it -- and `check_warning_baseline`'s own docstring says so while the code floored it anyway.
+///
+/// Concrete failure once that kind is legitimately baselined at N>0: an author FIXES one of those
+/// files (renames it onto the allowlist), live goes 2 -> 1, and on any host with a single dangling
+/// tracked symlink the floor restores 2, the diff is clean and `make validate` is GREEN. CI, which
+/// can read every file, reds on the change they were told was clean -- and before review #91 they
+/// could not clear it locally either, because the write path refused on the same collapsed bool.
+///
+/// THE DISCRIMINATING CASE IS A DECREASE ON THE PARTIAL PATH. Every other assertion in this file
+/// exercises the floor where flooring is correct, so deleting the discrimination leaves them all
+/// green. (Review #91 of PR #679.)
+#[test]
+fn the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly() {
+    use crate::validate::warning_baseline::CorpusShortfall;
+
+    const EXACT: &str = "decision-citation-file-out-of-corpus";
+    const LOWER_BOUND: &str = "decision-citation-file-not-utf8";
+
+    assert!(
+        !CorpusShortfall::Partial.unmeasured().contains(&EXACT),
+        "`{}` is floored on the PARTIAL-read path, where it is EXACT: the extension filter runs before the read attempt, so an unreadable file never leaves `skipped_ext` and every decrease in this kind is genuine. Flooring it turns a real `N -> N-1` elimination into a clean diff on any host with one unreadable corpus file, and CI then reds on a change the author was told was green",
+        EXACT
+    );
+    assert!(
+        CorpusShortfall::Partial.unmeasured().contains(&LOWER_BOUND),
+        "`{}` dropped off the PARTIAL-read floor. It IS a lower bound there -- a file that could not be read cannot be tested for UTF-8 -- so without the floor a host that drops one corpus file scores `N -> N-1` and reds on a tree nobody touched",
+        LOWER_BOUND
+    );
+    assert!(
+        CorpusShortfall::Partial.unmeasured().contains(&"decision-superseded-authority"),
+        "the rule that CONSUMES the corpus dropped off the PARTIAL-read floor: it scans fewer files, so its count is a lower bound and a decrease is not evidence of a fix"
+    );
+
+    // NOTHING measured -- every kind is absent rather than low, so all three are floored.
+    let mut nothing = CorpusShortfall::Nothing.unmeasured().to_vec();
+    nothing.sort_unstable();
+    let mut all = CORPUS_DERIVED_KINDS.to_vec();
+    all.sort_unstable();
+    assert_eq!(
+        nothing, all,
+        "`Nothing` means `git ls-files` did not answer and every vector came back cleared, so EVERY corpus-derived kind is absent rather than low and all of them must be floored"
+    );
+    assert!(
+        CorpusShortfall::None.unmeasured().is_empty(),
+        "a complete corpus floors nothing -- every count is the truth and every change in it is real"
+    );
+
+    // AND THE FLOOR ITSELF STILL SUPPRESSES ONLY A DECREASE, asserted here over the exact/lower-
+    // bound split rather than trusted from the other tests, which all run with `Nothing`.
+    let committed: WarningProfile = [(EXACT.to_string(), 2usize), (LOWER_BOUND.to_string(), 2usize)]
+        .into_iter()
+        .collect();
+    let live: WarningProfile = [(EXACT.to_string(), 1usize), (LOWER_BOUND.to_string(), 1usize)]
+        .into_iter()
+        .collect();
+    let floored = floor_unmeasured(&live, &committed, CorpusShortfall::Partial.unmeasured());
+    assert_eq!(
+        floored.get(EXACT).copied(),
+        Some(1),
+        "the exact kind's genuine `2 -> 1` was floored back to 2, so the ratchet reports clean on a real elimination"
+    );
+    assert_eq!(
+        floored.get(LOWER_BOUND).copied(),
+        Some(2),
+        "the lower-bound kind's `2 -> 1` survived the floor, so a host that could not read one file reds on a tree nobody touched"
+    );
+}
+
+/// A PARTIAL READ MAY NOT BLOCK `make warning-baseline`.
+///
+/// The refusal fired on `!readable || !unread.is_empty()`. The second disjunct is one tracked file
+/// under `.claude/**` the filesystem would not hand back -- a dangling symlink, a permission drop,
+/// a sparse-checkout gap. On such a host EVERY `make warning-baseline` exited 1, including one run
+/// for a spec change that moved a completely unrelated warning kind, while CLAUDE.md requires the
+/// refreshed artifact in the SAME commit and the printed remedy ("fix the checkout") may be outside
+/// the author's control. Composed with the floor defect above, that is the "left with a red they
+/// cannot clear" end state `CORPUS_DERIVED_KINDS` names, reached from both directions at once.
+/// (Review #91 of PR #679.)
+#[test]
+fn a_partial_read_may_still_mint_a_baseline() {
+    use crate::validate::warning_baseline::CorpusShortfall;
+
+    assert!(
+        CorpusShortfall::Partial.may_mint_a_baseline(),
+        "a PARTIALLY read corpus refuses to mint a baseline. The counts are computed there -- lower bounds, not absent -- so the floor is the correction they need and refusing blocks the author's only remedy for every unrelated warning move on that host"
+    );
+    assert!(
+        !CorpusShortfall::Nothing.may_mint_a_baseline(),
+        "a run where `git ls-files` did not answer minted a baseline. Nothing was measured, so this commits a permanent 0 for kinds this host never counted, and every host that CAN count them then reds"
+    );
+    assert!(
+        CorpusShortfall::None.may_mint_a_baseline(),
+        "a complete corpus refuses to mint a baseline, which leaves no way to move the artifact at all"
+    );
+}
+
+/// AN UNREADABLE CORPUS MAY NOT MINT A RATCHETED WARNING.
+///
+/// `skipped_ext` deliberately survives review #61's empty-corpus early return, where it is the
+/// EXPLANATION for the empty corpus. That return also sets `readable = false`, the caller turns
+/// that into `CorpusShortfall::Nothing`, and `--write-warning-baseline` REFUSES on it. So emitting
+/// those names under the tree-caused, ratcheted kind produced `0 -> N (NEW warning kind)` out of a
+/// run that -- by that return's own statement -- scanned nothing, with the printed remedy
+/// (`make warning-baseline`) exiting 1 as well: verbatim the end state `CORPUS_DERIVED_KINDS`
+/// calls "WORSE than the reporters': the reader can no longer commit the bad 0, so they are left
+/// with a red they cannot clear".
+///
+/// ASSERTED BY EXECUTION, not by reading `main.rs`: the choice was extracted into
+/// `out_of_corpus_warning_kind` rather than left as an `if` at the emission site.
+/// (Review #90 of PR #679.)
+#[test]
+fn an_unreadable_corpus_cannot_mint_a_ratcheted_warning() {
+    use crate::validate::decisions::out_of_corpus_warning_kind;
+
+    let (readable_kind, _) = out_of_corpus_warning_kind(true);
+    assert_eq!(
+        readable_kind, "decision-citation-file-out-of-corpus",
+        "on a READABLE corpus the allowlist drop is a property of this tree and must keep ratcheting -- adding a `.claude/**` file the rule cannot see is a deliberate, baseline-moving act, which is the whole reason the kind exists"
+    );
+    assert!(
+        !RATCHET_EXEMPT.contains(&readable_kind),
+        "`{}` became ratchet-exempt on the readable path, which switches the gate off in the case it was built for",
+        readable_kind
+    );
+
+    let (unreadable_kind, _) = out_of_corpus_warning_kind(false);
+    assert!(
+        RATCHET_EXEMPT.contains(&unreadable_kind),
+        "`{}` is emitted when NOT ONE corpus file was readable, and it is inside the section 17 ratchet. That run scanned nothing, so a kind absent from the baseline scores `0 -> N (NEW warning kind)` and `make validate` exits 1 -- while `--write-warning-baseline` refuses on the same shortfall, so the printed remedy exits 1 too. A red the reader cannot clear, over a tree that is not this repository",
+        unreadable_kind
+    );
+
+    // AND THE TWO PATHS MUST NOT COLLAPSE INTO ONE. Reporting both under the exempt kind would
+    // close this trap by disabling the gate; reporting both under the ratcheted kind is the bug.
+    assert_ne!(
+        readable_kind, unreadable_kind,
+        "the two paths report the same kind, so one of them is wrong: the readable path must ratchet (the count is a stable property of this tree) and the unreadable path must not (nothing was scanned, and the remedy is blocked)"
+    );
+}
+
+/// THE RATCHETED CORPUS KINDS MUST COUNT FILES, NOT PRESENCE.
+///
+/// `warning_profile` counts ISSUES per rule, and both tree-caused reporters used to push ONE
+/// aggregated warn listing N files -- so the live profile was `1` whether the allowlist dropped one
+/// file or twelve. Those two kinds are inside the section 17 ratchet on the stated ground that
+/// adding a `.claude/**` file the rule cannot see "becomes a deliberate, baseline-moving act", and
+/// at granularity 1 that held for the FIRST such file only. The moment anyone legitimately accepted
+/// one with `make warning-baseline` -- which at `warn` level is an EXPECTED state, and is the whole
+/// argument for `CITATION-RULE-LEVEL` option (a) -- a second extensionless hook carrying
+/// `Per row <DEAD-ROW>, ...` scored `1 -> 1`: clean, silent, and exactly the motivating incident
+/// class walking back in through the door the ratchet was built to close.
+///
+/// `decision-superseded-authority` never had the defect (one issue per CITING SITE), which is what
+/// makes `CITATION-RULE-LEVEL`'s "a SECOND stale citation still reds after the first is baselined"
+/// true of it. Five comments asserted that property of all three. (Review #92 of PR #679.)
+#[test]
+fn the_ratcheted_corpus_kinds_count_files_not_presence() {
+    use crate::validate::decisions::corpus_scan_issues;
+
+    let two = |a: &str, b: &str| vec![a.to_string(), b.to_string()];
+
+    let issues = corpus_scan_issues(true, &[], &[], &two(".claude/hooks/preflight", ".claude/notes.txt"));
+    assert_eq!(
+        warning_profile(&issues).get("decision-citation-file-out-of-corpus").copied(),
+        Some(2),
+        "two files outside the extension allowlist scored as one in the ratchet profile. At granularity 1 the baseline cannot tell one from twelve, so once the first is accepted with `make warning-baseline` every later one lands `1 -> 1` -- clean and silent, which is the property this kind's ratchet membership is justified by. Issues: {:?}",
+        issues.iter().map(|i| i.location.clone()).collect::<Vec<_>>()
+    );
+
+    let issues_utf8 = corpus_scan_issues(true, &[], &two(".claude/a.md", ".claude/b.md"), &[]);
+    assert_eq!(
+        warning_profile(&issues_utf8).get("decision-citation-file-not-utf8").copied(),
+        Some(2),
+        "two non-UTF-8 corpus files scored as one. Same defect, same consequence: a second committed latin-1 file citing a dead row lands silently once the first is baselined"
+    );
+
+    // AND EACH ISSUE NAMES ITS OWN FILE, which is what makes the count meaningful rather than
+    // merely numerous -- one aggregated message repeated N times would satisfy the counts above.
+    let mut locations: Vec<String> = issues.iter().map(|i| i.location.clone()).collect();
+    locations.sort();
+    assert_eq!(
+        locations,
+        vec![".claude/hooks/preflight".to_string(), ".claude/notes.txt".to_string()],
+        "the per-file issues do not carry the per-file LOCATION, so `make validate` prints the same line twice and the reader cannot tell which file is new"
+    );
+
+    // THE EXEMPT KIND IS DELIBERATELY STILL AGGREGATED, and that is not an inconsistency: it never
+    // reaches the baseline, so its granularity cannot hide anything. Asserted so the next reader
+    // does not "fix" it into the ratchet's shape and conclude the ratchet covers it.
+    let host = corpus_scan_issues(true, &two(".claude/x.md", ".claude/y.md"), &[], &[]);
+    assert_eq!(
+        host.len(),
+        1,
+        "the host-caused kind was split per file. It is `RATCHET_EXEMPT`, so the count never reaches the baseline and one message naming every unreadable file is the more useful report"
+    );
+    assert!(
+        warning_profile(&host).is_empty(),
+        "the host-caused kind entered the ratchet profile -- it is exempt precisely because its count has no stable value across hosts"
+    );
+}
+
+/// EVERY TEST NAME A DOC COMMENT IN THIS FILE CITES MUST STILL EXIST IN IT.
+///
+/// A DELETED TEST FAILS NOTHING, which is why this class is invisible to the suite it damages. It
+/// happened here, to the author, in the round that fixed the previous round's finding: a range
+/// splice bounded by two SEARCHED anchors (`s[..start] + new + s[end..]`) was written when the
+/// region between them held one test, and by the time it ran three more had been inserted there.
+/// All four were replaced by one. `cargo test` went green, the count moved by a number nobody was
+/// tracking, and the round reported "N tests green" as if that verified something -- while two of
+/// the assertions the same commit's message described no longer existed.
+///
+/// The surviving evidence was a doc comment on a NEIGHBOURING test naming one of the deleted ones,
+/// which is what eventually surfaced it. That is the property gated here: this file cites its own
+/// tests by name constantly (a docstring saying "the discriminating case is pinned in X" is how the
+/// reasoning is carried between them), so a dangling citation means either the test is gone or it
+/// was renamed and the reference rotted. Both are worth a red.
+///
+/// It is NOT a test-count ratchet: retiring a test deliberately is legitimate and this branch has
+/// done it (a text assertion the compiler subsumed). Deleting a test AND the sentences that point
+/// at it is still silent -- but it is then a visible, reviewable diff rather than an accident of
+/// slicing. (Review #92 of PR #679, on the author's own defect.)
+#[test]
+fn every_test_name_cited_in_a_doc_comment_still_exists() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let src = fs::read_to_string(root.join("tools/codegen-rs/src/tests.rs")).expect("tests.rs");
+
+    // DECLARED = every identifier the CRATE's real code carries, not just `fn` lines in this
+    // file. The first version scanned `fn ` in tests.rs alone and red on two honest citations: a
+    // `let` binding inside a test, and `out_of_corpus_warning_kind`, which is a function one module
+    // over -- exactly the kind of cross-reference these doc comments SHOULD make. What a deleted
+    // test's name has that those do not is that it appears nowhere in any code line at all.
+    let mut declared: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut stack = vec![root.join("tools/codegen-rs/src")];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).expect("read src").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    assert!(
+        files.len() > 5,
+        "only {} .rs files found under tools/codegen-rs/src -- the walk broke rather than the tree, so this would pass vacuously. Re-point it",
+        files.len()
+    );
+    for path in &files {
+        let text = fs::read_to_string(path).expect("read a crate source file");
+        for line in text.lines() {
+            // Code lines only: a name that survives ONLY inside prose is precisely the dangling case.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let mut token = String::new();
+            for c in line.chars() {
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                    token.push(c);
+                } else {
+                    if token.len() > 12 {
+                        declared.insert(std::mem::take(&mut token));
+                    } else {
+                        token.clear();
+                    }
+                }
+            }
+            if token.len() > 12 {
+                declared.insert(token);
+            }
+        }
+    }
+
+    // Cited names are the `snake_case_identifiers` inside backticks in `///` lines. Restricted to
+    // backticks so ordinary prose cannot produce a hit, and to names that LOOK like tests in this
+    // file (three or more underscore-separated lowercase words) so rule kinds, field names and
+    // shell variables are not swept in.
+    let mut dangling: Vec<(usize, &str)> = Vec::new();
+    for (i, line) in src.lines().enumerate() {
+        let Some(doc) = line.trim_start().strip_prefix("///") else { continue };
+        for cited in doc.split('`').skip(1).step_by(2) {
+            let looks_like_a_test_name = cited.len() > 12
+                && cited.matches('_').count() >= 3
+                && cited.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && !cited.starts_with('_')
+                && !cited.ends_with('_');
+            if looks_like_a_test_name && !declared.contains(cited) {
+                dangling.push((i + 1, cited));
+            }
+        }
+    }
+    assert!(
+        dangling.is_empty(),
+        "a doc comment in tests.rs cites a test that no longer exists: {:?}. Either the test was DELETED -- which fails nothing, so the suite cannot tell you -- or it was renamed and the sentence carrying its reasoning now points at nothing. If the removal was deliberate, remove the sentences that point at it in the same change",
+        dangling
+    );
+}
+
+#[test]
+fn only_host_dependent_warnings_are_exempt_from_the_ratchet() {
+    // AND THE TREE-CAUSED SIBLINGS ARE NOT ON IT. Both report the same OUTCOME as the exempt kind
+    // -- a corpus file that went unscanned -- from a DETERMINISTIC cause, so each has a stable
+    // committable value and belongs inside the ratchet: `decision-citation-file-not-utf8` (a
+    // committed latin-1 byte, review #60) and `decision-citation-file-out-of-corpus` (a tracked
+    // `.claude/**` file outside the extension allowlist, review #63). Lumping either with the host
+    // kind hands it the host-only exemption and the file goes unscanned forever at 0 errors with
+    // the ratchet unmoved. Asserted, because "these kinds look alike and one is exempt" is exactly
+    // the set a later refactor merges.
+    for tree_caused in ["decision-citation-file-not-utf8", "decision-citation-file-out-of-corpus"] {
+        assert!(
+            !RATCHET_EXEMPT.contains(&tree_caused),
+            "`{}` is TREE-caused, not host-caused: it fails identically on every host, so its count has a stable value to commit. Exempting it hides the unscanned file forever -- which is the whole defect the kind was added to surface",
+            tree_caused
+        );
+    }
+    assert_eq!(
+        RATCHET_EXEMPT.to_vec(),
+        vec!["decision-citation-corpus-unreadable"],
+        "the ratchet exemption list changed. Each entry removes a warning kind from the ONLY gate that counts warnings, so it is a decision, not a refactor: state why the kind depends on the HOST rather than on this tree, in `RATCHET_EXEMPT`'s doc comment, and update this assertion deliberately"
+    );
+    // The exemption is about the KIND, not about the level: an exempt kind still counts as a
+    // warning everywhere else, and a NON-exempt warning must still ratchet beside it.
+    let issues = vec![
+        warn("decision-citation-corpus-unreadable", "tools/codegen-rs".into(), String::new()),
+        warn("command-no-mutation", "a".into(), String::new()),
+    ];
+    let p = warning_profile(&issues);
+    assert_eq!(
+        p.get("decision-citation-corpus-unreadable"),
+        None,
+        "an exempt kind entered the ratchet -- on any tree where `git ls-files` fails (a bind-mounted checkout, a `git archive` extraction, a container stage without `.git`) `make validate` then exits 1 with a message about the warning baseline, and the remedy it prints commits a baseline that says this gate checked nothing"
+    );
+    assert_eq!(
+        p.get("command-no-mutation"),
+        Some(&1),
+        "the exemption widened past its list -- ordinary warnings must still ratchet"
+    );
+    // AND THE COMMITTED ARTIFACT MUST NOT ALREADY CARRY ONE. If a previous run blessed the kind
+    // into the baseline, this exemption turns that entry into a permanent `1 -> 0` red instead.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+    let committed = fs::read_to_string(root.join(WARNING_BASELINE_PATH)).expect("warning-baseline.json");
+    for kind in RATCHET_EXEMPT {
+        assert!(
+            !committed.contains(kind),
+            "`{}` is exempt from the ratchet but is COMMITTED in {} -- the live profile can never contain it again, so the baseline reds `{} : 1 -> 0 (kind eliminated)` on every host forever. Run `make warning-baseline` and commit the result",
+            kind, WARNING_BASELINE_PATH, kind
+        );
+    }
+}
+
 /// Round-trip, and the self-consistency check that makes a hand-edit visible: `total` is not an
 /// independent field you can nudge — it must equal the histogram sum.
 #[test]
@@ -8572,7 +9151,7 @@ fn the_committed_warning_baseline_matches_the_real_specs() {
         &load_span_source(&root),
     ));
     let live = warning_profile(&issues);
-    if let Err(msg) = check_warning_baseline(&root, &live) {
+    if let Err(msg) = check_warning_baseline(&root, &live, &[]) {
         panic!("{msg}");
     }
 }
@@ -9789,6 +10368,96 @@ mod decision_ask_and_citations {
         let sup_b = "key: \"ROW-B\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-A\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
         let ok = check_rows(&[("docs/decisions/ROW-A.yaml", &closed_challenge), ("docs/decisions/ROW-B.yaml", sup_b)]);
         assert!(ok.is_empty(), "coupled closure must be green, got {:?}", ok);
+        // THE MIRROR HALF (added 2026-08-25 after the independent review of PR #679 DISPROVED
+        // the claim that the coupling was already total). The case above is the challenge moving
+        // without its target; this is the TARGET moving without its challenge — a superseded row
+        // whose authority points at a question still OPEN, so the chain head is not an answer.
+        // Before the rule this returned zero issues: the register rested in exactly the split
+        // state docs/decisions/README.md forbids, and nothing saw it.
+        let open_challenge = format!("{}reconsiders: \"ROW-B\"\n", OPEN_A);
+        let split = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", &open_challenge),
+            ("docs/decisions/ROW-B.yaml", sup_b),
+        ]);
+        assert!(
+            split.contains(&rule),
+            "a row superseded BY an OPEN challenge must be RED — the supersession was executed by a question that has not been answered; got {:?}",
+            split
+        );
+        // A LEGAL TWO-LINK CHAIN must be GREEN: ROW-B challenged ROW-A and closed, then ROW-C
+        // challenged ROW-B and closed, so ROW-B is now `superseded` while still carrying the
+        // `reconsiders` edge that closed ROW-A. The first version of the rule above demanded the
+        // challenge be `decided` and false-redded exactly this — the next legal move on the QMD
+        // chain, and the one PROP-20260822-171212's rollback path instructs. A rule that only ever
+        // plants red is not the same as one that has had its boundary fixed.
+        let a_sup = "key: \"ROW-A\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-B\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let b_sup = "key: \"ROW-B\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-C\"\nreconsiders: \"ROW-A\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let c_dec = "key: \"ROW-C\"\nstatus: \"decided\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-20\"\ndecided_by: \"ADR-20260819-103112\"\nreconsiders: \"ROW-B\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        // NOT a rule, recorded so it is not "fixed" again: a supersession with NO `reconsiders`
+        // edge at all is LEGAL. The second review of PR #679 required making it red; implementing
+        // that broke two PRE-EXISTING tests — `a_fully_valid_corpus_is_green` and
+        // `supersession_is_a_dag_walked_by_identity`, whose "A -> B (open) terminates: green" case
+        // is exactly this shape. Those tests encode a deliberate design (a row can be superseded
+        // by a successor that never formally challenged it, e.g. a migration), and CLAUDE.md is
+        // explicit that a failing behaviour test means fix the generator, never the test. So the
+        // coupling is enforced only where a challenge edge EXISTS, and the records say so.
+        let orphan_sup = "key: \"ROW-A\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\ndecided: \"2026-08-19\"\ndecided_by: \"ADR-20260819-103112\"\nsuperseded_by: \"ROW-B\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n";
+        let orphan = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", orphan_sup),
+            ("docs/decisions/ROW-B.yaml", DECIDED_B),
+        ]);
+        assert!(orphan.is_empty(), "a supersession without a challenge edge is legal by design, got {:?}", orphan);
+
+        // THE SAME BOUNDARY WITH AN **OPEN** SUCCESSOR, pinned HERE and not only in
+        // `supersession_is_a_dag_walked_by_identity`, because review #29 read the coupling arm and
+        // concluded this state was an oversight. It is not: `A superseded_by B` with `B` open and
+        // no `reconsiders` edge is the shape that test calls "a chain terminating in a live row is
+        // legal", and it is what a MIGRATION produces -- a row replaced by a successor that never
+        // formally challenged it, whose own question is still being settled. Redding it would put
+        // the invariant on the `superseded_by` edge and break two pre-existing tests, and CLAUDE.md
+        // is explicit that a failing behaviour test means fix the generator, never the test.
+        //
+        // What the review WAS right about is the claim, not the code: the row and this comment said
+        // the arm closes "the direction the ADR wrongly claimed was already total", and it closes
+        // the direction WHERE A CHALLENGE EDGE EXISTS. Both records now say which. The reader
+        // routed to an open head is told the successor question is open -- that is information, not
+        // a dead end; the dead end this chain actually fixed was an index arrow pointing at the
+        // predecessor's own deciding record.
+        let open_successor = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", orphan_sup),
+            ("docs/decisions/ROW-B.yaml", "key: \"ROW-B\"\nstatus: \"open\"\nquestion: \"Q?\"\nowner: \"founder\"\nopened: \"2026-08-18\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n"),
+        ]);
+        assert!(
+            open_successor.is_empty(),
+            "a supersession whose successor is still OPEN, with no challenge edge, is legal by design -- see the comment above before 'fixing' it, got {:?}",
+            open_successor
+        );
+
+        let chain = check_rows(&[
+            ("docs/decisions/ROW-A.yaml", a_sup),
+            ("docs/decisions/ROW-B.yaml", b_sup),
+            ("docs/decisions/ROW-C.yaml", c_dec),
+        ]);
+        assert!(chain.is_empty(), "a legal two-link supersession chain must be GREEN, got {:?}", chain);
+
+        // Same shape with a DEFERRED and a WITHDRAWN challenge: neither closed the question, so
+        // neither may have executed a supersession. RED.
+        for st in ["deferred", "withdrawn"] {
+            let ch = format!(
+                "{}reconsiders: \"ROW-B\"\n{}",
+                OPEN_A.replace("\"open\"", &format!("\"{}\"", st)),
+                if st == "withdrawn" { "note: \"why it stopped being a question\"\n" } else { "until: \"a stated wake condition\"\n" }
+            );
+            let issues = check_rows(&[
+                ("docs/decisions/ROW-A.yaml", &ch),
+                ("docs/decisions/ROW-B.yaml", sup_b),
+            ]);
+            assert!(
+                issues.contains(&rule),
+                "a row superseded by a `{}` challenge must be RED; got {:?}",
+                st, issues
+            );
+        }
         // A challenge targeting a superseded MID-CHAIN row names the head: RED.
         let mid = format!("{}reconsiders: \"ROW-B\"\n", OPEN_A.replace("ROW-A", "ROW-D"));
         let sup_to_c = sup_b.replace("superseded_by: \"ROW-A\"", "superseded_by: \"ROW-C\"");
@@ -9799,6 +10468,1353 @@ mod decision_ask_and_citations {
             ("docs/decisions/ROW-D.yaml", &mid),
         ]);
         assert!(issues.contains(&rule), "mid-chain challenge must be red, got {:?}", issues);
+    }
+
+    /// The superseded-authority rule, planted RED and GREEN, plus the real corpus.
+    ///
+    /// It shipped with no test at all. `claude-review` pointed out that deleting the call site in
+    /// `main.rs` -- or making the function return an empty Vec -- left `cargo test --workspace`
+    /// entirely green, so the rule would vanish with no signal. That is the round-8 regression
+    /// (`env_ok` deleted by a refactor, invisible) and the round-9 lesson (*pin a guard from a test
+    /// that fails when it is removed, not from a sentence*) reproduced in the same PR that
+    /// catalogues both, in the rule written to stop the last recurrence.
+    #[test]
+    fn a_superseded_row_may_not_be_cited_as_live_authority() {
+        let rows_src: Vec<(String, String)> = vec![(
+            "docs/decisions/OLD-ROW.yaml".to_string(),
+            "key: \"OLD-ROW\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-01\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\nsuperseded_by: \"NEW-ROW\"\n".to_string(),
+        )];
+        let mut sink = Vec::new();
+        let rows = parse_decision_rows(&rows_src, &mut sink);
+        let check = |path: &str, body: &str| {
+            validate_no_superseded_row_is_cited_as_authority(
+                &rows,
+                &[(path.to_string(), body.to_string())],
+            )
+        };
+
+        // RED: every citation form an author actually writes.
+        for (label, body) in [
+            ("row + backticks", "Decided by row `OLD-ROW` (founder)."),
+            ("Per row, in a runtime message", "echo \"Per row OLD-ROW: record this failure\""),
+            ("Per <KEY>", "See Per OLD-ROW for the rollback path."),
+            ("decided_by field", "decided_by: OLD-ROW"),
+            // THE OTHER TWO FIELD FORMS IN THE SAME ARM, neither of which had a control: one was
+            // reachable-but-unexercised and the other was DEAD BY CONSTRUCTION, because
+            // `superseded_by` contains "superseded" and the clause exemption ran first. Of three
+            // field forms, one could never fire and two were held up by the comment above them
+            // rather than by anything that reds when they are removed -- round 9's own lesson,
+            // recurring in the arm added to satisfy it (review #21).
+            ("reconsiders field", "reconsiders: OLD-ROW"),
+            ("superseded_by field naming a row that is ITSELF superseded", "superseded_by: OLD-ROW"),
+            // THE SAME ARM, WITH A LENGTH-CHANGING CHARACTER BEFORE THE TOKEN. `ẞ` (U+1E9E, 3
+            // bytes) lowercases to `ß` (2), so applying `line`-relative offsets to a lowercased
+            // copy shifted the blanking by one byte and it was skipped -- leaving `superseded_by`
+            // intact in the exempt text, which exempts itself and makes the arm dead by
+            // construction all over again (review #21's defect, reopened). No control in this set
+            // put such a character before the citing token, which is why the class was invisible.
+            // (Review #49.)
+            // THE SAME ARM, WITH LENGTH-CHANGING CHARACTERS BEFORE THE TOKEN. `İ` (U+0130, 2
+            // bytes) lowercases to `i̇` (3), so `line`-relative offsets applied to a lowercased copy
+            // drift by one byte per occurrence. TWO of them are needed: with one, the drifted
+            // offset still lands on a char boundary and the blanking merely lands beside the token,
+            // which reds for the wrong reason -- with two it lands INSIDE the combining mark,
+            // `is_char_boundary` fails, the blanking is SKIPPED, `superseded_by` exempts itself and
+            // the citation goes GREEN. That is the permissive direction, and it is review #21's
+            // "arm dead by construction" reopened. `ẞ`→`ß` (3→2) drifts the other way and does not
+            // reach the skip, so it is not the fixture even though it is the more obvious one --
+            // this control was found by trying six spellings against both implementations, not by
+            // reasoning about one. (Review #49.)
+            ("superseded_by after two length-changing capitals", "İİ superseded_by: OLD-ROW"),
+            // A SENTENCE ENDING IN A FILENAME IS STILL A SENTENCE. `word.contains('.')` made every
+            // filename and version number an abbreviation, so the dot after `decision-lookup.sh`
+            // stopped bounding the clause and the `superseded` written a sentence EARLIER leaked
+            // forward to exempt a live instruction. Every control in this set ended its explanatory
+            // sentence on a plain word, which is why the class was invisible. (Review #51.)
+            (
+                "an explanation ending in a filename must not exempt the next sentence",
+                "# The predecessor is superseded, and the notes live in decision-lookup.sh.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
+            (
+                "an explanation ending in a version number must not exempt the next sentence",
+                "# That row is superseded; the pin was qmd 2.8.3.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
+            // THE SPELLINGS THAT ARE LIVE IN THE CORPUS TODAY, not invented ones: `Makefile:196`
+            // reads "...visibly, like stop-gate.sh. CI invokes the script directly..." and
+            // `render-config-sync.yml` carries the `.json.` form. Both files are in the pathspec
+            // list. A reviewer proposed closing this by requiring the token to be alphabetic-or-dot,
+            // which `gate.sh` and `sync.json` both satisfy -- the segment-length rule releases them
+            // and that alternative would not have. (Review #53.)
+            (
+                "an explanation ending in a hyphenated script name",
+                "# The old row is superseded, so use the head -- visibly, like stop-gate.sh.\n# Per row OLD-ROW, re-run with the opt-out.",
+            ),
+            (
+                "an explanation ending in a dotted json filename",
+                "# That row is superseded. See render-config-sync.json.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
+            // TWO-LETTER STEM, which the first form of the initialism rule admitted -- the same
+            // class one stem length over. `db.md` is a plausible filename; `i.e`/`e.g`/`a.k.a`/`U.S`
+            // are all single-letter segments, so the tighter rule loses nothing. The `superseded`
+            // and the filename must sit in the SAME sentence: the first draft of this control put
+            // them in two, so the dot after `superseded.` bounded the clause on its own and the
+            // fixture was green under BOTH rules -- shape #3, caught by measuring it rather than
+            // reading it. (Review #55.)
+            (
+                "an explanation ending in a two-letter-stem filename",
+                "# The old row is superseded, so the notes are in db.md.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
+            // NESTED PARENTHETICAL: the citing word sits in the OUTER group, and `open_paren` used
+            // to point at the inner one after it closed, so the window missed `see` entirely.
+            (
+                "a citing word in the enclosing parenthetical of a CLOSED nested one",
+                "the pin was rewritten (see (the wrapper) `OLD-ROW`) in round 4",
+            ),
+
+            ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
+            // THE ENVELOPE FORMAT this repo mandates, enforced by register-check.sh as
+            // `ENVELOPE='Decision row:'`. A trailing colon killed the match, so the most
+            // load-bearing citation form under `.claude/**` was the one the detector could not
+            // see (review #11).
+            ("the mandated envelope", "Decision row: OLD-ROW (2026-08-01, decided)"),
+            ("plural rows", "See rows `OLD-ROW` for the rollback path."),
+            ("a parenthetical, as SKILL.md writes it", "**The one CI change that IS authorized** (`OLD-ROW`, decided 2026-08-01 by"),
+            ("the key opening a line", "`OLD-ROW`). Re-run it locally after any wrapper change."),
+            // THE FORM THE REGISTER MANDATES, and the one the rule shipped without: `SKILL.md`
+            // and `CLAUDE.md` both route resolution through "exact `docs/decisions/<KEY>.yaml`
+            // resolution", so the highest-authority pointer at a dead row was the one arm the
+            // predicate could not see, while `row X` and `the X decision` were caught (review #12).
+            ("the mandated path form", "read docs/decisions/OLD-ROW.yaml before asking"),
+            ("the path form, backticked", "resolve `docs/decisions/OLD-ROW.yaml` directly"),
+            // WRAPPED. Every control here used to be a single line, which is why the whole
+            // line-scoping class was invisible to this test (review #13). A citation split across
+            // a wrap was MISSED before the join and is caught now.
+            ("a citation split across a wrap", "Decided by row\n`OLD-ROW` (founder)."),
+            // ROUND 14'S DEFECT, ONE MARKER OVER (review #18): a `#` comment block joined with the
+            // executable line beneath it, so the clause exemption read across the prose/code
+            // boundary and a LIVE citation in the code went green. Every wrapped control here was
+            // same-marker, which is why it was invisible.
+            (
+                "a comment's explanation must not exempt the code beneath it",
+                "# kept for history: the old row is superseded\necho \"Per row OLD-ROW: open a reversal decision\"",
+            ),
+            // ` -- ` IS THE DASH THIS CORPUS WRITES. `—` was a boundary and `--` was not, so a
+            // clause in a shell comment block ran until a `;` or a sentence dot -- often five
+            // joined lines -- and one `superseded` silenced everything after it (review #20).
+            (
+                "an explanation before a ` -- ` must not exempt a citation after it",
+                "# the old row is superseded -- and per row OLD-ROW, open a reversal decision",
+            ),
+            // A bare `#` separates paragraphs inside a comment block. Before it ended a unit, a
+            // backticked key opening any paragraph after the first could not be seen at all.
+            (
+                "a backticked key opening a later paragraph of a comment block",
+                "# an earlier paragraph.\n#\n# `OLD-ROW` still governs the rollback path.",
+            ),
+            // THE DIRECTION THE JOIN CHANGED, and the one the three wrapped controls below do not
+            // cover: they are all false-red cases. Joining grew the window the `superseded`
+            // exemption searches, so an ADJACENT BULLET -- with nothing to do with the citation --
+            // could silence a live stale instruction that redded before. Neither `(` nor `)` is a
+            // clause boundary, so it landed inside the citing clause. This is `activation_fail`'s
+            // shape, i.e. the motivating incident (review #14).
+            (
+                "an unrelated bullet supplying the exemption word",
+                "- Per row OLD-ROW, open a reversal decision before changing the pin\n- (that row is superseded)",
+            ),
+            // A NUMBERED item is a block start for the same reason.
+            (
+                "an unrelated numbered item supplying the exemption word",
+                "1. Per row OLD-ROW, open a reversal decision\n2. (that row is superseded)",
+            ),
+            // THE MARKER-DROP, PLANTED. Without it `before` becomes `"1."` (a `.` is not in the
+            // trim set), `last` is empty, and no arm fires -- so a numbered item pointing at a dead
+            // row goes green. The control that claimed to cover this was scanning a key the fixture
+            // does not declare (review #25).
+            ("a numbered item opening with the key", "1. `OLD-ROW` still governs the rollback path."),
+            // `SKILL.md:193`'S ACTUAL SPELLING -- a backticked key at the END of a parenthetical,
+            // not adjacent to its `(`. `opens_a_parenthetical` required adjacency, so the one site
+            // the records NAME as proof the corpus is covered was the site still missed; it redded
+            // only by luck, because three other lines in the same file do. The wrapped form is the
+            // one that ships: `logical_units` joins it, which is what put the key mid-unit.
+            (
+                "a backticked key closing a parenthetical",
+                "pinned there by the codegen test (decided 2026-08-24,\n`OLD-ROW`). Re-run it locally.",
+            ),
+            (
+                "a backticked key mid-parenthetical",
+                "the step is authorized (see `OLD-ROW` and the ADR) and nothing else.",
+            ),
+            // THE PARENTHETICAL ARM'S OWN DEAD-BY-CONSTRUCTION CASE. `cites` fires through
+            // `in_a_citing_parenthetical`, but `last` is EMPTY (a separator precedes the key), so
+            // the `last`-scoped blanking is a no-op and `superseded_by` -- the citing token itself
+            // -- was left in the clause to exempt the citation it created. Review #21's defect
+            // inside the arm added after it, which is why `"superseded_by"` in
+            // `PARENTHETICAL_CITES` could never fire in any spelling the `last` arm did not already
+            // cover. Verified missed before the fix. (Review #68.)
+            (
+                "a parenthetical whose citing token is superseded_by",
+                "(superseded_by ADR-20260824-205911, `OLD-ROW`)",
+            ),
+            // The plain field spelling, which the `last` arm covers -- kept beside it so the two
+            // are visibly different paths rather than assumed to be one.
+            ("a parenthetical superseded_by with no separator", "(superseded_by `OLD-ROW`)"),
+            // A MARKER-TYPE CHANGE, WHICH THE BOOLEAN COULD NOT SEE. `marked` collapsed `#`, `//`
+            // and `>` into one flag, so the only transition that ended a unit was marked <->
+            // unmarked: two blocks of DIFFERENT marker kinds joined, and the quoted history's
+            // `superseded` exempted the live instruction in the comment beneath it. Review #18's
+            // defect one marker over. Verified missed before the fix. Structural, not heuristic --
+            // a hard wrap repeats its own marker, so `>` is never a continuation of `#`, which is
+            // why closing this costs no false red where the same-marker residual would. (Review
+            // #89.)
+            (
+                "a quoted history exempting the comment beneath it",
+                "> kept for history: the predecessor is superseded\n# Per row OLD-ROW, open a reversal decision before changing the pin",
+            ),
+            // THE SAME CLASS AS THE TWO BULLET CONTROLS ABOVE, IN THE LAYOUT MOST OF THE CORPUS
+            // USES. Two adjacent table rows are both unmarked and neither `starts_a_block`, so
+            // nothing ended the unit between them: joined, row 1's `superseded` exempted row 2's
+            // live instruction and `make validate` was green. Verified missed before the fix.
+            // A GFM table row is one physical line by grammar, so treating it as its own unit
+            // cannot collide with review #13's hard-wrap case. (Review #64.)
+            (
+                "an adjacent table row supplying the exemption word",
+                "| `OLD-ROW` | superseded | replaced by the chain head |\n| next | Per row `OLD-ROW`, open a reversal decision |",
+            ),
+            // AND THE CLOSING HALF, WHICH THE ROW-ABOVE CASE DOES NOT PIN. Two adjacent rows each
+            // open a unit through `is_table_row` alone, so deleting `prev_table` left that case
+            // green -- the assertion was held up by the comment beside it, which is §19 shape #1 in
+            // the fix for #64. A table row must also CLOSE its unit, or the prose beneath a table
+            // joins the last row and the last row's `superseded` exempts it.
+            (
+                "prose beneath a table exempted by the last row",
+                "| `OLD-ROW` | superseded | the head is `NEW-ROW` |\nPer row OLD-ROW, open a reversal decision.",
+            ),
+        ] {
+            let issues = check(".claude/x.md", body);
+            assert_eq!(
+                issues.len(), 1,
+                "`{}` must be caught -- a superseded row cited as live authority sends the next session into a gate error. Body: {}",
+                label, body
+            );
+            assert_eq!(issues[0].rule, "decision-superseded-authority");
+            // THE LEVEL IS PINNED, because nothing pinned it and it is a DIRECTIVE rather than a
+            // preference. Every assertion in this test passed identically at `err` and at `warn`,
+            // so the flip that CLAUDE.md's gate-then-stabilize requires -- and the flip BACK, which
+            // is `CITATION-RULE-LEVEL`'s open question -- were both invisible to the suite. A
+            // hand-rolled English-clause parser on the path that feeds the required check ships
+            // non-blocking; §17 still exits 1 on the first occurrence, so detection is intact and
+            // what changes is only the ESCAPE from a false positive. Flipping this to `err` closes
+            // that row and must be a recorded decision, not an edit. (Review #81.)
+            // AND THE LEVEL IS COUPLED TO THE RATCHET LIST, because that edge is what broke. The
+            // moment this rule became a WARNING it entered `warning_profile`, and its count is
+            // gated on the corpus being readable -- so it belongs in `CORPUS_DERIVED_KINDS` or a
+            // git-unanswering host reds `N -> 0 (kind eliminated)` on a baselined finding. The list
+            // was COMPLETE when written (review #80: the rule was `err`, and errors never enter the
+            // profile); reviews #81/#82 flipped the level two rounds later and did not revisit it.
+            // Asserting the coupling is the only instrument that would have caught that, because
+            // the member did not exist when the list was reviewed. (Review #86.)
+            assert!(
+                !matches!(issues[0].level, Level::Warning)
+                    || CORPUS_DERIVED_KINDS.contains(&issues[0].rule),
+                "`decision-superseded-authority` emits at WARNING, so it is inside the section 17 ratchet -- but its count comes from a corpus that is empty whenever `git ls-files` does not answer. It must be in CORPUS_DERIVED_KINDS, or a host that cannot read the corpus reds `N -> 0 (kind eliminated)` against a baselined finding, with the printed remedy refused. If you are flipping this rule back to `err`, the assertion below reds first and this one goes quiet on its own"
+            );
+            assert!(
+                matches!(issues[0].level, Level::Warning),
+                "`decision-superseded-authority` must emit at WARNING. It reaches the required check through the section 17 ratchet either way, so detection is unchanged -- but at ERROR the only escape from a false positive is rewording prose, and this rule decides by abbreviation lists and a parenthetical word window. Raising it to ERROR closes `CITATION-RULE-LEVEL`, which is founder-owned and open"
+            );
+        }
+
+        // GREEN: prose ABOUT the supersession, and words that merely end in the trigger letters.
+        for (label, body) in [
+            // `NEW-ROW` is not a row in this fixture, so this case cannot fail on its own. Kept as
+            // the SHAPE control it was always meant to be, and paired below with the same sentence
+            // written against the row that IS scanned (review #25).
+            ("the chain head", "Decided by row `NEW-ROW` (the chain head)."),
+            ("the chain head, naming the dead row in an explaining clause", "Decided by row `NEW-ROW`, which supersedes `OLD-ROW`."),
+            (
+                "possessive clause explaining the supersession",
+                "Decided by row `NEW-ROW`, which carries `OLD-ROW`'s content forward in full.",
+            ),
+            // `ends_with(\"row\")` also matches these. That is the false-red class this file has
+            // retracted three times; without these controls the rule would carry it unnoticed.
+            ("narrow", "the narrow `OLD-ROW` boundary is deliberate"),
+            ("borrow", "we borrow OLD-ROW's wording here"),
+            ("arrow", "arrow OLD-ROW"),
+            ("a longer key is not a prefix match", "Decided by row `OLD-ROW-CI`."),
+            ("no citation form at all", "OLD-ROW was the predecessor."),
+            // AN EXPLANATION IS NOT A CITATION, and it necessarily names the old row. Without an
+            // exemption this reds with no way to clear it but rewording -- a guard whose only
+            // escape is silence, on exactly the prose the rule wants people to write.
+            ("prose explaining the supersession", "row `OLD-ROW` is superseded; name the head instead"),
+            ("a retraction quoting the bad form", "# it used to say `Per row OLD-ROW`, now superseded"),
+            // The path arm must not become the next false-red instrument: a path naming the row in
+            // a clause that says it is superseded is prose about the supersession, not a pointer.
+            ("the path form, explained", "docs/decisions/OLD-ROW.yaml is superseded -- read the head"),
+            // `decisions/` must be the DIRECTORY, not any word ending in those letters.
+            ("a lookalike directory", "see docs/old-decisions/OLD-ROW.yaml for history"),
+            // `next_word` used to scan PAST the sentence dot that ended the clause and read a
+            // citing noun from the next sentence -- so this redded as a hard error, and the
+            // `superseded` an author might add after it could not reach back to exempt it. The
+            // docstring names `narrower than the <KEY>` as a case that MUST stay green; it did,
+            // only because of what the next word happened to be (review #20).
+            (
+                "`the <KEY>` with a citing noun in the NEXT sentence",
+                "# the shape here is narrower than the OLD-ROW.\n# Decision rows are cheap, so open a new one.",
+            ),
+            // A BACKTICKED link's text. Both earlier controls used the unbackticked `[KEY]`, i.e.
+            // the spelling nobody writes -- every row key in this repo is backticked (review #20).
+            ("a backticked markdown link to somewhere else", "see [`OLD-ROW`](https://example.com/x) for context"),
+            ("a backticked link inside a bullet", "- [`OLD-ROW`](../adr/ADR-1.md) was the first attempt"),
+            // THE TWO WRAP FAILURES, as controls. Both redded as HARD `make validate` errors
+            // before the join, and neither had anything to do with what the author wrote --
+            // only with where the ~100-column wrap happened to fall (review #13).
+            (
+                "a backticked key merely opening a wrapped line",
+                "The predecessor was\n`OLD-ROW` and it is gone.",
+            ),
+            (
+                "the escape hatch reached across a wrap",
+                "`OLD-ROW` is\nsuperseded; name `NEW-ROW` instead.",
+            ),
+            // Same marker on both lines is a genuine wrap and must still join.
+            (
+                "a wrapped COMMENT whose explanation lands on the next line",
+                "# row `OLD-ROW` no longer governs, having been\n# superseded by the chain head.",
+            ),
+            (
+                "a wrapped bullet whose explanation lands on the next line",
+                "- row `OLD-ROW` no longer governs, having been\n  superseded by the chain head.",
+            ),
+            // AN ABBREVIATION DOT IS NOT A SENTENCE DOT. `.` was a boundary whenever the next
+            // char was whitespace, which is true of the final dot of `i.e.` / `e.g.` -- so the
+            // clause was truncated INSIDE the explanation and the `superseded` exemption could
+            // never see it. `Per row \`OLD-ROW\`, i.e. the row superseded by ...` was a hard
+            // `make validate` error whose only escape was rewording, in the sentence the docstring
+            // says is legal. Invisible to this set because every control above separates its
+            // explanation with `;`, ` -- ` or a plain sentence dot (review #35).
+            (
+                "an i.e. explanation after the citation",
+                "Per row `OLD-ROW`, i.e. the row superseded by `NEW-ROW`.",
+            ),
+            (
+                "an e.g. explanation before the citation",
+                "Rows go stale, e.g. `OLD-ROW` is superseded; name the head.",
+            ),
+            (
+                "a single-segment abbreviation, cf.",
+                "cf. row `OLD-ROW`, superseded by the chain head.",
+            ),
+            // THE PARENTHETICAL WIDENING MUST NOT BECOME THE NEXT FALSE-RED INSTRUMENT. The
+            // BACKTICK still carries the whole distinction, so a link whose TARGET is inside the
+            // parens (no backtick immediately before the key) and an unbackticked mention both
+            // stay green -- the two spellings review #16 named when it narrowed `[` out of the
+            // original arm.
+            ("a link target inside parens", "see [the predecessor](../decisions/notes/OLD-ROW-history.md) for why"),
+            ("an unbackticked parenthetical mention", "the pin was rewritten (OLD-ROW was the first attempt) in round 4"),
+            (
+                "a backticked key inside a parenthetical that explains the supersession",
+                "the pin was rewritten (`OLD-ROW`, superseded by the head) in round 4",
+            ),
+            // THE CLASS BARE CONTAINMENT RE-ADMITTED, with no control on either side for a round.
+            // `depth > 0` alone made this a HARD error, while the identical clause WITHOUT the
+            // parentheses stays green -- the docstring names `the <KEY> experiment was
+            // contaminated` as a case that must stay green, and punctuation decided it. A
+            // parenthetical must CITE, not merely CONTAIN. (Review #40.)
+            (
+                "a backticked key in a plain parenthetical mention",
+                "the pin was rewritten (the `OLD-ROW` experiment was contaminated) in round 4",
+            ),
+            // NOT ADJACENT TO THE `(`. The first draft of this control was
+            // `(\`OLD-ROW\` and its successor differ here)`, which reds on the ADJACENCY arm --
+            // pre-existing, accepted behaviour that has nothing to do with containment. A control
+            // that fails for the wrong reason is shape #3; the suite caught it immediately, which
+            // is the argument for adding controls rather than reasoning about them.
+            (
+                "a backticked key mid-parenthetical with no citing word",
+                "the shape changed (its successor and `OLD-ROW` differ here) in round 4",
+            ),
+            // AND THE SAME, WITH A CLOSED NESTED GROUP IN FRONT OF IT. Both green controls for the
+            // parenthetical arm were single-level, so nothing covered the direction the stack fixed
+            // -- an inner group that closes must not narrow the window the citing-word scan reads,
+            // in EITHER direction. (Review #53.)
+            (
+                "a nested closed group inside a plain parenthetical mention",
+                "the pin was rewritten (the (round 4) `OLD-ROW` experiment was contaminated) later",
+            ),
+            // THE TRADE ROUND 54 MADE, PINNED FROM BOTH SIDES. `open_paren` is the INNERMOST
+            // still-open paren, so a citing word in an OUTER group does not reach a key inside an
+            // inner one. The green half: this is the spelling the docstring names as one that must
+            // stay green (`(the \`KEY\` experiment was contaminated)`), nested inside a group that
+            // happens to carry `decided` -- under `first()` it was a HARD ERROR with rewording as
+            // the only escape. The miss half is stated in `decisions.rs` beside the choice: `(see
+            // (the wrapper \`KEY\`))` is no longer caught. A false red on honest prose is the worse
+            // instrument, which this file has ruled six times.
+            (
+                "the protected spelling nested inside a group carrying a citing word",
+                "(decided 2026-08-24 by ADR-20260824-205911 (the `OLD-ROW` experiment was contaminated))",
+            ),
+            // A markdown continuation is INDENTED, not re-marked -- which is exactly what lets the
+            // block rule tell this apart from the two reds above.
+            (
+                "a wrapped NUMBERED item whose explanation lands on the next line",
+                "1. row `OLD-ROW` no longer governs, having been\n   superseded by the chain head.",
+            ),
+            // The list marker must still be dropped, or a backticked key opening a bullet stops
+            // reading as the citation form `SKILL.md:193` uses.
+            // REWRITTEN AGAINST `OLD-ROW`, THE ONLY ROW THIS FIXTURE SCANS. This control used to
+            // read `- \`NEW-ROW\` is the head.` -- and `NEW-ROW` is not a row here, it is only
+            // `OLD-ROW`'s `superseded_by` VALUE, so the scanned key set never contained it and the
+            // case was green by construction whatever the code did. Its comment claimed to pin the
+            // list-marker drop in `logical_units`; deleting that drop left it green (review #25).
+            // The RED plant below is the one that actually dies when the marker-drop goes.
+            ("a bullet opening with the key, explained", "- `OLD-ROW` is superseded; name the head."),
+            // THE IDIOMATIC EXPLANATION IN THIS REPO, and a hard error until review #25: the dash
+            // closed the clause before `superseded` was reached. Both dashes, since both are
+            // boundaries looking backward.
+            ("an em-dash appositive explaining the row", "- `OLD-ROW` — superseded by the chain head, kept for history"),
+            ("an ASCII-dash appositive explaining the row", "- `OLD-ROW` -- superseded by the chain head, kept for history"),
+            // `opens_a_parenthetical` used to accept ANY `(` or `[`, which made a markdown link's
+            // TEXT and an ordinary parenthetical mention into hard `make validate` errors with
+            // rewording as the only escape -- on `CLAUDE.md` among others (review #16).
+            // THE BLANKING MUST NOT EAT THE EXPLANATION. Review #68 blanks every
+            // `PARENTHETICAL_CITES` member found BEFORE the key inside the enclosing parenthetical;
+            // an exemption that sits AFTER the key is untouched, which is where honest prose puts
+            // it. Both spellings pinned, because "I only blanked the citing side" is exactly the
+            // claim a later refactor widens.
+            (
+                "a citing parenthetical whose explanation follows the key",
+                "(see `OLD-ROW`, superseded by the chain head)",
+            ),
+            (
+                "a superseded_by parenthetical that also explains itself",
+                "(superseded_by ADR-1, `OLD-ROW` -- itself superseded since)",
+            ),
+            // THE CASE THAT PINS THE WINDOW'S UPPER BOUND, and the reason it exists: the first
+            // two green controls above did NOT discriminate it. Widening the blanking window from
+            // `at` to `clause_end` left them both green, because they explain with the bare word
+            // `superseded`, which is not a `PARENTHETICAL_CITES` member. This one explains with the
+            // FIELD spelling AFTER the key -- a `.claude/**` file mirroring a row's fields, which
+            // is the shape the whole `superseded_by` arm exists for -- so widening the window eats
+            // its exemption and reds honest prose. The citing side is before the key; everything
+            // after it is explanation and must survive. (Review #68.)
+            (
+                "a field-spelling explanation AFTER the key",
+                "(`OLD-ROW`, superseded_by ADR-20260824-205911)",
+            ),
+            // AND THE ONE THAT ACTUALLY PINS THE WINDOW'S UPPER BOUND. The case above does not:
+            // with no citing word BEFORE the key, `in_a_citing_parenthetical` is false, the
+            // blanking block never runs, and widening its window changes nothing there. This
+            // spelling has a citing word on BOTH sides -- `see` before the key arms the block, the
+            // field-spelling exemption after it must survive -- so widening the window to
+            // `clause_end` reds it. Verified by applying that mutation, not by reading.
+            //
+            // Worth the note because the first two attempts at this plant came back green for a
+            // reason that had nothing to do with the code: the mutation was driven from a shell
+            // one-liner whose escaping mangled the `&`, so `str.replace` matched nothing and
+            // silently changed no bytes. That reads exactly like "the guard does not discriminate"
+            // -- and it is worse than §19 shape #2, because a plant that fails to APPLY yields a
+            // false conclusion ABOUT THE CODE, which then gets acted on. A plant must assert it
+            // applied. (Review #68.)
+            (
+                "a citing parenthetical explained with the field spelling after the key",
+                "(see `OLD-ROW`, superseded_by ADR-20260824-205911)",
+            ),
+            ("a bare parenthetical mention", "(OLD-ROW was the first attempt)"),
+            ("a bracket that is not a citation", "[OLD-ROW] in the old numbering"),
+            ("a markdown link's TEXT", "see [OLD-ROW] for the history of this decision"),
+        ] {
+            let issues = check(".claude/x.md", body);
+            assert!(
+                issues.is_empty(),
+                "`{}` must stay GREEN -- a guard that fires on ordinary prose trains readers to discount it. Body: {}, got {:?}",
+                label, body, issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        // THE RESIDUAL, PINNED AS A RESIDUAL RATHER THAN LEFT TO BE REDISCOVERED. Two adjacent
+        // lines of the SAME marker class still join, and a plain line break is deliberately not a
+        // clause boundary -- review #13's motivating case is `superseded` landing on the next line
+        // of a hard wrap, and the four wrapped GREEN controls above are exactly that. So an
+        // unrelated `superseded` on the preceding line of a comment block still exempts a live
+        // citation on the next one.
+        //
+        // THE FIX FOR THE TABLE VARIANT DOES NOT REACH IT, and the difference is the whole reason
+        // one was closed and one was not: a GFM table row is one physical line BY GRAMMAR, so it
+        // can never be a wrap continuation; two `#` lines are indistinguishable from a wrap without
+        // a heuristic (line length, or "the next line starts a sentence"), and every such heuristic
+        // FALSE-REDS a legal wrap. On the gate that guards the required status check, a false red
+        // whose only escape is rewording is worse than a latent miss -- this branch has retracted
+        // two of those already, and `adding a bound is adding a failure mode`.
+        //
+        // Asserted in its CURRENT state so the gap is visible and cannot change silently: if a
+        // later change closes it, this reds and is deleted deliberately. Latent today -- no
+        // superseded key is cited anywhere in the corpus. (Review #64 of PR #679.)
+        {
+            let residual = check(
+                ".claude/x.sh",
+                "# kept for history: the old row is superseded\n# Per row OLD-ROW, open a reversal decision before changing the pin",
+            );
+            assert!(
+                residual.is_empty(),
+                "KNOWN RESIDUAL CHANGED, which is good news needing a deliberate edit rather than a surprise: two adjacent same-marker lines now separate, so this live citation is caught. Delete this block and move the case up into the RED set -- but first check the four wrapped GREEN controls above still pass, because they are the reason a plain line break is not a boundary. Got {:?}",
+                residual.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+
+        // THE REPORTED LINE IS THE CITING ONE, not the block's first. Joining made the finding's
+        // location the paragraph start, which on a 40-line comment block is a real step down from
+        // naming the line (review #14). `spans` maps the offset back; nothing pinned that until
+        // this case, and an unpinned improvement is what this PR keeps retracting.
+        {
+            let issues = check(
+                ".claude/x.md",
+                "A paragraph that\nruns on for a while and then\ncites row `OLD-ROW` at the end.",
+            );
+            assert_eq!(issues.len(), 1, "the citation must still be caught");
+            assert!(
+                issues[0].message.contains("From line 3,"),
+                "the finding must name the CITING line (3), not the block's first. Got: {}",
+                issues[0].message
+            );
+        }
+
+        // THE REAL CORPUS, so the rule is exercised against shipped content and not only fixtures.
+        // This is what would have caught the eight sites this PR fixed by hand.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let real_rows_src: Vec<(String, String)> = {
+            let mut v = Vec::new();
+            if let Ok(entries) = fs::read_dir(root.join("docs/decisions")) {
+                for e in entries.flatten() {
+                    let path = e.path();
+                    if path.extension().and_then(|x| x.to_str()) == Some("yaml")
+                        && !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('_'))
+                    {
+                        if let Ok(t) = fs::read_to_string(&path) {
+                            v.push((path.display().to_string(), t));
+                        }
+                    }
+                }
+            }
+            v
+        };
+        let mut sink2 = Vec::new();
+        let real_rows = parse_decision_rows(&real_rows_src, &mut sink2);
+        assert!(
+            real_rows.iter().any(|r| r.get("status") == Some("superseded")),
+            "the corpus must contain at least one superseded row, or this assertion is vacuous"
+        );
+        // THE SAME WALK THE VALIDATOR USES, not a second copy. This test re-implemented it once,
+        // without the pruning or the symlink guard, so `cargo test` reddened on any machine with a
+        // leftover `.claude/worktrees/` while CI stayed green -- the divergence introduced in the
+        // very commit that fixed the other copy.
+        // A HOST CONDITION IS A SKIP, NOT A RED THAT BLAMES THE AUTHOR. `claude_citation_corpus`
+        // returns an empty Vec on EVERY git failure -- binary absent, not a repository, or
+        // `git ls-files` exiting non-zero, which is what `fatal: detected dubious ownership in
+        // repository` produces on a bind-mounted or differently-owned checkout, i.e. the ordinary
+        // shape of `cargo test --workspace` in a container. The `must_reach` loop below then reds
+        // with "the citation corpus no longer reaches ... Got 0 files", sending the reader to hunt
+        // a narrowed pathspec nobody narrowed. And the inversion is the awkward half: in that same
+        // environment `make validate` reports a WARNING and passes
+        // (`decision-citation-corpus-unreadable`, ratchet-exempt since review #35), while
+        // `cargo test` screams about the wrong cause. This sentence said `make validate` "goes
+        // deliberately QUIET", which was true when written, stopped being true when review #27
+        // added the warning -- at which point it FAILED, on the §17 ratchet, about the wrong
+        // artifact -- and is corrected here rather than left as the argument for the branch below.
+        // `the_gate_self_verification_reds_on_a_tampered_script` next door already
+        // skips on this condition, and `stub-tests.sh`'s T15g rule says a host capability is a loud
+        // skip and never a red (review #25).
+        //
+        // The two claims are separable, which is the whole point: an empty corpus from a broken git
+        // and a shrunken corpus from an edited pathspec are different things, and only the second
+        // is coverage. Probe git first; keep the hard assertions for when git WORKS.
+        let git_usable = std::process::Command::new("git")
+            .args(["ls-files", "-z", "--", "CLAUDE.md"])
+            .current_dir(&root)
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+        if !git_usable {
+            eprintln!(
+                "SKIP: git is unusable here (absent, not a repo, or refusing this checkout), so the citation corpus is empty for a HOST reason -- the fixture cases above still ran"
+            );
+            return;
+        }
+        let (corpus_files, corpus_readable, _unread, _unread_tree, _skipped_ext) = claude_citation_corpus(&root);
+        assert!(corpus_readable, "git reported usable above, so the corpus walk must not have failed");
+        // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
+        // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
+        // failure path (git absent, not a repo, a non-zero `ls-files`). Review #13 named the
+        // consequence: narrowing the pathspec, or dropping `"md"` from the extension filter,
+        // silently removes `.claude/**/*.md` -- SKILL.md included, the file whose eight stale
+        // citations motivated the rule -- and every assertion below stays green while the rule
+        // stops seeing anything. This is the same defect the docstring above records as already
+        // found once ("making the function return an empty Vec left `cargo test --workspace`
+        // entirely green"), still open in the test written to close it.
+        // AND THE EXCLUSION MUST ACTUALLY EXCLUDE. `the_records_state_the_same_citation_corpus_as_
+        // the_code` proves the pathspec is WRITTEN and named in both records; it cannot prove git
+        // honoured it -- a typo (`:(exclude)claude/loop-budget`, a missing dot) is still a string
+        // both records can name. These files are tracked, numerous (89 of 139) and grow one per
+        // loop run, so their absence is a fact about behaviour with a loud signal if it regresses.
+        // The reverse direction matters more than it looks: if the exclusion silently stopped
+        // working, nothing would red until a row cited in a telemetry note was superseded, which is
+        // exactly the unfixable false red it exists to prevent. (Review #67 of PR #679.)
+        assert!(
+            corpus_files.iter().all(|(p, _)| !p.starts_with(".claude/loop-budget/")),
+            "{} `.claude/loop-budget/**` telemetry file(s) reached the citation corpus. Either `:(exclude).claude/loop-budget` was removed from the pathspec, or it is there and git did not honour it -- SAY WHICH BY LOOKING, because the two have different fixes and this message will not guess. If it is present, check the MAGIC spelling rather than the path: `:(exclude)` is exact, and a malformed prefix is treated as a literal path that matches nothing, so it ADDS the subtree back instead of erroring",
+            corpus_files.iter().filter(|(p, _)| p.starts_with(".claude/loop-budget/")).count()
+        );
+        assert!(
+            std::process::Command::new("git")
+                .args(["ls-files", "-z", "--", ".claude/loop-budget"])
+                .current_dir(&root)
+                .output()
+                .map(|o| o.status.success() && !o.stdout.is_empty())
+                .unwrap_or(false),
+            "`.claude/loop-budget` has no tracked files, so the exclusion assertion above is VACUOUS -- it passes whether or not git honours the pathspec. If that subtree was removed or untracked deliberately, delete the exclusion and this pair together"
+        );
+
+        for must_reach in [
+            ".claude/skills/decision-lookup/SKILL.md",
+            ".claude/skills/decision-lookup/scripts/decision-lookup.sh",
+            "CLAUDE.md",
+            "Makefile",
+            // Workflows carry LIVE scope instructions, not provenance -- `ci.yml`'s own gate-step
+            // comment names the row that authorizes it and what else may be added (review #21).
+            ".github/workflows/ci.yml",
+        ] {
+            assert!(
+                corpus_files.iter().any(|(p, _)| p == must_reach),
+                "the citation corpus no longer reaches `{}` -- the rule then says nothing, green, everywhere. Got {} files",
+                must_reach,
+                corpus_files.len()
+            );
+        }
+        let real = validate_no_superseded_row_is_cited_as_authority(&real_rows, &corpus_files);
+        assert!(
+            real.is_empty(),
+            "the committed corpus cites a superseded row as live authority: {:?}",
+            real.iter().map(|i| format!("{} {}", i.location, i.message)).collect::<Vec<_>>()
+        );
+        // AND PLANT IT RED THROUGH THE CORPUS, not only through a hand-passed fixture: this is the
+        // only assertion here that fails if the walk stops producing readable content.
+        let superseded_key = real_rows
+            .iter()
+            .find(|r| r.get("status") == Some("superseded"))
+            .and_then(|r| r.get("key"))
+            .expect("a superseded row, asserted above")
+            .to_string();
+        let planted: Vec<(String, String)> = corpus_files
+            .iter()
+            .cloned()
+            .chain([(
+                ".claude/planted.md".to_string(),
+                format!("Decided by row `{}` (founder).", superseded_key),
+            )])
+            .collect();
+        assert!(
+            !validate_no_superseded_row_is_cited_as_authority(&real_rows, &planted).is_empty(),
+            "a planted citation of the superseded row `{}` was NOT caught against the real corpus",
+            superseded_key
+        );
+    }
+
+    /// THE FOURTH EXIT FROM THE CORPUS, MEASURED RATHER THAN ASSERTED. Reviews #27, #52 and #60
+    /// each closed one silent way for a tracked file to leave `claude_citation_corpus`, and each
+    /// was verified by reading the code. That is how the fourth one survived three rounds of
+    /// exactly this reasoning: the extension allowlist `continue`s with no counter, so a
+    /// `.claude/**` file the rule cannot see is indistinguishable from one it saw and cleared.
+    ///
+    /// Two claims are separable here and BOTH are planted, because the fix and the comment it
+    /// corrects fail in opposite directions:
+    ///   * an out-of-allowlist tracked file must APPEAR in `skipped_ext` (delete the push and this
+    ///     reds) -- the reporting the warning is built on;
+    ///   * `.gitignore` must NOT appear (delete the `is_root_file` arm and this reds) -- the
+    ///     control for the comment that until review #63 said `.gitignore` and `.claudeignore`
+    ///     "are extensions rather than stems", the exact opposite of what `Path::extension` does.
+    ///     A reader who believed it would delete that arm, or add `"gitignore"` to the extension
+    ///     list where it matches nothing, and drop two files carrying live citations today. Prose
+    ///     cannot hold that shut; this can.
+    ///
+    /// SEEN RED THREE TIMES before being trusted, because a gate never asked to be wrong is an
+    /// unverified claim: dropping the `skipped_ext.push` (`left: []`); replacing `is_root_file`
+    /// with `false` (`.gitignore`, `.claudeignore` AND `Makefile` fall out); and the plausible
+    /// wrong edit rather than the obvious one -- moving the two ignore files from the name arm to
+    /// the extension allowlist as `"gitignore"`/`"claudeignore"`, which matches nothing and drops
+    /// exactly those two while `Makefile` stays, i.e. the failure the corrected comment describes,
+    /// reproduced.
+    ///
+    /// Run against a THROWAWAY repo, not this one, because the property under test is "what the
+    /// filter does to a file shape that is not in this tree" -- and today this tree contains zero
+    /// such files, which is precisely why reading the code proved nothing. (Review #63 of PR #679.)
+    #[test]
+    fn every_way_out_of_the_citation_corpus_is_reported() {
+        let have_git = std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !have_git {
+            eprintln!("SKIP every_way_out_of_the_citation_corpus_is_reported: git unavailable on this host");
+            return;
+        }
+
+        let sandbox = std::env::temp_dir().join(format!("cf-corpus-exit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(&sandbox).expect("create the fixture repo dir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&sandbox)
+                // The fixture must not inherit the developer's git identity or config, the same
+                // discipline the gate scripts hold themselves to.
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+            assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+
+        // (path, why it is here)
+        let files: &[(&str, &str)] = &[
+            // IN CORPUS by extension. Also keeps `cited` non-empty, without which the
+            // empty-corpus arm (review #61) short-circuits and this test measures that instead.
+            (".claude/skills/s/SKILL.md", "in corpus: the .md the rule was written for"),
+            (".claude/hooks/h.sh", "in corpus: the .sh a hook is written in"),
+            // IN CORPUS by name, with NO extension between them -- the control for the comment
+            // review #63 corrected. `Makefile` has no dot at all; the two ignore files are
+            // dotfiles, whose whole name is the `file_stem` and whose `extension()` is `None`.
+            ("CLAUDE.md", "in corpus: the root instruction file"),
+            ("Makefile", "in corpus: extensionless, reached only by the is_root_file arm"),
+            (".gitignore", "in corpus: a DOTFILE, reached only by the is_root_file arm"),
+            (".claudeignore", "in corpus: a DOTFILE, reached only by the is_root_file arm"),
+            // OUT OF CORPUS, and until review #63 out of it silently. Every one of these shapes
+            // can carry `Per row <KEY>` as a live instruction to the next session.
+            (".claude/hooks/preflight", "out: an extensionless hook, the shape hooks already use"),
+            (".claude/notes.txt", "out: a plain-text note"),
+            (".claude/agents/a.toml", "out: a config the allowlist does not name"),
+            // OUTSIDE THE PATHSPEC ENTIRELY -- must appear in neither vector, or the test cannot
+            // tell "the filter dropped it" from "git never listed it".
+            ("docs/decisions/X.yaml", "outside: docs/** is deliberately not scanned"),
+            ("src/main.rs", "outside: not under any pathspec"),
+        ];
+        for (rel, why) in files {
+            let f = sandbox.join(rel);
+            if let Some(dir) = f.parent() {
+                fs::create_dir_all(dir).expect("mkdir");
+            }
+            // `.gitignore` must ignore NOTHING, or it removes the very files it is here to prove
+            // are scanned. A comment line is inert and still exercises the dotfile path.
+            let body = if *rel == ".gitignore" || *rel == ".claudeignore" {
+                format!("# {}\n", why)
+            } else {
+                format!("Per row RETRIEVAL-QMD-CI, {}.\n", why)
+            };
+            fs::write(&f, body).expect("write fixture file");
+        }
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "fixture"]);
+
+        let (cited, readable, unread, unread_tree, skipped_ext) = claude_citation_corpus(&sandbox);
+        assert!(readable, "git works here and the index is non-empty, so the corpus must report readable");
+        assert!(unread.is_empty() && unread_tree.is_empty(), "every fixture file is present and UTF-8: unread={:?} unread_tree={:?}", unread, unread_tree);
+
+        let mut got: Vec<&str> = skipped_ext.iter().map(|s| s.as_str()).collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            vec![".claude/agents/a.toml", ".claude/hooks/preflight", ".claude/notes.txt"],
+            "the extension filter must REPORT what it drops, and drop only that -- `.gitignore`, `.claudeignore` and `Makefile` reach the corpus through the is_root_file arm and must never appear here (deleting that arm, or believing the comment that once called dotfiles 'extensions', puts them in this list)"
+        );
+
+        // AND THE POSITIVE HALF, because "reported what it dropped" is satisfied by a filter
+        // that drops everything. The six names below are the corpus this rule actually scans.
+        let mut scanned: Vec<&str> = cited.iter().map(|(p, _)| p.as_str()).collect();
+        scanned.sort_unstable();
+        assert_eq!(
+            scanned,
+            vec![
+                ".claude/hooks/h.sh",
+                ".claude/skills/s/SKILL.md",
+                ".claudeignore",
+                ".gitignore",
+                "CLAUDE.md",
+                "Makefile",
+            ],
+            "the in-corpus set must be exactly the allowlisted extensions plus the four named root files -- `docs/**` and `src/**` are outside the pathspec and must reach neither vector"
+        );
+
+        // THE STATE THE `corpus-unreadable` MESSAGE HAS TO DESCRIBE, constructed rather than
+        // reasoned about. `readable == false` has TWO producers -- `git ls-files` failing, and
+        // review #61's empty-corpus early return -- and the second is reached with git having
+        // EXITED 0. This builds that second state in its allowlist spelling: git works, it lists
+        // files, and every one of them is outside the extension allowlist.
+        //
+        // Pinned because the warning beside it asserted "`git ls-files` failed" as fact, which is
+        // wrong on exactly this path and sends an operator to debug git, ownership and
+        // `safe.directory` while the remedy sits in the sibling out-of-corpus line. The two halves
+        // asserted here are what makes the honest message honest: the flag says NOTHING WAS READ,
+        // and `skipped_ext` carries the DISCRIMINATOR that says why. (Review #65 of PR #679.)
+        {
+            let empty = sandbox.join("allowlist-empty");
+            fs::create_dir_all(empty.join(".claude/hooks")).expect("mkdir");
+            fs::write(empty.join(".claude/hooks/preflight"), "Per row RETRIEVAL-QMD-CI, out of corpus.\n").expect("write");
+            fs::write(empty.join(".claude/notes.txt"), "also out of corpus\n").expect("write");
+            let git2 = |args: &[&str]| {
+                let out = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&empty)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .env("GIT_AUTHOR_NAME", "t")
+                    .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                    .env("GIT_COMMITTER_NAME", "t")
+                    .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                    .output()
+                    .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+                assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+            };
+            git2(&["init", "-q", "-b", "main", "."]);
+            git2(&["add", "-A"]);
+            git2(&["commit", "-q", "-m", "only out-of-corpus files"]);
+
+            let (c2, readable2, u2, ut2, skipped2) = claude_citation_corpus(&empty);
+            assert!(
+                c2.is_empty() && u2.is_empty() && ut2.is_empty() && !readable2,
+                "a corpus where every tracked file is outside the allowlist must report NOT READABLE -- the rule scanned nothing, and `readable == true` here would print a clean green over an unscanned corpus"
+            );
+            let mut got2: Vec<&str> = skipped2.iter().map(|s| s.as_str()).collect();
+            got2.sort_unstable();
+            assert_eq!(
+                got2,
+                vec![".claude/hooks/preflight", ".claude/notes.txt"],
+                "`skipped_ext` must SURVIVE the empty-corpus early return: it is the only thing that distinguishes `git ls-files failed` from `git worked and the allowlist dropped everything`, and the warning printed for this state points the reader at it"
+            );
+        }
+    }
+
+    /// An empty `key` must not make the rule spin forever.
+    ///
+    /// `line[from..].find("")` is `Some(0)` unconditionally and the advance is
+    /// `from = at + key.len()`, so a zero-length key never moves `from`: `make validate` produces
+    /// no output and hangs, locally and in CI until the six-hour job timeout, INSTEAD of reporting
+    /// the `decision-key-file-mismatch` already waiting in the same issue list. Reachable by a
+    /// template copy-paste — `parse_decision_rows` accepts an explicit `key: ""` (only a YAML null
+    /// is rejected) and `valid_key` is applied to the FILE STEM, not to this field (review #20).
+    ///
+    /// RUN IN A THREAD WITH A DEADLINE, because the failure mode is a hang: an ordinary assertion
+    /// cannot fail a test that never returns, and a hung `cargo test` reads as a slow machine.
+    #[test]
+    fn an_empty_key_cannot_hang_the_citation_rule() {
+        let rows_src: Vec<(String, String)> = vec![(
+            "docs/decisions/BLANK.yaml".to_string(),
+            "key: \"\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-01\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\nsuperseded_by: \"NEW-ROW\"\n".to_string(),
+        )];
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut sink = Vec::new();
+            let rows = parse_decision_rows(&rows_src, &mut sink);
+            let issues = validate_no_superseded_row_is_cited_as_authority(
+                &rows,
+                &[(".claude/x.md".to_string(), "Decided by row `NEW-ROW`.".to_string())],
+            );
+            let _ = tx.send(issues.len());
+        });
+        let got = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| {
+            panic!(
+                "the citation rule did not return within 10s on a superseded row with an empty `key` -- `find(\"\")` is Some(0) and `from` never advances, so `make validate` hangs instead of reporting"
+            )
+        });
+        assert_eq!(got, 0, "an empty key names nothing and must produce no finding, not a match on every line");
+    }
+
+    /// The RECORDS' statement of the citation corpus must track the CODE's.
+    ///
+    /// `claude_citation_corpus`'s pathspec list is the one list. `RETRIEVAL-QMD-CI` clause (d) and
+    /// `ADR-20260824-205911` each restate it — and both were wrong for a round after review #21
+    /// added `.github/workflows` to the code, because that sweep updated the function and its
+    /// SCOPE docstring and stopped (review #26). That is the two-lists-of-one-scope divergence the
+    /// rule's own file retracts three times, in the records that AUTHORIZE the rule: the row is
+    /// what a reader consults to learn what `decision-superseded-authority` was allowed to cover,
+    /// so a row that under-states the corpus sends them hunting a red somewhere else.
+    ///
+    /// Prose cannot be made to track prose by intention — this repo has now proved that twice on
+    /// one branch. So the pathspecs are READ OUT OF THE SOURCE and each is required to appear in
+    /// both records. Adding a sixth pathspec reds this until the records say so too.
+    #[test]
+    fn the_records_state_the_same_citation_corpus_as_the_code() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = fs::read_to_string(root.join("tools/codegen-rs/src/validate/decisions.rs"))
+            .expect("decisions.rs");
+        // The `.args([...])` block that carries `"ls-files"`, up to its closing `])`.
+        let block = src
+            .split_once("\"ls-files\"")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(block, _)| block.to_string())
+            .expect("decisions.rs must build the corpus with a `git ls-files` arg list");
+        // STRIP COMMENT LINES BEFORE READING QUOTED STRINGS. This scrapes quoted tokens out of a
+        // TEXT block, so any `//` comment inside the arg list that contains a double quote donates
+        // a phantom pathspec -- and the assertion below then demands the records name a fragment of
+        // prose. Found the moment a comment was added there quoting a review ("only `branch` is
+        // free text"): the guard redded with `does not name \`only \`branch\` is free text\``.
+        // The guard was at fault, not the comment; a rule about what the corpus covers must not be
+        // steerable by the wording of a comment beside it. §19 shape #7 -- the helper building the
+        // inputs needs the scrutiny of the assertion it feeds. (Review #67 of PR #679.)
+        let code_only: String = block
+            .lines()
+            .map(|l| l.split_once("//").map_or(l, |(code, _)| code))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let pathspecs: Vec<String> = code_only
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|a| !matches!(*a, "-z" | "--"))
+            .map(str::to_string)
+            .collect();
+        assert!(
+            pathspecs.len() >= 6 && pathspecs.iter().any(|p| p == ".github/workflows"),
+            "could not read the corpus pathspecs out of `claude_citation_corpus` -- this test is then vacuous. Got {:?}",
+            pathspecs
+        );
+        // AND THE SECOND HALF OF THE DESCRIPTION, because comparing pathspecs alone let both
+        // records state the corpus WIDER than the code applies it for three rounds. Under those
+        // pathspecs an EXTENSION ALLOWLIST runs, and neither record mentioned it -- so a reader
+        // learned the rule covers all of `.claude/**` when it covers five extensions of it, and
+        // this test was green throughout. A guard that checks one half of a description cannot
+        // detect the other half overstating; it has to check both halves. (Review #63 of PR #679.)
+        let filter_line = src
+            .split_once(".is_some_and(|e| matches!(e,")
+            .and_then(|(_, rest)| rest.split_once("));"))
+            .map(|(block, _)| block.to_string())
+            .expect("decisions.rs must filter the corpus by an extension `matches!` -- if that moved, re-point this test rather than deleting it");
+        let extensions: Vec<String> = filter_line
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect();
+        assert!(
+            extensions.len() >= 5 && extensions.iter().any(|e| e == "md"),
+            "could not read the extension allowlist out of `claude_citation_corpus` -- the half of this test that closes review #63 is then vacuous. Got {:?}",
+            extensions
+        );
+        for (label, rel) in [
+            ("the authorizing row", "docs/decisions/RETRIEVAL-QMD-CI.yaml"),
+            ("the ADR", "docs/adr/ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md"),
+        ] {
+            let text = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            for spec in &pathspecs {
+                assert!(
+                    text.contains(spec.as_str()),
+                    "{} ({}) does not name `{}`, which `claude_citation_corpus` actually scans. The records are what a reader consults to learn what the rule was allowed to cover; a corpus stated short sends them hunting a red somewhere else",
+                    label, rel, spec
+                );
+            }
+            // ONE CONTIGUOUS TOKEN, not five independent `contains`. The first spelling of this
+            // assertion checked each extension separately and was VACUOUS: `.md` occurs in
+            // `SKILL.md`, `.sh` in `decision-lookup.sh`, `.yaml` in `docs/decisions/<KEY>.yaml`,
+            // `.yml` in `ci.yml` -- every record satisfies it while stating no filter at all, and
+            // the plant that deleted the clause stayed GREEN. Shape #6 of `gates.md` §19,
+            // reproduced inside the guard written to close review #63 in the same round it was
+            // written. The joined form is DERIVED from the source list, so adding an extension
+            // reds both records until they are updated.
+            let joined = extensions.iter().map(|e| format!(".{}", e)).collect::<Vec<_>>().join("/");
+            assert!(
+                text.contains(&joined),
+                "{} ({}) does not state the extension allowlist as `{}`. `claude_citation_corpus` filters the pathspecs down to exactly those, and a record naming the pathspecs alone describes the corpus WIDER than the code applies it -- the permissive direction, and the one that reads as coverage the reader does not have. Spell it contiguously: five separate mentions are satisfied by ordinary filenames",
+                label, rel, joined
+            );
+        }
+    }
+
+    /// `gates.md` MAY NOT STATE THE LENGTH OF A LIST IT INTRODUCES.
+    ///
+    /// Four times on one branch a spelled count in that file went stale by the list growing under
+    /// it: the §19 heading said "Seven shapes" and gained an eighth; the ride-along enumeration said
+    /// FIVE with six clauses (gated separately, over the decision row); "Two more from the same
+    /// branch" introduced three, twice — once when a measurement bullet landed and again a round
+    /// later. Every one was in the section whose own bullet reads *derive it or drop it*, and the
+    /// remedy was the same every time: drop the number.
+    ///
+    /// WHY THIS ONE IS GATED WHERE §19 #10 IS NOT, since the two decisions look inconsistent
+    /// side by side: the doc-comment class has no precise instrument, only heuristics that false-red
+    /// on this file's own prose. This one has a precise one — it bans a SPELLING, and a spelling is
+    /// exactly checkable. It cannot fire on an occurrence count ("Four times on this branch", "the
+    /// first thirteen rounds"), because those are not followed by a list-noun.
+    ///
+    /// WHAT IT DOES NOT DO, so "gated" does not read wider than it is: it guards ONE FILE, and it
+    /// bans the spelling rather than the concept. `N items below`, a digit, or a count in an ADR or
+    /// a PR body all pass. It catches the four shapes that actually happened, in the file CLAUDE.md
+    /// routes a session to before it works. (Review #75 of PR #679.)
+    #[test]
+    fn gates_md_does_not_state_the_length_of_a_list_it_introduces() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let path = "docs/claude/sessions/gates.md";
+        let text = fs::read_to_string(root.join(path)).expect("gates.md");
+        const CARDINALS: [&str; 11] = [
+            "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+        ];
+        // The nouns a list-length claim attaches to. An OCCURRENCE count ("four times", "three
+        // rounds") is legitimate and antecedent-bearing, so those nouns are deliberately absent.
+        const LIST_NOUNS: [&str; 7] = ["more", "shapes", "bullets", "items", "entries", "additions", "clauses"];
+        // BLANK QUOTED SPANS FIRST. The first run of this guard redded on the sentence RETRACTING
+        // the phrase, which necessarily quotes it (`This line said *"Two more"* while introducing
+        // three`). A record that cannot narrate its own correction is worse than the drift: this
+        // branch keeps every retraction in place rather than quietly dropping it, so a rule that
+        // forbids quoting the mistake would force exactly the silent edit the practice exists to
+        // prevent. §19 #6's own remedy -- blank the citing token before testing the text around it
+        // -- applied one file over. A genuine list-length claim is never inside quotes or backticks.
+        let unquoted = |line: &str| -> String {
+            let mut out = String::with_capacity(line.len());
+            let (mut in_dq, mut in_tick) = (false, false);
+            for c in line.chars() {
+                match c {
+                    '"' if !in_tick => { in_dq = !in_dq; out.push(' '); }
+                    '`' if !in_dq => { in_tick = !in_tick; out.push(' '); }
+                    _ if in_dq || in_tick => out.push(' '),
+                    _ => out.push(c),
+                }
+            }
+            out
+        };
+        let mut hits: Vec<(usize, String)> = Vec::new();
+        for (i, raw) in text.lines().enumerate() {
+            let line = &unquoted(raw)[..];
+            let words: Vec<String> = line
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .filter(|w| !w.is_empty())
+                .map(|w| w.to_lowercase())
+                .collect();
+            for pair in words.windows(2) {
+                if CARDINALS.contains(&pair[0].as_str()) && LIST_NOUNS.contains(&pair[1].as_str()) {
+                    hits.push((i + 1, raw.trim().to_string()));
+                }
+            }
+        }
+        assert!(
+            hits.is_empty(),
+            "{} states the length of a list it introduces, which is the defect its own bullet (`a count retracted twice will be retracted a third time -- derive it`) names. That number has gone stale four times on one branch, always by the list growing under it. DROP it -- this file is the durable record CLAUDE.md routes a session to before it works, and a reader who counts and finds a different number stops trusting the section. An OCCURRENCE count (`four times`, `three rounds`) is fine and is not what this matches. Hits: {:?}",
+            path, hits
+        );
+    }
+
+    /// A SUBSTANTIAL `timeout-minutes` JUSTIFICATION MAY NOT BE SHARED BY TWO JOBS.
+    ///
+    /// Twice now a cap's reasoning has been inherited rather than re-derived at the site it governs:
+    /// round 58 bucketed `lint` with the cheap jobs on an argument about jobs that do no compiling,
+    /// and round 70 found `docs-validate`'s paragraph pasted verbatim onto `specs` -- where its
+    /// permissive half is FALSE, because `specs` carries `if: docs_only != 'true'` and never runs on
+    /// the lane the argument is about. Both were written by an author arguing, in the same comment,
+    /// against inheriting a number from a different job.
+    ///
+    /// Two occurrences is this repo's threshold for turning a lesson into a gate, and prose cannot
+    /// hold it: the next paste looks exactly like the last one. A SHORT pointer is fine and common
+    /// (`build-test`/`db-test` both say "see the `changes` job comment"), so the rule bites only on
+    /// blocks long enough to BE a justification.
+    ///
+    /// WHAT IT DOES NOT CATCH, stated because "now gated" reads wider than this is. It is a
+    /// BYTE-IDENTITY check over consecutive lines: it stops a VERBATIM paste and nothing else. A
+    /// paste with one word changed — the likelier next form, since an author who pastes is usually
+    /// adapting — passes. Both known occurrences were verbatim, so this catches the shape that
+    /// actually happened twice; it does not decide whether a justification is TRUE of the job it
+    /// sits on, which no textual rule can. Keep reading them. (Review #73 of PR #679.)
+    ///
+    /// THE INLINE FORM IS COVERED NOW AND WAS NOT WHEN THIS LIST WAS WRITTEN. The scan collected
+    /// only `#` lines ABOVE the key, so a justification written as a trailing comment ON the key
+    /// line was invisible — and three of the seven caps are written exactly that way, which made
+    /// their blocks empty and shrank the effective comparison set to four. The trailing remainder
+    /// is now appended to the block. Named here rather than quietly fixed because this paragraph
+    /// enumerated the escape it did not have and omitted the one it did. (Review #90.)
+    #[test]
+    fn no_two_jobs_share_a_substantial_timeout_justification() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let lines: Vec<&str> = ci.lines().collect();
+        // The comment block immediately above each job-level `timeout-minutes:`, in file order.
+        let mut blocks: Vec<Vec<String>> = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            if !l.trim_start().starts_with("timeout-minutes:") || !l.starts_with("    timeout-minutes:") {
+                continue;
+            }
+            let mut j = i;
+            while j > 0 && lines[j - 1].trim_start().starts_with('#') {
+                j -= 1;
+            }
+            let mut block: Vec<String> = lines[j..i].iter().map(|l| l.trim().to_string()).collect();
+            // AND THE TRAILING COMMENT ON THE KEY LINE ITSELF, which the first version of this scan
+            // could not see -- it collected only `#` lines ABOVE the key. THREE of the seven caps
+            // carry their whole justification inline (`build-test`, `db-test`, `codegen`), so their
+            // blocks were EMPTY and contributed nothing to any pair: the effective comparison set
+            // was four, not seven, on the file this gate shipped with. Worse in the direction that
+            // matters, `lint` carries a 26-line block AND an inline remainder that is BYTE-IDENTICAL
+            // to `codegen`'s -- a justification already shared by two jobs, invisible to the gate in
+            // both directions. Legal today under the short-pointer carve-out (one line, far below
+            // SUBSTANTIAL), but moving a LONG justification inline is the natural next form once
+            // this gate reds someone for a block paste, and it would have escaped entirely.
+            // Appended rather than prepended: the trailing comment sits CLOSEST to the key, so it
+            // is the block's last line, and the shared-run scan below is order-sensitive.
+            // (Review #90 of PR #679.)
+            if let Some((_, inline)) = l.split_once(" #") {
+                let inline = inline.trim();
+                if !inline.is_empty() {
+                    block.push(format!("# {inline}"));
+                }
+            }
+            blocks.push(block);
+        }
+        // THE FLOOR IS DERIVED FROM `codegen`'s OWN `needs:`, not a literal. It was `>= 5` against
+        // seven keys, so TWO could be reindented out of the scan -- or two jobs dropped from the
+        // aggregator -- with this assertion still green, which is the vacuity it was written to
+        // stop. Every job the aggregator waits on carries a cap (asserted elsewhere over the same
+        // derived list), plus `codegen` itself, so the count is knowable exactly. Same derivation
+        // as the `continue-on-error`/cap sweep, for the same reason: a hand-kept list here is the
+        // two-lists-of-one-scope divergence this file has retracted four times. (Review #90.)
+        let doc: serde_yaml::Value = serde_yaml::from_str(&ci).expect("ci.yml parses as YAML");
+        let aggregated = doc
+            .get("jobs")
+            .and_then(|j| j.get("codegen"))
+            .and_then(|c| c.get("needs"))
+            .and_then(|n| n.as_sequence())
+            .expect("the `codegen` job must declare a `needs:` LIST -- this floor is derived from it")
+            .len();
+        assert_eq!(
+            blocks.len(),
+            aggregated + 1,
+            "found {} job-level `timeout-minutes:` keys but `codegen` aggregates {} jobs (+ itself = {}) -- this test reads the keys by an exact four-space indent, so a reindent makes it VACUOUS rather than red, and a job added to the aggregator without a cap makes it incomplete. Re-point the scan, or give the new job its own justification",
+            blocks.len(),
+            aggregated,
+            aggregated + 1
+        );
+        // THE LONGEST SHARED CONSECUTIVE RUN, NOT WHOLE-BLOCK EQUALITY -- and the first version of
+        // this gate got that wrong in the direction that made it VACUOUS ON THE FILE IT SHIPPED
+        // WITH. `assert_ne!(blocks[a], blocks[b])` fires only on a byte-identical whole block, and
+        // that is the one spelling of this defect that has never occurred here: both real ones were
+        // PARTIAL. Round 70's remedy rewrote the TAIL of `docs-validate`'s paste onto `specs` and
+        // left the head, so the two blocks shared 18 consecutive lines and differed only in the
+        // closing paragraph -- unequal, therefore green, in the same commit that added the gate.
+        // The next author copying those 18 lines plus one bespoke sentence onto a new aggregated
+        // job reproduces rounds 58 and 70 exactly, with this test's message never printed.
+        // (Review #76 of PR #679.)
+        //
+        // The duplication itself is gone too -- `docs-validate` now points at `specs` for the shared
+        // history, the way `build-test`/`db-test` point at `changes` -- so this bound has real
+        // headroom: the worst shared run across all seven pairs is ONE line.
+        //
+        // FIVE is the threshold because a SHORT pointer is the correct way not to repeat a
+        // justification and must stay legal. Below it, a shared line or two is boilerplate; at or
+        // above it, enough reasoning is being carried across that it needs to be true of both jobs.
+        const SUBSTANTIAL: usize = 5;
+        // AND A CHARACTER BOUND, BECAUSE A LINE COUNT CANNOT SEE AN INLINE PASTE AT ALL. A YAML
+        // trailing comment is ONE physical line however long it is, so appending it to the block
+        // (above) makes it VISIBLE but scores it 1 -- two jobs sharing a 400-character inline
+        // justification would still read as a short pointer under the line bound alone. That was
+        // the escape review #90 actually named, and the first fix for it closed only half.
+        //
+        // ANTECEDENT FOR THE VALUE, since a bare threshold is the defect this branch keeps
+        // retracting: the longest shared run in `ci.yml` today is `build-test`/`db-test`'s pointer
+        // at ONE line and 93 characters, and `lint`/`codegen` share an inline pointer of 67. 240 is
+        // ~2.5x the longest legal pointer and well under what 5 lines of this file's ~100-column
+        // prose costs (~500), so it separates a pointer from a justification without pinning either
+        // real one to the edge. Re-measure and move it deliberately if a legitimate pointer grows.
+        const SUBSTANTIAL_CHARS: usize = 240;
+        // Returns `(lines, chars)` for the longest shared consecutive run, ranked on lines first --
+        // the two real occurrences were multi-line block pastes, so that stays the primary reading
+        // and the character total is what catches the inline form.
+        let longest_shared = |x: &[String], y: &[String]| -> (usize, usize) {
+            let mut best = (0, 0);
+            for i in 0..x.len() {
+                for j in 0..y.len() {
+                    let (mut k, mut chars) = (0, 0);
+                    while i + k < x.len() && j + k < y.len() && x[i + k] == y[j + k] {
+                        chars += x[i + k].chars().count();
+                        k += 1;
+                    }
+                    best = best.max((k, chars));
+                }
+            }
+            best
+        };
+        for a in 0..blocks.len() {
+            for b in (a + 1)..blocks.len() {
+                let (run, chars) = longest_shared(&blocks[a], &blocks[b]);
+                assert!(
+                    run < SUBSTANTIAL && chars < SUBSTANTIAL_CHARS,
+                    "two jobs share {} consecutive line(s) / {} characters of `timeout-minutes` justification. A cap's reasoning is about ONE job's failure modes -- `specs` never runs on the docs-only lane, `docs-validate` only runs on it, and a job the aggregator waits on under `always()` cannot borrow \"too high is cheap\" from one that blocks no merge. Re-derive it at the site it governs, or replace one with a SHORT pointer to the other. A trailing comment on the key line counts too, and counts by CHARACTERS -- moving a long justification inline does not make it a pointer. Shared run starts: {:?}",
+                    run,
+                    chars,
+                    blocks[a].iter().find(|l| blocks[b].contains(l))
+                );
+            }
+        }
+    }
+
+    /// `RETRIEVAL-QMD-CI`'s stated ride-along COUNT must equal the clauses it enumerates.
+    ///
+    /// The row's own CLAUSE HISTORY records this drifting three times: it said TWO while three had
+    /// landed, then THREE while four had, and then review #30 found a FIFTH rider — the
+    /// `.gitignore` `__pycache__`/`*.pyc` entry — named in no record at all. Each time the repair
+    /// was to write the new number down, and each time the number went stale again, inside the
+    /// paragraph that exists to say it keeps going stale.
+    ///
+    /// A count restated in prose is a derived number with nothing re-deriving it — ADR-20260817-105845
+    /// exactly — so it is derived here instead. A sixth rider reds until the row names it.
+    #[test]
+    fn the_ride_along_count_matches_the_clauses_named() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let row = fs::read_to_string(root.join("docs/decisions/RETRIEVAL-QMD-CI.yaml"))
+            .expect("RETRIEVAL-QMD-CI.yaml");
+        // BOUND THE WINDOW FIRST, THEN READ BOTH THE NUMBER AND THE CLAUSES OUT OF IT.
+        //
+        // The CLAUSE half of this test was defended against `CLAUSE HISTORY` (which quotes `(c)`
+        // and `(d)` when narrating past misses); the WORD half was not, and it is the half that
+        // fails hard. `find_map` scanned the WHOLE ROW in ARRAY order, so the first spelled number
+        // anywhere won -- and this row's house style is verbatim quotation. The moment a future
+        // retraction is written the way the rest of the row writes them (`an earlier version said
+        // "THREE ADDITIONS RIDE ALONG" while four had landed`), `stated` is read out of HISTORY
+        // rather than out of the live sentence; worse, that match sits AFTER the `CLAUSE HISTORY`
+        // marker, so `row[start..].find("CLAUSE HISTORY")` returns None, `end` silently becomes
+        // `row.len()`, and the counting window is the whole tail -- exactly the prose the comment
+        // below says must not be counted.
+        //
+        // Cost when it fires: `cargo test` reds, `build-test` reds, `codegen` -- the required check
+        // -- reds, FROM A RECORDS-ONLY EDIT TO A YAML FILE, with a message accusing the author of an
+        // unnamed rider they did not add. Anchoring on the phrase and reading the number from the
+        // text immediately before it makes history unreachable by construction. (Review #52.)
+        let sentence_start = row
+            .find("ADDITIONS RIDE ALONG")
+            .expect("the row must state `<N> ADDITIONS RIDE ALONG` in words");
+        let end = row[sentence_start..]
+            .find("CLAUSE HISTORY")
+            .map_or(row.len(), |i| sentence_start + i);
+        let (stated_word, stated) = ["TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT"]
+            .iter()
+            .enumerate()
+            .find_map(|(i, w)| {
+                row[..sentence_start].ends_with(&format!("{} ", w)).then_some((*w, i + 2))
+            })
+            .expect("the row must state `<N> ADDITIONS RIDE ALONG` in words, immediately before the phrase");
+        // The enumerated clauses, `(a)`..`(z)`, counted only inside the ride-along sentence -- the
+        // CLAUSE HISTORY quotes `(c)` and `(d)` when narrating past misses, and counting those
+        // would make this assertion drift with the prose it exists to pin.
+        let start = sentence_start;
+        let enumerated = ('a'..='z')
+            .filter(|c| row[start..end].contains(&format!("({})", c)))
+            .count();
+        assert_eq!(
+            enumerated, stated,
+            "the row says {} ({}) additions ride along but enumerates {} clauses in that sentence. A rider named in no record is the drift this row's CLAUSE HISTORY has now retracted three times -- name it, or drop it",
+            stated_word, stated, enumerated
+        );
+    }
+
+    /// The rule must still be CALLED by `make validate`, not merely exist.
+    ///
+    /// Review #13: deleting the call site in `main.rs` left `cargo test --workspace` entirely
+    /// green, so the rule could stop running inside the one gate that matters with no red
+    /// anywhere. A source assertion is the cheap half of the fix the reviewer named; the deeper
+    /// one (hoisting the call into an entry point a test can invoke) is a refactor of the
+    /// validator's shape and is deliberately NOT ridden along with a behaviour fix.
+    #[test]
+    fn the_citation_rule_is_wired_into_the_validator() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = fs::read_to_string(root.join("tools/codegen-rs/src/main.rs")).expect("main.rs");
+        let code = src
+            .lines()
+            .map(|l| l.split_once("//").map_or(l, |(before, _)| before))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for needle in [
+            "claude_citation_corpus(&root)",
+            "validate_no_superseded_row_is_cited_as_authority(",
+        ] {
+            assert!(
+                code.contains(needle),
+                "main.rs no longer contains the EXECUTABLE `{}` (a copy inside a comment does not count) -- `make validate` would stop running the superseded-citation rule with every test still green",
+                needle
+            );
+        }
+    }
+
+    /// A superseded row's index line must route the reader to its SUCCESSOR, not its predecessor.
+    ///
+    /// The arrow was built from `decided_by` for `decided` and `superseded` alike, so a superseded
+    /// row pointed at its own deciding record. That is the one GENERATED surface -- what
+    /// `make generate` puts in front of the next session -- and PR #679 rewrote every other surface
+    /// to name the head while making both of the reader's next moves illegal (`reconsiders:` at a
+    /// superseded row, and citing it under `.claude/**`). A dead end on the page whose whole job is
+    /// to be the route.
+    #[test]
+    fn a_superseded_rows_index_line_names_the_chain_head() {
+        let rows_src: Vec<(String, String)> = vec![
+            (
+                "docs/decisions/OLD-ROW.yaml".to_string(),
+                "key: \"OLD-ROW\"\nstatus: \"superseded\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-08-01\"\ndecided: \"2026-08-02\"\ndecided_by: \"PROP-OLD\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\nsuperseded_by: \"NEW-ROW\"\n".to_string(),
+            ),
+            (
+                "docs/decisions/NEW-ROW.yaml".to_string(),
+                "key: \"NEW-ROW\"\nstatus: \"decided\"\nquestion: \"Q2?\"\nowner: \"team\"\nopened: \"2026-08-03\"\ndecided: \"2026-08-04\"\ndecided_by: \"ADR-NEW\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n".to_string(),
+            ),
+        ];
+        let mut sink = Vec::new();
+        let rows = parse_decision_rows(&rows_src, &mut sink);
+        let index = emit_decisions_index(&rows, 0);
+        let line = index
+            .lines()
+            .find(|l| l.contains("`OLD-ROW`"))
+            .expect("the superseded row must appear in the index");
+        assert!(
+            line.contains("NEW-ROW"),
+            "a superseded row's line must name its SUCCESSOR so the reader can reach the chain head -- every other route out of that row is now rejected by a gate. Got: {}",
+            line
+        );
+        // ...AND STILL NAME THE DECIDING RECORD, SUCCESSOR FIRST. This assertion used to be
+        // `!line.contains("PROP-OLD")` -- "following it is the dead end this line exists to
+        // prevent" -- which is true of the predecessor ROW and false of its deciding RECORD. The
+        // row is a dead end by construction now (a `reconsiders:` pointing at it is rejected, and
+        // citing it under `.claude/**` is gate-rejected); the record stays readable, and on the
+        // chain this change ships it is `PROP-20260822-171212`, the option-space authority for the
+        // whole thing, rewritten in this same PR to name the head. Dropping it left that proposal
+        // in NO row of the register index. What the routing argument actually requires is an
+        // ORDER, not a deletion. (Review #42 of PR #679.)
+        assert!(
+            line.contains("PROP-OLD"),
+            "a superseded row's line dropped its deciding record. The row is a dead end; the RECORD that decided it is not, and is often the live design document -- dropping it can remove the option-space authority from the register index entirely. Got: {}",
+            line
+        );
+        assert!(
+            line.find("NEW-ROW") < line.find("PROP-OLD"),
+            "the successor must be named BEFORE the deciding record: the reader's next move is the chain head, and the predecessor's authority is context. Got: {}",
+            line
+        );
+        // A DECIDED row still points at its deciding record -- the control that stops the fix
+        // above becoming "always print superseded_by".
+        let decided_line = index
+            .lines()
+            .find(|l| l.contains("`NEW-ROW`"))
+            .expect("the decided row must appear");
+        assert!(
+            decided_line.contains("ADR-NEW"),
+            "a decided row must still name its deciding record. Got: {}",
+            decided_line
+        );
     }
 
     #[test]
@@ -9978,18 +11994,2566 @@ mod docs_only_ci_and_legacy_visibility {
     fn the_hook_selftest_runs_in_the_always_run_changes_job() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
-        let cmd = "bash .claude/hooks/register-check-selftest.sh";
-        let cmd_at = ci.find(cmd).expect("ci.yml must run the register-check hook selftest — the ask-gate is otherwise unverified on every push");
-        let changes_at = ci.find("\n  changes:").expect("changes job");
-        let lint_at = ci.find("\n  lint:").expect("lint job");
-        assert!(
-            changes_at < cmd_at && cmd_at < lint_at,
-            "the selftest step must live INSIDE the always-run `changes` job (found outside the changes..lint span)"
+        // Same parsed-YAML pin as the stub suite below. This test previously asserted only that
+        // the command appeared somewhere between the `changes:` and `lint:` anchors, which left it
+        // green under every disarm mutant `beck` and the PR #679 review found.
+        assert_pinned_in_changes_job(
+            &ci,
+            "bash .claude/hooks/register-check-selftest.sh",
+            "the register-check hook selftest — the ask-gate is otherwise unverified on every push",
         );
-        let changes_job = &ci[changes_at..lint_at];
+    }
+
+    /// Asserts that an always-run `changes`-job step runs `cmd` VERBATIM and cannot be disarmed.
+    ///
+    /// Over PARSED YAML, not over text. The first version of this pin matched indentation strings
+    /// (`!contains("\n        if:")`) and the independent review of PR #679 defeated it with the
+    /// ELEVENTH mutant — the same condition hoisted onto the `- ` item line:
+    ///
+    /// ```yaml
+    /// - if: github.event_name == 'push' && github.ref == 'refs/heads/never'
+    ///   name: ...
+    ///   run: <cmd>
+    /// ```
+    ///
+    /// GitHub Actions accepts that spelling; the pin did not see it, and the step never ran.
+    /// Enumerating indentations is a losing game — CLAUDE.md's compiler-first rule says make the
+    /// mistake unspellable instead. A step whose parsed key set is exactly `{name, run}` with
+    /// `run` equal to the command has NOWHERE to put `if`, `continue-on-error`, `shell`, `env` or
+    /// `working-directory`, in any spelling, and `run` equality kills `|| true`, `; exit 0` and
+    /// any trailing pipe at once. Matching the parsed `run` VALUE also retires the second hole in
+    /// the same test: a decoy line inside an earlier step's block scalar that trimmed to
+    /// `run: <cmd>` satisfied the old line-based `assert_eq!` while the real step carried
+    /// `|| true`.
+    fn assert_pinned_in_changes_job(ci: &str, cmd: &str, what: &str) {
+        let doc: serde_yaml::Value = serde_yaml::from_str(ci).expect("ci.yml must parse as YAML");
+        // Guard dangerous CONTENT, not key PRESENCE, at BOTH scopes.
+        //
+        // The twelfth mutant was a workflow-level `defaults.run.shell` that drops the step script
+        // (GitHub's custom-shell form is `command [options] {0}`, so `bash -c "exit 0" {0}` passes
+        // the script as $0 and never runs it). The first fix banned the KEYS `defaults` and `env`
+        // at the root -- which false-redded ordinary CI work: 4 of this repo's 15 workflows already
+        // carry a root `env:` (4 of 15, counted with
+        // `for f in .github/workflows/*; do python3 -c 'import yaml,sys; print("env" in (yaml.safe_load(open(sys.argv[1])) or {}))' $f; done`),
+        // and adding `CARGO_TERM_COLOR: always`, the standard Rust-CI idiom,
+        // redded these tests with a message accusing the author of disarming the ask-gate. The
+        // suite's own T15g reasoning applies to its own guard: a red that fires on innocent work
+        // trains readers to discount reds.
+        //
+        // Banning the key at the ROOT also missed the THIRTEENTH mutant one scope down: a JOB-level
+        // `env: {BASH_ENV: preamble.sh}`. GitHub runs `run:` as `bash -e {0}`, and bash sources
+        // $BASH_ENV before a non-interactive script, so two lines disarm BOTH pinned gates with the
+        // step byte-identical and every other assertion green.
+        //
+        // These guards narrow what the JOB may be. BOTH `shell_ok` and `env_ok` are called at
+        // BOTH scopes below -- the job-scope `env_ok` call was deleted once by the refactor that
+        // extracted `shell_ok`, and review #8 measured job-level `BASH_ENV` and `LD_PRELOAD` green
+        // again while this very comment said otherwise. They do not, and cannot, make the job
+        // tamper-proof -- see the residual note at the step scan below.
+        let shell_ok = |v: &serde_yaml::Value, scope: &str| {
+            // `defaults.run` may only set `shell`. `working-directory` there points every step at
+            // a different tree, so both gates would run a decoy copy of the scripts with the step
+            // byte-identical. This was guarded at job scope and not at workflow scope -- the same
+            // one-scope-up miss as the twelfth mutant, found again by the sixth review.
+            if let Some(run_defaults) = v.get("defaults").and_then(|d| d.get("run")).and_then(|r| r.as_mapping()) {
+                for k in run_defaults.keys().filter_map(|k| k.as_str()) {
+                    assert_eq!(
+                        k, "shell",
+                        "{} `defaults.run` may only set `shell` -- `{}` (e.g. `working-directory`) changes where every step runs, disarming {} with the step byte-identical",
+                        scope, k, what
+                    );
+                }
+            }
+            if let Some(sh) = v
+                .get("defaults")
+                .and_then(|d| d.get("run"))
+                .and_then(|r| r.get("shell"))
+                .and_then(|s| s.as_str())
+            {
+                assert!(
+                    matches!(sh, "bash" | "sh" | "pwsh" | "powershell" | "cmd" | "python"),
+                    "{} `defaults.run.shell` must be a bare shell name, got `{}` -- a custom shell form (`command [options] {{0}}`) can pass the step script as $0 and never execute it, disarming {} while the step stays byte-identical",
+                    scope, sh, what
+                );
+            }
+        };
+        // Variables that change how a `run:` script EXECUTES, rather than what it sees -- plus the
+        // two gate scripts' OWN opt-out names. Each gate script compares itself against its
+        // committed blob unless told not to by name; leaving that name settable from CI would put
+        // the off switch on the same untrusted surface the check defends against. The check is
+        // default-on precisely so the safe state needs no cooperation, and this keeps it that way.
+        let env_ok = |v: &serde_yaml::Value, scope: &str| {
+            if let Some(env) = v.get("env").and_then(|e| e.as_mapping()) {
+                for k in env.keys().filter_map(|k| k.as_str()) {
+                    let dangerous = matches!(
+                        k,
+                        "PATH"
+                            | "BASH_ENV"
+                            | "ENV"
+                            | "SHELLOPTS"
+                            | "DECISION_LOOKUP_ALLOW_DIRTY"
+                            | "REGISTER_CHECK_ALLOW_DIRTY"
+                    ) || k.starts_with("BASH_FUNC_")
+                        // The LD_ family, by PREFIX. It was enumerated (LD_PRELOAD,
+                        // LD_LIBRARY_PATH) two lines from a comment saying enumeration is how the
+                        // previous misses happened, and `claude-review` walked LD_AUDIT straight
+                        // through: glibc's loader runs the named object's constructor inside bash,
+                        // git and cmp, which is exactly what the banned LD_PRELOAD buys. No LD_*
+                        // key has an innocent use in this job, so there is no control to balance.
+                        || k.starts_with("LD_")
+                        // The PYTHON family, by PREFIX, and this one is not theoretical: the
+                        // SECOND gate step IS a python3 gate. `decision-lookup.sh` runs plain
+                        // `python3 -c` at six sites with no -E/-S/-I, including the
+                        // trustedDependencies structural verification and the bun.lock
+                        // version-integrity binding -- the two checks that ARE the supply-chain
+                        // gate. CPython imports `sitecustomize` from any PYTHONPATH entry at
+                        // interpreter startup, so `env: {PYTHONPATH: /tmp/shim}` puts arbitrary
+                        // code inside every probe while both `run:` lines stay byte-identical, the
+                        // needle scan sees nothing (writing /tmp/shim names no `.claude` path), and
+                        // the gate-set self-verification sees nothing either -- it compares
+                        // bash/git/cmp bytes, not what python3 does afterwards. The suite itself
+                        // drives python3 this way 14 times (T15h/T15j/T15k), so the vector is
+                        // in-tree. No PYTHON* key has an innocent use in this job.
+                        //
+                        // THE DEEPER FIX IS AT THE CALL SITES, not here: `python3 -I` (or -E -S)
+                        // would make it unspellable rather than banned, which is CLAUDE.md's
+                        // compiler-first order. It is NOT done in this change because those same
+                        // T15 cases deliberately simulate a broken interpreter THROUGH PYTHONPATH,
+                        // so hardening the wrapper rewrites its own test harness -- a separate
+                        // change, not a rider on this one.
+                        //
+                        // A CLOSED SET, NOT A PREFIX -- and this is where `PYTHON` differs from
+                        // `LD_` and `GIT_`. Those two families are execution- or oracle-redirecting
+                        // THROUGHOUT, so "no member has an innocent use in this job" is true of the
+                        // family and the prefix earns itself. Of `PYTHON*`, four members inject
+                        // code and the rest are the commonest Python-CI idioms there are:
+                        // `PYTHONUNBUFFERED`, `PYTHONDONTWRITEBYTECODE` (which this branch's own
+                        // `.gitignore` `__pycache__` rider exists to compensate for),
+                        // `PYTHONHASHSEED`, `PYTHONWARNINGS`, `PYTHONIOENCODING`. Under the prefix,
+                        // a Python step with `env: {PYTHONUNBUFFERED: '1'}` redded BOTH gate pins
+                        // with a message accusing its author of making the register-check selftest
+                        // unable to fail -- and the one-line "fix" that message invites is deleting
+                        // this arm, which reopens the `PYTHONPATH` route it was written for. That
+                        // is the arc this file records for `CARGO_TERM_COLOR`, `steps.len() == 4`,
+                        // the `['**','!badges']` equality, `types` key-presence and the null
+                        // `push:` body: a red that fires on innocent work trains readers to
+                        // discount reds. Dangerous CONTENT, as the comment two screens up says.
+                        //
+                        // The four that inject: `PYTHONPATH` (any entry's `sitecustomize`),
+                        // `PYTHONHOME` (relocates the whole stdlib), `PYTHONUSERBASE` (the user
+                        // site directory, whose `usercustomize` is imported at startup) and
+                        // `PYTHONEXECUTABLE`. `PYTHONSTARTUP` only fires for an INTERACTIVE
+                        // interpreter and cannot reach `python3 -c`, but it stays banned and
+                        // planted: it costs nothing, and a future gate that opens a REPL would
+                        // otherwise inherit the hole silently. (Review #36 of PR #679.)
+                        || matches!(
+                            k,
+                            "PYTHONPATH"
+                                | "PYTHONHOME"
+                                | "PYTHONUSERBASE"
+                                | "PYTHONEXECUTABLE"
+                                | "PYTHONSTARTUP"
+                        )
+                        // The gate scripts pin their oracle to $GITHUB_SHA so that a step cannot
+                        // move HEAD onto its own tampered bytes (review #10 reproduced that with
+                        // one `git commit`). Overriding GITHUB_SHA from `env:` would hand the
+                        // oracle straight back.
+                        || k == "GITHUB_SHA"
+                        // WHERE GIT FINDS ITS GLOBAL CONFIG, and neither name starts with `GIT_`,
+                        // so `unset "${!GIT_@}"` in the scripts does not touch them. Global config
+                        // sets `core.attributesFile`; an attributes file binds a `filter.<x>.clean`
+                        // driver; and a clean driver that re-emits the committed blob makes every
+                        // comparison match over tampered scripts. The scripts now hash with
+                        // `--no-filters`, which is the real closure -- this ban is the second layer,
+                        // because a config route into the oracle has been demonstrated twice
+                        // (GIT_DIR, review #9) and neither name has an innocent use in this job
+                        // (review #15).
+                        || matches!(k, "HOME" | "XDG_CONFIG_HOME")
+                        // GIT_DIR, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY and friends redirect the
+                        // gate scripts' ORACLE, not their binary: `git cat-file blob HEAD:<path>`
+                        // reads a decoy repo whose HEAD holds the tampered bytes and reports OK.
+                        // Review #9 demonstrated it end to end through a job-level `env:`. A
+                        // PREFIX rule, matching the scripts' own `unset "${!GIT_@}"`, because
+                        // enumerating this family is how the previous two misses happened.
+                        || k.starts_with("GIT_");
+                    assert!(
+                        !dangerous,
+                        "{} `env.{}` alters how every `run:` script EXECUTES (or switches off a gate script's self-verification), not just what it sees -- it can make {} unable to fail while the step is byte-identical. Ordinary variables here are fine; this one is not.",
+                        scope, k, what
+                    );
+                }
+            }
+        };
+        // THE TRIGGER. Everything below pins what the `changes` job DOES; none of it stops the job
+        // from never running. `paths-ignore: ['docs/**']` is the first optimisation anyone reaches
+        // for -- and CLAUDE.md routes spec- and docs-only changes straight to `main` as pushes, so
+        // it would silently remove both gates from the dominant path with every assertion green.
+        //
+        // NOTE for anyone editing this: the bare key `on:` resolves DIFFERENTLY per YAML version --
+        // 1.1 (PyYAML) makes it the boolean `true`, 1.2 (serde_yaml) keeps it the string "on".
+        // A lookup written for the wrong one returns None and the test passes VACUOUSLY, which is
+        // this chain's signature defect. Accept either, so the assertion survives a parser change.
+        // DOES THIS `!` PATTERN NARROW THE TRIGGER? Shared by BOTH arms, which is the point: the
+        // `pull_request` half did not look at exclusions AT ALL, so `branches: ['**', '!main']`
+        // passed an assertion whose own message says "must still admit PRs targeting `main`" -- the
+        // two-halves-disagree shape this file retracts by name at review #27, in the half nobody
+        // revisited. A fork produces no push, so `pull_request` is a fork PR's ONLY coverage; after
+        // that edit a fork PR to `main` runs nothing and the PR stalls on "Expected -- waiting for
+        // status" forever. (Review #43.)
+        //
+        // FAIL CLOSED ON ANY WILDCARD, and this is the third form of this predicate. It began as a
+        // trailing-`*` special case (missed `!mai?` and `!m[a]in`), became a hand-rolled glob
+        // engine sampled against two names, `main` and `21-slug` -- and a SAMPLE IS ENUMERATION.
+        // The sample was disjoint from the branch space this repo actually generates: `!6*` removes
+        // every `6NN-slug` branch, WHICH IS THE LIVE ISSUE RANGE AND INCLUDES THE BRANCH THIS VERY
+        // CHANGE IS ON, and it passed. So did `!1*`, `!3*`, `!5*`, `!7*`. That is §19 shape #5
+        // ("a fixture set drawn from the shape you were thinking about proves only that shape")
+        // reproduced inside the matcher written to close shape #5.
+        //
+        // The only benign exclusion is a LITERAL branch name -- `!badges` is the one this repo
+        // ships, `!gh-pages` the obvious next -- and `main` is not benign even literally, because
+        // the docs-only lane reaches it as a push with no PR and has no other coverage. Everything
+        // with a `*`, `?` or `[` in it reds, and a deliberate one is argued in a comment rather
+        // than matched. That also retires the glob engine, which was the surface most likely to
+        // grow the next hole. (Review #56.)
+        let hides = |pat: &str| -> bool {
+            pat == "main" || pat.contains('*') || pat.contains('?') || pat.contains('[')
+        };
+        let trigger_val = doc
+            .get(serde_yaml::Value::String("on".into()))
+            .or_else(|| doc.get(serde_yaml::Value::Bool(true)))
+            .expect("ci.yml must declare `on:` (as the string \"on\" under YAML 1.2, or boolean true under 1.1)");
+        // `on:` HAS THREE LEGAL FORMS, and only the mapping one carries filters. `on: [push,
+        // pull_request]` and `on: push` are both `Some(..)`, so the `Bool(true)` fallback never
+        // fires; `.and_then(as_mapping)` then yielded `None` and the `.expect()` panicked with
+        // "ci.yml must declare `on:`" -- about a workflow that declares it and, in the sequence
+        // case, triggers on strictly MORE than the current filtered mapping does. That is the
+        // false-red instrument this file has now retracted five times (`CARGO_TERM_COLOR`,
+        // `steps.len() == 4`, the `['**','!badges']` equality, `types` key-presence, the null
+        // `push:` body), with a message accusing the author of the opposite of what they did and an
+        // obvious "fix" of reverting to a filtered mapping. The paragraph below makes exactly this
+        // argument for `push:`/`pull_request:` and stopped one level up. (Review #20 of PR #679.)
+        //
+        // A sequence still has to name BOTH events -- a fork PR produces no push, so dropping
+        // `pull_request` is a real narrowing however it is spelled -- but it carries no filters, so
+        // there is nothing else to check.
+        if let Some(seq) = trigger_val.as_sequence() {
+            let events: Vec<&str> = seq.iter().filter_map(|v| v.as_str()).collect();
+            for required in ["push", "pull_request"] {
+                assert!(
+                    events.contains(&required),
+                    "`on:` is a list ({:?}) that omits `{}` -- {} then stops covering a whole class of change. The list form carries no filters and is otherwise strictly wider than the mapping form, so it is fine",
+                    events, required, what
+                );
+            }
+        } else {
         assert!(
-            !changes_job.contains("\n    if:"),
-            "the `changes` job must stay ungated — a job-level `if:` would let the selftest skip on some path"
+            !matches!(trigger_val, serde_yaml::Value::String(_)),
+            "`on:` is a single scalar event -- whichever it is, one of `push`/`pull_request` is missing, and {} then never runs on that half. A fork PR produces no push, so `pull_request` is not redundant",
+            what
+        );
+        let trigger = trigger_val
+            .as_mapping()
+            .expect("`on:` must be a mapping, a sequence, or a scalar -- got none of those");
+        // ABSENT AND NULL ARE THE WIDEST CASES, not violations. `push:` with a null body is the
+        // commonest spelling of "every push", and `.as_mapping()` on it is None -- so `.expect()`
+        // panicked with "must run on push" about a workflow that does run on push. Likewise an
+        // omitted `branches:` means EVERY branch, strictly wider than `['**', '!badges']`, and the
+        // containment check redded it for "narrowing". Two strictly-widening edits blocked by the
+        // guard against narrowing: the false-red instrument, a fourth time (review of PR #679).
+        let push_val = trigger
+            .get(serde_yaml::Value::String("push".into()))
+            .expect("ci.yml must run on push -- the docs-only lane reaches `main` as a push");
+        if let Some(push) = push_val.as_mapping() {
+        // THE SAME BAN LIST AS `pull_request`, and for the same reason. This half banned only
+        // `paths`/`paths-ignore`, and the branch check below opens with `if let Some(seq) =
+        // push.get("branches")` -- so it does NOTHING when `branches` is absent. Review of PR
+        // #679 walked `branches-ignore: ['main']` straight through: it needs no `branches` key,
+        // so every assertion here stayed green while the workflow stopped running on `main` --
+        // the lane CLAUDE.md routes spec- and docs-only changes down, with no PR to fall back on.
+        for key in ["paths", "paths-ignore", "branches-ignore"] {
+            assert!(
+                !push.contains_key(serde_yaml::Value::String(key.into())),
+                "`on.push.{}` must not be set -- it narrows which pushes run {} at all, with every other assertion here green. The docs-only lane reaches `main` as a PUSH with no PR, so nothing else covers it",
+                key, what
+            );
+        }
+        // TAG FILTERS ARE A BRANCH FILTER BY OMISSION. GitHub fires `push` on a branch only when
+        // the event matches the declared filters, and declaring `tags:` (or `tags-ignore:`) with
+        // NO `branches:` admits no branch at all -- `tags: ['v*']` in place of the branch list
+        // makes this workflow tag-only, and the second mutant review #679 walked through. Banning
+        // the KEY would be the key-presence instrument this file has retracted twice: `tags`
+        // ALONGSIDE `branches` is legitimate and is kept green by a control. So the rule is about
+        // the PAIR, not the presence.
+        for key in ["tags", "tags-ignore"] {
+            if push.contains_key(serde_yaml::Value::String(key.into())) {
+                assert!(
+                    push.contains_key(serde_yaml::Value::String("branches".into())),
+                    "`on.push.{}` is set with no `on.push.branches` -- that makes the push trigger TAG-ONLY, so {} stops running on every branch push including the docs-only lane to `main`, with every other assertion here green. Declaring both is fine; declaring tag filters alone is not",
+                    key, what
+                );
+            }
+        }
+        // CONTAINMENT PLUS THE EXCLUSIONS. `["**", "!badges"]` was pinned by equality once, which
+        // reds a legitimate second exclusion. But treating every `!` pattern as benign was ALSO
+        // wrong, and worse: `['**', '!main']` keeps `**` present, passes every other assertion,
+        // and stops the workflow triggering on `main` -- the lane CLAUDE.md routes spec- and
+        // docs-only changes down with no branch and no PR, so it has no `pull_request` event to
+        // fall back on. `['**', '!*']` is worse still: `*` does not match `/`, so it drops every
+        // single-segment branch, which is every `NN-slug` branch this repo creates. GitHub
+        // evaluates `!` patterns as REMOVALS from the set the positive patterns admitted, so an
+        // exclusion absolutely can narrow the guarded surface (review of PR #679).
+        // FAIL CLOSED ON A NON-SEQUENCE, like the `pull_request` arms below. This read
+        // `.and_then(|b| b.as_sequence())`, so `branches: main` -- a scalar -- skipped the
+        // containment check silently. GitHub's schema would reject that workflow loudly, so it is
+        // not reachable in practice; the defect is that THE TWO HALVES DISAGREE about a mistake one
+        // of them catches, which is how the push half came to be six rounds behind the
+        // `pull_request` half in the first place (review #27). An absent `branches` still means
+        // EVERY branch and stays green -- only a present-but-unreadable one reds.
+        if let Some(val) = push.get(serde_yaml::Value::String("branches".into())) {
+            let branches: Vec<&str> = val
+                .as_sequence()
+                .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            assert!(
+                branches.iter().any(|b| *b == "**"),
+                "`on.push.branches` ({:?}) no longer contains `**` -- a positive filter narrows the branches {} guards, with every other assertion here green. Omitting `branches` entirely is fine (it means every branch); dropping `**` from a list is not",
+                branches, what
+            );
+            for excluded in branches.iter().filter(|b| b.starts_with('!')) {
+                let pat = &excluded[1..];
+                let hides_main = hides(pat);
+                assert!(
+                    !hides_main,
+                    "`on.push.branches` excludes `{}`, which removes `main` -- the docs-only lane reaches it as a PUSH with no PR, so nothing else covers it -- or removes the `NN-slug` feature branches, which is the pre-PR validation this file's header states as the reason `push` exists at all. `**` being present does not save you: GitHub applies `!` patterns as removals. If the exclusion is deliberate and narrower than it looks, say so here rather than loosening `hides` ({})",
+                    excluded, what
+                );
+            }
+        }
+        }
+        // `pull_request` exists for FORKED PRs, which never produce a push to this repo. Key
+        // PRESENCE was all this asserted until review #8 of PR #679: `pull_request: {paths-ignore:
+        // ['**']}` and `types: [labeled]` both left it green while removing the gate from every
+        // fork PR. Same filters as `push`, plus the `types` list, which defaults to
+        // opened/synchronize/reopened and must not be narrowed.
+        let pull_request = trigger
+            .get(serde_yaml::Value::String("pull_request".into()))
+            .expect("ci.yml must also run on pull_request -- otherwise the gate never guards a forked PR head");
+        if let Some(pr) = pull_request.as_mapping() {
+            // KEY PRESENCE is the instrument this file has retracted twice already (round 3's
+            // `CARGO_TERM_COLOR` false red, round 5's `steps.len() == 4`), and review #9 caught it
+            // returning here: banning `types` outright reds a LEGITIMATE widening such as
+            // `[opened, synchronize, reopened, ready_for_review]`, with a message accusing the
+            // author of narrowing. So ban dangerous CONTENT, as `env_ok`/`shell_ok` already do.
+            for key in ["paths", "paths-ignore", "branches-ignore"] {
+                assert!(
+                    !pr.contains_key(serde_yaml::Value::String(key.into())),
+                    "`on.pull_request.{}` must not be set -- it narrows which PRs run {} at all, with every other assertion here green. Forked PRs produce no push, so this trigger is their ONLY coverage",
+                    key, what
+                );
+            }
+            // `types`, if set at all, must still cover the default triad. Adding to it is fine.
+            if let Some(types) = pr.get(serde_yaml::Value::String("types".into())) {
+                let got: Vec<&str> = types
+                    .as_sequence()
+                    .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                for required in ["opened", "synchronize", "reopened"] {
+                    assert!(
+                        got.contains(&required),
+                        "`on.pull_request.types` omits `{}` (got {:?}) -- that is the DEFAULT set, and dropping any of it silently stops {} running on whole classes of PR. Adding types is fine; removing one is not",
+                        required, got, what
+                    );
+                }
+            }
+            // `branches`, if set, must still admit the default branch.
+            if let Some(branches) = pr.get(serde_yaml::Value::String("branches".into())) {
+                let got: Vec<&str> = branches
+                    .as_sequence()
+                    .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+                assert!(
+                    got.iter().any(|b| *b == "main" || *b == "**" || *b == "*"),
+                    "`on.pull_request.branches` ({:?}) must still admit PRs targeting `main` -- otherwise {} stops guarding the only branch that matters",
+                    got, what
+                );
+                // AND THE EXCLUSIONS, which this half did not look at at all: `['**', '!main']`
+                // satisfied the containment test above whose message claims the opposite. It fails
+                // CLOSED (a fork PR to `main` then runs nothing and stalls on "Expected -- waiting
+                // for status") rather than green, so it is narrower than the push-side hole review
+                // #27 closed -- but an assertion claiming a property it does not test is the class
+                // this file spends forty rounds removing. Same matcher as the push half now.
+                for excluded in got.iter().filter(|b| b.starts_with('!')) {
+                    assert!(
+                        !hides(&excluded[1..]),
+                        "`on.pull_request.branches` excludes `{}`, which removes `main` -- a fork produces no push, so this trigger is a fork PR's ONLY coverage, and `codegen` then never reports at all. GitHub applies `!` patterns as removals",
+                        excluded
+                    );
+                }
+            }
+        }
+
+        }
+        // THE SEQUENCE ARM USED TO `return`, WHICH EXITED THE WHOLE HELPER. Its comment said "it
+        // carries no filters, so there is nothing else to check" -- true of the TRIGGER, and this
+        // function is not only the trigger. Everything below was skipped: both `shell_ok`/`env_ok`
+        // scopes, the entire `build-test` block, `runs-on`, `container`/`services`, the job-level
+        // escape ban, the per-step scan, and the `{name, run}` key-set lock plus `run` equality --
+        // i.e. the one property the helper was rewritten around. So `on: [push, pull_request]` on
+        // line 37 made BOTH gate pins pass vacuously: the steps could carry `|| true`, a step-level
+        // `if:`, or be deleted outright, unseen.
+        //
+        // What caught it today was an ACCIDENT IN A DIFFERENT TEST -- the trigger plants anchor on
+        // `"  push:\n"`, which disappears, so `assert_ne!` fired with a message pointing at the
+        // PLANTS. The obvious repair is to re-anchor or drop those plants, after which both pins
+        // are silently vacuous forever. Shape #1 in `docs/claude/sessions/gates.md` §19 ("a corpus-size floor
+        // counts plants, not coverage") reproduced in the helper the list was written for, one
+        // round after writing it. Now the sequence arm skips only the trigger section, and a plant
+        // covers the class. (Review #22 of PR #679.)
+        shell_ok(&doc, "ci.yml workflow-level");
+        env_ok(&doc, "ci.yml workflow-level");
+
+        let changes_val = doc
+            .get("jobs")
+            .and_then(|j| j.get("changes"))
+            .expect("ci.yml must declare a `changes` job");
+        shell_ok(changes_val, "the `changes` job's");
+        // JOB SCOPE TOO. This line was present, then silently deleted by the refactor that
+        // extracted `shell_ok` -- and review #8 of PR #679 measured the consequence: job-level
+        // `env: {BASH_ENV: /tmp/preamble.sh}` and `env: {LD_PRELOAD: ...}` were BOTH green again,
+        // reopening the exact mutant the same commit's comments claimed closed. A guard removed
+        // during a refactor is invisible unless something plants it red, which is why
+        // `both_scopes_reject_execution_altering_env` exists below -- and review #9 found that
+        // sentence pointing at a test nobody had written. It exists now; deleting either `env_ok`
+        // call reds it, by name.
+        env_ok(changes_val, "the `changes` job's");
+        // THE JOB THE PIN ITSELF RUNS IN. Everything above bounds `changes`; `build-test` -- the
+        // job that actually executes THIS function and the three gate-script tests beside it --
+        // had no assertion over its own `env:` or `defaults.run` at all. A `build-test`-scope
+        // `env: {LD_PRELOAD: ...}` or `{BASH_ENV: ...}` (for the `bash` those tests spawn) makes
+        // every pin in this file vacuous while `changes` stays green and `codegen` aggregates
+        // green -- mutants twelve and thirteen, one job over, and the NEXT commit is then free to
+        // disarm the gate step itself. Review #12 of PR #679; the residual note below used to say
+        // build-test was "outside the blast radius", which is true of the `changes` job's runtime
+        // and was read as stronger than it is.
+        //
+        // `build-test` legitimately carries `uses:` steps (checkout, toolchain, rust-cache,
+        // upload-artifact) and a step-level `env: {DB_TESTS_REQUIRED: '0'}`, so only the
+        // execution-altering CONTENT guards are extended here -- not the `{name, run}` key-set
+        // pin, which is about a single gate step and would red every one of those.
+        // A STEP-LEVEL `shell:` IS NOT A `defaults.run` KEY, so `shell_ok` -- which only ever reads
+        // `defaults.run` -- cannot see one at either scope it is called at. That left the TWELFTH
+        // mutant open one scope down from where it was closed: `shell: bash -e -c "exit 0" {0}` on
+        // the `cargo test --workspace` step makes GitHub pass the script as `$0`, so it never runs,
+        // the step exits 0, and `assert_gate_script_self_verifies`,
+        // `the_gate_self_verification_reds_on_a_tampered_script`,
+        // `the_stub_suite_runs_in_the_always_run_changes_job` and the citation rule all go vacuous
+        // in one commit -- with `changes` green and `codegen` aggregating green. Review #12
+        // extended the guards to this job precisely because "nothing bounded the job the pins RUN
+        // in", and the extension covered `env:` and `defaults.run` and stopped at the step
+        // boundary (review #23).
+        let step_shell_ok = |st: &serde_yaml::Value, scope: &str| {
+            if let Some(sh) = st.get("shell").and_then(|s| s.as_str()) {
+                assert!(
+                    matches!(sh, "bash" | "sh" | "pwsh" | "powershell" | "cmd" | "python"),
+                    "{} sets `shell: {}` -- a custom shell form (`command [options] {{0}}`) passes the step script as $0 and never executes it, so the step exits 0 having run nothing while {} reports green",
+                    scope, sh, what
+                );
+            }
+        };
+        // THE JOBS THAT EXECUTE THE PINS, not just the job under test. `build-test` runs every
+        // assertion in this file; `specs` runs the canonical validator, which is where
+        // `decision-superseded-authority` executes -- and `specs` carried no job- or step-scope
+        // guard at all (review #23). `docs-validate` is the THIRD: it runs the same
+        // `--check --specs specs` on the docs-only complement, so on a `CLAUDE.md`-only push --
+        // the lane CLAUDE.md itself routes straight to `main` with no PR -- it is the ONLY job
+        // that runs the citation rule over a corpus that includes `CLAUDE.md`. Review #24 read
+        // that lane as uncovered because it looked at `specs` alone; it is covered, and
+        // `the_docs_only_ci_path_runs_the_canonical_validator` already pins both halves (same
+        // validator command, and the aggregator asserting docs-validate BY NAME). That sentence
+        // named `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` for a round --
+        // a similarly-named test that reads the `detect` step's `case` arms and carries neither
+        // half -- so the recorded ANSWER to review #24 pointed at a test that does not contain its
+        // evidence, and a future reader re-running #24's check against it reaches #24's wrong
+        // conclusion again. Second site of the misattribution corrected in review #59.
+        // Guarding it here is the half that was missing: the job carrying the rule on that lane
+        // was as unbounded as `specs` was.
+        //
+        // `codegen` IS THE FOURTH, AND ITS CONSEQUENCE IS THE WIDEST IN THE FILE. It is the
+        // REQUIRED status check on `main`; the other three only carry pins. A job-scope
+        // `defaults:\n  run:\n    shell: bash -c "exit 0" {0}` under `codegen:` makes its single
+        // aggregation step pass the script as $0 and never execute it -- the step exits 0 having
+        // asserted nothing, the job succeeds, and the required check is GREEN WITH EVERY GATE JOB
+        // RED, while every mutant and every pin in this file stay green because none of them
+        // ever looked at that job. Three sites in this file reasoned about `codegen` in prose
+        // ("`changes` green and `codegen` aggregates green") without a single assertion over it --
+        // the "held up by a sentence" shape, in the guard that names it. (Review of PR #679.)
+        for job in ["build-test", "specs", "docs-validate", "codegen"] {
+            // `.expect`, NOT `if let Some(..)`. A locator that silently finds nothing is the
+            // vacuous-pass shape this file spends thirty rounds removing from its neighbours
+            // (`gates.md` §19 shapes #1 and #3), and it was sitting under the guards this very
+            // block calls the widest in the file: rename a job and every assertion below vanishes
+            // green, with no message. `specs`/`build-test`/`docs-validate` are pinned indirectly by
+            // `the_docs_only_ci_path_runs_the_canonical_validator`'s literal `needs:` string --
+            // `codegen` is in no such list and was pinned NOWHERE. (Review #38.)
+            {
+                let j = doc.get("jobs").and_then(|jobs| jobs.get(job)).unwrap_or_else(|| panic!(
+                    "ci.yml declares no `{}` job -- every assertion below it would pass vacuously. If the job was renamed, re-point this list; do not delete the entry",
+                    job
+                ));
+                shell_ok(j, &format!("the `{}` job's", job));
+                env_ok(j, &format!("the `{}` job's", job));
+                if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
+                    for st in steps {
+                        env_ok(st, &format!("a `{}` step's", job));
+                        step_shell_ok(st, &format!("a `{}` step", job));
+                        // `env_ok` READS THE `env:` MAPPING and cannot see a variable EXPORTED AT
+                        // RUNTIME: `run: echo "PATH=/tmp/shim:$PATH" >> "$GITHUB_ENV"` needs no
+                        // `env:` key anywhere and poisons every LATER step in the job.
+                        //
+                        // THESE TWO GUARDS USED TO SIT IN A SECOND `build-test`-ONLY BLOCK below
+                        // this loop, while `shell_ok`/`env_ok`/`step_shell_ok` covered all three
+                        // jobs -- two lists of one scope, which is the defect this file retracts
+                        // repeatedly, in the round that extended the other three. And the
+                        // consequence is SHARPER at `specs`/`docs-validate` than at `build-test`:
+                        // `claude_citation_corpus` fails OPEN, so a shimmed `git` exiting 0 with
+                        // empty stdout yields an empty corpus and `decision-superseded-authority`
+                        // reports nothing at all -- `make validate` green, `codegen` green, the
+                        // rule silently vacuous. `docs-validate` is the only coverage of
+                        // `CLAUDE.md` on the docs-only lane. (Review #27 of PR #679.)
+                        //
+                        // A future step that legitimately computes a value into `GITHUB_ENV` reds
+                        // here. That is deliberate: it makes widening these jobs' environment a
+                        // stated decision rather than a silent one. No step in any of the three
+                        // mentions either name today.
+                        let rendered = serde_yaml::to_string(st).unwrap_or_default();
+                        for needle in ["GITHUB_ENV", "GITHUB_PATH"] {
+                            assert!(
+                                !rendered.contains(needle),
+                                "a `{}` step writes `{}` -- that exports into every LATER step in the job, including the one that runs {}, so it can poison the pins' own environment without any `env:` key for `env_ok` to see",
+                                job, needle, what
+                            );
+                        }
+                        // A decoy checkout swaps the tree the pins -- or the validator -- read.
+                        if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout")) {
+                            for key in ["repository", "ref"] {
+                                assert!(
+                                    st.get("with").and_then(|w| w.get(key)).is_none(),
+                                    "a `{}` checkout sets `{}` -- that points the job running {} at a different tree, so the pins would be read from a decoy",
+                                    job, key, what
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // NO JOB THE AGGREGATOR CONSUMES MAY SWALLOW A FAILURE. `continue-on-error` makes GitHub
+        // report `success` for the step (step scope) or the job (job scope) whatever actually
+        // happened, so `needs.<job>.result` is `success`, `codegen`'s `case "$r" in success|skipped)`
+        // accepts it, and the REQUIRED CHECK ON `main` IS GREEN WITH THE GATE RED. This file's own
+        // comment on the `changes` key ban states that failure verbatim, and the `codegen` block
+        // below restates it -- and neither reached the four jobs in between. One line on
+        // `build-test`:
+        //
+        //     - name: Unit tests ...
+        //       continue-on-error: true
+        //       run: cargo test --workspace
+        //
+        // reds every assertion in this file and ships green. On `specs` it is the validator; on
+        // `docs-validate` it is worse still, because the aggregator's by-name assertion is
+        // `[ "$DOCS_VALIDATE" != "success" ]`, which a swallowed failure ALSO satisfies -- the
+        // docs-only lane's only validator reports success having validated nothing, and the check
+        // written to catch exactly that passes with it. (Review #38 of PR #679.)
+        //
+        // DERIVED FROM `codegen`'s OWN `needs:`, not from a hand-written list, so a job ADDED to
+        // the aggregator is covered the moment it is added. A hand-kept list here is the
+        // two-lists-of-one-scope divergence this file has now retracted four times.
+        //
+        // THE ESCAPE IS NOT SILENCE: a step that is legitimately allowed to fail is written
+        // `run: <cmd> || true` in this repo -- every `Evidence:` step in `ci.yml` already is. That
+        // keeps the failure inside the step's own exit status instead of hiding it from `needs`.
+        {
+            let aggregated: Vec<String> = doc
+                .get("jobs")
+                .and_then(|j| j.get("codegen"))
+                .and_then(|c| c.get("needs"))
+                .and_then(|n| n.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+                .expect("the `codegen` job must declare a `needs:` LIST -- it is the required check, and this guard is derived from it");
+            assert!(
+                aggregated.len() >= 5,
+                "`codegen` aggregates only {:?} -- the guard below is derived from that list, so a shrunken `needs:` silently narrows it (this floor passes at FIVE, so dropping exactly one job clears it). The full list is pinned by `the_docs_only_ci_path_runs_the_canonical_validator`, which asserts the literal `needs:` string -- this message named `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` for a round, which reads the `detect` step's `case` arms and never touches `jobs.codegen.needs`: review #9's own finding, one file over",
+                aggregated
+            );
+            for job in aggregated.iter().map(String::as_str).chain(std::iter::once("codegen")) {
+                    let j = doc.get("jobs").and_then(|jobs| jobs.get(job)).unwrap_or_else(|| panic!(
+                    "`codegen` declares `needs: {}` but ci.yml has no such job -- the guard below is derived from that list, so a name that resolves to nothing checks nothing",
+                    job
+                ));
+                assert!(
+                    j.get("continue-on-error").is_none(),
+                    "the `{}` job carries `continue-on-error` -- it reports `success` to `needs` whatever happened, `codegen` accepts `success`, and the REQUIRED check on `main` goes green with the gate red. A step that may legitimately fail is written `run: <cmd> || true` here, which keeps the failure visible in the step",
+                    job
+                );
+                // AND EVERY ONE OF THEM MUST BE BOUNDED. `codegen` is `if: always()`, and
+                // `always()` still WAITS for a `needs:` job to finish -- so a job that HANGS keeps
+                // the required check queued forever, auto-merge never fires and nothing merges,
+                // which is the same end-state the timeout on `changes` was added for. That cap
+                // closed one door of six: `cargo build` stalling on a registry hiccup, or the
+                // `postgres` service never becoming healthy, sat at GitHub's 360-minute default.
+                // Derived from `codegen`'s own `needs:` for the same reason as the guard above.
+                // The BOUND matters as much as the key -- 600 is the default with extra steps --
+                // and the heavy jobs are bounded above any cold build this workspace plausibly
+                // produces. The FIRST version of this said "60 is generous enough for a cold-cache
+                // workspace build that it cannot red honest work" -- a bare derived number with no
+                // antecedent, in the branch about bare derived numbers, on the one cap where being
+                // wrong LOW causes exactly what the cap prevents. Warm durations are measured
+                // (~4m); the cold ones were never taken. The reasoning and the asymmetry live in
+                // ci.yml beside the values. (Review #44 set it; review #57 named it.)
+                let cap = j
+                    .get("timeout-minutes")
+                    .and_then(|t| t.as_u64())
+                    .unwrap_or_else(|| panic!(
+                        "the `{}` job declares no `timeout-minutes` -- `codegen` is `if: always()` and still WAITS on `needs:`, so a hang here keeps the required check queued for GitHub's 360-minute default and nothing in the repository merges",
+                        job
+                    ));
+                // A FLOOR AS WELL AS A CEILING, because the file's own argument is that too LOW is
+                // the harmful direction and only the high side was bounded. `timeout-minutes: 12`
+                // -- a dropped zero on a 120 -- passed this pin and every other assertion here, and
+                // then cancels on any cold-cache run, which is the exact failure the caps exist to
+                // prevent, reached by a typo rather than by a decision. FIVE is below every
+                // legitimate value in the file (the cheapest job is 10) and far above any plausible
+                // slip. (Review #79 of PR #679.)
+                assert!(
+                    (5..=120).contains(&cap),
+                    "the `{}` job's `timeout-minutes` is {} -- it must be in 5..=120. A large value is the 360-minute default with extra steps, and a hang in any job the aggregator waits on blocks every merge in the repository for that long. THIS BOUND HAS NO HEADROOM AND THAT IS THE STATE OF THE FILE, not an oversight: five of the seven aggregated jobs sit EXACTLY at the ceiling, and only `changes` and `codegen` are below it -- so this check can only fire on a value ABOVE the documented ceiling, never on a raise within it. An earlier message here said the heavy jobs were set `well below it on purpose`, which was false of the file it guards and was read by the one person guaranteed to be editing these values (review #70). The direction to be careful about: a cap that is too HIGH costs a hang some extra minutes on most jobs -- but NOT on one the aggregator waits on with `always()`, where it queues the required check for the full value -- while one that is too LOW cancels the job, reds the required check on an ordinary dependency bump, and does not converge on re-run because a cancelled job saves no cache. If a cold-cache run ever approaches a job's value: read the duration off that run, state it in ci.yml as the antecedent, and raise BOTH this bound and that job's value in the SAME commit -- do not edit the job down to fit",
+                    job, cap
+                );
+                if let Some(steps) = j.get("steps").and_then(|s| s.as_sequence()) {
+                    for st in steps {
+                        assert!(
+                            st.get("continue-on-error").is_none(),
+                            "a `{}` step carries `continue-on-error` -- its failure is swallowed, the job concludes `success`, and the required check is green over it. Use `run: <cmd> || true` (as every `Evidence:` step here does) so the failure stays inside the step",
+                            job
+                        );
+                    }
+                }
+            }
+        }
+        // THE REQUIRED CHECK'S OWN ESCAPES. The loop above bounds how `codegen`'s step EXECUTES;
+        // these bound whether it reports. `continue-on-error: true` at job scope makes GitHub
+        // report the job `success` no matter what the step did, and at STEP scope it does the same
+        // for the step -- either way the required check on `main` is green with the aggregation
+        // failed. A step-level `if:` skips the assertion entirely, and a skipped step leaves the
+        // job successful. `if:` and `needs:` are NOT banned at job scope here, unlike `changes`:
+        // `if: always()` and the six-job `needs:` list are what make the aggregator work at all.
+        //
+        // `if: always()` is asserted rather than merely allowed, because dropping it is the
+        // one-word version of the same disarm: GitHub SKIPS a job whose `needs:` dependency
+        // failed, and branch protection ACCEPTS `skipped` (the property the whole docs-only design
+        // rests on). `contains("always()")` rather than an equality, so an author may legitimately
+        // widen the expression; narrowing it to `!cancelled()` or a ref test reds, by name.
+        {
+            let codegen = doc
+                .get("jobs")
+                .and_then(|j| j.get("codegen"))
+                .and_then(|c| c.as_mapping())
+                .expect("ci.yml must declare a `codegen` job -- it is the REQUIRED status check on `main`, and the four guards below (its `continue-on-error`/`strategy` ban, `if: always()`, and the step-level bans) all hang off this locator. If it was renamed, re-point this test; do not delete it. Branch protection would eventually say \"Expected -- waiting for status\" on a PR, but NOT on the docs-only lane, which pushes straight to `main` with no required-check evaluation at push time");
+            for key in ["continue-on-error", "strategy"] {
+                assert!(
+                    !codegen.contains_key(serde_yaml::Value::String(key.into())),
+                    "the `codegen` job must carry no `{}` -- it is the REQUIRED status check on `main`, and either key makes it report `success` while its aggregation step failed, so the check goes green with every gate job red",
+                    key
+                );
+            }
+            let cond = codegen
+                .get(serde_yaml::Value::String("if".into()))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            assert!(
+                cond.contains("always()"),
+                "the `codegen` job's `if:` is `{}` -- it must still contain `always()`. GitHub SKIPS a job whose `needs:` dependency failed, and branch protection ACCEPTS `skipped`, so without it the aggregator never runs on exactly the runs it exists to fail",
+                cond
+            );
+            if let Some(steps) = codegen.get(serde_yaml::Value::String("steps".into())).and_then(|s| s.as_sequence()) {
+                for st in steps {
+                    for key in ["if", "continue-on-error"] {
+                        assert!(
+                            st.get(key).is_none(),
+                            "a `codegen` step carries `{}` -- the aggregation step is the entire content of the required check; skipping it or swallowing its failure leaves the job green with every gate job red",
+                            key
+                        );
+                    }
+                }
+            }
+        }
+        // A BOUND ON THE HANG, ASSERTED. Every other job `needs:` this one and `codegen` -- the
+        // REQUIRED check -- reds on `needs.changes.result == failure`, so a hang here stops
+        // ANYTHING merging, on any branch, for any diff. Without `timeout-minutes` that window is
+        // GitHub's 360-minute default, and this job runs a suite whose own step comment names three
+        // host-drift classes as expected failure modes. Raised twice by review of PR #679 and
+        // applied there; `GATE-STEP-LOCUS` (in-job vs sibling job) stays open and is not settled
+        // by it. The CAP is the half that matters as much as the key: `timeout-minutes: 600` is
+        // the 360-minute default with extra steps, so a value is required AND bounded. 30 minutes
+        // is far above anything this job legitimately does -- seconds of shell and a shallow diff --
+        // and far below "a shift". No multiplier is stated: the one this comment's ci.yml sibling
+        // carried was a bare derived number and was measured wrong (review #45).
+        let timeout = changes_val
+            .get("timeout-minutes")
+            .and_then(|t| t.as_u64())
+            .unwrap_or_else(|| panic!(
+                "the `changes` job must declare a `timeout-minutes` INTEGER -- every other job `needs:` it and `codegen` reds on its failure, so a hung step here blocks every merge in the repository for GitHub's 360-minute default while {} reports nothing at all",
+                what
+            ));
+        assert!(
+            (5..=30).contains(&timeout),
+            "the `changes` job's `timeout-minutes` is {} -- it must be in 5..=30. TWO bounds apply to this job and this is the tighter one: `changes` is the first entry of `codegen`'s `needs:`, so the aggregated-job loop already asserts 5..=120 over it. The FLOOR is shared with that loop (review #79 added it to catch a dropped zero) and was stated here as 1, which told an author `timeout-minutes: 3` was legal and then redded them on the OTHER assertion, whose message talks about aggregated jobs and a 120 ceiling and never mentions this 30. The CEILING is this rule's own: a hung probe in the job every other job `needs:` blocks every merge in the repository for its duration, including a peak-hour fix to checkout, dispatch or payments",
+            timeout
+        );
+        for key in ["container", "services"] {
+            assert!(
+                changes_val.get(key).is_none(),
+                "the `changes` job must carry no `{}` -- it changes the machine {} runs on, with the step byte-identical",
+                key, what
+            );
+        }
+        // CONTENT, not a literal. The threat is a self-hosted label; asserting the exact string
+        // `ubuntu-latest` reds ordinary reproducibility work (pinning to `ubuntu-24.04`, which is
+        // what GitHub itself advises during a `-latest` migration) with a message accusing the
+        // author of moving the gate off controlled hardware -- the false-red class this file has
+        // now retracted three times, and the "fix" a reader reaches for is editing the literal.
+        let runner = changes_val
+            .get("runs-on")
+            .and_then(|r| r.as_str())
+            .unwrap_or_else(|| panic!(
+                "the `changes` job must declare a single `runs-on` STRING -- a matrix or a label list can put {} on a machine this repo does not control",
+                what
+            ));
+        // A CLOSED SET, not a prefix. `starts_with("ubuntu-")` also admits `ubuntu-24.04-custom`,
+        // which is how a self-hosted pool gets labelled to look hosted -- a check whose message
+        // says "only a GitHub-hosted label is allowed" while admitting one that is not. The label
+        // set is closed and published, so match it exactly: the same property-not-shape argument
+        // the rest of this pin makes (review of PR #679).
+        const HOSTED_RUNNERS: [&str; 9] = [
+            "ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04",
+            "windows-latest", "windows-2025", "windows-2022",
+            "macos-latest", "macos-15", "macos-14",
+        ];
+        assert!(
+            HOSTED_RUNNERS.contains(&runner),
+            "the `changes` job's `runs-on` is `{}`, which is not one of the GitHub-hosted labels {:?} -- a `self-hosted` label, or a custom pool labelled to look hosted (`ubuntu-24.04-custom`), puts {} on a machine this repo does not control. If GitHub has published a new image label, add it here deliberately",
+            runner, HOSTED_RUNNERS, what
+        );
+        let changes = changes_val
+            .as_mapping()
+            .expect("the `changes` job is a mapping");
+
+        // Job-level escapes that are never legitimate here. `if` gates the whole job;
+        // `continue-on-error` at job level reports `success` to `needs`, which the `codegen`
+        // aggregator accepts -- the entire required check goes green with the gate red.
+        // `needs` belongs here for the same reason as `if`: GitHub SKIPS a job whose dependency
+        // was skipped, and the `codegen` aggregator accepts `skipped` for every upstream by design,
+        // so a skippable dependency takes both gates down with the required check still green.
+        // Not a one-liner to exploit -- every existing job already `needs: changes`, so a cycle
+        // fails to load loudly and the mutant must add a job too -- but so did `find -exec cp`.
+        for key in ["if", "continue-on-error", "strategy", "needs"] {
+            assert!(
+                !changes.contains_key(serde_yaml::Value::String(key.into())),
+                "the `changes` job must carry no `{}` -- it is the one always-run job with a checkout, and {} depends on it never skipping or swallowing a failure",
+                key, what
+            );
+        }
+
+        let steps = changes
+            .get(serde_yaml::Value::String("steps".into()))
+            .and_then(|s| s.as_sequence())
+            .expect("the `changes` job must have steps");
+
+        // PIN THE PROPERTY, NOT THE COUNT.
+        //
+        // The previous version asserted `steps.len() == 4`. Two things were wrong with it, both
+        // found by the fifth review. It did not stop the FOURTEENTH mutant -- two lines added
+        // INSIDE the existing docs-only detect step's `run:` block, overwriting both gate scripts
+        // with `exit 0`; four steps, both gates byte-identical, every assertion green. And it was
+        // the same instrument this file rejects one screen earlier: the `changes` job gained a gate
+        // step on 2026-08-21 and another on 2026-08-24, so the next innocent addition reds two
+        // tests whose one-character "fix" (4 -> 5) reopens the whole vector. A red that fires on
+        // innocent work trains readers to discount reds -- T15g's rule, applied consistently this
+        // time.
+        //
+        // So: any step may exist, but NO step other than the two gates may touch what the gates
+        // depend on. That is structure-insensitive to legitimate maintenance and closes the
+        // sibling-step and inside-a-sibling-step spellings together.
+        //
+        // THE RESIDUAL, stated NORMATIVELY here (the records narrate it as history, which is why
+        // this no longer claims to be the only copy -- the previous version made that claim in the
+        // same commit that landed two others).
+        //
+        // A substring scan cannot bound arbitrary shell -- a step can rebuild the path
+        // (`d=".cl""aude"`) or never name it (`find . -name 'stub-tests.sh' | while read -r f`).
+        // Those are NOT closed here and cannot be. They are DETECTED by the gate scripts
+        // themselves: each compares the WHOLE four-file gate set against its committed blobs
+        // before reporting anything (`assert_gate_script_self_verifies` below pins that, from the
+        // build-test job -- a different checkout, outside this job's blast radius).
+        //
+        // THE PREVIOUS VERSION OF THIS PARAGRAPH WAS FALSE, and the eighth review proved it by
+        // construction. It said the overwrite class was killed "-- every spelling of it --" while
+        // only `stub-tests.sh` had the block; `register-check-selftest.sh` had nothing, so a
+        // `find -exec cp` step replaced the ask-gate selftest with `exit 0` and every assertion
+        // here stayed green. Round 9 then showed that "both scripts carry it now" did not close it
+        // either -- a block inside a script goes away when the script is REPLACED. Each script now
+        // verifies the WHOLE gate set, so replacing either guard is caught by the other. That was
+        // the fourth completeness claim in this chain written before it was checked, so this one
+        // states its own boundary instead:
+        //
+        // - DETECTED, not prevented: the script still runs; it refuses to report a verdict.
+        // - NOT a defence against arbitrary code running BEFORE it. Three routes have been closed,
+        //   each because a review demonstrated it end to end: a `git` shell FUNCTION via job-level
+        //   `env: BASH_ENV` (hence `unset -f`), a PATH shim (hence the fixed `_vpath`), and
+        //   `GIT_DIR` pointing the ORACLE at a decoy repo whose HEAD holds the tampered bytes
+        //   (hence `unset "${!GIT_@}"` in the scripts and a `GIT_*` PREFIX ban in `env_ok` above).
+        //   "Arbitrary preamble" is not a bounded set, and each of those three was found only
+        //   after the previous fix was declared complete.
+        // - Out of reach of BOTH: a commit that changes the gate scripts in the same change. That
+        //   is a code review's job, and always was.
+        // - NAMED RESIDUAL, `build-test`'s STEPS. Review #12 pointed out that everything here
+        //   bounds `changes` while nothing bounded the job the pins RUN in. Its `env:` and
+        //   `defaults.run` are now guarded at job and step scope, a decoy checkout there is
+        //   rejected, and no step may write `GITHUB_ENV`/`GITHUB_PATH` (review #17: `env_ok` reads
+        //   the `env:` MAPPING and cannot see a runtime export, so that door was open at
+        //   `build-test` while the `changes` scan already closed it). THIS LIST IS THE ROUTES
+        //   CLOSED, NOT A CLAIM THAT NO OTHERS EXIST -- an earlier version enumerated exactly one
+        //   remaining route, which reads as completeness. What remains is a `build-test` step that
+        //   REWRITES `tools/codegen-rs/src/tests.rs`
+        //   before `cargo test` is not closed and cannot be by a YAML scan: banning the path is
+        //   the enumeration instrument this file has retracted three times, and it would red
+        //   ordinary work (`cargo test --manifest-path tools/codegen-rs/Cargo.toml` names it).
+        //   That is the same code-review residual as the line above, stated separately because
+        //   the previous version of this paragraph did not mention this job at all and
+        //   `register-check-selftest.sh:29` calls build-test "outside the blast radius" -- true of
+        //   the `changes` job's runtime, and read as stronger than it is.
+        let gate_cmds = [
+            "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+            "bash .claude/hooks/register-check-selftest.sh",
+        ];
+        for (i, st) in steps.iter().enumerate() {
+            env_ok(st, &format!("the `changes` job's step {}", i));
+            // AND THE JOB THIS HELPER IS NAMED FOR. `step_shell_ok` was added by review #23 with
+            // the reasoning that "a step-level `shell:` is not a `defaults.run` key, so `shell_ok`
+            // cannot see one at either scope it is called at" -- and was then called on every step
+            // of `build-test`, `specs`, `docs-validate` and `codegen` and on none of `changes`.
+            // Two guards extended to four jobs and one left at zero: the shape rounds 28-31
+            // retracted, reproduced inside the extension that closed it. (Review #42.)
+            //
+            // NOT EXPLOITABLE TODAY, and the reason is worth stating rather than implying: the two
+            // gate steps are key-set-locked to `{name, run}` so they cannot carry `shell:` at all,
+            // and on `detect` a script-dropping shell means `$GITHUB_OUTPUT` is never written,
+            // `docs_only` resolves to the empty string and `!= 'true'` runs the FULL gate --
+            // fail-open, so the disarm costs the attacker the point. What makes it worth closing
+            // is that the fail-open property lives in `ci.yml`, not here: the moment a `changes`
+            // step produces an output consumed fail-CLOSED -- which is exactly what
+            // `GATE-STEP-LOCUS` option (a) introduces if the gate steps move to a sibling job the
+            // aggregator asserts -- the hole is live and the pin meant to notice is one line short.
+            step_shell_ok(st, &format!("the `changes` job's step {}", i));
+            // A checkout of a different tree puts someone else's scripts under the gate steps.
+            if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.contains("actions/checkout")) {
+                if let Some(with) = st.get("with").and_then(|w| w.as_mapping()) {
+                    for key in ["repository", "ref"] {
+                        assert!(
+                            !with.contains_key(serde_yaml::Value::String(key.into())),
+                            "the `changes` job's checkout must not set `{}` -- it would run {} against a different tree than the one under review",
+                            key, what
+                        );
+                    }
+                }
+            }
+            // Constrain what a non-gate step may BE, not just what its `run` says. A
+            // `uses: actions/github-script` with a `with: script:` payload writing to the gate
+            // scripts carries no `run:` at all, so a run-only scan never saw it (sixth review).
+            if let Some(u) = st.get("uses").and_then(|u| u.as_str()) {
+                assert!(
+                    u.starts_with("actions/checkout@"),
+                    "step {} of the `changes` job uses `{}`. Only `actions/checkout` is allowed here: any other action can write files in this workspace, and {} depends on the gate scripts being the ones in the commit under review.",
+                    i, u, what
+                );
+            }
+            // `.claude` WITHOUT the trailing slash: `cd .claude && printf ... > skills/...` and
+            // `working-directory: .claude` both name the directory in the most ordinary spellings
+            // there are, and both walked past `".claude/"` -- one character apart (seventh review).
+            // Serializing the whole step also covers `working-directory` and `with:` payloads.
+            let serialized = serde_yaml::to_string(st).unwrap_or_default();
+            let is_gate = st
+                .get("run")
+                .and_then(|r| r.as_str())
+                .is_some_and(|r| gate_cmds.contains(&r.trim()));
+            if is_gate {
+                continue; // the gate steps themselves, key-set-locked below
+            }
+            for needle in [".claude", "GITHUB_ENV", "GITHUB_PATH"] {
+                assert!(
+                    !serialized.contains(needle),
+                    "step {} of the `changes` job is not a gate step, but it mentions `{}`. Nothing in this job except the two gate steps may touch the gate scripts or rewrite the environment they run in.",
+                    i, needle
+                );
+            }
+        }
+        // The checkout must still exist: without it the gate steps have no scripts to run, and a
+        // `run:` that silently no-ops is the failure this whole pin exists to prevent.
+        assert!(
+            steps.iter().any(|st| st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout@"))),
+            "the `changes` job must check the repository out -- {} cannot run against an empty workspace",
+            what
+        );
+        let matching: Vec<_> = steps
+            .iter()
+            .filter(|st| st.get("run").and_then(|r| r.as_str()) == Some(cmd))
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "exactly one step of the `changes` job must run `{}` verbatim ({}); found {}. A `run` that is not EXACTLY this string — a trailing `|| true`, `; exit 0` or pipe — silently disarms the gate.",
+            cmd, what, matching.len()
+        );
+
+        let keys: std::collections::BTreeSet<String> = matching[0]
+            .as_mapping()
+            .expect("a step is a mapping")
+            .keys()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect();
+        let allowed: std::collections::BTreeSet<String> =
+            ["name", "run"].iter().map(|k| k.to_string()).collect();
+        assert_eq!(
+            keys, allowed,
+            "the `{}` step may carry ONLY `name` and `run`. Any other key — `if` (in ANY spelling, including hoisted onto the `- ` item line), `continue-on-error`, `shell`, `env`, `working-directory` — is a way to make the step not run, or not report, while every text-matching assertion stays green.",
+            what
+        );
+    }
+
+    /// Shell source with comment lines removed, for pins that must see CODE and not PROSE.
+    ///
+    /// Shared on purpose. Review #9 fixed `assert_gate_script_self_verifies` this way and left
+    /// `the_stub_suite_runs_in_the_always_run_changes_job`'s `EXPECTED_CASES` scan matching the raw
+    /// file, so commenting the completeness block out kept that pin green while the suite went back
+    /// to printing `RESULT: n passed` on a host where cases had stopped running -- `claude-review`
+    /// found it one screen from the fix. Two stripping policies that must agree WILL diverge, the
+    /// same reason the two needle lists were collapsed into one.
+    /// WHAT IT DOES NOT REACH: a TRAILING comment. It drops whole-line comments only, so
+    /// `foo bar   # unset "${!GIT_@}"` still satisfies a needle. The pins that consume it state the
+    /// property as "a copy inside a comment does not count", which is stronger than what this
+    /// delivers -- corrected here rather than left implied (review #19). Closing it properly needs a
+    /// shell tokenizer (a `#` inside a quoted string is not a comment), and the exploit is already
+    /// covered by defence in depth: `the_gate_self_verification_reds_on_a_tampered_script` EXECUTES
+    /// both guards against a tampered fixture, so a block that is present-but-commented fails there
+    /// regardless of what this scan sees. Stating the boundary is the honest instrument; writing a
+    /// tokenizer to make a comment true is not.
+    fn shell_code_only(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The docs-only fast path may never swallow the paths the gate pins live on.
+    ///
+    /// `assert_gate_script_self_verifies` and `both_scopes_reject_execution_altering_env` run in
+    /// the build-test job, which is SKIPPED when the `changes` job decides a push is docs-only.
+    /// (NOT `codegen`: that job is `if: always()` with no checkout and no cargo, so it never skips
+    /// and runs no test. Five sites in this file said `codegen`; the correction reached the two
+    /// shell scripts and stopped, which is the half-applied-sweep defect one file over.) That
+    /// is safe today only because `.claude/**` and `.github/**` are absent from the allowlist, so
+    /// any change able to disarm a pin also runs it. Nothing recorded that coupling until
+    /// `claude-review` noted it on PR #679 -- as prose, in a review comment, which is where a
+    /// forgettable invariant goes to die.
+    ///
+    /// Widening the allowlist to cover either path would silently stop the pins running on exactly
+    /// the changes they exist to police: the gate-disarm class this whole PR is about, arriving
+    /// through the door marked "docs". CLAUDE.md's compiler-first rule says a check is the fallback
+    /// where types cannot reach, and a shell `case` arm in a YAML string is one of those places.
+    #[test]
+    fn the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        // PARSED YAML, AND EVERY ARM. The first version located the allowlist as "the first line
+        // in the whole file whose trimmed end is `) ;;`" -- and ci.yml has two, the second being
+        // the codegen aggregator's `success|skipped) ;;`. It was right by ORDERING alone: move the
+        // aggregator up, or add a `case` to any earlier step, and this silently starts asserting
+        // about the wrong arm, green forever, with the `expect` never firing because the `find`
+        // succeeded on the wrong line. It also read ONE arm, while the natural way to widen an
+        // allowlist is to ADD one. Both are the vacuity this file spent ten rounds removing from
+        // its neighbours, reproduced in the guard that protects them.
+        let doc: serde_yaml::Value = serde_yaml::from_str(&ci).expect("ci.yml must parse as YAML");
+        let detect = doc
+            .get("jobs")
+            .and_then(|j| j.get("changes"))
+            .and_then(|c| c.get("steps"))
+            .and_then(|s| s.as_sequence())
+            .and_then(|steps| steps.iter().find(|st| st.get("id").and_then(|i| i.as_str()) == Some("detect")))
+            .and_then(|st| st.get("run"))
+            .and_then(|r| r.as_str())
+            .expect("the `changes` job's `detect` step (whose `case` decides docs_only) has moved or been renamed -- find it and re-point this test, do not delete it");
+        assert!(
+            detect.contains("docs_only=false; break"),
+            "the docs-only `case` has been reworded -- re-point this test, do not delete it. A locator that silently finds nothing is the vacuous-pass shape this file has retracted repeatedly."
+        );
+        let arms: Vec<&str> = detect.lines().map(str::trim).filter(|l| l.ends_with(") ;;")).collect();
+        assert!(!arms.is_empty(), "no docs-only allowlist arm found in the `detect` step -- re-point this test");
+        for arm in &arms {
+            for forbidden in [".claude", ".github", "crates", "tools", "specs"] {
+                assert!(
+                    !arm.contains(forbidden),
+                    "a docs-only allowlist arm ({}) now covers `{}`. A push touching only that path would be classified docs-only and SKIP build-test, and with it the gate pins -- how the gate-disarm class walks in through the door marked \"docs\". Adding an ARM is the same widening as editing one.",
+                    arm, forbidden
+                );
+            }
+        }
+    }
+
+    /// The docs-only detector, EXECUTED against real diffs — not read.
+    ///
+    /// `the_docs_only_fast_path_never_covers_the_gate_or_workflow_paths` above inspects the `case`
+    /// arms, which is shape #4 in `docs/claude/sessions/gates.md` §19: it reads the allowlist as
+    /// DECLARED and is blind to the same widening done imperatively. Appending one bare `docs_only=true` line before the
+    /// `GITHUB_OUTPUT` echo satisfies both of that test's assertions — the `case` text is
+    /// untouched and no arm names a forbidden path — while classifying EVERY push as docs-only.
+    /// That skips `lint`, `specs`, `build-test` and `db-test`, so the required check goes green
+    /// with every pin in this file unexecuted, in one commit.
+    ///
+    /// No shape test can close that, because the disarm is a legal rewrite of a shell script. So
+    /// this one RUNS the step's `run:` body — extracted from the parsed workflow, never a copy —
+    /// against a throwaway git repository, and asserts the VALUE it writes to `$GITHUB_OUTPUT`.
+    /// Any rewrite that misclassifies reds here whatever it looks like.
+    #[test]
+    fn the_docs_only_detector_classifies_by_behaviour_not_by_shape() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        let doc: serde_yaml::Value = serde_yaml::from_str(&ci).expect("ci.yml must parse as YAML");
+        let script = doc
+            .get("jobs")
+            .and_then(|j| j.get("changes"))
+            .and_then(|c| c.get("steps"))
+            .and_then(|s| s.as_sequence())
+            .and_then(|steps| steps.iter().find(|st| st.get("id").and_then(|i| i.as_str()) == Some("detect")))
+            .and_then(|st| st.get("run"))
+            .and_then(|r| r.as_str())
+            .expect("the `changes` job's `detect` step has moved or been renamed -- re-point this test, do not delete it")
+            .to_string();
+
+        // HOST CAPABILITY, LOUD BUT GREEN (the suite-completeness rule the ci.yml comment states):
+        // no `git` or no `bash` means this case cannot be built, not that the detector is wrong.
+        let have = |bin: &str| {
+            std::process::Command::new(bin)
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        if !have("git") || !have("bash") {
+            eprintln!("SKIP the_docs_only_detector_classifies_by_behaviour_not_by_shape: git or bash unavailable on this host");
+            return;
+        }
+
+        let sandbox = std::env::temp_dir().join(format!("cf-docsonly-{}", std::process::id()));
+        let tmp = sandbox.join("repo");
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(&tmp).expect("create the fixture repo dir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+
+        let git = |args: &[&str]| -> String {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                // The gate scripts' own discipline: a stray GIT_* or a global config in the
+                // developer's HOME must not reach the fixture.
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+            assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        let commit = |paths: &[&str], msg: &str| -> String {
+            for rel in paths {
+                let f = tmp.join(rel);
+                if let Some(dir) = f.parent() {
+                    fs::create_dir_all(dir).expect("mkdir");
+                }
+                fs::write(&f, format!("{}\n", msg)).expect("write fixture file");
+            }
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", msg]);
+            git(&["rev-parse", "HEAD"])
+        };
+        let base = commit(&["README.md", "docs/a.md", "crates/x.rs", ".github/workflows/ci.yml", ".claude/hooks/h.sh", "specs/s.yaml"], "base");
+
+        // Run the REAL step body with the same environment GitHub gives it.
+        let run = |base_sha: &str, head_sha: &str| -> String {
+            // OUTSIDE THE WORKTREE, deliberately. It sat in `tmp` first, and the next case's
+            // `git add -A` committed it -- so `README.md` came back `false` for a path the
+            // allowlist covers, and the four cases after it were passing on the PREVIOUS case's
+            // leaked file rather than their own. Shape #3 in both directions in one fixture.
+            let out_file = sandbox.join("gh-output");
+            let _ = fs::remove_file(&out_file);
+            fs::write(&out_file, "").expect("seed $GITHUB_OUTPUT");
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .current_dir(&tmp)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("EVENT_NAME", "push")
+                .env("BASE_SHA", base_sha)
+                .env("HEAD_SHA", head_sha)
+                .env("GITHUB_OUTPUT", &out_file)
+                .output()
+                .expect("run the detect step body");
+            assert!(
+                out.status.success(),
+                "the `detect` step body exited {:?} on base={} head={} -- stderr: {}",
+                out.status.code(), base_sha, head_sha, String::from_utf8_lossy(&out.stderr)
+            );
+            let written = fs::read_to_string(&out_file).expect("read $GITHUB_OUTPUT");
+            let last = written
+                .lines()
+                .filter_map(|l| l.strip_prefix("docs_only="))
+                .next_back()
+                .unwrap_or_else(|| panic!("the step wrote no `docs_only=` to $GITHUB_OUTPUT (got {:?})", written));
+            last.to_string()
+        };
+
+        // (changed paths, expected docs_only, why this case exists)
+        let cases: Vec<(Vec<&str>, &str, &str)> = vec![
+            (vec!["docs/a.md"], "true", "the whole point of the fast path"),
+            (vec!["README.md"], "true", "the root allowlist"),
+            (vec!["crates/x.rs"], "false", "code must never take the fast path"),
+            // THE THREE THAT MAKE THIS TEST LOAD-BEARING: each one, classified docs-only, skips
+            // `build-test` -- the job that runs every pin in this file -- on exactly the change
+            // able to disarm them.
+            (vec![".github/workflows/ci.yml"], "false", "the workflow carrying the gate steps"),
+            (vec![".claude/hooks/h.sh"], "false", "a gate script"),
+            (vec!["specs/s.yaml"], "false", "spec markdown participates in drift checking"),
+            (vec!["docs/a.md", "crates/x.rs"], "false", "one non-doc file is enough"),
+        ];
+        let mut wrong = Vec::new();
+        for (i, (paths, expected, why)) in cases.iter().enumerate() {
+            // EACH CASE BRANCHES OFF `base`. Stacked commits made the diff CUMULATIVE, so once
+            // `crates/x.rs` had been touched every later case saw it and reported `false` for a
+            // reason that had nothing to do with the path under test -- four plants passing for
+            // the wrong reason, which is worse than not having them.
+            git(&["checkout", "-q", "-B", &format!("case{}", i), &base]);
+            let head = commit(paths, &format!("touch {:?}", paths));
+            let got = run(&base, &head);
+            if got != *expected {
+                wrong.push(format!("{:?} -> docs_only={} (expected {}; {})", paths, got, expected, why));
+            }
+        }
+        // FAIL-OPEN, the header's stated contract: anything ambiguous runs the full gate.
+        git(&["checkout", "-q", "-B", "failopen", &base]);
+        let head = commit(&["docs/a.md"], "fail-open head");
+        for (label, base_sha, head_sha) in [
+            ("an empty diff", head.as_str(), head.as_str()),
+            ("an all-zeros base (a branch's first push)", "0000000000000000000000000000000000000000", head.as_str()),
+            ("an unresolvable base (force-pushed away)", "1111111111111111111111111111111111111111", head.as_str()),
+            ("an absent base", "", head.as_str()),
+        ] {
+            let got = run(base_sha, head_sha);
+            if got != "false" {
+                wrong.push(format!("{} -> docs_only={} (expected false: the header promises fail-open)", label, got));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "the docs-only detector misclassified: {:#?}\nA `true` where `false` is expected skips `lint`, `specs`, `build-test` and `db-test` while the required check stays green -- and one appended `docs_only=true` line does it without touching a single `case` arm, which is all the shape test above can see.",
+            wrong
+        );
+    }
+
+    /// The scope guards, PLANTED RED **from the repo**, not from a reviewer's scratchpad.
+    ///
+    /// This test exists because review #9 grepped for the name a comment two screens up promised
+    /// and found only the comment. The B1 regression -- `env_ok(changes_val, ...)` deleted by a
+    /// refactor, job-level `BASH_ENV` and `LD_PRELOAD` green again -- had been "fixed" and then
+    /// protected by a SENTENCE claiming plants that were manual and reverted. The round's own
+    /// headline lesson ("pin a guard from a test that fails when it is removed, not from a
+    /// sentence") was failing inside its own retraction.
+    ///
+    /// Mutations are applied to the REAL ci.yml so the fixture cannot drift away from what ships.
+    #[test]
+    fn both_scopes_reject_execution_altering_env() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        const CMD: &str = "bash .claude/skills/decision-lookup/scripts/stub-tests.sh";
+        // NO PANIC HOOK AT ALL. Two earlier shapes silenced panics process-wide: the first leaked
+        // the null hook on the failure path, and the second (a Drop guard) still entered a global
+        // window ~26 times while libtest runs this binary's other tests on sibling threads -- so a
+        // sibling panicking inside a window lost its message, which is the diagnosability this file
+        // argues for everywhere else. `claude-review` flagged both.
+        //
+        // The hook was only ever suppressing LOG NOISE from deliberate panics, and libtest already
+        // captures a passing test's output: those ~26 "panicked at" lines are printed only if this
+        // test FAILS, which is exactly when you want to read them. So the fix is to delete the
+        // mechanism rather than guard it -- no global state, no catch_unwind subtleties, and every
+        // assertion inside `assert_pinned_in_changes_job` keeps its message. (The reviewer's
+        // Result-returning refactor is the deeper answer and would also surface WHY each survivor
+        // survived; it converts ~30 assertions, so it is not being done in the same step as a
+        // behaviour fix -- Beck. Recorded here rather than left as a silent choice.)
+        let check = |src: &str| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert_pinned_in_changes_job(src, CMD, "the gate")
+            }))
+            .is_ok()
+        };
+
+        assert!(check(&ci), "the real ci.yml must pass, or every mutant below is vacuous");
+
+        // Job scope: insert directly under `  changes:`. Workflow scope: before `jobs:`.
+        let at_job = |body: &str| ci.replacen("  changes:\n", &format!("  changes:\n    env:\n      {}\n", body), 1);
+        let at_workflow = |body: &str| ci.replacen("\njobs:\n", &format!("\nenv:\n  {}\njobs:\n", body), 1);
+        // MUTATE INSIDE ONE NAMED JOB. `ci.replacen(anchor, .., 1)` rewrites the FIRST match in
+        // the whole file, and job bodies here are near-identical: the anchor
+        // `steps:\n      - uses: actions/checkout@v5\n      - uses: dtolnay/rust-toolchain@stable`
+        // occurs in FIVE jobs, so a plant labelled `build-test ...` silently mutated `lint`,
+        // satisfied `assert_ne!` (the file did change) and pinned nothing. Review #16 caught the
+        // label/mutation mismatch on that entry; this closure is why fixing the label alone would
+        // not have fixed the plant. `runs-on: ubuntu-latest` appears SEVEN times and its two
+        // plants land in `changes` only because `changes` happens to be the first job -- exactly
+        // the kind of accident that stops being true when a job is reordered. Slicing to the job
+        // makes the class unspellable instead of asking every future author to check uniqueness,
+        // and the `contains` assertion turns a drifted anchor into a red rather than a silent
+        // no-op somewhere else.
+        // SWAP THE WHOLE `on:` BLOCK. Replacing just the `on:` LINE leaves the old mapping body
+        // dangling under a sequence, which is invalid YAML -- the mutant then reds on the parse
+        // rather than on the property, and the green control for a legitimate list trigger reds
+        // with it. A plant that fails for the wrong reason is worse than none: it reports the
+        // guard working while proving nothing (review #22).
+        let with_trigger = |replacement: &str| -> String {
+            let start = ci.find("\non:\n").expect("ci.yml declares `on:` at column 0") + 1;
+            // END AT THE NEXT TOP-LEVEL KEY, NOT AT `jobs:`. Splicing all the way to `jobs:` also
+            // swallowed the workflow's `permissions: {contents: read}` block, which sits between
+            // them -- so both plants using this helper silently dropped it. `assert_ne!` was
+            // satisfied and nothing reads `permissions` today, so neither plant was proving
+            // anything false YET. That is shape #2 in `docs/claude/sessions/gates.md` §19: a mutation that
+            // applies somewhere other than where its label says. The moment a `permissions`
+            // assertion is added -- an over-broad `permissions: write-all` on `changes` is the
+            // obvious next hardening here -- the GREEN CONTROL `on: as a list of events` would red
+            // for a reason unrelated to the list form, and the one-line repair a reader reaches for
+            // is loosening the new assertion. Bounded to the trigger block instead. (Review #28.)
+            let end = ci[start..]
+                .match_indices('\n')
+                .find(|(i, _)| {
+                    let after = &ci[start + i + 1..];
+                    after.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                })
+                .map(|(i, _)| start + i + 1)
+                .expect("ci.yml must declare another top-level key after `on:`");
+            assert!(
+                !ci[start..end].contains("\npermissions:"),
+                "the trigger splice still spans `permissions:` -- it would drop it from every mutant built with this helper"
+            );
+            format!("{}{}{}", &ci[..start], replacement, &ci[end..])
+        };
+        let in_job = |job: &str, from: &str, to: &str| -> String {
+            let header = format!("\n  {}:\n", job);
+            let start = ci
+                .find(&header)
+                .unwrap_or_else(|| panic!("ci.yml has no `{}` job", job))
+                + 1;
+            // The next line indented by exactly two spaces is the next job header; job-level keys
+            // are indented four and step lines six or more.
+            let end = ci[start..]
+                .match_indices("\n  ")
+                .find(|(i, _)| !ci[start + i + 3..].starts_with(' '))
+                .map_or(ci.len(), |(i, _)| start + i + 1);
+            let slice = &ci[start..end];
+            assert!(
+                slice.contains(from),
+                "the `{}` job does not contain the anchor {:?} -- this plant would have mutated another job, or nothing",
+                job, from
+            );
+            format!("{}{}{}", &ci[..start], slice.replacen(from, to, 1), &ci[end..])
+        };
+
+        let must_red: Vec<(&str, String)> = vec![
+            ("job BASH_ENV", at_job("BASH_ENV: /tmp/preamble.sh")),
+            ("job LD_PRELOAD", at_job("LD_PRELOAD: /tmp/x.so")),
+            ("job LD_AUDIT", at_job("LD_AUDIT: /tmp/x.so")),
+            ("job PYTHONPATH", at_job("PYTHONPATH: /tmp/shim")),
+            ("job PYTHONSTARTUP", at_job("PYTHONSTARTUP: /tmp/shim.py")),
+            ("job PYTHONHOME", at_job("PYTHONHOME: /tmp/fakelib")),
+            ("job PYTHONUSERBASE", at_job("PYTHONUSERBASE: /tmp/usersite")),
+            ("workflow PYTHONPATH", at_workflow("PYTHONPATH: /tmp/shim")),
+            ("job PATH", at_job("PATH: /tmp/shim:/usr/bin")),
+            ("job BASH_FUNC_x%%", at_job("BASH_FUNC_x%%: \"() { :; }\"")),
+            // The oracle-redirect family (review #9): git obeys these even when the BINARY is
+            // the real one, so the comparison reads a decoy repo and reports OK.
+            ("job GIT_DIR", at_job("GIT_DIR: /tmp/decoy/.git")),
+            ("job GIT_WORK_TREE", at_job("GIT_WORK_TREE: /tmp/decoy")),
+            ("job GIT_OBJECT_DIRECTORY", at_job("GIT_OBJECT_DIRECTORY: /tmp/decoy/objects")),
+            // The gate scripts' own off switches.
+            ("job DECISION_LOOKUP_ALLOW_DIRTY", at_job("DECISION_LOOKUP_ALLOW_DIRTY: \"1\"")),
+            ("job REGISTER_CHECK_ALLOW_DIRTY", at_job("REGISTER_CHECK_ALLOW_DIRTY: \"1\"")),
+            ("workflow BASH_ENV", at_workflow("BASH_ENV: /tmp/preamble.sh")),
+            ("workflow PATH", at_workflow("PATH: /tmp/shim:/usr/bin")),
+            ("workflow GIT_DIR", at_workflow("GIT_DIR: /tmp/decoy/.git")),
+            ("workflow DECISION_LOOKUP_ALLOW_DIRTY", at_workflow("DECISION_LOOKUP_ALLOW_DIRTY: \"1\"")),
+            // Shell that never executes the step script, at both scopes.
+            ("job shell drops the script", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n", 1)),
+            ("workflow shell drops the script", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    shell: bash -c \"exit 0\" {0}\njobs:\n", 1)),
+            ("workflow defaults.run.working-directory", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    working-directory: /tmp/decoy\njobs:\n", 1)),
+            // THE THIRD env_ok CALL SITE. The docstring and the PR body both said "deleting
+            // EITHER env_ok call reds it" -- there are three, and review #10 found the per-step
+            // one (`env_ok(st, ...)`) unguarded: commenting it out left the whole suite green,
+            // which is the round-8 "a guard deleted during a refactor is invisible" regression
+            // reopened one scope down. A step-scoped GIT_DIR plants it.
+            ("STEP-scope GIT_DIR", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Warm\n        run: echo warm\n        env:\n          GIT_DIR: /tmp/decoy/.git\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            // Trigger filters that remove the gate from a whole class of change.
+            ("push paths-ignore", ci.replacen("  push:\n", "  push:\n    paths-ignore: ['docs/**']\n", 1)),
+            ("pull_request paths-ignore", ci.replacen("  pull_request:\n", "  pull_request:\n    paths-ignore: ['**']\n", 1)),
+            ("pull_request types drops synchronize", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened]\n", 1)),
+            ("pull_request branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['release/*']\n", 1)),
+            // `**` still present, workflow no longer triggers on main -- and the docs-only lane
+            // reaches main as a PUSH with no PR, so nothing else covers it.
+            ("push.branches EXCLUDES main", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!main']", 1)),
+            ("push.branches excludes every single-segment branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*']", 1)),
+            // THE THREE CLASSES `hides_main` DECIDED BY A TRAILING `*` ALONE (reviews #43/#44).
+            // `!*-*` and `!2*` leave `main` untouched and remove every `NN-slug` branch, i.e. the
+            // pre-PR validation `ci.yml`'s header states as the reason `push` exists at all -- the
+            // `!*` plant above caught its class only incidentally, because `*` also matches `main`.
+            // `!mai?` and `!m[a]in` remove `main` itself through glob metacharacters a trailing-`*`
+            // special case cannot see, which is why the matcher now fails CLOSED on `?` and `[`.
+            ("push.branches drops every NN-slug branch", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!*-*']", 1)),
+            ("push.branches drops the 2-prefixed feature branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!2*']", 1)),
+            ("push.branches hides main through a ? wildcard", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!mai?']", 1)),
+            ("push.branches hides main through a character class", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!m[a]in']", 1)),
+            // THE ONE THAT NAMES THIS BRANCH. `!6*` leaves `main` alone and removes every
+            // `6NN-slug` branch -- the live issue range, including `678-qmd-stub-suite-in-ci` --
+            // and it passed the two-sample matcher. Same for `!1*`, `!3*`, `!5*`, `!7*`.
+            ("push.branches drops the live issue range", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!6*']", 1)),
+            // THE `pull_request` HALF, WHICH DID NOT LOOK AT EXCLUSIONS AT ALL. A fork produces no
+            // push, so this trigger is a fork PR's only coverage.
+            ("pull_request.branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['**', '!main']\n", 1)),
+            // `branches-ignore` needs no `branches` key, so the containment check above never
+            // looked at it; `tags` alone makes the trigger tag-only. Both removed BOTH gate steps
+            // from the push lane with every assertion green (review of PR #679).
+            ("push branches-ignore excludes main", ci.replacen("    branches: ['**', '!badges']", "    branches-ignore: ['main']", 1)),
+            ("push tags-only trigger", ci.replacen("    branches: ['**', '!badges']", "    tags: ['v*']", 1)),
+            // THE SEQUENCE `on:` FORM, COMBINED WITH A DISARMED GATE STEP. The sequence arm is a
+            // legitimate widening and must not red on its own -- the control below says so -- but
+            // it must not become a bypass either. Before review #22 this pair was GREEN: the arm
+            // returned from the whole helper, so `|| true` on the gate step was never looked at.
+            ("a sequence trigger must not skip the step checks", with_trigger("on: [push, pull_request]\n")
+                .replacen(
+                    "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                    "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh || true",
+                    1)),
+            // A scalar `on:` drops one of the two events outright.
+            ("on: as a single scalar event", with_trigger("on: push\n")),
+            // THE JOB THE PINS RUN IN. Ungoverned until review #12: these two make every assertion
+            // in this file vacuous while `changes` stays green.
+            ("build-test job LD_PRELOAD", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      LD_PRELOAD: /tmp/x.so\n", 1)),
+            ("build-test job BASH_ENV", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      BASH_ENV: /tmp/preamble.sh\n", 1)),
+            ("build-test job GIT_DIR", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      GIT_DIR: /tmp/decoy/.git\n", 1)),
+            // NAMED AFTER THE GUARD IT EXERCISES. This entry was labelled `build-test decoy
+            // checkout` while inserting a job-level `env: {GIT_DIR: ...}` -- a third copy of the
+            // `env_ok` plants beside it, so the checkout `repository`/`ref` assertions it was
+            // supposed to pin had NO plant and deleting them stayed green (review #16). A label is
+            // not coverage; the mutation is.
+            ("build-test checkout re-points ref", in_job("build-test",
+                "      - uses: actions/checkout@v5\n",
+                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/decoy\n")),
+            ("build-test checkout re-points repository", in_job("build-test",
+                "      - uses: actions/checkout@v5\n",
+                "      - uses: actions/checkout@v5\n        with:\n          repository: someone/else\n")),
+            // The runtime-export door `env_ok` structurally cannot see (review #17).
+            ("build-test step exports through GITHUB_ENV", in_job("build-test",
+                "      - uses: dtolnay/rust-toolchain@stable\n",
+                "      - run: echo \"LD_PRELOAD=/tmp/x.so\" >> \"$GITHUB_ENV\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
+            ("build-test step prepends through GITHUB_PATH", in_job("build-test",
+                "      - uses: dtolnay/rust-toolchain@stable\n",
+                "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
+            // THE TWELFTH MUTANT AT STEP SCOPE. `shell_ok` reads `defaults.run` only, so a
+            // step-level `shell:` was invisible at every scope it is called at (review #23).
+            ("changes step shell drops the script", in_job("changes",
+                "      - id: detect\n",
+                "      - id: detect\n        shell: bash -c \"exit 0\" {0}\n")),
+            ("build-test step shell drops the script", in_job("build-test",
+                "      - uses: dtolnay/rust-toolchain@stable\n",
+                "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: dtolnay/rust-toolchain@stable\n")),
+            // `specs` RUNS `make validate`, i.e. the new citation rule, and had no guard at all.
+            ("specs job BASH_ENV", in_job("specs", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
+            ("docs-validate job BASH_ENV", in_job("docs-validate", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
+            // THE TWO GUARDS THAT USED TO BE `build-test`-ONLY, on the jobs that run the VALIDATOR.
+            // A shimmed git there makes the citation rule report nothing at all, green (review #27).
+            ("specs step exports through GITHUB_ENV", in_job("specs",
+                "      - uses: actions/checkout@v5\n",
+                "      - run: echo \"PATH=/tmp/shim:$PATH\" >> \"$GITHUB_ENV\"\n      - uses: actions/checkout@v5\n")),
+            ("specs checkout re-points ref", in_job("specs",
+                "      - uses: actions/checkout@v5\n",
+                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/decoy\n")),
+            ("docs-validate step exports through GITHUB_PATH", in_job("docs-validate",
+                "      - uses: actions/checkout@v5\n",
+                "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: actions/checkout@v5\n")),
+            ("specs step shell drops the script", in_job("specs",
+                "      - uses: actions/checkout@v5\n",
+                "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: actions/checkout@v5\n")),
+            // The oracle's OTHER config route: global config -> core.attributesFile -> a
+            // filter.<x>.clean driver that re-emits the committed blob (review #15).
+            ("job XDG_CONFIG_HOME", at_job("XDG_CONFIG_HOME: /tmp/x")),
+            ("job HOME", at_job("HOME: /tmp/x")),
+            ("workflow XDG_CONFIG_HOME", at_workflow("XDG_CONFIG_HOME: /tmp/x")),
+            // ── THE OTHER EIGHT ASSERTION FAMILIES IN THIS HELPER ──────────────────────────────
+            // Every plant above mutates an `env:` key, `defaults.run`, an `on:` filter or
+            // `runs-on`. Review #16 measured what that leaves: the `{name, run}` key-set lock, the
+            // `run` equality, the job-level `if`/`continue-on-error`/`strategy`/`needs` ban, the
+            // `container`/`services` ban, the `.claude`/`GITHUB_ENV`/`GITHUB_PATH` needle scan,
+            // the `uses:` restriction, the checkout `repository`/`ref` bans and the JOB-scope
+            // `defaults.run.working-directory` were each held up by a sentence -- delete any one
+            // and every red and control here stayed exactly as it was. That is the round-8
+            // regression shape verbatim (`env_ok(changes_val, ...)` lost in a refactor, measured
+            // green again two rounds later), and `must_red.len() >= N` cannot see it: it counts
+            // plants, not which assertions have one.
+            //
+            // The `{name, run}` key set, which is the "make it unspellable" property the whole
+            // helper was rewritten around (mutants 11 and 12). Both spellings of the step-level
+            // `if:` that defeated the indentation-matching version.
+            ("gate step gains a step-level if", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - if: github.event_name == 'push' && github.ref == 'refs/heads/never'\n        name: decision-lookup hermetic stub suite",
+                1)),
+            ("gate step gains continue-on-error", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        continue-on-error: true\n        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                1)),
+            ("gate step gains a step-level env", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        env:\n          FOO: bar\n        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                1)),
+            // `run` EQUALITY: the two disarms a substring scan cannot see.
+            ("gate step run gains || true", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh || true",
+                1)),
+            ("gate step run gains ; exit 0", ci.replacen(
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+                "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh ; exit 0",
+                1)),
+            // The JOB may not gate or matrix itself out of existence.
+            ("changes job gains an if", ci.replacen("  changes:\n", "  changes:\n    if: github.ref == 'refs/heads/never'\n", 1)),
+            ("changes job gains continue-on-error", ci.replacen("  changes:\n", "  changes:\n    continue-on-error: true\n", 1)),
+            ("changes job gains a container", ci.replacen("  changes:\n", "  changes:\n    container: alpine:3\n", 1)),
+            // JOB-scope `working-directory`: only the workflow-scope spelling was planted, and the
+            // one-scope-up miss is how mutants twelve and thirteen both got in.
+            ("job defaults.run.working-directory", ci.replacen(
+                "  changes:\n",
+                "  changes:\n    defaults:\n      run:\n        working-directory: /tmp/decoy\n",
+                1)),
+            // MUTANT FOURTEEN -- two lines INSIDE a sibling step that overwrite a gate script. The
+            // comment 100 lines up calls this the reason `steps.len() == 4` was replaced, and the
+            // needle scan that closed it had only a GREEN control.
+            ("a sibling step overwrites a gate script", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Warm\n        run: printf 'exit 0' > .claude/hooks/register-check.sh\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            ("a sibling step exports through GITHUB_ENV", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Warm\n        run: echo \"BASH_ENV=/tmp/p.sh\" >> \"$GITHUB_ENV\"\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            // The `github-script` payload from review #6: an action with no `run:` at all.
+            ("a non-checkout uses in the changes job", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - uses: actions/github-script@v7\n        with:\n          script: |\n            require('fs').writeFileSync('x', '')\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            // A checkout re-pointed at another tree puts someone else's scripts under the gates.
+            ("changes checkout re-points repository", ci.replacen(
+                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
+                "      - uses: actions/checkout@v5\n        with:\n          repository: someone/else\n          fetch-depth: 0",
+                1)),
+            ("changes checkout re-points ref", ci.replacen(
+                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
+                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n          fetch-depth: 0",
+                1)),
+            ("a self-hosted pool labelled to look hosted", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
+            // ── THE FIVE ASSERTIONS THAT HAD NO PLANT ─────────────────────────────────────────
+            // Review #35 measured what the corpus still leaves standing on a sentence: of the
+            // job-level key ban `["if", "continue-on-error", "strategy", "needs"]` only two
+            // elements were planted, of `["container", "services"]` only one, and neither the
+            // non-string `runs-on` arm nor the must-check-the-repository-out assertion had
+            // anything. Deleting `"needs"` from that array -- the element whose own comment calls
+            // it load-bearing -- was a one-character edit that left every mutant and every control
+            // in this test behaving identically. That is the round-8 shape (a guard lost in a
+            // refactor, measured green two rounds later) reproduced inside the harness written to
+            // stop it, and `must_red.len() >= N` cannot see it: shape #1, again.
+            //
+            // `needs: lint` is a load-time CYCLE on GitHub (`lint` needs `changes`), which is the
+            // comment's reason for calling the real exploit awkward -- but this test parses YAML,
+            // and the assertion under test is about the KEY, so the cycle is irrelevant to what is
+            // being pinned. The exploitable spelling adds a job; this is the same key.
+            ("changes job gains strategy", ci.replacen("  changes:\n", "  changes:\n    strategy:\n      matrix:\n        x: [1]\n", 1)),
+            ("changes job gains needs", ci.replacen("  changes:\n", "  changes:\n    needs: lint\n", 1)),
+            ("changes job gains services", ci.replacen("  changes:\n", "  changes:\n    services:\n      pg:\n        image: postgres:16-alpine\n", 1)),
+            ("changes runs-on as a label list", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: [self-hosted, linux]")),
+            ("the changes job loses its timeout", in_job("changes", "    timeout-minutes: 10\n", "")),
+            // AND THE FIVE OTHER JOBS THE AGGREGATOR WAITS ON. `always()` does not mean "do not
+            // wait": a hang in any of them keeps the required check queued at the 360-minute
+            // default. The two heavy jobs are the realistic ones (a registry stall, a service
+            // container that never becomes healthy).
+            ("build-test loses its timeout", in_job("build-test", "    timeout-minutes: 120  # see the `changes` job comment: bounds a HANG, set ABOVE an unmeasured cold build on purpose\n", "")),
+            ("db-test timeout is the default with extra steps", in_job("db-test", "    timeout-minutes: 120", "    timeout-minutes: 360")),
+            ("codegen loses its timeout", in_job("codegen", "    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
+            ("the changes job's timeout is the default with extra steps", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 360")),
+            ("the changes job loses its checkout", in_job("changes",
+                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0   # need the base commit to diff against\n",
+                "")),
+            // ── THE REQUIRED CHECK ITSELF ──────────────────────────────────────────────────────
+            // Every plant above disarms a job that CARRIES a pin. These eight disarm the job that
+            // REPORTS -- `codegen`, the required status check on `main`. Each one leaves every
+            // plant above green and every assertion in this file untouched, and each one makes
+            // the check green with every gate job red. That job had no assertion over it at all
+            // until this round, while three comments in this file reasoned about it in prose.
+            ("codegen job shell drops the script", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n    runs-on: ubuntu-latest")),
+            ("codegen job BASH_ENV", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on: ubuntu-latest")),
+            ("codegen job continue-on-error", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            // ── THE FOUR JOBS BETWEEN `changes` AND `codegen` ────────────────────────────────
+            // `continue-on-error` was banned at the two ends of the graph and nowhere in the
+            // middle, so one line on any aggregated job reported `success` to `needs` and took the
+            // required check green with every pin in this file red. Job scope and step scope are
+            // separate spellings and both are planted. (Review #38.)
+            // THE LOCATORS THEMSELVES. Both job-scope blocks used `if let Some(..)`, so renaming a
+            // job made every assertion under it vanish GREEN with no message -- and `codegen`, the
+            // required check, is the one name no OTHER test pins (`specs`/`build-test`/
+            // `docs-validate` ride on `the_docs_only_ci_path_runs_the_canonical_validator`'s
+            // literal `needs:` string). Review #38.
+            //
+            // MEASURED, AND THE LABELS DO NOT BOTH MEAN WHAT THEY SAY. With all three locators
+            // reverted to the silent form, only the `specs` plant survives: the `codegen` rename is
+            // already caught by the `expect` on `codegen`'s `needs:` list (round 38), because that
+            // guard has to read the job before it can derive anything from it. So the `codegen`
+            // plant does NOT pin the `.expect` it sits next to -- it pins that SOME assertion still
+            // sees the rename, which is the property that matters, and the `.expect` is defence in
+            // depth behind it. Saying so here rather than letting the label imply otherwise is
+            // shape #2 of `gates.md` §19: a mutation applied is not a mutation applied where its
+            // label says. The `specs` plant is the one that makes the locators load-bearing.
+            ("the codegen job is renamed away", ci.replacen("\n  codegen:\n", "\n  aggregate:\n", 1)),
+            ("the specs job is renamed away", ci.replacen("\n  specs:\n", "\n  validate-specs:\n", 1)),
+            ("build-test job continue-on-error", ci.replacen("  build-test:\n", "  build-test:\n    continue-on-error: true\n", 1)),
+            ("build-test step continue-on-error", in_job("build-test",
+                "      - name: Build the workspace",
+                "      - continue-on-error: true\n        name: Build the workspace")),
+            ("specs job continue-on-error", in_job("specs", "    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            ("docs-validate step continue-on-error", in_job("docs-validate",
+                "      - name: Validate (canonical validator",
+                "      - continue-on-error: true\n        name: Validate (canonical validator")),
+            ("lint job continue-on-error", in_job("lint", "    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            ("db-test job continue-on-error", in_job("db-test", "    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest")),
+            ("codegen job strategy", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    strategy:\n      matrix:\n        x: []\n    runs-on: ubuntu-latest")),
+            // Losing `always()` is the one-WORD version: the aggregator is then skipped on exactly
+            // the runs it exists to fail, and branch protection accepts `skipped`.
+            ("codegen loses if: always()", in_job("codegen", "    if: always()\n", "")),
+            ("codegen if narrowed away from always()", in_job("codegen", "    if: always()", "    if: \"!cancelled()\"")),
+            ("codegen step gains continue-on-error", in_job("codegen", "      - name: Every gate job must have succeeded",
+                "      - continue-on-error: true\n        name: Every gate job must have succeeded")),
+            ("codegen step gains a step-level if", in_job("codegen", "      - name: Every gate job must have succeeded",
+                "      - if: github.ref == 'refs/heads/never'\n        name: Every gate job must have succeeded")),
+            ("codegen step shell drops the script", in_job("codegen", "        run: |\n          set -euo pipefail",
+                "        shell: bash -c \"exit 0\" {0}\n        run: |\n          set -euo pipefail")),
+        ];
+        let mut survived = Vec::new();
+        for (name, mutated) in &must_red {
+            assert_ne!(mutated, &ci, "mutant `{}` did not apply -- ci.yml's shape changed and this plant is now vacuous", name);
+            if check(mutated) {
+                survived.push(*name);
+            }
+        }
+
+        // Innocent work must stay GREEN. Banning key PRESENCE is the instrument this file has
+        // retracted twice; these are the controls that keep it honest.
+        let must_stay_green: Vec<(&str, String)> = vec![
+            ("job CARGO_TERM_COLOR", at_job("CARGO_TERM_COLOR: always")),
+            ("a pinned GitHub-hosted runner image", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04")),
+            // The cap must not become a second false-red instrument: any sane bound is fine.
+            ("a tighter timeout", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 5")),
+            ("a looser but still bounded timeout", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 25")),
+            ("workflow CARGO_TERM_COLOR", at_workflow("CARGO_TERM_COLOR: always")),
+            ("workflow RUST_LOG", at_workflow("RUST_LOG: debug")),
+            // THE INERT HALF OF THE `PYTHON*` FAMILY. `k.starts_with("PYTHON")` banned these, so
+            // the commonest Python-CI idiom there is redded both gate pins with a message about
+            // disarming the ask-gate -- the false-red instrument this file has now retracted six
+            // times, one family over (review #36).
+            ("job PYTHONUNBUFFERED", at_job("PYTHONUNBUFFERED: \"1\"")),
+            ("job PYTHONDONTWRITEBYTECODE", at_job("PYTHONDONTWRITEBYTECODE: \"1\"")),
+            ("workflow PYTHONHASHSEED", at_workflow("PYTHONHASHSEED: \"0\"")),
+            ("job shell: bash", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash\n", 1)),
+            ("pull_request types WIDENED", ci.replacen("  pull_request:\n", "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", 1)),
+            // STRICTLY WIDER trigger surfaces. Both redded before review #11: an omitted
+            // `branches:` means EVERY branch, and a null `push:` body is the commonest spelling of
+            // "every push". A guard against narrowing that blocks widening is the false-red
+            // instrument wearing the other hat.
+            ("push.branches removed entirely", ci.replacen("    branches: ['**', '!badges']\n", "", 1)),
+            // The control that keeps the tag rule about the PAIR rather than the key: adding a
+            // tag filter NEXT TO the branch list is ordinary release plumbing and widens nothing.
+            // `build-test` carries `uses:` steps and a step-level `DB_TESTS_REQUIRED` today; the
+            // guards extended to it must not red any of that.
+            ("build-test job CARGO_TERM_COLOR", ci.replacen("  build-test:\n", "  build-test:\n    env:\n      CARGO_TERM_COLOR: always\n", 1)),
+            // A list `on:` carries no filters at all -- strictly wider than the mapping form, and
+            // the fifth spelling of the false-red instrument this file has retracted (review #20).
+            ("on: as a list of events", with_trigger("on: [push, pull_request]\n")),
+            ("push tags ALONGSIDE branches", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges']\n    tags: ['v*']", 1)),
+            // The matcher must not become the next false-red instrument: `!badges` is the real
+            // exclusion this file ships, and an added narrow one must stay green.
+            ("a second narrow branch exclusion", ci.replacen("    branches: ['**', '!badges']", "    branches: ['**', '!badges', '!gh-pages']", 1)),
+            ("push with a null body", ci.replacen("  push:\n    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)\n    branches: ['**', '!badges']\n", "  push:\n", 1)),
+            // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used
+            // to red on an innocent step addition (`steps.len() == 4`). An ordinary extra step
+            // that names nothing sensitive must stay green, or the next contributor learns to
+            // discount this red.
+            ("an ordinary extra step", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Print the toolchain\n        run: rustc --version\n      - name: decision-lookup hermetic stub suite",
+                1)),
+            // `codegen` must tolerate the same ordinary work as every other job: a conventional
+            // env var, a WIDENED `if:` that still contains `always()`, and an extra step that
+            // names nothing sensitive. Without these three the new guards are the key-presence
+            // instrument this file has retracted three times, aimed at the required check.
+            ("codegen job CARGO_TERM_COLOR", in_job("codegen", "    runs-on: ubuntu-latest",
+                "    env:\n      CARGO_TERM_COLOR: always\n    runs-on: ubuntu-latest")),
+            // THE EXPLICIT-EXPRESSION SPELLING, not a "widening": `if: always() && <x>` reads like
+            // one and NARROWS, which is the mislabelled-plant shape one control over. `${{ }}` is
+            // the same condition written the way GitHub's own docs write it, and an equality
+            // assertion would have redded it.
+            ("codegen if in the ${{ }} spelling", in_job("codegen", "    if: always()", "    if: ${{ always() }}")),
+            ("an ordinary extra codegen step", in_job("codegen", "      - name: Every gate job must have succeeded",
+                "      - name: Print the runner\n        run: uname -a\n      - name: Every gate job must have succeeded")),
+            ("a reordering that keeps both gate steps", ci.replacen(
+                "      - name: decision-lookup hermetic stub suite",
+                "      - name: Cache warm\n        run: echo warm\n      - name: decision-lookup hermetic stub suite",
+                1)),
+        ];
+        // ASSERTED, NOT NARRATED. The ADR, the journal and the PR body all said "20 mutants, 5
+        // controls" while the test carried 21 and 7 -- a derived number stated in three records
+        // with nothing re-deriving it, which is exactly ADR-20260817-105845. The prose no longer
+        // states a count; this is the only place one lives, and it cannot drift from the arrays it
+        // measures.
+        assert!(
+            must_red.len() >= 99 && must_stay_green.len() >= 22,
+            "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
+            must_red.len(),
+            must_stay_green.len()
+        );
+        let mut false_reds = Vec::new();
+        for (name, mutated) in &must_stay_green {
+            assert_ne!(mutated, &ci, "control `{}` did not apply", name);
+            if !check(mutated) {
+                false_reds.push(*name);
+            }
+        }
+        assert!(
+            survived.is_empty(),
+            "these disarming mutants were NOT caught: {:?}. Each makes the gate step unable to fail while its `run:` stays byte-identical.",
+            survived
+        );
+        assert!(
+            false_reds.is_empty(),
+            "these INNOCENT changes were redded: {:?}. A guard that fires on ordinary CI work trains readers to discount reds — the T15g rule, and the defect rounds 3 and 5 both landed.",
+            false_reds
+        );
+    }
+
+    /// Both gate scripts must compare themselves against their committed blobs before reporting.
+    ///
+    /// PINNED FROM HERE, deliberately: this test runs in the build-test job, which has its own
+    /// checkout. A step in the `changes` job that overwrites a gate script cannot touch this copy,
+    /// so the presence of the block is asserted from outside the blast radius while the block does
+    /// the runtime comparison. Neither half is sufficient alone — the eighth review of PR #679
+    /// deleted the block from `stub-tests.sh` and every gate in the repo stayed green.
+    #[test]
+    fn assert_gate_script_self_verifies() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        // THE GATE SET, named once here and required IN FULL in BOTH scripts. A script's own block
+        // cannot survive that script being REPLACED wholesale, so each must verify the others.
+        // WHAT IS NOT IN THIS SET, recorded here because this is where the next person revising it
+        // will look. `.claude/hooks/stop-gate.sh` is the only thing that runs the ask-gate selftest
+        // on every INTERACTIVE turn, and it is not a member: emptying it disarms that gate locally
+        // with every pin in this file green. CI still catches the disarmed state on push, because
+        // the `changes` job invokes the selftest script directly rather than through stop-gate; and
+        // `stop-gate.sh` predates this branch, so widening the set is a change to the set's
+        // boundary rather than a fix to anything this PR introduced. Raised by the independent
+        // review of PR #679 and deliberately NOT taken here -- but a set whose omissions are
+        // undocumented is how the next omission gets argued from silence.
+        const GATE_SET: [&str; 4] = [
+            ".claude/hooks/register-check.sh",
+            ".claude/hooks/register-check-selftest.sh",
+            ".claude/skills/decision-lookup/scripts/decision-lookup.sh",
+            ".claude/skills/decision-lookup/scripts/stub-tests.sh",
+        ];
+        for (rel, optout) in [
+            (".claude/skills/decision-lookup/scripts/stub-tests.sh", "DECISION_LOOKUP_ALLOW_DIRTY"),
+            (".claude/hooks/register-check-selftest.sh", "REGISTER_CHECK_ALLOW_DIRTY"),
+        ] {
+            let raw = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            // SCAN THE CODE, NOT THE PROSE. Review #9 commented the whole block out of
+            // `register-check-selftest.sh` and every needle still matched -- inside the comment
+            // that describes the block. A pin that a `# ` prefix defeats is not a pin.
+            let src = shell_code_only(&raw);
+            // ONE list, checked against the COMMENT-STRIPPED source. There used to be two -- a
+            // `raw` list and a shorter `src` list -- and the newest needle was added to the raw one
+            // only. `claude-review` caught it on PR #679: deleting the real `unset "${!GIT_@}"`
+            // line from both scripts left this test GREEN, because the identical string sits in the
+            // header comment DESCRIBING the line that no longer existed, re-opening the
+            // oracle-redirect route for every GIT_* source that is not ci.yml. That is the round-9
+            // defect (`raw.contains` matching inside a comment) recurring for the one needle added
+            // after round 9. Two lists that must agree WILL diverge; there is now one, and a needle
+            // added here is automatically checked where it has to hold.
+            // THESE NEEDLES TRACK THE MECHANISM, and the mechanism changed in review #13: the
+            // comparison was `cat-file blob | cmp`, which put the RAW blob against a SMUDGED
+            // worktree file and so read git's own EOL translation as tampering on any
+            // core.autocrlf checkout. It is object-id against object-id now, `hash-object` running
+            // the same clean filter git runs on commit, and `cmp` is gone entirely -- a required
+            // binary nothing called could only produce a false refusal.
+            // THE THIRD ROUTE THE HEADER CLAIMS CLOSED HAD NEITHER A NEEDLE NOR A PLANT. Both
+            // scripts' V3 header names three demonstrated routes: a `git` shell function (closed by
+            // `unset -f`), a PATH shim (closed by the fixed `_vpath`), and `GIT_DIR` at a decoy
+            // repo (closed by `unset "${!GIT_@}"`). Routes 1 and 3 were pinned here, and route 3
+            // is exercised behaviourally by the decoy block below. Route 2 was pinned by NOTHING:
+            // rewriting `_git="$(PATH="$_vpath" command -v git || true)"` to
+            // `_git="$(command -v git || true)"` and deleting the `_vpath` line left
+            // `cargo test --workspace` entirely green. `env_ok`'s `PATH` ban does not cover it --
+            // that is about `ci.yml`, and the header scopes `_vpath` to an INHERITED environment
+            // (a composite action, a runner image, a local invocation), which is the case `env_ok`
+            // structurally cannot see. It is the separation this file already makes for `GIT_*`.
+            // §19 shape #1, in the needle list written to close it, on the one route of the trio
+            // whose defence is a VALUE rather than a statement. (Review #46 of PR #679.)
+            for needle in [
+                "hash-object --no-filters",
+                "rev-parse -q --verify \"${_ref}:$rel\"",
+                "unset -f git tr command",
+                "unset \"${!GIT_@}\"",
+                "PATH=\"$_vpath\" command -v git",
+                // AND `tr`, WHICH REVIEW #46's FIX LEFT UNPINNED -- its own finding, one binary
+                // over. Dropping the PATH prefix from the `tr` line ALONE kept `cargo test
+                // --workspace` green, because `_vpath=` survives for `_git` and both needles above
+                // still match. And `tr` is not a symmetric afterthought: it is the binary that
+                // TRANSFORMS THE BYTES BEING COMPARED. On a tampered script the first `hash-object`
+                // mismatches, so the CRLF fallback runs `"$_tr" -d '\r' < file | "$_git"
+                // hash-object --no-filters --stdin`; a `tr` earlier on an inherited PATH that
+                // ignores stdin and emits the pristine content makes `_have == _want`, and the step
+                // prints `all 4 gate scripts are byte-identical` over a disarmed gate set -- with no
+                // `git` shim anywhere. `unset -f git tr command` covers the shell-FUNCTION spelling
+                // only, and `env_ok`'s PATH ban covers `ci.yml` only, which is the same separation
+                // this list already draws for `GIT_*`. (Review #73 of PR #679.)
+                "PATH=\"$_vpath\" command -v tr",
+                "_vpath=\"/usr/bin:/bin:/usr/local/bin\"",
+            ] {
+                assert!(
+                    src.contains(needle),
+                    "{} is missing the EXECUTABLE `{}` (a copy on its own comment LINE does not count; see `shell_code_only` for the trailing-comment boundary). Without it a step in the `changes` job can overwrite a gate script, or redirect the oracle, and the whole gate reports green.",
+                    rel, needle
+                );
+            }
+            // AND THE SHARED CONTRACT PARAGRAPH MUST BE IDENTICAL BETWEEN THE TWO SCRIPTS -- which
+            // nothing asserted, though three separate places CLAIMED it did ("the byte-identical
+            // copy ... which `assert_gate_script_self_verifies` requires to stay in lockstep").
+            // This function iterates the scripts INDEPENDENTLY and checks needles, paths and the
+            // version marker; it never compares one to the other. The two "WHEN IT IS ARMED"
+            // blocks were wrong together only because one author edited both by hand, and they
+            // could have drifted silently at any point -- which is the two-statements-of-one-scope
+            // defect this branch retracts repeatedly, with a false claim of a gate on top of it.
+            //
+            // The paragraph describes a CONTRACT that is the same for both scripts (when the
+            // comparison is armed, what it catches, what it does not), so it must read identically;
+            // everything around it legitimately differs, including the opt-out variable names.
+            // Planted by inverting one copy's claim. (Review #79 of PR #679.)
+            //
+            // The version marker is prose by construction, so it is the one thing checked in `raw`.
+            assert!(
+                raw.contains("GATE-SELF-VERIFICATION-V3"),
+                "{} must carry the GATE-SELF-VERIFICATION-V3 marker so a reader can tell which contract this block implements",
+                rel
+            );
+            for gate in GATE_SET {
+                assert!(
+                    src.contains(gate),
+                    "{} must verify the WHOLE gate set and is missing `{}`. A block inside a script goes away when that script is REPLACED, so the only thing that catches `find -name '<guard>' -exec cp exit0.sh {{}} +` is the OTHER guard checking it.",
+                    rel, gate
+                );
+            }
+            assert!(
+                src.contains(optout),
+                "{} must name its opt-out `{}` — the check is default-on, and a check with no documented way out gets deleted instead of opted out of",
+                rel, optout
+            );
+            // Default-ON. The previous shape ran the comparison only when GITHUB_ACTIONS=true,
+            // which fails OPEN: the discriminator was an ordinary environment variable, settable
+            // from the same untrusted surface the check defends against.
+            assert!(
+                !src.contains("${GITHUB_ACTIONS:-}"),
+                "{} must not gate its self-verification on GITHUB_ACTIONS — an attacker-settable variable as the on-switch means the safe state needs cooperation. Gate it on the explicit opt-out `{}` instead.",
+                rel, optout
+            );
+        }
+    }
+
+    /// The two gate scripts' shared CONTRACT paragraph must read identically.
+    ///
+    /// `assert_gate_script_self_verifies` iterates them independently, so nothing compared one to
+    /// the other -- while the ADR, a commit message and a PR reply all asserted it did. See that
+    /// function's comment for the full retraction. (Review #79 of PR #679.)
+    #[test]
+    fn both_gate_scripts_state_the_same_armed_contract() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let para = |rel: &str| -> String {
+            let s = fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{}: {}", rel, e));
+            let i = s
+                .find("# WHEN IT IS ARMED")
+                .unwrap_or_else(|| panic!("{} lost its `WHEN IT IS ARMED` block -- that paragraph is the contract both scripts publish; re-point this test rather than deleting it", rel));
+            let j = s[i..]
+                .find("# WHAT THIS DOES NOT DO")
+                .map(|k| i + k)
+                .unwrap_or_else(|| panic!("{}'s `WHEN IT IS ARMED` block is no longer terminated by `WHAT THIS DOES NOT DO`", rel));
+            s[i..j].to_string()
+        };
+        assert_eq!(
+            para(".claude/hooks/register-check-selftest.sh"),
+            para(".claude/skills/decision-lookup/scripts/stub-tests.sh"),
+            "the two gate scripts publish DIFFERENT versions of the same contract. That paragraph says when the comparison is armed, what it catches and what it does not -- facts about the shared mechanism, identical for both -- so a reader who opens either must get the same answer. Everything around it may differ, including the opt-out variable names"
+        );
+    }
+
+    /// THE PREDICATE, MEASURED IN BOTH DIRECTIONS -- because the sentence describing it was wrong.
+    ///
+    /// Review #72 claimed the conditional opt-out means "an in-session `cp exit0.sh <gate script>`
+    /// is caught on the next turn rather than on push". It is not: `git status --porcelain` over
+    /// those paths is non-empty exactly when the bytes differ from HEAD, which is exactly when the
+    /// selftest's comparison would mismatch, so **dirty implies opted out** and the comparison is
+    /// skipped in precisely the state where it could fail. No working-tree predicate can separate
+    /// "editing a gate script" from "overwriting one" -- at the byte level they are one state.
+    ///
+    /// What the block DOES deliver is the tamper that hides from `git status`
+    /// (`--assume-unchanged`, `--skip-worktree`): status clean, bytes different, so the predicate
+    /// arms and the selftest reds. That is the stealthier class, and the coverage is inverted from
+    /// the naive reading -- the clumsy overwrite is caught at push, the careful one on the next turn.
+    ///
+    /// Both directions are asserted here rather than argued, because a sentence carried this claim
+    /// for one round and was false. Runs the REAL predicate, lifted out of `stop-gate.sh`, against a
+    /// throwaway repo. (Review #79 of PR #679.)
+    /// A HOST THAT CANNOT BUILD THE ORACLE MUST OPT OUT, NOT BLOCK THE TURN.
+    ///
+    /// The selftest resolves `git` and `tr` on a PINNED PATH so it cannot be sent to a shim, and
+    /// FATALs when they are not there. `stop-gate.sh` runs it ARMED whenever the four gate scripts
+    /// are clean — the ordinary state — and its `step()` turns a non-zero exit into the hook's
+    /// `exit 2`. So on NixOS (`/run/current-system/sw/bin`) or a slim container, EVERY TURN was
+    /// blocked with a clean tree and no gate script touched. The printed remedy
+    /// (`REGISTER_CHECK_ALLOW_DIRTY=1`) works for the two Makefile targets that pass it and not for
+    /// this caller, which picks the branch itself: the only escape was exporting the variable into
+    /// the session, disarming the comparison permanently and silently — the end state the V3 header
+    /// argues against.
+    ///
+    /// NOT A WEAKENING, which is why it is closed rather than recorded: the comparison is
+    /// IMPOSSIBLE on such a host, so the choice is between saying so once per turn and a permanent
+    /// silent disarm. The branch is decided by what exists under a fixed ABSOLUTE path, which no
+    /// in-repo edit and no inherited environment can move — that is what pinning it buys.
+    /// (Review #91 of PR #679.)
+    #[test]
+    fn a_host_without_the_oracle_opts_out_instead_of_blocking_every_turn() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let hook = fs::read_to_string(root.join(".claude/hooks/stop-gate.sh")).expect("stop-gate.sh");
+
+        // LIFTED FROM THE SHIPPED SCRIPT, never re-implemented here.
+        let start = hook
+            .find("_vpath=")
+            .expect("stop-gate.sh must resolve the oracle on a pinned `_vpath` -- if that moved, re-point this test rather than deleting it");
+        let end = hook[start..]
+            .find("_gate_scripts_dirty=0")
+            .map(|i| start + i)
+            .expect("the oracle check must sit above the dirty predicate");
+        let probe = &hook[start..end];
+        assert!(
+            probe.contains("_oracle_missing"),
+            "the lifted slice is not the oracle check: {}",
+            probe
+        );
+
+        let run = |src: &str| -> String {
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(format!("{}\nprintf '%s' \"$_oracle_missing\"\n", src))
+                .output()
+                .expect("run the lifted oracle probe");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        // On this host `git` and `tr` ARE under the pinned path, so the probe must find nothing and
+        // the hook must stay ARMED. Without this half the fix would read as "always opt out".
+        assert_eq!(
+            run(probe),
+            "",
+            "the oracle probe reports a miss on a host where `git` and `tr` resolve under the pinned PATH -- that opts the comparison out on every ordinary machine, which is the gate switching itself off"
+        );
+
+        // AND THE MISS IS DETECTED. The pinned path is absolute, so the only way to exercise this
+        // is to repoint it -- and the substitution is ASSERTED to have applied, because a plant
+        // that silently fails to apply reads exactly like a guard that does not discriminate.
+        let empty = std::env::temp_dir().join(format!("cf-no-oracle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&empty);
+        fs::create_dir_all(&empty).expect("mkdir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(empty.clone());
+        let repointed = probe.replace(
+            "_vpath=\"/usr/bin:/bin:/usr/local/bin\"",
+            &format!("_vpath={:?}", empty.to_string_lossy()),
+        );
+        assert_ne!(
+            repointed, probe,
+            "the `_vpath` substitution did not apply, so the assertion below would pass on the UNMODIFIED probe and prove nothing. The pinned value in stop-gate.sh changed spelling -- re-point this substitution"
+        );
+        let missing = run(&repointed);
+        for tool in ["git", "tr"] {
+            assert!(
+                missing.contains(tool),
+                "with the pinned PATH repointed at an empty directory, `{}` was not reported missing (got {:?}). The hook would then run the selftest ARMED, the selftest would FATAL on the same resolution, `step` would set fail=1 and the hook would exit 2 -- every turn blocked on a host where the comparison is simply impossible",
+                tool, missing
+            );
+        }
+
+        // AND THE DISPATCH MUST ACT ON IT: the capability branch runs the selftest with the opt-out
+        // rather than armed, and it is evaluated FIRST so its message (which explains the host, not
+        // a dirty tree) is the one the operator sees.
+        let dispatch = &hook[hook
+            .find("# --- END OF THE DIRTY PREDICATE ---")
+            .expect("the predicate marker must exist")..];
+        let oracle_at = dispatch
+            .find("if [ -n \"$_oracle_missing\" ]; then")
+            .expect("the dispatch must branch on `_oracle_missing` -- detecting the miss and then running armed anyway blocks the turn exactly as before");
+        let dirty_at = dispatch
+            .find("[ \"$_gate_scripts_dirty\" = \"1\" ]")
+            .expect("the dispatch must still branch on `_gate_scripts_dirty`");
+        assert!(
+            oracle_at < dirty_at,
+            "the dirty-tree branch is evaluated before the oracle-capability branch. Both opt out, so the VERDICT is the same -- but the message is not, and on a host with no oracle the operator would be told a gate script is dirty when none is"
+        );
+        let branch = &dispatch[oracle_at..dirty_at];
+        assert!(
+            branch.contains("REGISTER_CHECK_ALLOW_DIRTY=1"),
+            "the oracle-capability branch does not pass the opt-out, so the selftest still FATALs and the hook still exits 2: {}",
+            branch
+        );
+    }
+
+    #[test]
+    fn the_stop_gate_predicate_discriminates_a_hidden_tamper() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let have_git = std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !have_git {
+            eprintln!("SKIP the_stop_gate_predicate_discriminates_a_hidden_tamper: no git on this host");
+            return;
+        }
+        // LIFT THE PREDICATE OUT OF THE SHIPPED SCRIPT, never a copy: a re-implementation here
+        // would drift from what runs, which is the two-lists-of-one-scope defect this branch
+        // retracts repeatedly.
+        let hook = fs::read_to_string(root.join(".claude/hooks/stop-gate.sh")).expect("stop-gate.sh");
+        let start = hook
+            .find("_gate_scripts_dirty=0")
+            .expect("stop-gate.sh must initialise `_gate_scripts_dirty` -- the predicate moved, re-point this test rather than deleting it");
+        // END ON AN EXPLICIT MARKER, not on "the next `if`". The end anchor used to be the
+        // dispatch's `if [ "$_gate_scripts_dirty" = "1" ]`; when that dispatch grew a branch in
+        // front of it (the oracle-capability opt-out), the anchor matched INSIDE the new `elif`
+        // and the lifted snippet became an unterminated `if`. Bash printed nothing, and this
+        // test's first assertion failed as "a clean tree must ARM the comparison" -- a message
+        // about the predicate, for a defect in the extraction. A guard whose FAILURE MESSAGE
+        // misidentifies the subject is the class this branch keeps closing. (Review #91.)
+        let end = hook[start..]
+            .find("# --- END OF THE DIRTY PREDICATE ---")
+            .map(|i| start + i)
+            .expect("stop-gate.sh must carry the `# --- END OF THE DIRTY PREDICATE ---` marker -- this test lifts the predicate out of the shipped script by it, so moving the marker without moving this anchor lifts the wrong lines");
+        let predicate = &hook[start..end];
+
+        let sandbox = std::env::temp_dir().join(format!("cf-stopgate-pred-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&sandbox);
+        fs::create_dir_all(sandbox.join(".claude/hooks")).expect("mkdir");
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(sandbox.clone());
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&sandbox)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.invalid")
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?}: {}", args, e));
+            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        let target = ".claude/hooks/register-check.sh";
+        fs::write(sandbox.join(target), "#!/usr/bin/env bash\n# the real one\n").expect("write");
+        git(&["init", "-q", "-b", "main", "."]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "base"]);
+
+        let verdict = || -> String {
+            let script = format!(
+                "ROOT={:?}\n{}\nprintf '%s' \"$_gate_scripts_dirty\"\n",
+                sandbox.to_string_lossy(),
+                predicate
+            );
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&script)
+                .output()
+                .expect("run the lifted predicate");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+
+        assert_eq!(verdict(), "0", "a clean tree must ARM the comparison");
+
+        fs::write(sandbox.join(target), "#!/usr/bin/env bash\nexit 0\n").expect("tamper");
+        assert_eq!(
+            verdict(),
+            "1",
+            "an ordinary overwrite leaves the tree DIRTY, so the predicate opts out -- this is the claim review #72 got wrong, and it is asserted so the retraction cannot quietly un-retract. The comparison does not run here; that overwrite is caught at push"
+        );
+
+        git(&["update-index", "--assume-unchanged", target]);
+        assert_eq!(
+            verdict(),
+            "0",
+            "a tamper HIDDEN from `git status` (--assume-unchanged / --skip-worktree) leaves the status clean while the bytes differ, so the predicate must ARM and let the selftest's hash comparison catch it. This is the only class the conditional opt-out actually buys, and if it stops holding the block delivers nothing"
+        );
+    }
+
+    /// `stop-gate.sh` MAY NOT DISARM THE COMPARISON UNCONDITIONALLY.
+    ///
+    /// V3's rationale is that a guard cannot detect its own wholesale replacement and only the OTHER
+    /// guard can. `stop-gate.sh` is the only caller that runs every turn, and it passed
+    /// `REGISTER_CHECK_ALLOW_DIRTY=1` on all of them -- so an in-session overwrite of a gate script
+    /// was silent until push, and the cross-guard was consulted on no path where it would fire
+    /// first. The opt-out is now conditional on a gate script being dirty in the working tree.
+    ///
+    /// Pinned because the regression is one character: putting `env REGISTER_CHECK_ALLOW_DIRTY=1`
+    /// back on the unconditional line restores the old behaviour with every other assertion green,
+    /// and it is the edit a maintainer reaches for the first time the armed path reds on them.
+    /// (Review #72 of PR #679.)
+    #[test]
+    fn stop_gate_arms_the_comparison_when_the_gate_scripts_are_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = fs::read_to_string(root.join(".claude/hooks/stop-gate.sh")).expect("stop-gate.sh");
+        // INVOCATIONS ONLY. The first version of this filter took every non-comment line naming the
+        // script -- which includes the PATHSPEC LIST in the dirtiness predicate a few lines above,
+        // where the script appears as a `git status --porcelain -- <paths>` argument with no
+        // `REGISTER_CHECK_ALLOW_DIRTY` on it. That line alone satisfied "an armed invocation
+        // exists", so the plant (putting the opt-out back on the real call) applied and the test
+        // stayed GREEN. §19 shape #7 -- the helper building the inputs needs the scrutiny of the
+        // assertion it feeds -- reproduced in the guard written for review #72, in the same round.
+        // `step ` is what actually runs something here.
+        let calls: Vec<&str> = src
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with('#') && l.starts_with("step ") && l.contains("register-check-selftest.sh"))
+            .collect();
+        assert!(
+            !calls.is_empty(),
+            "stop-gate.sh no longer invokes register-check-selftest.sh at all -- the ask-gate discipline lost its every-turn caller. Re-point this test only if that moved somewhere that still runs every turn"
+        );
+        assert!(
+            calls.iter().any(|l| !l.contains("REGISTER_CHECK_ALLOW_DIRTY")),
+            "every stop-gate.sh invocation of register-check-selftest.sh passes REGISTER_CHECK_ALLOW_DIRTY. That disarms the four-way gate-script comparison on the ONLY path that runs every turn, so an in-session overwrite of a gate script is silent until push -- and the cross-guard, whose whole rationale is that a script cannot detect its own replacement, is then consulted nowhere it would fire first. Keep an ARMED invocation for the clean-tree case; the opt-out belongs on the dirty-tree branch. Got: {:?}",
+            calls
+        );
+        assert!(
+            calls.iter().any(|l| l.contains("REGISTER_CHECK_ALLOW_DIRTY")),
+            "stop-gate.sh has no opted-out invocation left. Editing a gate script and re-running is the normal interactive loop, and an armed-only caller makes that turn a hard failure with deletion of the block as the tempting escape -- which the block's own header asks readers not to do. Got: {:?}",
+            calls
+        );
+    }
+
+    /// The self-verification, PLANTED RED. A block never seen to fire is an unverified claim, and
+    /// this one was unreachable on every path anyone ran: `stop-gate.sh` opted out on EVERY turn,
+    /// `make hooks-test` opts out by necessity, and in CI it only fires against a tampered tree —
+    /// which nothing else in the repo ever constructs. So construct it.
+    ///
+    /// `stop-gate.sh`'s opt-out is now CONDITIONAL on a gate script being dirty in the working tree
+    /// (review #72), so the block does run in-session on an ordinary turn — but that changes how
+    /// often it is *exercised*, not whether it is *pinned*: a clean tree takes the OK path, and only
+    /// this test constructs the tamper. The sentence above is kept in the past tense rather than
+    /// deleted, because "locally it is opted out" is the claim that stopped being true and the next
+    /// reader should see which way it moved.
+    #[test]
+    fn the_gate_self_verification_reds_on_a_tampered_script() {
+        // Needs a real git; skip rather than red where the toolchain is absent (a HOST condition,
+        // never a precondition this test could build).
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            eprintln!("SKIP: no git on this host");
+            return;
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let tmp = std::env::temp_dir().join(format!("gate-selfverify-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let scripts = tmp.join(".claude/skills/decision-lookup/scripts");
+        fs::create_dir_all(&scripts).expect("mkdir");
+        let hooks = tmp.join(".claude/hooks");
+        fs::create_dir_all(&hooks).expect("mkdir hooks");
+        // The fixture must hold the WHOLE gate set, or the tamper cases below can only ever reach
+        // the two files this script happens to sit next to — which is how review #9 found that
+        // `register-check-selftest.sh`'s block was never exercised by anything.
+        for (dir, base) in [
+            (".claude/skills/decision-lookup/scripts", "stub-tests.sh"),
+            (".claude/skills/decision-lookup/scripts", "decision-lookup.sh"),
+            (".claude/hooks", "register-check.sh"),
+            (".claude/hooks", "register-check-selftest.sh"),
+        ] {
+            fs::copy(root.join(dir).join(base), tmp.join(dir).join(base))
+                .unwrap_or_else(|e| panic!("copy {}: {}", base, e));
+        }
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&tmp)
+                // FENCE THE FIXTURE OFF THE DEVELOPER'S GIT CONFIG, as the docs-only detector's
+                // fixture already does and comments. Without these two, a maintainer host's
+                // `commit.gpgsign` fails the commit and this test panics with a GPG error where
+                // the reader expects a tamper verdict; `core.hooksPath` runs arbitrary local
+                // hooks inside the fixture; and `core.autocrlf` CR-strips the committed blobs
+                // while the worktree copies keep CRLF -- reintroducing, in the harness, the exact
+                // smudge class review #13 rewrote the block under test to remove. Worse than a
+                // red: the guard's CR-strip fallback probably absorbs it, so the test would pass
+                // for a reason nobody chose. CI is Linux with a clean HOME, so none of it shows
+                // up there. (Review #43.)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "gate scripts"]);
+
+        // BOTH GUARDS, not one. Review #10 and `claude-review` found the same hole independently:
+        // this test copied all four scripts into the fixture but only ever EXECUTED
+        // `stub-tests.sh`, so `register-check-selftest.sh`'s block was held up by a substring scan
+        // alone -- and a substring scan cannot tell live code from dead code. Changing its opt-out
+        // default to `${REGISTER_CHECK_ALLOW_DIRTY:-1}` disarmed it in CI with every needle, every
+        // GATE_SET path and all 285 tests green. Since V3's whole rationale is that each guard
+        // catches the OTHER's wholesale replacement, disarming one reopens the round-9 mutant.
+        // Adding a script to the fixture as a TARGET is not the same as exercising its BLOCK.
+        const GUARDS: [&str; 2] = [
+            ".claude/skills/decision-lookup/scripts/stub-tests.sh",
+            ".claude/hooks/register-check-selftest.sh",
+        ];
+        // ONE builder for every invocation in this test. Each site must clear both opt-outs AND
+        // GITHUB_SHA -- the last one because the fixture is a throwaway repo whose HEAD is not the
+        // runner's commit, so an inherited GITHUB_SHA makes the script refuse (correctly) for a
+        // reason none of these cases is about.
+        let guard_cmd = |guard: &str| {
+            let mut c = std::process::Command::new("bash");
+            c.arg(guard)
+                .current_dir(&tmp)
+                .env_remove("DECISION_LOOKUP_ALLOW_DIRTY")
+                .env_remove("REGISTER_CHECK_ALLOW_DIRTY")
+                .env_remove("GITHUB_SHA");
+            c
+        };
+        let run_guard = |guard: &str| guard_cmd(guard).output().expect("bash");
+        let run = || run_guard(GUARDS[0]);
+
+        // GREEN half: untouched tree, the block says so out loud. (The suite's own cases need a
+        // wrapper this fixture does not provide, so only the self-verification verdict is read.)
+        let clean = run();
+        let clean_out = String::from_utf8_lossy(&clean.stdout).to_string();
+        assert!(
+            clean_out.contains("self-verification: OK"),
+            "an untouched tree must report the comparison PASSING, out loud -- a silent skip and a silent pass look identical in a green log. Got:\n{}",
+            clean_out
+        );
+
+        // RED half, twice: tamper each script in turn and require a non-zero exit naming it.
+        for (dir, base) in [
+            (".claude/skills/decision-lookup/scripts", "decision-lookup.sh"),
+            (".claude/skills/decision-lookup/scripts", "stub-tests.sh"),
+            (".claude/hooks", "register-check.sh"),
+            // THE ONE THAT MATTERS: replacing a GUARD, not a guarded script. Under V2 this was
+            // green — the block went away with the file it lived in.
+            (".claude/hooks", "register-check-selftest.sh"),
+        ] {
+            let path = tmp.join(dir).join(base);
+            let original = fs::read_to_string(&path).expect("read");
+            fs::write(&path, format!("{}\n# TAMPERED\n", original)).expect("write");
+            let out = run();
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                !out.status.success(),
+                "tampering with {} must make the suite EXIT NON-ZERO. It exited 0:\n{}",
+                base, combined
+            );
+            assert!(
+                combined.contains("differs from the committed blob at HEAD") && combined.contains(base),
+                "the failure must name WHICH script drifted, or the operator cannot act on it. Got:\n{}",
+                combined
+            );
+            fs::write(&path, original).expect("restore");
+        }
+
+        // EACH GUARD'S OWN BLOCK, planted red. The loop above proves `stub-tests.sh`'s block
+        // fires; this proves the hook selftest's does, which is the half that had never been seen
+        // red anywhere in the repo.
+        for guard in GUARDS {
+            let clean = run_guard(guard);
+            let clean_out = format!(
+                "{}{}",
+                String::from_utf8_lossy(&clean.stdout),
+                String::from_utf8_lossy(&clean.stderr)
+            );
+            // WHAT THIS ASSERTION DOES AND DOES NOT PROVE. It reads the self-verification VERDICT
+            // out of a clean run, which is the property it is for. It does NOT prove the guard
+            // exits 0: this fixture repo has no `.claude/settings.json` and no `.claude/agents/**`,
+            // so `register-check-selftest.sh` exits non-zero for a reason that has nothing to do
+            // with the gate set -- and `stub-tests.sh` exits non-zero too, having no wrapper for
+            // its 54 cases. Reading exit status here would be the vacuous assertion the tamper case
+            // above already got wrong twice (review #46). Stated rather than implied, because a
+            // green assertion that proves less than it reads as is how the next one gets written.
+            assert!(
+                clean_out.contains("self-verification: OK"),
+                "{} must report its comparison PASSING out loud on an untouched tree -- a silent skip and a silent pass look identical in a green log. Got:\n{}",
+                guard, clean_out
+            );
+            // Tamper a script this guard is responsible for, and require THIS guard to say so.
+            let victim = tmp.join(".claude/hooks/register-check.sh");
+            let original = fs::read_to_string(&victim).expect("read");
+            fs::write(&victim, format!("{}\n# TAMPERED\n", original)).expect("write");
+            let out = run_guard(guard);
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            fs::write(&victim, original).expect("restore");
+            assert!(
+                !out.status.success() && combined.contains("differs from the committed blob"),
+                "{}'s OWN self-verification block never fires. It is asserted by a substring scan, which cannot tell live code from dead code -- so `${{REGISTER_CHECK_ALLOW_DIRTY:-1}}`, `if false; then`, or `|| true` on the cmp disarms it with every pin green. Got exit {:?}:\n{}",
+                guard, out.status.code(), combined
+            );
+        }
+
+        // THE ORACLE-REDIRECT ROUTE, exercised for real. `claude-review` on PR #679 pointed out
+        // that nothing here had ever set a `GIT_*` variable, so `unset "${!GIT_@}"` was asserted
+        // by a string match and never by behaviour -- and the `env_ok` ban in ci.yml is a
+        // DIFFERENT defence that does not reach an inherited runner environment, a composite
+        // action, or a local invocation. Build a decoy repo whose HEAD holds the TAMPERED bytes,
+        // point GIT_DIR at it, and require the suite to notice anyway.
+        {
+            let decoy = tmp.join("decoy");
+            fs::create_dir_all(decoy.join(".claude/skills/decision-lookup/scripts")).expect("mkdir decoy");
+            fs::create_dir_all(decoy.join(".claude/hooks")).expect("mkdir decoy hooks");
+            let target = scripts.join("stub-tests.sh");
+            let original = fs::read_to_string(&target).expect("read");
+            let tampered = format!("{}\n# TAMPERED\n", original);
+            for (dir, base) in [
+                (".claude/skills/decision-lookup/scripts", "decision-lookup.sh"),
+                (".claude/hooks", "register-check.sh"),
+                (".claude/hooks", "register-check-selftest.sh"),
+            ] {
+                fs::copy(tmp.join(dir).join(base), decoy.join(dir).join(base)).expect("copy decoy");
+            }
+            // The decoy commits the TAMPERED bytes, so a redirected oracle sees a match.
+            fs::write(decoy.join(".claude/skills/decision-lookup/scripts/stub-tests.sh"), &tampered)
+                .expect("write decoy");
+            let dgit = |args: &[&str]| {
+                let out = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&decoy)
+                    // Same fencing as the fixture above: the decoy repo is the ORACLE this case
+                    // redirects the guard at, so a host config reaching it is a harness defect.
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .env("GIT_AUTHOR_NAME", "t")
+                    .env("GIT_AUTHOR_EMAIL", "t@t")
+                    .env("GIT_COMMITTER_NAME", "t")
+                    .env("GIT_COMMITTER_EMAIL", "t@t")
+                    .output()
+                    .expect("git");
+                assert!(out.status.success(), "decoy git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+            };
+            dgit(&["init", "-q", "-b", "main"]);
+            dgit(&["add", "-A"]);
+            dgit(&["commit", "-qm", "decoy"]);
+
+            fs::write(&target, &tampered).expect("tamper");
+            // GITHUB_SHA MUST BE CLEARED HERE TOO. `run_guard` clears it; this site built its own
+            // Command and did not, so in CI -- where the runner sets it -- the script pinned its
+            // oracle to a commit that does not exist in this throwaway fixture and refused with
+            // `not tracked at <sha>`. Correct fail-closed behaviour, wrong message for this
+            // assertion: green locally, red in CI, on my own commit. Three invocation sites with
+            // three environments is the "two lists that must agree" defect one more time; they
+            // share `guard_cmd` now.
+            let out = guard_cmd(".claude/skills/decision-lookup/scripts/stub-tests.sh")
+                .env("GIT_DIR", decoy.join(".git"))
+                .env("GIT_WORK_TREE", &decoy)
+                .output()
+                .expect("bash");
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                !out.status.success() && combined.contains("differs from the committed blob at HEAD"),
+                "GIT_DIR pointed at a decoy repo whose HEAD holds the tampered bytes must NOT be able to talk the block into reporting OK. Deleting `unset \"${{!GIT_@}}\"` from the scripts must red exactly here. Got exit {:?}:\n{}",
+                out.status.code(), combined
+            );
+            fs::write(&target, original).expect("restore");
+        }
+
+        // ROUTE 2 OF THE THREE THE V3 HEADER CLAIMS CLOSED, EXERCISED RATHER THAN ASSERTED.
+        // `unset -f` (route 1) and `unset "${!GIT_@}"` (route 3) were both pinned by a needle, and
+        // route 3 is driven behaviourally by the decoy block above. The PATH shim -- route 2, whose
+        // defence is the fixed `_vpath` VALUE rather than a statement -- had neither until review
+        // #46: deleting `_vpath` and resolving `git` off the ambient PATH left the whole suite
+        // green. `env_ok`'s `PATH` ban does not reach this, because it is about `ci.yml` and the
+        // header scopes `_vpath` to an INHERITED environment.
+        //
+        // The shim here is the real attack in miniature: a `git` earlier on PATH that exits 0 and
+        // prints nothing, so every `rev-parse`/`hash-object` "succeeds" with empty output and a
+        // comparison of two empty strings reports the tampered file as byte-identical. The guard
+        // must red anyway, because it never asks this PATH for git.
+        {
+            // THE SHIM MUST BE THE REAL ATTACK, NOT A BROKEN GIT. The first version of this plant
+            // was `#!/bin/sh\nexit 0`: with `_vpath` deleted the guard still redded, because an
+            // oracle that returns NOTHING is caught by the empty-oid refusal, not by `_vpath`. It
+            // passed for the wrong reason -- §19 shape #3, in the plant added to close shape #1 --
+            // and the measurement said so: deleting `_vpath` from both scripts (and the needles
+            // above) left this case green.
+            //
+            // A shim that wants to hide a tampered file delegates to the real git for everything
+            // except the one question that matters, and answers THAT with the hash of the file on
+            // disk -- so committed and live agree and the guard reports OK over the tamper.
+            let real_git = String::from_utf8_lossy(
+                &std::process::Command::new("sh")
+                    .args(["-c", "command -v git"])
+                    .output()
+                    .expect("locate git")
+                    .stdout,
+            )
+            .trim()
+            .to_string();
+            let shim = tmp.join("shim-bin");
+            fs::create_dir_all(&shim).expect("shim dir");
+            let fake = shim.join("git");
+            fs::write(
+                &fake,
+                format!(
+                    "#!/bin/sh\n\
+                     # Answer `rev-parse -q --verify <ref>:<path>` with the WORKTREE file's hash,\n\
+                     # so the committed oid matches the tampered bytes. Everything else is real.\n\
+                     for a in \"$@\"; do\n\
+                     \x20 case \"$a\" in *:*) p=${{a#*:}}; if [ -f \"$p\" ]; then exec {g} hash-object --no-filters \"$p\"; fi ;; esac\n\
+                     done\n\
+                     exec {g} \"$@\"\n",
+                    g = real_git
+                ),
+            )
+            .expect("write shim");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).expect("chmod shim");
+            }
+            let target = tmp.join(GUARDS[1]);
+            let original = fs::read_to_string(&target).expect("read guard");
+            fs::write(&target, "#!/usr/bin/env bash\nexit 0\n").expect("tamper");
+            let out = guard_cmd(GUARDS[0])
+                .env("PATH", format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default()))
+                .output()
+                .expect("bash");
+            fs::write(&target, original).expect("restore");
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            // ASSERT THE VERDICT, NOT THE EXIT CODE. The first version of this assertion was
+            // `!out.status.success()` -- and `stub-tests.sh` in this fixture exits non-zero anyway,
+            // because the fixture provides no wrapper for its 54 cases. So the assertion held for a
+            // reason that had nothing to do with the shim, and deleting `_vpath` from both scripts
+            // left it green. That is §19 shape #3 landing a SECOND time in the same plant, after
+            // the `exit 0` shim was replaced for the same reason. What distinguishes the two states
+            // is the self-verification VERDICT, which is what the sibling cases above read.
+            assert!(
+                !combined.contains("self-verification: OK")
+                    && combined.contains("differs from the committed blob"),
+                "a `git` shim earlier on PATH -- one that answers the oracle with the WORKTREE file's hash -- made the guard report `self-verification: OK` over a visibly tampered script. The fixed `_vpath` is gone or bypassed, and route 2 of the three the V3 header claims closed is open. Got:\n{}",
+                combined
+            );
+        }
+
+        // FAIL CLOSED when the oracle names a commit this tree does not have. Found the hard way:
+        // CI set GITHUB_SHA, the fixture is a throwaway repo without that commit, and the script
+        // refused with `not tracked at <sha>` rather than reporting anything -- which is exactly
+        // right, and was unpinned. A future edit could easily make an unresolvable ref fall back to
+        // "OK", which is the fail-open shape this whole block exists to remove.
+        {
+            let out = guard_cmd(GUARDS[0])
+                .env("GITHUB_SHA", "0000000000000000000000000000000000000000")
+                .output()
+                .expect("bash");
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                !out.status.success() && combined.contains("is not present in this checkout"),
+                "an oracle ref this tree cannot resolve must REFUSE, not report OK -- a gate that cannot verify must never say it verified. Got exit {:?}:\n{}",
+                out.status.code(), combined
+            );
+            // AND IT MUST SAY WHICH CONDITION FIRED. An absent COMMIT and an untracked PATH are
+            // different problems with the same `cat-file -e` exit code, and reporting the merge-ref
+            // race as "not tracked" sends the operator hunting a file that is present -- while
+            // reading exactly like tampering.
+            assert!(
+                combined.contains("NOT a tamper signal") && combined.contains("RE-RUN"),
+                "the missing-commit refusal must distinguish itself from tampering and tell the operator to re-run, because on a pull_request run the merge ref can be recomputed between queue time and checkout. Got:\n{}",
+                combined
+            );
+        }
+
+        // And the opt-out must actually opt out, or the local loop is broken and someone deletes
+        // the block instead of using it.
+        fs::write(scripts.join("stub-tests.sh"), {
+            let mut c = fs::read_to_string(scripts.join("stub-tests.sh")).expect("read");
+            c.push_str("\n# TAMPERED\n");
+            c
+        })
+        .expect("write");
+        let opted = std::process::Command::new("bash") // deliberately NOT guard_cmd: sets the opt-out
+            .arg(".claude/skills/decision-lookup/scripts/stub-tests.sh")
+            .current_dir(&tmp)
+            .env("DECISION_LOOKUP_ALLOW_DIRTY", "1")
+            .output()
+            .expect("bash");
+        assert!(
+            String::from_utf8_lossy(&opted.stdout).contains("self-verification: OPTED OUT"),
+            "DECISION_LOOKUP_ALLOW_DIRTY=1 must skip the comparison and SAY so"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Pins the decision-lookup hermetic stub suite into the always-run `changes` job
+    /// (decision row `RETRIEVAL-QMD-CI`, ADR-20260824-205911 — that row authorizes this step and
+    /// this pin and nothing else in CI).
+    #[test]
+    fn the_stub_suite_runs_in_the_always_run_changes_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        assert_pinned_in_changes_job(
+            &ci,
+            "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
+            "the decision-lookup stub suite — SKILL.md declares it the authority for a wrapper carrying a supply-chain gate, and an unrun suite reports the author's machine",
+        );
+
+        // The suite's own count guard must stay armed: `skipped()` is not a failure, so without it
+        // a host that cannot construct preconditions prints a green with a fraction of the cases.
+        let suite = fs::read_to_string(root.join(".claude/skills/decision-lookup/scripts/stub-tests.sh"))
+            .expect("stub-tests.sh");
+        assert!(
+            {
+                let code = shell_code_only(&suite);
+                code.contains("EXPECTED_CASES=") && code.contains("-ne \"$EXPECTED_CASES\"")
+            },
+            "stub-tests.sh must assert its case COUNT, not merely the absence of failures — a skipped case is not a covered case"
+        );
+
+        // AND SKILL.md MUST STATE THE SAME INTEGER. The suite's count is self-enforcing (adding a
+        // case is forced to move `EXPECTED_CASES`); the DOC copy was not, and the assertion above
+        // checked only that the guard exists, never its value. So the next case added left
+        // SKILL.md -- the document SKILL.md itself calls the wrapper's authority -- stating a
+        // count nobody re-derives: exactly ADR-20260817-105845, and exactly the drift this PR
+        // retracts twice in its own records (an invented `6 passed … 12 skipped`, a "34 to 54"
+        // growth reproducing at no commit). The number now lives in ONE place and the doc copy
+        // cannot drift from it. Review #13.
+        let expected = shell_code_only(&suite)
+            .split("EXPECTED_CASES=")
+            .nth(1)
+            .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+            .filter(|d| !d.is_empty())
+            .expect("stub-tests.sh must set EXPECTED_CASES to a literal integer");
+        let skill = fs::read_to_string(root.join(".claude/skills/decision-lookup/SKILL.md"))
+            .expect("SKILL.md");
+        assert!(
+            skill.contains(&format!("**{} cases**", expected)),
+            "SKILL.md must state `**{} cases**` to match stub-tests.sh's EXPECTED_CASES={} -- a derived number in the authority doc with nothing re-deriving it is the drift ADR-20260817-105845 governs",
+            expected, expected
+        );
+        // A FLOOR, BECAUSE THE COMPLETENESS INVARIANT ONLY RATCHETS UP. `pass + fail + skip ==
+        // EXPECTED_CASES` catches a case that stops RUNNING (the round-17 defect) and not one that
+        // is REMOVED: delete a case, decrement the literal, and every gate in the repo is green --
+        // and the SKILL.md assertion above FOLLOWS the decrement rather than resisting it, because
+        // it derives its number from that same literal. So the suite's own rule three lines from
+        // the invariant ("Never delete a case and never weaken an assertion to recover green") was
+        // the one thing in that block that stayed PROSE, in a branch whose whole argument is that
+        // prose can be ignored and a gate cannot. Shape #1 one direction over: an equality is a
+        // floor AND a ceiling, and only the ceiling was load-bearing.
+        //
+        // The floor lives HERE, in Rust, deliberately -- not next to `EXPECTED_CASES` in the shell,
+        // where the same two-token edit would move both. Lowering it is a decision a diff has to
+        // argue with, in another language and another file, with this message attached. Raising it
+        // when cases are added is ordinary. (Review #47 of PR #679.)
+        const MINIMUM_CASES: u32 = 54;
+        let expected_n: u32 = expected.parse().expect("EXPECTED_CASES is an integer");
+        assert!(
+            expected_n >= MINIMUM_CASES,
+            "stub-tests.sh declares EXPECTED_CASES={} but this suite has committed to at least {}. The completeness invariant is an EQUALITY, so deleting a case and decrementing the literal is green in one edit and the SKILL.md pin follows it down. If a case is genuinely obsolete, say why here and lower this floor in the same change -- that is the whole point of it being in a different file",
+            expected_n, MINIMUM_CASES
         );
     }
 

@@ -543,7 +543,19 @@ trails and stale-decision citations stay decomposable defects); questions travel
 run reports, decision-queue sections, PR/issue comments, register rows, decision forms — are bound
 by the citation block every `.claude/agents/*.md` carries, whose presence (with this section's
 existence, the settings wiring, and the live row gate) is asserted by
-`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). The hook
+`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). That script
+also compares all four gate scripts against their committed blobs before reporting, and REFUSES to
+report if one drifted. `make hooks-test` and `make stub-tests` pass the matching
+`REGISTER_CHECK_ALLOW_DIRTY=1` / `DECISION_LOOKUP_ALLOW_DIRTY=1` unconditionally, so editing a gate
+script and re-running still works. **`stop-gate.sh` opts out only when a gate script is DIRTY in the
+working tree** — on an ordinary turn it runs the comparison armed. What that catches is narrower
+than it first reads: an ordinary overwrite leaves the tree dirty, so it opts out and is caught at
+push; the armed path catches the tamper that *hides* from `git status` (`--assume-unchanged`,
+`--skip-worktree`), which is the stealthier class. CI invokes both directly and cannot be
+talked out of the comparison at all (`env_ok` forbids both opt-out names as `env:` keys). **A local green from
+either `make` target therefore EXCLUDES the gate-set comparison** — that is the point of the opt-out,
+and it is the one thing those targets do not prove. If you run either script by hand mid-edit, pass
+the variable; run it clean-tree without one to see what CI sees. The hook
 proves presence, shape and row status, never that a search happened — honesty stays with the mob
 briefing and the independent review, which is why the trail must name its artifact.
 

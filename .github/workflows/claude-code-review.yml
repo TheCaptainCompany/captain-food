@@ -1,8 +1,24 @@
 name: Claude Code Review
 
+# ONE REVIEW PASS PER PRESENTATION, NOT ONE PER PUSH. `synchronize` fires on EVERY push to an open
+# PR, which makes the review a function of the author's commit rate rather than of the work being
+# ready. That is a loop with no termination condition: a review always finds something (it is built
+# to), the author pushes the fix, the push fires the next review. On PR #679 it ran for a night and
+# 114 commits; the last four passes each concluded "no blocking defect in the shipped behaviour"
+# while the rounds themselves introduced three regressions the author then had to fix. The reviewer
+# was not wrong and the author was not lazy -- the trigger had no stopping rule, so there was none.
+#
+# `opened` / `ready_for_review` / `reopened` are the moments the author PRESENTS the work. A second
+# opinion after a substantial rewrite is still available and costs one deliberate act: convert to
+# draft and back to ready, which fires `ready_for_review` again. Deliberate is the whole point --
+# it is a decision to re-present, not a side effect of typing `git push`.
+#
+# Findings that arrive and are not blocking do not become another round: they become an issue.
+# The triage protocol is `.claude/skills/review-triage/SKILL.md`; the ruling is
+# ADR-20260826-084500. (Founder directive 2026-08-26.)
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, ready_for_review, reopened]
 
 jobs:
   claude-review:

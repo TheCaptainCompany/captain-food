@@ -26,7 +26,7 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: hooks-test typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
+.PHONY: hooks-test stub-tests typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
@@ -39,6 +39,9 @@ help:
 	@echo "         (progress dropped, verdicts never; full log in target/quiet-gate.log)"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
+	@echo "         hooks-test / stub-tests = the two gate-script suites, run with their"
+	@echo "         self-verification opt-out so an edit-and-re-run loop works. CI runs both"
+	@echo "         WITHOUT the opt-out, so a local green here excludes the gate-set comparison."
 
 # Production E2E smoke (Stripe TEST mode) against the live deployment — tools/smoke/README.md.
 # Needs: STRIPE_SECRET_KEY (sk_test) and SUPABASE_SECRET_KEY.
@@ -188,8 +191,20 @@ gate:
 # Guard tests for the register-check gate (ADR-20260821-010543): hook verdicts on fixture
 # payloads, the settings.json wiring, and the agent files' citation blocks. Also run by the
 # Stop hook on every turn; this target is the direct entrypoint.
+# REGISTER_CHECK_ALLOW_DIRTY: the selftest compares all four gate scripts against their committed
+# blobs and refuses to report otherwise. This is the EDIT-AND-RE-RUN entrypoint, so it opts out --
+# visibly, like stop-gate.sh. CI invokes the script directly and gets the comparison. Review #9 of
+# PR #679 found this caller unlisted, which made `make hooks-test` exit 1 on any uncommitted hook
+# edit: a silent trap on the one loop the target exists for.
 hooks-test:
-	bash .claude/hooks/register-check-selftest.sh
+	env REGISTER_CHECK_ALLOW_DIRTY=1 bash .claude/hooks/register-check-selftest.sh
+
+# The SAME entrypoint for the other gate script. `make hooks-test` was given the opt-out so an
+# edit-and-re-run loop stays possible; the decision-lookup stub suite -- the one PR #679 is about
+# -- was left with no interactive caller at all, so a maintainer editing the wrapper got
+# `FATAL: ... differs from the committed blob` and zero cases run (review #13).
+stub-tests:
+	env DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 
 # Night loop: validate the frozen DSL, regenerate, re-validate. NEVER edits specs/**.
 night-loop: validate generate
