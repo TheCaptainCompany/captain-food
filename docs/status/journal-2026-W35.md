@@ -2540,3 +2540,30 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > RESEMBLE each other, not the things that share X.** Both reporters emit a count *about* the corpus;
 > the consumer emits findings *from* it — different shape, same dependency, and the shape is what the
 > eye groups by.
+>
+> **Round 85 — the round-82 retraction reached `.gitignore` and the journal and stopped at the
+> decision row, which is the one surface that is authority.**
+>
+> Clause (e) of `RETRIEVAL-QMD-CI` still said *"both Python call sites use `python3 -c`, which writes
+> no bytecode"* — the sentence round 82 retracted two files over, in the same diff, with the measured
+> version (~20 call sites, two stdin heredocs, and the six `PYTHONPATH=` probes that **do** write
+> `__pycache__` into a trapped `mktemp -d`). **The half-applied sweep, landing on the record that
+> documents the pattern** — and on the one of the three surfaces a future session resolves as
+> controlling: `.gitignore` is a file a reader might skim, the journal is history, the ROW is what
+> `docs/decisions/<KEY>.yaml` resolution returns.
+>
+> **Why this site is the expensive one to miss**: the next author asking whether a `.py` file may be
+> added under `.claude/**`, or whether `PYTHONDONTWRITEBYTECODE` is redundant here, reads clause (e)
+> and gets *"no call site writes bytecode"*. The probes do — the trapped fixture is why nothing
+> reaches the tree, and that is the fact the row should have carried.
+>
+> **The YAML gate caught my fix before the tests did.** The corrected clause quoted the heredoc form
+> verbatim, whose `"$1"` broke the double-quoted scalar — `decision-file-unparseable`, one command
+> after writing it. A record that is *machine-readable* is a record whose corrections are gated, which
+> is the argument for the row format over prose in the first place.
+>
+> **And one sizing note taken into `GATE-STEP-LOCUS` rather than actioned**: the aggregated-job bound
+> is `5..=120` and **five of the seven jobs sit exactly at 120**, so the ceiling can only fire on a
+> value ABOVE the documented maximum — never on a raise within it. If a cold run ever approaches 120
+> there is no signal until the cancellation, which is the direction that does not self-heal. **The
+> guard asserts the values are SANE, not that they are ADEQUATE, and nothing measures the second.**
