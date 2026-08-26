@@ -10025,6 +10025,17 @@ mod decision_ask_and_citations {
                 "an explanation ending in a dotted json filename",
                 "# That row is superseded. See render-config-sync.json.\n# Per row OLD-ROW, open a reversal decision.",
             ),
+            // TWO-LETTER STEM, which the first form of the initialism rule admitted -- the same
+            // class one stem length over. `db.md` is a plausible filename; `i.e`/`e.g`/`a.k.a`/`U.S`
+            // are all single-letter segments, so the tighter rule loses nothing. The `superseded`
+            // and the filename must sit in the SAME sentence: the first draft of this control put
+            // them in two, so the dot after `superseded.` bounded the clause on its own and the
+            // fixture was green under BOTH rules -- shape #3, caught by measuring it rather than
+            // reading it. (Review #55.)
+            (
+                "an explanation ending in a two-letter-stem filename",
+                "# The old row is superseded, so the notes are in db.md.\n# Per row OLD-ROW, open a reversal decision.",
+            ),
             // NESTED PARENTHETICAL: the citing word sits in the OUTER group, and `open_paren` used
             // to point at the inner one after it closed, so the window missed `see` entirely.
             (

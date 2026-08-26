@@ -1591,3 +1591,20 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > right. **A plant that separates two implementations tells you they differ; it says nothing about
 > which side of the difference you want** — for that you need the case the other side breaks, and
 > here the docstring already named it.
+>
+> **Round 55 — the fix for the filename class was one stem length short.** The initialism rule
+> admitted segments of one *or two* letters, which lets a two-letter-stem filename through: `db.md`,
+> `de.md`. Same permissive class as `lookup.sh` in round 51, **inside the fix for it**. Every
+> initialism the rule exists for is single-letter segments (`i.e`, `e.g`, `a.k.a`, `U.S`, `a.m`), so
+> tightening to exactly one loses nothing. The review that spotted it **recorded rather than filed**,
+> on the grounds that no token in today's corpus hits it — right about the corpus, and the fix is one
+> character in the permissive direction, so it is taken.
+>
+> **And my control for it was green under both rules until I measured it.** The first draft put the
+> `superseded` and the filename in *two* sentences, so the dot after `superseded.` bounded the clause
+> on its own and the fixture proved nothing. They have to sit in the same sentence, as the
+> `lookup.sh` control does. Shape #3 for the third time in four rounds — and each time it was the
+> measurement, not the reading, that caught it.
+>
+> That review's one filed finding (`first()` vs `last()`) was closed in round 54 — **two independent
+> reviewers reached it separately**, which is the first time on this branch that has happened.

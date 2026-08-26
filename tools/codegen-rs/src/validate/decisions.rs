@@ -1010,9 +1010,18 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                             .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
                             .next()
                             .unwrap_or("");
+                        // EVERY SEGMENT EXACTLY ONE LETTER. The first version allowed one OR two,
+                        // which admits a two-letter-stem filename -- `db.md`, `de.md` -- and so
+                        // extends a clause past a real sentence end: the `lookup.sh` class of
+                        // review #51, one stem length over, in the fix for it. Every initialism
+                        // this rule exists for is single-letter segments (`i.e`, `e.g`, `a.k.a`,
+                        // `U.S`, `a.m`), so nothing is lost by the tighter form. Recorded rather
+                        // than filed by the review that spotted it, on the grounds that no token in
+                        // today's corpus hits it -- but the fix is one character and the direction
+                        // is the permissive one. (Review #55 of PR #679.)
                         let dotted_initialism = word.contains('.')
                             && word.split('.').all(|seg| {
-                                (1..=2).contains(&seg.len()) && seg.chars().all(|c| c.is_ascii_alphabetic())
+                                seg.len() == 1 && seg.chars().all(|c| c.is_ascii_alphabetic())
                             });
                         dotted_initialism || ABBREVIATIONS.contains(&word.to_lowercase().as_str())
                     };
