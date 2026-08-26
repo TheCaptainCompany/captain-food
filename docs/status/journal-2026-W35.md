@@ -1568,3 +1568,26 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `STATUS.md` also gains the step itself: the precedent sentence already said the register-check
 > selftest runs in the always-run `changes` job, and this change adds a second gate step beside it —
 > durable state, so it belongs there and not only in the journal link.
+>
+> **Round 54 — round 51's choice was wrong, and the review that caught it argued the direction rather
+> than the case.** `open_paren` is the innermost still-open paren now, not the outermost. The two
+> differ **only** when an inner group is still open at the key — for round 51's motivating case the
+> inner paren has already been popped, so the stack holds one entry and the choice was invisible.
+> Where they differ, `first()` **false-reds the spelling this file's own docstring names as one that
+> must stay green**: `(decided 2026-08-24 by ADR-… (the \`KEY\` experiment was contaminated))` picks
+> up `decided` from the OUTER group and reds prose *about* the row. The rule is an ERROR, so that
+> reds `specs`, `docs-validate` and the required check, with rewording as the only escape — **"a red
+> whose escape is silence", through the arm added to close a miss.**
+>
+> **What it gives up is stated beside the choice rather than left implied**: a citing word in an
+> outer group with the key inside a still-open inner one — `(see (the wrapper \`KEY\`))` — is now a
+> **miss**. That is the deliberate direction, and it is the sixth time this file has ruled that a
+> false red on honest prose is the worse instrument. Both spellings carry a control now, so the
+> trade is visible rather than rediscovered — and the closed-nested red still pins the pop
+> independently, measured against the original overwrite.
+>
+> **The rule worth banking**: round 51's plant *did* discriminate `first()` from `last()`, and that
+> made the choice look measured. It measured that the two differ, not that the one I picked was
+> right. **A plant that separates two implementations tells you they differ; it says nothing about
+> which side of the difference you want** — for that you need the case the other side breaks, and
+> here the docstring already named it.

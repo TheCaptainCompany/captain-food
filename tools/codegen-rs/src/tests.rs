@@ -10031,14 +10031,7 @@ mod decision_ask_and_citations {
                 "a citing word in the enclosing parenthetical of a CLOSED nested one",
                 "the pin was rewritten (see (the wrapper) `OLD-ROW`) in round 4",
             ),
-            // AND WITH THE INNER GROUP STILL OPEN, which is what distinguishes `first()` from
-            // `last()`: the citing word is in the OUTER group and the innermost open paren's window
-            // does not contain it. The closed-nested case above is caught by the pop alone, so this
-            // is the one that pins the choice of `first()` -- measured, not assumed.
-            (
-                "a citing word in the enclosing parenthetical of an OPEN nested one",
-                "the pin was rewritten (see (the wrapper `OLD-ROW`)) in round 4",
-            ),
+
             ("the <KEY> decision", "# the OLD-ROW decision forbids widening the surface"),
             // THE ENVELOPE FORMAT this repo mandates, enforced by register-check.sh as
             // `ENVELOPE='Decision row:'`. A trailing colon killed the match, so the most
@@ -10238,6 +10231,18 @@ mod decision_ask_and_citations {
             (
                 "a nested closed group inside a plain parenthetical mention",
                 "the pin was rewritten (the (round 4) `OLD-ROW` experiment was contaminated) later",
+            ),
+            // THE TRADE ROUND 54 MADE, PINNED FROM BOTH SIDES. `open_paren` is the INNERMOST
+            // still-open paren, so a citing word in an OUTER group does not reach a key inside an
+            // inner one. The green half: this is the spelling the docstring names as one that must
+            // stay green (`(the \`KEY\` experiment was contaminated)`), nested inside a group that
+            // happens to carry `decided` -- under `first()` it was a HARD ERROR with rewording as
+            // the only escape. The miss half is stated in `decisions.rs` beside the choice: `(see
+            // (the wrapper \`KEY\`))` is no longer caught. A false red on honest prose is the worse
+            // instrument, which this file has ruled six times.
+            (
+                "the protected spelling nested inside a group carrying a citing word",
+                "(decided 2026-08-24 by ADR-20260824-205911 (the `OLD-ROW` experiment was contaminated))",
             ),
             // A markdown continuation is INDENTED, not re-marked -- which is exactly what lets the
             // block rule tell this apart from the two reds above.

@@ -1125,7 +1125,7 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     const PARENTHETICAL_CITES: [&str; 8] = [
                         "row", "rows", "per", "see", "decided", "decided_by", "reconsiders", "superseded_by",
                     ];
-                    // A STACK, SO `open_paren` IS THE OUTERMOST ONE STILL OPEN. Overwriting it on
+                    // A STACK, SO `open_paren` IS THE INNERMOST ONE STILL OPEN. Overwriting it on
                     // every `(` and clearing it only at depth 0 left it pointing at an INNER paren
                     // that had already closed: for `` (see (the wrapper) `KEY`) `` the window
                     // searched for a citing word was `the wrapper) `, which does not contain `see`,
@@ -1143,7 +1143,27 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                         }
                     }
                     let depth = open_stack.len() as i32;
-                    let open_paren = open_stack.first().copied();
+                    // INNERMOST, NOT OUTERMOST -- AND ROUND 51 CHOSE THE OTHER ONE AND PLANTED IT.
+                    // The two differ only when an inner group is STILL OPEN at the key; for review
+                    // #51's motivating case the inner paren has already been popped, so the stack
+                    // holds one entry and the choice is invisible. Where they differ, `first()`
+                    // FALSE-REDS the spelling this file's docstring names as one that must stay
+                    // green: `(decided 2026-08-24 by ADR-... (the `KEY` experiment was
+                    // contaminated))` picks up `decided` from the OUTER group and reds a sentence
+                    // that is prose about the row. `decision-superseded-authority` is an ERROR, so
+                    // that reds `specs`, `docs-validate` and the required check, with rewording as
+                    // the only escape -- "a red whose escape is silence", through the arm added to
+                    // close a miss. `last()` gives the identical verdict on #51's case and the
+                    // right one here, because the intent -- "some citing word has to appear inside
+                    // IT before the key" -- is about the parenthetical the key is actually in.
+                    //
+                    // WHAT THIS GIVES UP, stated rather than left implied: a citing word in an
+                    // OUTER group with the key inside a still-open inner one -- `(see (the wrapper
+                    // `KEY`))` -- is now a MISS. That is the deliberate direction: this file has
+                    // ruled repeatedly that a false red on honest prose is the worse instrument,
+                    // and both spellings now carry a control so the trade is visible rather than
+                    // rediscovered. (Review #54 of PR #679, correcting review #51's choice.)
+                    let open_paren = open_stack.last().copied();
                     let in_a_citing_parenthetical = backticked
                         && depth > 0
                         && open_paren.is_some_and(|o| {
