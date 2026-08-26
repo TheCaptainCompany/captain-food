@@ -1191,3 +1191,31 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > laundered into a green. Right for the case; it is also what makes a runner-image bump a
 > repository-wide merge block at 19:00 on a Friday. Said out loud in both records so nobody prices
 > the timeout as covering both — only `GATE-STEP-LOCUS` option (a) closes the red case.
+>
+> **Round 41 — a finding DECLINED with evidence, and the overclaim it exposed in our own comment.**
+> The review held that pinning the oracle to `GITHUB_SHA` converts the `pull_request` merge-ref race
+> into a repository-wide merge block, and proposed falling back to `refs/remotes/pull/N/merge`.
+> **The mechanism does not hold**: `actions/checkout` verifies exactly that condition and refuses.
+> After fetching it calls `testRef(git, settings.ref, settings.commit)`, retries once with a
+> SHA-targeted refspec on a full fetch, and then throws *"The ref '<ref>' does not point to the
+> expected commit"*. So either checkout fails and this step never runs, or `GITHUB_SHA` is present —
+> **verified by checkout itself** — and the `rev-parse` refusal cannot fire for that reason. Read off
+> `actions/checkout`'s `src/git-source-provider.ts`, not inferred.
+>
+> **The proposed fallback is also the wrong trade**: a local ref name is forgeable by any earlier
+> step with `git update-ref`, which is the exact property `GITHUB_SHA` was chosen for after review
+> #10 moved `HEAD` by committing. It would trade the oracle away for an availability problem this
+> path does not have.
+>
+> **But the finding was still worth its round, because our own comment claimed the thing it
+> claimed.** The block said *"It is not hypothetical … the workspace no longer holds the object
+> GITHUB_SHA names"* — written when the pin landed, never checked against `actions/checkout`, and
+> repeated verbatim in both gate scripts. **A wrong finding can still name a real defect**, and here
+> the defect was ours: an antecedent-free mechanism claim, in the branch whose thesis is that no
+> completeness claim ships before it is checked. Corrected in both copies with the source it was
+> read from.
+>
+> **The availability half of the finding is real and is left where it belongs.** When checkout does
+> fail, `changes` fails, every sibling job skips and the required check reds — but that is
+> `actions/checkout`'s behaviour in *every* job in this workflow, not something the pin introduced,
+> and `GATE-STEP-LOCUS` option (a) is what bounds it. Recorded rather than patched.

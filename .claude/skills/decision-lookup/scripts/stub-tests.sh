@@ -102,15 +102,33 @@ else
   # different reasons -- the path is untracked there, or the COMMIT is absent from this checkout --
   # and reporting both as "not tracked" sends the operator hunting a missing file that is present.
   #
-  # It is not hypothetical. On a `pull_request` run GITHUB_SHA is the merge commit GitHub computed
-  # when the run was QUEUED, while actions/checkout resolves refs/pull/N/merge when it FETCHES. If
-  # the base branch moves in between, the merge ref is recomputed and the workspace no longer holds
-  # the object GITHUB_SHA names. Because `changes` is the always-run job, that race would take the
-  # required check down on EVERY branch -- including the docs-only pushes that go straight to main
-  # -- with a message that reads as tampering. Refusing is still right; being unable to tell
-  # "someone overwrote a gate script" from "the merge ref moved" is not. A re-run recomputes both
-  # and self-heals, which is why the message says so. (Review of PR #679, on a defect this branch
-  # introduced two commits earlier by pinning the oracle to GITHUB_SHA.)
+  # THE `pull_request` MERGE-REF RACE CANNOT REACH THIS BRANCH, AND THE COMMENT THAT USED TO LIVE
+  # HERE SAID IT COULD. It read: "It is not hypothetical. On a `pull_request` run GITHUB_SHA is the
+  # merge commit GitHub computed when the run was QUEUED, while actions/checkout resolves
+  # refs/pull/N/merge when it FETCHES. If the base branch moves in between, the merge ref is
+  # recomputed and the workspace no longer holds the object GITHUB_SHA names." The first half is
+  # true; the conclusion is not, because `actions/checkout` verifies exactly that and REFUSES:
+  # after fetching it calls `testRef(git, settings.ref, settings.commit)`, retries once with a
+  # SHA-targeted refspec on a full fetch, and then throws `The ref '<ref>' does not point to the
+  # expected commit ...`. So either checkout fails -- and this step never runs -- or GITHUB_SHA is
+  # present, verified by checkout itself, and `rev-parse` below cannot fail for that reason. Read
+  # off `actions/checkout`'s `src/git-source-provider.ts`, not inferred (review #41 of PR #679
+  # raised the availability consequence of the race; the mechanism does not hold).
+  #
+  # The refusal stays, as defence in depth for the cases checkout does not cover: a LOCAL run with
+  # a stale GITHUB_SHA exported in the shell, and any future job whose checkout is reconfigured.
+  # The message still distinguishes itself from tampering, because a reader who meets it has no
+  # reason to know which of the two they are looking at.
+  #
+  # THE AVAILABILITY CONCERN THE REVIEW RAISED IS REAL AND UNCHANGED BY THIS: when checkout does
+  # fail, `changes` fails, every sibling job is skipped and `codegen` -- the required check -- reds,
+  # so nothing merges until a human re-runs. That is `actions/checkout`'s behaviour in EVERY job in
+  # this workflow, not something the GITHUB_SHA pin introduced, and it is `GATE-STEP-LOCUS` option
+  # (a) that bounds it. The fallback the review proposed -- read the oracle from
+  # `refs/remotes/pull/N/merge` when GITHUB_SHA is unresolvable -- is NOT taken: a local ref name is
+  # forgeable by any earlier step with `git update-ref`, which is precisely the property GITHUB_SHA
+  # was chosen for (review #10 moved HEAD by committing), so it would trade the oracle for an
+  # availability problem this path does not actually have.
   # A `git fetch --no-tags --depth=1 origin "$_ref"` RECOVERY WAS ADDED HERE AND REMOVED AGAIN,
   # and the reason is worth more than the code was. It was justified by the sentence "upload-pack
   # serves fetch-by-SHA, so one fetch usually turns the refusal back into a verification" -- an
