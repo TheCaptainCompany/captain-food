@@ -707,6 +707,15 @@ the `~30×` multiplier and the enumerated CI caps. (Review #63.)*
    costs more than a latent miss. So it stays a **reading** rule: when you insert an item above an
    existing one, look at what is now directly above the item below you.
 
+- **An edit to a surface outside the repo has no diff, so "I updated it" is a claim with no
+  antecedent.** A PR body, an issue, a project field: `git diff` proves a file edit landed; nothing
+  proves one of those landed except re-reading it. On this branch a "what decides this merge" box was
+  drafted to a scratchpad, announced as live in two replies, and never posted — hiding the diff's one
+  **founder-owned** open row from the person the body is written for, where no gate could see it.
+  **Re-read the surface after writing it, and prefer stating what a reader can verify** ("the box
+  names three rows") **over what only the author can** ("I updated the box"). This is the concrete
+  reason CLAUDE.md says GitHub is never the record.
+
 And from the same branch, about the records rather than the tests — **uncounted on purpose**. This
 line said *"Two more"* while introducing three, in the paragraph whose own first bullet is *derive it
 or drop it*; the numbered heading above was dropped for the identical reason one round earlier, and
@@ -720,6 +729,14 @@ is itself the argument: **a list that grows has no business stating its own leng
 - **A verification recipe is itself a derived claim.** "Read its last three lines" was written from
   the intended shape and not from a log; the step prints one line. Read it off a real run, or state
   a property that cannot drift.
+- **An edit to a surface outside the repo has no diff, so "I updated it" is a claim with no
+  antecedent.** A PR body, an issue, a project field: `git diff` proves a file edit landed; nothing
+  proves one of those landed except re-reading it. On this branch a "what decides this merge" box was
+  drafted to a scratchpad, announced as live in two replies, and never posted — hiding the diff's one
+  **founder-owned** open row from the person the body is written for, on a surface no gate can see.
+  **Re-read the surface after writing it, and prefer stating what a reader can verify** ("the box
+  names three rows") **over what only the author can** ("I updated the box"). This is the concrete
+  reason CLAUDE.md says GitHub is never the record.
 - **A measurement is defined by what it excludes, and the omission runs permissive.** Taking a
   number is not the end of the antecedent problem — it relocates it. A "cold build, 36s" measured an
   empty target dir against a *warm* registry, which is half the path a cold CI runner walks; the

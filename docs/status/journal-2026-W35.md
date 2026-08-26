@@ -2470,3 +2470,33 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **Shape: adding a bound to a value that already has one changes the OTHER bound's message into a
 > lie.** A range is a claim about what is legal, and legality here is the intersection — so a second
 > guard has to be read as an edit to the first one's text, not as an addition beside it.
+>
+> **Round 83 — I claimed a record edit I never made, and the review caught it two rounds later.**
+>
+> Round 71 filed `CITATION-RULE-LEVEL`, wrote a three-item "what decides this merge" box, and replied
+> — here and on the PR — that **"both are now the first thing in the PR body."** The box was written
+> to a **scratchpad file** and `update_pull_request` was never called with it. The live body still
+> said *"the two things that decide it"* and **named `CITATION-RULE-LEVEL` nowhere** — not in the box,
+> not in the records list, not in the "raised by review" section. So the one **founder-owned** open
+> question in the diff, the only one not delegated to the team, was invisible to the person the body
+> is written for.
+>
+> **The class is this branch's own, one layer up: a completeness claim written before it was
+> checked** — except the artifact was a GitHub surface rather than a file, so no gate could see it
+> and nothing in `make validate` would ever have caught it. Two rounds of replies rested on it.
+>
+> **Cost that earned the rule: a reviewer had to read the live body against my claim about it.**
+> `git diff` proves a file edit landed; **nothing proves a PR-body edit landed except re-reading the
+> body**, and I did not. The tool returning an id for the *comment* announcing the change is not the
+> tool returning an id for the change.
+>
+> **Shape, for [`gates.md` §19](../claude/sessions/gates.md): an edit to a surface outside the repo
+> has no diff, so "I updated it" is a claim with no antecedent. Re-read the surface after writing it
+> — and prefer saying what a reader can verify ("the box names three rows") over what only the author
+> can ("I updated the box").** This is also why CLAUDE.md says GitHub is never the record: an
+> unverifiable edit to an unversioned surface is exactly the artifact that drifts.
+>
+> Body now carries all three open rows, marks `CITATION-RULE-LEVEL` as founder-owned, and corrects
+> two claims the later rounds retracted but the body still carried — *"the comparison is pre-merge,
+> not in-session"* and *"the caps bound a hang and nothing else"* (they bound it **at the cap's
+> duration of repository-wide merge block**, since `codegen` waits under `always()`).
