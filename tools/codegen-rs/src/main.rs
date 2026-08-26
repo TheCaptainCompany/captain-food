@@ -111,7 +111,15 @@ fn main() {
         // say "anywhere under `.claude/**`", which had already stopped being true of the walk it
         // describes.
         {
-            let cited = validate::decisions::claude_citation_corpus(&root);
+            let (cited, readable) = validate::decisions::claude_citation_corpus(&root);
+            if !readable {
+                // A gate that cannot look must not read as a gate that looked and found nothing.
+                dec_issues.push(model::warn(
+                    "decision-citation-corpus-unreadable",
+                    "tools/codegen-rs".to_string(),
+                    "`git ls-files` failed, so the superseded-citation corpus is EMPTY and `decision-superseded-authority` checked nothing. Not an error -- a corpus this cannot read is not a corpus it may judge -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+                ));
+            }
             dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));
         }
         // §22c — the decision-form template anchors questions to rows (requirement 6; published

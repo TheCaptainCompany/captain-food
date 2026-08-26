@@ -634,7 +634,7 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 /// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
 /// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
 /// corpus it may judge.
-pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, String)> {
+pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool) {
     let out = match std::process::Command::new("git")
         .args([
             "ls-files",
@@ -650,8 +650,15 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
         .current_dir(root)
         .output()
     {
+        // FAIL OPEN, BUT NOT SILENTLY. Returning an empty corpus here is deliberate -- a corpus
+        // this cannot read is not a corpus it may judge -- but it used to be INVISIBLE, and that
+        // is what made a shimmed `git` a route rather than merely a limitation: exiting 0 with
+        // empty stdout yields no files, so the rule reports nothing at all and `make validate` is
+        // green with no error, no warning, and no "corpus unreadable" line. "No stale citations"
+        // and "did not look" printed identically. The `readable` flag lets the caller say which
+        // one happened; the posture is unchanged. (Review #27 of PR #679.)
         Ok(o) if o.status.success() => o.stdout,
-        _ => return Vec::new(),
+        _ => return (Vec::new(), false),
     };
     let mut cited = Vec::new();
     for rel in String::from_utf8_lossy(&out).split('\0').filter(|s| !s.is_empty()) {
@@ -669,7 +676,7 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> Vec<(String, Str
             cited.push((rel.to_string(), text));
         }
     }
-    cited
+    (cited, true)
 }
 
 /// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.

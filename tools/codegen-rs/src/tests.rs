@@ -10142,7 +10142,8 @@ mod decision_ask_and_citations {
             );
             return;
         }
-        let corpus_files = claude_citation_corpus(&root);
+        let (corpus_files, corpus_readable) = claude_citation_corpus(&root);
+        assert!(corpus_readable, "git reported usable above, so the corpus walk must not have failed");
         // PIN THE CORPUS ITSELF, because `real.is_empty()` is SATISFIED by an empty corpus rather
         // than exercised by it -- and `claude_citation_corpus` returns `Vec::new()` on every
         // failure path (git absent, not a repo, a non-zero `ls-files`). Review #13 named the
@@ -10789,8 +10790,18 @@ mod docs_only_ci_and_legacy_visibility {
         // single-segment branch, which is every `NN-slug` branch this repo creates. GitHub
         // evaluates `!` patterns as REMOVALS from the set the positive patterns admitted, so an
         // exclusion absolutely can narrow the guarded surface (review of PR #679).
-        if let Some(seq) = push.get(serde_yaml::Value::String("branches".into())).and_then(|b| b.as_sequence()) {
-            let branches: Vec<&str> = seq.iter().filter_map(|v| v.as_str()).collect();
+        // FAIL CLOSED ON A NON-SEQUENCE, like the `pull_request` arms below. This read
+        // `.and_then(|b| b.as_sequence())`, so `branches: main` -- a scalar -- skipped the
+        // containment check silently. GitHub's schema would reject that workflow loudly, so it is
+        // not reachable in practice; the defect is that THE TWO HALVES DISAGREE about a mistake one
+        // of them catches, which is how the push half came to be six rounds behind the
+        // `pull_request` half in the first place (review #27). An absent `branches` still means
+        // EVERY branch and stays green -- only a present-but-unreadable one reds.
+        if let Some(val) = push.get(serde_yaml::Value::String("branches".into())) {
+            let branches: Vec<&str> = val
+                .as_sequence()
+                .map(|s| s.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
             assert!(
                 branches.iter().any(|b| *b == "**"),
                 "`on.push.branches` ({:?}) no longer contains `**` -- a positive filter narrows the branches {} guards, with every other assertion here green. Omitting `branches` entirely is fine (it means every branch); dropping `**` from a list is not",
@@ -10947,43 +10958,42 @@ mod docs_only_ci_and_legacy_visibility {
                     for st in steps {
                         env_ok(st, &format!("a `{}` step's", job));
                         step_shell_ok(st, &format!("a `{}` step", job));
-                    }
-                }
-            }
-        }
-        if let Some(bt) = doc.get("jobs").and_then(|j| j.get("build-test")) {
-            if let Some(steps) = bt.get("steps").and_then(|s| s.as_sequence()) {
-                for st in steps {
-                    // `env_ok` READS THE `env:` MAPPING; it cannot see a variable EXPORTED AT
-                    // RUNTIME. Two lines with no `env:` key anywhere --
-                    // `run: echo "PATH=/tmp/shim:$PATH" >> "$GITHUB_ENV"` (or `LD_PRELOAD=`,
-                    // `BASH_ENV=`) placed before `cargo test --workspace` -- put every pin in this
-                    // file under an attacker-chosen environment, with `changes` green and `codegen`
-                    // aggregating green. That is mutants twelve and thirteen arriving through a
-                    // door the `changes` scan already closes, and unlike the residual named below
-                    // it IS reachable by a YAML scan, so "banning the path is the enumeration
-                    // instrument" does not excuse leaving it open. Both names are single
-                    // unambiguous strings and no `build-test` step mentions either today.
-                    //
-                    // A future step that legitimately computes a value into `GITHUB_ENV` will red
-                    // here. That is deliberate: it makes widening this job's environment a stated
-                    // decision rather than a silent one. (Review #17 of PR #679.)
-                    let rendered = serde_yaml::to_string(st).unwrap_or_default();
-                    for needle in ["GITHUB_ENV", "GITHUB_PATH"] {
-                        assert!(
-                            !rendered.contains(needle),
-                            "a `build-test` step writes `{}` -- that exports into every LATER step, including the `cargo test` that runs {}, so it can poison the pins' own environment without any `env:` key for `env_ok` to see",
-                            needle, what
-                        );
-                    }
-                    // A decoy checkout in build-test swaps the tree the pins are read from.
-                    if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout")) {
-                        for key in ["repository", "ref"] {
+                        // `env_ok` READS THE `env:` MAPPING and cannot see a variable EXPORTED AT
+                        // RUNTIME: `run: echo "PATH=/tmp/shim:$PATH" >> "$GITHUB_ENV"` needs no
+                        // `env:` key anywhere and poisons every LATER step in the job.
+                        //
+                        // THESE TWO GUARDS USED TO SIT IN A SECOND `build-test`-ONLY BLOCK below
+                        // this loop, while `shell_ok`/`env_ok`/`step_shell_ok` covered all three
+                        // jobs -- two lists of one scope, which is the defect this file retracts
+                        // repeatedly, in the round that extended the other three. And the
+                        // consequence is SHARPER at `specs`/`docs-validate` than at `build-test`:
+                        // `claude_citation_corpus` fails OPEN, so a shimmed `git` exiting 0 with
+                        // empty stdout yields an empty corpus and `decision-superseded-authority`
+                        // reports nothing at all -- `make validate` green, `codegen` green, the
+                        // rule silently vacuous. `docs-validate` is the only coverage of
+                        // `CLAUDE.md` on the docs-only lane. (Review #27 of PR #679.)
+                        //
+                        // A future step that legitimately computes a value into `GITHUB_ENV` reds
+                        // here. That is deliberate: it makes widening these jobs' environment a
+                        // stated decision rather than a silent one. No step in any of the three
+                        // mentions either name today.
+                        let rendered = serde_yaml::to_string(st).unwrap_or_default();
+                        for needle in ["GITHUB_ENV", "GITHUB_PATH"] {
                             assert!(
-                                st.get("with").and_then(|w| w.get(key)).is_none(),
-                                "a `build-test` checkout sets `{}` -- that points the job running {} at a different tree, so the pins would be read from a decoy",
-                                key, what
+                                !rendered.contains(needle),
+                                "a `{}` step writes `{}` -- that exports into every LATER step in the job, including the one that runs {}, so it can poison the pins' own environment without any `env:` key for `env_ok` to see",
+                                job, needle, what
                             );
+                        }
+                        // A decoy checkout swaps the tree the pins -- or the validator -- read.
+                        if st.get("uses").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("actions/checkout")) {
+                            for key in ["repository", "ref"] {
+                                assert!(
+                                    st.get("with").and_then(|w| w.get(key)).is_none(),
+                                    "a `{}` checkout sets `{}` -- that points the job running {} at a different tree, so the pins would be read from a decoy",
+                                    job, key, what
+                                );
+                            }
                         }
                     }
                 }
@@ -11445,6 +11455,17 @@ mod docs_only_ci_and_legacy_visibility {
             // `specs` RUNS `make validate`, i.e. the new citation rule, and had no guard at all.
             ("specs job BASH_ENV", in_job("specs", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
             ("docs-validate job BASH_ENV", in_job("docs-validate", "    runs-on:", "    env:\n      BASH_ENV: /tmp/p.sh\n    runs-on:")),
+            // THE TWO GUARDS THAT USED TO BE `build-test`-ONLY, on the jobs that run the VALIDATOR.
+            // A shimmed git there makes the citation rule report nothing at all, green (review #27).
+            ("specs step exports through GITHUB_ENV", in_job("specs",
+                "      - uses: actions/checkout@v5\n",
+                "      - run: echo \"PATH=/tmp/shim:$PATH\" >> \"$GITHUB_ENV\"\n      - uses: actions/checkout@v5\n")),
+            ("specs checkout re-points ref", in_job("specs",
+                "      - uses: actions/checkout@v5\n",
+                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/decoy\n")),
+            ("docs-validate step exports through GITHUB_PATH", in_job("docs-validate",
+                "      - uses: actions/checkout@v5\n",
+                "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: actions/checkout@v5\n")),
             ("specs step shell drops the script", in_job("specs",
                 "      - uses: actions/checkout@v5\n",
                 "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: actions/checkout@v5\n")),
@@ -11577,7 +11598,7 @@ mod docs_only_ci_and_legacy_visibility {
         // states a count; this is the only place one lives, and it cannot drift from the arrays it
         // measures.
         assert!(
-            must_red.len() >= 53 && must_stay_green.len() >= 13,
+            must_red.len() >= 56 && must_stay_green.len() >= 13,
             "the mutant corpus shrank ({} reds, {} controls) -- deleting a plant is how a guard stops being pinned",
             must_red.len(),
             must_stay_green.len()

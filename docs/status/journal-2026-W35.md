@@ -824,3 +824,29 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > noticed while all of us were looking straight at the divergence. That is the whole argument for
 > preferring an executable check over a careful reading, stated better by the check than by this
 > paragraph.
+>
+> **Round 29 — I extended three guards to three jobs and left the two beside them at one.** Round 25
+> moved `shell_ok`/`env_ok`/`step_shell_ok` to `build-test`, `specs` and `docs-validate`, with the
+> stated reason that `specs` runs the validator and `docs-validate` is the only coverage of
+> `CLAUDE.md` on the docs-only lane. The very next block — the `GITHUB_ENV`/`GITHUB_PATH` runtime-
+> export scan and the decoy-checkout check, i.e. the two doors `env_ok` structurally *cannot* see —
+> stayed `build-test`-only. **Two lists of one scope, in the round that extended the other three.**
+>
+> **And the consequence is sharper on the jobs I left out.** `claude_citation_corpus` fails OPEN, so
+> a shimmed `git` exiting 0 with empty stdout yields an empty corpus and `decision-superseded-authority`
+> reports *nothing at all* — `make validate` green, `codegen` green, the rule silently vacuous. One
+> list now, three plants.
+>
+> **Fail-open is fine; fail-open-and-SILENT is what made that a route rather than a limitation.**
+> "No stale citations" and "did not look" printed identically. `claude_citation_corpus` now returns
+> whether it could read, and the caller emits `decision-citation-corpus-unreadable` — verified by
+> running the binary with a `git` that exits 1: 92 warnings instead of 91, with the diagnostic, and
+> the baseline untouched on a normal run. **A gate that cannot look must not read as a gate that
+> looked and found nothing** — which is this branch's own thesis, applied to the one place it had
+> been written as a deliberate silence.
+>
+> Also: `on.push.branches` read `.and_then(as_sequence)`, so a scalar skipped the containment check
+> silently, while the `pull_request` arms fail closed on the same shape. GitHub would reject that
+> workflow anyway — the defect is that **the two halves disagree about a mistake one of them
+> catches**, which is exactly how the push half came to be six rounds behind the `pull_request` half
+> to begin with.
