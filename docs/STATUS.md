@@ -87,11 +87,29 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 > supervise checks until MERGED; the hourly stale-claim reaper releases claims silent for >24h.
 > Method: `BACKLOG.md`.
 
+## ⚠️ `claude-review` is decided-out, STILL REQUIRED, and now able to fail (2026-08-25)
+
+> **If every PR in this repo is suddenly unmergeable on `claude-review`, this is why — read it
+> before debugging anything.** [REV-1](decisions/REV-1.yaml) decided on 2026-08-17 to remove
+> `claude-review` from the required checks and **was never executed** (403 from the session's agent
+> proxy on ruleset `19179892`; open on
+> [#593](https://github.com/TheCaptainCompany/captain-food/issues/593)). #680 then hardened the
+> check so it reds when no verdict was produced — the [#677](https://github.com/TheCaptainCompany/captain-food/issues/677)
+> fix — merged by a one-time admin bypass the founder chose over executing REV-1 first, against the
+> team's recommendation and with the cost stated twice
+> ([REVIEW-GATE-BYPASS](decisions/REVIEW-GATE-BYPASS.yaml), `ADR-20260825-005323`).
+>
+> **Consequence, knowingly carried**: any run where the reviewer cannot post — 429, model outage,
+> permission denials, or the action's own self-skip on a PR editing its workflow — is a repo-wide
+> merge stop, and a revert of #680 would itself need the check green. **A red there means NO
+> VERDICT WAS PRODUCED; it does not mean the reviewer found a problem.** Executing REV-1 removes
+> the exposure without touching any workflow file and remains the recommended next step.
+
 ## 🗂️ Decision register & ask gate (2026-08-21)
 
 | Piece | Status | Notes |
 |---|---|---|
-| Machine-readable decision rows — **`docs/decisions/<KEY>.yaml` is the authority** | ✅ | One file per globally unique key, closed status vocabulary (`open\|decided\|deferred\|superseded\|withdrawn`), resolvable `decided_by`/`superseded_by`, `reconsiders` challenge chains ([ADR-20260821-095957](adr/ADR-20260821-095957-decision-register-rows-are-machine-readable-files.md)). Generated index injected into `DECISIONS.md` (§22b keeps it in sync); `_legacy.yaml` = 103 prose-only keys, a **migration boundary, never authority**; `_exempt.yaml` = self-pruning held-record citation exemptions |
+| Machine-readable decision rows — **`docs/decisions/<KEY>.yaml` is the authority** | ✅ | One file per globally unique key, closed status vocabulary (`open\|decided\|deferred\|superseded\|withdrawn`), resolvable `decided_by`/`superseded_by`, `reconsiders` challenge chains ([ADR-20260821-095957](adr/ADR-20260821-095957-decision-register-rows-are-machine-readable-files.md)). Generated index injected into `DECISIONS.md` (§22b keeps it in sync); `_legacy.yaml` = 102 prose-only keys, a **migration boundary, never authority**; `_exempt.yaml` = self-pruning held-record citation exemptions |
 | Ask gate — founder decision questions carry `Decision row: <KEY>` on an OPEN row | ✅ | Fail-closed PreToolUse hook on `AskUserQuestion` (`.claude/hooks/register-check.sh`; envelope/trail/passive lanes, exit 0 allow / 2 block only) + selftest run by the stop-gate every turn **and by CI's always-run `changes` job on every push, docs-only included** ([ADR-20260821-010543](adr/ADR-20260821-010543-agents-check-the-register-before-asking.md), [ADR-20260821-103403](adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)). Boundary stated honestly: only the structured envelope is mechanically gated; free text is not. **A SECOND always-run gate step joined that job 2026-08-26** — the decision-lookup hermetic stub suite (row `RETRIEVAL-QMD-CI`, [ADR-20260824-205911](adr/ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md)) — and both steps compare all four gate scripts against their committed blobs before reporting. That comparison is **mostly pre-merge**: `make hooks-test`/`make stub-tests` opt out unconditionally, and the stop-gate opts out only when a gate script is dirty. So an ordinary overwrite is still caught at push (it makes the tree dirty, which is what opts the turn out); what the in-session armed path catches is the tamper that HIDES from `git status` (`--assume-unchanged`, `--skip-worktree`), i.e. the stealthier class. CI is the only caller that cannot be talked out of it. Every job the `codegen` aggregator consumes now carries a `timeout-minutes`, because `always()` still waits. **The locus is an open question** — `GATE-STEP-LOCUS` — since a red in `changes` skips every other job and reds the required check |
 | Citation ratchet + docs-only CI enforcement | ✅ | Validator §22/§23 on `make validate` (every full-form ADR/PROP citation across `docs/**` + `CLAUDE.md` resolves); the docs-only CI path runs the canonical validator (`docs-validate` job + by-name `codegen` aggregator assertion — the pre-2026-08-21 bypass is closed and pinned by shape tests) |
 

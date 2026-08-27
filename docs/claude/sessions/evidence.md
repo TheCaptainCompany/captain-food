@@ -167,6 +167,101 @@ Smoke-test the reviewer the same way you would a deploy: land the change, then o
 deliberate, realistic bug and confirm the finding arrives **on the PR**. "The workflow ran" is not
 evidence — here it was not even true.
 
+- **The self-skip EXITS 0, and `claude-review` is a REQUIRED check — so such a PR clears its own
+  review gate** ([#677](https://github.com/TheCaptainCompany/captain-food/issues/677)). Since
+  [#680](https://github.com/TheCaptainCompany/captain-food/pull/680) the job asserts the outcome
+  instead: the reviewer's summary comment must CONTAIN, on a line of its own,
+
+  > `Reviewed-Commit: <sha>`
+
+  on a line of its own, outside any ``` / ~~~ fence **opened at column 0** (that is the entire
+  block rule — indentation, blockquotes and lists are all treated as live), where
+  `<sha>` is the PR's **head or merge** commit — decorated (backticks, bold) and abbreviated to
+  ≥7 hex are accepted, because across 23 real reviewer comments (every `claude[bot]` comment on
+  PRs #670/#674/#675 — 5 + 10 + 8 — via `GET /repos/{owner}/{repo}/issues/{n}/comments`) it wrote
+  a bare 40-char sha **zero** times. **Copy the sha from the prompt, not from the working tree**: on a `pull_request`
+  event the checkout is the MERGE ref, so `git rev-parse HEAD` reports something else.
+
+  Two things that gate CANNOT do, both learned the expensive way. **It cannot prove WHICH bot
+  reviewed** — this repo's own mob-lens sessions post under the identical `claude[bot]` identity, so
+  anyone quoting a marker into a comment satisfies it. Never paste a marker line into a comment: it
+  flips the check green and destroys the only signal it carries. **And it cannot make the check
+  required or un-required**, nor stop the ruleset accepting `skipped`. Requiredness lives in ruleset
+  `19179892` — [DECISIONS §45 REV-1](../../proposals/DECISIONS.md) and
+  [#593](https://github.com/TheCaptainCompany/captain-food/issues/593), still open. A red from that
+  step means **no verdict was produced**; it does not mean the reviewer found a problem.
+
+- **`gh api --paginate --jq` applies the filter PER PAGE and concatenates**, and `--slurp` is
+  *rejected* together with `--jq`. So a filter ending in `| length` emits one integer **per page**
+  (`"1\n0"` on two pages) — which reds any numeric guard on a PR with more than 30 comments. The
+  only shape that works across pages **while still using `--jq`** is emit one line per hit and
+  count the lines. Better: drop `--jq` and parse the whole array once in a real language — and
+  accept BOTH shapes, because a plain `json.load` raises "Extra data" on back-to-back arrays. Cost that
+  earned this: a false red on a required check, on the second attempt at the same assertion.
+- **`x="$(cmd | grep -c ... || true)"` binds `|| true` to the WHOLE pipeline**, not to `grep`. An
+  API failure then reads as "zero matches" instead of aborting under `set -e` — an outage
+  diagnosed as a missing review — and a partial failure after a match reads as a **pass**. Split
+  the fetch from the count: one assignment each, so the fetch's failure is its own exit status.
+- **Do not require a marker to be the LAST line of a bot comment.** ANY trailing text at all — a
+  footer, a sign-off, a horizontal rule, a postscript — then reds a complete, correct review. That
+  is the whole argument and it needs no premise about how often it happens; two earlier versions of
+  this bullet asserted one (a corpus count, then a repo rule requiring footers on bot comments) and
+  neither survived measurement.
+
+  **Do not hand-roll a CommonMark block parser to decide where the marker renders.** Nine review
+  rounds each found a different block rule wrong — backtick closers with trailing content, tilde
+  closers, blockquoted fences, list-item plus indented code, a fence quoting a fence, tab columns,
+  container lifetimes, prefix equality vs block structure — because the rules interact and a
+  hand-rolled parser re-derives what a parser already knows. Two earlier versions of this bullet
+  prescribed rules (`^ {0,3}` openers, excluding 4-space-indented code) that the design later
+  deleted on purpose; they are gone rather than annotated.
+
+  **Decide the DIRECTION of error first, and justify it with the property, not with the blast
+  radius.** For a marker gate the argument that survives measurement is: *no no-verdict path
+  produces a body that counts.* The action's self-skip, a 429, a model outage and permission
+  denials all end with no marker anywhere, so biasing toward counting cannot weaken what the gate
+  was built to catch. **The tempting argument — "a false red is a repo-wide merge stop whose revert
+  needs the same check green" — is false and was written into three files before a review checked
+  it**: a *matcher* false red blocks the one PR whose comment tripped it and clears by re-posting;
+  the repo-wide stop is the credit/outage case, which is a TRUE red; and an admin bypass exists
+  (`docs/decisions/REVIEW-GATE-BYPASS.yaml`). Get the mechanism right before reaching for the
+  consequence.
+
+  So: keep ONE rule (a fence delimiter at column 0), state the residual, and keep a DIFFERENTIAL
+  harness against a real parser with a false-red budget —
+  `.github/scripts/assert_review_marker_differential.py`. **Its oracle must track `<pre>` depth,
+  not strip every `<code>`**: an inline code span in a paragraph renders LIVE, it is the commonest
+  real shape for a sha, and blanket-stripping it makes the harness under-count exactly the number
+  the budget guards. **Sweep several seeds and ratchet the VECTOR, not a scalar against a constant.** A
+  single-seed budget lets a change that multiplies false reds pass and makes a fix invisible; so
+  does `max(per_seed) > K`, one level up, because seeds sitting at zero carry the slack. Commit the
+  per-seed counts the way `warning-baseline.json` is committed, and fail in both directions. No
+  magnitude is quoted here on purpose — an earlier version of this line stated a range that the
+  branch's own committed baseline refuted within two commits, which is the note's own lesson
+  happening inside the note for the second time.
+  **The harness prints its own antecedents** (corpus seed, corpus size, parser version) and no
+  comment quotes its figure: the first version of this line stated a bare count that had already
+  drifted by the time the next commit landed, which is ADR-20260817-105845 happening inside the
+  note recording the lesson.
+
+  **A generated corpus can only find disagreements its ALPHABET can express.** Every entry in this
+  one's fence list was a genuine fence opener, so no body it emitted could ever disagree with
+  CommonMark about whether a column-0 delimiter OPENS a fence — and a live false red sat in that
+  blind spot for two rounds (```` ```make validate``` ```` starts a paragraph, not a fence: a
+  backtick info string may not contain a backtick). Widening the alphabet with NON-openers and
+  indented delimiters found it, and the measured numbers then improved. **Before trusting a
+  differential harness, ask what its generator cannot produce.**
+
+  **The residual is real and now cheap to trip**: a quoted marker inside a blockquote, a list, an
+  indented block or an HTML block counts, as do `<pre>`, `<code>` and HTML comments. That RAISES
+  the bar on quoting; it does not make it impossible, and it never could — the gate cannot prove
+  WHICH bot posted. Never paste a marker line into a comment.
+
+  **And make the exemplar you give the model conform to the rule you enforce** — a prompt that
+  demonstrates the marker indented, under an assertion that requires the left margin, reds every
+  real review while the pass path stays unexercised.
+  Even then, anyone willing can satisfy such a gate; say so rather than claiming otherwise.
+
 **And the `code-review` plugin was still not enough.** With `--comment`, `pull-requests: write` and
 `permission_denials_count: 0`, it posted nothing on three consecutive probes of a 5-line diff
 carrying a deliberate oversell hole — 5 turns / $0.29, then 11 turns / $1.01, PR untouched, and no

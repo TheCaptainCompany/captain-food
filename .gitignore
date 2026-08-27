@@ -24,16 +24,19 @@ wt*/
 .qmd/
 
 # Python bytecode caches — a .pyc with no source in this tree was committed once by an over-broad
-# `git add` (review #8 of PR #679). Nothing in-tree runs a .py FILE today: every call site passes
-# the program on the COMMAND LINE (`python3 -c`) or on STDIN (`python3 - "$1" <<'PYEOF'`, twice in
-# `register-check-selftest.sh`), and the interpreter writes no bytecode for either. The
-# `PYTHONPATH=` probes in `stub-tests.sh` DO write `__pycache__/sitecustomize.*.pyc` -- but into
-# their `mktemp -d` fixture, which the EXIT trap removes, so nothing reaches this tree. An earlier
-# version of this sentence said "both Python call sites here use `python3 -c`": there are ~20 across
-# the gate scripts, two of them stdin heredocs, and the `PYTHONPATH` six do write bytecode -- the
-# conclusion held and every stated reason for it was wrong (review #83). So this is insurance, not a
-# fix for an observed dirtying — the first version of this comment invented the cause (`running
-# .github/scripts/*.py`, a directory that does not exist on this branch), which is the defect this
-# PR catalogues nine times, in the comment justifying the entry.
+# `git add` (review #8 of PR #679). Kept for the reason PR #679 landed it, and the reason is now
+# WIDER than it was: that PR's comment said "Nothing in-tree runs a .py FILE today: every call site
+# passes the program on the COMMAND LINE (`python3 -c`) or on STDIN", which was true of `main` and
+# is FALSE of this tree. `.github/scripts/assert_review_marker.py`, its checked-in battery and the
+# differential harness are .py FILES, invoked as files, and the battery runs in CI — so the
+# interpreter can write bytecode for the imported module rather than only into a `mktemp -d`
+# fixture some EXIT trap removes. Merging the branch that adds them is exactly when that sentence
+# had to move, and this entry stops being insurance and starts being load-bearing.
+#
+# The rest of #679's reasoning stands and is worth keeping: the `PYTHONPATH=` probes in
+# `stub-tests.sh` DO write `__pycache__/sitecustomize.*.pyc`, into a fixture their trap removes.
+# An earlier version of that comment said "both Python call sites here use `python3 -c`" — there
+# are ~20 across the gate scripts, two of them stdin heredocs, and the `PYTHONPATH` six do write
+# bytecode; the conclusion held and every stated reason for it was wrong (review #83).
 __pycache__/
 *.pyc
