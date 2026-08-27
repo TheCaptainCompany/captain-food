@@ -7,8 +7,14 @@ name: ci
 #
 # The gate is the Rust codegen (tools/codegen-rs, ADR-0034). The earlier TypeScript codegen reached full
 # parity (byte-identical artifacts + identical validation issue set) and has been retired.
-# The gate runs on EVERY branch push (not just main) so a feature branch is validated even before a
-# PR exists; `pull_request` stays for forked PRs. Duplicate push+PR runs on an open PR are accepted.
+# The gate runs on `pull_request` for branch work, and on `push` for `main` ONLY. Until 2026-08-25
+# `push` took `['**','!badges']`, so a feature branch was validated even before a PR existed -- and
+# every commit on a branch WITH a PR ran the whole suite twice, once per event (#681). The
+# duplicate is gone and the pre-PR validation went with it: a branch with no PR open now triggers
+# nothing, which costs nothing, because nothing can merge from it either. What `push` is for now is
+# the ONE lane `pull_request` cannot see -- a commit that reaches `main` directly, which is both
+# CLAUDE.md's spec/docs route (no branch, no PR) and the squash-merge sha itself. See the trigger
+# below, which carries the full four-lane argument.
 #
 # DOCS-ONLY CHANGES SKIP THE GATE (product-owner directive, 2026-07-28): a push touching only
 # docs/** (+ root README.md / CLAUDE.md / LICENSE) has nothing to validate or regenerate — proposals

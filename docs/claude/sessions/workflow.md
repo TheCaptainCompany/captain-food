@@ -193,9 +193,14 @@ Three things this session paid for (2026-08-17, #623):
   Every job passed at least once across the two runs, which is the evidence that mattered. Wait
   several minutes.
 - **`POST /actions/runs/{id}/rerun-failed-jobs` answers `403 Resource not accessible by
-  integration`**, so a session cannot re-run a job — the only lever is a new push, and `ci.yml`
-  triggers on EVERY branch push, so any commit does it (a `--allow-empty` one whose message records
-  the flake, if there is nothing real to land).
+  integration`**, so a session cannot re-run a job — the only lever is a new push, **and since
+  #681 it only works on a branch with an OPEN PR**. `ci.yml`'s `push` trigger is `[main]` now, so
+  a push to a branch is picked up by `pull_request: synchronize` and by nothing else. On a branch
+  with no PR yet — the claim-time window described below, where the claim commit lands before the
+  PR is opened — a push triggers NOTHING, and empty commits go into silence that reads exactly like
+  a GitHub outage. Open the PR first (that fires `opened` on the head), or close and reopen an
+  existing one. Where a push does work, a `--allow-empty` commit whose message records the flake is
+  the form to use if there is nothing real to land.
 
 ### An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff
 

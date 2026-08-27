@@ -12332,7 +12332,7 @@ mod docs_only_ci_and_legacy_visibility {
                 let hides_main = hides(pat);
                 assert!(
                     !hides_main,
-                    "`on.push.branches` excludes `{}`, which removes `main` -- the docs-only lane reaches it as a PUSH with no PR, so nothing else covers it -- or removes the `NN-slug` feature branches, which is the pre-PR validation this file's header states as the reason `push` exists at all. `**` being present does not save you: GitHub applies `!` patterns as removals. If the exclusion is deliberate and narrower than it looks, say so here rather than loosening `hides` ({})",
+                    "`on.push.branches` excludes `{}`. Either it removes `main` -- the direct-to-main lane reaches it as a PUSH with no PR, and since #681 this trigger is that lane's ONLY coverage -- or it carries a wildcard, and `hides` fails CLOSED on every `*`, `?` and `[` rather than trying to decide which branches a glob eats. `**` being present does not save you: GitHub applies `!` patterns as removals. If the exclusion is deliberate and narrower than it looks, argue it here rather than loosening `hides` ({})",
                     excluded, what
                 );
             }
@@ -13348,19 +13348,32 @@ mod docs_only_ci_and_legacy_visibility {
             // no test at all.
             ("push.branches covers neither ** nor main", ci.replacen("    branches: [main]", "    branches: ['release/*']", 1)),
             ("push.branches excludes every single-segment branch", ci.replacen("    branches: [main]", "    branches: ['**', '!*']", 1)),
-            // THE THREE CLASSES `hides_main` DECIDED BY A TRAILING `*` ALONE (reviews #43/#44).
-            // `!*-*` and `!2*` leave `main` untouched and remove every `NN-slug` branch, i.e. the
-            // pre-PR validation `ci.yml`'s header states as the reason `push` exists at all -- the
-            // `!*` plant above caught its class only incidentally, because `*` also matches `main`.
-            // `!mai?` and `!m[a]in` remove `main` itself through glob metacharacters a trailing-`*`
-            // special case cannot see, which is why the matcher now fails CLOSED on `?` and `[`.
+            // THE CLASSES A TRAILING-`*` MATCHER DECIDED WRONG (reviews #43/#44), KEPT AS
+            // FAIL-CLOSED CONTROLS. `!mai?` and `!m[a]in` remove `main` itself through glob
+            // metacharacters that special case cannot see -- those are the unambiguous reds.
+            //
+            // `!*-*`, `!2*` and `!6*` are DIFFERENT NOW and the labels below are stale in a way
+            // worth stating rather than quietly renaming. Each leaves `main` untouched, so under
+            // the property this file now declares -- "the gate runs on every push that can reach
+            // `main` DIRECTLY" -- they are strictly WIDENING edits that the suite nonetheless
+            // requires red. Before #681 they redded for their names: they removed the `NN-slug`
+            // branches, i.e. the pre-PR validation `ci.yml`'s header used to give as the reason
+            // `push` existed. #681 removed that reason AND that header clause, so what they catch
+            // today is only `hides` failing closed on a wildcard.
+            //
+            // Kept anyway, deliberately: `hides` is the right predicate for a positive list of one
+            // literal, and a wildcard exclusion reappearing beside `[main]` is a shape worth
+            // stopping to argue about. But this IS the over-red this file has retracted five times
+            // in the other direction, so it is named here instead of discovered later. Whether
+            // these three should red at all is the open question -- see the issue linked from
+            // #682. (Review of PR #682.)
             ("push.branches drops every NN-slug branch", ci.replacen("    branches: [main]", "    branches: ['**', '!*-*']", 1)),
             ("push.branches drops the 2-prefixed feature branches", ci.replacen("    branches: [main]", "    branches: ['**', '!2*']", 1)),
             ("push.branches hides main through a ? wildcard", ci.replacen("    branches: [main]", "    branches: ['**', '!mai?']", 1)),
             ("push.branches hides main through a character class", ci.replacen("    branches: [main]", "    branches: ['**', '!m[a]in']", 1)),
-            // THE ONE THAT NAMES THIS BRANCH. `!6*` leaves `main` alone and removes every
-            // `6NN-slug` branch -- the live issue range, including `678-qmd-stub-suite-in-ci` --
-            // and it passed the two-sample matcher. Same for `!1*`, `!3*`, `!5*`, `!7*`.
+            // `!6*` left `main` alone and removed every `6NN-slug` branch -- the live issue
+            // range when it was written -- and it PASSED the two-sample matcher that preceded
+            // `hides`. That is why the matcher stopped sampling: a sample is an enumeration.
             ("push.branches drops the live issue range", ci.replacen("    branches: [main]", "    branches: ['**', '!6*']", 1)),
             // THE `pull_request` HALF, WHICH DID NOT LOOK AT EXCLUSIONS AT ALL. A fork produces no
             // push, so this trigger is a fork PR's only coverage.
