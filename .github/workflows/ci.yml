@@ -66,58 +66,26 @@ jobs:
     runs-on: ubuntu-latest
     # EVERY OTHER JOB `needs:` THIS ONE, AND `codegen` -- the REQUIRED check on `main` -- reds on
     # `needs.changes.result == failure`. So a hang here does not merely lose signal: nothing in the
-    # repository can merge until it clears, on any branch, for any diff. With no `timeout-minutes`
-    # that window is GitHub's 360-minute default, and this job now runs a suite that drives python3
-    # at ~14 sites and builds non-UTF-8 paths, symlink PATH fixtures, an ASCII-locale probe and a
-    # poisoned sqlite file -- whose own step comment enumerates three host-drift classes as EXPECTED
-    # failure modes. Compose that with peak (CLAUDE.md: Friday/Saturday 19:00-21:30) and a runner
-    # image bump has a path to "no checkout, dispatch or payments fix merges for six hours", at the
-    # hours where a paid order nobody is told about is the failure that costs most.
-    # 10 minutes is orders of magnitude above anything this job legitimately does -- seconds of
-    # shell, plus the checkout. That checkout is `fetch-depth: 0`, i.e. a FULL-HISTORY clone, and
-    # this line said "a shallow diff" for a round: it is the one cost in this job that grows with
-    # the REPOSITORY rather than with the diff, which is worth naming inside the justification for
-    # a cap whose failure blocks every merge. It holds comfortably at today's size (~15s observed
-    # for the whole job); if the clone ever dominates, that is a capacity signal, not a hang.
-    # So the cap bounds a HANG AND NOTHING ELSE -- the multiplier this line
-    # used to state was a bare derived number, and review #45 measured it as ~43x where the line
-    # said ~30x. Right in the conservative direction and still the shape ADR-20260817-105845
-    # governs, so the figure is gone rather than corrected. And what the cap DOES cover is worth
-    # saying out loud, because the far likelier event is a RED, and a red has the SAME blast
-    # radius: `changes` fails, all five downstream jobs are skipped, `codegen` reds on
-    # `needs.*.result`, nothing merges. The timeout turns a six-hour worst case into ten minutes and
-    # does nothing at all for the case where the suite runs to completion and fails. That case is
-    # DESIGNED IN: T3/T3b/T3c ("controlled PATH not constructible", "stub bun + symlinks
-    # unavailable") and T15g's ASCII control are deliberately hard `verdict bad` rather than skips,
-    # on the stated reasoning that a harness which cannot build its own setup must not be laundered
-    # into a green. That is right for the CASE and it is what makes a runner-image bump a
-    # repository-wide merge block.
-    #
-    # AND OPTION (a) DOES NOT CLOSE THAT MERGE BLOCK -- this line said it did, and the row it cites
-    # says the opposite in its own words: a sibling always-run job is "EQUALLY BLOCKING". Trace it:
-    # the sibling job is in `codegen`'s `needs:`, it reds on host drift, `join(needs.*.result)`
-    # carries `failure`, the `case` arm sets `status=1`, the required check reds, nothing merges.
-    # Identical blast radius. What option (a) DOES close is the SKIP CASCADE -- the other five jobs
-    # keep running, so their signal survives, and on the docs-only lane `docs-validate` still runs,
-    # which is the direction where the failure INVERTS (a docs-only push is a push to `main` with no
-    # PR, so a red blocks nothing and the change lands with the one validator that lane has skipped).
-    # That is worth having and it is a different property. Whoever closes the row on (a) believing
-    # they bought back "a host-drift red cannot stop shipping at peak" would not have.
-    #
-    # WHAT ACTUALLY CLOSES THE RED CLASS is not on this diff: making the suite's host-CAPABILITY
-    # preconditions `skipped` rather than `verdict bad` -- the treatment T16's ASCII-locale branch
-    # already gets and T3/T3b/T3c and T15g's control deliberately do not -- or keeping the suite out
-    # of the aggregator's assertion entirely. Both are `RETRIEVAL-QMD-CI`'s to authorize, not this
-    # change's, as is moving the step. (Review #91 of PR #679.)
+    # repository can merge until it clears, and with no `timeout-minutes` that window is GitHub's
+    # 360-minute default. SINCE 2026-08-27 THIS JOB IS BACK TO WHAT ITS NAME SAYS -- the docs-only
+    # detector plus checkout, seconds of shell. The two gate-script suites that briefly lived here
+    # (and were the reason this cap's justification once enumerated python3 probes and host-drift
+    # classes) moved to the sibling `gate-scripts` job below, GATE-STEP-LOCUS option (a): a red in
+    # a gate suite no longer skips every downstream job, and a docs-only push can no longer land on
+    # `main` with `docs-validate` skipped. Equally BLOCKING on a genuine failure -- that is kept.
+    # 10 minutes is orders of magnitude above what remains here. The checkout is `fetch-depth: 0`,
+    # a FULL-HISTORY clone -- the one cost that grows with the REPOSITORY rather than the diff; it
+    # holds comfortably today (~15s for the whole job), and if the clone ever dominates that is a
+    # capacity signal, not a hang. The cap bounds a HANG AND NOTHING ELSE.
     #
     # AND A CAP HERE CLOSES ONE DOOR OF SIX. `codegen` is `if: always()`, and `always()` still
     # WAITS for a `needs:` job to finish -- so a job that HANGS (rather than fails) keeps the
     # required check queued indefinitely, auto-merge never fires, and nothing merges. `cargo build`
     # stalling on a registry hiccup in `build-test`, or the `postgres` service never becoming
     # healthy in `db-test`, does exactly that at GitHub's 360-minute default. Every job the
-    # aggregator consumes therefore carries a cap, and `assert_pinned_in_changes_job` requires one
-    # on each -- derived from `codegen`'s own `needs:`, like the `continue-on-error` sweep beside
-    # it, so a job added to the aggregator is covered when it is added. The heavy jobs get 60
+    # aggregator consumes therefore carries a cap, and the gate-pin helper in `tests.rs` requires
+    # one on each -- derived from `codegen`'s own `needs:`, like the `continue-on-error` sweep
+    # beside it, so a job added to the aggregator is covered when it is added. The heavy jobs get 60
     # minutes -- and THAT FIGURE WAS A BARE DERIVED NUMBER with no antecedent, in the branch about
     # bare derived numbers (review #57). What is measured: `build-test` ~4m17s and `db-test` ~3m54s
     # WARM, read off real runs on this branch. What is NOT measured, and could not be here, is the
@@ -139,9 +107,10 @@ jobs:
     # never taken. If a cold run ever approaches it, that is a CAPACITY signal: read the duration
     # off that run, state it here, and raise both this value and the bound in `tests.rs` in the
     # same commit. (Review #44 set 60; review #57 named it unantecedented and it was raised.)
-    # It does NOT settle `GATE-STEP-LOCUS` (in-job vs sibling job); that row stays open, and this is
-    # the interim mitigation it names. Pinned by `assert_pinned_in_changes_job`, which requires the
-    # key and caps it -- removing it or setting it to hours reds, by name.
+    # `GATE-STEP-LOCUS` is DECIDED (option a, founder 2026-08-27): the gate suites live in the
+    # sibling `gate-scripts` job, and this cap is no longer an interim mitigation for anything --
+    # it is the ordinary hang bound every aggregated job carries. Pinned by the gate-pin helper in
+    # `tests.rs`, which requires the key and caps it -- removing it or setting it to hours reds.
     timeout-minutes: 10
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
@@ -176,10 +145,36 @@ jobs:
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only (base=$BASE_SHA head=$HEAD_SHA event=$EVENT_NAME)"
+
+  gate-scripts:
+    # THE GATE-SCRIPT SUITES, IN THEIR OWN ALWAYS-RUN JOB -- GATE-STEP-LOCUS decided option (a)
+    # (founder, 2026-08-27, ADR-20260827-081500). They lived inside `changes`, the job every other
+    # job `needs:`, so a host-drift red in either suite SKIPPED lint/specs/build-test/db-test/
+    # docs-validate and took all signal with it -- and on the docs-only lane (a push straight to
+    # `main` with no PR) it skipped `docs-validate`, the only validator that lane has, so the change
+    # LANDED UNCHECKED while `codegen` redded. Moving them here closes that skip cascade: a red in
+    # this job reds `codegen` -- equally blocking, and that property is kept on purpose -- but every
+    # other job still runs and reports. Cost: one extra runner start per run, on a repo whose own
+    # header records Actions as free here.
+    #
+    # No `if:` -- ALWAYS RUN, including docs-only changes, for the same reason the steps used to
+    # live in `changes`: a broken register-check hook or stub suite must not ship silently on the
+    # paths that skip the Rust suites. `codegen` aggregates this job by name; a skipped job would
+    # be accepted by branch protection, so this job must always produce a real conclusion.
+    runs-on: ubuntu-latest
+    # Bounds a HANG only (a red has its own path above). Both suites are dependency-free shell +
+    # python3, ~15s observed together, and this value is the same order-of-magnitude ceiling
+    # `changes` and `codegen` carry: far above anything legitimate, far below the 360-minute
+    # default that turns a hung probe into a six-hour repository-wide merge block.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       # The ask-gate's own guard, on EVERY change — docs-only included. This job is the one
       # always-run job with a checkout (no `if:`), so a broken register-check hook cannot ship
       # silently on the paths that skip the Rust suites; pure shell, ~200ms. Pinned by the
-      # `the_hook_selftest_runs_in_the_always_run_changes_job` codegen test (2026-08-21 hardening).
+      # `the_hook_selftest_runs_in_the_always_run_gate_job` codegen test (2026-08-21 hardening,
+      # re-pointed here when GATE-STEP-LOCUS moved the gate steps out of `changes`).
       - name: Register-check hook selftest (the ask-gate must never be disarmed silently)
         run: bash .claude/hooks/register-check-selftest.sh
       # The decision-lookup wrapper carries a supply-chain gate (pinned + scriptless install,
@@ -188,8 +183,10 @@ jobs:
       # author's machine. It is hermetic: stubs only, no network, no install, and it never touches a
       # real .qmd/ cache. Pure bash + python3, seconds, no Rust, so it belongs in this always-run
       # job rather than behind the docs-only skip. Authorized by decision row RETRIEVAL-QMD-CI
-      # (ADR-20260824-205911) - that row authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI.
-      # Pinned by the `the_stub_suite_runs_in_the_always_run_changes_job` codegen test, which
+      # (ADR-20260824-205911) - that row authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI;
+      # its LOCUS (which job carries the step) was RETRIEVAL-QMD-CI's `changes` until GATE-STEP-LOCUS
+      # decided option (a) (founder 2026-08-27), which moved it here without touching the step.
+      # Pinned by the `the_stub_suite_runs_in_the_always_run_gate_job` codegen test, which
       # asserts over PARSED YAML: this step is located by its `run` VALUE and its key set must be
       # exactly {name, run}, so `|| true`, a trailing `; exit 0`, a step-level `if:` in ANY
       # spelling, `shell:`, `env:` or `continue-on-error` all red it - as do a job-level `if:` /
@@ -354,8 +351,9 @@ jobs:
     # the same wall -- reached by an ordinary `Cargo.lock` or toolchain bump, which rekeys every
     # cache at once. Too HIGH is NOT free here, unlike on `docs-validate`: `specs` is in `codegen`'s
     # `needs:`, `always()` still WAITS, so a hung `specs` keeps the required check queued for the
-    # full value with auto-merge never firing -- the repository-wide block `GATE-STEP-LOCUS` prices,
-    # and the reason `changes` is capped at 10 rather than at this value.
+    # full value with auto-merge never firing -- the repository-wide block `GATE-STEP-LOCUS`
+    # priced before it was decided, and the reason `changes` is capped at 10 rather than at this
+    # value.
     #
     # So this number is a genuine trade rather than a cheap direction, and it is set at the same
     # value as the other unmeasured jobs deliberately: one number across them is one fewer figure to
@@ -625,7 +623,7 @@ jobs:
     # build as an acceptable skip and silently disable the entire gate. `if: always()` makes this job
     # run whatever happened upstream, and the step fails unless every upstream result is `success`
     # (normal run) or `skipped` (docs-only change). `cancelled` and `failure` both fail here.
-    needs: [changes, lint, specs, build-test, db-test, docs-validate]
+    needs: [changes, gate-scripts, lint, specs, build-test, db-test, docs-validate]
     if: always()
     timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`
     runs-on: ubuntu-latest

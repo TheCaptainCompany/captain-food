@@ -188,9 +188,9 @@ reaches the controlling record even where retrieval alone missed it.
 ## Hermetic test suite (stubs only — never installs, never touches the real `.qmd/`)
 
 The committed suite is the authority for this wrapper, and it is **executable in CI**: one step of
-`.github/workflows/ci.yml`'s always-run `changes` job runs it on every PR and on every push to
-`main`, pinned there by the
-`the_stub_suite_runs_in_the_always_run_changes_job` codegen test (decided 2026-08-24,
+`.github/workflows/ci.yml`'s always-run `gate-scripts` job runs it on every PR and on every push
+to `main` (GATE-STEP-LOCUS option (a), 2026-08-27 -- it lived in `changes` before), pinned by the
+`the_stub_suite_runs_in_the_always_run_gate_job` codegen test (decided 2026-08-24,
 `RETRIEVAL-QMD-CI`). Re-run it locally after any wrapper change:
 
 ```

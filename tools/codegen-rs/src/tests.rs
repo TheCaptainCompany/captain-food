@@ -11974,8 +11974,8 @@ mod docs_only_ci_and_legacy_visibility {
             "docs-validate must execute the same canonical validator command as the specs job"
         );
         assert!(
-            ci.contains("needs: [changes, lint, specs, build-test, db-test, docs-validate]"),
-            "the codegen aggregator must depend on docs-validate"
+            ci.contains("needs: [changes, gate-scripts, lint, specs, build-test, db-test, docs-validate]"),
+            "the codegen aggregator must depend on docs-validate AND gate-scripts -- the literal list is pinned so a dropped entry cannot hide behind a partial match (gate-scripts joined it when GATE-STEP-LOCUS decided option (a))"
         );
         // The aggregator's generic skipped-acceptance must NOT be the only guard: a mis-gated
         // docs-validate that skips on a docs-only run would slide through it.
@@ -11986,18 +11986,19 @@ mod docs_only_ci_and_legacy_visibility {
     }
 
     /// The ask-gate's own guard must run in CI on EVERY change — docs-only included — or a broken
-    /// hook ships silently on exactly the paths that skip the Rust suites. The `changes` detector
-    /// is the one always-run job with a checkout (no `if:` gate, every push/PR), so the selftest
-    /// lives there; this pin fails if the step is deleted, renamed, moved out of `changes`, or the
-    /// job itself gains a gate (2026-08-21 hardening slice, founder-directed).
+    /// hook ships silently on exactly the paths that skip the Rust suites. It lives in the
+    /// always-run `gate-scripts` job (no `if:` gate, every push/PR, aggregated by `codegen` by
+    /// name) — GATE-STEP-LOCUS option (a), founder 2026-08-27; before that it lived inside the
+    /// `changes` detector (2026-08-21 hardening slice, founder-directed). This pin fails if the
+    /// step is deleted, renamed, moved out of `gate-scripts`, or the job itself gains a gate.
     #[test]
-    fn the_hook_selftest_runs_in_the_always_run_changes_job() {
+    fn the_hook_selftest_runs_in_the_always_run_gate_job() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
         // Same parsed-YAML pin as the stub suite below. This test previously asserted only that
         // the command appeared somewhere between the `changes:` and `lint:` anchors, which left it
         // green under every disarm mutant `beck` and the PR #679 review found.
-        assert_pinned_in_changes_job(
+        assert_pinned_in_gate_job(
             &ci,
             "bash .claude/hooks/register-check-selftest.sh",
             "the register-check hook selftest — the ask-gate is otherwise unverified on every push",
@@ -12025,7 +12026,7 @@ mod docs_only_ci_and_legacy_visibility {
     /// the same test: a decoy line inside an earlier step's block scalar that trimmed to
     /// `run: <cmd>` satisfied the old line-based `assert_eq!` while the real step carried
     /// `|| true`.
-    fn assert_pinned_in_changes_job(ci: &str, cmd: &str, what: &str) {
+    fn assert_pinned_in_gate_job(ci: &str, cmd: &str, what: &str) {
         let doc: serde_yaml::Value = serde_yaml::from_str(ci).expect("ci.yml must parse as YAML");
         // Guard dangerous CONTENT, not key PRESENCE, at BOTH scopes.
         //
@@ -12420,11 +12421,16 @@ mod docs_only_ci_and_legacy_visibility {
         shell_ok(&doc, "ci.yml workflow-level");
         env_ok(&doc, "ci.yml workflow-level");
 
+        // THE JOB CARRYING THE GATE STEPS IS `gate-scripts` SINCE GATE-STEP-LOCUS DECIDED OPTION
+        // (a) (founder 2026-08-27): a sibling always-run job `codegen` aggregates equally, so a
+        // host-drift red in a gate suite no longer skips every downstream job and can no longer
+        // land a docs-only push on `main` with `docs-validate` skipped. Every guard below moved
+        // with the steps -- they bound the job the gate scripts EXECUTE in, wherever that is.
         let changes_val = doc
             .get("jobs")
-            .and_then(|j| j.get("changes"))
-            .expect("ci.yml must declare a `changes` job");
-        shell_ok(changes_val, "the `changes` job's");
+            .and_then(|j| j.get("gate-scripts"))
+            .expect("ci.yml must declare a `gate-scripts` job -- GATE-STEP-LOCUS option (a) put the gate steps there; if the job moved again, re-point this helper in the same change");
+        shell_ok(changes_val, "the `gate-scripts` job's");
         // JOB SCOPE TOO. This line was present, then silently deleted by the refactor that
         // extracted `shell_ok` -- and review #8 of PR #679 measured the consequence: job-level
         // `env: {BASH_ENV: /tmp/preamble.sh}` and `env: {LD_PRELOAD: ...}` were BOTH green again,
@@ -12433,7 +12439,7 @@ mod docs_only_ci_and_legacy_visibility {
         // `both_scopes_reject_execution_altering_env` exists below -- and review #9 found that
         // sentence pointing at a test nobody had written. It exists now; deleting either `env_ok`
         // call reds it, by name.
-        env_ok(changes_val, "the `changes` job's");
+        env_ok(changes_val, "the `gate-scripts` job's");
         // THE JOB THE PIN ITSELF RUNS IN. Everything above bounds `changes`; `build-test` -- the
         // job that actually executes THIS function and the three gate-script tests beside it --
         // had no assertion over its own `env:` or `defaults.run` at all. A `build-test`-scope
@@ -12454,7 +12460,7 @@ mod docs_only_ci_and_legacy_visibility {
         // the `cargo test --workspace` step makes GitHub pass the script as `$0`, so it never runs,
         // the step exits 0, and `assert_gate_script_self_verifies`,
         // `the_gate_self_verification_reds_on_a_tampered_script`,
-        // `the_stub_suite_runs_in_the_always_run_changes_job` and the citation rule all go vacuous
+        // `the_stub_suite_runs_in_the_always_run_gate_job` and the citation rule all go vacuous
         // in one commit -- with `changes` green and `codegen` aggregating green. Review #12
         // extended the guards to this job precisely because "nothing bounded the job the pins RUN
         // in", and the extension covered `env:` and `defaults.run` and stopped at the step
@@ -12710,12 +12716,12 @@ mod docs_only_ci_and_legacy_visibility {
             .get("timeout-minutes")
             .and_then(|t| t.as_u64())
             .unwrap_or_else(|| panic!(
-                "the `changes` job must declare a `timeout-minutes` INTEGER -- every other job `needs:` it and `codegen` reds on its failure, so a hung step here blocks every merge in the repository for GitHub's 360-minute default while {} reports nothing at all",
+                "the `gate-scripts` job must declare a `timeout-minutes` INTEGER -- `codegen` aggregates it and reds on its failure, so a hung gate probe here keeps the required check queued for GitHub's 360-minute default while {} reports nothing at all",
                 what
             ));
         assert!(
             (5..=30).contains(&timeout),
-            "the `changes` job's `timeout-minutes` is {} -- it must be in 5..=30. TWO bounds apply to this job and this is the tighter one: `changes` is the first entry of `codegen`'s `needs:`, so the aggregated-job loop already asserts 5..=120 over it. The FLOOR is shared with that loop (review #79 added it to catch a dropped zero) and was stated here as 1, which told an author `timeout-minutes: 3` was legal and then redded them on the OTHER assertion, whose message talks about aggregated jobs and a 120 ceiling and never mentions this 30. The CEILING is this rule's own: a hung probe in the job every other job `needs:` blocks every merge in the repository for its duration, including a peak-hour fix to checkout, dispatch or payments",
+            "the `gate-scripts` job's `timeout-minutes` is {} -- it must be in 5..=30. TWO bounds apply to this job and this is the tighter one: `gate-scripts` is in `codegen`'s `needs:`, so the aggregated-job loop already asserts 5..=120 over it. The FLOOR is shared with that loop (review #79 added it to catch a dropped zero). The CEILING is this rule's own: both gate suites are seconds of dependency-free shell, so a value near the heavy jobs' 120 would only ever bound a hang that keeps the REQUIRED check queued -- since GATE-STEP-LOCUS option (a) that hang no longer skips any sibling job, but it still blocks every merge until it clears",
             timeout
         );
         for key in ["container", "services"] {
@@ -12941,7 +12947,7 @@ mod docs_only_ci_and_legacy_visibility {
     /// Shell source with comment lines removed, for pins that must see CODE and not PROSE.
     ///
     /// Shared on purpose. Review #9 fixed `assert_gate_script_self_verifies` this way and left
-    /// `the_stub_suite_runs_in_the_always_run_changes_job`'s `EXPECTED_CASES` scan matching the raw
+    /// `the_stub_suite_runs_in_the_always_run_gate_job`'s `EXPECTED_CASES` scan matching the raw
     /// file, so commenting the completeness block out kept that pin green while the suite went back
     /// to printing `RESULT: n passed` on a host where cases had stopped running -- `claude-review`
     /// found it one screen from the fix. Two stripping policies that must agree WILL diverge, the
@@ -13217,21 +13223,24 @@ mod docs_only_ci_and_legacy_visibility {
         // captures a passing test's output: those ~26 "panicked at" lines are printed only if this
         // test FAILS, which is exactly when you want to read them. So the fix is to delete the
         // mechanism rather than guard it -- no global state, no catch_unwind subtleties, and every
-        // assertion inside `assert_pinned_in_changes_job` keeps its message. (The reviewer's
+        // assertion inside `assert_pinned_in_gate_job` keeps its message. (The reviewer's
         // Result-returning refactor is the deeper answer and would also surface WHY each survivor
         // survived; it converts ~30 assertions, so it is not being done in the same step as a
         // behaviour fix -- Beck. Recorded here rather than left as a silent choice.)
         let check = |src: &str| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                assert_pinned_in_changes_job(src, CMD, "the gate")
+                assert_pinned_in_gate_job(src, CMD, "the gate")
             }))
             .is_ok()
         };
 
         assert!(check(&ci), "the real ci.yml must pass, or every mutant below is vacuous");
 
-        // Job scope: insert directly under `  changes:`. Workflow scope: before `jobs:`.
-        let at_job = |body: &str| ci.replacen("  changes:\n", &format!("  changes:\n    env:\n      {}\n", body), 1);
+        // Job scope: insert directly under `  gate-scripts:` -- the job the helper guards, since
+        // GATE-STEP-LOCUS moved the gate steps there. Anchoring on `changes` after the move would
+        // plant the env one job over and prove nothing (the label/mutation mismatch class below).
+        // Workflow scope: before `jobs:`.
+        let at_job = |body: &str| ci.replacen("  gate-scripts:\n", &format!("  gate-scripts:\n    env:\n      {}\n", body), 1);
         let at_workflow = |body: &str| ci.replacen("\njobs:\n", &format!("\nenv:\n  {}\njobs:\n", body), 1);
         // MUTATE INSIDE ONE NAMED JOB. `ci.replacen(anchor, .., 1)` rewrites the FIRST match in
         // the whole file, and job bodies here are near-identical: the anchor
@@ -13321,7 +13330,7 @@ mod docs_only_ci_and_legacy_visibility {
             ("workflow GIT_DIR", at_workflow("GIT_DIR: /tmp/decoy/.git")),
             ("workflow DECISION_LOOKUP_ALLOW_DIRTY", at_workflow("DECISION_LOOKUP_ALLOW_DIRTY: \"1\"")),
             // Shell that never executes the step script, at both scopes.
-            ("job shell drops the script", ci.replacen("  changes:\n", "  changes:\n    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n", 1)),
+            ("job shell drops the script", ci.replacen("  gate-scripts:\n", "  gate-scripts:\n    defaults:\n      run:\n        shell: bash -c \"exit 0\" {0}\n", 1)),
             ("workflow shell drops the script", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    shell: bash -c \"exit 0\" {0}\njobs:\n", 1)),
             ("workflow defaults.run.working-directory", ci.replacen("\njobs:\n", "\ndefaults:\n  run:\n    working-directory: /tmp/decoy\njobs:\n", 1)),
             // THE THIRD env_ok CALL SITE. The docstring and the PR body both said "deleting
@@ -13419,9 +13428,9 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - run: echo /tmp/shim >> \"$GITHUB_PATH\"\n      - uses: dtolnay/rust-toolchain@stable\n")),
             // THE TWELFTH MUTANT AT STEP SCOPE. `shell_ok` reads `defaults.run` only, so a
             // step-level `shell:` was invisible at every scope it is called at (review #23).
-            ("changes step shell drops the script", in_job("changes",
-                "      - id: detect\n",
-                "      - id: detect\n        shell: bash -c \"exit 0\" {0}\n")),
+            ("gate job step shell drops the script", in_job("gate-scripts",
+                "      - name: Register-check hook selftest",
+                "      - name: Warm\n        shell: bash -c \"exit 0\" {0}\n        run: echo warm\n      - name: Register-check hook selftest")),
             ("build-test step shell drops the script", in_job("build-test",
                 "      - uses: dtolnay/rust-toolchain@stable\n",
                 "      - name: Warm\n        shell: bash -e -c \"exit 0\" {0}\n        run: echo warm\n      - uses: dtolnay/rust-toolchain@stable\n")),
@@ -13484,14 +13493,14 @@ mod docs_only_ci_and_legacy_visibility {
                 "        run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh ; exit 0",
                 1)),
             // The JOB may not gate or matrix itself out of existence.
-            ("changes job gains an if", ci.replacen("  changes:\n", "  changes:\n    if: github.ref == 'refs/heads/never'\n", 1)),
+            ("gate job gains an if", ci.replacen("  gate-scripts:\n", "  gate-scripts:\n    if: github.ref == 'refs/heads/never'\n", 1)),
             ("changes job gains continue-on-error", ci.replacen("  changes:\n", "  changes:\n    continue-on-error: true\n", 1)),
-            ("changes job gains a container", ci.replacen("  changes:\n", "  changes:\n    container: alpine:3\n", 1)),
+            ("gate job gains a container", ci.replacen("  gate-scripts:\n", "  gate-scripts:\n    container: alpine:3\n", 1)),
             // JOB-scope `working-directory`: only the workflow-scope spelling was planted, and the
             // one-scope-up miss is how mutants twelve and thirteen both got in.
             ("job defaults.run.working-directory", ci.replacen(
-                "  changes:\n",
-                "  changes:\n    defaults:\n      run:\n        working-directory: /tmp/decoy\n",
+                "  gate-scripts:\n",
+                "  gate-scripts:\n    defaults:\n      run:\n        working-directory: /tmp/decoy\n",
                 1)),
             // MUTANT FOURTEEN -- two lines INSIDE a sibling step that overwrite a gate script. The
             // comment 100 lines up calls this the reason `steps.len() == 4` was replaced, and the
@@ -13510,15 +13519,13 @@ mod docs_only_ci_and_legacy_visibility {
                 "      - uses: actions/github-script@v7\n        with:\n          script: |\n            require('fs').writeFileSync('x', '')\n      - name: decision-lookup hermetic stub suite",
                 1)),
             // A checkout re-pointed at another tree puts someone else's scripts under the gates.
-            ("changes checkout re-points repository", ci.replacen(
-                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
-                "      - uses: actions/checkout@v5\n        with:\n          repository: someone/else\n          fetch-depth: 0",
-                1)),
-            ("changes checkout re-points ref", ci.replacen(
-                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0",
-                "      - uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n          fetch-depth: 0",
-                1)),
-            ("a self-hosted pool labelled to look hosted", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
+            ("gate job checkout re-points repository", in_job("gate-scripts",
+                "        uses: actions/checkout@v4\n",
+                "        uses: actions/checkout@v4\n        with:\n          repository: someone/else\n")),
+            ("gate job checkout re-points ref", in_job("gate-scripts",
+                "        uses: actions/checkout@v4\n",
+                "        uses: actions/checkout@v4\n        with:\n          ref: refs/heads/other\n")),
+            ("a self-hosted pool labelled to look hosted", in_job("gate-scripts", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
             // ── THE FIVE ASSERTIONS THAT HAD NO PLANT ─────────────────────────────────────────
             // Review #35 measured what the corpus still leaves standing on a sentence: of the
             // job-level key ban `["if", "continue-on-error", "strategy", "needs"]` only two
@@ -13534,10 +13541,10 @@ mod docs_only_ci_and_legacy_visibility {
             // comment's reason for calling the real exploit awkward -- but this test parses YAML,
             // and the assertion under test is about the KEY, so the cycle is irrelevant to what is
             // being pinned. The exploitable spelling adds a job; this is the same key.
-            ("changes job gains strategy", ci.replacen("  changes:\n", "  changes:\n    strategy:\n      matrix:\n        x: [1]\n", 1)),
-            ("changes job gains needs", ci.replacen("  changes:\n", "  changes:\n    needs: lint\n", 1)),
-            ("changes job gains services", ci.replacen("  changes:\n", "  changes:\n    services:\n      pg:\n        image: postgres:16-alpine\n", 1)),
-            ("changes runs-on as a label list", in_job("changes", "    runs-on: ubuntu-latest", "    runs-on: [self-hosted, linux]")),
+            ("gate job gains strategy", ci.replacen("  gate-scripts:\n", "  gate-scripts:\n    strategy:\n      matrix:\n        x: [1]\n", 1)),
+            ("gate job gains needs", ci.replacen("  gate-scripts:\n", "  gate-scripts:\n    needs: lint\n", 1)),
+            ("gate job gains services", ci.replacen("  gate-scripts:\n", "  gate-scripts:\n    services:\n      pg:\n        image: postgres:16-alpine\n", 1)),
+            ("gate job runs-on as a label list", in_job("gate-scripts", "    runs-on: ubuntu-latest", "    runs-on: [self-hosted, linux]")),
             ("the changes job loses its timeout", in_job("changes", "    timeout-minutes: 10\n", "")),
             // AND THE FIVE OTHER JOBS THE AGGREGATOR WAITS ON. `always()` does not mean "do not
             // wait": a hang in any of them keeps the required check queued at the 360-minute
@@ -13547,8 +13554,8 @@ mod docs_only_ci_and_legacy_visibility {
             ("db-test timeout is the default with extra steps", in_job("db-test", "    timeout-minutes: 120", "    timeout-minutes: 360")),
             ("codegen loses its timeout", in_job("codegen", "    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
             ("the changes job's timeout is the default with extra steps", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 360")),
-            ("the changes job loses its checkout", in_job("changes",
-                "      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0   # need the base commit to diff against\n",
+            ("the gate job loses its checkout", in_job("gate-scripts",
+                "      - name: Checkout repository\n        uses: actions/checkout@v4\n",
                 "")),
             // ── THE REQUIRED CHECK ITSELF ──────────────────────────────────────────────────────
             // Every plant above disarms a job that CARRIES a pin. These eight disarm the job that
@@ -14525,10 +14532,10 @@ mod docs_only_ci_and_legacy_visibility {
     /// (decision row `RETRIEVAL-QMD-CI`, ADR-20260824-205911 — that row authorizes this step and
     /// this pin and nothing else in CI).
     #[test]
-    fn the_stub_suite_runs_in_the_always_run_changes_job() {
+    fn the_stub_suite_runs_in_the_always_run_gate_job() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
-        assert_pinned_in_changes_job(
+        assert_pinned_in_gate_job(
             &ci,
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "the decision-lookup stub suite — SKILL.md declares it the authority for a wrapper carrying a supply-chain gate, and an unrun suite reports the author's machine",
