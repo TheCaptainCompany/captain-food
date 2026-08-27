@@ -87,23 +87,24 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 > supervise checks until MERGED; the hourly stale-claim reaper releases claims silent for >24h.
 > Method: `BACKLOG.md`.
 
-## ⚠️ `claude-review` is decided-out, STILL REQUIRED, and now able to fail (2026-08-25)
+## ✅ `claude-review` is no longer a required check — REV-1 executed (2026-08-26)
 
-> **If every PR in this repo is suddenly unmergeable on `claude-review`, this is why — read it
-> before debugging anything.** [REV-1](decisions/REV-1.yaml) decided on 2026-08-17 to remove
-> `claude-review` from the required checks and **was never executed** (403 from the session's agent
-> proxy on ruleset `19179892`; open on
-> [#593](https://github.com/TheCaptainCompany/captain-food/issues/593)). #680 then hardened the
-> check so it reds when no verdict was produced — the [#677](https://github.com/TheCaptainCompany/captain-food/issues/677)
-> fix — merged by a one-time admin bypass the founder chose over executing REV-1 first, against the
-> team's recommendation and with the cost stated twice
-> ([REVIEW-GATE-BYPASS](decisions/REVIEW-GATE-BYPASS.yaml), `ADR-20260825-005323`).
+> **If you are here because a PR is stuck on `claude-review`: it is no longer required, so that is
+> not what is blocking you.** [REV-1](decisions/REV-1.yaml) decided on 2026-08-17 to remove it and
+> was finally **executed by the founder on 2026-08-26**, nine days later, in the GitHub UI. Ruleset
+> `19179892` now requires `codegen`, `build-test` and `db-test` only.
 >
-> **Consequence, knowingly carried**: any run where the reviewer cannot post — 429, model outage,
-> permission denials, or the action's own self-skip on a PR editing its workflow — is a repo-wide
-> merge stop, and a revert of #680 would itself need the check green. **A red there means NO
-> VERDICT WAS PRODUCED; it does not mean the reviewer found a problem.** Executing REV-1 removes
-> the exposure without touching any workflow file and remains the recommended next step.
+> **The exposure this section used to carry is CLOSED**: a 429, a model outage, a permission denial
+> or the action's self-skip on a PR editing its own workflow is no longer a repo-wide merge stop.
+>
+> `claude-review` still RUNS on every PR and still posts findings — it just does not gate merges.
+> The compensating control is unchanged and is a process obligation, not a mechanism: the
+> independent reviewer pass stays MANDATORY before ready-for-review (founder directive 2026-08-01),
+> now at one pass per PRESENTATION rather than per push
+> (`ADR-20260826-084500`, [`review-triage`](../.claude/skills/review-triage/SKILL.md)).
+>
+> **A red on `claude-review` still means NO VERDICT WAS PRODUCED**, not that the reviewer found a
+> problem — #680 hardened it to fail rather than self-clear, which is why that distinction matters.
 
 ## 🗂️ Decision register & ask gate (2026-08-21)
 
