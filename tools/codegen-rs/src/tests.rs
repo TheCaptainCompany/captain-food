@@ -8618,9 +8618,8 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
         vec![
             "decision-citation-file-not-utf8",
             "decision-citation-file-out-of-corpus",
-            "decision-superseded-authority",
         ],
-        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on the corpus being fully read; adding one is a decision, and removing one reopens the `kind eliminated` trap for it. `decision-superseded-authority` is the rule that CONSUMES the corpus rather than reporting on it, and it is the one most likely to carry a baselined N>0 -- shipping it at `warn` exists so a false positive can be accepted with `make warning-baseline`"
+        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on the corpus being fully read; adding one is a decision, and removing one reopens the `kind eliminated` trap for it. `decision-superseded-authority` LEFT this list when the founder decided CITATION-RULE-LEVEL to `err` (2026-08-27) -- an error never enters the warning profile, so there is no count to floor; the coupling assertion in `a_superseded_row_may_not_be_cited_as_live_authority` forces it back in if the level ever returns to `warn`"
     );
     for k in CORPUS_DERIVED_KINDS {
         assert!(
@@ -8709,8 +8708,8 @@ fn the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly() {
         LOWER_BOUND
     );
     assert!(
-        CorpusShortfall::Partial.unmeasured().contains(&"decision-superseded-authority"),
-        "the rule that CONSUMES the corpus dropped off the PARTIAL-read floor: it scans fewer files, so its count is a lower bound and a decrease is not evidence of a fix"
+        !CorpusShortfall::Partial.unmeasured().contains(&"decision-superseded-authority"),
+        "`decision-superseded-authority` is back on the PARTIAL-read floor, but it emits at ERROR (founder decision 2026-08-27) and an error never enters the warning profile -- flooring a kind the ratchet cannot see is a no-op that reads as coverage. If the level returned to `warn`, re-adding it here is correct; do both halves in the same change"
     );
 
     // NOTHING measured -- every kind is absent rather than low, so all three are floored.
@@ -10716,11 +10715,11 @@ mod decision_ask_and_citations {
             assert!(
                 !matches!(issues[0].level, Level::Warning)
                     || CORPUS_DERIVED_KINDS.contains(&issues[0].rule),
-                "`decision-superseded-authority` emits at WARNING, so it is inside the section 17 ratchet -- but its count comes from a corpus that is empty whenever `git ls-files` does not answer. It must be in CORPUS_DERIVED_KINDS, or a host that cannot read the corpus reds `N -> 0 (kind eliminated)` against a baselined finding, with the printed remedy refused. If you are flipping this rule back to `err`, the assertion below reds first and this one goes quiet on its own"
+                "`decision-superseded-authority` emits at WARNING, so it is inside the section 17 ratchet and must be in CORPUS_DERIVED_KINDS -- or a host that cannot read the corpus reds `N -> 0 (kind eliminated)` against a baselined finding, with the printed remedy refused. At today's decided level (ERROR, 2026-08-27) this arm is vacuously green; it stays armed so that a future flip back to `warn` cannot land without rejoining the list in the same change"
             );
             assert!(
-                matches!(issues[0].level, Level::Warning),
-                "`decision-superseded-authority` must emit at WARNING. It reaches the required check through the section 17 ratchet either way, so detection is unchanged -- but at ERROR the only escape from a false positive is rewording prose, and this rule decides by abbreviation lists and a parenthetical word window. Raising it to ERROR closes `CITATION-RULE-LEVEL`, which is founder-owned and open"
+                matches!(issues[0].level, Level::Error),
+                "`decision-superseded-authority` must emit at ERROR -- the level is a FOUNDER DECISION, not a preference. It shipped at `warn` under gate-then-stabilize while `CITATION-RULE-LEVEL` held the flip open; the founder decided `err` on 2026-08-27 (ADR-20260827-081500) after the parser had run over the real corpus with zero false positives. At `err` the one-commit supersession coupling docs/decisions/README.md requires is enforced absolutely again. Lowering this back to `warn` reverses a recorded decision and needs its own register row -- and if you do, the rule re-enters the section 17 ratchet, so it must rejoin CORPUS_DERIVED_KINDS in the SAME change (the coupling above reds if you forget)"
             );
         }
 

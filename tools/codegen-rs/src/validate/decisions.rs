@@ -1743,40 +1743,33 @@ pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
                     if exempt_text.contains("superseded") {
                         continue;
                     }
-                    // WARNING, NOT ERROR -- and the level is a directive, not a preference.
+                    // ERROR, BY RECORDED DECISION -- and the level is a directive, not a
+                    // preference. The rule SHIPPED at `warn` under CLAUDE.md's GATE-THEN-STABILIZE
+                    // (a new blocking rule on the path feeding the required check must not land
+                    // with its default flipped in the same commit; reviews #81/#82 of PR #679),
+                    // and `CITATION-RULE-LEVEL` was filed open and founder-owned to hold the flip.
+                    // The founder DECIDED it 2026-08-27 (call sheet, Q2: "Make it a hard error";
+                    // ADR-20260827-081500), after the parser had run over the real corpus and the
+                    // review rounds' live edits with zero false positives -- which is the smoking
+                    // the gated form was shipped to get.
                     //
-                    // CLAUDE.md's GATE-THEN-STABILIZE (founder-approved 2026-07-31): behaviour
-                    // changing a critical path ships BEHIND a gate, and flipping the default is a
-                    // SEPARATE recorded decision after the gated form has been smoked. A new
-                    // BLOCKING validator rule on the job that feeds the required check is that, so
-                    // shipping it at `err` in the same commit that wires it is the deviation
-                    // needing approval -- not shipping it at `warn`. `CITATION-RULE-LEVEL` is filed
-                    // OPEN and founder-owned, and it would have been decided by merging: the gated
-                    // form and the default landing together, with the row that should have gated it
-                    // filed inside the change it would gate. (Reviews #81 and #82 of PR #679,
-                    // reached independently.)
+                    // WHAT `err` BUYS BACK: the one-commit supersession coupling
+                    // `docs/decisions/README.md` requires is enforced ABSOLUTELY again -- a stale
+                    // citation can no longer land behind a baseline entry.
                     //
-                    // THE DETECTION VALUE IS ESSENTIALLY UNCHANGED, which is what makes this cheap:
-                    // §17 is exact per-kind in BOTH directions, so the first stale citation scores
-                    // `0 -> 1 (NEW warning kind)` and `make validate` still exits 1. What changes is
-                    // the ESCAPE: at `err` the only way past a false positive is rewording the
-                    // prose; at `warn` an author who judges the finding wrong accepts it with
-                    // `make warning-baseline` in the same commit -- visible, reviewable, recorded.
-                    // That asymmetry is why a HAND-ROLLED ENGLISH-CLAUSE PARSER belongs here and the
-                    // two deterministic sibling kinds could have gone either way.
+                    // WHAT IT COSTS, unchanged from the row and accepted with it: on a false
+                    // positive the only escape is rewording the prose, and on the docs-only lane
+                    // (a push to `main` with no PR) that red lands after the push. The residuals
+                    // are unchanged too -- the same-marker join, the fail-open corpus posture --
+                    // and the second half of `CITATION-RULE-LEVEL`'s question (an explicit marker
+                    // instead of the implicit word `superseded`) was NOT decided here and remains
+                    // open in the register's history for whoever takes it up.
                     //
-                    // WHAT IT COSTS, stated rather than glossed: the one-commit supersession
-                    // coupling `docs/decisions/README.md` requires is no longer enforced absolutely
-                    // -- a baselined stale citation can land. That cost, and the argument for
-                    // flipping back, are in `CITATION-RULE-LEVEL`, which stays open.
-                    //
-                    // TWO COMMENTS ABOVE ARE IN THE PAST TENSE FOR THIS REASON (~1291, ~1334): each
-                    // argued an arm's shape from "this rule is an ERROR". The argument they make is
-                    // UNCHANGED at warning level -- §17 still exits 1 on a new kind, so a false
-                    // positive still stops the commit -- but the sentence stating the level had to
-                    // move with the level, or it becomes the stale cross-reference this branch
-                    // catalogues. Kept rather than deleted so the direction is visible.
-                    issues.push(warn(
+                    // AN ERROR NEVER ENTERS `warning_profile`, so this rule left
+                    // `CORPUS_DERIVED_KINDS` and the §17 ratchet in the same change -- the
+                    // level<->list coupling reviews #84/#86 pinned, exercised in the direction it
+                    // was built for.
+                    issues.push(err(
                         "decision-superseded-authority",
                         path.clone(),
                         format!(

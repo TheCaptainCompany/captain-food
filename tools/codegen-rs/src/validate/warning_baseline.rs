@@ -97,35 +97,18 @@ pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadab
 /// validator regression on a tree nobody touched. The fix is this file's own vocabulary applied one
 /// level down — "did not look" is not "found nothing", so on such a run these kinds are neither
 /// compared nor rewritten. (Review #80 of PR #679.)
-pub(crate) const CORPUS_DERIVED_KINDS: [&str; 3] = [
+pub(crate) const CORPUS_DERIVED_KINDS: [&str; 2] = [
     "decision-citation-file-not-utf8",
     "decision-citation-file-out-of-corpus",
-    // THE RULE THAT CONSUMES THE CORPUS, not merely one that reports on it. `main.rs` feeds
-    // `validate_no_superseded_row_is_cited_as_authority` the `cited` vector, which is EMPTY on every
-    // host where `git ls-files` did not answer, so the rule scans nothing and emits nothing.
-    //
-    // WHY IT WAS MISSING, checked against the history rather than inferred from the shape: THIS LIST
-    // WAS COMPLETE WHEN IT WAS WRITTEN. At review #80 the citation rule emitted at `err(...)`, and
-    // an ERROR never enters `warning_profile` at all -- so it could not have been a member. Reviews
-    // #81/#82 then moved it to `warn(...)` IN THE SAME PR, which put it inside the §17 ratchet, and
-    // the list was not revisited. A sequencing defect, not a grouping one: no amount of care while
-    // writing the list would have caught it, because the member did not exist yet.
-    //
-    // Hence the coupling asserted in `a_superseded_row_may_not_be_cited_as_live_authority`: if this
-    // rule emits at WARNING it must be on this list. That is the edge that actually broke, and it
-    // is the one thing a test can hold. (Reviews #84 and #86 of PR #679.)
-    //
-    // IT MATTERS MORE HERE THAN FOR THE TWO REPORTERS, because N>0 is not an accident for this kind
-    // -- it is the state the LEVEL CHOICE was made for. Shipping at `warn` rather than `err` exists
-    // precisely so an author who judges a finding wrong accepts it with `make warning-baseline` in
-    // the same commit; the moment anyone does, the baseline carries `decision-superseded-authority:
-    // N` and the next git-unanswering host reds `N -> 0 (kind eliminated)` on a tree nobody touched.
-    // And the `--write-warning-baseline` refusal added beside this constant makes that end state
-    // WORSE than the reporters': the reader can no longer commit the bad 0, so they are left with a
-    // red they cannot clear. (Review #84 of PR #679.)
-    "decision-superseded-authority",
+    // `decision-superseded-authority` WAS the third member, and its arrival and departure are both
+    // the level<->list coupling working as built. It joined when reviews #81/#82 moved the rule to
+    // `warn` (an error never enters `warning_profile`, so the list was complete when written and
+    // incomplete two rounds later -- the sequencing defect reviews #84/#86 pinned with the
+    // coupling assertion). It LEFT on 2026-08-27 when the founder decided `CITATION-RULE-LEVEL`
+    // to `err` (ADR-20260827-081500): as an error it cannot appear in the profile, so keeping it
+    // here would have been the reverse lie -- an unmeasured-kind floor over a kind the ratchet can
+    // never see. The coupling test asserts membership tracks the level in BOTH directions.
 ];
-
 /// HOW SHORT THIS RUN'S CORPUS SCAN FELL, which is not a boolean and was one for four rounds.
 ///
 /// `main.rs` collapsed the two causes into `corpus_incomplete = !readable || !unread.is_empty()`
@@ -186,7 +169,10 @@ impl CorpusShortfall {
             Self::None => &[],
             // Everything the unread files could have contributed to -- but NOT the extension
             // filter, which ran before the read attempt and is therefore exact.
-            Self::Partial => &["decision-citation-file-not-utf8", "decision-superseded-authority"],
+            // Only `not-utf8`: the extension filter is exact (runs before the read attempt), and
+            // `decision-superseded-authority` is an ERROR since 2026-08-27 -- errors never enter
+            // the profile, so there is no count to floor.
+            Self::Partial => &["decision-citation-file-not-utf8"],
             Self::Nothing => &CORPUS_DERIVED_KINDS,
         }
     }
