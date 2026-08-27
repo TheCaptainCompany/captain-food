@@ -326,6 +326,8 @@ mandatory-workflow rule.
 
 **The one CI change that IS authorized** (`RETRIEVAL-QMD-CI`, decided 2026-08-24 by
 `ADR-20260824-205911`): the single `bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step
-in the always-run `changes` job, plus the codegen test pinning it. It tests the **wrapper** — it
+in the always-run `gate-scripts` job (its locus since `GATE-STEP-LOCUS` was decided,
+ADR-20260827-081500; the row named `changes` and the step moved without changing),
+plus the codegen test pinning it. It tests the **wrapper** — it
 runs no QMD, installs nothing, and never touches a live `.qmd/` cache. Anything else in CI still
 needs a new row.

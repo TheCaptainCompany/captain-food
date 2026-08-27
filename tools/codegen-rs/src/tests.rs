@@ -13620,11 +13620,11 @@ mod docs_only_ci_and_legacy_visibility {
                 1)),
             // A checkout re-pointed at another tree puts someone else's scripts under the gates.
             ("gate job checkout re-points repository", in_job("gate-scripts",
-                "        uses: actions/checkout@v4\n",
-                "        uses: actions/checkout@v4\n        with:\n          repository: someone/else\n")),
+                "        uses: actions/checkout@v5\n",
+                "        uses: actions/checkout@v5\n        with:\n          repository: someone/else\n")),
             ("gate job checkout re-points ref", in_job("gate-scripts",
-                "        uses: actions/checkout@v4\n",
-                "        uses: actions/checkout@v4\n        with:\n          ref: refs/heads/other\n")),
+                "        uses: actions/checkout@v5\n",
+                "        uses: actions/checkout@v5\n        with:\n          ref: refs/heads/other\n")),
             ("a self-hosted pool labelled to look hosted", in_job("gate-scripts", "    runs-on: ubuntu-latest", "    runs-on: ubuntu-24.04-custom")),
             // ── THE FIVE ASSERTIONS THAT HAD NO PLANT ─────────────────────────────────────────
             // Review #35 measured what the corpus still leaves standing on a sentence: of the
@@ -13655,7 +13655,7 @@ mod docs_only_ci_and_legacy_visibility {
             ("codegen loses its timeout", in_job("codegen", "    timeout-minutes: 10   # bounds a HANG; `codegen` waits on `needs:` even under `if: always()`\n", "")),
             ("the changes job's timeout is the default with extra steps", in_job("changes", "    timeout-minutes: 10", "    timeout-minutes: 360")),
             ("the gate job loses its checkout", in_job("gate-scripts",
-                "      - name: Checkout repository\n        uses: actions/checkout@v4\n",
+                "      - name: Checkout repository\n        uses: actions/checkout@v5\n",
                 "")),
             // ── THE REQUIRED CHECK ITSELF ──────────────────────────────────────────────────────
             // Every plant above disarms a job that CARRIES a pin. These eight disarm the job that
@@ -14633,9 +14633,10 @@ mod docs_only_ci_and_legacy_visibility {
         let _ = fs::remove_dir_all(&tmp);
     }
 
-    /// Pins the decision-lookup hermetic stub suite into the always-run `changes` job
+    /// Pins the decision-lookup hermetic stub suite into the always-run `gate-scripts` job
     /// (decision row `RETRIEVAL-QMD-CI`, ADR-20260824-205911 — that row authorizes this step and
-    /// this pin and nothing else in CI).
+    /// this pin and nothing else in CI; the step lived in `changes` until `GATE-STEP-LOCUS`
+    /// decided option (a), ADR-20260827-081500).
     #[test]
     fn the_stub_suite_runs_in_the_always_run_gate_job() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");

@@ -173,7 +173,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       # The ask-gate's own guard, on EVERY change — docs-only included. This job is the one
       # always-run job with a checkout (no `if:`), so a broken register-check hook cannot ship
       # silently on the paths that skip the Rust suites; pure shell, ~200ms. Pinned by the
