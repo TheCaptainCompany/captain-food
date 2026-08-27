@@ -199,13 +199,24 @@ jobs:
       # BASH_ENV, LD_PRELOAD, ...) or names a gate script's self-verification opt-out. No non-gate
       # step may mention `.claude`, `GITHUB_ENV` or `GITHUB_PATH` anywhere in its definition, only
       # `actions/checkout` may be `uses:`d here. On the TRIGGERS the pin checks CONTAINMENT, not
-      # absence: no `paths`/`paths-ignore`/`branches-ignore`; `push.branches` must still contain
-      # `**` (so `!badges` and future exclusions are fine); `pull_request.types`, if set, must still
-      # cover opened/synchronize/reopened (widening is fine); `pull_request.branches` must still
-      # admit `main`. A fork PR produces no push, so that trigger is its only coverage. (An earlier
-      # version of this line said "no path, branch or type filter", which would have had a reader
-      # delete `!badges` from line 40 to satisfy a rule the pin does not have -- key-presence vs
-      # dangerous content, the instrument this file has retracted three times.)
+      # absence: no `paths`/`paths-ignore`/`branches-ignore`; `push.branches` must still admit a
+      # DIRECT PUSH TO `main` -- `**` or `main` both satisfy it, and no exclusion may take `main`
+      # back out; `pull_request.types`, if set, must still cover opened/synchronize/reopened
+      # (widening is fine); `pull_request.branches` must still admit `main`. `pull_request` carries
+      # more now than it did: a fork PR produces no push, so it was always a fork's only coverage,
+      # and since #681 it is ALSO the only coverage for ordinary branch work.
+      #
+      # THAT CLAUSE READ "`push.branches` must still contain `**` (so `!badges` and future
+      # exclusions are fine)" UNTIL #681, WHICH IS THE VALUE THIS FILE NO LONGER HAS. Taken
+      # literally it said the shipped trigger violates the pin, and the obvious "fix" was to put
+      # `**` back -- reinstating the double run #681 removed, with the test green either way. The
+      # property was never the literal `**`; it is the direct-to-main lane, which `pull_request`
+      # cannot see. This is the THIRD site in the sweep for that trigger change and the one the
+      # sweep missed, because it states the rule as "contain `**`" rather than naming the trigger
+      # (review of PR #682). An earlier version said "no path, branch or type filter", which would
+      # have had a reader delete `!badges` to satisfy a rule the pin does not have -- key-presence
+      # vs dangerous content, the instrument this file has retracted three times. Same shape, third
+      # time: a pin restated in prose drifts from the pin.
       # What that does NOT reach is written in the test's own comment; it is not restated here,
       # because three copies of a residual statement is how the last one came to be wrong.
       # READ THE MESSAGE, read this before "fixing" a red: the suite asserts COMPLETENESS -- every
