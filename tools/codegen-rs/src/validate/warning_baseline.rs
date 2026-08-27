@@ -364,6 +364,25 @@ pub(crate) fn render_baseline_failure(diff: &BaselineDiff, live: &WarningProfile
 /// unrelated warning kind, with CLAUDE.md requiring the refreshed artifact in the same commit and
 /// the printed remedy ("fix the checkout") outside the author's control. Two call sites deriving
 /// the same correction separately is how they drift; one function is the fix. (Review #91.)
+/// The kinds `floor_unmeasured` would RAISE, as `(kind, live, committed)` -- i.e. where the
+/// committed value wins over a lower live one. Split out so both paths that floor can SAY they
+/// floored: issue #685's defect was `--write-warning-baseline` flooring on a partial read, writing
+/// a byte-identical artifact, and printing `✓ wrote ...` -- an author who had genuinely FIXED a
+/// baselined finding saw success locally and an unclearable `N -> N-1` red in CI, with the printed
+/// remedy re-writing the same bytes. The floor is correct (a lower bound must not be written down
+/// as the truth); what was missing is the sentence naming what it did.
+pub(crate) fn floor_raises(live: &WarningProfile, committed: &WarningProfile, unmeasured: &[&str]) -> Vec<(String, usize, usize)> {
+    let mut raised = Vec::new();
+    for kind in unmeasured {
+        let c = committed.get(*kind).copied().unwrap_or(0);
+        let l = live.get(*kind).copied().unwrap_or(0);
+        if c > l {
+            raised.push(((*kind).to_string(), l, c));
+        }
+    }
+    raised
+}
+
 pub(crate) fn floor_unmeasured(live: &WarningProfile, committed: &WarningProfile, unmeasured: &[&str]) -> WarningProfile {
     let mut effective = live.clone();
     for kind in unmeasured {

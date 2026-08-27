@@ -8747,6 +8747,57 @@ fn the_floor_does_not_cover_a_kind_the_partial_read_measures_exactly() {
     );
 }
 
+/// A FLOORED MINT MUST SAY IT FLOORED (#685).
+///
+/// `--write-warning-baseline` on a `Partial` read floors the lower-bound kinds back to the
+/// committed values and writes the artifact. Correct -- and it printed an unqualified `✓ wrote`,
+/// so an author who had genuinely FIXED a baselined finding on a host with one unreadable corpus
+/// file saw success locally, a `N -> N-1` red in CI, and a printed remedy that re-wrote the same
+/// bytes. No local command produced the correct artifact and nothing said the checkout was the
+/// problem. `floor_raises` is the testable half: it names exactly the kinds where the committed
+/// value won over a lower live one, and the write path prints one note per entry.
+#[test]
+fn a_floored_mint_names_what_it_raised() {
+    use crate::validate::warning_baseline::{floor_raises, CorpusShortfall};
+
+    const KIND: &str = "decision-citation-file-not-utf8";
+    let committed: WarningProfile = [(KIND.to_string(), 2usize)].into_iter().collect();
+
+    // The #685 scenario: the author fixed one finding (live 1 < committed 2) on a Partial host.
+    let live: WarningProfile = [(KIND.to_string(), 1usize)].into_iter().collect();
+    let raised = floor_raises(&live, &committed, CorpusShortfall::Partial.unmeasured());
+    assert_eq!(
+        raised,
+        vec![(KIND.to_string(), 1, 2)],
+        "the floor raised `{}` from 1 back to 2 and reported nothing -- that silence is #685: the author reads `✓ wrote` as success while CI reds `2 -> 1` and the printed remedy re-writes the same bytes",
+        KIND
+    );
+
+    // An increase is NOT a raise: the floor lets it through, so there is nothing to announce.
+    let live_up: WarningProfile = [(KIND.to_string(), 3usize)].into_iter().collect();
+    assert!(
+        floor_raises(&live_up, &committed, CorpusShortfall::Partial.unmeasured()).is_empty(),
+        "an INCREASE must not be reported as a floor raise -- the live value wins there and the ratchet reds on it honestly"
+    );
+
+    // EQUAL counts are not a raise: the floor changes nothing, so announcing one would tell the
+    // author their run was under-read when it read exactly what is committed. This case is what
+    // separates `c > l` from `c >= l` -- the first plant of this test used `>=` and every other
+    // assertion here stayed green.
+    let live_eq: WarningProfile = [(KIND.to_string(), 2usize)].into_iter().collect();
+    assert!(
+        floor_raises(&live_eq, &committed, CorpusShortfall::Partial.unmeasured()).is_empty(),
+        "a live count EQUAL to the committed one was announced as a floor raise -- the floor changed nothing, and the note would train authors to ignore it"
+    );
+
+    // A kind outside `unmeasured` is never floored, so it is never announced either.
+    let raised_none = floor_raises(&live, &committed, CorpusShortfall::None.unmeasured());
+    assert!(
+        raised_none.is_empty(),
+        "a complete corpus floors nothing, so announcing a raise there would report an event that did not happen"
+    );
+}
+
 /// A PARTIAL READ MAY NOT BLOCK `make warning-baseline`.
 ///
 /// The refusal fired on `!readable || !unread.is_empty()`. The second disjunct is one tracked file
@@ -12197,7 +12248,9 @@ mod docs_only_ci_and_legacy_visibility {
         // `pull_request` half did not look at exclusions AT ALL, so `branches: ['**', '!main']`
         // passed an assertion whose own message says "must still admit PRs targeting `main`" -- the
         // two-halves-disagree shape this file retracts by name at review #27, in the half nobody
-        // revisited. A fork produces no push, so `pull_request` is a fork PR's ONLY coverage; after
+        // revisited. Since #681 `pull_request` is the ONLY CI coverage for EVERY branch push in this
+        // repo -- `push` fires on `main` alone -- not just the fork slice (a fork produces no push,
+        // so it was always a fork's only coverage); after
         // that edit a fork PR to `main` runs nothing and the PR stalls on "Expected -- waiting for
         // status" forever. (Review #43.)
         //
@@ -12355,7 +12408,7 @@ mod docs_only_ci_and_legacy_visibility {
             for key in ["paths", "paths-ignore", "branches-ignore"] {
                 assert!(
                     !pr.contains_key(serde_yaml::Value::String(key.into())),
-                    "`on.pull_request.{}` must not be set -- it narrows which PRs run {} at all, with every other assertion here green. Forked PRs produce no push, so this trigger is their ONLY coverage",
+                    "`on.pull_request.{}` must not be set -- it narrows which PRs run {} at all, with every other assertion here green. Since #681 (`push` fires on `main` only) this trigger is the ONLY CI coverage for EVERY branch push in the repo, fork or not: narrowing it switches off 100% of pre-merge validation, not the fork slice",
                     key, what
                 );
             }
@@ -12393,7 +12446,7 @@ mod docs_only_ci_and_legacy_visibility {
                 for excluded in got.iter().filter(|b| b.starts_with('!')) {
                     assert!(
                         !hides(&excluded[1..]),
-                        "`on.pull_request.branches` excludes `{}`, which removes `main` -- a fork produces no push, so this trigger is a fork PR's ONLY coverage, and `codegen` then never reports at all. GitHub applies `!` patterns as removals",
+                        "`on.pull_request.branches` excludes `{}`, which removes `main` -- and since #681 this trigger is the ONLY CI coverage for every branch push in the repo (a fork never had a push at all), so `codegen` then never reports on any PR. GitHub applies `!` patterns as removals",
                         excluded
                     );
                 }
@@ -13384,7 +13437,8 @@ mod docs_only_ci_and_legacy_visibility {
             // `hides`. That is why the matcher stopped sampling: a sample is an enumeration.
             ("push.branches drops the live issue range", ci.replacen("    branches: [main]", "    branches: ['**', '!6*']", 1)),
             // THE `pull_request` HALF, WHICH DID NOT LOOK AT EXCLUSIONS AT ALL. A fork produces no
-            // push, so this trigger is a fork PR's only coverage.
+            // push, so this was always a fork's only coverage -- and since #681 it is the only
+            // coverage for ordinary branch work too.
             ("pull_request.branches excludes main", ci.replacen("  pull_request:\n", "  pull_request:\n    branches: ['**', '!main']\n", 1)),
             // `branches-ignore` needs no `branches` key, so the containment check above never
             // looked at it; `tags` alone makes the trigger tag-only. Both removed BOTH gate steps
@@ -13663,6 +13717,11 @@ mod docs_only_ci_and_legacy_visibility {
             ("push with a null body", {
                 let start = ci.find("  push:\n").expect("push block");
                 let end = ci.find("  pull_request:").expect("pull_request key");
+                // ORDER GUARD (#688 N3): the splice assumes `push:` precedes `pull_request:`. If
+                // `on:` is ever reordered, end < start silently duplicates the `pull_request:` key
+                // and the parse failure surfaces as a false red named after THIS plant -- a
+                // diagnosability trap, not a coverage one. Fail with the real cause instead.
+                assert!(start < end, "ci.yml's `on:` block lists `pull_request:` before `push:` -- this splice cuts [push:, pull_request:) and needs re-deriving, not the workflow re-ordering");
                 format!("{}  push:\n{}", &ci[..start], &ci[end..])
             }),
             // ROUND 5'S WHOLE FINDING had no control until review #10 asked for one: the pin used

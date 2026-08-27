@@ -47,9 +47,13 @@ on:
     # pull_request event, ~4 minutes of build-test and db-test duplicated each time (founder, on
     # #679's check list; see #681). Coverage is unchanged where it matters:
     #   * a branch push with an open PR   -> the pull_request event covers it;
-    #   * a DIRECT PUSH TO main           -> this trigger, and nothing else: CLAUDE.md routes spec-
-    #     and docs-only work straight to main with no branch and no PR, so that lane has no
-    #     pull_request event to fall back on. This is why the pin below still asserts `main`;
+    #   * a DIRECT PUSH TO main           -> this trigger, and nothing else -- for HUMAN pushes:
+    #     CLAUDE.md routes spec- and docs-only work straight to main with no branch and no PR, so
+    #     that lane has no pull_request event to fall back on; this is why the pin still asserts
+    #     `main`. A GITHUB_TOKEN-authenticated push (architecture-review.yml writes proposals and
+    #     STATUS.md to main) triggers NOTHING -- GitHub's recursion guard suppresses workflow runs
+    #     for that actor, before AND after #681. Pre-existing, not introduced; stated so this line
+    #     is not read as a guarantee it never had (#688 N2);
     #   * a FORK PR                       -> produces no push to this repo; pull_request covers it;
     #   * a branch push with no PR open   -> uncovered, and nothing can merge from it.
     branches: [main]
