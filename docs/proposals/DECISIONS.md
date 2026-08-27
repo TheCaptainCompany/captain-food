@@ -21,13 +21,13 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `DELIV-THRESHOLD` | open | 2026-08-19 | The free-delivery threshold: which field, computed where, and the ninth money term — design team-owned, commercial parameters founder-owned (suggest, never cap). | team |
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
 | `KEY-NAMESPACE` | open | 2026-08-21 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? | team |
-| `GATE-STEP-LOCUS` | open | 2026-08-25 | Do executable gate steps live INSIDE the always-run `changes` job, or in a sibling always-run job that `codegen` aggregates equally? | team |
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
-| `CITATION-RULE-LEVEL` | open | 2026-08-26 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? | founder |
 | `DISPATCH-CARD-CITATION` | open | 2026-08-26 | WHICH `docs/**` SUBTREES ARE INSTRUCTION SURFACES for `decision-superseded-authority` — i.e. which of them should leave the `docs/**` exclusion and join `.claude/**` in the citation corpus? Opened for `docs/dispatch/**`; widened to the class after review #59 named `docs/claude/**` and `docs/PLAYBOOK.md` as the same exception with more weight. | team |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
+| `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
 | `CONTROLLER-HANDOVER` | decided | 2026-08-19 | Is the association-to-company controller handover made reconstructible in the event log? -> ADR-20260819-103112 | founder |
+| `GATE-STEP-LOCUS` | decided | 2026-08-27 | Do executable gate steps live INSIDE the always-run `changes` job, or in a sibling always-run job that `codegen` aggregates equally? -> ADR-20260827-081500 | team |
 | `MARGIN-MECHANISM` | decided | 2026-08-19 | What replaces the margin-proportional fee mechanism? -> ADR-20260819-103112 | founder |
 | `REFUND-BEARER` | decided | 2026-08-19 | Who bears a refund? -> ADR-20260819-103112 | founder |
 | `REG-1` | decided | 2026-08-21 | Does enforcement against re-asked questions go on the ask, or on the archive? -> ADR-20260821-010543 | founder |
@@ -41,7 +41,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**Migrated rows: 27 — 12 open · 13 decided · 1 superseded · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 27 — 10 open · 15 decided · 1 superseded · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

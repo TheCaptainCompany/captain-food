@@ -313,7 +313,21 @@ fn main() {
             // A lower-bound count must not be written down as the truth. Same correction the
             // compare path applies, from the same function, so the two cannot drift apart.
             match read_committed_baseline(&root) {
-                Ok(committed) => floor_unmeasured(&live_profile, &committed, unmeasured),
+                Ok(committed) => {
+                    // SAY WHAT THE FLOOR DID, or the author cannot tell a written truth from a
+                    // written lower bound (#685): on a host with one unreadable corpus file, a
+                    // genuinely fixed finding floored back to its old count and this command
+                    // printed an unqualified success -- while CI, reading the whole corpus, redded
+                    // `N -> N-1` and its printed remedy re-wrote the same bytes. The floor stays
+                    // (a lower bound must never be minted as the truth); the silence goes.
+                    for (kind, live, committed_n) in floor_raises(&live_profile, &committed, unmeasured) {
+                        eprintln!(
+                            "  note: `{}` measured {} on this run but is written as {} -- this host could not read the whole corpus (see the decision-citation-corpus-unreadable warning for which files), so the lower live count may be an under-read rather than a fix. If you really fixed a finding, re-run `make warning-baseline` on a host that can read every corpus file; until then CI, which can, will red on the difference.",
+                            kind, live, committed_n
+                        );
+                    }
+                    floor_unmeasured(&live_profile, &committed, unmeasured)
+                }
                 // No readable baseline to floor against -- `make warning-baseline` is also how the
                 // artifact is CREATED, so this is the legitimate first-run path. Mint the live
                 // profile and say which kinds went in unfloored rather than failing the create.

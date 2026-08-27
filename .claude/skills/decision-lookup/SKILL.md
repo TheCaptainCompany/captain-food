@@ -188,9 +188,9 @@ reaches the controlling record even where retrieval alone missed it.
 ## Hermetic test suite (stubs only — never installs, never touches the real `.qmd/`)
 
 The committed suite is the authority for this wrapper, and it is **executable in CI**: one step of
-`.github/workflows/ci.yml`'s always-run `changes` job runs it on every PR and on every push to
-`main`, pinned there by the
-`the_stub_suite_runs_in_the_always_run_changes_job` codegen test (decided 2026-08-24,
+`.github/workflows/ci.yml`'s always-run `gate-scripts` job runs it on every PR and on every push
+to `main` (GATE-STEP-LOCUS option (a), 2026-08-27 -- it lived in `changes` before), pinned by the
+`the_stub_suite_runs_in_the_always_run_gate_job` codegen test (decided 2026-08-24,
 `RETRIEVAL-QMD-CI`). Re-run it locally after any wrapper change:
 
 ```
@@ -326,6 +326,8 @@ mandatory-workflow rule.
 
 **The one CI change that IS authorized** (`RETRIEVAL-QMD-CI`, decided 2026-08-24 by
 `ADR-20260824-205911`): the single `bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step
-in the always-run `changes` job, plus the codegen test pinning it. It tests the **wrapper** — it
+in the always-run `gate-scripts` job (its locus since `GATE-STEP-LOCUS` was decided,
+ADR-20260827-081500; the row named `changes` and the step moved without changing),
+plus the codegen test pinning it. It tests the **wrapper** — it
 runs no QMD, installs nothing, and never touches a live `.qmd/` cache. Anything else in CI still
 needs a new row.

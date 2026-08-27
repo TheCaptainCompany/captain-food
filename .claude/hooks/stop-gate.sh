@@ -97,7 +97,7 @@ step bash "$ROOT/.claude/hooks/loop-budget.sh" audit
 # out unconditionally and THIS caller opts out only when a gate script is actually dirty -- see the
 # block below, which is where that condition is computed and argued. CI invokes the
 # script directly and verifies. Those two are the whole list. The CI path cannot be talked out of
-# verifying because `env_ok`, inside `assert_pinned_in_changes_job`, forbids both opt-out names as
+# verifying because `env_ok`, inside `assert_pinned_in_gate_job`, forbids both opt-out names as
 # `env:` keys at every scope -- planted red by `both_scopes_reject_execution_altering_env`. This
 # line used to credit `assert_gate_script_self_verifies`, which never opens `ci.yml` at all: it
 # asserts things about the two SHELL SCRIPTS. A maintainer following the wrong name would have
