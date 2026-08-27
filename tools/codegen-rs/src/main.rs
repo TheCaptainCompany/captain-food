@@ -184,6 +184,11 @@ fn main() {
         &contracts_classifying_by_span_error(&model),
         &load_span_source(&root),
     ));
+    // ─── §22 — tenant-scoped queries BOUND or explicitly exempt (#618, DECISIONS §39 IDOR-1): the
+    // `ReadScope` prelude used to be hand-copied per arm, so an arm with no prelude could not be
+    // told from an arm that forgot one. Calls the emitter's own table, so gate and generator cannot
+    // drift. ERROR-level: the exempt list is complete, nothing is grandfathered.
+    issues.extend(validate_read_scope_binding(&declared_queries(&model), &root));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 

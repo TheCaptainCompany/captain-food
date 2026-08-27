@@ -199,6 +199,21 @@ pub mod metric {
     pub const READ_AUTHORIZATION_CHECKS_TOTAL: &str = "read_authorization_checks_total";
     pub const READ_AUTHORIZATION_BRIDGE_UNRESOLVED_TOTAL: &str =
         "read_authorization_bridge_unresolved_total";
+    /// `read-authorization` contract (#618): a BOUND caller supplied a tenant filter that is not
+    /// the tenant its credential resolves to. Attributes `operation` (the api.yaml query name),
+    /// `role` and `mode` (the `READ_SCOPE_BINDING_MODE` in force for that request).
+    ///
+    /// Deliberately NOT [`READ_AUTHORIZATION_DENIED_TOTAL`]: that counter's contract note says list
+    /// denials are structurally invisible, and this is not a per-row decision but one discrete
+    /// per-request fact, which a list path CAN emit. Under `observe` the caller was still served
+    /// the rows it asked for and only the mismatch was counted — which is why `mode` is on the
+    /// series and why a count alone never means "refused".
+    ///
+    /// PROSPECTIVE and BOUND-CALLER-ONLY: the unbound population (the only RESTAURANT population
+    /// that exists today) is denied without incrementing this. Never read a zero here as evidence
+    /// that no cross-tenant read occurred.
+    pub const READ_AUTHORIZATION_SCOPE_MISMATCH_TOTAL: &str =
+        "read_authorization_scope_mismatch_total";
     pub const READ_AUTHORIZATION_CHECK_MS: &str = "read_authorization_check_ms";
     /// `read-authorization` contract (#469): the OPEN path read a credential and could not act on
     /// it, so the request was served ANONYMOUS — attribute `reason` (invalid_token |

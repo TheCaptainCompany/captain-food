@@ -350,6 +350,64 @@ keys:
 
 
   # ===================================================================
+  # Read-surface scope binding (#618, DECISIONS §39 IDOR-1; ADR-20260818-101500)
+  #
+  # THE THREE TOKENS ARE DEFINED HERE, not in a dispatch card: a mode enum whose meaning lives only
+  # in a card is a convention, not a published term. The table below is a YAML comment rather than
+  # `gates:` prose on purpose — `tools/codegen-rs/src/config.rs` flattens `gates` with
+  # `.replace('\n', " ")`, so a table there becomes one unreadable line in the generated Rust doc
+  # comment AND in the operator boot report, which is the artifact somebody reads at 20:00.
+  #
+  # The three tokens encode TWO independent axes:
+  #   (a) does the caller's own scope apply when they asked for nothing;
+  #   (b) who wins when the request's filter and the caller's scope conflict.
+  #
+  #   | caller (pendingRefunds; roles: [RESTAURANT, ADMIN]) | off        | observe          | enforce  |
+  #   |-----------------------------------------------------|------------|------------------|----------|
+  #   | unbound RESTAURANT (ReadScope::Public)               | EVERYTHING | empty            | empty    |
+  #   | Restaurant(R1), no filter                            | everything | R1's rows        | R1's rows|
+  #   | Restaurant(R1), filter R1                            | R1's rows  | R1's rows        | R1's rows|
+  #   | Restaurant(R1), filter R2                            | R2's rows  | R2's rows + count| EMPTY + count |
+  #   | ADMIN                                                | unchanged  | unchanged        | unchanged|
+  #
+  # The unbound row is NOT gated between `observe` and `enforce`: it is not a binding, it is the
+  # ABSENCE of one, and the system already answers that ("a missing claim fails closed inside
+  # read_scope" — crates/server/src/graphql/routes.rs). `off` DOES restore it, and that is what
+  # `off` means: an incident rung, the one value of the three that re-opens the only hole
+  # production can reach today.
+  #
+  # ⚠️ THE `off` RUNG HAS A SUNSET. While no restaurant credential exists it is a harmless
+  # rollback. The moment a real restaurateur holds one, `off` stops being a rollback and becomes a
+  # cross-member DISCLOSURE switch an operator can throw with no second signature. It must be
+  # retired by the chunk that mints the first restaurant claim (#639) — the same chunk that may
+  # not merge with this key below `enforce`.
+  #
+  # ⚠️ ON MKS THIS KEY IS NOT RENDERED. `tools/codegen-rs/src/emit/deploy.rs` (`env_yaml`) emits
+  # APP_PROFILE + PORT + secret-sourced keys only, so a non-secret enum gets no env line in any bin
+  # manifest and there is no ConfigMap. Overriding it is Render-env-only today; #358's cutover
+  # chunk (or the `enforce`-flip chunk, whichever lands first) owns rendering it.
+  # ===================================================================
+
+  READ_SCOPE_BINDING_MODE:
+    type: enum
+    # QUOTED deliberately: bare `off` is a YAML 1.1 boolean, and a loader that reads it as `false`
+    # would silently declare a two-value enum whose incident rung is spelled `false`.
+    values: ["off", "observe", "enforce"]
+    default: observe
+    gates: >
+      Whether a tenant-scoped READ is bound to the caller's own ReadScope, on the two axes the
+      three tokens encode: (a) does the caller's scope apply when the request supplied no filter,
+      and (b) who wins when the request's filter and the caller's scope conflict — the caller's
+      scope always, by INTERSECTION, so a filter may narrow within the scope and never move it.
+      Governs the binding COMPARISON only, never the absence of an identity: an unbound caller is
+      denied under `observe` and `enforce` alike. The four-row table above this key is the
+      definition. Read per request from the injected value; the value's SOURCE is resolved at
+      startup, so flipping it is an env override plus a pod restart -- no rebuild, no image, no
+      CI, no migration -- and NOT a live toggle. Absent from a request context entirely, the
+      binding treats it as `enforce`: fail closed.
+
+
+  # ===================================================================
   # Actor mailbox + projection runtime (ADR-20260730-231500; PROP-20260728-152752 /
   # PROP-20260730-230803). Declared AHEAD of their readers — the drift gate is one-directional
   # (a read must be declared; a declaration may precede its read): the mailbox worker (#242

@@ -572,6 +572,123 @@ pub(crate) fn emit_server_acl(model: &Model) -> String {
     out
 }
 
+// ─── The read-scope binding table (#618) ─────────────────────────────────────────────────────────
+//
+// Before this table, the `ReadScope` prelude was HAND-COPIED into each bound arm: `myReclamations`
+// and `customerCredit` each carried a verbatim copy of the same lines, comment and all, while
+// `restaurantReclamations` — three arms away in the same match — had none, with a comment conceding
+// that the narrowing was a follow-up gap. Same defect, three arms apart: second occurrence ⇒ a rule,
+// not a comment (ADR-20260803-234035, compiler-first).
+//
+// What the table removes is the PRELUDE, which is exactly what was copied wrong. The BODIES stay
+// per-arm and the table does not pretend otherwise: `myReclamations` / `customerCredit` bind by
+// REPLACING the read (`by_customer(...)`), `pendingRefunds` binds by INTERSECTING a caller-supplied
+// filter with the bound scope. Those are different operations on different shapes.
+//
+// `validate::read_scope_binding` calls THIS function — same binary, same table — so a query's
+// binding decision and the gate that audits it cannot drift. #649 later swaps this table's SOURCE
+// (literal here → derived from the DSL) without touching the emit path or a single test.
+
+/// How one query's resolver binds its read to the caller's `ReadScope`.
+pub(crate) enum ScopeBinding {
+    /// The read is REPLACED by a scope-derived one. The emitted prelude destructures `ReadScope`
+    /// into `variant(bind)`; **every** other scope — `Admin` and `System` included — short-circuits
+    /// with `otherwise`. That is correct for the two `me`-pattern reads: "which customer am I" has
+    /// no answer for a caller that is not a customer, and an admin is not one.
+    Replace {
+        /// The `ReadScope` variant this read is only meaningful for, e.g. `Customer`.
+        variant: &'static str,
+        /// The identifier the variant's payload is bound to, for the arm body to use.
+        bind: &'static str,
+        /// The expression returned for any other scope — the resolver's own "nothing" shape.
+        otherwise: &'static str,
+    },
+    /// The read's caller-supplied filter is INTERSECTED with the caller's bound scope (#618). The
+    /// prelude brings `scope` AND `binding_mode` into the body; the arm performs the intersection
+    /// itself, because the filter's shape is the arm's own business.
+    Intersect,
+}
+
+/// The binding a query's resolver applies, or `None` for a query that binds elsewhere (see
+/// [`READ_SCOPE_BINDING_EXEMPT`]).
+pub(crate) fn read_scope_binding(op_name: &str) -> Option<ScopeBinding> {
+    match op_name {
+        // "Which customer am I" is exactly what the verified claim answers — no bridge row, no
+        // lookup (#144/#433, CARD-11).
+        "myReclamations" => Some(ScopeBinding::Replace {
+            variant: "Customer",
+            bind: "customer_id",
+            otherwise: "Vec::new()",
+        }),
+        "customerCredit" => {
+            Some(ScopeBinding::Replace { variant: "Customer", bind: "customer_id", otherwise: "None" })
+        }
+        // The refund queue: `restaurantId` is a SELECTOR WITHIN the caller's scope, never a grant
+        // (#618, DECISIONS §39 IDOR-1).
+        "pendingRefunds" => Some(ScopeBinding::Intersect),
+        _ => None,
+    }
+}
+
+/// Tenant-scoped queries that are deliberately NOT in [`read_scope_binding`], each with a
+/// MECHANICAL reason: a `file:line` where the scoping actually happens, or the literal token
+/// [`UNSCOPED_TOKEN`]. Prose is not admissible here and `validate::read_scope_binding` rejects it —
+/// a reason a reader cannot check is how a gate becomes a formality.
+///
+/// The `UNSCOPED — #618` rows are the authoritative enumeration of #618's remaining read surfaces:
+/// the count is DERIVED from this list rather than measured into a record and left to rot.
+pub(crate) const READ_SCOPE_BINDING_EXEMPT: &[(&str, &str)] = &[
+    // --- Scoped, but not by this emit path -------------------------------------------------
+    // The resolver hands the row and the scope to a hand-written predicate.
+    ("cart", "crates/server/src/graphql/cart_read.rs:87"),
+    ("current", "crates/server/src/graphql/cart_read.rs:48"),
+    // The scope is threaded into the repository and fused into the SQL as an EXISTS predicate, so
+    // out-of-scope rows never enter the result set at all.
+    ("order", "crates/infrastructure/src/persistence/order.rs:85"),
+    ("orders", "crates/infrastructure/src/persistence/order.rs:45"),
+    ("delivery", "crates/infrastructure/src/persistence/order.rs:85"),
+    ("restaurantDeliveries", "crates/infrastructure/src/persistence/order.rs:85"),
+    // Scoped inline in the emitted body — the arm maps the scope to its own read key or performs
+    // its own ownership comparison, rather than delegating either.
+    ("carts", "crates/server/src/graphql/generated/query.rs:346"),
+    ("me", "crates/server/src/graphql/generated/query.rs:101"),
+    ("myDeliveries", "crates/server/src/graphql/generated/query.rs:152"),
+    ("paymentStatus", "crates/server/src/graphql/generated/query.rs:557"),
+    // --- NOT scoped. These are #618's remaining surfaces ------------------------------------
+    // Every one takes a caller-supplied id or filter and consults no identity whatsoever.
+    ("favoriteRestaurants", UNSCOPED_TOKEN),
+    ("orderConversation", UNSCOPED_TOKEN),
+    ("orderConversationInternalNotes", UNSCOPED_TOKEN),
+    ("reclamation", UNSCOPED_TOKEN),
+    ("restaurantDeliverySatisfaction", UNSCOPED_TOKEN),
+    ("restaurantLocationsByAccount", UNSCOPED_TOKEN),
+    ("restaurantReclamations", UNSCOPED_TOKEN),
+];
+
+/// The one admissible non-`file:line` exempt reason: this surface is not scoped at all, and #618
+/// owns it. Written as a constant so the list cannot drift into near-spellings of it.
+pub(crate) const UNSCOPED_TOKEN: &str = "UNSCOPED — #618";
+
+/// The `ReadScope` prelude, emitted from the table instead of hand-copied into each arm.
+fn scope_binding_prelude(binding: &ScopeBinding) -> String {
+    let mut out = String::from(
+        "        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read. Absent => Public -- fail closed.\n        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);\n",
+    );
+    match binding {
+        ScopeBinding::Replace { variant, bind, otherwise } => {
+            out.push_str(&format!(
+                "        let application::queries::ReadScope::{variant}({bind}) = scope else {{\n            return Ok({otherwise});\n        }};\n"
+            ));
+        }
+        ScopeBinding::Intersect => {
+            out.push_str(
+                "        // The binding MODE, per request (#618). Absent from the context => ENFORCE: \"forgot to wire it\" must never be indistinguishable from \"chose the permissive value\".\n        let binding_mode = crate::graphql::read_binding::ReadScopeBindingMode::from_context(ctx);\n",
+            );
+        }
+    }
+    out
+}
+
 /// Emit `crates/server/src/graphql/generated/query.rs` — the `QueryRoot`, mirroring `query_block`:
 /// one async resolver per api.yaml query with the SDL argument/return shape. Every resolver returns
 /// `Err("not implemented")` until the read-model repositories are injected (a later stage).
@@ -596,11 +713,16 @@ pub(crate) fn emit_server_query(model: &Model) -> String {
             ret = format!("Option<{}>", ret);
         }
         push_doc(&mut out, "    ", q.description.as_deref());
+        // The `ReadScope` prelude comes from the BINDING TABLE, never hand-copied into an arm
+        // (#618): three arms carrying two verbatim copies and one silent omission is how the
+        // omission happened. The arm body follows it and consumes `scope` (and, for an
+        // intersecting binding, `binding_mode`).
+        let prelude = read_scope_binding(&q.name).map(|b| scope_binding_prelude(&b)).unwrap_or_default();
         match wired_query_body(&q.name) {
             // Wired: delegate to the injected read-model repo (ctx.data); takes &Context.
             Some(body) => out.push_str(&format!(
-                "    #[graphql(name = \"{}\"{})]\n    async fn {}(&self, ctx: &async_graphql::Context<'_>{}) -> async_graphql::Result<{}> {{\n{}\n    }}\n",
-                q.name, acl, fnname, arg, ret, body
+                "    #[graphql(name = \"{}\"{})]\n    async fn {}(&self, ctx: &async_graphql::Context<'_>{}) -> async_graphql::Result<{}> {{\n{}{}\n    }}\n",
+                q.name, acl, fnname, arg, ret, prelude, body
             )),
             None => out.push_str(&format!(
                 "    #[graphql(name = \"{}\"{})]\n    async fn {}(&self{}) -> async_graphql::Result<{}> {{\n        Err(async_graphql::Error::new(\"not implemented\"))\n    }}\n",
@@ -710,7 +832,7 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         // The refund queue reads the View_PendingRefunds fold view (RefundProcess). Rows map 1:1 —
         // no navigation fields (the Payment aggregate is not a registered API type), so no joins.
         "pendingRefunds" => Some(
-            "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::RefundFilter {\n                restaurant_id: i.restaurant_id.map(Into::into),\n                status: i.status.map(Into::into),\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Refund::from).collect())",
+            "        let (requested_restaurant, requested_status): (Option<domain::generated::scalars::RestaurantId>, Option<domain::generated::scalars::RefundStatus>) = match input {\n            Some(i) => (i.restaurant_id.map(Into::into), i.status.map(Into::into)),\n            None => (None, None),\n        };\n        // BOUND SCOPE INTERSECT REQUESTED FILTER (#618, DECISIONS ss39 IDOR-1). `restaurantId` is a\n        // SELECTOR WITHIN the caller's scope, never a grant: no filter => the caller's own queue,\n        // the caller's own id => the same queue, any OTHER id => EMPTY. Substitution -- serving the\n        // caller its own rows when it asked for another tenant's -- is a DEFECT, not a kindness: the\n        // client asked for R2, got HTTP 200 with R1's rows, no error, and no way to tell.\n        let bound_restaurant = match (&scope, binding_mode) {\n            // OFF -- the incident rollback rung. Today's behaviour restored EXACTLY: the\n            // caller-supplied filter, whatever the caller's scope, including none at all. This is the\n            // one value of the three that re-opens the only hole production can reach today. It is\n            // PROBED, deliberately: an untested rollback rung is a rollback that fails at 20:00 on a\n            // Friday with the operator holding the flag.\n            (_, crate::graphql::read_binding::ReadScopeBindingMode::Off) => requested_restaurant,\n            // The ADMIN arbitrates ACROSS restaurants (stories.yaml, ArbitrateRefunds: \"the\n            // cross-restaurant refund queue\"). Unchanged in every mode -- and unbounded: the view\n            // folds every RefundOpened ever recorded and the query has no LIMIT.\n            (application::queries::ReadScope::Admin | application::queries::ReadScope::System, _) => requested_restaurant,\n            (application::queries::ReadScope::Restaurant(bound), _) => match requested_restaurant {\n                None => Some(*bound),\n                Some(want) if want == *bound => Some(*bound),\n                Some(_) => {\n                    // ONE execution. The comparison is Option<RestaurantId> against RestaurantId, in\n                    // memory, BEFORE the repository is called -- never two reads diffed, which would\n                    // double the most expensive read on the money path at the hour the queue is longest.\n                    telemetry::meters::read_authorization::scope_mismatch(\"pendingRefunds\", \"RESTAURANT\", binding_mode.as_str());\n                    if binding_mode.is_enforcing() {\n                        // The intersection is EMPTY, and the repository is never touched.\n                        return Ok(Vec::new());\n                    }\n                    requested_restaurant\n                }\n            },\n            // No bound scope at all -- an unbound RESTAURANT credential, which is the ONLY RESTAURANT\n            // credential that can exist today. This is not a binding, it is the ABSENCE of one, and the\n            // system has a recorded answer for that: a missing claim fails closed inside read_scope.\n            // NOT gated between OBSERVE and ENFORCE -- only OFF restores it.\n            _ => return Ok(Vec::new()),\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;\n        let filter = application::queries::RefundFilter { restaurant_id: bound_restaurant, status: requested_status };\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Refund::from).collect())",
         ),
         // The restaurant timeliness insight reads the View_DeliverySatisfaction fold view (#62). Rows
         // map 1:1 — no navigation fields, so no joins.
@@ -727,7 +849,7 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         // row, like `me`); `restaurantReclamations` filters the queue by status/category (restaurant
         // narrowing is a recorded follow-up gap); `reclamation` is claim detail by id. Rows map 1:1.
         "myReclamations" => Some(
-            "        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.\n        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);\n        // \"Which customer am I\" is exactly what the claim answers -- no bridge row, no lookup.\n        let application::queries::ReadScope::Customer(customer_id) = scope else {\n            return Ok(Vec::new());\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;\n        let rows = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Reclamation::from).collect())",
+            "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;\n        let rows = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Reclamation::from).collect())",
         ),
         "restaurantReclamations" => Some(
             "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::ReclamationFilter {\n                status: i.status.map(Into::into),\n                category: i.category.map(Into::into),\n                overdue: i.overdue,\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(Reclamation::from).collect())",
@@ -740,7 +862,7 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         // the materialized CustomerCreditBalance projection table. Null for an anonymous caller or a
         // customer with no ledger yet.
         "customerCredit" => Some(
-            "        // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.\n        let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);\n        // \"Which customer am I\" is exactly what the claim answers -- no bridge row, no lookup.\n        let application::queries::ReadScope::Customer(customer_id) = scope else {\n            return Ok(None);\n        };\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CustomerCreditReadRepository>>()?;\n        let row = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(row.map(CustomerCredit::from))",
+            "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::CustomerCreditReadRepository>>()?;\n        let row = repo.by_customer(customer_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(row.map(CustomerCredit::from))",
         ),
         "prospectionPipeline" => Some(
             "        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded\n        // down -- every serviceWindow this request builds agrees on \"now\".\n        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);\n        let repo = ctx.data::<std::sync::Arc<dyn application::queries::ProspectionReadRepository>>()?;\n        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;\n        let filter = input\n            .map(|i| application::queries::ProspectFilter {\n                min_score: i.min_score.map(|s| s.0 as i32),\n                status: i.status.map(Into::into),\n            })\n            .unwrap_or_default();\n        let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        // The non-null `restaurant` navigation field: join against the Restaurant read model in memory\n        // (both rows are folded from the same Restaurant-stream events, so a match always exists).\n        let by_id: std::collections::HashMap<_, _> = restaurants\n            .list(application::queries::RestaurantFilter::default())\n            .await\n            .map_err(|e| async_graphql::Error::new(e.to_string()))?\n            .into_iter()\n            .map(|r| (r.restaurant_id.0, r))\n            .collect();\n        Ok(rows\n            .into_iter()\n            .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, Restaurant::at(r, now, horizon)))))\n            .collect())",

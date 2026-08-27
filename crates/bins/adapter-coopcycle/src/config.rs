@@ -212,6 +212,8 @@ pub struct Config {
     pub external_api_tokens: Option<String>,
     /// Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`). Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for its hourly poll instead of starting in seconds.
     pub internal_trigger_token: Option<String>,
+    /// Whether a tenant-scoped READ is bound to the caller's own ReadScope, on the two axes the three tokens encode: (a) does the caller's scope apply when the request supplied no filter, and (b) who wins when the request's filter and the caller's scope conflict — the caller's scope always, by INTERSECTION, so a filter may narrow within the scope and never move it. Governs the binding COMPARISON only, never the absence of an identity: an unbound caller is denied under `observe` and `enforce` alike. The four-row table above this key is the definition. Read per request from the injected value; the value's SOURCE is resolved at startup, so flipping it is an env override plus a pod restart -- no rebuild, no image, no CI, no migration -- and NOT a live toggle. Absent from a request context entirely, the binding treats it as `enforce`: fail closed.
+    pub read_scope_binding_mode: String,
     /// How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
     pub mailbox_lease_seconds: i64,
     /// Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
@@ -347,6 +349,8 @@ impl Config {
         let log_level = log_level.unwrap_or_else(|| "info".to_string());
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
+        let read_scope_binding_mode = raw("READ_SCOPE_BINDING_MODE");
+        let read_scope_binding_mode = read_scope_binding_mode.unwrap_or_else(|| "observe".to_string());
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
@@ -456,6 +460,7 @@ impl Config {
                 log_level,
                 external_api_tokens,
                 internal_trigger_token,
+                read_scope_binding_mode,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activations,
@@ -519,6 +524,7 @@ impl Config {
         out.push_str(&format!("  LOG_LEVEL                  = {}\n", self.log_level));
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INTERNAL_TRIGGER_TOKEN     = {}\n", if self.internal_trigger_token.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  READ_SCOPE_BINDING_MODE    = {}\n", self.read_scope_binding_mode));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
@@ -551,7 +557,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 42;
+pub const KEY_COUNT: usize = 43;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -571,6 +577,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "LOG_LEVEL",
     "EXTERNAL_API_TOKENS",
     "INTERNAL_TRIGGER_TOKEN",
+    "READ_SCOPE_BINDING_MODE",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATIONS",
