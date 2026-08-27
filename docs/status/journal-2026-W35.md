@@ -3,6 +3,34 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-27 — the call sheet: the founder answered four questions through an artifact form,
+> and all four are executed.** Verbatim: *Move to a separate job · Make it a hard error · Fix both
+> now · "If the fix is small always do it now."* The last is a **standing instruction**, recorded in
+> ADR-20260827-081500.
+>
+> **`GATE-STEP-LOCUS` decided (a)**: the two gate suites moved from `changes` into the sibling
+> always-run `gate-scripts` job, aggregated by `codegen` by name. The skip cascade is closed — a
+> host-drift red in a gate suite no longer takes lint/specs/build-test/db-test/docs-validate with
+> it — and the docs-only inversion is closed with it: a docs push can no longer land on `main` with
+> its only validator skipped. Equally blocking on a genuine failure, kept on purpose. The interim
+> (option b) was in force exactly one day. Thirteen job-scope mutants re-anchored to the new job —
+> planted against the wrong job they prove nothing.
+>
+> **`CITATION-RULE-LEVEL` decided `err`**: gate-then-stabilize executed end to end — shipped at
+> `warn` under the directive, smoked over the real corpus and ninety-plus review rounds' live edits
+> with zero false positives, then flipped by the founder. A stale citation of a superseded row is
+> now unmergeable and unlandable (verified by plant: `[error]`, exit 2). The level↔list coupling
+> fired in the direction it was built for: the rule left `CORPUS_DERIVED_KINDS` and the
+> partial-read floor in the same change, and all three pins now assert the reverse direction.
+> Question (2) of that row — implicit word vs explicit marker — was NOT decided and stays open
+> ground.
+>
+> **#685 and #688 fixed under the standing note.** The floored mint now names what it raised — and
+> the first plant for it **survived** (`>=` for `>` left every assertion green, because no case
+> separated an announced no-op from correct behaviour); the equal-count case is the discriminator
+> and is now in the test. The four `pull_request` guard messages price what they actually guard
+> since #681: the only CI coverage for every branch push, not the fork slice.
+
 > ✅ **2026-08-26 — REV-1 executed after nine days, #680 merged through the ordinary path, and the
 > bypass was never spent.** The founder removed `claude-review` from ruleset `19179892` in the
 > GitHub UI. Required checks are now `codegen`, `build-test`, `db-test` — verified by reading the
