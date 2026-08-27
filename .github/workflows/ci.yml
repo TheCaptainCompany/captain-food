@@ -7,8 +7,14 @@ name: ci
 #
 # The gate is the Rust codegen (tools/codegen-rs, ADR-0034). The earlier TypeScript codegen reached full
 # parity (byte-identical artifacts + identical validation issue set) and has been retired.
-# The gate runs on EVERY branch push (not just main) so a feature branch is validated even before a
-# PR exists; `pull_request` stays for forked PRs. Duplicate push+PR runs on an open PR are accepted.
+# The gate runs on `pull_request` for branch work, and on `push` for `main` ONLY. Until 2026-08-25
+# `push` took `['**','!badges']`, so a feature branch was validated even before a PR existed -- and
+# every commit on a branch WITH a PR ran the whole suite twice, once per event (#681). The
+# duplicate is gone and the pre-PR validation went with it: a branch with no PR open now triggers
+# nothing, which costs nothing, because nothing can merge from it either. What `push` is for now is
+# the ONE lane `pull_request` cannot see -- a commit that reaches `main` directly, which is both
+# CLAUDE.md's spec/docs route (no branch, no PR) and the squash-merge sha itself. See the trigger
+# below, which carries the full four-lane argument.
 #
 # DOCS-ONLY CHANGES SKIP THE GATE (product-owner directive, 2026-07-28): a push touching only
 # docs/** (+ root README.md / CLAUDE.md / LICENSE) has nothing to validate or regenerate — proposals
@@ -36,8 +42,17 @@ name: ci
 # alone would therefore turn every red build green. It asserts the upstream results explicitly.
 on:
   push:
-    # every branch EXCEPT `badges` (workflow-written badge JSON only — nothing to gate)
-    branches: ['**', '!badges']
+    # `main` ONLY. Until 2026-08-25 this was `['**', '!badges']`, which meant every commit on a
+    # branch with an open PR ran the ENTIRE suite twice -- once on the push event, once on the
+    # pull_request event, ~4 minutes of build-test and db-test duplicated each time (founder, on
+    # #679's check list; see #681). Coverage is unchanged where it matters:
+    #   * a branch push with an open PR   -> the pull_request event covers it;
+    #   * a DIRECT PUSH TO main           -> this trigger, and nothing else: CLAUDE.md routes spec-
+    #     and docs-only work straight to main with no branch and no PR, so that lane has no
+    #     pull_request event to fall back on. This is why the pin below still asserts `main`;
+    #   * a FORK PR                       -> produces no push to this repo; pull_request covers it;
+    #   * a branch push with no PR open   -> uncovered, and nothing can merge from it.
+    branches: [main]
   pull_request:
 
 permissions:
@@ -184,13 +199,24 @@ jobs:
       # BASH_ENV, LD_PRELOAD, ...) or names a gate script's self-verification opt-out. No non-gate
       # step may mention `.claude`, `GITHUB_ENV` or `GITHUB_PATH` anywhere in its definition, only
       # `actions/checkout` may be `uses:`d here. On the TRIGGERS the pin checks CONTAINMENT, not
-      # absence: no `paths`/`paths-ignore`/`branches-ignore`; `push.branches` must still contain
-      # `**` (so `!badges` and future exclusions are fine); `pull_request.types`, if set, must still
-      # cover opened/synchronize/reopened (widening is fine); `pull_request.branches` must still
-      # admit `main`. A fork PR produces no push, so that trigger is its only coverage. (An earlier
-      # version of this line said "no path, branch or type filter", which would have had a reader
-      # delete `!badges` from line 40 to satisfy a rule the pin does not have -- key-presence vs
-      # dangerous content, the instrument this file has retracted three times.)
+      # absence: no `paths`/`paths-ignore`/`branches-ignore`; `push.branches` must still admit a
+      # DIRECT PUSH TO `main` -- `**` or `main` both satisfy it, and no exclusion may take `main`
+      # back out; `pull_request.types`, if set, must still cover opened/synchronize/reopened
+      # (widening is fine); `pull_request.branches` must still admit `main`. `pull_request` carries
+      # more now than it did: a fork PR produces no push, so it was always a fork's only coverage,
+      # and since #681 it is ALSO the only coverage for ordinary branch work.
+      #
+      # THAT CLAUSE READ "`push.branches` must still contain `**` (so `!badges` and future
+      # exclusions are fine)" UNTIL #681, WHICH IS THE VALUE THIS FILE NO LONGER HAS. Taken
+      # literally it said the shipped trigger violates the pin, and the obvious "fix" was to put
+      # `**` back -- reinstating the double run #681 removed, with the test green either way. The
+      # property was never the literal `**`; it is the direct-to-main lane, which `pull_request`
+      # cannot see. This is the THIRD site in the sweep for that trigger change and the one the
+      # sweep missed, because it states the rule as "contain `**`" rather than naming the trigger
+      # (review of PR #682). An earlier version said "no path, branch or type filter", which would
+      # have had a reader delete `!badges` to satisfy a rule the pin does not have -- key-presence
+      # vs dangerous content, the instrument this file has retracted three times. Same shape, third
+      # time: a pin restated in prose drifts from the pin.
       # What that does NOT reach is written in the test's own comment; it is not restated here,
       # because three copies of a residual statement is how the last one came to be wrong.
       # READ THE MESSAGE, read this before "fixing" a red: the suite asserts COMPLETENESS -- every

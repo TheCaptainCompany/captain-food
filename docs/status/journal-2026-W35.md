@@ -271,6 +271,27 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > anyone. **The lesson: importing a reviewer's number into a durable record is the same defect as
 > inventing one.** ADR-20260817-105845 does not care where the number came from.
 
+> **2026-08-25 — `ci.yml` ran the whole suite twice on every PR commit** (#681, founder-spotted).
+> `on: push: branches: ['**','!badges']` and `on: pull_request:` both fired for a branch with an
+> open PR, so `build-test` and `db-test` — ~4 minutes each — ran in duplicate on every push.
+> Narrowed to `push: branches: [main]`: a branch push with a PR is covered by the pull_request
+> event, a fork PR produces no push at all, and the **direct-to-main lane** — spec/docs work, no
+> branch, no PR — is the one with no fallback, which is exactly what the pin now asserts.
+>
+> **`concurrency: cancel-in-progress` is the wrong tool here and the reason is worth keeping**: a
+> cancelled run reports `cancelled`, neither `success` nor `skipped` — a NO-VERDICT state on a
+> required check, which is the defect #677/#680 exist to police. It becomes safe on the review
+> workflow only once REV-1 makes that check non-required. Azure DevOps' `trigger: batch: true` does
+> not apply either: it batches CI triggers, not PR validation.
+>
+> **The pin's own vacuity, found by planting rather than reading**: `assert_pinned_in_changes_job`
+> asserted `push.branches` contains `**`, and replacing that assertion with `true` left the suite
+> GREEN — every existing push mutant exercised the EXCLUSION arm, so the CONTAINMENT arm had never
+> been pinned. A positive filter that simply omits `main` is the obvious way to lose the lane, and
+> nothing tested it. Added. And the four push mutants anchored on the old literal all reported
+> *"this plant is now vacuous"* the moment the trigger changed — the guard review #10 asked for,
+> doing its job on the first edit that could have silently defeated it.
+
 
 > **Week boundary, recorded once so the next reader does not hunt**: 2026-08-24 is ISO week **35**,
 > but several entries dated 2026-08-24 sit in [`journal-2026-W34.md`](journal-2026-W34.md) — earlier
