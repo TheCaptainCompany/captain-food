@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 2400,
+  "recordedAt": "2026-08-28T22:10:34.188Z",
+  "branch": "712-superseded-adr-citation-gate",
+  "note": "issue #712 superseded-ADR citation gate; timer closed by a concurrent session before this stop (shared git-common-dir timer race, per dispatch note); elapsed is an estimate from session start to gates-green"
+}
