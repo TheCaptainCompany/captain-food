@@ -359,6 +359,28 @@ struct CachedJwks {
     fetched: Instant,
 }
 
+/// A witness that the decision to fetch was formed BEFORE the cache read that justified it.
+///
+/// [`AuthContext::refresh`]'s single-flight test is "someone else's fetch completed after this
+/// intent formed: it is our fetch" — which is only sound if the intent's instant predates the
+/// read that concluded a fetch was needed. #683 was exactly that ordering minted wrong (the
+/// instant taken after the read), and it looked like a flake for a week. The field is private
+/// and only [`AuthContext::stale`] and [`AuthContext::rotation_refetch_due`] construct one, each
+/// before its own cache read — so the mistake is unspellable at a production call site rather
+/// than guarded by a comment. (Tests in this module can construct one directly; they use that to
+/// build #683's ordering deterministically.)
+struct FetchIntent {
+    formed_at: Instant,
+}
+
+impl FetchIntent {
+    /// Capture "now" as the moment the fetch decision forms. Callers MUST invoke this before the
+    /// cache read they decide on — both constructors in this module do so on their first line.
+    fn formed_now() -> Self {
+        Self { formed_at: Instant::now() }
+    }
+}
+
 /// **The verification contract, as ONE value** (#519): the JWKS endpoint that supplies the signing
 /// keys AND the issuer those keys are trusted to have signed for.
 ///
@@ -625,10 +647,8 @@ impl AuthContext {
     /// an unthrottled "unknown kid ⇒ fetch" would let an anonymous caller drive one outbound
     /// request per inbound one.
     async fn key_for(&self, kid: &str) -> Result<Jwk, AuthError> {
-        // BEFORE the staleness read, not after it -- see `refresh`.
-        let arrived = Instant::now();
-        if self.stale().await {
-            if let Err(e) = self.refresh(arrived).await {
+        if let Some(intent) = self.stale().await {
+            if let Err(e) = self.refresh(intent).await {
                 // Fail closed only when there is nothing cached to fall back to (cold cache).
                 if self.cache.read().await.is_none() {
                     return Err(e);
@@ -642,30 +662,32 @@ impl AuthContext {
         // Unknown kid (e.g. a just-rotated key): absorb the rotation with ONE refetch, but only if
         // the set we are holding is old enough to plausibly predate it. Keys fetched seconds ago do
         // not gain a member by asking again — that request would exist purely because someone sent
-        // us a `kid` we never issued.
-        // A SECOND instant, captured before the rotation read for the same reason: this is a new
-        // decision, and reusing the one from the top would treat any fetch since then as ours.
-        let arrived = Instant::now();
-        if !self.rotation_refetch_due().await {
+        // us a `kid` we never issued. This is a NEW decision, so it mints its own intent — reusing
+        // the one from the top would treat any fetch since then as ours.
+        let Some(intent) = self.rotation_refetch_due().await else {
             return Err(AuthError::Unauthorized);
-        }
-        self.refresh(arrived).await?;
+        };
+        self.refresh(intent).await?;
         self.lookup(kid).await.ok_or(AuthError::Unauthorized)
     }
 
-    async fn stale(&self) -> bool {
+    /// Is the cache stale (or absent)? `Some` means "a fetch is needed" and carries the witness
+    /// `refresh` requires; `None` means the cache answers.
+    async fn stale(&self) -> Option<FetchIntent> {
+        let intent = FetchIntent::formed_now();
         match &*self.cache.read().await {
-            Some(c) => c.fetched.elapsed() > JWKS_TTL,
-            None => true,
+            Some(c) if c.fetched.elapsed() <= JWKS_TTL => None,
+            _ => Some(intent),
         }
     }
 
     /// May an UNKNOWN kid trigger a refetch? Only if the cached set is older than the rotation
-    /// interval (or there is none at all).
-    async fn rotation_refetch_due(&self) -> bool {
+    /// interval (or there is none at all). `Some` carries the witness, as in [`Self::stale`].
+    async fn rotation_refetch_due(&self) -> Option<FetchIntent> {
+        let intent = FetchIntent::formed_now();
         match &*self.cache.read().await {
-            Some(c) => c.fetched.elapsed() >= JWKS_ROTATION_REFETCH_MIN_INTERVAL,
-            None => true,
+            Some(c) if c.fetched.elapsed() < JWKS_ROTATION_REFETCH_MIN_INTERVAL => None,
+            _ => Some(intent),
         }
     }
 
@@ -681,23 +703,29 @@ impl AuthContext {
     /// [`JWKS_FAILURE_BACKOFF`] of attempts, so a JWKS outage costs one request the timeout and
     /// costs everyone else nothing — the difference between a degraded storefront and a 3-s-per-
     /// request storefront on a Friday evening.
-    /// `arrived` MUST BE CAPTURED BY THE CALLER, before the read that decided a fetch was needed.
+    /// The `intent` is a WITNESS, not a parameter anyone may mint: only [`Self::stale`] and
+    /// [`Self::rotation_refetch_due`] construct one, and each captures its instant before its own
+    /// cache read — so "the instant was taken after the read that decided to fetch" (#683) is
+    /// unspellable at a production call site rather than guarded by a comment.
     ///
-    /// It used to be `Instant::now()` taken here, just above the lock -- i.e. AFTER `key_for`'s own
-    /// `stale()` / `rotation_refetch_due()` read. A task that read `stale() == true` on the cold
-    /// cache and was then descheduled while the first fetch completed re-entered with `arrived`
-    /// LATER than `c.fetched`, failed the test below, and issued a SECOND fetch. Fifty callers on
-    /// four worker threads reach that window on a loaded runner
+    /// The instant used to be `Instant::now()` taken here, just above the lock -- i.e. AFTER
+    /// `key_for`'s own `stale()` / `rotation_refetch_due()` read. A task that read stale on the
+    /// cold cache and was then descheduled while the first fetch completed re-entered with its
+    /// instant LATER than `c.fetched`, failed the test below, and issued a SECOND fetch. Fifty
+    /// callers on four worker threads reach that window on a loaded runner
     /// (`concurrent_cold_requests_cost_exactly_one_jwks_fetch` failed twice in CI with `left: 2`)
-    /// and never on an idle one, which is why it read as a flake (#683).
+    /// and never on an idle one, which is why it read as a flake (#683). The first repair passed a
+    /// bare `Instant` from the caller — correct, but only by every call site reading a comment;
+    /// the review of #684 asked for the witness (CLAUDE.md compiler-first, level 4 is the floor).
     ///
-    /// TAKING THE INSTANT FROM THE CALLER, rather than testing "is the cache fresh now", is
+    /// TAKING THE CALLER'S INTENT, rather than testing "is the cache fresh now", is
     /// deliberate: a blanket `c.fetched.elapsed() <= JWKS_TTL` here would ALSO short-circuit the
     /// ROTATION refetch, because `JWKS_ROTATION_REFETCH_MIN_INTERVAL` is 5s against a 3600s TTL --
     /// an unknown `kid` on a cache 10 seconds old would pass `rotation_refetch_due()` and then be
     /// refused a fetch, so a just-rotated key would 401 every caller for the rest of the hour. The
     /// two callers ask different questions; only the arrival instant answers both.
-    async fn refresh(&self, arrived: Instant) -> Result<(), AuthError> {
+    async fn refresh(&self, intent: FetchIntent) -> Result<(), AuthError> {
+        let arrived = intent.formed_at;
         let url = self.verifier.as_ref().map(|v| v.jwks_url.as_str()).ok_or(AuthError::Unavailable)?;
         let _flight = self.refresh_lock.lock().await;
         // Someone else's fetch completed after we FORMED THE INTENT to fetch: it IS our fetch.
@@ -1080,19 +1108,24 @@ mod tests {
     /// (it failed twice in CI with `left: 2` and never once locally in isolation), so a flake is
     /// what it looks like and a re-run is what it invites. This constructs the ordering directly.
     ///
-    /// The single-flight test is `c.fetched > arrived`. If `arrived` is captured INSIDE `refresh`
-    /// — after the caller's own `stale()` read — then a caller that decided to fetch on the cold
-    /// cache and was descheduled while the first fetch landed resumes with `arrived` LATER than
-    /// `fetched`, so the test says "not mine" and it fetches again. Passing the caller's instant in
-    /// is what closes it; reverting `refresh` to `let arrived = Instant::now()` reds this by name.
+    /// The single-flight test is `c.fetched > intent.formed_at`. If that instant is captured
+    /// INSIDE `refresh` — after the caller's own `stale()` read — then a caller that decided to
+    /// fetch on the cold cache and was descheduled while the first fetch landed resumes with an
+    /// instant LATER than `fetched`, so the test says "not mine" and it fetches again. The first
+    /// fix passed a bare `Instant` from the caller and this test redded its revert by name; since
+    /// #691 the [`FetchIntent`] witness makes that revert unspellable outside this module (only
+    /// the deciding reads construct one), and this test keeps the SEMANTICS pinned: a pre-fetch
+    /// intent never pays a second fetch.
     #[tokio::test]
     async fn a_caller_whose_intent_predates_the_fetch_does_not_pay_a_second_one() {
         use std::sync::atomic::Ordering;
         let (url, hits) = counting_jwks(false).await;
         let ctx = AuthContext::from_config(url, TEST_SUPABASE_URL.into());
 
-        // The intent forms here, on a cold cache — this is where `key_for` captures it.
-        let arrived = Instant::now();
+        // The intent forms here, on a cold cache — constructed directly (a liberty only this
+        // module's tests have; production code can only get one from `stale()` /
+        // `rotation_refetch_due()`, which mint it before their own cache read).
+        let intent = FetchIntent::formed_now();
 
         // …and someone else's fetch lands before we get to run.
         ctx.key_for("captain-test-es256").await.expect("the first caller fetches");
@@ -1100,7 +1133,7 @@ mod tests {
 
         // Now the descheduled caller resumes into `refresh`. Its intent predates the fetch that
         // already answered it, so it must take that answer rather than issue its own.
-        ctx.refresh(arrived).await.expect("refresh");
+        ctx.refresh(intent).await.expect("refresh");
         assert_eq!(
             hits.load(Ordering::SeqCst),
             1,
@@ -1123,8 +1156,19 @@ mod tests {
         ctx.key_for("captain-test-es256").await.expect("warm the cache");
         assert_eq!(hits.load(Ordering::SeqCst), 1, "precondition: one fetch, cache well inside TTL");
 
-        // An unknown kid on a cache that is FRESH by TTL but older than the rotation interval.
-        tokio::time::sleep(JWKS_ROTATION_REFETCH_MIN_INTERVAL + Duration::from_millis(50)).await;
+        // An unknown kid on a cache that is FRESH by TTL but older than the rotation interval —
+        // PLACED there, not waited into. This was `tokio::time::sleep(interval + 50ms)`: a real
+        // 5.05 s wall-clock block on every run (the runtime cannot be `start_paused` here — real
+        // loopback server, `std::time::Instant`), plus a fudge factor someone would eventually
+        // have to defend. Aging the cache is instant, and the review of #684 flagged the irony of
+        // this suite growing its first wall-clock dependency in the PR about a timing-shaped test.
+        {
+            let mut cache = ctx.cache.write().await;
+            let c = cache.as_mut().expect("cache was just warmed");
+            c.fetched = Instant::now()
+                .checked_sub(JWKS_ROTATION_REFETCH_MIN_INTERVAL + Duration::from_secs(1))
+                .expect("host uptime exceeds the rotation interval");
+        }
         let _ = ctx.key_for("a-kid-we-never-issued").await;
         assert_eq!(
             hits.load(Ordering::SeqCst),
