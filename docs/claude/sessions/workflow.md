@@ -576,3 +576,13 @@ briefing and the independent review, which is why the trail must name its artifa
 Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
 required, and always end with a free-text question.
+
+## Delegate execution to a cheaper model tier (founder, 2026-08-28)
+
+The founder's standing instruction for token optimisation: **execution goes to subagents on a lower
+model tier; the coordinating session keeps judgment, mob mechanics and founder-facing surfaces.**
+Concretely, when spawning `executor`/`generator`/sweep-style agents, pass a cheaper model (`sonnet`
+by default; `haiku` for purely mechanical sweeps — renames, grep-and-fix, regeneration runs). Keep
+the coordinator model for: triage decisions, review verdicts, records (ADRs/journal/call sheet),
+and anything on the `HOLD: human` class. Cost asymmetry is the reason: a long diff-authoring run
+is mostly tool-echo tokens, which price the same on every tier and carry no judgment.
