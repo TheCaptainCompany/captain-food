@@ -359,40 +359,60 @@ struct CachedJwks {
     fetched: Instant,
 }
 
-/// A witness that the decision to fetch was formed BEFORE the cache read that justified it.
-///
-/// [`AuthContext::refresh`]'s single-flight test is "someone else's fetch completed after this
-/// intent formed: it is our fetch" — which is only sound if the intent's instant predates the
-/// read that concluded a fetch was needed. #683 was exactly that ordering minted wrong (the
-/// instant taken after the read), and it looked like a flake for a week.
-///
-/// The ordering lives in [`FetchIntent::decide`]'s BODY: the instant is captured, THEN the
-/// deciding read runs, and there is no other production constructor — so no call site can invert
-/// it. (The first shape of this type had a free `formed_now()` with a "MUST call before the read"
-/// doc line; the review of #692 pointed out that every production call site lives in this module,
-/// where such a constructor keeps the mistake spellable and the "unspellable" claim false. The
-/// `#[cfg(test)]` constructor below is the one deliberate forgery point, for building #683's
-/// ordering deterministically.)
-struct FetchIntent {
-    formed_at: Instant,
-}
+/// The [`FetchIntent`] witness, in a module of its own so that Rust's MODULE-scoped privacy does
+/// the enforcing: `formed_at` is out of scope at every call site in `auth`, so neither the struct
+/// literal nor a late mint is spellable there. See the type's doc for the invariant.
+mod fetch_intent {
+    use super::CachedJwks;
+    use std::time::Instant;
+    use tokio::sync::RwLock;
 
-impl FetchIntent {
-    /// Form the intent, THEN run the read that decides on it. Returns `Some` when the read says
-    /// a fetch is needed (`true`), carrying an instant that provably predates that read.
-    async fn decide<Fut: std::future::Future<Output = bool>>(
-        read: impl FnOnce() -> Fut,
-    ) -> Option<Self> {
-        let intent = Self { formed_at: Instant::now() };
-        read().await.then_some(intent)
+    /// A witness that the decision to fetch was formed BEFORE the cache read that justified it.
+    ///
+    /// `AuthContext::refresh`'s single-flight test is "someone else's fetch completed after this
+    /// intent formed: it is our fetch" — which is only sound if the intent's instant predates the
+    /// read that concluded a fetch was needed. #683 was exactly that ordering minted wrong (the
+    /// instant taken after the read), and it looked like a flake for a week.
+    ///
+    /// Three shapes converged here, each retired by a review round on #692/#693:
+    /// a free `formed_now()` with a "MUST call before the read" doc line (spellable wherever the
+    /// call sites live); then `decide(read)` over an opaque async closure (the struct literal was
+    /// still spellable in `auth` — privacy is MODULE-scoped, not type-scoped — and nothing forced
+    /// the read to happen inside the closure). Now BOTH doors are the type's own: the struct
+    /// lives in this child module, so `formed_at` is out of scope at every call site, and
+    /// [`FetchIntent::decide`] owns the cache read itself — the caller hands over a SYNCHRONOUS
+    /// predicate, which cannot `await` a read of its own before the instant exists. The
+    /// `#[cfg(test)]` constructor is the one deliberate forgery point, for building #683's
+    /// ordering deterministically from `auth::tests`.
+    pub(super) struct FetchIntent {
+        formed_at: Instant,
     }
 
-    /// Tests only: mint a witness at an arbitrary moment, to construct #683's ordering directly.
-    #[cfg(test)]
-    fn formed_now() -> Self {
-        Self { formed_at: Instant::now() }
+    impl FetchIntent {
+        /// Form the intent, THEN run the deciding read over the cache. Returns `Some` when the
+        /// predicate says a fetch is needed (`true`), carrying an instant that provably predates
+        /// the read the predicate saw.
+        pub(super) async fn decide(
+            cache: &RwLock<Option<CachedJwks>>,
+            needed: impl FnOnce(Option<&CachedJwks>) -> bool,
+        ) -> Option<Self> {
+            let intent = Self { formed_at: Instant::now() };
+            needed(cache.read().await.as_ref()).then_some(intent)
+        }
+
+        pub(super) fn formed_at(&self) -> Instant {
+            self.formed_at
+        }
+
+        /// Tests only: mint a witness at an arbitrary moment, to construct #683's ordering
+        /// directly.
+        #[cfg(test)]
+        pub(super) fn formed_now() -> Self {
+            Self { formed_at: Instant::now() }
+        }
     }
 }
+use fetch_intent::FetchIntent;
 
 /// **The verification contract, as ONE value** (#519): the JWKS endpoint that supplies the signing
 /// keys AND the issuer those keys are trusted to have signed for.
@@ -687,23 +707,14 @@ impl AuthContext {
     /// Is the cache stale (or absent)? `Some` means "a fetch is needed" and carries the witness
     /// `refresh` requires; `None` means the cache answers.
     async fn stale(&self) -> Option<FetchIntent> {
-        FetchIntent::decide(|| async {
-            match &*self.cache.read().await {
-                Some(c) if c.fetched.elapsed() <= JWKS_TTL => false,
-                _ => true,
-            }
-        })
-        .await
+        FetchIntent::decide(&self.cache, |c| !matches!(c, Some(c) if c.fetched.elapsed() <= JWKS_TTL)).await
     }
 
     /// May an UNKNOWN kid trigger a refetch? Only if the cached set is older than the rotation
     /// interval (or there is none at all). `Some` carries the witness, as in [`Self::stale`].
     async fn rotation_refetch_due(&self) -> Option<FetchIntent> {
-        FetchIntent::decide(|| async {
-            match &*self.cache.read().await {
-                Some(c) if c.fetched.elapsed() < JWKS_ROTATION_REFETCH_MIN_INTERVAL => false,
-                _ => true,
-            }
+        FetchIntent::decide(&self.cache, |c| {
+            !matches!(c, Some(c) if c.fetched.elapsed() < JWKS_ROTATION_REFETCH_MIN_INTERVAL)
         })
         .await
     }
@@ -742,7 +753,7 @@ impl AuthContext {
     /// refused a fetch, so a just-rotated key would 401 every caller for the rest of the hour. The
     /// two callers ask different questions; only the arrival instant answers both.
     async fn refresh(&self, intent: FetchIntent) -> Result<(), AuthError> {
-        let arrived = intent.formed_at;
+        let arrived = intent.formed_at();
         let url = self.verifier.as_ref().map(|v| v.jwks_url.as_str()).ok_or(AuthError::Unavailable)?;
         let _flight = self.refresh_lock.lock().await;
         // Someone else's fetch completed after we FORMED THE INTENT to fetch: it IS our fetch.
