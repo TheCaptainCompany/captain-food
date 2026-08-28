@@ -198,7 +198,9 @@ bottom_sheets:
     sections:
       - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.body' } }
       - { type: phone_field, id: phone_field, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.phone_label' }, country_picker: true, autofocus: true }
-      - { type: button, id: send_otp_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.continue' }, variant: primary, full_width: true, action: { type: send_otp, phone: "{{ phone_field.value }}" } }
+      # #529: `on_success` opens the OTP sheet on ACCEPTANCE of the send — never before the
+      # response (the sheet used to never open at all: the parser only ever read `.route`).
+      - { type: button, id: send_otp_btn, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.continue' }, variant: primary, full_width: true, action: { type: send_otp, phone: "{{ phone_field.value }}", on_success: { type: open_bottom_sheet, sheet_id: otp_sheet } } }
       - { type: divider, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.or' } }
       - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.passkey' }, variant: outline, icon: fingerprint, visible_when: passkey_available, action: { type: authenticate_passkey } }
 
@@ -209,7 +211,14 @@ bottom_sheets:
     drag_to_close: false
     sections:
       - { type: text, value: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.otp_body' } }   # params: { phone }
-      - { type: otp_input, id: otp_field, length: 6, autofocus: true, on_complete: { type: verify_otp, code: "{{ otp_field.value }}" } }
+      # #529 (ADR-20260809-212810 cookie-is-the-transport, PROP-20260724-150500): on a SUCCEEDED
+      # verification, `claim_session` claims the parked session (POST /auth/session with the
+      # acceptance messageId + X-SESSION-ID; the server answers Set-Cookie) THEN `navigate` reloads
+      # the current page — the special `route: "$reload"` token (never a hardcoded destination) so
+      # the reload's fresh SSR pass re-reads `me`/the auth cookie and lands wherever THIS page's own
+      # requires_auth/conditional wiring already says an authenticated visitor belongs. The ORDER is
+      # load-bearing: the cookie must land before the reload, or the new page still sees a guest.
+      - { type: otp_input, id: otp_field, length: 6, autofocus: true, on_complete: { type: verify_otp, code: "{{ otp_field.value }}", on_success: [{ type: claim_session }, { type: navigate, route: "$reload" }] } }
       - { type: inline_error, visible_when: otp_error, message: "{{ otp_error_message }}" }
       - { type: text_button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.resend' }, visible_when: resend_available, action: { type: resend_otp } }
       - { type: countdown, visible_when: "!resend_available", label: { $ref: 'restaurant_frontoffice.translations.yaml#/auth.resend_in' } }   # params: { seconds }

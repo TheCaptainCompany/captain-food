@@ -5783,6 +5783,77 @@ Catalog:
     }
 
     #[test]
+    fn on_success_type_is_a_closed_set_at_the_loader_validator_level() {
+        // #529: `on_success` — ONE typed object OR an ORDERED LIST of them — must name a type from
+        // the CLOSED set (`screen-on-success-unknown-type`). Covers BOTH spellings live in the real
+        // specs: the single-object form (`send_otp_btn`'s `open_bottom_sheet`) and the list form
+        // (`verify_otp`'s `[claim_session, navigate]`) — and both live under `bottom_sheets:`, NOT
+        // `screens:`, so `collect_screen_actions` (screen-`components`-only) never sees them;
+        // `collect_on_success_types` walks the WHOLE file, which is exactly what this proves.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let hits = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "screen-on-success-unknown-type")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+        // GREEN — every on_success type in the real catalog (both spellings) is in the closed set.
+        assert!(hits(&model).is_empty(), "{:?}", hits(&model));
+
+        fn send_otp_on_success(m: &mut Model) -> &mut serde_yaml::Mapping {
+            m.defs
+                .get_mut("screens/captain_frontoffice.yaml")
+                .and_then(|v| v.get_mut("bottom_sheets"))
+                .and_then(|v| v.get_mut("auth_sheet"))
+                .and_then(|v| v.get_mut("sections"))
+                .and_then(|v| v.as_sequence_mut())
+                .and_then(|ss| {
+                    ss.iter_mut().find(|s| s.get("id").and_then(|x| x.as_str()) == Some("send_otp_btn"))
+                })
+                .and_then(|s| s.get_mut("action"))
+                .and_then(|a| a.get_mut("on_success"))
+                .and_then(|v| v.as_mapping_mut())
+                .expect("send_otp_btn's on_success (single-object form) exists")
+        }
+
+        // RED 1 — the single-object form: `send_otp_btn`'s `on_success.type` drifts to a typo.
+        send_otp_on_success(&mut model).insert(Value::from("type"), Value::from("open_a_typo"));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "{:?}", found);
+        assert!(found[0].contains("open_a_typo"), "{}", found[0]);
+
+        // RED-to-GREEN: restoring the real type clears exactly that finding.
+        send_otp_on_success(&mut model).insert(Value::from("type"), Value::from("open_bottom_sheet"));
+        assert!(hits(&model).is_empty(), "{:?}", hits(&model));
+
+        // RED 2 — the LIST form: `verify_otp`'s `on_success[0].type` drifts.
+        let verify_otp_on_success = model
+            .defs
+            .get_mut("screens/captain_frontoffice.yaml")
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut("otp_sheet"))
+            .and_then(|v| v.get_mut("sections"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|ss| {
+                ss.iter_mut().find(|s| s.get("id").and_then(|x| x.as_str()) == Some("otp_field"))
+            })
+            .and_then(|s| s.get_mut("on_complete"))
+            .and_then(|a| a.get_mut("on_success"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("verify_otp's on_success (list form) exists");
+        verify_otp_on_success[0]
+            .as_mapping_mut()
+            .expect("the first step is a mapping")
+            .insert(Value::from("type"), Value::from("claim_a_typo"));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "{:?}", found);
+        assert!(found[0].contains("claim_a_typo") && found[0].contains("on_success.0"), "{}", found[0]);
+    }
+
+    #[test]
     fn bam_folds_are_total_and_metrics_read_their_own_projection() {
         // ADR-20260811-014129 / #167 Phase 3: the business-metric catalog's semantic rules.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");

@@ -56,14 +56,102 @@ pub enum ActionPlan {
     Disabled { reason: String },
 }
 
-/// One button's action, parsed and resolved. `on_success_route` is the DSL's
-/// `action.on_success.route` (the checkout pattern: navigate to the confirmation on acceptance) —
-/// `{{ variables.orderId }}` templates in it are substituted from the RESOLVED input.
+/// One step of a mutation's ORDERED `on_success` sequence (#529 — the DSL's `action.on_success`,
+/// either a single typed object or a list of them; the loader/validator enforces the type is from
+/// the CLOSED set, `screen-on-success-unknown-type`). Steps fire in DECLARED order once the
+/// mutation's acceptance SUCCEEDS: `ClaimSession` is AWAITED before any step that follows it
+/// (`crate::executor::run_on_success`) — the httpOnly session cookie must land before a page reload
+/// reads it back, or the reload still sees a guest. `Navigate`'s `route` carries `{{ variables.X }}`
+/// templates substituted from the mutation's RESOLVED input (the checkout pattern) at PARSE time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OnSuccessStep {
+    Navigate { route: String },
+    OpenSheet { sheet_id: String },
+    CloseSheet,
+    /// POST the acceptance `messageId` to `/auth/session` (`crate::auth::claim_session`) — claims
+    /// the parked provider session and lands the httpOnly cookie (PROP-20260724-150500,
+    /// ADR-20260809-212810). The ONLY step that is genuinely asynchronous.
+    ClaimSession,
+}
+
+/// The special `navigate` route the client interprets as "reload the current location" instead of
+/// a literal href (#529): deliberately NOT a hardcoded destination — after `ClaimSession` lands the
+/// cookie, a fresh SSR pass re-reads `me`/the auth cookie and lands wherever THIS page's own
+/// `requires_auth`/`conditional` wiring already says an authenticated visitor belongs, so no new
+/// per-caller landing route needs inventing here. Same `$`-prefix convention as [`MINT_UUID`] /
+/// [`LOCALE_TOKEN`] (a synthesized value, never a screen/form binding) — different subsystem
+/// (a [`ClientEffect`]/[`OnSuccessStep`] target, not a mutation variable), same idea.
+pub const RELOAD_ROUTE: &str = "$reload";
+
+impl OnSuccessStep {
+    fn to_json(&self) -> Value {
+        match self {
+            OnSuccessStep::Navigate { route } => serde_json::json!({ "type": "navigate", "route": route }),
+            OnSuccessStep::OpenSheet { sheet_id } => {
+                serde_json::json!({ "type": "open_bottom_sheet", "sheet_id": sheet_id })
+            }
+            OnSuccessStep::CloseSheet => serde_json::json!({ "type": "close_sheet" }),
+            OnSuccessStep::ClaimSession => serde_json::json!({ "type": "claim_session" }),
+        }
+    }
+
+    fn from_json(v: &Value) -> Option<Self> {
+        match v.get("type").and_then(|t| t.as_str())? {
+            "navigate" => Some(OnSuccessStep::Navigate { route: v.get("route")?.as_str()?.to_string() }),
+            "open_bottom_sheet" => {
+                Some(OnSuccessStep::OpenSheet { sheet_id: v.get("sheet_id")?.as_str()?.to_string() })
+            }
+            "close_sheet" => Some(OnSuccessStep::CloseSheet),
+            "claim_session" => Some(OnSuccessStep::ClaimSession),
+            // The spec-level closed set (`screen-on-success-unknown-type`) is wider than what this
+            // client build executes (e.g. `show_toast`, used only by the bespoke non-SDUI
+            // post-delivery screens) — an unimplemented-but-valid type is simply not acted on here,
+            // never a crash.
+            _ => None,
+        }
+    }
+}
+
+/// Decode the `data-on-success` DOM attribute (a JSON array [`spec_attrs`] stamped from
+/// [`ActionSpec::on_success`]) back into steps — the driver's (`interact.rs`) read side of the
+/// contract. Native-testable: no wasm/DOM dependency.
+pub fn parse_on_success_attr(raw: &str) -> Vec<OnSuccessStep> {
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(raw) else { return Vec::new() };
+    items.iter().filter_map(OnSuccessStep::from_json).collect()
+}
+
+/// Run an ordered `on_success` sequence against an injected sink — pure sequencing, natively
+/// testable off-wasm (#529 checkpoint (c)): [`OnSuccessStep::ClaimSession`] is `.await`ed before
+/// the FOLLOWING step runs, so a mutant that reorders them (navigate-before-claim) is caught by a
+/// recording fake without any real DOM/network. `interact.rs` (wasm-only) is the only real sink.
+pub async fn run_on_success<F, Fut>(
+    steps: &[OnSuccessStep],
+    mut claim_session: F,
+    mut navigate: impl FnMut(&str),
+    mut open_sheet: impl FnMut(&str),
+    mut close_sheet: impl FnMut(),
+) where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    for step in steps {
+        match step {
+            OnSuccessStep::ClaimSession => claim_session().await,
+            OnSuccessStep::Navigate { route } => navigate(route),
+            OnSuccessStep::OpenSheet { sheet_id } => open_sheet(sheet_id),
+            OnSuccessStep::CloseSheet => close_sheet(),
+        }
+    }
+}
+
+/// One button's action, parsed and resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionSpec {
     pub plan: ActionPlan,
     pub loading_label: Option<String>,
-    pub on_success_route: Option<String>,
+    /// The DSL's `action.on_success` — the ordered steps to run once a mutation SUCCEEDS
+    /// ([`OnSuccessStep`]). Empty = nothing declared (the pre-#529 default: settle and stop).
+    pub on_success: Vec<OnSuccessStep>,
 }
 
 impl ActionSpec {
@@ -86,7 +174,7 @@ impl ActionSpec {
                     reason: format!("action `{action_type}` is not in the generated allowlist"),
                 },
                 loading_label: None,
-                on_success_route: None,
+                on_success: Vec::new(),
             });
         };
 
@@ -114,14 +202,61 @@ impl ActionSpec {
             ActionPlan::Mutation { input, .. } => Some(input),
             _ => None,
         };
-        let on_success_route = text_prop(node, &format!("{prefix}.on_success.route"), ctx)
-            .map(|route| substitute_variables(&route, input_for_template));
+        let on_success = parse_on_success(node, ctx, prefix, input_for_template);
 
-        Some(ActionSpec {
-            plan,
-            loading_label: text_prop(node, "loading_label", ctx),
-            on_success_route,
-        })
+        Some(ActionSpec { plan, loading_label: text_prop(node, "loading_label", ctx), on_success })
+    }
+}
+
+/// Parse a node's `<prefix>.on_success` into ordered steps — the DSL uses BOTH spellings today:
+/// ONE typed action object (`place_order`'s single-route form) or an ordered LIST of them
+/// (`rate_order`/`tip_order`'s `[{…},{…}]`, and #529's `verify_otp` claim-then-navigate pair). A
+/// step whose `type` this client build has no local implementation for is simply omitted from the
+/// returned list — the CLOSED SET itself is enforced at the spec/validator level
+/// (`screen-on-success-unknown-type`), not here.
+fn parse_on_success(
+    node: &Node,
+    ctx: &RenderContext,
+    prefix: &str,
+    input_for_template: Option<&Map<String, Value>>,
+) -> Vec<OnSuccessStep> {
+    let root = format!("{prefix}.on_success");
+    let mut steps = Vec::new();
+    let mut i = 0;
+    while let Some(ty) = text_prop(node, &format!("{root}.{i}.type"), ctx) {
+        if let Some(step) = build_on_success_step(&ty, node, ctx, &format!("{root}.{i}"), input_for_template) {
+            steps.push(step);
+        }
+        i += 1;
+    }
+    if steps.is_empty() {
+        if let Some(ty) = text_prop(node, &format!("{root}.type"), ctx) {
+            if let Some(step) = build_on_success_step(&ty, node, ctx, &root, input_for_template) {
+                steps.push(step);
+            }
+        }
+    }
+    steps
+}
+
+fn build_on_success_step(
+    ty: &str,
+    node: &Node,
+    ctx: &RenderContext,
+    prefix: &str,
+    input_for_template: Option<&Map<String, Value>>,
+) -> Option<OnSuccessStep> {
+    match ty {
+        "navigate" => {
+            let route = text_prop(node, &format!("{prefix}.route"), ctx)?;
+            Some(OnSuccessStep::Navigate { route: substitute_variables(&route, input_for_template) })
+        }
+        "open_bottom_sheet" => {
+            Some(OnSuccessStep::OpenSheet { sheet_id: text_prop(node, &format!("{prefix}.sheet_id"), ctx)? })
+        }
+        "close_sheet" => Some(OnSuccessStep::CloseSheet),
+        "claim_session" => Some(OnSuccessStep::ClaimSession),
+        _ => None,
     }
 }
 
@@ -286,7 +421,9 @@ pub mod attrs {
     pub const VARS: &str = "data-vars";
     /// The label to show while the write is unsettled (`data-loading`).
     pub const LOADING: &str = "data-loading";
-    /// Route to navigate to on acceptance (`data-on-success`).
+    /// The ordered `on_success` steps, JSON-encoded (`data-on-success`) — e.g.
+    /// `[{"type":"claim_session"},{"type":"navigate","route":"$reload"}]`. Mutation kinds only;
+    /// see [`super::OnSuccessStep`]/[`super::parse_on_success_attr`] for the wire shape.
     pub const ON_SUCCESS: &str = "data-on-success";
     /// Unresolved `{{ field.value }}` bindings as JSON `{input_name: binding}` — the driver fills
     /// them from the live form inputs at dispatch time (`data-var-bindings`).
@@ -349,8 +486,9 @@ fn spec_attrs(spec: &ActionSpec) -> (Vec<(&'static str, String)>, Option<String>
             if let Some(label) = &spec.loading_label {
                 out.push((attrs::LOADING, label.clone()));
             }
-            if let Some(route) = &spec.on_success_route {
-                out.push((attrs::ON_SUCCESS, route.clone()));
+            if !spec.on_success.is_empty() {
+                let arr: Vec<Value> = spec.on_success.iter().map(OnSuccessStep::to_json).collect();
+                out.push((attrs::ON_SUCCESS, Value::Array(arr).to_string()));
             }
         }
         ActionPlan::Client(effect) => {
@@ -719,5 +857,141 @@ mod tests {
             }),
         );
         assert_eq!(route, "/orders/abc-123/confirmation");
+    }
+
+    // ─── #529 — the OTP sheet never opens, and the session cookie is never picked up ────────────
+
+    #[test]
+    fn send_otp_success_opens_the_otp_sheet() {
+        // #529 verified break 1: `send_otp_btn`'s action carried NO `on_success` at all, and the
+        // old parser only ever read `.route` — the OTP sheet never opened. Straight from the
+        // GENERATED sheet tree (#94's send_otp button).
+        fn find_send_otp<'a>(nodes: &'a [Node]) -> Option<&'a Node> {
+            for n in nodes {
+                if matches!(n.prop("action.type"), Some(PropValue::Text("send_otp"))) {
+                    return Some(n);
+                }
+                if let Some(hit) = find_send_otp(n.children) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        let auth = Surface::RestaurantFrontoffice
+            .sheets()
+            .iter()
+            .find(|s| s.id == "auth_sheet")
+            .expect("auth sheet in the generated tables");
+        let btn = find_send_otp(std::slice::from_ref(&auth.node)).expect("send_otp button");
+        let spec = ActionSpec::from_node(btn, &ctx_with(&[])).unwrap();
+        assert_eq!(
+            spec.on_success,
+            vec![OnSuccessStep::OpenSheet { sheet_id: "otp_sheet".to_string() }],
+            "send_otp's on_success must open the otp_sheet on ACCEPTANCE, not before"
+        );
+
+        // The marketplace surface must carry the exact same wiring (reviewer checkpoint: the two
+        // screens files are kept consistent).
+        let auth_marketplace = Surface::CaptainFrontoffice
+            .sheets()
+            .iter()
+            .find(|s| s.id == "auth_sheet")
+            .expect("auth sheet in the marketplace surface");
+        let btn2 =
+            find_send_otp(std::slice::from_ref(&auth_marketplace.node)).expect("send_otp button");
+        let spec2 = ActionSpec::from_node(btn2, &ctx_with(&[])).unwrap();
+        assert_eq!(spec.on_success, spec2.on_success, "both surfaces must wire send_otp identically");
+    }
+
+    #[test]
+    fn verify_otp_success_claims_the_session_then_navigates_in_order() {
+        // #529 verified break 2: `pickup_session` (renamed `claim_session`) had ZERO call sites —
+        // the parked session was never claimed, the cookie never landed. The DSL now declares an
+        // ORDERED pair on `verify_otp`'s `on_complete.on_success`.
+        fn find_by_prefix_type<'a>(nodes: &'a [Node], prefix: &str, ty: &str) -> Option<&'a Node> {
+            for n in nodes {
+                if matches!(n.prop(&format!("{prefix}.type")), Some(PropValue::Text(t)) if t == ty) {
+                    return Some(n);
+                }
+                if let Some(hit) = find_by_prefix_type(n.children, prefix, ty) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        let otp = Surface::RestaurantFrontoffice
+            .sheets()
+            .iter()
+            .find(|s| s.id == "otp_sheet")
+            .expect("otp sheet");
+        let field = find_by_prefix_type(std::slice::from_ref(&otp.node), "on_complete", "verify_otp")
+            .expect("otp_input on_complete");
+        let spec = ActionSpec::from_node_prefixed(field, &ctx_with(&[]), "on_complete").unwrap();
+        assert_eq!(
+            spec.on_success,
+            vec![
+                OnSuccessStep::ClaimSession,
+                OnSuccessStep::Navigate { route: RELOAD_ROUTE.to_string() },
+            ],
+            "the cookie must land (claim_session) BEFORE the reload picks it up"
+        );
+
+        // The DOM contract (`trigger_attrs`, what `interact.rs` actually reads) carries the SAME
+        // ordered steps, round-tripped through the JSON wire format.
+        let (attrs_list, _) = trigger_attrs(field, &ctx_with(&[]), "on_complete", "complete");
+        let raw = attrs_list
+            .iter()
+            .find(|(a, _)| *a == attrs::ON_SUCCESS)
+            .map(|(_, v)| v.clone())
+            .expect("data-on-success stamped for interact.rs to read");
+        assert_eq!(parse_on_success_attr(&raw), spec.on_success);
+    }
+
+    #[tokio::test]
+    async fn claim_session_is_awaited_before_the_following_step_runs() {
+        // #529 checkpoint (c) — hydrate-gated ordering, made natively testable: `run_on_success` is
+        // the pure sequencing `interact.rs` (wasm-only, untestable off-browser) delegates to. A
+        // mutant that fires `navigate` before `claim_session`'s future is polled to completion
+        // would record `navigate` FIRST — this test catches exactly that reorder.
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let calls: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let steps =
+            vec![OnSuccessStep::ClaimSession, OnSuccessStep::Navigate { route: RELOAD_ROUTE.to_string() }];
+        let claim_calls = Rc::clone(&calls);
+        run_on_success(
+            &steps,
+            || {
+                let calls = Rc::clone(&claim_calls);
+                async move {
+                    // A real await point: a same-tick/synchronous mutant would still (accidentally)
+                    // pass without this — the yield forces genuine interleaving to matter.
+                    tokio::task::yield_now().await;
+                    calls.borrow_mut().push("claim_session".to_string());
+                }
+            },
+            |route| calls.borrow_mut().push(format!("navigate:{route}")),
+            |sheet_id| calls.borrow_mut().push(format!("open_sheet:{sheet_id}")),
+            || calls.borrow_mut().push("close_sheet".to_string()),
+        )
+        .await;
+        assert_eq!(
+            *calls.borrow(),
+            vec!["claim_session".to_string(), format!("navigate:{RELOAD_ROUTE}")],
+            "claim_session must complete before navigate runs"
+        );
+    }
+
+    #[test]
+    fn on_success_attr_round_trips_every_step_kind() {
+        let steps = vec![
+            OnSuccessStep::ClaimSession,
+            OnSuccessStep::Navigate { route: "/checkout".to_string() },
+            OnSuccessStep::OpenSheet { sheet_id: "otp_sheet".to_string() },
+            OnSuccessStep::CloseSheet,
+        ];
+        let arr: Vec<Value> = steps.iter().map(OnSuccessStep::to_json).collect();
+        let raw = Value::Array(arr).to_string();
+        assert_eq!(parse_on_success_attr(&raw), steps);
     }
 }

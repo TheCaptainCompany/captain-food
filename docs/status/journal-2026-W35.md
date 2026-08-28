@@ -3,6 +3,24 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#529 "A customer cannot log in at all: the OTP sheet never opens, and the
+> session cookie is never picked up"](https://github.com/TheCaptainCompany/captain-food/issues/529)
+> fixed: both verified breaks wired, plus a new closed `on_success` action-type set.**
+> `send_otp_btn`'s action carried no `on_success` at all (`crates/web/src/executor.rs` only ever
+> read a bare `.route`), so the OTP code sheet never opened after the SMS was sent; separately,
+> `crates/web/src/auth.rs`'s `pickup_session` (renamed `claim_session`) had ZERO call sites, so a
+> correctly entered code never claimed the parked provider session and the httpOnly cookie never
+> landed. Both screens (`captain_frontoffice.yaml` + `restaurant_frontoffice.yaml`) now declare
+> `on_success` as a TYPED, ordered action list — `open_bottom_sheet` on `send_otp`'s acceptance,
+> `[claim_session, navigate]` on `verify_otp`'s (claim AWAITED before the reload, `executor.rs`'s
+> new `run_on_success`) — and the type is a CLOSED set the loader/validator now proves
+> (`screen-on-success-unknown-type`, `tools/codegen-rs`). The `navigate` step's `$reload` token
+> deliberately does not hardcode a landing route: the reload's fresh SSR pass re-reads `me`/the
+> cookie and lands wherever the page's own `requires_auth`/`conditional` wiring already decides —
+> flagged for the architect as a design call within GREEN scope, not a redesign of the recorded
+> cookie-is-the-transport posture (PROP-20260724-150500, ADR-20260809-212810). No login gate added
+> anywhere; anonymous checkout is untouched.
+
 > ✅ **2026-08-28 — [#660 "STATUS.md's durable sections are stale and are now read first"](https://github.com/TheCaptainCompany/captain-food/issues/660)
 > corrected: STATUS.md contradicted itself within 170 lines.** The Deployment table still showed
 > Render (Frankfurt) / Supabase Postgres as ✅ current while the same file, further down, already

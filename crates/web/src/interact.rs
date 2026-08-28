@@ -11,7 +11,9 @@
 //!     `pending::dispatch_persisted` → verdict push-first (`operationStatusChanged` on the shared
 //!     socket, interpreted by `pending::settle_from_push`) with the bounded poll as fallback →
 //!     restore + toast on REJECTED/FAILED (server-provided message, errors.yaml code as fallback) →
-//!     `data-on-success` navigation on success;
+//!     on SUCCESS, the `data-on-success` ORDERED STEPS run in declared order (#529 —
+//!     `executor::run_on_success`: claim the parked session cookie, open/close a sheet, navigate —
+//!     `ClaimSession` is `.await`ed before whatever follows it);
 //!   * **retry** — a transport failure BEFORE acceptance keeps the persisted record and stamps its
 //!     messageId onto the button (`data-retry`): the next click goes through `pending::retry`
 //!     (same id — duplicate-proof) instead of minting a new intent.
@@ -35,7 +37,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::actions::{ActionOutcome, DispatchHandle};
-use crate::executor::attrs;
+use crate::executor::{attrs, OnSuccessStep};
 use crate::generated::data_layer::{ActionKey, ActionKind};
 use crate::graphql::{HttpTransport, Role};
 use crate::pending::{self, BrowserPendingStore, PendingStore, ResumedWrite};
@@ -49,12 +51,13 @@ use crate::subscriptions::{SubId, SubscriptionEvent, SubscriptionKey};
 const PUSH_HEAD_START: Duration = Duration::from_secs(2);
 
 /// A dispatched write the driver is tracking: the acceptance handle + the button to restore + the
-/// success navigation. Registered under its push-subscription id.
+/// ordered `on_success` steps (#529 — `executor::OnSuccessStep`, no longer a single route).
+/// Registered under its push-subscription id.
 struct InFlight {
     handle: DispatchHandle,
     button: web_sys::HtmlElement,
     original_label: String,
-    on_success: Option<String>,
+    on_success: Vec<OnSuccessStep>,
     settled: Rc<std::cell::Cell<bool>>,
 }
 
@@ -65,6 +68,11 @@ struct Driver {
     socket: Rc<RefCell<Option<Handle>>>,
     /// Push-subscription id → the write it watches.
     in_flight: Rc<RefCell<HashMap<SubId, InFlight>>>,
+    /// The BFF origin (#529 — `OnSuccessStep::ClaimSession` POSTs `{origin}/auth/session`).
+    origin: String,
+    /// This tab's anonymous session id (#529 — the `X-SESSION-ID` `claim_session` must present to
+    /// match the one that journaled `verify_otp`).
+    session: SessionId,
 }
 
 /// Install the interaction layer: the delegated click listener, the shared subscription socket,
@@ -75,6 +83,8 @@ pub fn install(origin: &str, role: Role, session: SessionId) {
         store: Rc::new(BrowserPendingStore),
         socket: Rc::new(RefCell::new(None)),
         in_flight: Rc::new(RefCell::new(HashMap::new())),
+        origin: origin.to_string(),
+        session,
     });
 
     // The shared push socket. `on_connect` fires on every (re)connect: store the fresh handle —
@@ -258,7 +268,9 @@ impl Driver {
                 }
             }
         }
-        let on_success = el.get_attribute(attrs::ON_SUCCESS);
+        let on_success = crate::executor::parse_on_success_attr(
+            &el.get_attribute(attrs::ON_SUCCESS).unwrap_or_default(),
+        );
         let retry_id = el.get_attribute("data-retry").and_then(|s| Uuid::parse_str(&s).ok());
 
         // Pending UX: freeze the button.
@@ -325,7 +337,8 @@ impl Driver {
             match pending::settle(d.transport.as_ref(), d.store.as_ref(), &handle).await {
                 Ok(outcome) if !settled.get() => {
                     settled.set(true);
-                    apply_outcome(&el, &original_label, &on_success, &outcome);
+                    apply_outcome(&d, &el, &original_label, &on_success, handle.message_id, &outcome)
+                        .await;
                 }
                 Ok(_) => {} // push won while we polled — already applied
                 Err(err) if !settled.get() => {
@@ -338,19 +351,29 @@ impl Driver {
     }
 
     /// A frame from the shared socket: route it to its in-flight write, settle push-first.
-    fn on_push(&self, sub_id: SubId, event: SubscriptionEvent) {
+    /// `self: &Rc<Self>` (like `on_click`) — `apply_outcome`'s `ClaimSession` step is genuinely
+    /// async, so the outcome is applied on a SPAWNED task, after everything needed is cloned out of
+    /// the `in_flight` borrow (never held across an `.await`).
+    fn on_push(self: &Rc<Self>, sub_id: SubId, event: SubscriptionEvent) {
         let SubscriptionEvent::Next(operation) = event else { return };
         let mut in_flight = self.in_flight.borrow_mut();
         let Some(watch) = in_flight.get(&sub_id) else { return };
         match pending::settle_from_push(self.store.as_ref(), &watch.handle, &operation) {
             Ok(Some(outcome)) => {
                 watch.settled.set(true);
-                apply_outcome(&watch.button, &watch.original_label, &watch.on_success, &outcome);
-                let watch = in_flight.remove(&sub_id);
+                let button = watch.button.clone();
+                let original_label = watch.original_label.clone();
+                let on_success = watch.on_success.clone();
+                let message_id = watch.handle.message_id;
+                let removed = in_flight.remove(&sub_id);
                 drop(in_flight);
-                if let (Some(_), Some(socket)) = (watch, self.socket.borrow_mut().as_mut()) {
+                if let (Some(_), Some(socket)) = (removed, self.socket.borrow_mut().as_mut()) {
                     socket.unsubscribe(sub_id);
                 }
+                let d = Rc::clone(self);
+                wasm_bindgen_futures::spawn_local(async move {
+                    apply_outcome(&d, &button, &original_label, &on_success, message_id, &outcome).await;
+                });
             }
             Ok(None) => {}  // PENDING frame — keep watching
             Err(_) => {}    // malformed push — the poll fallback owns the verdict
@@ -401,21 +424,50 @@ fn restore(el: &web_sys::HtmlElement, label: &str) {
     el.set_class_name(&el.class_name().replace(" is-pending", ""));
 }
 
-fn apply_outcome(
+/// Apply a settled mutation's outcome: restore the button, then on SUCCESS run the declared
+/// `on_success` steps IN ORDER (#529 — `executor::run_on_success`; `ClaimSession` is the only
+/// genuinely async one, `.await`ed before whatever follows it runs), otherwise toast the failure.
+async fn apply_outcome(
+    driver: &Driver,
     el: &web_sys::HtmlElement,
     original_label: &str,
-    on_success: &Option<String>,
+    on_success: &[OnSuccessStep],
+    message_id: uuid::Uuid,
     outcome: &ActionOutcome,
 ) {
     restore(el, original_label);
     match outcome {
         ActionOutcome::Succeeded { .. } => {
             let _ = el.set_attribute("data-state", "succeeded");
-            if let (Some(route), Some(w)) = (on_success, web_sys::window()) {
-                let _ = w.location().set_href(route);
-            }
+            let origin = driver.origin.clone();
+            let session = driver.session;
+            crate::executor::run_on_success(
+                on_success,
+                || {
+                    let origin = origin.clone();
+                    async move {
+                        let _ = crate::auth::claim_session(&origin, message_id, session).await;
+                    }
+                },
+                |route| navigate_to(route),
+                |sheet_id| set_sheet_hidden(Some(sheet_id), false),
+                || set_sheet_hidden(None, true),
+            )
+            .await;
         }
         other => toast(&outcome_toast(other, "")),
+    }
+}
+
+/// `navigate` step target (#529): the special [`crate::executor::RELOAD_ROUTE`] token reloads the
+/// current location (a fresh SSR pass re-reads the now-set auth cookie); anything else is a literal
+/// href.
+fn navigate_to(route: &str) {
+    let Some(w) = web_sys::window() else { return };
+    if route == crate::executor::RELOAD_ROUTE {
+        let _ = w.location().reload();
+    } else {
+        let _ = w.location().set_href(route);
     }
 }
 
