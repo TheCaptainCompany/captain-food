@@ -312,3 +312,19 @@ a failure — the coordinator holds the delete capability the subagent lacks. Al
 tools with absolute paths do not enforce worktree isolation (the git hook does, `Edit` does,
 `curl -o` does not) — a worktree-scoped dispatch card must say "never write to the shared checkout
 path" explicitly, and this one now does.
+
+## The 38GB effective quota, ENOSPC-safe cargo flags, and the capture-share trap (2026-08-28)
+
+The #641 executor measured what the earlier disk note implied: the session's writable allowance is
+~38GB EFFECTIVE (never the 252GB `df` reports), shared across every concurrent agent worktree's
+`target/` (~11-15GB each when full). Rules earned, at the cost of ~1h across 6 build attempts:
+(1) build-heavy executor runs set `CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0
+RUSTFLAGS="-C debuginfo=0"` from the FIRST build, not after the first ENOSPC; (2) the Bash tool's
+own output capture lives on the same disk — a build that fills it breaks the NEXT command's
+capture ("Command output was lost") even for `rm`; redirect big-output commands to a worktree file
+(`> build.log 2>&1`) and Read it back, and remember `> /dev/null 2>&1` still gets a cleanup
+command through a full-capture condition; (3) a finished worktree's `target/` is reclaimable by
+the COORDINATOR only — executors must report, not delete, other agents' trees. Also confirmed:
+executors cannot perform GitHub API mutations (classifier blocks GITHUB_TOKEN in Bash; no gh/MCP
+in subagent toolsets) — dispatch cards must say "push only, PR mechanics are the coordinator's",
+which they now do.
