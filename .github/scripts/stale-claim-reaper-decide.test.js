@@ -13,12 +13,21 @@
 // MUTATION TESTING. `STALE_CLAIM_REAPER_DECIDE_MODULE` overrides which module under test is
 // required, so an alternate (deliberately buggy) implementation can be pointed at this exact same
 // suite to prove the suite CATCHES the regression it is named for, without duplicating the
-// fixtures. Three such mutants were run during development of this fix and produced the RED
+// fixtures. Four such mutants were run during development of this fix and produced the RED
 // evidence recorded in this change's commit message:
 //   1. "liveness re-widened to cross-referenced events" — reds case C1 (noise-only mentions).
 //   2. "blocked-item check deleted" — reds cases B0-B4 (5/5 blocked-notice cases).
 //   3. "branch-commit lookup widened to any commit ever" (drops the claimedAt comparison) — reds
 //      case C5 (a branch whose only commit predates the claim must still be reaped).
+//   4. (issue #642 follow-up, re-review of #697) the module AS MERGED at 05996a3b — no recency
+//      bound, and each decider filtering only its own marker — pointed at THIS suite (with the new
+//      cases already added): reds C8 (a claim-time comment and branch push, followed by 13 days of
+//      silence, reported `alive: true` forever — finding 1), C9 (a `BLOCKED_MARKER` comment fed
+//      `decideClaimLiveness`'s liveness — finding 2) and B5 (a `CLAIM_MARKER` comment fed
+//      `decideBlockedNotice`'s liveness — finding 2, mirrored). Case C2 was ITSELF a fixture
+//      encoding the finding-1 bug before this change (asserting `alive: true` for a comment 9.5
+//      days stale) and has been corrected to test a genuinely RECENT comment instead. Transcript
+//      (13 passed, 3 failed, 16 total) is in this change's commit message.
 // The mutant source files are not committed (they exist only to prove the suite is not vacuous);
 // the RED transcripts are the evidence, per the dispatch's "record red output in the commit
 // message or a test comment".
@@ -91,8 +100,8 @@ check('C1: cross-referenced/referenced/connected mentions do NOT count as livene
   assert.strictEqual(r.reason, 'no-branch');
 });
 
-check('C2: a comment on the issue itself, since the claim, keeps it alive', () => {
-  const timeline = [labeled(claimedLongAgo), commented(claimedLongAgo + DAY_MS_HALF())];
+check('C2: a RECENT comment on the issue itself keeps it alive (fixed — see the mutant-4 note above: this fixture used to encode the #642 recency bug, asserting `alive` for a comment 9.5 days stale)', () => {
+  const timeline = [labeled(claimedLongAgo), commented(NOW - DAY_MS_HALF())];
   const r = decideClaimLiveness(issue, timeline, [], NOW);
   assert.strictEqual(r.alive, true);
   assert.strictEqual(r.reason, 'commented-since-claim');
@@ -134,6 +143,35 @@ check('C7: claimedAt falls back to issue creation when no labeled event is on th
   const r = decideClaimLiveness(issue, [], [], NOW);
   assert.strictEqual(r.claimedAt, Date.parse(issue.created_at));
   assert.strictEqual(r.alive, false);
+});
+
+check('C8: RECENCY BOUND (issue #642 follow-up) — a comment AND a branch push at claim time, then 13 days of silence, is reaped, not immune forever', () => {
+  const claimedThirteenDaysAgo = NOW - 13 * 24 * 60 * 60 * 1000;
+  const oneMinuteAfterClaim = claimedThirteenDaysAgo + 60 * 1000;
+  // This is exactly the shape the claim protocol (BACKLOG.md, "Claim protocol") manufactures for
+  // EVERY well-formed claim: a claim comment and a branch push within a minute of `claimedAt`.
+  // Before the recency bound, both signals compared only against `claimedAt`, so this fixture
+  // reported `alive: true` FOREVER regardless of how much silence followed — the exact defect the
+  // #144 precedent (BACKLOG.md) recorded and #697 failed to close.
+  const timeline = [
+    labeled(claimedThirteenDaysAgo),
+    commented(oneMinuteAfterClaim, 'claiming this, branch 642-reaper-recency-bound'),
+  ];
+  const branches = [{ name: '642-reaper-recency-bound', latestCommitAt: iso(oneMinuteAfterClaim) }];
+  const issue13 = { number: 642, created_at: iso(claimedThirteenDaysAgo) };
+  const r = decideClaimLiveness(issue13, timeline, branches, NOW);
+  assert.strictEqual(
+    r.alive,
+    false,
+    'a claim-time comment and branch push must not grant permanent immunity -- both are 13 days stale and neither signal is RECENT'
+  );
+});
+
+check("C9: a BLOCKED_MARKER comment does not count as claim liveness either (finding 2 -- the reaper's own comments never count, whichever job posted them)", () => {
+  const timeline = [labeled(claimedLongAgo), commented(NOW - 60 * 60 * 1000, `${BLOCKED_MARKER}\nstill blocked`)];
+  const r = decideClaimLiveness(issue, timeline, [], NOW);
+  assert.strictEqual(r.alive, false, 'a BLOCKED_MARKER comment is still a bot comment standing in for work, not first-party activity');
+  assert.strictEqual(r.reason, 'no-branch');
 });
 
 // ── Blocked dead-man's-switch cases ──────────────────────────────────────────────────────────
@@ -186,8 +224,18 @@ check('B4: real activity restarting the clock, then a second 72h of silence, not
   assert.strictEqual(r.reason, 'silence-exceeded');
 });
 
+check('B5: a CLAIM_MARKER comment does not count as blocked-notice liveness either (finding 2, mirrored)', () => {
+  const timeline = [
+    commented(NOW - 200 * 60 * 60 * 1000),
+    commented(NOW - 10 * 60 * 60 * 1000, `${CLAIM_MARKER}\nexpired`),
+  ];
+  const r = decideBlockedNotice(blockedIssue, timeline, NOW);
+  assert.strictEqual(r.notify, true, 'a CLAIM_MARKER comment is still a bot comment standing in for work, not real activity');
+  assert.strictEqual(r.reason, 'silence-exceeded');
+});
+
 // ── Completeness ──────────────────────────────────────────────────────────────────────────────
-const EXPECTED_CASES = 13;
+const EXPECTED_CASES = 16;
 const ran = pass + fail;
 if (ran !== EXPECTED_CASES) {
   console.log(

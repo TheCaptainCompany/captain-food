@@ -18,6 +18,36 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > rust-quiet` green; `tools/codegen-rs/warning-baseline.json` +1 `obs-metric-no-emitter` (the
 > declared-but-silent OVH gauge, accepted per ADR-20260813-021500's second OWED item, closed by #699).
 
+> ✅ **2026-08-28 — the stale-claim reaper's #642 fix gets a recency bound: branch
+> `642-reaper-recency-bound`.** The independent review of the merged fix
+> ([#697 "The stale-claim reaper's liveness is a commit, not a mention — and parked items get a
+> dead-man's-switch"](https://github.com/TheCaptainCompany/captain-food/pull/697)) found the reaper still
+> could not fire on a crashed claim — both liveness signals compared activity only against the
+> moment of the claim, never against how RECENT it was, so the comment + branch push the claim
+> protocol manufactures within a minute of every claim (docs/BACKLOG.md) kept a claim "alive"
+> forever regardless of how much silence followed: the #144 precedent survived #697 verbatim.
+> Fixed in `.github/scripts/stale-claim-reaper-decide.js` with a shared `liveAfter = max(claimedAt,
+> now - CLAIM_WINDOW_MS)` bound used by both signals; a shared `isReaperComment` recognizer so
+> neither job's bot comment feeds the OTHER job's liveness; the `gate-scripts` CI job's prose-only
+> claim of a pin (`the_reaper_stub_suite_runs_in_the_always_run_gate_job`) made real as a
+> `tools/codegen-rs` codegen test; the reap job's per-issue loop now collects errors and fails loud
+> at the end instead of stopping on the first API hiccup, `listBranches` hoisted out of the
+> per-issue loop, and `removeLabel`'s 404 (label already gone) is targeted idempotence rather than
+> a silent swallow. `docs/BACKLOG.md`'s "Stale-claim reaper" section rewritten to the shipped
+> semantics; the historical #144 hole is marked closed rather than open.
+
+> ✅ **2026-08-28 — [#695 "Self-host the GraphQL Voyager bundle"](https://github.com/TheCaptainCompany/captain-food/issues/695)
+> closed the CDN-on-authenticated-origin defect (PROP-170500 D4):** `graphql-voyager@2.1.0`'s CSS
+> and standalone JS are now vendored under `crates/server/assets/voyager/` (sha256 pinned at
+> vendoring time, no runtime re-verification) and served same-origin from
+> `/voyager-assets/{voyager.css,voyager.standalone.js,voyager-init.js}`; the inline
+> `<script type="module">` moved into a first-party `voyager-init.js` file. The voyager page and
+> its three asset routes now carry a `Content-Security-Policy` header (`script-src 'self'
+> 'wasm-unsafe-eval'`; `style-src` needs `'unsafe-inline'` — the bundle's `styled-components`
+> runtime style injection has no exposed nonce hook, a bounded residual since style-src cannot
+> execute script). Three planted-mutant tests (CDN URL reintroduced / CSP header dropped /
+> vendored route deleted) proved red before the fix and green after.
+
 > ✅ **2026-08-28 — call-sheet round 3 answered: merge-on-green stands
 > (`REVIEW-GATES-CRATES-MERGE` decided (a), ADR-20260828-023258), and the next pick is the
 > stale-claim reaper bug

@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 1800,
+  "recordedAt": "2026-08-28T03:03:53.797Z",
+  "branch": "695-voyager-self-hosted",
+  "note": "695-voyager-self-hosted: timer file lost when coordinator's mid-run disk cleanup removed .git/loop-budget-timer.json (shared common-dir state); recorded with an honest ~30min estimate for this run's actual duration"
+}
