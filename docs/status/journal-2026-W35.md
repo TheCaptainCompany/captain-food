@@ -3,6 +3,24 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — the JWKS single-flight thread is closed:
+> [#684](https://github.com/TheCaptainCompany/captain-food/pull/684) ·
+> [#692](https://github.com/TheCaptainCompany/captain-food/pull/692) ·
+> [#693](https://github.com/TheCaptainCompany/captain-food/pull/693) ·
+> [#694](https://github.com/TheCaptainCompany/captain-food/pull/694) all merged** (issues #683 and
+> #691 closed). #684 fixed the double-fetch itself (the caller's arrival instant). The review chain
+> then hardened it in three rounds, each finding real and each fix small under the standing
+> "do it now" (ADR-20260827-081500): #692 replaced the bare `Instant` with a `FetchIntent` witness
+> and removed the suite's only wall-clock sleep (auth suite 5.3s → 1.3s); #693 moved the ordering
+> into `decide()`'s body and made `stale_instant()` fail loud; #694 moved the type into a private
+> child module and gave `decide()` the cache read behind a synchronous predicate — both remaining
+> forgery spellings are now compile errors (struct-literal plant reds `E0451`).
+> **Review-round ceiling reached** on one subject (ADR-20260826-084500): reported to the founder on
+> the call sheet rather than continued, with a process question — on small PRs auto-merge fires
+> before the review pass posts (~5 min CI vs ~10 min review), so every round's findings landed as a
+> follow-up PR instead of on the PR reviewed. Whether the review should gate merges on `crates/**`
+> is the founder's call, filed as decision row `REVIEW-GATES-CRATES-MERGE`.
+
 > ✅ **2026-08-27 — call-sheet round 2: the founder picked the recommended next item — finish the
 > JWKS single-flight ([#683 "JWKS single-flight can issue a second fetch: `arrived` is captured
 > after the staleness check"](https://github.com/TheCaptainCompany/captain-food/issues/683) /
