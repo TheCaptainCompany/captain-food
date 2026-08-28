@@ -3,6 +3,19 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — round-5 answers recorded as register rows (the first instance of
+> [ADR-20260828-120500](../adr/ADR-20260828-120500-an-answered-question-is-never-asked-again.md),
+> the founder's "agents do not ask questions already answered" made executable).**
+> `IDENT1-RESOLUTION-ACTIVATION` decided (wait; the row states honestly that quiet days prove the
+> refactored seam on the old path, not the new path); `IDENT1-OUTAGE-EXPERIENCE` open with its
+> revisit trigger AT the flip; `ERASURE-LAUNCH-GATE` open (legal's escalation of
+> [#708](https://github.com/TheCaptainCompany/captain-food/issues/708) — first-real-order launch
+> is blocked on the erasure flow or an explicit counsel-cleared deferral, by record). The hook
+> strengthening (refuse an AskUserQuestion citing a decided row) is
+> [#709](https://github.com/TheCaptainCompany/captain-food/issues/709). Next work per the
+> founder: the product backlog top — architect defining the chunk (holub's focus note: the UI is
+> the value-stream gap).
+
 > ✅ **2026-08-28 — IDENT-1 Phase A merged gated-off
 > ([#707](https://github.com/TheCaptainCompany/captain-food/pull/707), closing
 > [#641](https://github.com/TheCaptainCompany/captain-food/issues/641)) under the full mob loop:

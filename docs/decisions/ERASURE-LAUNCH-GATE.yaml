@@ -1,0 +1,8 @@
+key: "ERASURE-LAUNCH-GATE"
+status: "open"
+question: "Does the Customer GDPR erasure flow (#708) ship BEFORE the first real order in Tours, or does the founder record an explicit, counsel-cleared acceptance of an exposure window?"
+owner: "founder"
+opened: "2026-08-28"
+capacity: "founder"
+register: "docs/decisions/ERASURE-LAUNCH-GATE.yaml"
+evidence: "OPEN — the legal lens's escalation (2026-08-28, on the round-5 relay): #708 established that NO Customer erasure flow exists (deletion blocks only on Order). Art. 17 attaches at the first real customer order (BRIEF-20260811, grade a); CLAUDE.md: legal preconditions are flagged, never deferred silently. 'Filed and visible' proves the gap is KNOWN, not that a deferral was CHOSEN — this row is the flag that makes any deferral explicit. Options put to the founder (next call sheet, not a re-ask — this question has never been asked): (a) #708 ships before launch/first real order (a launch gate, recommended); (b) founder records an accepted exposure window of stated length, counsel consulted. No lens output is legal advice or clearance. Until decided, launch (first real order) is BLOCKED on either #708 or this row's explicit (b)."
