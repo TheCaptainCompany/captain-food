@@ -87,9 +87,11 @@ jobs:
                     // `listBranches` out of the per-issue loop widened the snapshot->getBranch
                     // window from milliseconds to the whole run, so a branch routinely deleted
                     // mid-run (GitHub deletes a merged PR's head branch) now 404s here. That is
-                    // NOT a liveness signal failing to resolve -- it is proof the branch is gone,
-                    // which `decideClaimLiveness` already treats as "no proof of work" when
-                    // `latestCommitAt` is null. Drop the candidate; any other status is a real
+                    // NOT a liveness signal failing to resolve -- it is proof the branch is gone.
+                    // The candidate is dropped (never pushed into `branches`), which
+                    // `decideClaimLiveness` cannot distinguish from "no branch matched the prefix"
+                    // -- it sees the no-branch arm, not a null `latestCommitAt` (see the matching
+                    // residual in `stale-claim-reaper-decide.js`). Any other status is a real
                     // failure and is rethrown, caught by the per-issue try/catch, and fails the run.
                     if (err.status !== 404) throw err;
                     continue;
