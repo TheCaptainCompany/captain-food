@@ -291,6 +291,7 @@ New ADRs use a UTC date-time id (ADR-20260718-135417) and are listed here in id 
 | [20260825-005323](ADR-20260825-005323-claude-review-hardens-while-still-required-the-bypass-over-the-recorded-path.md) | `claude-review` hardens while still required: the bypass, chosen over the recorded path |
 | [20260826-084500](ADR-20260826-084500-one-review-pass-per-presentation-and-findings-are-triaged-not-chased.md) | One review pass per presentation, and findings are triaged rather than chased |
 | [20260827-081500](ADR-20260827-081500-the-call-sheet-answers-gate-steps-move-and-the-citation-rule-hardens.md) | The call-sheet answers: gate steps move to a sibling job, and the citation rule hardens to an error |
+| [20260828-023258](ADR-20260828-023258-merge-on-green-stands-review-lands-after.md) | Merge-on-green stands; the review pass lands after, and follow-ups absorb its findings |
 
 ## Proposed (deferred until app/runtime code exists)
 

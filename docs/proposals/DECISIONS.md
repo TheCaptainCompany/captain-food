@@ -23,7 +23,6 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `KEY-NAMESPACE` | open | 2026-08-21 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? | team |
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
 | `DISPATCH-CARD-CITATION` | open | 2026-08-26 | WHICH `docs/**` SUBTREES ARE INSTRUCTION SURFACES for `decision-superseded-authority` — i.e. which of them should leave the `docs/**` exclusion and join `.claude/**` in the citation corpus? Opened for `docs/dispatch/**`; widened to the class after review #59 named `docs/claude/**` and `docs/PLAYBOOK.md` as the same exception with more weight. | team |
-| `REVIEW-GATES-CRATES-MERGE` | open | 2026-08-28 | Should the independent review pass gate auto-merge on PRs touching crates/**, or keep merging on green CI with review findings landing as follow-up PRs? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
@@ -39,10 +38,11 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `RETRIEVAL-QMD-CI` | decided | 2026-08-24 | Should the decision-lookup hermetic stub suite be wired into CI (the always-run `changes` job, pinned by a codegen test), narrowing RETRIEVAL-QMD's non-authorization of CI changes to exactly that one step plus its pin — or does the suite stay an executor-side authority? -> ADR-20260824-205911 | founder |
 | `REV-1` | decided | 2026-08-17 | Does the `claude-review` bot check stay a REQUIRED status check on `main`? -> ADR-20260807-235930 | founder |
 | `REVIEW-GATE-BYPASS` | decided | 2026-08-24 | Does the #677 hardening of `claude-review` land BEFORE REV-1 is executed — merged by a one-time admin bypass, leaving the check required and newly able to fail — or does REV-1 execute first so the hardened check reds on a non-required gate? -> ADR-20260825-005323 | founder |
+| `REVIEW-GATES-CRATES-MERGE` | decided | 2026-08-28 | Should the independent review pass gate auto-merge on PRs touching crates/**, or keep merging on green CI with review findings landing as follow-up PRs? -> ADR-20260828-023258 | founder |
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 
-**Migrated rows: 28 — 11 open · 15 decided · 1 superseded · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 28 — 10 open · 16 decided · 1 superseded · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

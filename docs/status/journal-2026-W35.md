@@ -3,6 +3,14 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — call-sheet round 3 answered: merge-on-green stands
+> (`REVIEW-GATES-CRATES-MERGE` decided (a), ADR-20260828-023258), and the next pick is the
+> stale-claim reaper bug
+> [#642 "The stale-claim reaper counts an unrelated mention as liveness…"](https://github.com/TheCaptainCompany/captain-food/issues/642).**
+> Also in effect since this session: the founder's standing token-optimisation instruction —
+> execution delegated to cheaper-model subagents, coordinator keeps judgment and records
+> (docs/claude/sessions/workflow.md) — #642 is the first chunk dispatched under it.
+
 > ✅ **2026-08-28 — the JWKS single-flight thread is closed:
 > [#684](https://github.com/TheCaptainCompany/captain-food/pull/684) ·
 > [#692](https://github.com/TheCaptainCompany/captain-food/pull/692) ·
