@@ -22,6 +22,12 @@
 //     when no new work happened — a rebased-but-otherwise-idle branch reads as live. Not closed
 //     here: distinguishing a genuine rebase from a genuine commit needs comparing tree contents
 //     across runs, which this stateless decision function does not do.
+//   - `getBranch` 404ing mid-run (the branch was deleted -- routine on merge, since GitHub deletes
+//     a merged PR's head branch) is handled WORKFLOW-SIDE, in `stale-claim-reaper.yml`: the
+//     candidate is dropped rather than pushed into `branches`, which is indistinguishable to this
+//     function from "no branch matched the prefix" (`decideClaimLiveness` already handles an empty
+//     `branches` array). Not exercised by THIS suite because it is a fetch-time decision the
+//     workflow makes before this function ever runs, not a branch this function's own logic takes.
 //
 // FOLLOW-UP (issue #642, re-review of #697): both liveness signals below used to compare only
 // against `claimedAt`, so ANY single artifact at any instant after the claim — including the
