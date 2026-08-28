@@ -3,6 +3,24 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — the stale-claim reaper's #642 fix gets a recency bound: branch
+> `642-reaper-recency-bound`.** The independent review of the merged fix
+> ([#697 "The stale-claim reaper's liveness is a commit, not a mention — and parked items get a
+> dead-man's-switch"](https://github.com/TheCaptainCompany/captain-food/pull/697)) found the reaper still
+> could not fire on a crashed claim — both liveness signals compared activity only against the
+> moment of the claim, never against how RECENT it was, so the comment + branch push the claim
+> protocol manufactures within a minute of every claim (docs/BACKLOG.md) kept a claim "alive"
+> forever regardless of how much silence followed: the #144 precedent survived #697 verbatim.
+> Fixed in `.github/scripts/stale-claim-reaper-decide.js` with a shared `liveAfter = max(claimedAt,
+> now - CLAIM_WINDOW_MS)` bound used by both signals; a shared `isReaperComment` recognizer so
+> neither job's bot comment feeds the OTHER job's liveness; the `gate-scripts` CI job's prose-only
+> claim of a pin (`the_reaper_stub_suite_runs_in_the_always_run_gate_job`) made real as a
+> `tools/codegen-rs` codegen test; the reap job's per-issue loop now collects errors and fails loud
+> at the end instead of stopping on the first API hiccup, `listBranches` hoisted out of the
+> per-issue loop, and `removeLabel`'s 404 (label already gone) is targeted idempotence rather than
+> a silent swallow. `docs/BACKLOG.md`'s "Stale-claim reaper" section rewritten to the shipped
+> semantics; the historical #144 hole is marked closed rather than open.
+
 > ✅ **2026-08-28 — [#695 "Self-host the GraphQL Voyager bundle"](https://github.com/TheCaptainCompany/captain-food/issues/695)
 > closed the CDN-on-authenticated-origin defect (PROP-170500 D4):** `graphql-voyager@2.1.0`'s CSS
 > and standalone JS are now vendored under `crates/server/assets/voyager/` (sha256 pinned at

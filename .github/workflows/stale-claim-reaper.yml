@@ -1,18 +1,27 @@
-# Stale-claim reaper (issue #39, ADR-20260720-233000; liveness fixed by issue #642): a
-# `status/in-progress` claim with >24h of silence (no issue comments since the claim, no commit on
-# its own `NN-slug` branch since the claim -- the reaper's own comments don't count) is released
-# back to the queue, so a crashed session never holds an issue hostage. `cross-referenced` /
-# `referenced` / `connected` timeline events (an unrelated PR merely mentioning the issue number)
-# are DELIBERATELY not consulted -- see `.github/scripts/stale-claim-reaper-decide.js` for why and
+# Stale-claim reaper (issue #39, ADR-20260720-233000; liveness fixed by issue #642, then a
+# recency bound added by #642's follow-up on the re-review of #697): a `status/in-progress` claim
+# with >24h of no RECENT activity (no issue comment, no commit on its own `NN-slug` branch, WITHIN
+# the trailing 24h -- an artifact at any single instant after the claim is not enough, since the
+# claim protocol itself manufactures one within a minute of every claim) is released back to the
+# queue, so a crashed session never holds an issue hostage. `cross-referenced` / `referenced` /
+# `connected` timeline events (an unrelated PR merely mentioning the issue number) are DELIBERATELY
+# not consulted -- see `.github/scripts/stale-claim-reaper-decide.js` for why and
 # `.github/scripts/stale-claim-reaper-decide.test.js` for the hermetic proof.
 #
 # A second, independent job surfaces `status/blocked` issues that have sat silent for over 72h
 # (a dead-man's-switch for parked items, ADR-20260810-231300's monitoring carve-out), mirroring the
-# same marker-based idempotence so it notifies once per silence window rather than every hour.
+# same marker-based idempotence so it notifies once per silence window rather than every hour. The
+# two jobs' bot comments never count as liveness for EACH OTHER's decider -- `isReaperComment` in
+# the decision module recognizes both markers, on both sides.
 #
-# Both jobs FAIL LOUD: no `.catch(() => {})` around an API call. An API failure fails the run --
-# never adapted around, per the founder's "fix the generator/runtime, never the check" doctrine
-# applied to CI scripts.
+# Both jobs FAIL LOUD AND COMPLETE, never fail-stop: a per-issue try/catch COLLECTS each error and
+# keeps processing every OTHER issue, then the run throws (failing loud) if any were collected --
+# one issue's API hiccup no longer stops the whole run from reaping/notifying everything else it
+# can see. The one exception is TARGETED, not a silent swallow: `removeLabel` returning 404 means
+# the `status/in-progress` label is ALREADY gone -- the exact end state this branch exists to
+# reach, most likely a concurrent re-claim or a second run racing this one -- so that one call
+# catches 404 specifically and rethrows anything else. No other API call is ever adapted around,
+# per the founder's "fix the generator/runtime, never the check" doctrine applied to CI scripts.
 name: stale-claim-reaper
 on:
   schedule:
@@ -41,36 +50,63 @@ jobs:
               owner, repo, state: 'open', labels: 'status/in-progress', per_page: 100,
             });
 
+            // Hoisted OUT of the per-issue loop (issue #642 follow-up, finding 4): the whole
+            // branch list is fetched ONCE per run, not once per open claim -- a busy backlog with
+            // N claims used to re-page the same repo-wide list N times for data that cannot change
+            // mid-run.
+            const allBranches = await github.paginate(github.rest.repos.listBranches, {
+              owner, repo, per_page: 100,
+            });
+
+            // FAIL LOUD STAYS, FAIL STOP GOES (finding 4): one issue's API hiccup must not stop
+            // the run from reaping every OTHER stale claim it can see. Errors are COLLECTED, never
+            // swallowed -- the run still fails, loud and complete, if anything errored.
+            const errors = [];
             for (const issue of issues) {
               if (issue.pull_request) continue; // claims live on issues, not PRs
 
-              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
-                owner, repo, issue_number: issue.number, per_page: 100,
-              });
+              try {
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: issue.number, per_page: 100,
+                });
 
-              // Every branch whose name starts with `<issue-number>-`, per the claim protocol
-              // (`NN-slug`, BACKLOG.md) -- paginated, since a busy repo can carry hundreds.
-              const allBranches = await github.paginate(github.rest.repos.listBranches, {
-                owner, repo, per_page: 100,
-              });
-              const prefix = branchPrefix(issue.number);
-              const candidates = allBranches.filter(b => b.name.startsWith(prefix));
-              const branches = [];
-              for (const b of candidates) {
-                const { data } = await github.rest.repos.getBranch({ owner, repo, branch: b.name });
-                const commit = data.commit && data.commit.commit;
-                const latestCommitAt = commit && (commit.committer?.date || commit.author?.date) || null;
-                branches.push({ name: b.name, latestCommitAt });
+                // Every branch whose name starts with `<issue-number>-`, per the claim protocol
+                // (`NN-slug`, BACKLOG.md), filtered from the run-wide list fetched above.
+                const prefix = branchPrefix(issue.number);
+                const candidates = allBranches.filter(b => b.name.startsWith(prefix));
+                const branches = [];
+                for (const b of candidates) {
+                  const { data } = await github.rest.repos.getBranch({ owner, repo, branch: b.name });
+                  const commit = data.commit && data.commit.commit;
+                  const latestCommitAt = commit && (commit.committer?.date || commit.author?.date) || null;
+                  branches.push({ name: b.name, latestCommitAt });
+                }
+
+                const decision = decideClaimLiveness(issue, timeline, branches, now);
+                if (decision.alive) continue;
+
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name: 'status/in-progress' });
+                } catch (err) {
+                  // TARGETED idempotence, not a silent swallow: a 404 on THIS ONE call means the
+                  // label is ALREADY gone -- exactly the end state this branch exists to reach,
+                  // most likely a concurrent re-claim or a second run racing this one. Any other
+                  // status is a real failure and is rethrown, caught by the per-issue try/catch
+                  // below, and fails the run.
+                  if (err.status !== 404) throw err;
+                }
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: `${CLAIM_MARKER}\n⏰ **Claim expired** — \`status/in-progress\` was set over 24h ago with no comment on this issue and no commit on its \`${prefix}*\` branch since. The issue is back in the queue (BACKLOG.md claim protocol, ADR-20260720-233000). Re-claim by re-adding the label with a fresh claim comment.`,
+                });
+              } catch (err) {
+                core.error(`issue #${issue.number}: ${err.message}`);
+                errors.push(`#${issue.number} (${err.message})`);
               }
+            }
 
-              const decision = decideClaimLiveness(issue, timeline, branches, now);
-              if (decision.alive) continue;
-
-              await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name: 'status/in-progress' });
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: issue.number,
-                body: `${CLAIM_MARKER}\n⏰ **Claim expired** — \`status/in-progress\` was set over 24h ago with no comment on this issue and no commit on its \`${prefix}*\` branch since. The issue is back in the queue (BACKLOG.md claim protocol, ADR-20260720-233000). Re-claim by re-adding the label with a fresh claim comment.`,
-              });
+            if (errors.length) {
+              throw new Error(`${errors.length} issue(s) failed while reaping stale claims: ${errors.join('; ')}`);
             }
   parked-dead-mans-switch:
     runs-on: ubuntu-latest
@@ -90,18 +126,30 @@ jobs:
               owner, repo, state: 'open', labels: 'status/blocked', per_page: 100,
             });
 
+            // FAIL LOUD STAYS, FAIL STOP GOES (finding 4, same discipline as the `reap` job): one
+            // issue's API hiccup must not stop the run from notifying every OTHER parked issue.
+            const errors = [];
             for (const issue of issues) {
               if (issue.pull_request) continue;
 
-              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
-                owner, repo, issue_number: issue.number, per_page: 100,
-              });
+              try {
+                const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                  owner, repo, issue_number: issue.number, per_page: 100,
+                });
 
-              const decision = decideBlockedNotice(issue, timeline, now);
-              if (!decision.notify) continue;
+                const decision = decideBlockedNotice(issue, timeline, now);
+                if (!decision.notify) continue;
 
-              await github.rest.issues.createComment({
-                owner, repo, issue_number: issue.number,
-                body: `${BLOCKED_MARKER}\n🚧 **Still blocked** — no activity on this \`status/blocked\` issue for over 72h. Surfacing it so it does not sit parked unnoticed; this fires once per silence window, not on every run.`,
-              });
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: `${BLOCKED_MARKER}\n🚧 **Still blocked** — no activity on this \`status/blocked\` issue for over 72h. Surfacing it so it does not sit parked unnoticed; this fires once per silence window, not on every run.`,
+                });
+              } catch (err) {
+                core.error(`issue #${issue.number}: ${err.message}`);
+                errors.push(`#${issue.number} (${err.message})`);
+              }
+            }
+
+            if (errors.length) {
+              throw new Error(`${errors.length} issue(s) failed while checking parked issues: ${errors.join('; ')}`);
             }
