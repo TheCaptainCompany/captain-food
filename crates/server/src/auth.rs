@@ -965,10 +965,15 @@ mod tests {
         .expect("parse test JWKS")
     }
 
-    /// An `Instant` far enough in the past to be stale (falls back to `now` on a very-low-uptime host,
-    /// which still keeps the assertions below valid).
+    /// An `Instant` far enough in the past to be stale. LOUD on a host whose monotonic clock is
+    /// younger than 2×TTL: the old `unwrap_or_else(Instant::now)` fallback silently INVERTED the
+    /// fixture (a "stale" cache that is actually fresh), and its doc claimed the assertions stayed
+    /// valid — false for any test that needs staleness to fire. A panic with a legible message
+    /// beats a fixture that asserts the opposite of its name (review of #692).
     fn stale_instant() -> Instant {
-        Instant::now().checked_sub(JWKS_TTL * 2).unwrap_or_else(Instant::now)
+        Instant::now()
+            .checked_sub(JWKS_TTL * 2)
+            .expect("host uptime exceeds twice the JWKS TTL; on a fresh-boot host this fixture cannot be constructed honestly")
     }
 
     /// A verifier whose JWKS fetch can only FAIL: loopback port 9 (discard) refuses instantly and
@@ -1130,9 +1135,13 @@ mod tests {
     /// fetch on the cold cache and was descheduled while the first fetch landed resumes with an
     /// instant LATER than `fetched`, so the test says "not mine" and it fetches again. The first
     /// fix passed a bare `Instant` from the caller and this test redded its revert by name; since
-    /// #691 the [`FetchIntent`] witness makes that revert unspellable outside this module (only
-    /// the deciding reads construct one), and this test keeps the SEMANTICS pinned: a pre-fetch
-    /// intent never pays a second fetch.
+    /// #691 the ordering is [`FetchIntent::decide`]'s BODY (capture, then read), so the revert is
+    /// unspellable in production code — inside this module included, which is where every call
+    /// site lives. What this test pins is the SEMANTICS of `refresh`'s comparison: a pre-fetch
+    /// intent never pays a second fetch. The mint-vs-read ordering itself is closed by
+    /// construction, not by coverage — #692's review judged it untestable deterministically
+    /// without a seam (the cache read would have to block while another fetch completes), which
+    /// is the argument for the constructor shape.
     #[tokio::test]
     async fn a_caller_whose_intent_predates_the_fetch_does_not_pay_a_second_one() {
         use std::sync::atomic::Ordering;
