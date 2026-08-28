@@ -274,6 +274,8 @@ pub struct Config {
     pub sms_send_backoff_seconds: String,
     /// THE KILL SWITCH AND THE ONLY CEILING ON THE BILL. Total OTP sends allowed platform-wide per rolling day, across every number. Once spent, every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` until the ceiling is raised — which DOES turn real sign-ups away, and is the correct trade against an unbounded invoice, but only because it is loud (`otp_send_refused_total{reason=global_ceiling}`, and each refusal logs at ERROR). THE DEFAULT IS A DELIBERATELY CONSERVATIVE GUESS, NOT A COSTED NUMBER. The per-message price of our OVH credit pack is not recorded anywhere in this repository, so no ceiling here can be derived — 200/day is chosen as "comfortably above any plausible V0 day in Tours, low enough that the worst overnight case is tens of euros rather than hundreds". It must be re-derived from the real EUR/SMS the day that price is known (see ADR-20260813-021500). OPERABLE WITHOUT A DEPLOY, two ways, and both matter: setting the env key and restarting the surface changes the ceiling persistently, while `UPDATE sms_send_quota SET sent_count = <big> WHERE quota_key = 'global:day'` stops sends IMMEDIATELY on a live system with no rollout at all (and `DELETE` on that row restores them). The second is the one to use at 02:00.
     pub sms_max_sends_per_day_global: i64,
+    /// IDENT-1 Phase A (ADR-20260818-004646, gate-then-stabilize; the ENFORCE_SERVICE_HOURS_GUARD pattern): ON, `resolve_read_scope`'s CUSTOMER arm resolves the caller's domain id from Postgres via the existing `CustomerReadRepository::by_auth_ref` bridge, keyed on the verified auth subject (`authRef`) -- the JWT's `captain_food.customer_id` claim is UNREAD for this decision. OFF -- the DEFAULT -- is today's behaviour byte for byte: the claim, already bound into the verified Principal at `authorize()` time, is trusted, no lookup, no I/O. The two paths are selected ONCE at startup/config-load, never a per-request fallback (a runtime try-Postgres-else-claim is the dual-path the ADR forbids): the gated-ON path contains no claim read at all for CUSTOMER read-scope resolution. A NoMapping row and a failed lookup BOTH fail closed to Public identically at the API boundary, distinguishably in telemetry (specs/observability.yaml#/customer-identity). Scope: CUSTOMER only -- RESTAURANT, RESTAURANT_ACCOUNT and RIDER have no sign-in operation in the DSL at all (STAFF-AUTH, DECISIONS §46), so there is no subject to key a mapping on for them; this key does not touch their claim reads. Flipping the default is a SEPARATE recorded decision after the gated form is smoked.
+    pub resolve_customer_identity_from_postgres: bool,
 }
 
 impl Config {
@@ -412,6 +414,10 @@ impl Config {
         let sms_send_backoff_seconds = raw("SMS_SEND_BACKOFF_SECONDS");
         let sms_send_backoff_seconds = sms_send_backoff_seconds.unwrap_or_else(|| "30,120,600".to_string());
         let sms_max_sends_per_day_global = raw("SMS_MAX_SENDS_PER_DAY_GLOBAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(200);
+        let resolve_customer_identity_from_postgres = raw("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES")
+            .or_else(|| baked("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", profile).map(str::to_string))
+            .map(|v| parse_bool("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", &v, false))
+            .unwrap_or(false);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -501,6 +507,7 @@ impl Config {
                 sms_max_sends_per_number_per_day,
                 sms_send_backoff_seconds,
                 sms_max_sends_per_day_global,
+                resolve_customer_identity_from_postgres,
             },
             problems,
         )
@@ -568,12 +575,13 @@ impl Config {
         out.push_str(&format!("  SMS_MAX_SENDS_PER_NUMBER_PER_DAY = {}\n", self.sms_max_sends_per_number_per_day));
         out.push_str(&format!("  SMS_SEND_BACKOFF_SECONDS   = {}\n", self.sms_send_backoff_seconds));
         out.push_str(&format!("  SMS_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.sms_max_sends_per_day_global));
+        out.push_str(&format!("  RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES = {}\n", self.resolve_customer_identity_from_postgres));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 46;
+pub const KEY_COUNT: usize = 47;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -624,6 +632,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SMS_MAX_SENDS_PER_NUMBER_PER_DAY",
     "SMS_SEND_BACKOFF_SECONDS",
     "SMS_MAX_SENDS_PER_DAY_GLOBAL",
+    "RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR

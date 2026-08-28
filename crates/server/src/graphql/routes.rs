@@ -45,11 +45,23 @@ use super::schema::CaptainSchema;
 pub struct GraphqlState {
     schema: CaptainSchema,
     tenants: crate::hosts::TenantLookup,
+    /// Where a CUSTOMER's domain identity comes from for THIS request (IDENT-1 Phase A,
+    /// ADR-20260818-004646, #641) — resolved ONCE at startup/config-load and cloned into every
+    /// request's state; `resolve_read_scope` never falls back per request.
+    identity: crate::auth::CustomerIdentitySource,
 }
 
 /// Mount `/{role}/graphql` for the seven roles (unknown role segments 404). Returns a `Router<()>` (the
 /// schema + tenant lookup are applied as state) so it can be merged into the main router.
-pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup) -> Router {
+///
+/// `identity` is the gate-then-stabilize choice for CUSTOMER read-scope resolution (#641): pass
+/// `CustomerIdentitySource::Claim` for the default (legacy) behaviour, or
+/// `CustomerIdentitySource::Postgres(..)` once `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set.
+pub fn graphql_routes(
+    schema: CaptainSchema,
+    tenants: crate::hosts::TenantLookup,
+    identity: crate::auth::CustomerIdentitySource,
+) -> Router {
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
         .route("/{role}/voyager", get(voyager))
@@ -61,7 +73,7 @@ pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup
         // Convenience: bare paths redirect to the PUBLIC role (307 preserves method/body for POST).
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
-        .with_state(GraphqlState { schema, tenants })
+        .with_state(GraphqlState { schema, tenants, identity })
         .layer(axum::middleware::map_response(private_no_store))
 }
 
@@ -138,19 +150,18 @@ async fn graphql_handler(
     headers: HeaderMap,
     req: GraphQLRequest,
 ) -> Response {
-    let GraphqlState { schema, tenants } = state;
+    let GraphqlState { schema, tenants, identity } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
-    // Authn/authz at the path boundary (ADR-0047): /public is open; every other path needs a valid
-    // Supabase JWT whose `captain_food.role` matches this path — so the role is now VERIFIED, not merely
-    // self-asserted by the URL. On success we inject BOTH the RequestRole — read by the generated
-    // guard/visible ACL bindings that enforce per-field authz + filter introspection (ADR-0006) — and the
-    // verified Principal (identity for resolvers).
-    let principal = match auth.authorize(role, &headers).await {
-        Ok(p) => p,
-        Err(e) => return e.into_response(),
-    };
+    // Authn/authz + per-instance authorization at the path boundary (ADR-0047, #144/#433/#641),
+    // shared by this handler and the WS `connection_init` closure below — see
+    // [`authorize_and_resolve_scope`] for what each step does and why it is one function.
+    let (principal, correlation, scope) =
+        match authorize_and_resolve_scope(&auth, role, &headers, &identity).await {
+            Ok(t) => t,
+            Err(e) => return e.into_response(),
+        };
     // Transport envelope (ADR-20260720-015500): the anonymous session id (X-SESSION-ID — a present
     // but malformed value is a client bug, fail-visible 400) and the W3C trace context, injected
     // next to the Principal for the journal envelope + ownership scopes.
@@ -159,19 +170,9 @@ async fn graphql_handler(
         Err(_) => return (StatusCode::BAD_REQUEST, "invalid X-SESSION-ID (must be a UUID)").into_response(),
     };
     let trace = crate::graphql::session::trace_context(&headers);
-    // The ONE `request.correlation_id` of this request (#451): minted here, at the transport
-    // boundary, and shared by every read-path span the request opens (`auth.read_scope` below,
-    // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
-    // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
-    let correlation = crate::graphql::session::RequestCorrelationId::mint();
     // The ONE request clock (RSO-1): every serviceWindow this request evaluates agrees on "now"
     // — minted here at the transport boundary, like the correlation id above, never per row.
     let request_now = crate::graphql::service_clock::RequestNow::mint();
-    // Per-instance authorization (#144/#433): resolve the verified Principal to a ReadScope ONCE
-    // here — a PURE function of the token's claims (CARD-11), no lookup, no dependency that could
-    // be missing. Injected into the GraphQL context so the GENERATED resolvers pass it into the
-    // read ports without hand-written plumbing; a missing claim fails closed inside read_scope.
-    let scope = crate::auth::resolve_read_scope(&principal, correlation);
     // The request's TENANT (#469), resolved ONCE here from the `Host` — its OWN datum beside the
     // ReadScope, never folded into it (different provenance: claims vs host, and legitimately
     // absent on the marketplace). Tenant-scoped reads take it from the context, so no operation can
@@ -192,6 +193,38 @@ async fn graphql_handler(
         .await
         .into();
     resp.into_response()
+}
+
+/// Authn/authz + per-instance authorization at the path boundary (ADR-0047, #144/#433), shared by
+/// [`graphql_handler`] (HTTP POST) and [`graphql_get`]'s WS `connection_init` closure — the ONE
+/// place both transports resolve who the caller is and what they may read, so the two paths can
+/// never drift (#641, IDENT-1 Phase A, ADR-20260818-004646: the socket must never widen what a
+/// query would refuse).
+///
+/// Verifies the token for `path_role` — `/public` never refuses (see [`AuthContext::public_principal`]),
+/// every other path fails with the mapped [`AuthError`] on an invalid/missing/wrong-role credential
+/// — then resolves the caller's [`application::queries::ReadScope`] ONCE (`resolve_read_scope`)
+/// under `customer_identity`: the default `CustomerIdentitySource::Claim`, or — once
+/// `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set — `CustomerIdentitySource::Postgres`, which
+/// resolves a CUSTOMER caller through Postgres instead of trusting the JWT's `captain_food.customer_id`
+/// claim.
+async fn authorize_and_resolve_scope(
+    auth: &AuthContext,
+    path_role: RequestRole,
+    headers: &HeaderMap,
+    customer_identity: &crate::auth::CustomerIdentitySource,
+) -> Result<
+    (crate::auth::Principal, crate::graphql::session::RequestCorrelationId, application::queries::ReadScope),
+    crate::auth::AuthError,
+> {
+    let principal = auth.authorize(path_role, headers).await?;
+    // The ONE `request.correlation_id` of this request/connection (#451): minted here, at the
+    // transport boundary, and shared by every read-path span it opens (`auth.read_scope`,
+    // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
+    // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
+    let correlation = crate::graphql::session::RequestCorrelationId::mint();
+    let scope = crate::auth::resolve_read_scope(&principal, correlation, customer_identity).await;
+    Ok((principal, correlation, scope))
 }
 
 /// The effective auth headers for a WS connection, PURE (#437 makes this composition load-bearing:
@@ -240,7 +273,7 @@ async fn graphql_get(
     Path(role_seg): Path<String>,
     req: Request,
 ) -> Response {
-    let GraphqlState { schema, tenants } = state;
+    let GraphqlState { schema, tenants, identity } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -266,31 +299,34 @@ async fn graphql_get(
         GraphQLWebSocket::new(stream, schema, protocol)
             .on_connection_init(move |payload| async move {
                 let headers = ws_auth_headers(headers, &payload);
-                let principal = auth.authorize(role, &headers).await.map_err(|e| {
-                    async_graphql::Error::new(match e {
-                        crate::auth::AuthError::Unauthorized => {
-                            "unauthorized: valid bearer token required (connection_init payload `Authorization`)"
-                        }
-                        crate::auth::AuthError::Forbidden => {
-                            "forbidden: token role not permitted for this path"
-                        }
-                        crate::auth::AuthError::Unavailable => "auth unavailable",
-                    })
-                })?;
+                // One correlation id per CONNECTION here (the socket is the request): every
+                // read-path span served over it shares the id, same posture as POST. The socket
+                // resolves its ReadScope ONCE at connection init, through the SAME
+                // `authorize_and_resolve_scope` the POST path uses — a subscription must not
+                // widen what a query would refuse (#144/#433), and Postgres-mode resolution (#641)
+                // applies identically on both transports (the shared function IS the proof).
+                let (principal, correlation, scope) =
+                    authorize_and_resolve_scope(&auth, role, &headers, &identity)
+                        .await
+                        .map_err(|e| {
+                            async_graphql::Error::new(match e {
+                                crate::auth::AuthError::Unauthorized => {
+                                    "unauthorized: valid bearer token required (connection_init payload `Authorization`)"
+                                }
+                                crate::auth::AuthError::Forbidden => {
+                                    "forbidden: token role not permitted for this path"
+                                }
+                                crate::auth::AuthError::Unavailable => "auth unavailable",
+                            })
+                        })?;
                 let mut data = async_graphql::Data::default();
                 data.insert(role);
-                // One correlation id per CONNECTION here (the socket is the request): every
-                // read-path span served over it shares the id, same posture as POST.
-                let correlation = crate::graphql::session::RequestCorrelationId::mint();
                 data.insert(correlation);
                 // Deliberately NO `RequestNow` here (RSO-1): a socket lives for hours, so a
                 // connection-scoped clock would serve every later operation a stale "now". On
                 // this transport "the request" is each operation, and `service_clock::evaluation`
                 // reads the clock once per execution — the correct per-operation clock.
-                // The socket resolves its ReadScope ONCE at connection init, from the same pure
-                // claims function the POST path uses — a subscription must not widen what a query
-                // would refuse (#144/#433).
-                data.insert(crate::auth::resolve_read_scope(&principal, correlation));
+                data.insert(scope);
                 // The socket's TENANT, resolved ONCE at init from the UPGRADE request's Host —
                 // same posture as the ReadScope beside it (#469). A live cart or tracking socket
                 // must not read wider than the POST that opened the page could.
@@ -494,6 +530,7 @@ mod tests {
         let router = graphql_routes(
             crate::graphql::schema::build_schema(None, None, None),
             crate::hosts::TenantLookup(None),
+            crate::auth::CustomerIdentitySource::Claim,
         )
         .layer(Extension(crate::auth::AuthContext::from_config(
             String::new(),
@@ -518,6 +555,7 @@ mod tests {
         graphql_routes(
             crate::graphql::schema::build_schema(None, None, None),
             crate::hosts::TenantLookup(None),
+            crate::auth::CustomerIdentitySource::Claim,
         )
         .layer(Extension(crate::auth::AuthContext::from_config(
             String::new(),
@@ -597,5 +635,116 @@ mod tests {
                 "{path} must also carry the CSP header (dispatch scope: voyager route AND asset routes)"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // IDENT-1 Phase A (#641, ADR-20260818-004646): `authorize_and_resolve_scope` is the ONE
+    // function both `graphql_handler` (HTTP POST) and `graphql_get`'s WS `connection_init`
+    // closure call — testing it here covers BOTH call sites' identity-resolution logic; the WS
+    // closure's ONLY additional work is the already independently-tested `ws_auth_headers` merge
+    // before it. A signed JWT is required to reach it (`Principal`'s constructors are
+    // module-private), so the key material is duplicated from `crate::auth`'s own suite — the
+    // established `#[cfg(test)]`-is-crate-invisible-to-integration-tests reason does not apply
+    // here (this IS the same crate), but auth's signing helpers sit in a SIBLING test module with
+    // no shared visibility, so duplicating the ~10 lines is still the cheapest correct path.
+    // -----------------------------------------------------------------------------------------
+
+    const WS_TEST_EC_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTCTNdGfegiVKVsm+
+vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
+5bKnk8sNetDUBHLVIGpXoxBRFJVNSeDN6QB9IHl6rqDLaZR4iqLatScL
+-----END PRIVATE KEY-----
+";
+    const WS_TEST_SUPABASE_URL: &str = "https://captain-under-test.supabase.co";
+
+    async fn ws_jwks_endpoint() -> String {
+        let body = json!({"keys":[{"kty":"EC","crv":"P-256","use":"sig","kid":"captain-test-es256",
+            "alg":"ES256","x":"baNA5O-X8ZdiMi8fPb8L41FpCQG_6eWyp5PLDXrQ1AQ",
+            "y":"ctUgalejEFEUlU1J4M3pAH0geXquoMtplHiKotq1Jws"}]});
+        let app = Router::new().route(
+            "/jwks",
+            get(move || {
+                let body = body.clone();
+                async move { axum::Json(body) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}/jwks")
+    }
+
+    fn ws_customer_jwt(sub: uuid::Uuid, claim_customer_id: uuid::Uuid) -> String {
+        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+        header.kid = Some("captain-test-es256".into());
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_secs()
+            + 3600;
+        let claims = json!({
+            "sub": sub.to_string(),
+            "aud": "authenticated",
+            "iss": format!("{WS_TEST_SUPABASE_URL}/auth/v1"),
+            "exp": exp,
+            "app_metadata": { "captain_food": { "role": "CUSTOMER", "customer_id": claim_customer_id.to_string() } },
+        });
+        let key = jsonwebtoken::EncodingKey::from_ec_pem(WS_TEST_EC_PRIVATE_KEY_PEM.as_bytes())
+            .expect("test EC key parses");
+        jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+    }
+
+    struct WsScriptedResolver(crate::auth::CustomerIdentityResolution);
+
+    #[async_trait::async_trait]
+    impl crate::auth::ResolveCustomerIdentity for WsScriptedResolver {
+        async fn resolve(&self, _auth_ref: &str) -> crate::auth::CustomerIdentityResolution {
+            self.0.clone()
+        }
+    }
+
+    /// (e) WS connect path covered: the SAME `authorize_and_resolve_scope` the WS `connection_init`
+    /// closure calls resolves a CUSTOMER through Postgres — the token's claim carries a
+    /// deliberately WRONG id, the seam answers the RIGHT one, and the resolved scope carries the
+    /// RIGHT one. Proves the Postgres arm is reachable from BOTH transports' shared entry point,
+    /// not re-derived per transport.
+    #[tokio::test]
+    async fn ws_connection_init_resolves_customer_through_postgres_not_the_claim() {
+        use domain::generated::scalars::CustomerId;
+
+        let auth = crate::auth::AuthContext::from_config(
+            ws_jwks_endpoint().await,
+            WS_TEST_SUPABASE_URL.into(),
+        );
+        let sub = uuid::Uuid::from_u128(0x437);
+        let wrong_claim = uuid::Uuid::from_u128(0xBAD);
+        let right_id = uuid::Uuid::from_u128(0x600D);
+        let jwt = ws_customer_jwt(sub, wrong_claim);
+        // The WS transport's own header shape (`ws_auth_headers`): the connection_init payload
+        // carries the bearer token, exactly as `graphql_get`'s closure builds it before calling
+        // `authorize_and_resolve_scope`.
+        let headers = ws_auth_headers(
+            HeaderMap::new(),
+            &json!({ "Authorization": format!("Bearer {jwt}") }),
+        );
+        let identity = crate::auth::CustomerIdentitySource::Postgres(Arc::new(WsScriptedResolver(
+            crate::auth::CustomerIdentityResolution::Resolved(CustomerId(right_id)),
+        )));
+        let (_, _, scope) =
+            authorize_and_resolve_scope(&auth, RequestRole::Customer, &headers, &identity)
+                .await
+                .expect("a well-formed CUSTOMER token authorizes");
+        assert_eq!(
+            scope,
+            application::queries::ReadScope::Customer(CustomerId(right_id)),
+            "the WS connect path must resolve through Postgres, not the claim"
+        );
+        assert_ne!(
+            scope,
+            application::queries::ReadScope::Customer(CustomerId(wrong_claim)),
+            "and never the claim's id"
+        );
     }
 }

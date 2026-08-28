@@ -64,13 +64,23 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
             config.service_window_validity_horizon_seconds,
         ),
     );
+    // IDENT-1 Phase A (#641, ADR-20260818-004646): the SAME gate-then-stabilize choice the
+    // monolith makes, over the SAME `customers` repository -- a subgraph bin serves the identical
+    // resolvers over the same adapters (#385 D8), no logic fork.
+    let customer_identity_source = if config.resolve_customer_identity_from_postgres {
+        crate::auth::CustomerIdentitySource::Postgres(std::sync::Arc::new(
+            crate::auth::PgCustomerIdentity::new(di.read.customers.clone()),
+        ))
+    } else {
+        crate::auth::CustomerIdentitySource::Claim
+    };
     let schema = crate::graphql_schema::build_schema_for_scope(
         Some(di.read),
         Some(di.write),
         Some(event_bus),
         Some(settings.scope),
     );
-    crate::graphql::routes::graphql_routes(schema, di.tenant_lookup)
+    crate::graphql::routes::graphql_routes(schema, di.tenant_lookup, customer_identity_source)
         // API auth (ADR-0047): the same Supabase-JWT verifier the monolith layers — the subgraph
         // IS the schema boundary, so authn/authz live here, never in the (stateless) gateway.
         .layer(Extension(crate::auth::AuthContext::from_config(

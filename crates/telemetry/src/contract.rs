@@ -56,6 +56,11 @@ pub mod span {
     /// gate is OFF — the shadow would-cancel decision that is the flip ADR's whole evidence set
     /// (the `service_window_verdict` precedent). Never in the pure handler (SDK-free rule).
     pub const REMINDER_PROMOTE: &str = "reminder.promote";
+    /// INTERNAL — one Postgres-mode CUSTOMER identity resolution at the request seam
+    /// (`customer-identity` contract, #641, IDENT-1 Phase A): never emitted in claim mode (the
+    /// DEFAULT), never for a non-CUSTOMER role. A CHILD of `auth.read_scope`'s span, ONE per
+    /// resolution.
+    pub const CUSTOMER_IDENTITY_RESOLVE: &str = "customer.identity.resolve";
 }
 
 /// Attribute keys. All business context is `business.*` per `docs/claude/observability.md`; the two
@@ -105,6 +110,11 @@ pub mod attr {
     pub const BRIDGE_RESOLVED: &str = "business.bridge_resolved";
     pub const SCOPE_TYPE: &str = "business.scope_type";
     pub const AUTHORIZED: &str = "business.authorized";
+
+    /// `customer-identity` contract key (#641, IDENT-1 Phase A): set only when
+    /// `business.result = lookup_failed` — the coarse `DomainError` class, never the query text or
+    /// driver message (unbounded cardinality on a labeled series).
+    pub const FAILURE_REASON: &str = "business.failure_reason";
 }
 
 /// Metric names, split exactly as the contracts split them: `metrics` are technical, `business_metrics`
@@ -255,6 +265,25 @@ pub mod metric {
     /// (`actor_type`, `purpose` = the reminder's message_type) — the cardinality watch on the
     /// reminder table (V0 expectation ≈ single digits; a runaway here is a scheduling leak).
     pub const MAILBOX_SCHEDULED_DEPTH: &str = "mailbox_scheduled_depth";
+    /// `customer-identity` contract (#641, IDENT-1 Phase A): the resolution latency, attribute
+    /// `result` (resolved | not_found | lookup_failed). Rides the existing `Customer.auth_ref`
+    /// index — one indexed lookup, same budget discipline as `read_authorization_check_ms`.
+    pub const CUSTOMER_IDENTITY_RESOLVE_MS: &str = "customer_identity_resolve_ms";
+    /// `customer-identity` contract (#641): an ordinary provisioning gap — the verified subject
+    /// carries no Postgres mapping row (yet). Fails closed to Public, same population as
+    /// [`READ_AUTHORIZATION_BRIDGE_UNRESOLVED_TOTAL`] would watch on the role-path side, but scoped
+    /// to THIS seam. OBSERVE, never PAGE — this is expected traffic, not an outage.
+    pub const CUSTOMER_IDENTITY_NOT_FOUND_TOTAL: &str = "customer_identity_not_found_total";
+    /// `customer-identity` contract (#641): the seam itself could not be asked — a DEFECT counter
+    /// (the `read_authorization_bridge_unresolved_total` pattern), attribute `reason` (the coarse
+    /// `DomainError` class: repository | invariant | rejected). The OPPOSITE operator response from
+    /// [`CUSTOMER_IDENTITY_NOT_FOUND_TOTAL`]: PAGE on any sustained non-zero rate.
+    pub const CUSTOMER_IDENTITY_LOOKUP_FAILED_TOTAL: &str = "customer_identity_lookup_failed_total";
+    /// `customer-identity` contract (#641): attribute `source` (db | request_reuse) — so
+    /// REQUEST-SCOPED REUSE can never hide an outage behind a cache hit. Phase A's two call sites
+    /// each resolve read scope once per request, so only `db` fires today; `request_reuse` is
+    /// declared for a later resolver reusing this seam's result within the same request.
+    pub const CUSTOMER_IDENTITY_LOOKUP_SOURCE_TOTAL: &str = "customer_identity_lookup_source_total";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

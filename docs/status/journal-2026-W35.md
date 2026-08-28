@@ -3,6 +3,29 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — IDENT-1 Phase A landed:
+> [#641](https://github.com/TheCaptainCompany/captain-food/issues/641), `resolve_read_scope` can
+> now resolve a CUSTOMER's domain id from Postgres instead of trusting the JWT claim, gated OFF.**
+> `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` (`specs/customer/configuration.yaml`, default `false`)
+> selects, ONCE at startup, whether `resolve_read_scope`'s CUSTOMER arm trusts
+> `captain_food.customer_id` (unchanged, the default) or resolves the caller through a new
+> `ResolveCustomerIdentity` seam wrapping the EXISTING `CustomerReadRepository::by_auth_ref` bridge
+> — never a per-request fallback, and the claim is structurally unread in the gated-ON path (the
+> match arm destructures `Identity::Customer` as `{ sub, .. }`). `NoMapping` and `LookupFailed` both
+> fail closed to `Public` identically at the API boundary but are distinguishable in telemetry (new
+> `customer-identity` contract: span `customer.identity.resolve`, histogram, and two separate
+> counters — `customer_identity_not_found_total` OBSERVE vs `customer_identity_lookup_failed_total{reason}`
+> PAGE — deliberately different metric NAMES so the two classes can never collapse into one label).
+> `graphql_handler` (HTTP POST) and `graphql_get`'s WS `connection_init` closure were unified onto
+> one shared `authorize_and_resolve_scope` function so both transports are provably identical
+> rather than independently re-implemented. **Erasure check**: no GDPR erasure flow exists for
+> Customer at all today (no `deletion:` block on the Customer actor anywhere in
+> `specs/customer/actors.yaml`) — flagged for the architect, not fixed in this PR. **OWED spec
+> wording** named in the ADR (`specs/services.yaml#/identity.stamp_customer_claim`,
+> `specs/observability.yaml`'s claim-stamp contract, `specs/common/configuration.yaml`'s admin-stamp
+> keys) is still accurate — Phase A only changes the READ side, Phase B (stop stamping) is
+> untouched. HOLD: human (auth path) — stays draft pending the team's independent reviewer pass.
+
 > ✅ **2026-08-28 — [#703 "Reaper follow-ups at the round ceiling"](https://github.com/TheCaptainCompany/captain-food/issues/703)
 > landed: `resolveBranches` extracted as a separate I/O-orchestration export, a `mergedAt` liveness
 > signal added (bounded by the same `liveAfter` as the commit signal), and the stranded wording fix

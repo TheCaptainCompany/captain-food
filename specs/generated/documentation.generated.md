@@ -10896,7 +10896,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(9)_
+### 📡 Observability _(10)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -10952,6 +10952,31 @@ _criticality: **high**_
 - **Metrics**: `cart_price_ms` _(histogram)_, `cart_price_unresolvable_total` _(counter)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans [`cart.price`]
 - **SLOs**: p95 ≤ 300ms · p99 ≤ 600ms · error rate ≤ 1%
+
+<a id="obs-customer-identity"></a>
+#### 📡 Contract: `customer-identity`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `customer.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason` |
+
+- **Metrics**: `customer_identity_resolve_ms` _(histogram)_, `customer_identity_not_found_total` _(counter)_, `customer_identity_lookup_failed_total` _(counter)_, `customer_identity_lookup_source_total` _(counter)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 
 <a id="obs-stripe-webhook-ingestion"></a>
 #### 📡 Contract: `stripe-webhook-ingestion`

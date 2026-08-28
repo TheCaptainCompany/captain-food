@@ -530,6 +530,75 @@ cart-price:
   error_budget: { max_error_rate_pct: 1.0 }
 
 # =====================================================================
+# customer-identity — IDENT-1 Phase A (ADR-20260818-004646, #641): the request-seam translation
+# from the verified auth SUBJECT (authRef) to the CUSTOMER's domain identity, resolved from
+# Postgres via the EXISTING by_auth_ref bridge -- GATED
+# (configuration.yaml#/RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES), DEFAULT OFF. A step INSIDE
+# auth.read_scope's span (read-authorization contract, #144): this one fires only when the gate is
+# ON and the caller is on the CUSTOMER path -- claim mode (the default) never opens it, and the
+# claim is UNREAD in this path (no per-request fallback; the ADR forbids a runtime
+# try-Postgres-else-claim). NoMapping and LookupFailed BOTH fail closed to Public identically at
+# the API boundary, but they are DISTINGUISHABLE here because they have OPPOSITE operator
+# responses: a missing mapping row is an ordinary provisioning gap (OBSERVE), a failed lookup means
+# the identity seam itself is unavailable (PAGE).
+# =====================================================================
+customer-identity:
+  feature: customer-identity
+  criticality: high
+  workflow:
+    surface: graphql   # read-path binding, request seam -- no single command/saga/aggregate (validator §8)
+
+  run_identity:
+    # Reads carry no command envelope: the SAME request-scoped id auth.read_scope stamps (#144).
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    # ONE per Postgres-mode CUSTOMER resolution -- never emitted in claim mode (the DEFAULT), and
+    # never for a non-CUSTOMER role (Phase A's whole scope, ADR-20260818-004646: the other three
+    # roles have no sign-in operation in the DSL, STAFF-AUTH, DECISIONS §46). `business.result` is
+    # the seam's typed three-way outcome; `business.failure_reason` is set only when it is
+    # `lookup_failed` (the coarse DomainError class, never the query text or driver message --
+    # unbounded cardinality on a labeled series).
+    - name: "customer.identity.resolve"
+      kind: INTERNAL
+      required: false   # only present in Postgres mode -- claim mode (the DEFAULT) never opens it
+      attributes:
+        - { key: "business.result", type: string, required: true }   # resolved | not_found | lookup_failed
+        - { key: "business.correlation_id", type: string, required: true }
+        - { key: "business.failure_reason", type: string, required: false }
+
+  metrics:
+    - { name: "customer_identity_resolve_ms", type: histogram, attributes: ["result"] }
+    # OBSERVE: an ordinary provisioning gap (no mapping row yet for this subject) -- fails closed
+    # to Public, the same population read_authorization_bridge_unresolved_total watches on the
+    # role-path side, but scoped to THIS seam so it is never conflated with the general bridge
+    # counter or misread as an outage.
+    - { name: "customer_identity_not_found_total", type: counter, attributes: [] }
+    # PAGE: the seam itself could not be asked -- the opposite operator response from not_found (a
+    # stale-but-working index vs a broken/unreachable read path). `reason` is the coarse DomainError
+    # class.
+    - { name: "customer_identity_lookup_failed_total", type: counter, attributes: ["reason"] }
+    # So request-scoped reuse (the mitigation: resolve once per request/WS connection_init, share
+    # across resolvers of that request -- vernon+holub+dba convergence) can never hide an outage:
+    # `db` is one real Postgres round trip, `request_reuse` is the same request's ALREADY resolved
+    # value handed to a second reader with no further I/O. Phase A's two call sites each resolve
+    # read scope exactly once per request, so `request_reuse` is declared for the shape a later
+    # resolver reusing this seam's result would need -- not yet reachable from this change alone.
+    - { name: "customer_identity_lookup_source_total", type: counter, attributes: ["source"] }
+
+  status_rules:
+    success:
+      required_spans: []   # the span is OPTIONAL (claim mode never opens it) -- gated by configuration, not by this contract
+    technical_error:
+      any_span_errors: true
+
+  # The lookup rides the EXISTING `Customer.auth_ref` index (dba) -- one indexed lookup, same
+  # discipline as read-authorization's membership check: if it drifts, something started scanning.
+  latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
+  error_budget: { max_error_rate_pct: 0.1 }
+
+# =====================================================================
 # refund — the compensation saga (Stripe refund driven by RefundProcess)
 # OrderRejected/Cancelled* or RefundRequested -> [Stripe refund] -> PaymentRefunded (recorded)
 # =====================================================================
