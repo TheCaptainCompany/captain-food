@@ -296,3 +296,19 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   succeeded. A clean pop would have silently applied held work into an unrelated branch AND deleted
   it from the stack, with no signal in either direction. **Check `git stash list` before any pop, or
   simply do not stash**: a clean tree needs no stash, and a dirty one is better committed.
+
+## The session disk allowance dies mid-run, silently, and subagent scratch is the hog (2026-08-28)
+
+An executor subagent lost ALL Bash capability mid-dispatch (`ENOSPC` before any command ran — even
+`echo`) because the session's writable allowance was spent. What filled it: this session's own
+accumulated scratch (two full cargo target trees copied into the scratchpad by earlier review
+rounds, ~1.1GB) and `target/debug/incremental` (12GB). Deletes still succeed when writes fail, so
+the coordinator freed 13GB in one command and resumed the agent — nothing was lost but ~10 minutes
+and a partial run. Rules earned: (1) never copy a target tree into the scratchpad (symlink or run
+in place); (2) before dispatching a build-running subagent, `df` the root and prune
+`target/debug/incremental` if tight — it is pure cache, and the shared non-incremental artifacts
+survive; (3) a subagent reporting "environment broken, no cleanup tool" is a COORDINATOR page, not
+a failure — the coordinator holds the delete capability the subagent lacks. Also observed: file
+tools with absolute paths do not enforce worktree isolation (the git hook does, `Edit` does,
+`curl -o` does not) — a worktree-scoped dispatch card must say "never write to the shared checkout
+path" explicitly, and this one now does.
