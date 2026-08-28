@@ -1140,7 +1140,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > names via `external_identifiers` (register + close paths) and checkpoints deterministic rejections
 > instead of retrying (DB-gated tests: adoption, legacy close, no-churn).
 
-> ✅ **LANDED (2026-07-20): command sourcing + inbound-event sourcing + ACCEPTANCE-FIRST GraphQL**
+> ✅ **2026-07-20 — LANDED: command sourcing + inbound-event sourcing + ACCEPTANCE-FIRST GraphQL**
 > (ADR-20260720-015300/-015400/-015500, branch `claude/clarification-needed-5si77x`). The two
 > pre-agreed constraints held: journals NEVER write `domain_events` (aggregates own the log) and the
 > event log stays the single source of truth. What shipped:
