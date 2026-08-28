@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 1800,
+  "recordedAt": "2026-08-28T21:44:43.808Z",
+  "branch": "529-otp-sheet-and-session-pickup",
+  "note": "#529 OTP sheet + session claim: shared .git/ timer vanished mid-run (concurrent worktree stop/reset) -- elapsed recorded as an estimate, not measured"
+}
