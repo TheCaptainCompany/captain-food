@@ -163,15 +163,22 @@ alongside it. This manual check remains good practice even though the automated 
 the gap on its own.
 
 `.github/workflows/stale-claim-reaper.yml` (hourly): a `status/in-progress` issue with **no RECENT
-activity in the trailing 24h** — a genuine issue comment, or a commit landed on its own `NN-slug`
-branch, WITHIN the last 24h; the reaper ignores its own marker comments from either job, and
+activity in the trailing 24h** — a genuine issue comment, a commit landed on its own `NN-slug`
+branch, or (issue #703) the merge of a PR whose head was that branch, WITHIN the last 24h; the
+reaper ignores its own marker comments from either job, and
 `cross-referenced`/`referenced`/`connected` timeline events (an unrelated PR mentioning the issue
 number) are never consulted — loses the label and gets a "claim expired" comment → back to the
-queue. A crashed session can never hold an issue hostage. A second, independent job in the same
-workflow surfaces `status/blocked` issues silent for **over 72h** (a dead-man's-switch for parked
-items) with a "still blocked" comment, once per silence window.
+queue. A crashed session can never hold an issue hostage. The merge signal closes the case where a
+claim's work landed and merged, and GitHub then deleted the (now merged) head branch as routine
+cleanup — a branch 404 alone no longer reads as "no proof of work" when a recent merge proves the
+opposite. A second, independent job in the same workflow surfaces `status/blocked` issues silent
+for **over 72h** (a dead-man's-switch for parked items) with a "still blocked" comment, once per
+silence window.
 
 **Residual — `getBranch` reports the branch tip's COMMITTER date**, which `git rebase` rewrites
-even when no new work happened: a rebased-but-otherwise-idle branch reads as live. Not closed;
-distinguishing a genuine rebase from a genuine commit would need comparing tree contents across
-runs, which the reaper's stateless decision function does not do.
+even when no new work happened: a rebased-but-otherwise-idle UNMERGED branch reads as live.
+PARTIALLY CLOSED (issue #703): a MERGED branch's liveness is now proven by its PR's immutable
+`merged_at` regardless of any rebase or deletion of the branch itself. Still open: an unmerged
+branch, rebased with no real new work, keeps reading as live via its commit date — distinguishing
+that from a genuine commit would need comparing tree contents across runs, which the reaper's
+stateless decision function does not do.

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 
-// Hermetic stub tests for stale-claim-reaper-decide.js (issue #642). No network, no `github`/
-// `context` objects — every case feeds the pure decision functions fixture data shaped like
-// GitHub's REST responses (timeline events, branches) and checks the returned verdict. Modelled on
+// Hermetic stub tests for stale-claim-reaper-decide.js (issue #642, extended by issue #703). No
+// network, no `github`/`context` objects — every case feeds the pure decision functions (or, for
+// `resolveBranches`, a stub `fetcher`) fixture data shaped like GitHub's REST responses (timeline
+// events, branches, PR merge state) and checks the returned verdict. Modelled on
 // `.claude/skills/decision-lookup/scripts/stub-tests.sh`: verdict()/skipped() bookkeeping, an
 // EXPECTED_CASES completeness count, and a non-zero exit code on any failure or on a case that
 // silently stopped running.
@@ -13,8 +14,8 @@
 // MUTATION TESTING. `STALE_CLAIM_REAPER_DECIDE_MODULE` overrides which module under test is
 // required, so an alternate (deliberately buggy) implementation can be pointed at this exact same
 // suite to prove the suite CATCHES the regression it is named for, without duplicating the
-// fixtures. Four such mutants were run during development of this fix and produced the RED
-// evidence recorded in this change's commit message:
+// fixtures. Mutants run during development of this fix, with the RED evidence recorded in this
+// change's commit message:
 //   1. "liveness re-widened to cross-referenced events" — reds case C1 (noise-only mentions).
 //   2. "blocked-item check deleted" — reds cases B0-B4 (5/5 blocked-notice cases).
 //   3. "branch-commit lookup widened to any commit ever" (drops the claimedAt comparison) — reds
@@ -28,6 +29,18 @@
 //      encoding the finding-1 bug before this change (asserting `alive: true` for a comment 9.5
 //      days stale) and has been corrected to test a genuinely RECENT comment instead. Transcript
 //      (13 passed, 3 failed, 16 total) is in this change's commit message.
+//   5. (issue #703) `mergedAt` check dropped from `decideClaimLiveness` entirely (signal 3
+//      deleted, falls straight through to the final `no-branch`/`branch-stale` return) — reds
+//      C10 (fresh merge, deleted branch, must be `alive: true`) and C12 (the reviewer's
+//      merged-vs-rebased case).
+//   6. (issue #703) `mergedAt` recency bound dropped (`b.mergedAt && Date.parse(b.mergedAt) >
+//      liveAfter` weakened to `b.mergedAt` alone, i.e. ANY non-null `mergedAt` counts regardless
+//      of age) — reds C11 (a merge from long before the trailing window must NOT keep a stale
+//      claim alive; the mutant reports `alive: true`).
+//   7. (issue #703) `resolveBranches`'s error contract weakened: a non-404 from `branchCommitAt`
+//      mapped to `latestCommitAt: null` instead of rethrown (`if (err.status !== 404) throw err;`
+//      deleted) — reds RB1 (the loud-failure case: resolveBranches must rethrow, not silently
+//      resolve to absence-of-proof).
 // The mutant source files are not committed (they exist only to prove the suite is not vacuous);
 // the RED transcripts are the evidence, per the dispatch's "record red output in the commit
 // message or a test comment".
@@ -38,7 +51,13 @@ const path = require('path');
 const modulePath = process.env.STALE_CLAIM_REAPER_DECIDE_MODULE
   ? path.resolve(process.env.STALE_CLAIM_REAPER_DECIDE_MODULE)
   : path.join(__dirname, 'stale-claim-reaper-decide.js');
-const { decideClaimLiveness, decideBlockedNotice, CLAIM_MARKER, BLOCKED_MARKER } = require(modulePath);
+const {
+  decideClaimLiveness,
+  decideBlockedNotice,
+  resolveBranches,
+  CLAIM_MARKER,
+  BLOCKED_MARKER,
+} = require(modulePath);
 
 let pass = 0;
 let fail = 0;
@@ -58,6 +77,15 @@ function verdict(ok, name, detail) {
 function check(name, fn) {
   try {
     fn();
+    verdict(true, name);
+  } catch (err) {
+    verdict(false, name, err.message);
+  }
+}
+
+async function checkAsync(name, fn) {
+  try {
+    await fn();
     verdict(true, name);
   } catch (err) {
     verdict(false, name, err.message);
@@ -118,7 +146,7 @@ check("C3: the reaper's own marker comment does not count as activity", () => {
 
 check('C4 (green control): a commit on the NN-slug branch inside the window keeps the claim alive', () => {
   const timeline = [labeled(claimedLongAgo)];
-  const branches = [{ name: '642-reaper-liveness-is-a-commit', latestCommitAt: iso(NOW - 60 * 60 * 1000) }];
+  const branches = [{ name: '642-reaper-liveness-is-a-commit', latestCommitAt: iso(NOW - 60 * 60 * 1000), mergedAt: null }];
   const r = decideClaimLiveness(issue, timeline, branches, NOW);
   assert.strictEqual(r.alive, true);
   assert.strictEqual(r.reason, 'branch-commit-since-claim');
@@ -126,7 +154,7 @@ check('C4 (green control): a commit on the NN-slug branch inside the window keep
 
 check('C5: a branch whose only commit PREDATES the claim is reaped, not kept alive', () => {
   const timeline = [labeled(claimedLongAgo)];
-  const branches = [{ name: '642-reaper-liveness-is-a-commit', latestCommitAt: iso(claimedLongAgo - DAY_MS_HALF()) }];
+  const branches = [{ name: '642-reaper-liveness-is-a-commit', latestCommitAt: iso(claimedLongAgo - DAY_MS_HALF()), mergedAt: null }];
   const r = decideClaimLiveness(issue, timeline, branches, NOW);
   assert.strictEqual(r.alive, false, 'a stale branch commit from before the claim is not proof of live work');
   assert.strictEqual(r.reason, 'branch-stale');
@@ -157,7 +185,7 @@ check('C8: RECENCY BOUND (issue #642 follow-up) — a comment AND a branch push 
     labeled(claimedThirteenDaysAgo),
     commented(oneMinuteAfterClaim, 'claiming this, branch 642-reaper-recency-bound'),
   ];
-  const branches = [{ name: '642-reaper-recency-bound', latestCommitAt: iso(oneMinuteAfterClaim) }];
+  const branches = [{ name: '642-reaper-recency-bound', latestCommitAt: iso(oneMinuteAfterClaim), mergedAt: null }];
   const issue13 = { number: 642, created_at: iso(claimedThirteenDaysAgo) };
   const r = decideClaimLiveness(issue13, timeline, branches, NOW);
   assert.strictEqual(
@@ -172,6 +200,105 @@ check("C9: a BLOCKED_MARKER comment does not count as claim liveness either (fin
   const r = decideClaimLiveness(issue, timeline, [], NOW);
   assert.strictEqual(r.alive, false, 'a BLOCKED_MARKER comment is still a bot comment standing in for work, not first-party activity');
   assert.strictEqual(r.reason, 'no-branch');
+});
+
+check('C10 (issue #703): a RECENT merge of a PR whose head was the claim branch keeps the claim alive even though the branch itself is deleted (404 -- latestCommitAt: null)', () => {
+  const timeline = [labeled(claimedLongAgo)];
+  const branches = [{ name: '642-reaper-mergedat', latestCommitAt: null, mergedAt: iso(NOW - 60 * 60 * 1000) }];
+  const r = decideClaimLiveness(issue, timeline, branches, NOW);
+  assert.strictEqual(r.alive, true, 'a fresh merge is proof of completed work, independent of the now-deleted branch');
+  assert.strictEqual(r.reason, 'branch-merged-since-claim');
+});
+
+check("C11 (issue #703, beck's 2022-merge trap): an ANCIENT mergedAt does not grant permanent immunity -- it must be bounded by the SAME liveAfter as the commit signal", () => {
+  const timeline = [labeled(claimedLongAgo)];
+  const branches = [{ name: '642-reaper-old-merge', latestCommitAt: null, mergedAt: iso(Date.parse('2022-01-01T00:00:00Z')) }];
+  const r = decideClaimLiveness(issue, timeline, branches, NOW);
+  assert.strictEqual(r.alive, false, 'a merge from 2022 proves nothing about a claim that has since gone stale');
+  assert.strictEqual(r.reason, 'branch-stale');
+});
+
+check('C12 (reviewer\'s required case, issue #703): merged-and-deleted branch vs rebased-but-unmerged branch, both with a recent-looking date -- only the merged one is live', () => {
+  const timeline = [labeled(claimedLongAgo)];
+  const branches = [
+    // Rebased-but-unmerged: still open, tip committer date is recent because of the rebase, not
+    // real new work -- this is the residual the module header states is NOT closed (existing
+    // behaviour, unchanged: it reads as live via latestCommitAt, same as case C4).
+    { name: '642-reaper-rebased-not-merged', latestCommitAt: iso(NOW - 30 * 60 * 1000), mergedAt: null },
+  ];
+  const rebasedOnly = decideClaimLiveness(issue, timeline, branches, NOW);
+  assert.strictEqual(rebasedOnly.alive, true, 'sanity: the rebase residual still reads as live via latestCommitAt');
+  assert.strictEqual(rebasedOnly.reason, 'branch-commit-since-claim');
+
+  // Merged-and-deleted: branch is GONE (latestCommitAt: null, as getBranch 404'd), but its PR's
+  // mergedAt is recent -- live via the merge signal even though the branch itself no longer
+  // exists. This is the case the #702 review flagged and issue #703 closes.
+  const mergedDeleted = [{ name: '642-reaper-merged-deleted', latestCommitAt: null, mergedAt: iso(NOW - 30 * 60 * 1000) }];
+  const r = decideClaimLiveness(issue, timeline, mergedDeleted, NOW);
+  assert.strictEqual(r.alive, true, 'the merged-and-deleted branch is live via mergedAt despite having no latestCommitAt at all');
+  assert.strictEqual(r.reason, 'branch-merged-since-claim');
+});
+
+// ── resolveBranches (I/O orchestration, stub fetcher) ────────────────────────────────────────
+
+function stubFetcher(overrides) {
+  const calls = { branchCommitAt: [], mergedAt: [] };
+  const fetcher = {
+    async branchCommitAt(name) {
+      calls.branchCommitAt.push(name);
+      const fn = overrides.branchCommitAt;
+      return typeof fn === 'function' ? fn(name) : fn[name];
+    },
+    async mergedAt(name) {
+      calls.mergedAt.push(name);
+      const fn = overrides.mergedAt;
+      return typeof fn === 'function' ? fn(name) : fn[name];
+    },
+  };
+  return { fetcher, calls };
+}
+
+const rbChecks = [];
+function checkRb(name, fn) {
+  rbChecks.push(checkAsync(name, fn));
+}
+
+checkRb('RB0 (issue #703): a 404 on branchCommitAt resolves the candidate with a null latestCommitAt but STILL consults mergedAt -- no silent skip', async () => {
+  const { fetcher, calls } = stubFetcher({
+    branchCommitAt: name => {
+      if (name === '642-gone') {
+        const err = new Error('Branch not found');
+        err.status = 404;
+        throw err;
+      }
+      return iso(NOW - 60 * 60 * 1000);
+    },
+    mergedAt: name => (name === '642-gone' ? iso(NOW - 30 * 60 * 1000) : null),
+  });
+  const result = await resolveBranches(['642-gone', '642-still-here'], fetcher);
+  assert.deepStrictEqual(result, [
+    { name: '642-gone', latestCommitAt: null, mergedAt: iso(NOW - 30 * 60 * 1000) },
+    { name: '642-still-here', latestCommitAt: iso(NOW - 60 * 60 * 1000), mergedAt: null },
+  ]);
+  assert.deepStrictEqual(calls.branchCommitAt, ['642-gone', '642-still-here'], 'branchCommitAt must be called for every candidate');
+  assert.deepStrictEqual(calls.mergedAt, ['642-gone', '642-still-here'], 'mergedAt must be consulted even for the 404 candidate -- no silent skip');
+});
+
+checkRb('RB1 (issue #703): a NON-404 error from branchCommitAt rethrows out of resolveBranches -- never mapped to absence-of-proof', async () => {
+  const { fetcher, calls } = stubFetcher({
+    branchCommitAt: () => {
+      const err = new Error('Internal Server Error');
+      err.status = 500;
+      throw err;
+    },
+    mergedAt: () => null,
+  });
+  await assert.rejects(
+    () => resolveBranches(['642-flaky'], fetcher),
+    err => err.status === 500,
+    'a non-404 API failure must rethrow, loud, not resolve silently'
+  );
+  assert.deepStrictEqual(calls.branchCommitAt, ['642-flaky'], 'the stub was called -- this is not a silent skip');
 });
 
 // ── Blocked dead-man's-switch cases ──────────────────────────────────────────────────────────
@@ -235,19 +362,22 @@ check('B5: a CLAIM_MARKER comment does not count as blocked-notice liveness eith
 });
 
 // ── Completeness ──────────────────────────────────────────────────────────────────────────────
-const EXPECTED_CASES = 16;
-const ran = pass + fail;
-if (ran !== EXPECTED_CASES) {
-  console.log(
-    `FATAL: ${ran} case(s) reached a verdict, expected exactly EXPECTED_CASES=${EXPECTED_CASES} -- ` +
-      'a case that stops running silently must be loud, not green.'
-  );
-  process.exit(1);
-}
+const EXPECTED_CASES = 21;
 
-console.log(`RESULT: ${pass} passed, ${fail} failed, ${ran} total (EXPECTED_CASES=${EXPECTED_CASES})`);
-if (fail > 0) {
-  console.log(`Failing cases: ${failures.join(', ')}`);
-  process.exit(1);
-}
-process.exit(0);
+Promise.all(rbChecks).then(() => {
+  const ran = pass + fail;
+  if (ran !== EXPECTED_CASES) {
+    console.log(
+      `FATAL: ${ran} case(s) reached a verdict, expected exactly EXPECTED_CASES=${EXPECTED_CASES} -- ` +
+        'a case that stops running silently must be loud, not green.'
+    );
+    process.exit(1);
+  }
+
+  console.log(`RESULT: ${pass} passed, ${fail} failed, ${ran} total (EXPECTED_CASES=${EXPECTED_CASES})`);
+  if (fail > 0) {
+    console.log(`Failing cases: ${failures.join(', ')}`);
+    process.exit(1);
+  }
+  process.exit(0);
+});

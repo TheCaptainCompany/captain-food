@@ -3,6 +3,16 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#703 "Reaper follow-ups at the round ceiling"](https://github.com/TheCaptainCompany/captain-food/issues/703)
+> landed: `resolveBranches` extracted as a separate I/O-orchestration export, a `mergedAt` liveness
+> signal added (bounded by the same `liveAfter` as the commit signal), and the stranded wording fix
+> from `642-reaper-getbranch-race` carried into the rewritten region.** A branch deleted by a
+> just-merged PR now reads as live via the PR's immutable `merged_at`, closing the #702 review
+> finding and the merged-branch half of the rebase residual (BACKLOG.md "Stale-claim reaper"
+> updated to describe the third signal and the narrowed residual). `mergedAt` is resolved via
+> `pulls.list({ state: 'closed', head })` rather than `listPullRequestsAssociatedWithCommit`,
+> because the latter needs a commit SHA the reaper may not have for a branch that just 404'd.
+
 > ✅ **2026-08-28 — round-4 answers received and relayed to the whole roster
 > (ADR-20260812-143619): OVH facts pending the founder's console check, #703 picked next, and
 > "Always stay quiet" recorded as
