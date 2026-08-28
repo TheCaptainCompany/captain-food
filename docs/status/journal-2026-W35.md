@@ -3,6 +3,21 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#696 "OTP guard telemetry: refusal cohorts + the OVH gauge declaration"](https://github.com/TheCaptainCompany/captain-food/issues/696):
+> `otp_send_refused_total` gains a closed 3-value `region` attribute
+> (`north_america`/`non_eu_europe`/`rest_of_world`), closing the North-American refusal-cohort gap
+> ADR-20260813-021500 (#535) owed — a refused `+1` now buckets to `north_america` instead of
+> collapsing into `other`, without widening `dialing_code_label`'s per-code label set (attacker
+> cardinality stays 3 new values whatever code arrives).** The OVH prepaid-SMS-pack balance gauge
+> (`ovh_sms_credit_balance`) is declared NOT YET IMPLEMENTED, tracked by
+> [#699](https://github.com/TheCaptainCompany/captain-food/issues/699) — the ADR's second, higher-ranked
+> `OWED` item, monitoring's permanent-poll carve-out (ADR-20260810-231300). Two mutants planted and
+> reverted for evidence (bucket mapping deleted; unmatched code mints its own label), both red against
+> `telemetry::meters::otp_send::region_label`'s unit tests; a new `crates/server/tests/otp_refusal_region_metric.rs`
+> proves the bucket through the real `SmsSendAuthorizer::authorize` seam. `make validate` / `make
+> rust-quiet` green; `tools/codegen-rs/warning-baseline.json` +1 `obs-metric-no-emitter` (the
+> declared-but-silent OVH gauge, accepted per ADR-20260813-021500's second OWED item, closed by #699).
+
 > ✅ **2026-08-28 — the stale-claim reaper's #642 fix gets a recency bound: branch
 > `642-reaper-recency-bound`.** The independent review of the merged fix
 > ([#697 "The stale-claim reaper's liveness is a commit, not a mention — and parked items get a

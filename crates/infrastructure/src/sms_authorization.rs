@@ -108,7 +108,7 @@ impl SmsSendAuthorizer {
                     refusal,
                     SmsRefusal::StoreUnavailable { .. }
                 ));
-                Self::record_refusal(&refusal);
+                Self::record_refusal(&refusal, &dialing_code.0);
                 Err(refusal)
             }
         }
@@ -141,8 +141,8 @@ impl SmsSendAuthorizer {
             // The metric label is bounded by `otp_send::requested` itself (anything unknown collapses
             // to `other`), so passing the observed head here cannot mint time series.
             telemetry::meters::otp_send::requested(&head, false);
-            let refusal = SmsRefusal::CountryNotServed { dialing_code: head };
-            Self::record_refusal(&refusal);
+            let refusal = SmsRefusal::CountryNotServed { dialing_code: head.clone() };
+            Self::record_refusal(&refusal, &head);
             return Err(refusal);
         };
         let national = phone[code.len()..].to_string();
@@ -173,7 +173,7 @@ impl SmsSendAuthorizer {
                     refusal,
                     SmsRefusal::StoreUnavailable { .. }
                 ));
-                Self::record_refusal(&refusal);
+                Self::record_refusal(&refusal, &dialing_code.0);
                 Err(refusal)
             }
         }
@@ -182,8 +182,18 @@ impl SmsSendAuthorizer {
     /// One place decides how loud a refusal is. The global ceiling is the only one that turns real
     /// sign-ups away, so it is the only one that logs at ERROR: if it fires, either the ceiling is too
     /// low for real traffic or an attack is under way, and both need a human tonight.
-    fn record_refusal(refusal: &SmsRefusal) {
-        telemetry::meters::otp_send::refused(refusal.reason());
+    ///
+    /// `dialing_code` is the code the refusal was decided against — always known at every call site
+    /// even where the `SmsRefusal` variant itself does not carry it (a quota refusal fires only for a
+    /// number that already cleared the allowlist check) — and is passed straight to
+    /// `otp_send::refused` for the `region` bucket (#696). **No new span**: this path constructs none
+    /// today (`sms_authorization.rs` / `sms_guard.rs` have no `tracing::info_span!` or
+    /// `#[tracing::instrument]` anywhere), and building one is out of this change's scope — the
+    /// per-code detail #696 asks to keep off the metric therefore has nowhere to attach except a
+    /// `tracing::info!`/`tracing::error!` field, which the two ERROR/loud branches below already carry
+    /// (`reason`, `detail`); a plain-info refusal logs only `reason` today and stays that way here.
+    fn record_refusal(refusal: &SmsRefusal, dialing_code: &str) {
+        telemetry::meters::otp_send::refused(refusal.reason(), dialing_code);
         match refusal {
             SmsRefusal::GlobalCeilingReached => tracing::error!(
                 reason = refusal.reason(),

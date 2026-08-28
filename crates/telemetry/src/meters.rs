@@ -592,6 +592,43 @@ pub mod otp_send {
             .unwrap_or("other")
     }
 
+    /// The refusal-cohort fix OWED in ADR-20260813-021500 (#535, #696): a HAND-DECLARED business
+    /// segmentation, not ITU/geographic data — it exists only to make refused-but-unserved codes
+    /// countable without widening `dialing_code_label`'s per-code label set (which stays bounded to
+    /// what we SERVE, `LABELLED_DIALING_CODES` above, untouched by this table).
+    ///
+    /// `north_america` = `+1` and `+52`. `+1` is the code the ADR names directly (NANP's
+    /// premium-payout ranges billed as if they were a Boston number). `+52` (Mexico) is a DELIBERATE
+    /// CHOICE, not an omission: Mexican mobile termination is commonly bundled into the same
+    /// SMS-pumping campaigns the ADR's `+1` finding is about, and a reader must not have to guess
+    /// whether it was considered.
+    ///
+    /// `non_eu_europe` = European calling codes NOT already in `LABELLED_DIALING_CODES` above: `+7`
+    /// (Russia/Kazakhstan share the code), `+380` (Ukraine), `+90` (Turkey). Checked against the
+    /// served list before this table was written: `+41` (Switzerland) IS in `LABELLED_DIALING_CODES`,
+    /// so it is deliberately absent here — a served code keeps its per-code label on the REQUESTED
+    /// side and falls through to `rest_of_world` here, which is fine: this table exists to bucket the
+    /// codes we do NOT serve, not to re-describe the ones we do.
+    ///
+    /// Everything else — the true default — is `rest_of_world`.
+    ///
+    /// ATTACKER-CARDINALITY PROPERTY: whatever code arrives, this function returns ONE of exactly
+    /// three values. An attacker rotating dialing codes cannot mint a fourth label, however many
+    /// distinct codes they try — the same bound `dialing_code_label` gives the requested-side metric,
+    /// extended to refusals without reopening the cardinality risk that bounded it in the first place.
+    const NORTH_AMERICA_DIALING_CODES: &[&str] = &["+1", "+52"];
+    const NON_EU_EUROPE_DIALING_CODES: &[&str] = &["+7", "+380", "+90"];
+
+    fn region_label(dialing_code: &str) -> &'static str {
+        if NORTH_AMERICA_DIALING_CODES.contains(&dialing_code) {
+            "north_america"
+        } else if NON_EU_EUROPE_DIALING_CODES.contains(&dialing_code) {
+            "non_eu_europe"
+        } else {
+            "rest_of_world"
+        }
+    }
+
     fn requested_counter() -> &'static Counter<u64> {
         static C: OnceLock<Counter<u64>> = OnceLock::new();
         C.get_or_init(|| meter().u64_counter(metric::OTP_SEND_REQUESTED_TOTAL).build())
@@ -656,10 +693,21 @@ pub mod otp_send {
         );
     }
 
-    /// A send was refused by the guards (`otp_send_refused_total{reason}`). `reason` comes from
-    /// `SmsRefusal::reason()`, bounded by construction.
-    pub fn refused(reason: &str) {
-        refused_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    /// A send was refused by the guards (`otp_send_refused_total{reason, region}`). `reason` comes
+    /// from `SmsRefusal::reason()`, bounded by construction. `region` is [`region_label`] applied to
+    /// the dialing code the refusal was decided against (#696) — every refusal has one at the call
+    /// site (`SmsSendAuthorizer::authorize`/`peek`/`authorize_e164` all hold the code that was being
+    /// evaluated, even when the `SmsRefusal` variant itself does not carry it, e.g. a quota refusal on
+    /// an already-served number), so the label is populated for every reason, not only
+    /// `country_not_served`.
+    pub fn refused(reason: &str, dialing_code: &str) {
+        refused_counter().add(
+            1,
+            &[
+                KeyValue::new("reason", reason.to_string()),
+                KeyValue::new("region", region_label(dialing_code)),
+            ],
+        );
     }
 
     /// THE MONEY SEAM (`sms_send_total{result}`): one per message handed to the OVH sender.
@@ -679,6 +727,62 @@ pub mod otp_send {
         ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
         // Registers the callback on first declaration; idempotent afterwards.
         let _ = enforcing_gauge();
+    }
+
+    #[cfg(test)]
+    mod region_label_tests {
+        use super::region_label;
+
+        /// The #696 mutant: "the bucket mapping is deleted, everything collapses to `rest_of_world`
+        /// again" — the exact shape ADR-20260813-021500 owed a fix for on the REQUESTED side
+        /// (`dialing_code_label` collapsing `+1` into `other`). If the `north_america` arm is removed,
+        /// this is the assertion that reds.
+        #[test]
+        fn a_north_american_code_lands_in_north_america() {
+            assert_eq!(region_label("+1"), "north_america");
+            assert_eq!(region_label("+52"), "north_america", "Mexico is a declared, deliberate member");
+        }
+
+        #[test]
+        fn a_non_eu_european_code_lands_in_non_eu_europe() {
+            assert_eq!(region_label("+7"), "non_eu_europe");
+            assert_eq!(region_label("+380"), "non_eu_europe");
+            assert_eq!(region_label("+90"), "non_eu_europe");
+        }
+
+        /// `+41` is IN `LABELLED_DIALING_CODES` (Switzerland is served) and must NOT be reclassified
+        /// as `non_eu_europe` by this table — that would silently duplicate the served label with a
+        /// second, contradictory bucket for the same code.
+        #[test]
+        fn a_served_code_is_not_reclassified_as_non_eu_europe() {
+            assert_eq!(region_label("+41"), "rest_of_world");
+            assert_eq!(region_label("+33"), "rest_of_world");
+        }
+
+        /// The #696 mutant: "a code outside every table mints its own label" (e.g. formatting the
+        /// unmatched code into the returned string instead of returning the shared constant). Several
+        /// UNRELATED, never-declared codes must all collapse onto the SAME `rest_of_world` value —
+        /// proving the fallback is a closed constant, not a per-code mint — and every value produced,
+        /// across every case in this file, must be one of exactly the three declared buckets.
+        #[test]
+        fn an_unlabelled_code_never_mints_its_own_label() {
+            let never_declared = ["+999", "+888", "+212", "+61", "+81", "+combined-nonsense"];
+            for code in never_declared {
+                assert_eq!(
+                    region_label(code),
+                    "rest_of_world",
+                    "code {code} must collapse to the shared rest_of_world constant, not a label of its own"
+                );
+            }
+            let closed_set = ["north_america", "non_eu_europe", "rest_of_world"];
+            for code in ["+1", "+52", "+7", "+380", "+90", "+41", "+999", "+212"] {
+                assert!(
+                    closed_set.contains(&region_label(code)),
+                    "region_label({code}) = {} is outside the declared 3-value set",
+                    region_label(code)
+                );
+            }
+        }
     }
 }
 
