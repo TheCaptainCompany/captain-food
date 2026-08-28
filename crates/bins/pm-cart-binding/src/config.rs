@@ -274,6 +274,8 @@ pub struct Config {
     pub sms_send_backoff_seconds: String,
     /// THE KILL SWITCH AND THE ONLY CEILING ON THE BILL. Total OTP sends allowed platform-wide per rolling day, across every number. Once spent, every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` until the ceiling is raised — which DOES turn real sign-ups away, and is the correct trade against an unbounded invoice, but only because it is loud (`otp_send_refused_total{reason=global_ceiling}`, and each refusal logs at ERROR). THE DEFAULT IS A DELIBERATELY CONSERVATIVE GUESS, NOT A COSTED NUMBER. The per-message price of our OVH credit pack is not recorded anywhere in this repository, so no ceiling here can be derived — 200/day is chosen as "comfortably above any plausible V0 day in Tours, low enough that the worst overnight case is tens of euros rather than hundreds". It must be re-derived from the real EUR/SMS the day that price is known (see ADR-20260813-021500). OPERABLE WITHOUT A DEPLOY, two ways, and both matter: setting the env key and restarting the surface changes the ceiling persistently, while `UPDATE sms_send_quota SET sent_count = <big> WHERE quota_key = 'global:day'` stops sends IMMEDIATELY on a live system with no rollout at all (and `DELETE` on that row restores them). The second is the one to use at 02:00.
     pub sms_max_sends_per_day_global: i64,
+    /// IDENT-1 Phase A (ADR-20260818-004646, gate-then-stabilize; the ENFORCE_SERVICE_HOURS_GUARD pattern): ON, `resolve_read_scope`'s CUSTOMER arm resolves the caller's domain id from Postgres via the existing `CustomerReadRepository::by_auth_ref` bridge, keyed on the verified auth subject (`authRef`) -- the JWT's `captain_food.customer_id` claim is UNREAD for this decision. OFF -- the DEFAULT -- is today's behaviour byte for byte: the claim, already bound into the verified Principal at `authorize()` time, is trusted, no lookup, no I/O. The two paths are selected ONCE at startup/config-load, never a per-request fallback (a runtime try-Postgres-else-claim is the dual-path the ADR forbids): the gated-ON path contains no claim read at all for CUSTOMER read-scope resolution. A NoMapping row and a failed lookup BOTH fail closed to Public identically at the API boundary, distinguishably in telemetry (specs/observability.yaml#/customer-identity). Scope: CUSTOMER only -- RESTAURANT, RESTAURANT_ACCOUNT and RIDER have no sign-in operation in the DSL at all (STAFF-AUTH, DECISIONS §46), so there is no subject to key a mapping on for them; this key does not touch their claim reads. Flipping the default is a SEPARATE recorded decision after the gated form is smoked.
+    pub resolve_customer_identity_from_postgres: bool,
     /// The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
     pub enforce_service_hours_guard: bool,
     /// The Order-lane BIRTH routing (#588, ADR-20260816-040239 "deliver: is a lane ENQUEUE, not a foreign-stream append"). ON, PlaceOrderProcess's `deliver: OrderPlaced to: Order` step stops calling Repository::save on the Order's stream and instead stages a lane ENQUEUE that the delivery glue turns into an inbound_messages row INSIDE the same fenced transaction; the Order's own lane worker then appends the birth, and it is THAT delivery's Recorded verdict the acceptance deadline is keyed on. OFF — the DEFAULT — is today's behaviour byte for byte: the saga appends OrderPlaced (and CartCheckedOut) itself and no Order-lane message exists. What flipping it CHANGES, stated plainly: (a) the birth gains one lane hop of latency after the payment authorization commits — the order is still accepted acceptance-first, but the OrderPlaced row appears a beat later; (b) the birth's ENVELOPE changes — user_id/user_type and cause_id come from the mailbox row rather than the saga's system actor (no fold, view or projector reads either, verified in the ADR §2, and stored rows are NEVER backfilled); (c) one aggregate per transaction on the checkout saga's most expensive leg, where today Order-{id} and Cart-{id} are written in one; (d) the acceptance clock can arm at all, which is precondition (5) of ENFORCE_ACCEPTANCE_TIMEOUT below. ROLLBACK IS A FLIP, NOT A REDEPLOY: set it OFF and the next delivery appends the legacy way; already-routed births stay as they are (reversible in code, not in state — those rows exist). Both the monolith and any standalone worker fleet MUST read the same value; a split fleet would route some births and append others. Flipping the default is a SEPARATE recorded decision, and it is scoped to the Order/OrderPlaced pair alone — the other twelve deliver: steps keep the legacy append until each is moved by its own record.
@@ -422,6 +424,10 @@ impl Config {
         let sms_send_backoff_seconds = raw("SMS_SEND_BACKOFF_SECONDS");
         let sms_send_backoff_seconds = sms_send_backoff_seconds.unwrap_or_else(|| "30,120,600".to_string());
         let sms_max_sends_per_day_global = raw("SMS_MAX_SENDS_PER_DAY_GLOBAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(200);
+        let resolve_customer_identity_from_postgres = raw("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES")
+            .or_else(|| baked("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", profile).map(str::to_string))
+            .map(|v| parse_bool("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", &v, false))
+            .unwrap_or(false);
         let enforce_service_hours_guard = raw("ENFORCE_SERVICE_HOURS_GUARD")
             .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
             .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
@@ -525,6 +531,7 @@ impl Config {
                 sms_max_sends_per_number_per_day,
                 sms_send_backoff_seconds,
                 sms_max_sends_per_day_global,
+                resolve_customer_identity_from_postgres,
                 enforce_service_hours_guard,
                 route_order_birth_through_lane,
                 order_acceptance_timeout_seconds,
@@ -599,6 +606,7 @@ impl Config {
         out.push_str(&format!("  SMS_MAX_SENDS_PER_NUMBER_PER_DAY = {}\n", self.sms_max_sends_per_number_per_day));
         out.push_str(&format!("  SMS_SEND_BACKOFF_SECONDS   = {}\n", self.sms_send_backoff_seconds));
         out.push_str(&format!("  SMS_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.sms_max_sends_per_day_global));
+        out.push_str(&format!("  RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES = {}\n", self.resolve_customer_identity_from_postgres));
         out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
         out.push_str(&format!("  ROUTE_ORDER_BIRTH_THROUGH_LANE = {}\n", self.route_order_birth_through_lane));
         out.push_str(&format!("  ORDER_ACCEPTANCE_TIMEOUT_SECONDS = {}\n", self.order_acceptance_timeout_seconds));
@@ -609,7 +617,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 51;
+pub const KEY_COUNT: usize = 52;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -660,6 +668,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SMS_MAX_SENDS_PER_NUMBER_PER_DAY",
     "SMS_SEND_BACKOFF_SECONDS",
     "SMS_MAX_SENDS_PER_DAY_GLOBAL",
+    "RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES",
     "ENFORCE_SERVICE_HOURS_GUARD",
     "ROUTE_ORDER_BIRTH_THROUGH_LANE",
     "ORDER_ACCEPTANCE_TIMEOUT_SECONDS",

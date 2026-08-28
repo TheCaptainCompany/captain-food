@@ -101,6 +101,14 @@ pub use auth::AuthContext;
 // The verified request principal — exposed for the subscription-ownership integration tests
 // (the generated resolvers reach it as crate::auth::Principal).
 pub use auth::Principal;
+/// IDENT-1 Phase A (#641): the CUSTOMER identity-resolution seam, re-exported so integration tests
+/// can drive `graphql_routes` under either mode and plant a fake `ResolveCustomerIdentity`, and
+/// exercise `resolve_read_scope` directly over a REAL verified `Principal` (its own constructors
+/// stay module-private — only `AuthContext::authorize` produces one).
+pub use auth::{
+    resolve_read_scope, CustomerIdentityResolution, CustomerIdentitySource, LookupFailureReason,
+    PgCustomerIdentity, ResolveCustomerIdentity,
+};
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
 pub use graphql::schema as graphql_schema;
@@ -561,6 +569,10 @@ pub async fn router() -> Router {
     let mut read_deps: Option<ReadDeps> = None;
     // The host fallback's tenant lookup (#98): decides registered-vs-unclaimed for {slug} hosts.
     let mut tenant_lookup = hosts::TenantLookup(None);
+    // IDENT-1 Phase A (#641, ADR-20260818-004646): the CUSTOMER identity-resolution mode, selected
+    // ONCE here from the DECLARED configuration — never a per-request fallback. DEFAULT (and the
+    // only reachable value without a database) is the legacy claim path.
+    let mut customer_identity_source = auth::CustomerIdentitySource::Claim;
     // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
     // fail-closed no-op (parking succeeds, claiming yields nothing → no cookie, anonymous still works).
     let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
@@ -630,6 +642,15 @@ pub async fn router() -> Router {
                         config.service_window_validity_horizon_seconds,
                     ),
                 );
+                // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
+                // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already
+                // carries (vernon/evans: reuse the port, never re-derive it), so the seam reads
+                // through the identical `by_auth_ref` bridge the `me` query resolves through.
+                if config.resolve_customer_identity_from_postgres {
+                    customer_identity_source = auth::CustomerIdentitySource::Postgres(Arc::new(
+                        auth::PgCustomerIdentity::new(di.read.customers.clone()),
+                    ));
+                }
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
                 // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
@@ -1329,7 +1350,11 @@ pub async fn router() -> Router {
         ),
     };
 
-    base.merge(graphql::routes::graphql_routes(schema, tenant_lookup.clone()))
+    base.merge(graphql::routes::graphql_routes(
+        schema,
+        tenant_lookup.clone(),
+        customer_identity_source,
+    ))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))
         // Internal trigger (ADR-20260720-015400): ops ping to wake the inbound-events drain worker.

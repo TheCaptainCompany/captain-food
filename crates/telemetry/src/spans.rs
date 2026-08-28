@@ -223,6 +223,37 @@ pub fn record_correlation_id(span: &Span, correlation_id: &str) {
     span.record(attr::CORRELATION_ID, correlation_id);
 }
 
+/// `customer.identity.resolve` (INTERNAL) — one Postgres-mode CUSTOMER identity resolution at the
+/// request seam (`customer-identity` contract, #641, IDENT-1 Phase A). A CHILD of `auth.read_scope`
+/// (opened only for the CUSTOMER role, only when the gate is ON): never emitted in claim mode, the
+/// DEFAULT, and never for a non-CUSTOMER role — the claim is UNREAD in this path.
+///
+/// `business.result` / `business.failure_reason` / `otel.status_code` are late-bound: the outcome
+/// is only known after the seam answers. `otel.status_code` is declared for the same reason
+/// `cart.price` declares it — the contract's `technical_error: any_span_errors` rule needs a field
+/// a failure can actually set, or every failed lookup exports as a plain success.
+pub fn customer_identity_resolve(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "customer.identity.resolve",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        business.failure_reason = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the seam's typed outcome. `reason` is `Some` only for `lookup_failed` — the coarse
+/// `DomainError` class, never carried for `resolved`/`not_found`. A `lookup_failed` outcome also
+/// sets OTel ERROR status, matching the contract's `technical_error` classification.
+pub fn record_customer_identity_resolve_result(span: &Span, result: &str, reason: Option<&str>) {
+    span.record(attr::RESULT, result);
+    if let Some(reason) = reason {
+        span.record(attr::FAILURE_REASON, reason);
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 // --- late-bound recorders -----------------------------------------------------------------------
 //
 // Each takes the span explicitly rather than using `Span::current()`. After an `.instrument(..).await`

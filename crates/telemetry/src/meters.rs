@@ -544,6 +544,58 @@ pub mod cart_price {
     }
 }
 
+/// Technical metrics for the `customer-identity` contract (#641, IDENT-1 Phase A): the
+/// request-seam CUSTOMER identity resolution (`RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES`).
+pub mod customer_identity {
+    use super::*;
+
+    fn resolve_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::CUSTOMER_IDENTITY_RESOLVE_MS).with_unit("ms").build()
+        })
+    }
+
+    fn not_found_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CUSTOMER_IDENTITY_NOT_FOUND_TOTAL).build())
+    }
+
+    fn lookup_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CUSTOMER_IDENTITY_LOOKUP_FAILED_TOTAL).build())
+    }
+
+    fn lookup_source_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::CUSTOMER_IDENTITY_LOOKUP_SOURCE_TOTAL).build())
+    }
+
+    /// `customer_identity_resolve_ms{result}` — one Postgres-mode CUSTOMER resolution.
+    pub fn duration(elapsed_ms: f64, result: &str) {
+        resolve_histogram().record(elapsed_ms, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `customer_identity_not_found_total` — the verified subject carries no mapping row (yet): an
+    /// ORDINARY provisioning gap, fails closed to Public. OBSERVE, never PAGE.
+    pub fn not_found() {
+        not_found_counter().add(1, &[]);
+    }
+
+    /// `customer_identity_lookup_failed_total{reason}` — the seam itself could not be asked, a
+    /// DEFECT distinct from [`not_found`] because the operator response is the OPPOSITE one: PAGE
+    /// on any sustained non-zero rate.
+    pub fn lookup_failed(reason: &str) {
+        lookup_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `customer_identity_lookup_source_total{source}` (`db` | `request_reuse`) — so request-scoped
+    /// reuse can never hide an outage behind a cache hit.
+    pub fn lookup_source(source: &str) {
+        lookup_source_counter().add(1, &[KeyValue::new("source", source.to_string())]);
+    }
+}
+
 /// Technical metrics for the `customer-identification` contract (#437).
 pub mod customer_identification {
     use super::*;

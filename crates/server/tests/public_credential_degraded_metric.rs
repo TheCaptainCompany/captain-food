@@ -84,6 +84,7 @@ async fn router() -> axum::Router {
     server::graphql_routes(
         server::graphql_schema::build_schema(None, None, None),
         server::TenantLookup(None),
+        server::CustomerIdentitySource::Claim,
     )
     .layer(axum::Extension(server::AuthContext::from_config(
         jwks_endpoint().await,

@@ -46,6 +46,7 @@ use jsonwebtoken::{
 };
 use serde::Deserialize;
 use tokio::sync::RwLock;
+use tracing::Instrument;
 
 use crate::graphql::acl::RequestRole;
 
@@ -1927,6 +1928,121 @@ fn claim_uuid(v: &Option<String>) -> Option<uuid::Uuid> {
     v.as_deref().and_then(|s| uuid::Uuid::parse_str(s).ok())
 }
 
+// =====================================================================================
+// IDENT-1 Phase A (ADR-20260818-004646, #641) — the request-seam translation from the verified
+// auth SUBJECT (`authRef`) to the CUSTOMER's domain identity, resolved from Postgres INSTEAD OF
+// the JWT `captain_food.customer_id` claim, gated by `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES`
+// (specs/customer/configuration.yaml, DEFAULT off). Scope: CUSTOMER only — the other three roles
+// have no sign-in operation in the DSL at all (STAFF-AUTH, DECISIONS §46), so there is no subject
+// to key a mapping on for them; their claim reads are untouched.
+// =====================================================================================
+
+/// The request-seam TRANSLATION from the verified auth subject to this product's CUSTOMER domain
+/// identity (evans: named for the translation it performs — `authRef` is the vocabulary, never
+/// `sub`, in identifiers/spans/metric names). Deciders/scope logic receive the [`CustomerIdentityResolution`]
+/// RESULT; only implementations of this trait perform I/O.
+#[async_trait::async_trait]
+pub trait ResolveCustomerIdentity: Send + Sync {
+    /// `auth_ref` is the verified Supabase `sub` — already authenticated by [`AuthContext::authorize`],
+    /// never attacker-controlled at this point.
+    async fn resolve(&self, auth_ref: &str) -> CustomerIdentityResolution;
+}
+
+/// The seam's typed THREE-WAY outcome. A bare `Option<CustomerId>` would collapse "no mapping row"
+/// and "could not ask" into one signal — the ADR requires them distinguishable, because they fail
+/// closed IDENTICALLY at the API boundary (both become `ReadScope::Public`) but have OPPOSITE
+/// operator responses: a missing mapping is an ordinary provisioning gap (OBSERVE), a failed
+/// lookup means the identity seam itself is unavailable (PAGE).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CustomerIdentityResolution {
+    /// The verified subject maps to this CUSTOMER.
+    Resolved(domain::generated::scalars::CustomerId),
+    /// The subject is verified but carries no Customer.auth_ref mapping — ordinary (a
+    /// not-yet-provisioned or genuinely unmapped subject), never an outage signal on its own.
+    NoMapping,
+    /// The lookup itself could not be answered (a repository/adapter failure) — distinct from
+    /// [`CustomerIdentityResolution::NoMapping`] because THIS is the outage class.
+    LookupFailed(LookupFailureReason),
+}
+
+/// The coarse, CLOSED set of reasons a lookup can fail — safe as a telemetry label (never the
+/// underlying error string, which is unbounded cardinality on a labeled series).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LookupFailureReason {
+    /// A repository/adapter failure (`DomainError::Repository`) — the ordinary shape for a DB
+    /// outage or timeout.
+    Repository,
+    /// `DomainError::Invariant` — a legacy stringly-typed failure surfacing through this port.
+    Invariant,
+    /// `DomainError::Rejected` — an anticipated `errors.yaml` code surfacing through a read port
+    /// that does not normally reject; kept distinct rather than silently folded into `Repository`.
+    Rejected,
+}
+
+impl LookupFailureReason {
+    /// The telemetry label — the contract's bounded `reason` attribute value.
+    fn label(self) -> &'static str {
+        match self {
+            LookupFailureReason::Repository => "repository",
+            LookupFailureReason::Invariant => "invariant",
+            LookupFailureReason::Rejected => "rejected",
+        }
+    }
+
+    fn from_domain_error(e: &domain::shared::errors::DomainError) -> Self {
+        match e {
+            domain::shared::errors::DomainError::Repository(_) => LookupFailureReason::Repository,
+            domain::shared::errors::DomainError::Invariant(_) => LookupFailureReason::Invariant,
+            domain::shared::errors::DomainError::Rejected { .. } => LookupFailureReason::Rejected,
+        }
+    }
+}
+
+/// The Postgres implementation: wraps the EXISTING `CustomerReadRepository::by_auth_ref` bridge
+/// (already the `me` query's mechanism) rather than re-deriving the query (vernon/evans — reuse
+/// the port, don't duplicate it).
+pub struct PgCustomerIdentity {
+    customers: Arc<dyn application::queries::CustomerReadRepository>,
+}
+
+impl PgCustomerIdentity {
+    pub fn new(customers: Arc<dyn application::queries::CustomerReadRepository>) -> Self {
+        Self { customers }
+    }
+}
+
+#[async_trait::async_trait]
+impl ResolveCustomerIdentity for PgCustomerIdentity {
+    async fn resolve(&self, auth_ref: &str) -> CustomerIdentityResolution {
+        match self
+            .customers
+            .by_auth_ref(domain::generated::scalars::ExternalReference(auth_ref.to_string()))
+            .await
+        {
+            Ok(Some(row)) => CustomerIdentityResolution::Resolved(row.customer_id),
+            Ok(None) => CustomerIdentityResolution::NoMapping,
+            Err(e) => {
+                CustomerIdentityResolution::LookupFailed(LookupFailureReason::from_domain_error(&e))
+            }
+        }
+    }
+}
+
+/// Where the CUSTOMER's domain identity comes from — selected ONCE at startup/config-load from
+/// `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES`, and NEVER a per-request fallback
+/// (gate-then-stabilize; the ADR forbids a runtime try-Postgres-else-claim dual path): the mode is
+/// fixed for the process's lifetime and cloned into every request's `GraphqlState`
+/// (`crate::graphql::routes`). The gated-ON path reads no claim at all for this decision — see
+/// [`resolve_customer_scope`], whose match arm destructures `Identity::Customer` as `{ sub, .. }`.
+#[derive(Clone)]
+pub enum CustomerIdentitySource {
+    /// DEFAULT (config default `false`). The legacy JWT claim path — [`read_scope`], unchanged, no
+    /// I/O — byte for byte the pre-Phase-A behaviour.
+    Claim,
+    /// The gated-ON path (config `true`): resolve through the seam instead of trusting the claim.
+    Postgres(Arc<dyn ResolveCustomerIdentity>),
+}
+
 /// Resolve a verified [`Principal`] into the application's [`application::queries::ReadScope`] —
 /// a PURE function of the token's verified claims (#433, ADR-20260809-050000 CARD-11: the
 /// login-to-domain bridge lives in JWT claims for EVERY role; product-owner correction on #430).
@@ -1978,9 +2094,65 @@ fn role_label(role: RequestRole) -> &'static str {
     }
 }
 
-/// [`read_scope`] under the contract's `auth.read_scope` span (ONE per request), stamped with the
-/// request's correlation id. This is the transport entry point; the pure function above is the
-/// logic.
+/// [`read_scope`] for every identity/mode combination EXCEPT one: a verified `Identity::Customer`
+/// under [`CustomerIdentitySource::Postgres`] resolves through the seam instead — the claim is
+/// UNREAD, structurally, because the match arm below destructures `Identity::Customer` as
+/// `{ sub, .. }` and never binds `customer_id` at all. Every other role, and the CUSTOMER role
+/// under [`CustomerIdentitySource::Claim`] (the default), is exactly [`read_scope`]: pure, no I/O.
+///
+/// `NoMapping` and `LookupFailed` both resolve to `ReadScope::Public` — fail closed, identically at
+/// this boundary — but are DISTINGUISHABLE in telemetry (`customer-identity` contract, #641):
+/// `NoMapping` is OBSERVE (an ordinary provisioning gap), `LookupFailed` is PAGE (the seam itself
+/// is unavailable).
+async fn resolve_customer_scope(
+    principal: &Principal,
+    correlation_id: crate::graphql::session::RequestCorrelationId,
+    customer_identity: &CustomerIdentitySource,
+) -> application::queries::ReadScope {
+    use application::queries::ReadScope;
+
+    let (sub, resolver) = match (&principal.identity, customer_identity) {
+        (Identity::Customer { sub, .. }, CustomerIdentitySource::Postgres(resolver)) => {
+            (sub.clone(), resolver.clone())
+        }
+        // Every other combination — every non-CUSTOMER role, an Unbound/Anonymous CUSTOMER caller,
+        // or CustomerIdentitySource::Claim (the default) — is the unchanged pure claims function.
+        _ => return read_scope(principal),
+    };
+
+    let span = telemetry::spans::customer_identity_resolve(&correlation_id.0.to_string());
+    let started = std::time::Instant::now();
+    let outcome = resolver.resolve(&sub).instrument(span.clone()).await;
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let (scope, result, reason) = match &outcome {
+        CustomerIdentityResolution::Resolved(customer_id) => {
+            (ReadScope::Customer(*customer_id), "resolved", None)
+        }
+        CustomerIdentityResolution::NoMapping => {
+            telemetry::meters::customer_identity::not_found();
+            (ReadScope::Public, "not_found", None)
+        }
+        CustomerIdentityResolution::LookupFailed(reason) => {
+            telemetry::meters::customer_identity::lookup_failed(reason.label());
+            (ReadScope::Public, "lookup_failed", Some(reason.label()))
+        }
+    };
+    telemetry::spans::record_customer_identity_resolve_result(&span, result, reason);
+    telemetry::meters::customer_identity::duration(elapsed_ms, result);
+    // Phase A resolves read scope exactly ONCE per request (both call sites, HTTP POST and WS
+    // connection_init) — every actual lookup is a real Postgres round trip. `request_reuse` is
+    // declared in the contract for a later resolver reusing this seam's result within the same
+    // request; it is not reachable from this change alone, and this counter guarantees that shape
+    // can never silently hide an outage once it exists.
+    telemetry::meters::customer_identity::lookup_source("db");
+    scope
+}
+
+/// [`resolve_customer_scope`] under the contract's `auth.read_scope` span (ONE per request),
+/// stamped with the request's correlation id. This is the transport entry point; the function
+/// above resolves the CUSTOMER-Postgres arm, delegating everything else to [`read_scope`], the pure
+/// claims function.
 ///
 /// The id is PASSED IN, never minted here (#451 Phase 2b): reads carry no command envelope, so the
 /// server mints `request.correlation_id` once at the transport boundary
@@ -1988,13 +2160,21 @@ fn role_label(role: RequestRole) -> &'static str {
 /// `auth.read_scope` here, `cart.price` at the pricing seam — records the SAME value. Minting one
 /// per span made a single request emit several unrelated ids, which is the attribute present and
 /// the correlation absent.
-pub fn resolve_read_scope(
+///
+/// `customer_identity` is resolved ONCE at startup/config-load and REUSED across every request of
+/// the process (`CustomerIdentitySource`, gate-then-stabilize) — never a per-request fallback: the
+/// Postgres arm, when selected, never falls back to the claim on `NoMapping` or `LookupFailed`,
+/// both of which fail closed to `Public` instead.
+pub async fn resolve_read_scope(
     principal: &Principal,
     correlation_id: crate::graphql::session::RequestCorrelationId,
+    customer_identity: &CustomerIdentitySource,
 ) -> application::queries::ReadScope {
     let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role()));
     span.record("business.correlation_id", correlation_id.0.to_string().as_str());
-    let scope = span.in_scope(|| read_scope(principal));
+    let scope = resolve_customer_scope(principal, correlation_id, customer_identity)
+        .instrument(span.clone())
+        .await;
     telemetry::spans::record_bridge_resolved(
         &span,
         !matches!(scope, application::queries::ReadScope::Public)
