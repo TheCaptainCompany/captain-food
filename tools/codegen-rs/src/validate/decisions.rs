@@ -214,14 +214,37 @@ pub(crate) fn parse_decision_rows(files: &[(String, String)], issues: &mut Vec<I
     rows
 }
 
+/// The v2 key grammar (PROP-20260819-110442 D5 / slice 5, decided by ADR-20260828-153000): `--` is
+/// no longer bare-reserved, it is the ONE namespace separator for the per-proposal `D1`-`D7` family
+/// — `<PROPOSAL-ID>--<LOCAL>` (e.g. `PROP-20260809-003000--D1`). At most one `--` per key: a bare
+/// ambiguous local name (`D1`, 2 chars) still fails the base length floor unchanged, and two
+/// separators or an empty half are still illegal syntax. The namespace's SHAPE is checked here
+/// (must be a `PROP-` stamp); whether it actually RESOLVES to a committed proposal is a semantic
+/// check in `validate_decision_rows` (`decision-key-namespace-dangling`), because that needs the
+/// injected record resolver this pure function does not have.
 fn valid_key(key: &str) -> bool {
     let bytes = key.as_bytes();
-    key.len() >= 3
+    let base_shape = !key.is_empty()
         && key.len() <= 64
         && bytes[0].is_ascii_uppercase()
         && key.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
-        && !key.contains("--") // reserved: the future namespace separator for the D1–D7 family (slice 5)
-        && !key.ends_with('-')
+        && !key.ends_with('-');
+    if !base_shape {
+        return false;
+    }
+    match key.match_indices("--").count() {
+        0 => key.len() >= 3,
+        1 => {
+            let idx = key.find("--").expect("counted above");
+            let ns = &key[..idx];
+            let local = &key[idx + 2..];
+            !ns.is_empty()
+                && !local.is_empty()
+                && !local.starts_with('-')
+                && ns.strip_prefix("PROP-").map(is_stamp).unwrap_or(false)
+        }
+        _ => false, // more than one `--` — the separator is reserved singular, never a general delimiter
+    }
 }
 
 fn valid_date(s: &str) -> bool {
@@ -288,10 +311,27 @@ pub(crate) fn validate_decision_rows(
                 "decision-key-grammar",
                 path.clone(),
                 format!(
-                    "key `{}` violates the v1 key grammar `^[A-Z][A-Z0-9-]{{2,63}}$` (no `--`, no trailing `-`; `--` is reserved for the future namespaced-key encoding of the D1–D7 family, PROP-20260819-110442 D5 / slice 5).",
+                    "key `{}` violates the v2 key grammar `^[A-Z][A-Z0-9-]{{2,63}}$`, optionally with exactly ONE `--` splitting it into `<PROPOSAL-ID>--<LOCAL>` (e.g. `PROP-20260809-003000--D1`) — the namespace must itself look like a `PROP-YYYYMMDD-HHMMSS` stamp, neither half may be empty or start/end with `-`, and a second `--` is illegal (PROP-20260819-110442 D5 / slice 5, ADR-20260828-153000). A bare local name this short (e.g. `D1`) still fails the base length floor on its own — namespace it.",
                     r.stem
                 ),
             ));
+        } else if let Some(idx) = r.stem.find("--") {
+            // Syntactically a namespaced key (valid_key already proved the namespace half LOOKS
+            // like a `PROP-` stamp) — now prove it RESOLVES. A namespace that parses but names no
+            // committed proposal is a dangling reference the moment it is created, and the DO-NOT-
+            // GUESS discipline this same slice writes for key OWNERSHIP applies equally to key
+            // EXISTENCE: a key must point at a real proposal, not a plausible-looking one.
+            let ns = &r.stem[..idx];
+            if !record_exists(ns) {
+                issues.push(err(
+                    "decision-key-namespace-dangling",
+                    path.clone(),
+                    format!(
+                        "key `{}` namespaces to `{}`, which resolves to no file under docs/proposals/ — a namespace is migrated (the proposal exists) before a key points at it.",
+                        r.stem, ns
+                    ),
+                ));
+            }
         }
 
         // Required-always fields.

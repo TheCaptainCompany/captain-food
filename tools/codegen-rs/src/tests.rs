@@ -10304,7 +10304,9 @@ mod decisions_register {
         assert!(check(&[("docs/decisions/ROW-A.yaml", &stray_succ)], &[]).contains(&"decision-status-field-conflict".to_string()));
         // Key/filename mismatch.
         assert!(check(&[("docs/decisions/ROW-Z.yaml", OPEN_OK)], &[]).contains(&"decision-key-file-mismatch".to_string()));
-        // The v1 key grammar reserves `--` for the future D1–D7 namespacing.
+        // A `--` namespace whose left half is not a `PROP-` stamp is still bad grammar under the
+        // v2 grammar (ADR-20260828-153000) — `ROW` does not even look like a proposal id, so this
+        // never reaches the resolution check.
         let ns = OPEN_OK.replace("ROW-A", "ROW--A");
         assert!(check(&[("docs/decisions/ROW--A.yaml", &ns)], &[]).contains(&"decision-key-grammar".to_string()));
         // A migrated key still on the legacy allowlist = two authorities for one fact.
@@ -10315,6 +10317,47 @@ mod decisions_register {
         // A multi-line question is a topic essay, not the index's answerable question.
         let multiline = OPEN_OK.replace("question: \"Q?\"", "question: \"Q\\nand more\"");
         assert!(check(&[("docs/decisions/ROW-A.yaml", &multiline)], &[]).contains(&"decision-question-missing".to_string()));
+    }
+
+    // ─── v2 key grammar — `--` namespacing (PROP-20260819-110442 D5 / slice 5, ADR-20260828-153000,
+    // #658) — red-first, per the dispatch's own acceptance clause.
+    #[test]
+    fn a_bare_ambiguous_local_key_still_reds_on_the_length_floor() {
+        // The whole point of the D1-D7 family being ambiguous is that a bare local name is too
+        // short to be a real key on its own — namespacing does not relax that, it is the only fix.
+        let bare = OPEN_OK.replace("ROW-A", "D1");
+        assert!(check(&[("docs/decisions/D1.yaml", &bare)], &[]).contains(&"decision-key-grammar".to_string()));
+    }
+
+    #[test]
+    fn two_separators_in_one_key_reds() {
+        let two_dashes = OPEN_OK.replace("ROW-A", "PROP-20260819-110442--D1--EXTRA");
+        assert!(
+            check(&[("docs/decisions/PROP-20260819-110442--D1--EXTRA.yaml", &two_dashes)], &[])
+                .contains(&"decision-key-grammar".to_string()),
+            "`--` is a singular reserved separator, never a general delimiter"
+        );
+    }
+
+    #[test]
+    fn a_syntactically_shaped_but_unresolving_namespace_reds() {
+        // `PROP-29990101-000000` is a `PROP-` stamp SHAPE (passes `valid_key`) but names no
+        // committed proposal — the resolution half of the check, injected via the record resolver.
+        let dangling = OPEN_OK.replace("ROW-A", "PROP-29990101-000000--D1");
+        assert!(
+            check(&[("docs/decisions/PROP-29990101-000000--D1.yaml", &dangling)], &[])
+                .contains(&"decision-key-namespace-dangling".to_string()),
+            "a namespace is migrated (the proposal exists) before a key points at it"
+        );
+    }
+
+    #[test]
+    fn a_properly_namespaced_key_with_a_resolving_proposal_is_green() {
+        // The fixture corpus's one `proposal_files` entry is `PROP-20260819-110442-...`, so this
+        // namespace resolves — the row is otherwise `OPEN_OK`'s shape, so this must be fully green.
+        let good = OPEN_OK.replace("ROW-A", "PROP-20260819-110442--D1");
+        let rules = check(&[("docs/decisions/PROP-20260819-110442--D1.yaml", &good)], &[]);
+        assert!(rules.is_empty(), "a properly namespaced key with a resolving proposal must be green, got: {:?}", rules);
     }
 
     #[test]
