@@ -3,6 +3,41 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#659 "Gate the STATUS.md journal split"](https://github.com/TheCaptainCompany/captain-food/issues/659)
+> lands scoped to A2/A3/A5 — the assertions that bind to a real artifact — and its own first run
+> found (and fixed) two live corpus defects.** New `tools/codegen-rs/src/validate/status.rs` (§24,
+> always-run, errors not warnings): A2 no dated journal-entry opener may remain in `docs/STATUS.md`
+> (loud failure if the file is missing/unreadable, never a silent "zero found"); A3 every journal
+> entry, parsed structurally (blank-line-delimited paragraphs, never positional order), sits in the
+> ISO-week file its own opener date derives — proleptic-Gregorian arithmetic hand-rolled (Howard
+> Hinnant's algorithms; no date crate in this workspace) since a regex only constrains digit count,
+> never calendar validity; A5 the validator derives every entry count itself, and any `"<N> journal
+> entries"`/`"<N> entries total"` claim found in the corpus is checked against that derived truth,
+> never trusted. **A1's index-row term and A4 (byte-preserving rendered-index headlines) are NOT
+> built**: both gate a rendered "recent-changes index" that only ever existed on an abandoned branch
+> (`3a207eb7`, never merged) — `#665` (merged 2026-08-21) shipped a simpler design instead, a bare
+> link list with no per-entry rendering, so there is no index artifact left to check (coordinator
+> decision on `#659`/`#711`, correcting the hand-back's finding).
+>
+> **First run was red twice, both fixed in this commit, never the gate weakened.** (1) Four
+> 2026-08-24 entries (the decision-lookup slice-A/B/C + fast-follow work) sat in
+> `journal-2026-W34.md` — 2026-08-24 is ISO week 35 — left there, per a note already in
+> `journal-2026-W35.md`, only because "this file [W35] existed" yet when they were written; moved
+> to the end of `journal-2026-W35.md` (after the entry they chronologically follow), byte-identical,
+> and the now-obsolete boundary note removed. (2) `journal-2026-W30.md`'s `2026-07-20` entry used an
+> older `**LANDED (2026-07-20): …**` phrasing that predates the `**DATE — …` convention every other
+> entry follows (the founder's own 220-of-220 opener measurement was against a corpus without this
+> row); reworded to `**2026-07-20 — LANDED: …**`, content otherwise untouched.
+>
+> **Red-first, real-corpus injection (`an_eighth_break_in_the_real_register_is_caught`'s shape)**: a
+> stranded opener planted into `STATUS.md` (caught, exact line); a 2026-08-19 (W34) entry planted
+> into `journal-2026-W35.md` (caught, exact line, neither sibling file affected); a false per-file
+> declared count and a false declared corpus-wide total, each planted into the real corpus, each
+> caught against what the validator itself derives. 14 new
+> tests (`tools/codegen-rs/src/tests.rs`, `mod status_journal_gate`), all green; 307/307 codegen
+> tests green; `make validate` 0 errors; `make rust` clean (no generated-artifact drift — this
+> change touches no spec/model).
+
 > ✅ **2026-08-28 — [#660 "STATUS.md's durable sections are stale and are now read first"](https://github.com/TheCaptainCompany/captain-food/issues/660)
 > corrected: STATUS.md contradicted itself within 170 lines.** The Deployment table still showed
 > Render (Frankfurt) / Supabase Postgres as ✅ current while the same file, further down, already
@@ -526,12 +561,6 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > nothing tested it. Added. And the four push mutants anchored on the old literal all reported
 > *"this plant is now vacuous"* the moment the trigger changed — the guard review #10 asked for,
 > doing its job on the first edit that could have silently defeated it.
-
-
-> **Week boundary, recorded once so the next reader does not hunt**: 2026-08-24 is ISO week **35**,
-> but several entries dated 2026-08-24 sit in [`journal-2026-W34.md`](journal-2026-W34.md) — earlier
-> sessions filed them there before this file existed. They are left where they are rather than
-> rewritten; W34 is the place to look for the earlier part of that day.
 
 > ✅ **2026-08-24 — RETRIEVAL-QMD-CI decided: the decision-lookup stub suite now runs in CI, and
 > the mob's briefing found four disarm mutants alive in the gate it was told to copy.** Founder
@@ -3431,3 +3460,156 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > (ADR-20260808-235113), which normally forbids one. Legitimate — the locus is `RETRIEVAL-QMD-CI`'s
 > to authorize and the final step is designed and recorded in that very row — but the row now says so
 > rather than letting whoever closes it believe the interim was neutral.
+
+> 🔧 **2026-08-24 — decision-lookup fast-follow: the probe verdict is narrowed to what can
+> actually testify, and two tests that were passing for the wrong reason are fixed** (separately
+> authorized; the reviewer-classified non-blocking findings recorded on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671) during the PR #674 and
+> #675 reviews). **A DECISION BOUNDARY WAS ATTEMPTED AND WITHDRAWN — the instrument was wrong.**
+> The recorded fast-follow "wire the stub suite into CI" is a CI change, and both the
+> `RETRIEVAL-QMD` row and PROP-20260822-171212 §"Non-goals" send CI changes to a NEW decision
+> row. The first attempt appended an `AMENDMENT` paragraph to the `evidence:` of that *decided*
+> row — which `docs/decisions/README.md` forbids: a decided row is challenged by a new open row
+> carrying `reconsiders:`, and `superseded_by` is the ONE legal edit to it. The independent
+> review caught it; the edit was reverted and the CI wiring dropped from the change. **The
+> lesson, worth the cost**: an unauthorized change can be honestly scoped in CONTENT (it was —
+> exactly one CI step and one pin) and still be recorded with the wrong INSTRUMENT, and the
+> instrument is what a future session can check. The question now sits as the open row
+> `RETRIEVAL-QMD-CI` (`docs/decisions/RETRIEVAL-QMD-CI.yaml`, `reconsiders: RETRIEVAL-QMD`) for
+> the founder, not as prose inside the artifact it would authorize.
+> **What landed** — wrapper: the probe's verdict arm classifies with
+> `isinstance(e, getattr(sqlite3, "Error", ()))`, so a failure of the CALL (an interpreter whose
+> `connect()` lacks the `uri=`/`timeout=` kwargs, or a shim module with no `Error` attribute at
+> all — where a bare `except sqlite3.Error:` would raise AttributeError while evaluating the
+> clause and exit 1) is never a corruption verdict; the caller dispatches on the **exit status**
+> rather than a command substitution, with the probe's stdout silenced, so interpreter noise (a
+> printing `sitecustomize.py`) cannot reshape the one verdict that wipes; `bun.lock` is read with
+> an explicit `encoding="utf-8"`; and the "lookups are sequential" justification is now stated as
+> an ACCEPTED ASSUMPTION with its bounded consequence.
+> **Two tests were passing for the wrong reason, and that is the sharper finding.** (1) T3b/T3c's
+> "no install dir" assertion could not fail: `mkdir` was absent from their controlled PATH, so the
+> wrapper physically could not create the dir whatever the ordering — the assertion survived the
+> very mutant it existed to catch (moving `mkdir -p "$TOOL"` above the preflight). `mkdir` is now
+> on that PATH and the reordering mutant genuinely reddens both cases. (2) The ASCII-locale
+> precondition compared `getpreferredencoding()` to the string `"utf-8"`, which is case-sensitive
+> and alias-blind (`UTF-8`, musl's C locale), so on such a host it would declare an ASCII locale
+> reached while running under UTF-8 — vacuously green with the `encoding=` fix removed. It now
+> asserts the PROPERTY: a locale-dependent `open()` of the fixture must actually raise.
+> **T15g's skip is gated on an ASCII control**: skipping on any `mkdir` failure would have
+> swallowed ENOSPC/EROFS/EACCES as "filesystem rejects non-UTF-8 names" — coverage vanishing at
+> exit 0. Control succeeds AND the `\375` name fails ⇒ skip; control fails ⇒ loud failure.
+> **Suite 54 cases**, every new gate planted-red proven against its own mutant — with one
+> honestly stated exception: the stdout-noise hole needs the COMBINED substitution-plus-
+> unsilenced mutant to reopen, each half alone being safe, so the two are recorded as ONE defense
+> (SKILL.md said "planted red" of a half-mutant that stays green; corrected).
+> **The suite was also not hermetic**: it silently required a real `bun` on PATH (the wrapper
+> preflights `command -v bun` before any lookup work), so on a host without one every
+> cache-building case failed its precondition — its green reported the author's machine. An
+> exit-0 stub bun now covers the whole run, with a fatal guard if it is unresolvable; verified
+> 53/53 both with bun present and on a PATH where it is absent.
+
+> 🔧 **2026-08-24 — decision-lookup slice-C lockfile binding: version and integrity are now ONE
+> structural fact, not two independent greps** (separately authorized — this is the SEPARATE
+> VERIFICATION-DESIGN DECISION the deferred note on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671) required). The two
+> independent `bun.lock` presence greps — satisfiable by DIFFERENT entries — are replaced by one
+> python3-stdlib structural check: bun's JSONC trailing commas are stripped, the file is
+> json-parsed, and the `@tobilu/qmd` packages entry must itself name exactly `@tobilu/qmd@2.8.3`
+> AND carry the recorded sha512 digest as its final element. Parse failure, missing package,
+> wrong version, or a digest attached to a different entry all fail `--install` loudly
+> (`activation_fail`, non-zero) — format churn can no longer produce a false verdict (the
+> `588cbd8` lesson applied to the lockfile side); the activation-evidence line now reports the
+> BINDING, not bare digest presence. No dependency, lockfile, QMD-version, or supply-chain-policy
+> change; `bun.lock` is never regenerated. Because this change routes the lockfile-binding
+> TAMPERING verdict through python3, `--install` now also **preflights python3 by execution**
+> (realizing the recorded #674-review fast-follow, in scope here for exactly that reason): a
+> broken-but-resolvable interpreter fails as a named host defect ("python3 not usable") before
+> any network touch, never inside the binding check alleging a non-assessed artifact; the
+> binding failure message also names the shape-assumption cause (a format-assumption miss is
+> not tampering), and the comma-strip's string-interior harmlessness is recorded at the
+> function; the proposal's `--install` bullet is rewritten in the same change (living-proposal
+> rule) so the register-pointed record carries the current verification design. Suite grows to
+> **49 cases** (eight T16 fixture cases against the extracted real
+> function: valid binding; right version with the digest on another package; tampered digest;
+> wrong version with the recorded digest last — pinning the version arm red, so BOTH halves of
+> the binding have been seen red;
+> the digest present but NOT last, a non-list entry, and a one-element entry — pinning every
+> guard of the tuple-shape assumption red;
+> valid JSONC trailing commas — fixture 2 is the discriminator the old greps lacked; plus T3c
+> broken-python3 install fails the named preflight with no install dir, and both
+> install-preflight cases use a stub bun so no network touch is reachable even under a
+> preflight-less mutant).
+
+> 🔧 **2026-08-24 — decision-lookup slice-B corruption handling: a corrupt index is deleted
+> wholesale and rebuilt, never repaired and never a permanent degradation** (separately
+> authorized; implements the founder-authorized fix for the corruption follow-up tracked on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671), per §6.3's
+> delete-wholesale policy). Two changes: **(1)** the cache-hit check adds a **bounded openability
+> probe** — python3 stdlib `sqlite3.connect` + `PRAGMA schema_version` (microseconds; never
+> `quick_check`/`integrity_check` on the hit path) — so a corrupt-but-present
+> `corpus/.qmd/index.sqlite` under a matching stamp is a BROKEN CACHE that takes the ordinary
+> wipe-and-rebuild path; **(2)** a failed `qmd search` now **wipes the derived corpus/index
+> caches before its named tool-failure fallback**, so deep corruption the probe cannot see is
+> rebuilt on the next lookup instead of degrading every lookup until HEAD changes. No repair
+> path exists anywhere. Review findings absorbed pre-merge — eight fixes and three record-only
+> items, folded into the four themes (a)–(d) below ((a) folds the python3-absent and
+> resolvable-but-broken findings; (c) folds the exit-2 introduction, the best-effort
+> acceptance, the exit-1-only-verdict completion and the URI-construction move into the
+> unavailable arm; (d) folds the cost-shift record, its named reproducer and the scoped
+> corruption claim): **(a)** python3 is preflighted
+> on the lookup path before the cache is consulted, BY EXECUTION (`command -v` proves
+> resolvability, not runnability — an absent python3 or a resolvable one that cannot start
+> would both fail the probe exactly like "corrupt", wiping and rebuilding a healthy cache on
+> every lookup); an unusable python3 now degrades to a named fallback with the caches
+> untouched; **(b)** the probe connects **immutable read-only
+> with zero busy timeout** — a default read-write connect silently runs SQLite WAL recovery on
+> a pending `-wal` (verified empirically: it deletes the file), a write into the derived index
+> on the hit path, i.e. the repair §6.3 forbids — and even plain `mode=ro` creates the `-shm`
+> side file; `immutable=1` touches nothing and probes only whether the main database file is
+> openable, a pending `-wal` being the tool's own business on its read-write open; **(c)** probe
+> UNAVAILABILITY OR FAILURE is never read as corruption — only the probe's deliberate exit-1
+> not-openable verdict may wipe: the sqlite3 module is a compile-time optional of python3 and
+> its absence exits distinctly (2); any OTHER exit (import-chain failure, signal death) is
+> likewise a probe failure, not a verdict, and the probe's import surface is kept minimal
+> (`urllib.parse.quote` inside the guarded try, never `urllib.request`, whose transitive
+> `socket` import is another compile-time optional; URI construction also lives in that arm —
+> a non-UTF-8 byte in the cache path makes `quote()` raise, and a path-shaped failure is not a
+> verdict — so the verdict arm holds only connect + `PRAGMA`); on anything but exit 1 the best-effort
+> probe ACCEPTS the stamped non-empty hit at the pre-probe trust level rather than silently
+> wiping a healthy cache or refusing it (the rebuild arm serves exactly that trust level
+> unprobed, so a refusal would disable the advisory tool on such hosts between HEAD changes
+> for zero gained safety); **(d)**
+> the honest cost of the search-failure wipe is now recorded in the wrapper, SKILL and §6.2:
+> the exit code cannot distinguish a damaged index from qmd rejecting the query itself, so a
+> query-triggered failure also wipes and the next lookup pays a full rebuild — accepted over
+> ever serving a possibly-poisoned cache, with the known reproducer (a leading-hyphen query,
+> positional and unfenced at the qmd call) named in both breadcrumbs — a `--` fence is
+> unverifiable offline against the claudeignored pinned package, so the class is documented
+> rather than fenced unverified; the wipe's reach is scoped honestly — it bounds corruption
+> qmd reports as a non-zero exit, while exit-0 corruption (garbage or empty output) keeps the
+> cache and degrades per-HEAD, because the output-contract arm is also the schema-pin-mismatch
+> path and must never wipe. The fake `qmd update` writes a REAL sqlite index
+> so the probe is exercised genuinely; suite grows to **40 cases** (T15 corrupt-index rebuild;
+> T15b python3-absent and T15e python3-broken lookups leave the cache byte-untouched; T15c a
+> planted garbage `-wal` survives a cache hit byte-identical — the probe never writes; T15d a
+> poisoned sqlite3 module, T15f an unknown probe exit and T15g a non-UTF-8 cache path all
+> still serve the stamped hit cache-untouched; T8 extended with the wipe assertions). Lookup exit-0, `--install` semantics, advisory boundaries unchanged.
+
+> 🔧 **2026-08-24 — decision-lookup slice-A corrections: the "caches wiped" message is now true on
+> every failure arm, the bun-absent test is host-independent, and the `.qmd/` ignore entry records
+> its deliberate non-mirror** (separately authorized; three small follow-ups tracked on
+> [#671 "RETRIEVAL-QMD: advisory decision-lookup skill (QMD BM25) — decided integration
+> tracking"](https://github.com/TheCaptainCompany/captain-food/issues/671)). (1) A failure to
+> write `corpus/.sha` after a successful indexed build now wipes the derived corpus/index caches
+> before returning failure — the existing named rebuild-failed fallback's "caches wiped" wording
+> was inaccurate on that one arm; every failure arm of `build_corpus` now behaves identically.
+> (2) Stub case T3 (bun-absent `--install`) reworked to T3b's controlled-PATH model with asserted
+> preconditions — no more reliance on bun being absent from `/usr/bin:/bin`. (3) The
+> `.claudeignore` `.qmd/` entry now records that it is deliberately NOT mirrored in
+> `settings.json` `permissions.deny` (the RETRIEVAL-QMD decision forbids `settings.json` changes
+> without separate approval) — `settings.json` untouched. Hermetic suite: **33 cases** (T14
+> stamp-write-failure regression added). Lookup exit-0, `--install` semantics, cache policy and
+> all boundaries unchanged.
