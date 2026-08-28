@@ -170,8 +170,11 @@ reaper ignores its own marker comments from either job, and
 number) are never consulted — loses the label and gets a "claim expired" comment → back to the
 queue. A crashed session can never hold an issue hostage. The merge signal closes the case where a
 claim's work landed and merged, and GitHub then deleted the (now merged) head branch as routine
-cleanup — a branch 404 alone no longer reads as "no proof of work" when a recent merge proves the
-opposite. A second, independent job in the same workflow surfaces `status/blocked` issues silent
+cleanup, hours or days before a run: the candidate set is now derived from BOTH still-live branches
+AND the `head.ref`s of a run-level closed-PR listing (`candidateNames`, issue #703 / #705 review),
+so a deleted-at-merge branch is still a candidate even though `listBranches` can no longer see it,
+and its PR's `merged_at` (bounded by the same trailing window as every other signal) proves the
+claim alive. A second, independent job in the same workflow surfaces `status/blocked` issues silent
 for **over 72h** (a dead-man's-switch for parked items) with a "still blocked" comment, once per
 silence window.
 

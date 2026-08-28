@@ -41,6 +41,14 @@
 //      mapped to `latestCommitAt: null` instead of rethrown (`if (err.status !== 404) throw err;`
 //      deleted) — reds RB1 (the loud-failure case: resolveBranches must rethrow, not silently
 //      resolve to absence-of-proof).
+//   8. (issue #705 review — the SAME finding, fixed properly) `candidateNames` widened to drop the
+//      `closedPrHeadRefs` source entirely (candidates come from `branchNames` alone, exactly the
+//      pre-#705 shape) — reds 4/28: CN0 and CN1 directly (the closed-PR-sourced names are simply
+//      missing from the result), and end-to-end, RC0 (case a, the motivating bug — a branch
+//      deleted hours ago at merge time never becomes a candidate at all, so `candidates = []` and
+//      the claim would read `no-branch` instead of alive) and RC1 (case b — the closed-not-merged
+//      head ref never becomes a candidate either, `candidates = []` there too).
+//      Transcript: `RESULT: 24 passed, 4 failed, 28 total`.
 // The mutant source files are not committed (they exist only to prove the suite is not vacuous);
 // the RED transcripts are the evidence, per the dispatch's "record red output in the commit
 // message or a test comment".
@@ -54,6 +62,9 @@ const modulePath = process.env.STALE_CLAIM_REAPER_DECIDE_MODULE
 const {
   decideClaimLiveness,
   decideBlockedNotice,
+  branchPrefix,
+  candidateNames,
+  mergedAtByBranch,
   resolveBranches,
   CLAIM_MARKER,
   BLOCKED_MARKER,
@@ -218,7 +229,7 @@ check("C11 (issue #703, beck's 2022-merge trap): an ANCIENT mergedAt does not gr
   assert.strictEqual(r.reason, 'branch-stale');
 });
 
-check('C12 (reviewer\'s required case, issue #703): merged-and-deleted branch vs rebased-but-unmerged branch, both with a recent-looking date -- only the merged one is live', () => {
+check("C12 (reviewer's required case, issue #703): merged-and-deleted branch vs rebased-but-unmerged branch -- both are ALIVE, but via DIFFERENT signals (commit date vs merge date)", () => {
   const timeline = [labeled(claimedLongAgo)];
   const branches = [
     // Rebased-but-unmerged: still open, tip committer date is recent because of the rebase, not
@@ -231,12 +242,52 @@ check('C12 (reviewer\'s required case, issue #703): merged-and-deleted branch vs
   assert.strictEqual(rebasedOnly.reason, 'branch-commit-since-claim');
 
   // Merged-and-deleted: branch is GONE (latestCommitAt: null, as getBranch 404'd), but its PR's
-  // mergedAt is recent -- live via the merge signal even though the branch itself no longer
-  // exists. This is the case the #702 review flagged and issue #703 closes.
+  // mergedAt is recent -- live via the DIFFERENT (merge) signal even though the branch itself no
+  // longer exists. This is the case the #702 review flagged and issue #703 closes.
   const mergedDeleted = [{ name: '642-reaper-merged-deleted', latestCommitAt: null, mergedAt: iso(NOW - 30 * 60 * 1000) }];
   const r = decideClaimLiveness(issue, timeline, mergedDeleted, NOW);
   assert.strictEqual(r.alive, true, 'the merged-and-deleted branch is live via mergedAt despite having no latestCommitAt at all');
   assert.strictEqual(r.reason, 'branch-merged-since-claim');
+  assert.notStrictEqual(r.reason, rebasedOnly.reason, 'the two branches must be alive via genuinely different signals, not the same one twice');
+});
+
+// ── candidateNames / mergedAtByBranch (pure derivation, issue #703 / #705 review) ───────────────
+
+check('CN0 (issue #705 review): candidateNames merges live branch names with closed-PR head refs for the same prefix, deduplicated', () => {
+  const names = candidateNames('642-', {
+    branchNames: ['642-live-one', '642-shared', '700-unrelated'],
+    closedPrHeadRefs: ['642-shared', '642-merged-deleted'],
+  });
+  assert.deepStrictEqual(names.slice().sort(), ['642-live-one', '642-merged-deleted', '642-shared']);
+});
+
+check("CN1 (issue #705 review, case c -- prefix collision): a '70-' or '7-' branch/head-ref must not leak into '703-' candidates", () => {
+  const names = candidateNames('703-', {
+    branchNames: ['70-other-issue-branch', '7-yet-another-issue'],
+    closedPrHeadRefs: ['70-other-issue-merged', '7-x-merged'],
+  });
+  assert.deepStrictEqual(names, [], 'the trailing hyphen in the prefix must reject a numerically-colliding lower issue number');
+
+  const withRealOne = candidateNames('703-', {
+    branchNames: ['70-other-issue-branch'],
+    closedPrHeadRefs: ['703-real-work', '7-x-merged'],
+  });
+  assert.deepStrictEqual(withRealOne, ['703-real-work'], 'the genuinely prefixed name must still be picked up');
+});
+
+check('MB0 (issue #705 review): mergedAtByBranch reduces a raw closed-PR listing to a name -> merged_at map, keeping the MOST RECENT merged_at when a head ref is reused', () => {
+  const merged = iso(NOW - 2 * 60 * 60 * 1000);
+  const older = iso(NOW - 10 * 24 * 60 * 60 * 1000);
+  const newer = iso(NOW - 60 * 60 * 1000);
+  const map = mergedAtByBranch([
+    { head: { ref: '642-merged-once' }, merged_at: merged },
+    { head: { ref: '642-closed-not-merged' }, merged_at: null },
+    { head: { ref: '642-reused' }, merged_at: older },
+    { head: { ref: '642-reused' }, merged_at: newer },
+  ]);
+  assert.strictEqual(map['642-merged-once'], merged);
+  assert.strictEqual(map['642-closed-not-merged'], null, 'a closed-but-unmerged PR must record an explicit null, not be omitted');
+  assert.strictEqual(map['642-reused'], newer, 'the more recent merge must win when a head ref is reused');
 });
 
 // ── resolveBranches (I/O orchestration, stub fetcher) ────────────────────────────────────────
@@ -263,7 +314,7 @@ function checkRb(name, fn) {
   rbChecks.push(checkAsync(name, fn));
 }
 
-checkRb('RB0 (issue #703): a 404 on branchCommitAt resolves the candidate with a null latestCommitAt but STILL consults mergedAt -- no silent skip', async () => {
+checkRb("RB0 (issue #703, fallback path -- no pre-resolved mergedAtByName given): a 404 on branchCommitAt for an UNKNOWN name STILL consults mergedAt via the narrow fallback; a surviving candidate never triggers it at all", async () => {
   const { fetcher, calls } = stubFetcher({
     branchCommitAt: name => {
       if (name === '642-gone') {
@@ -281,7 +332,7 @@ checkRb('RB0 (issue #703): a 404 on branchCommitAt resolves the candidate with a
     { name: '642-still-here', latestCommitAt: iso(NOW - 60 * 60 * 1000), mergedAt: null },
   ]);
   assert.deepStrictEqual(calls.branchCommitAt, ['642-gone', '642-still-here'], 'branchCommitAt must be called for every candidate');
-  assert.deepStrictEqual(calls.mergedAt, ['642-gone', '642-still-here'], 'mergedAt must be consulted even for the 404 candidate -- no silent skip');
+  assert.deepStrictEqual(calls.mergedAt, ['642-gone'], 'the fallback fires only for the 404\'d, unknown candidate -- not the surviving one (issue #705 review, item 2\'s cost fix)');
 });
 
 checkRb('RB1 (issue #703): a NON-404 error from branchCommitAt rethrows out of resolveBranches -- never mapped to absence-of-proof', async () => {
@@ -299,6 +350,102 @@ checkRb('RB1 (issue #703): a NON-404 error from branchCommitAt rethrows out of r
     'a non-404 API failure must rethrow, loud, not resolve silently'
   );
   assert.deepStrictEqual(calls.branchCommitAt, ['642-flaky'], 'the stub was called -- this is not a silent skip');
+});
+
+checkRb('RB2 (issue #705 review, item 2 -- the cost fix): a name already KNOWN in mergedAtByName (merged or explicitly not) never triggers the per-candidate fetcher.mergedAt fallback, whatever branchCommitAt did', async () => {
+  const mergedDate = iso(NOW - 60 * 60 * 1000);
+  const liveDate = iso(NOW - 30 * 60 * 1000);
+  const { fetcher, calls } = stubFetcher({
+    branchCommitAt: name => {
+      if (name === '642-known-merged-gone') {
+        const err = new Error('Not Found');
+        err.status = 404;
+        throw err;
+      }
+      return liveDate; // '642-known-unmerged-live' still exists
+    },
+    mergedAt: () => { throw new Error('must not be called -- both names are already known'); },
+  });
+  const mergedAtByName = { '642-known-merged-gone': mergedDate, '642-known-unmerged-live': null };
+  const result = await resolveBranches(['642-known-merged-gone', '642-known-unmerged-live'], fetcher, mergedAtByName);
+  assert.deepStrictEqual(result, [
+    { name: '642-known-merged-gone', latestCommitAt: null, mergedAt: mergedDate },
+    { name: '642-known-unmerged-live', latestCommitAt: liveDate, mergedAt: null },
+  ]);
+  assert.deepStrictEqual(calls.mergedAt, [], 'no fallback call for a name already resolved by the run-level closed-PR listing');
+});
+
+checkRb('RB3 (issue #705 review, item 2): a SURVIVING candidate unknown to mergedAtByName costs NO pulls.list call at all -- only a 404 ever triggers the fallback', async () => {
+  const liveDate = iso(NOW - 30 * 60 * 1000);
+  const { fetcher, calls } = stubFetcher({
+    branchCommitAt: () => liveDate,
+    mergedAt: () => { throw new Error('must not be called -- the branch is still live'); },
+  });
+  const result = await resolveBranches(['642-still-live-unknown'], fetcher, {});
+  assert.deepStrictEqual(result, [{ name: '642-still-live-unknown', latestCommitAt: liveDate, mergedAt: null }]);
+  assert.deepStrictEqual(calls.mergedAt, [], 'a surviving live branch needs no pulls.list call unless getBranch 404s');
+});
+
+// ── Full pipeline: candidateNames -> mergedAtByBranch -> resolveBranches -> decideClaimLiveness ─
+// (issue #705 review, the finding this whole push exists to fix: `listBranches` alone cannot see
+// a branch deleted hours/days ago at merge time, so the earlier `mergedAt` signal never reached
+// the case it was built for.)
+
+checkRb('RC0 (issue #705 review, case a -- the motivating bug): a branch deleted AT MERGE TIME, hours before this run, is recovered as a candidate via the closed-PR listing, and the claim is ALIVE via its fresh merged_at', async () => {
+  const prefix = branchPrefix(issue.number); // '642-'
+  const closedPrs = [
+    { head: { ref: '642-landed-and-merged' }, merged_at: iso(NOW - 2 * 60 * 60 * 1000) },
+    // A distractor for a numerically-colliding, DIFFERENT issue -- must not leak into this
+    // issue's candidates (case c, exercised end-to-end here too).
+    { head: { ref: '64-distractor-different-issue' }, merged_at: iso(NOW - 60 * 60 * 1000) },
+  ];
+  const mergedAtByName = mergedAtByBranch(closedPrs);
+  const closedPrHeadRefs = Object.keys(mergedAtByName);
+  // listBranches sees NOTHING -- the branch is gone, deleted routinely when its PR merged.
+  const candidates = candidateNames(prefix, { branchNames: [], closedPrHeadRefs });
+  assert.deepStrictEqual(candidates, ['642-landed-and-merged'], 'the distractor must not be picked up');
+
+  const { fetcher, calls } = stubFetcher({
+    branchCommitAt: () => {
+      const err = new Error('Not Found');
+      err.status = 404;
+      throw err;
+    },
+    mergedAt: () => { throw new Error('must not be called -- mergedAt is pre-resolved from the run-level listing'); },
+  });
+  const branches = await resolveBranches(candidates, fetcher, mergedAtByName);
+  assert.deepStrictEqual(calls.mergedAt, [], 'the per-candidate pulls.list fallback must not fire -- mergedAt was already known');
+
+  const timeline = [labeled(claimedLongAgo)];
+  const r = decideClaimLiveness(issue, timeline, branches, NOW);
+  assert.strictEqual(r.alive, true, 'a branch deleted hours ago at merge time must still read as live via its PR merge date');
+  assert.strictEqual(r.reason, 'branch-merged-since-claim');
+});
+
+checkRb('RC1 (issue #705 review, case b): a CLOSED-WITHOUT-MERGING PR head ref, branch deleted, with no other signal, is NOT alive', async () => {
+  const prefix = branchPrefix(issue.number);
+  const closedPrs = [{ head: { ref: '642-closed-not-merged' }, merged_at: null }];
+  const mergedAtByName = mergedAtByBranch(closedPrs);
+  const closedPrHeadRefs = Object.keys(mergedAtByName);
+  const candidates = candidateNames(prefix, { branchNames: [], closedPrHeadRefs });
+  assert.deepStrictEqual(candidates, ['642-closed-not-merged']);
+
+  const { fetcher, calls } = stubFetcher({
+    branchCommitAt: () => {
+      const err = new Error('Not Found');
+      err.status = 404;
+      throw err;
+    },
+    mergedAt: () => { throw new Error('must not be called -- name is already known (null) from the run-level listing'); },
+  });
+  const branches = await resolveBranches(candidates, fetcher, mergedAtByName);
+  assert.deepStrictEqual(branches, [{ name: '642-closed-not-merged', latestCommitAt: null, mergedAt: null }]);
+  assert.deepStrictEqual(calls.mergedAt, []);
+
+  const timeline = [labeled(claimedLongAgo)];
+  const r = decideClaimLiveness(issue, timeline, branches, NOW);
+  assert.strictEqual(r.alive, false, 'a closed-but-never-merged PR is not proof of live work');
+  assert.strictEqual(r.reason, 'branch-stale');
 });
 
 // ── Blocked dead-man's-switch cases ──────────────────────────────────────────────────────────
@@ -362,7 +509,7 @@ check('B5: a CLAIM_MARKER comment does not count as blocked-notice liveness eith
 });
 
 // ── Completeness ──────────────────────────────────────────────────────────────────────────────
-const EXPECTED_CASES = 21;
+const EXPECTED_CASES = 28;
 
 Promise.all(rbChecks).then(() => {
   const ran = pass + fail;
