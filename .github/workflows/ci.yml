@@ -257,6 +257,13 @@ jobs:
       # thing standing behind the wrapper's supply-chain gate.
       - name: decision-lookup hermetic stub suite (the wrapper's supply-chain gate must stay proven)
         run: bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+      # The stale-claim reaper's decision logic (issue #642) lives in
+      # `.github/scripts/stale-claim-reaper-decide.js`, required by a scheduled workflow that never
+      # runs in CI on a push or PR -- so a regression in it (e.g. re-widening liveness to a bare
+      # mention) would otherwise ship silently until the next hourly run misbehaved for days. Pure
+      # Node, no network, seconds. Pinned by `the_reaper_stub_suite_runs_in_the_always_run_gate_job`.
+      - name: Stale-claim reaper hermetic stub suite (liveness must stay a commit, not a mention)
+        run: node .github/scripts/stale-claim-reaper-decide.test.js
 
   lint:
     # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability
