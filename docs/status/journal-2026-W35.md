@@ -3,6 +3,23 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — overnight loop closed: the architect's three-chunk list is fully shipped and
+> call-sheet round 4 is published.** Merged this night: the reaper chain
+> ([#697](https://github.com/TheCaptainCompany/captain-food/pull/697) →
+> [#701](https://github.com/TheCaptainCompany/captain-food/pull/701) →
+> [#702](https://github.com/TheCaptainCompany/captain-food/pull/702) — recency bound, shared
+> markers, getBranch-404 idempotence; the ADR-20260826-084500 three-round ceiling was reached and
+> the two remaining non-blocking findings went to
+> [#703 "Reaper follow-ups at the round ceiling…"](https://github.com/TheCaptainCompany/captain-food/issues/703)
+> instead of a fourth round), Voyager self-hosting + CSP
+> ([#698](https://github.com/TheCaptainCompany/captain-food/pull/698)), and OTP refusal cohorts
+> ([#700](https://github.com/TheCaptainCompany/captain-food/pull/700)). Two watch items recorded on
+> the call sheet: #700's CI did not auto-start on PR open (recovered via a branch update after the
+> base moved) and no independent review pass fired on #700 at all — one look owed if either
+> repeats. Founder questions queued: the OVH SMS credit alert path/top-up lag (prices
+> [#699](https://github.com/TheCaptainCompany/captain-food/issues/699)) and the next-work pick
+> (IDENT-1 full mob, HOLD: human, recommended).
+
 > ✅ **2026-08-28 — [#696 "OTP guard telemetry: refusal cohorts + the OVH gauge declaration"](https://github.com/TheCaptainCompany/captain-food/issues/696):
 > `otp_send_refused_total` gains a closed 3-value `region` attribute
 > (`north_america`/`non_eu_europe`/`rest_of_world`), closing the North-American refusal-cohort gap
