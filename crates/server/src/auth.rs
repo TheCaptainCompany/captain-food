@@ -364,18 +364,31 @@ struct CachedJwks {
 /// [`AuthContext::refresh`]'s single-flight test is "someone else's fetch completed after this
 /// intent formed: it is our fetch" — which is only sound if the intent's instant predates the
 /// read that concluded a fetch was needed. #683 was exactly that ordering minted wrong (the
-/// instant taken after the read), and it looked like a flake for a week. The field is private
-/// and only [`AuthContext::stale`] and [`AuthContext::rotation_refetch_due`] construct one, each
-/// before its own cache read — so the mistake is unspellable at a production call site rather
-/// than guarded by a comment. (Tests in this module can construct one directly; they use that to
-/// build #683's ordering deterministically.)
+/// instant taken after the read), and it looked like a flake for a week.
+///
+/// The ordering lives in [`FetchIntent::decide`]'s BODY: the instant is captured, THEN the
+/// deciding read runs, and there is no other production constructor — so no call site can invert
+/// it. (The first shape of this type had a free `formed_now()` with a "MUST call before the read"
+/// doc line; the review of #692 pointed out that every production call site lives in this module,
+/// where such a constructor keeps the mistake spellable and the "unspellable" claim false. The
+/// `#[cfg(test)]` constructor below is the one deliberate forgery point, for building #683's
+/// ordering deterministically.)
 struct FetchIntent {
     formed_at: Instant,
 }
 
 impl FetchIntent {
-    /// Capture "now" as the moment the fetch decision forms. Callers MUST invoke this before the
-    /// cache read they decide on — both constructors in this module do so on their first line.
+    /// Form the intent, THEN run the read that decides on it. Returns `Some` when the read says
+    /// a fetch is needed (`true`), carrying an instant that provably predates that read.
+    async fn decide<Fut: std::future::Future<Output = bool>>(
+        read: impl FnOnce() -> Fut,
+    ) -> Option<Self> {
+        let intent = Self { formed_at: Instant::now() };
+        read().await.then_some(intent)
+    }
+
+    /// Tests only: mint a witness at an arbitrary moment, to construct #683's ordering directly.
+    #[cfg(test)]
     fn formed_now() -> Self {
         Self { formed_at: Instant::now() }
     }
@@ -674,21 +687,25 @@ impl AuthContext {
     /// Is the cache stale (or absent)? `Some` means "a fetch is needed" and carries the witness
     /// `refresh` requires; `None` means the cache answers.
     async fn stale(&self) -> Option<FetchIntent> {
-        let intent = FetchIntent::formed_now();
-        match &*self.cache.read().await {
-            Some(c) if c.fetched.elapsed() <= JWKS_TTL => None,
-            _ => Some(intent),
-        }
+        FetchIntent::decide(|| async {
+            match &*self.cache.read().await {
+                Some(c) if c.fetched.elapsed() <= JWKS_TTL => false,
+                _ => true,
+            }
+        })
+        .await
     }
 
     /// May an UNKNOWN kid trigger a refetch? Only if the cached set is older than the rotation
     /// interval (or there is none at all). `Some` carries the witness, as in [`Self::stale`].
     async fn rotation_refetch_due(&self) -> Option<FetchIntent> {
-        let intent = FetchIntent::formed_now();
-        match &*self.cache.read().await {
-            Some(c) if c.fetched.elapsed() < JWKS_ROTATION_REFETCH_MIN_INTERVAL => None,
-            _ => Some(intent),
-        }
+        FetchIntent::decide(|| async {
+            match &*self.cache.read().await {
+                Some(c) if c.fetched.elapsed() < JWKS_ROTATION_REFETCH_MIN_INTERVAL => false,
+                _ => true,
+            }
+        })
+        .await
     }
 
     async fn lookup(&self, kid: &str) -> Option<Jwk> {
@@ -703,10 +720,10 @@ impl AuthContext {
     /// [`JWKS_FAILURE_BACKOFF`] of attempts, so a JWKS outage costs one request the timeout and
     /// costs everyone else nothing — the difference between a degraded storefront and a 3-s-per-
     /// request storefront on a Friday evening.
-    /// The `intent` is a WITNESS, not a parameter anyone may mint: only [`Self::stale`] and
-    /// [`Self::rotation_refetch_due`] construct one, and each captures its instant before its own
-    /// cache read — so "the instant was taken after the read that decided to fetch" (#683) is
-    /// unspellable at a production call site rather than guarded by a comment.
+    /// The `intent` is a WITNESS, not a parameter anyone may mint: production code can only get
+    /// one from [`FetchIntent::decide`], whose body captures the instant and THEN runs the
+    /// deciding cache read — so "the instant was taken after the read that decided to fetch"
+    /// (#683) is unspellable rather than guarded by a comment.
     ///
     /// The instant used to be `Instant::now()` taken here, just above the lock -- i.e. AFTER
     /// `key_for`'s own `stale()` / `rotation_refetch_due()` read. A task that read stale on the
