@@ -11,9 +11,13 @@ Accepted.
 
 ## The directive, verbatim
 
-Appended to the round-5 call-sheet answers:
+The round-5 call-sheet answers, in full (this ADR is the same-turn record the register rows'
+`decided_by` resolves to):
 
-> *"We need to ensure that agents do not ask questions already answered"*
+> *"1. Flip identity resolution: Wait - flip after a few quiet days.*
+> *2. Outage state: Decide later.*
+> *3. Next up: Back to the product backlog top.*
+> *Note: We need to ensure that agents do not ask questions already answered"*
 
 ## The rule, made executable
 
