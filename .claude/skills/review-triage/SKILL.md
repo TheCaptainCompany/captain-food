@@ -58,9 +58,12 @@ ask whether it can happen on `main` today** — that question decides more cases
 Not "when the reviewer is satisfied" — a reviewer is never finished, by construction. File the
 non-blocking findings, name them in the PR, merge.
 
-**A review pass fires on presentation, not on push** (`.github/workflows/claude-code-review.yml`:
-`opened` / `ready_for_review` / `reopened`). To ask for a genuinely fresh look after a substantial
-rewrite, convert the PR to draft and back to ready. That is deliberate, which is the point.
+**A review pass fires on presentation, not on push** — and since ADR-20260828 (founder directive:
+the CI auto-review is retired, the team reviews its own work) the pass is the TEAM's independent
+reviewer-agent read of the full branch diff, run in-session before the PR is marked
+ready-for-review (the standing CLAUDE.md rule). One pass per presentation, not one per push; a
+genuinely fresh look after a substantial rewrite is one deliberate re-presentation. `@claude` in a
+PR comment remains available for an on-demand look the founder asks for.
 
 ## 3. The ceiling: three rounds, then it goes to the founder
 
