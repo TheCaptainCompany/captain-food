@@ -8898,7 +8898,7 @@ _criticality: **high**_
 | `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`* |
 | `event.publish` | `PRODUCER` | ✅ | — | `business.event_type`* |
 
-- **Metrics**: `customer_identification_duration_ms` _(histogram)_, `customer_claim_stamp_failed_total` _(counter)_, `otp_send_requested_total` _(counter)_, `otp_send_refused_total` _(counter)_, `sms_send_total` _(counter)_, `otp_send_guard_enforcing` _(gauge)_ · **Business metrics**: `customer_signins_total` _(counter)_, `otp_verifications_failed_total` _(counter)_
+- **Metrics**: `customer_identification_duration_ms` _(histogram)_, `customer_claim_stamp_failed_total` _(counter)_, `otp_send_requested_total` _(counter)_, `otp_send_refused_total` _(counter)_, `sms_send_total` _(counter)_, `otp_send_guard_enforcing` _(gauge)_, `ovh_sms_credit_balance` _(gauge)_ · **Business metrics**: `customer_signins_total` _(counter)_, `otp_verifications_failed_total` _(counter)_
 - **Status rules**: success ⇐ spans [`command.receive`, `otp.verify`, `claims.stamp`, `event.store.append`, `event.publish`]
 - **SLOs**: p95 ≤ 600ms · p99 ≤ 1200ms · error rate ≤ 2%
 

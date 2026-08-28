@@ -766,7 +766,31 @@ customer-identification:
     # reads identically to "the limiter is switched off". `reason` is bounded: country_not_served |
     # unparseable | cooldown | hourly_cap | daily_cap | global_ceiling | store_unavailable.
     # `reason=global_ceiling` is the loud one — it means real sign-ups are being turned away.
-    - { name: "otp_send_refused_total", type: counter, attributes: ["reason"] }
+    #
+    # `region` (#696) is the fix OWED in ADR-20260813-021500 (#535): dropping bare `+1` from the
+    # served allowlist made the North American refusal cohort unmeasurable, because
+    # `otp_send_requested_total`'s `dialing_code` label is bounded to what we SERVE and every
+    # refused, unserved code collapses into `other` there. `region` is a SEPARATE, hand-declared
+    # 3-value business segmentation over the code the refusal was decided against — never ITU or
+    # geographic data — so an attacker rotating dialing codes cannot mint a fourth label however
+    # many distinct codes they try (the same attacker-cardinality property `dialing_code` already
+    # has, extended to refusals). `north_america` and `non_eu_europe` name only codes NOT already
+    # served (a served code, e.g. `+41`, keeps its per-code detail on `dialing_code` above and
+    # falls through to `rest_of_world` here — this attribute exists to bucket what we do NOT
+    # serve). THE PHONE NUMBER IS STILL NEVER A LABEL: `region` carries the dialing code's BUCKET,
+    # never the code or the number itself.
+    - name: "otp_send_refused_total"
+      type: counter
+      attributes: ["reason", "region"]
+      # The bounded populations of both grouping keys, DECLARED (ADR-20260811-014129: a grouping
+      # key needs a declared bounded population). `region`'s mapping table (which dialing codes
+      # fall into which bucket) is declared once, in Rust, next to the function it bounds
+      # (`crates/telemetry/src/meters.rs` `otp_send::region_label` — NORTH_AMERICA/NON_EU_EUROPE
+      # dialing-code tables) rather than duplicated here as a second copy that could drift.
+      attribute_values:
+        reason:
+          [country_not_served, unparseable, cooldown, hourly_cap, daily_cap, global_ceiling, store_unavailable]
+        region: [north_america, non_eu_europe, rest_of_world]
     # THE MONEY SEAM: emitted at the OVH sender itself, on the hook path, where a send becomes a euro.
     # `result` is bounded: sent | failed | refused. The gap between otp_send_requested_total{allowed=true}
     # and sms_send_total is the provider hop, and a persistent gap means we are being asked to send
@@ -776,6 +800,21 @@ customer-identification:
     # enforcing with a shared counter, 0 when it is degraded. Without this, "no refusals tonight" and
     # "the limiter has been disabled since the last deploy" are the same observation.
     - { name: "otp_send_guard_enforcing", type: gauge, attributes: [] }
+    # NOT YET IMPLEMENTED — tracked by #699, DECLARED here so the gap is a recorded fact rather
+    # than a silent one (CLAUDE.md: "reporting replaces the freeze"). OWED in ADR-20260813-021500
+    # as the SECOND item (ranked by the business lens ABOVE the refusal-cohort hole #696 itself
+    # closes): the OVH prepaid SMS pack drains SILENTLY — OVH pushes nothing — and the first
+    # symptom would be every OTP send failing, on the ONLY V0 sign-in path. This is monitoring's
+    # PERMANENT-POLL carve-out (ADR-20260810-231300): the observer is outside what it observes and
+    # has no durable record of its own to reconcile a missed push against, so a poll here is the
+    # intended, permanent shape, not a degraded fallback earning its way back to push. Follows the
+    # `checkout_degraded_render_total` DOCUMENTED-FOR-FUTURE precedent (line ~237 above): the name
+    # is declared and reserved, nothing emits it today. `make validate`'s `obs-metric-no-emitter`
+    # ratchet (tools/codegen-rs/src/validate/metric_emitters.rs) is deliberately left to flag this
+    # ONE new warning rather than silently widening its own baseline for an unbuilt gauge — #699
+    # closes it by building the OVH balance poll and the instrument together, never by declaring
+    # the name alone.
+    - { name: "ovh_sms_credit_balance", type: gauge, attributes: [] }
   business_metrics:
     - { name: "customer_signins_total", type: counter, attributes: ["outcome"] }
     - { name: "otp_verifications_failed_total", type: counter, attributes: ["reason"] }
