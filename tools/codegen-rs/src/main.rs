@@ -141,6 +141,11 @@ fn main() {
             // rather than by reading this file's source. (Review #92.)
             dec_issues.extend(corpus_scan_issues(readable, &unread, &unread_tree, &skipped_ext));
             dec_issues.extend(validate_no_superseded_row_is_cited_as_authority(&dec_rows, &cited));
+            // §24 — the ADR-id sibling (#477/#712): a citation of a SUPERSEDED ADR in the same
+            // instruction-surface corpus, read by its OWN `Status:` line rather than a register
+            // row's `status:` field. Same corpus, same posture on an incomplete scan (the finding
+            // counts are lower bounds when `readable`/`unread` say so — see `CORPUS_DERIVED_KINDS`).
+            dec_issues.extend(validate_no_superseded_adr_is_cited_as_authority(&cited, &load_adr_status_corpus(&root)));
         }
         // §22c — the decision-form template anchors questions to rows (requirement 6; published
         // form copies are uncommitted and NOT mechanically validated — recorded in the ADR).

@@ -38,6 +38,55 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > tests green; `make validate` 0 errors; `make rust` clean (no generated-artifact drift — this
 > change touches no spec/model).
 
+> ✅ **2026-08-28 — [#712 "No gate checks a citation of a superseded ADR by its own Status line"](https://github.com/TheCaptainCompany/captain-food/issues/712)
+> closes the gap the entry below flagged: `adr-superseded-citation` (+ its WARN and unparseable
+> siblings) now checks WHAT the shipped rule looks for, not only where.** New validator rules beside
+> §23's citation machinery (`tools/codegen-rs/src/validate/citations.rs`): for every `ADR-\d{8}-\d{6}`
+> id resolved by §23 over the instruction-surface corpus, read the TARGET ADR's own `Status:` line —
+> `Superseded by …` is `adr-superseded-citation` (ERROR, naming the citing site and the superseding
+> record); `Superseded IN PART by …` is `adr-superseded-citation-in-part` (WARNING, ratcheted — some
+> of the cited ADR may still hold, so this is a surfaced finding, never an automatic error); a Status
+> line the parser cannot locate on a CITED file is `adr-status-unparseable` (WARNING, ratcheted,
+> silent on every uncited ADR). Division of labor stated in the rule's own docstring, mirroring
+> `record_resolves`'s: an id that does not resolve at all stays §23's error, never duplicated.
+> Exemption reuses `decision-superseded-authority`'s DESIGN rather than a second mechanism — no new
+> `_exempt.yaml`: a citation sitting inside the same `logical_units` paragraph/list-item/table-row
+> join as a "supersed…" narration is a citation ABOUT the history, not live authority, and needs no
+> manual entry. Status-line parser tolerant of the real corpus's shapes (a `## Status` heading and an
+> inline `**Status**:` bold field, `·`-separated or wrapped across an indented continuation line),
+> verified against four real ADRs covering all four combinations (heading/inline × full/in-part,
+> including both `IN PART` casings) in
+> `tests::adr_superseded_citation::the_status_parser_tolerates_the_real_corpus_format_variance`.
+> Triage on the live tree: **zero real hits** — `docs/claude/sessions/gates.md`'s own citation of
+> `ADR-20260731-061609` (the #477 motivating example) already narrates that it "cited the superseded"
+> ADR, so it is exempted by the SAME word-presence check without any manual entry; nothing else in
+> the corpus cites a superseded ADR. `make validate` stays at 0 errors and the warning baseline is
+> unmoved (asserted live, not carried in prose). Executable regression:
+> `tests::adr_superseded_citation::the_committed_instruction_surface_carries_no_stale_adr_citation`
+> re-runs the rule against the real committed tree on every `cargo test`.
+
+> ✅ **2026-08-28 — [#477 "Validator gate: no first-read doc may cite a SUPERSEDED ADR (CLAUDE.md +
+> docs/claude/\*\*)"](https://github.com/TheCaptainCompany/captain-food/issues/477) widened: the
+> citation corpus now covers the instruction-surface class.** `docs/decisions/DISPATCH-CARD-CITATION.yaml`
+> decided ([ADR-20260828-213000](../adr/ADR-20260828-213000-citation-corpus-widened-to-instruction-surfaces.md)),
+> per the founder's 2026-08-28 directive ("work #477... ASAP, it influences agent behaviour")
+> landing on top of the case the row had already made: `claude_citation_corpus`
+> (`tools/codegen-rs/src/validate/decisions.rs`) grows three pathspecs — `docs/dispatch`,
+> `docs/claude`, `docs/PLAYBOOK.md` — as named exceptions to the general `docs/**` exclusion; the
+> rest of `docs/**` (ADRs, proposals, the register, the journal) stays excluded because narrating a
+> supersession there is legitimate. Both records `the_records_state_the_same_citation_corpus_as_the_code`
+> checks were updated in the same change. Verified against the real tree: `make validate` stays at
+> 0 errors, the 92-warning baseline is unmoved — no live citation of a superseded row exists today
+> in any of the three subtrees. **A scope gap surfaced by the red-first plant, left open rather than
+> silently absorbed**: the shipped `decision-superseded-authority` mechanism catches citations of
+> decision-register **row keys** (`docs/decisions/*.yaml`, `status: superseded`), never ADR ids —
+> planting a citation of `ADR-20260731-061609` (the issue's own motivating, superseded-IN-PART
+> example) inside a tracked `docs/claude/**` file does **not** red under the widened corpus, while
+> the same form citing the one live-superseded row key (`RETRIEVAL-QMD`) reds immediately as a hard
+> error. Issue #477's original "cite a superseded ADR by id" ask is therefore still unimplemented by
+> any gate; this change widened WHERE the shipped rule looks, not WHAT it looks for — flagged for
+> the architect to triage as separate work or an explicit closure.
+
 > ✅ **2026-08-28 — [#660 "STATUS.md's durable sections are stale and are now read first"](https://github.com/TheCaptainCompany/captain-food/issues/660)
 > corrected: STATUS.md contradicted itself within 170 lines.** The Deployment table still showed
 > Render (Frankfurt) / Supabase Postgres as ✅ current while the same file, further down, already
