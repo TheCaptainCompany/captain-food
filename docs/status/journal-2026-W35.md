@@ -3,6 +3,18 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#695 "Self-host the GraphQL Voyager bundle"](https://github.com/TheCaptainCompany/captain-food/issues/695)
+> closed the CDN-on-authenticated-origin defect (PROP-170500 D4):** `graphql-voyager@2.1.0`'s CSS
+> and standalone JS are now vendored under `crates/server/assets/voyager/` (sha256 pinned at
+> vendoring time, no runtime re-verification) and served same-origin from
+> `/voyager-assets/{voyager.css,voyager.standalone.js,voyager-init.js}`; the inline
+> `<script type="module">` moved into a first-party `voyager-init.js` file. The voyager page and
+> its three asset routes now carry a `Content-Security-Policy` header (`script-src 'self'
+> 'wasm-unsafe-eval'`; `style-src` needs `'unsafe-inline'` — the bundle's `styled-components`
+> runtime style injection has no exposed nonce hook, a bounded residual since style-src cannot
+> execute script). Three planted-mutant tests (CDN URL reintroduced / CSP header dropped /
+> vendored route deleted) proved red before the fix and green after.
+
 > ✅ **2026-08-28 — call-sheet round 3 answered: merge-on-green stands
 > (`REVIEW-GATES-CRATES-MERGE` decided (a), ADR-20260828-023258), and the next pick is the
 > stale-claim reaper bug

@@ -17,7 +17,10 @@ use async_graphql::http::{GraphiQLSource, ALL_WEBSOCKET_PROTOCOLS};
 use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse, GraphQLWebSocket};
 use axum::{
     extract::{ws::WebSocketUpgrade, FromRequestParts, Path, Request, State},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::{
+        header::{AUTHORIZATION, CONTENT_SECURITY_POLICY, CONTENT_TYPE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     response::{Html, IntoResponse, Redirect, Response},
     routing::{any, get, post},
     Extension, Json, Router,
@@ -50,6 +53,11 @@ pub fn graphql_routes(schema: CaptainSchema, tenants: crate::hosts::TenantLookup
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
         .route("/{role}/voyager", get(voyager))
+        // Vendored Voyager assets (#695): served same-origin, no role scoping needed (identical for
+        // every role — only the introspection ENDPOINT the page fetches varies by role).
+        .route("/voyager-assets/voyager.css", get(voyager_css))
+        .route("/voyager-assets/voyager.standalone.js", get(voyager_standalone_js))
+        .route("/voyager-assets/voyager-init.js", get(voyager_init_js))
         // Convenience: bare paths redirect to the PUBLIC role (307 preserves method/body for POST).
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
@@ -301,45 +309,118 @@ async fn graphql_get(
 }
 
 /// GraphQL Voyager — an interactive graph of the schema — introspecting this role's `/{role}/graphql`.
-/// Loads Voyager from a CDN; it visualizes types/relationships (the FK-derived navigation shows as edges).
+/// Vendored same-origin (#695, PROP-170500 D4): the bundle used to load from a CDN onto this
+/// authenticated admin origin with no CSP; both defects are closed here.
 async fn voyager(Path(role_seg): Path<String>) -> Response {
     match RequestRole::from_segment(&role_seg) {
         Some(role) => {
             let endpoint = format!("/{}/graphql", role.segment());
-            Html(VOYAGER_HTML.replace("__ENDPOINT__", &endpoint)).into_response()
+            let mut response = Html(VOYAGER_HTML.replace("__ENDPOINT__", &endpoint)).into_response();
+            response
+                .headers_mut()
+                .insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(VOYAGER_CSP));
+            response
         }
         None => (StatusCode::NOT_FOUND, "unknown role path").into_response(),
     }
 }
 
-/// Standalone GraphQL Voyager page (graphql-voyager v2). Loads the bundle from jsdelivr and drives
-/// introspection against `__ENDPOINT__` (replaced per role). Served by our own origin (no CSP set).
+/// The vendored `graphql-voyager@2.1.0` stylesheet, retrieved 2026-08-28 from
+/// `https://cdn.jsdelivr.net/npm/graphql-voyager@2.1.0/dist/voyager.css`
+/// (sha256 `88105ff1aac63f54d4bf647701247b0dba7f9cf6c1d7cb8c763ec0eb18a44a37`, computed at vendoring
+/// time — there is no runtime re-verification of this hash; a residual, per the dispatch).
+const VOYAGER_CSS: &str = include_str!("../../assets/voyager/voyager.css");
+
+/// The vendored `graphql-voyager@2.1.0` standalone bundle, retrieved 2026-08-28 from
+/// `https://cdn.jsdelivr.net/npm/graphql-voyager@2.1.0/dist/voyager.standalone.js`
+/// (sha256 `03777306cecf12701d510a0dff3dfd737a4c395e911c23fcf92498e9c9b1fead`, same residual as above).
+const VOYAGER_JS: &str = include_str!("../../assets/voyager/voyager.standalone.js");
+
+/// First-party glue script (never vendored — it is OUR code): reads the role's GraphQL endpoint from
+/// `#voyager`'s `data-endpoint` attribute (substituted server-side, same `__ENDPOINT__` mechanism as
+/// before) and drives Voyager's introspection fetch. Moved out of an inline `<script type="module">`
+/// into its own same-origin file so `script-src 'self'` needs no `'unsafe-inline'`/nonce/hash — the
+/// simplest honest CSP for the one piece of markup we author ourselves.
+const VOYAGER_INIT_JS: &str = r#"(async () => {
+  // Matches the official graphql-voyager v2 example: fetch introspection HERE and pass the RESULT
+  // to renderVoyager. The standalone build expects introspection DATA, not a query-taking function
+  // (the function form never fires the request -- Voyager just stays on "Transmitting...").
+  const { voyagerIntrospectionQuery: query } = GraphQLVoyager;
+  const container = document.getElementById('voyager');
+  const endpoint = container.dataset.endpoint;
+  const response = await fetch(window.location.origin + endpoint, {
+    method: 'post',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+    credentials: 'omit',
+  });
+  const introspection = await response.json();
+  GraphQLVoyager.renderVoyager(container, { introspection });
+})();
+"#;
+
+/// CSP for the Voyager page and its three same-origin asset routes (#695). Permits only what the
+/// vendored bundle actually does, each grant tied to a concrete need found by inspecting the bundle:
+/// - `script-src 'self' 'wasm-unsafe-eval'`: no remote/inline script; `'wasm-unsafe-eval'` because the
+///   bundle embeds an emscripten-compiled graphviz (`new WebAssembly.Instance(module, info)`, the
+///   synchronous form CSP treats like `eval` for WASM) to lay out the graph.
+/// - `style-src 'self' 'unsafe-inline'`: the bundle ships `styled-components` in "speedy" mode, which
+///   injects `<style>` tags and calls `CSSStyleSheet.insertRule` at runtime with no nonce hook exposed
+///   by the prebuilt standalone build; without `'unsafe-inline'` the interactive UI chrome (search,
+///   docs panel) silently loses its layout. Bounded residual: style-src cannot execute script, so this
+///   does not reopen the defect being closed here (arbitrary REMOTE code execution on an authenticated
+///   origin) -- worst case is a CSS-based side channel, not RCE.
+/// - `img-src 'self' data:`, `connect-src 'self' data:`: the graph is rendered to a `data:image/...`
+///   URI, and the WASM layout path fetches its own embedded module from a `data:application/wasm` URI.
+/// - `worker-src 'self' blob:`: graph layout runs in a `new Worker(...)` created from a `Blob`.
+/// - `default-src 'none'`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`: no other
+///   capability the page needs, and no framing of this admin surface.
+///
+/// Residual, per the dispatch: this header is enforced by the BROWSER; the test below only proves it
+/// is served, not that every browser enforces every directive identically.
+const VOYAGER_CSP: &str = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' data:; worker-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; object-src 'none'";
+
+fn static_asset_response(body: &'static str, content_type: &'static str) -> Response {
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, content_type)
+        .body(axum::body::Body::from(body))
+        .expect("static asset response is well-formed");
+    response
+        .headers_mut()
+        .insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static(VOYAGER_CSP));
+    response
+}
+
+async fn voyager_css() -> Response {
+    static_asset_response(VOYAGER_CSS, "text/css; charset=utf-8")
+}
+
+async fn voyager_standalone_js() -> Response {
+    static_asset_response(VOYAGER_JS, "text/javascript; charset=utf-8")
+}
+
+async fn voyager_init_js() -> Response {
+    static_asset_response(VOYAGER_INIT_JS, "text/javascript; charset=utf-8")
+}
+
+/// Standalone GraphQL Voyager page (graphql-voyager v2), served entirely same-origin (#695): styles,
+/// script bundle and the introspection-driving glue script all resolve under `/voyager-assets/*`, and
+/// `Content-Security-Policy` (see [`VOYAGER_CSP`]) is set alongside this HTML. Drives introspection
+/// against `__ENDPOINT__` (replaced per role) via the `data-endpoint` attribute below.
 const VOYAGER_HTML: &str = r#"<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <title>Captain.Food GraphQL — Voyager</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/graphql-voyager@2.1.0/dist/voyager.css" />
+  <link rel="stylesheet" href="/voyager-assets/voyager.css" />
   <style>html, body, #voyager { margin: 0; height: 100vh; overflow: hidden; }</style>
 </head>
 <body>
-  <div id="voyager">Loading GraphQL Voyager…</div>
-  <script src="https://cdn.jsdelivr.net/npm/graphql-voyager@2.1.0/dist/voyager.standalone.js"></script>
-  <script type="module">
-    // Matches the official graphql-voyager v2 CDN example: fetch introspection HERE and pass the RESULT
-    // to renderVoyager. The standalone build expects introspection DATA, not a query-taking function
-    // (the function form never fires the request — Voyager just stays on "Transmitting…").
-    const { voyagerIntrospectionQuery: query } = GraphQLVoyager;
-    const response = await fetch(window.location.origin + '__ENDPOINT__', {
-      method: 'post',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
-      credentials: 'omit',
-    });
-    const introspection = await response.json();
-    GraphQLVoyager.renderVoyager(document.getElementById('voyager'), { introspection });
-  </script>
+  <div id="voyager" data-endpoint="__ENDPOINT__">Loading GraphQL Voyager…</div>
+  <script src="/voyager-assets/voyager.standalone.js"></script>
+  <script src="/voyager-assets/voyager-init.js"></script>
 </body>
 </html>
 "#;
@@ -431,5 +512,90 @@ mod tests {
             Some("private, no-store"),
             "a credential-varying response must not be storable by a shared cache"
         );
+    }
+
+    fn voyager_test_router() -> Router {
+        graphql_routes(
+            crate::graphql::schema::build_schema(None, None, None),
+            crate::hosts::TenantLookup(None),
+        )
+        .layer(Extension(crate::auth::AuthContext::from_config(
+            String::new(),
+            String::new(),
+        )))
+    }
+
+    /// #695 (PROP-170500 D4): the Voyager page must be entirely same-origin — no `cdn.jsdelivr.net`,
+    /// no `https://` reference of any kind — must reference the vendored same-origin asset paths, and
+    /// must carry the CSP header. The green control (c) keeps the `__ENDPOINT__` role-substitution
+    /// behaviour asserted in the same test, so a fix for (a)/(b) cannot silently break (c).
+    #[tokio::test]
+    async fn voyager_page_is_same_origin_with_csp_and_endpoint_wiring() {
+        use tower::ServiceExt;
+        let router = voyager_test_router();
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/restaurant/voyager")
+            .body(axum::body::Body::empty())
+            .expect("request builds");
+        let response = router.oneshot(request).await.expect("router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_SECURITY_POLICY).map(|v| v.to_str().unwrap()),
+            Some(VOYAGER_CSP),
+            "the voyager page must carry the CSP header"
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20).await.expect("body");
+        let body = String::from_utf8(bytes.to_vec()).expect("utf8 body");
+        assert!(
+            !body.contains("cdn.jsdelivr.net"),
+            "the CDN must be gone from the served page: {body}"
+        );
+        assert!(
+            !body.contains("https://"),
+            "no remote asset reference of any kind may remain in the page: {body}"
+        );
+        assert!(
+            body.contains("/voyager-assets/voyager.css") &&
+                body.contains("/voyager-assets/voyager.standalone.js") &&
+                body.contains("/voyager-assets/voyager-init.js"),
+            "the page must reference the same-origin vendored/first-party asset paths: {body}"
+        );
+        // (c) the green control: role-specific endpoint wiring survives the same-origin rewrite.
+        assert!(
+            body.contains(r#"data-endpoint="/restaurant/graphql""#),
+            "the role's GraphQL endpoint must still be wired into the page: {body}"
+        );
+    }
+
+    /// #695: each vendored/first-party asset route serves 200 with the right content type, and (as a
+    /// consequence of them existing at all) the HTML's references to them are not dangling.
+    #[tokio::test]
+    async fn voyager_asset_routes_serve_200_with_content_type_and_csp() {
+        use tower::ServiceExt;
+        for (path, expected_content_type) in [
+            ("/voyager-assets/voyager.css", "text/css; charset=utf-8"),
+            ("/voyager-assets/voyager.standalone.js", "text/javascript; charset=utf-8"),
+            ("/voyager-assets/voyager-init.js", "text/javascript; charset=utf-8"),
+        ] {
+            let router = voyager_test_router();
+            let request = axum::http::Request::builder()
+                .method("GET")
+                .uri(path)
+                .body(axum::body::Body::empty())
+                .expect("request builds");
+            let response = router.oneshot(request).await.expect("router answers");
+            assert_eq!(response.status(), StatusCode::OK, "{path} must serve 200");
+            assert_eq!(
+                response.headers().get(CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+                Some(expected_content_type),
+                "{path} must serve the correct content type"
+            );
+            assert_eq!(
+                response.headers().get(CONTENT_SECURITY_POLICY).map(|v| v.to_str().unwrap()),
+                Some(VOYAGER_CSP),
+                "{path} must also carry the CSP header (dispatch scope: voyager route AND asset routes)"
+            );
+        }
     }
 }
