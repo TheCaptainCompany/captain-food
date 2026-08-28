@@ -289,8 +289,13 @@ re-enables it**. Auth, keys, query discipline:
   something — that is what it is for — so review-on-every-push is a cycle with **no terminating
   condition**, and on #679 it ran a night and 114 commits for a one-step deliverable while the last
   four passes each found no blocking defect and the rounds themselves introduced three regressions.
-  The trigger is now `opened`/`ready_for_review`/`reopened` — **a pass fires on PRESENTATION, not on
-  push**; a fresh look after a rewrite costs one deliberate act (draft → ready). Findings are
+  **A pass fires on PRESENTATION, not on push** — and since the founder retired the CI auto-review
+  (2026-08-28, [ADR-20260828-091500](docs/adr/ADR-20260828-091500-the-ci-auto-review-is-retired-the-team-reviews-its-own-work.md):
+  *"It cost ai usage for each commit and unnecessary because we are doing the code review
+  ourselves"*), the pass IS the team's independent reviewer-agent read of the full branch diff,
+  in-session, before ready-for-review — an implementation shift, the review pattern unchanged;
+  `@claude` on a PR stays as the founder's on-demand look. A fresh look after a rewrite costs one
+  deliberate re-presentation. Findings are
   **triaged, never chased**: blocking (fix here) · non-blocking (one linked issue) · not-a-finding
   (reply, change nothing), and **a PR ships when no BLOCKING finding remains**, never "when the
   reviewer is satisfied". **Three rounds is a CEILING**: at a third, stop and bring the founder what
