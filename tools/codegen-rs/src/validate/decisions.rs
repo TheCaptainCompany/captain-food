@@ -1060,10 +1060,13 @@ pub(crate) fn out_of_corpus_warning_kind(readable: bool) -> (&'static str, &'sta
 /// repeats its own marker, so `>` followed by `#` is never a continuation. Latent today — no superseded key is cited anywhere in the corpus — and pinned as a
 /// residual in `a_superseded_row_may_not_be_cited_as_live_authority`, so closing it later is a
 /// deliberate edit rather than a rediscovery. (Review #64 of PR #679.)
-struct Unit {
-    text: String,
+// `pub(crate)`: reused by `validate_no_superseded_adr_is_cited_as_authority` (citations.rs §24),
+// the ADR-id sibling of this rule -- it needs the same paragraph/list-item/table-row join to scope
+// ITS "superseded" narration exemption. One join, two callers (#712).
+pub(crate) struct Unit {
+    pub(crate) text: String,
     /// `(byte offset where this line's text starts in `text`, 1-based source line)`, ascending.
-    spans: Vec<(usize, usize)>,
+    pub(crate) spans: Vec<(usize, usize)>,
 }
 
 impl Unit {
@@ -1077,7 +1080,7 @@ impl Unit {
     }
 }
 
-fn logical_units(content: &str) -> Vec<Unit> {
+pub(crate) fn logical_units(content: &str) -> Vec<Unit> {
     // `- foo`, `* foo`, `1. foo`, `2) foo` — and a bare marker on its own line.
     fn starts_a_block(body: &str) -> bool {
         if matches!(body, "-" | "*") || body.starts_with("- ") || body.starts_with("* ") {
