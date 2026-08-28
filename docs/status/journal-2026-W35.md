@@ -34,6 +34,24 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > prior citations of any bare `D1`-`D7` existed anywhere in the repo as a formal register reference,
 > so the "update every citation" step of the dispatch found nothing to update.
 
+> ✅ **2026-08-28 — the founder's four-issue ADR-hygiene batch is landed and reported (call-sheet
+> round 6).** In one evening: [#660](https://github.com/TheCaptainCompany/captain-food/issues/660)
+> STATUS.md facts corrected (verified list in the commit);
+> [#710](https://github.com/TheCaptainCompany/captain-food/pull/710) citation corpus widened to
+> the instruction surfaces (deciding `DISPATCH-CARD-CITATION`);
+> [#711](https://github.com/TheCaptainCompany/captain-food/pull/711) the journal-split gate
+> (A2/A3/A5 — A1's index clause and A4 correctly retired as gating an artifact the merged #665
+> design eliminated);
+> [#714](https://github.com/TheCaptainCompany/captain-food/pull/714) the superseded-ADR-citation
+> gate (#477's original mechanism, which red-first testing proved was never built);
+> [#716](https://github.com/TheCaptainCompany/captain-food/pull/716) register-key namespacing
+> (13 promoted; 14 DEFERRED to
+> [#715](https://github.com/TheCaptainCompany/captain-food/issues/715) because their summary
+> table was reversed by §27bis — promoting would have recorded superseded positions as truth).
+> Alongside: [#713](https://github.com/TheCaptainCompany/captain-food/pull/713) shipped the
+> customer login journey. Open follow-ups: #709 (ask-gate refusal), #715 (table reconciliation);
+> open founder rows: ERASURE-LAUNCH-GATE (round-6 question), OVH facts (round 4).
+
 > ✅ **2026-08-28 — [#529 "A customer cannot log in at all: the OTP sheet never opens, and the
 > session cookie is never picked up"](https://github.com/TheCaptainCompany/captain-food/issues/529)
 > fixed: both verified breaks wired, plus a new closed `on_success` action-type set.**
