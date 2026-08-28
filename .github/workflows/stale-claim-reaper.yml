@@ -1,9 +1,10 @@
 # Stale-claim reaper (issue #39, ADR-20260720-233000; liveness fixed by issue #642, then a
-# recency bound added by #642's follow-up on the re-review of #697): a `status/in-progress` claim
-# with >24h of no RECENT activity (no issue comment, no commit on its own `NN-slug` branch, WITHIN
-# the trailing 24h -- an artifact at any single instant after the claim is not enough, since the
-# claim protocol itself manufactures one within a minute of every claim) is released back to the
-# queue, so a crashed session never holds an issue hostage. `cross-referenced` / `referenced` /
+# recency bound added by #642's follow-up on the re-review of #697, then a `mergedAt` signal added
+# by issue #703): a `status/in-progress` claim with >24h of no RECENT activity (no issue comment,
+# no commit on its own `NN-slug` branch, and no merge of a PR whose head was that branch, all
+# WITHIN the trailing 24h -- an artifact at any single instant after the claim is not enough, since
+# the claim protocol itself manufactures one within a minute of every claim) is released back to
+# the queue, so a crashed session never holds an issue hostage. `cross-referenced` / `referenced` /
 # `connected` timeline events (an unrelated PR merely mentioning the issue number) are DELIBERATELY
 # not consulted -- see `.github/scripts/stale-claim-reaper-decide.js` for why and
 # `.github/scripts/stale-claim-reaper-decide.test.js` for the hermetic proof.
@@ -17,14 +18,21 @@
 # Both jobs FAIL LOUD AND COMPLETE, never fail-stop: a per-issue try/catch COLLECTS each error and
 # keeps processing every OTHER issue, then the run throws (failing loud) if any were collected --
 # one issue's API hiccup no longer stops the whole run from reaping/notifying everything else it
-# can see. TWO exceptions are TARGETED, not a silent swallow: `removeLabel` returning 404 means the
+# can see. `removeLabel` returning 404 is TARGETED, not a silent swallow: it means the
 # `status/in-progress` label is ALREADY gone -- the exact end state that branch exists to reach,
-# most likely a concurrent re-claim or a second run racing this one -- and `getBranch` returning
-# 404 for a `listBranches` candidate means the branch was deleted mid-run (routine: GitHub deletes
-# a merged PR's head branch), which is proof the branch is gone, not a liveness signal that failed
-# to resolve. Both catch 404 specifically and rethrow anything else. No other API call is ever
-# adapted around, per the founder's "fix the generator/runtime, never the check" doctrine applied
-# to CI scripts.
+# most likely a concurrent re-claim or a second run racing this one. Any other status is a real
+# failure and rethrows. No other API call is ever adapted around, per the founder's "fix the
+# generator/runtime, never the check" doctrine applied to CI scripts.
+#
+# CANDIDATE DERIVATION (issue #703, corrected by the #705 review): `repos.listBranches` alone
+# cannot see a branch deleted at merge time, hours or days before a run -- the ROUTINE case, since
+# GitHub deletes a merged PR's head branch -- so a multi-PR issue whose work had already landed and
+# merged could be reaped anyway. Candidates are now the UNION of still-live branches AND a
+# run-level CLOSED-PR listing's head refs (`candidateNames`), with that same listing's `merged_at`
+# PRE-RESOLVED into a map (`mergedAtByBranch`) and threaded into `resolveBranches` -- so a candidate
+# sourced from the closed-PR listing costs no further API call. `getBranch` 404ing on a candidate
+# is still expected and handled INSIDE `resolveBranches` (a narrow fallback for the seconds-wide
+# race the run-level listing did not already cover) -- see the module for the full contract.
 name: stale-claim-reaper
 on:
   schedule:
@@ -32,7 +40,8 @@ on:
   workflow_dispatch: {}
 permissions:
   issues: write
-  contents: read   # listBranches/getBranch, for the branch-commit liveness proof
+  contents: read        # listBranches/getBranch, for the branch-commit liveness proof
+  pull-requests: read   # pulls.list, for the mergedAt liveness proof (issue #703)
 jobs:
   reap:
     runs-on: ubuntu-latest
@@ -44,6 +53,9 @@ jobs:
             const {
               CLAIM_MARKER,
               branchPrefix,
+              candidateNames,
+              mergedAtByBranch,
+              resolveBranches,
               decideClaimLiveness,
             } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/stale-claim-reaper-decide.js`);
             const now = Date.now();
@@ -61,6 +73,47 @@ jobs:
               owner, repo, per_page: 100,
             });
 
+            // ONE run-level fetch (issue #703, corrected by the #705 review) of recently-closed
+            // PRs -- NOT paginated further, `per_page: 100` caps this at a SINGLE call, sorted so
+            // the most recently closed/merged come first. This is what lets a branch deleted HOURS
+            // OR DAYS ago at merge time still resolve to a candidate at all: `listBranches` alone
+            // cannot see it any more, but a closed PR keeps its `head.ref` string regardless. Not
+            // wrapped in a try/catch: a failure here fails the WHOLE job immediately, louder than
+            // the per-issue collection below, and correctly so -- without this listing every
+            // deleted-branch candidate would silently look like "no proof of work" was ever
+            // findable (observability's rule: an API error is never absence-of-proof).
+            const { data: closedPrs } = await github.rest.pulls.list({
+              owner, repo, state: 'closed', sort: 'updated', direction: 'desc', per_page: 100,
+            });
+            const mergedAtByName = mergedAtByBranch(closedPrs);
+            const closedPrHeadRefs = Object.keys(mergedAtByName);
+
+            // The workflow-side fetcher (issue #703) -- the ONLY place `github.rest` is called per
+            // candidate; injected into `resolveBranches`, the module's sole I/O-touching function.
+            // `mergedAt` below is now a NARROW FALLBACK (see `resolveBranches`'s own contract):
+            // most candidates resolve their `mergedAt` from `mergedAtByName` above, for free.
+            const fetcher = {
+              async branchCommitAt(name) {
+                const { data } = await github.rest.repos.getBranch({ owner, repo, branch: name });
+                const commit = data.commit && data.commit.commit;
+                return (commit && (commit.committer?.date || commit.author?.date)) || null;
+              },
+              async mergedAt(name) {
+                // API CHOICE (farley): `pulls.list({ state: 'closed', head })` over
+                // `listPullRequestsAssociatedWithCommit`. The latter needs a commit SHA, which is
+                // exactly what we may NOT have for a branch that just 404'd on `getBranch`. Only
+                // reached for the seconds-wide race `mergedAtByName` did not already cover -- see
+                // `resolveBranches`'s contract for exactly when.
+                const { data: prs } = await github.rest.pulls.list({
+                  owner, repo, state: 'closed', head: `${owner}:${name}`, per_page: 10,
+                });
+                const mergedDates = prs.map(pr => pr.merged_at).filter(Boolean);
+                if (!mergedDates.length) return null; // an orphaned branch is simply never-merged
+                mergedDates.sort();
+                return mergedDates[mergedDates.length - 1];
+              },
+            };
+
             // FAIL LOUD STAYS, FAIL STOP GOES (finding 4): one issue's API hiccup must not stop
             // the run from reaping every OTHER stale claim it can see. Errors are COLLECTED, never
             // swallowed -- the run still fails, loud and complete, if anything errored.
@@ -73,31 +126,16 @@ jobs:
                   owner, repo, issue_number: issue.number, per_page: 100,
                 });
 
-                // Every branch whose name starts with `<issue-number>-`, per the claim protocol
-                // (`NN-slug`, BACKLOG.md), filtered from the run-wide list fetched above.
+                // Candidates for `<issue-number>-*` (`NN-slug`, BACKLOG.md): the UNION of
+                // still-live branches and closed-PR head refs (issue #705 review -- see the module
+                // header), then resolved (branch-tip commit date + PR merge state) by
+                // `resolveBranches` -- the only per-candidate I/O this workflow step does.
                 const prefix = branchPrefix(issue.number);
-                const candidates = allBranches.filter(b => b.name.startsWith(prefix));
-                const branches = [];
-                for (const b of candidates) {
-                  let data;
-                  try {
-                    ({ data } = await github.rest.repos.getBranch({ owner, repo, branch: b.name }));
-                  } catch (err) {
-                    // TARGETED idempotence, same shape as `removeLabel` below: hoisting
-                    // `listBranches` out of the per-issue loop widened the snapshot->getBranch
-                    // window from milliseconds to the whole run, so a branch routinely deleted
-                    // mid-run (GitHub deletes a merged PR's head branch) now 404s here. That is
-                    // NOT a liveness signal failing to resolve -- it is proof the branch is gone,
-                    // which `decideClaimLiveness` already treats as "no proof of work" when
-                    // `latestCommitAt` is null. Drop the candidate; any other status is a real
-                    // failure and is rethrown, caught by the per-issue try/catch, and fails the run.
-                    if (err.status !== 404) throw err;
-                    continue;
-                  }
-                  const commit = data.commit && data.commit.commit;
-                  const latestCommitAt = commit && (commit.committer?.date || commit.author?.date) || null;
-                  branches.push({ name: b.name, latestCommitAt });
-                }
+                const candidates = candidateNames(prefix, {
+                  branchNames: allBranches.map(b => b.name),
+                  closedPrHeadRefs,
+                });
+                const branches = await resolveBranches(candidates, fetcher, mergedAtByName);
 
                 const decision = decideClaimLiveness(issue, timeline, branches, now);
                 if (decision.alive) continue;
@@ -114,7 +152,7 @@ jobs:
                 }
                 await github.rest.issues.createComment({
                   owner, repo, issue_number: issue.number,
-                  body: `${CLAIM_MARKER}\n⏰ **Claim expired** — \`status/in-progress\` was set over 24h ago with no comment on this issue and no commit on its \`${prefix}*\` branch since. The issue is back in the queue (BACKLOG.md claim protocol, ADR-20260720-233000). Re-claim by re-adding the label with a fresh claim comment.`,
+                  body: `${CLAIM_MARKER}\n⏰ **Claim expired** — \`status/in-progress\` was set over 24h ago with no comment on this issue, no commit on its \`${prefix}*\` branch, and no merged PR whose head was that branch, since. The issue is back in the queue (BACKLOG.md claim protocol, ADR-20260720-233000). Re-claim by re-adding the label with a fresh claim comment.`,
                 });
               } catch (err) {
                 core.error(`issue #${issue.number}: ${err.message}`);

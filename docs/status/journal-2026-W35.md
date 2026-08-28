@@ -3,6 +3,19 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#703 "Reaper follow-ups at the round ceiling"](https://github.com/TheCaptainCompany/captain-food/issues/703)
+> landed: `resolveBranches` extracted as a separate I/O-orchestration export, a `mergedAt` liveness
+> signal added (bounded by the same `liveAfter` as the commit signal), and the stranded wording fix
+> from `642-reaper-getbranch-race` carried into the rewritten region.** The #705 review caught that
+> the first cut still sourced candidates from `repos.listBranches` alone, so the motivating case (a
+> branch deleted HOURS OR DAYS before a run, at merge time — the routine, not the rare, shape) was
+> simply absent from that list and never reached the `mergedAt` check at all. Fixed by
+> `candidateNames`, deriving candidates from live branches UNION a run-level closed-PR listing's
+> `head.ref`s (fetched ONCE per run), with `mergedAtByBranch` pre-resolving `merged_at` from that
+> same listing so a candidate sourced from it costs no further call — the earlier per-candidate
+> `pulls.list` is now a narrow fallback for the seconds-wide race only. BACKLOG.md "Stale-claim
+> reaper" updated to describe the real mechanism.
+
 > ✅ **2026-08-28 — founder directive executed: the CI auto-review is retired
 > ([ADR-20260828-091500](../adr/ADR-20260828-091500-the-ci-auto-review-is-retired-the-team-reviews-its-own-work.md),
 > whole-roster consult, no lens blocked).** `claude-code-review.yml` deleted — *"It cost ai usage
