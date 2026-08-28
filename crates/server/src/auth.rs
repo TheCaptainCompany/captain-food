@@ -625,8 +625,10 @@ impl AuthContext {
     /// an unthrottled "unknown kid ⇒ fetch" would let an anonymous caller drive one outbound
     /// request per inbound one.
     async fn key_for(&self, kid: &str) -> Result<Jwk, AuthError> {
+        // BEFORE the staleness read, not after it -- see `refresh`.
+        let arrived = Instant::now();
         if self.stale().await {
-            if let Err(e) = self.refresh().await {
+            if let Err(e) = self.refresh(arrived).await {
                 // Fail closed only when there is nothing cached to fall back to (cold cache).
                 if self.cache.read().await.is_none() {
                     return Err(e);
@@ -641,10 +643,13 @@ impl AuthContext {
         // the set we are holding is old enough to plausibly predate it. Keys fetched seconds ago do
         // not gain a member by asking again — that request would exist purely because someone sent
         // us a `kid` we never issued.
+        // A SECOND instant, captured before the rotation read for the same reason: this is a new
+        // decision, and reusing the one from the top would treat any fetch since then as ours.
+        let arrived = Instant::now();
         if !self.rotation_refetch_due().await {
             return Err(AuthError::Unauthorized);
         }
-        self.refresh().await?;
+        self.refresh(arrived).await?;
         self.lookup(kid).await.ok_or(AuthError::Unauthorized)
     }
 
@@ -676,11 +681,26 @@ impl AuthContext {
     /// [`JWKS_FAILURE_BACKOFF`] of attempts, so a JWKS outage costs one request the timeout and
     /// costs everyone else nothing — the difference between a degraded storefront and a 3-s-per-
     /// request storefront on a Friday evening.
-    async fn refresh(&self) -> Result<(), AuthError> {
+    /// `arrived` MUST BE CAPTURED BY THE CALLER, before the read that decided a fetch was needed.
+    ///
+    /// It used to be `Instant::now()` taken here, just above the lock -- i.e. AFTER `key_for`'s own
+    /// `stale()` / `rotation_refetch_due()` read. A task that read `stale() == true` on the cold
+    /// cache and was then descheduled while the first fetch completed re-entered with `arrived`
+    /// LATER than `c.fetched`, failed the test below, and issued a SECOND fetch. Fifty callers on
+    /// four worker threads reach that window on a loaded runner
+    /// (`concurrent_cold_requests_cost_exactly_one_jwks_fetch` failed twice in CI with `left: 2`)
+    /// and never on an idle one, which is why it read as a flake (#683).
+    ///
+    /// TAKING THE INSTANT FROM THE CALLER, rather than testing "is the cache fresh now", is
+    /// deliberate: a blanket `c.fetched.elapsed() <= JWKS_TTL` here would ALSO short-circuit the
+    /// ROTATION refetch, because `JWKS_ROTATION_REFETCH_MIN_INTERVAL` is 5s against a 3600s TTL --
+    /// an unknown `kid` on a cache 10 seconds old would pass `rotation_refetch_due()` and then be
+    /// refused a fetch, so a just-rotated key would 401 every caller for the rest of the hour. The
+    /// two callers ask different questions; only the arrival instant answers both.
+    async fn refresh(&self, arrived: Instant) -> Result<(), AuthError> {
         let url = self.verifier.as_ref().map(|v| v.jwks_url.as_str()).ok_or(AuthError::Unavailable)?;
-        let arrived = Instant::now();
         let _flight = self.refresh_lock.lock().await;
-        // Someone else's fetch completed while we queued: it IS our fetch.
+        // Someone else's fetch completed after we FORMED THE INTENT to fetch: it IS our fetch.
         if matches!(&*self.cache.read().await, Some(c) if c.fetched > arrived) {
             return Ok(());
         }
@@ -1054,6 +1074,63 @@ mod tests {
             assert!(done.expect("task joins"), "every caller gets the key");
         }
         assert_eq!(hits.load(Ordering::SeqCst), 1, "single-flight: one fetch serves them all");
+    }
+
+    /// #683, DETERMINISTIC: the concurrent test above reaches this only under scheduler pressure
+    /// (it failed twice in CI with `left: 2` and never once locally in isolation), so a flake is
+    /// what it looks like and a re-run is what it invites. This constructs the ordering directly.
+    ///
+    /// The single-flight test is `c.fetched > arrived`. If `arrived` is captured INSIDE `refresh`
+    /// — after the caller's own `stale()` read — then a caller that decided to fetch on the cold
+    /// cache and was descheduled while the first fetch landed resumes with `arrived` LATER than
+    /// `fetched`, so the test says "not mine" and it fetches again. Passing the caller's instant in
+    /// is what closes it; reverting `refresh` to `let arrived = Instant::now()` reds this by name.
+    #[tokio::test]
+    async fn a_caller_whose_intent_predates_the_fetch_does_not_pay_a_second_one() {
+        use std::sync::atomic::Ordering;
+        let (url, hits) = counting_jwks(false).await;
+        let ctx = AuthContext::from_config(url, TEST_SUPABASE_URL.into());
+
+        // The intent forms here, on a cold cache — this is where `key_for` captures it.
+        let arrived = Instant::now();
+
+        // …and someone else's fetch lands before we get to run.
+        ctx.key_for("captain-test-es256").await.expect("the first caller fetches");
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "precondition: exactly one fetch so far");
+
+        // Now the descheduled caller resumes into `refresh`. Its intent predates the fetch that
+        // already answered it, so it must take that answer rather than issue its own.
+        ctx.refresh(arrived).await.expect("refresh");
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "#683: a caller whose intent PREDATES the completed fetch must not pay a second one"
+        );
+    }
+
+    /// The other half of #683, and the reason the fix is an arrival instant rather than a blanket
+    /// freshness test: `JWKS_ROTATION_REFETCH_MIN_INTERVAL` is 5s against a 3600s `JWKS_TTL`, so
+    /// `if cache.fetched.elapsed() <= JWKS_TTL { return Ok(()) }` inside `refresh` would ALSO
+    /// short-circuit the rotation refetch — a just-rotated `kid` would 401 every caller for the
+    /// rest of the hour. That was the first shape of this fix, and this case is why it is not the
+    /// shipped one.
+    #[tokio::test]
+    async fn a_rotation_refetch_still_happens_on_a_cache_inside_its_ttl() {
+        use std::sync::atomic::Ordering;
+        let (url, hits) = counting_jwks(false).await;
+        let ctx = AuthContext::from_config(url, TEST_SUPABASE_URL.into());
+
+        ctx.key_for("captain-test-es256").await.expect("warm the cache");
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "precondition: one fetch, cache well inside TTL");
+
+        // An unknown kid on a cache that is FRESH by TTL but older than the rotation interval.
+        tokio::time::sleep(JWKS_ROTATION_REFETCH_MIN_INTERVAL + Duration::from_millis(50)).await;
+        let _ = ctx.key_for("a-kid-we-never-issued").await;
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            2,
+            "#683: the rotation refetch must still fire on a cache inside its TTL — a blanket freshness short-circuit would swallow it"
+        );
     }
 
     /// The same shape when the JWKS is DOWN: the first caller pays the fetch, the rest degrade
