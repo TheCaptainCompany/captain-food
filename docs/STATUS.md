@@ -6,8 +6,9 @@
 
 | Piece | Status | Notes |
 |---|---|---|
-| Render web service (Docker, Frankfurt) | ✅ | Blueprint IaC (`render.yaml`), cargo-chef cached build, verified live |
-| Supabase Postgres (Frankfurt, eu-central-1) | ✅ | Session pooler; Data API off (intentional) |
+| Render web service (Docker, Frankfurt) | ⏸️ SUSPENDED | Billing-suspended since ~2026-08-04 (`suspenders: ["billing"]`); `captain-food.onrender.com` returns 404. **This is a decided state, not an open incident** — see "Production is DELIBERATELY SUSPENDED" below (ADR-20260817-105844). Blueprint IaC (`render.yaml`) still describes what was live before suspension |
+| Supabase Postgres (Frankfurt, eu-central-1) | ⏸️ idle | No live traffic while the Render app is suspended; the team develops/walks against a **local** Postgres stack instead (ADR-20260813-004634) |
+| Hosting target — OVH Managed Kubernetes + in-cluster CloudNativePG, GitOps-reconciled | 📋 decided, not built | [ADR-20260807-002705](adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md): MKS (Paris), CNPG ≥3 nodes + WAL archiving + restore drills, manifests GENERATED from specs, GitOps-only ops. Realization backlog tracked under [#271](https://github.com/TheCaptainCompany/captain-food/issues/271); the cluster does not exist yet — production cutover is a separate decision to re-take, not a task in flight |
 | CI workflow `ci` (build+test+validate+drift; ex `codegen-consistency`) | ✅ | Gates deploys (`autoDeployTrigger: checksPass`); `changes` also runs the decision-lookup stub suite (#679) |
 | CI `Claude Code Review` | ✅ | Fires on `opened`/`ready_for_review`/`reopened` — **one pass per presentation, never per push** (ADR-20260826-084500). Re-request = draft → ready |
 | CI `db-migrate` (sqlx-cli, gated on green build) | ✅ | Applies `migrations/*.sql` out-of-band (ADR-0043) |
@@ -182,7 +183,28 @@ fixed in that run to report **red** on suspension (ADR-20260805-070138) — it p
 last deploy's status and showed a false green while prod was down.
 
 ## 🧭 Architecture decisions
-See [`docs/adr/`](adr/) — latest: **20260802-200416 (drain loops woken by Postgres NOTIFY, not a 1.5 s poll — background polling was 95% of outbound bandwidth)**, 0047 (API auth — Supabase JWT/JWKS), 20260719-120000 (structured domain rejections), **20260719-014434 (checkout snapshot on `PaymentIntentCreated`)**, **20260719-031136 (write-side `Repository` / event-sourced actors — handlers + saga runner route through it, never the raw `EventStore`)**, 20260718-145856 amendment (adapter webhook routes → `/adapters/{partner}/webhooks`). **ADR ids are now date-time** to avoid concurrent-session collisions (ADR-20260718-135417).
+See [`docs/adr/`](adr/) for the full chronological log (247 records as of 2026-08-28) — **latest:
+ADR-20260828-120500** (an answered question is never asked again — the register-check rule closing
+the ask-gate). The picks below are the **load-bearing** ones a new session needs first, not the
+newest filenames:
+
+- **[ADR-20260807-002705](adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)** — hosting
+  target is OVH Managed Kubernetes + in-cluster CloudNativePG, GitOps-only ops. Decided, **not yet
+  built** (see the Deployment table above).
+- **[ADR-20260817-105844](adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)**
+  — production stays deliberately suspended; the team develops against a local walk, not a live
+  cluster.
+- **[ADR-20260802-224532](adr/20260802-224532-push-driven-mailbox-approved.md)** — the CQRS/actor
+  posture: the mailbox door notifies via Postgres `pg_notify`, workers wake cross-process instead of
+  polling.
+- **[ADR-20260719-031136](adr/20260719-031136-write-side-repository-event-sourced-actor.md)** —
+  write-side `Repository` / event-sourced actors: handlers and the saga runner route through it,
+  never the raw `EventStore`.
+- **[ADR-20260821-095957](adr/ADR-20260821-095957-the-register-row-gets-machine-identity-reg2-reg4-and-the-ask-gate-reads-it.md)**
+  — decision register rows are machine-readable files; this is the governance spine the ask-gate
+  (register-check) reads before any founder question.
+
+**ADR ids are date-time** to avoid concurrent-session collisions (ADR-20260718-135417).
 
 > Convention: keep this file current with every substantive change, and record cross-cutting decisions as an ADR in the same change.
 

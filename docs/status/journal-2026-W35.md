@@ -3,6 +3,25 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#660 "STATUS.md's durable sections are stale and are now read first"](https://github.com/TheCaptainCompany/captain-food/issues/660)
+> corrected: STATUS.md contradicted itself within 170 lines.** The Deployment table still showed
+> Render (Frankfurt) / Supabase Postgres as ✅ current while the same file, further down, already
+> recorded production as deliberately suspended. Fixed: Render is now shown ⏸️ SUSPENDED (billing
+> suspension since ~2026-08-04) and Supabase Postgres ⏸️ idle, both pointing at the dedicated
+> "Production is DELIBERATELY SUSPENDED" section
+> ([ADR-20260817-105844](../adr/ADR-20260817-105844-the-walk-goes-first-on-one-database-and-production-stays-suspended.md)),
+> and a new row states the decided-but-unbuilt hosting target — OVH MKS + in-cluster CloudNativePG,
+> GitOps-only
+> ([ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)) — verified
+> against the 2026-08-18 journal note that the cluster does not exist yet. "Architecture decisions"
+> was a stale "latest: 20260802-200416" line, 26 days and ~90 ADRs behind (repo runs to
+> ADR-20260828-120500, 247 records); replaced with the true latest plus a short editorial pick of
+> load-bearing decisions (hosting, production suspension, the push-driven mailbox posture, the
+> write-side `Repository` rule, the decision-register governance spine) instead of chasing the
+> newest filename forever. The "Remaining work" historical banner (2026-07-20) was checked and
+> already states plainly it is a pre-migration snapshot pointing at GitHub issues as the live
+> source — left unchanged.
+
 > ✅ **2026-08-28 — round-5 answers recorded as register rows (the first instance of
 > [ADR-20260828-120500](../adr/ADR-20260828-120500-an-answered-question-is-never-asked-again.md),
 > the founder's "agents do not ask questions already answered" made executable).**
