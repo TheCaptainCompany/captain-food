@@ -3,6 +3,20 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — round-4 answers received and relayed to the whole roster
+> (ADR-20260812-143619): OVH facts pending the founder's console check, #703 picked next, and
+> "Always stay quiet" recorded as
+> [ADR-20260828-063500](../adr/ADR-20260828-063500-always-stay-quiet.md).** The 14-lens consult
+> reshaped [#703 "Reaper follow-ups…"](https://github.com/TheCaptainCompany/captain-food/issues/703)
+> before dispatch: vernon's Tell-don't-Ask boundary (resolveBranches is a separate I/O-orchestration
+> export; the deciders stay pure comparators of already-resolved timestamps), beck's recency rule
+> (merged_at counts only ≥ liveAfter, like every other signal), observability's loud-failure rule
+> (an API error resolving merged_at rethrows — it is never absence-of-proof), holub's fence
+> (extraction + merged_at + the stranded wording fix, no wider audit), and the reviewer's
+> clean-pass checklist (fixture impact, the fifth mutation, the rebase-residual case). Legal's
+> SMS-continuity obligation map recorded on
+> [#699](https://github.com/TheCaptainCompany/captain-food/issues/699).
+
 > ✅ **2026-08-28 — overnight loop closed: the architect's three-chunk list is fully shipped and
 > call-sheet round 4 is published.** Merged this night: the reaper chain
 > ([#697](https://github.com/TheCaptainCompany/captain-food/pull/697) →
