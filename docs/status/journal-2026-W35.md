@@ -16,6 +16,16 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `pulls.list` is now a narrow fallback for the seconds-wide race only. BACKLOG.md "Stale-claim
 > reaper" updated to describe the real mechanism.
 
+> ✅ **2026-08-28 — founder directive executed: the CI auto-review is retired
+> ([ADR-20260828-091500](../adr/ADR-20260828-091500-the-ci-auto-review-is-retired-the-team-reviews-its-own-work.md),
+> whole-roster consult, no lens blocked).** `claude-code-review.yml` deleted — *"It cost ai usage
+> for each commit and unnecessary because we are doing the code review ourselves."* An
+> implementation shift, the review pattern unchanged: the team's in-session reviewer-agent pass
+> over the full branch diff before ready-for-review is now the sole standing third look
+> (ADR-20260826-084500's cadence, ceiling and triage all stand); `claude.yml` (`@claude`
+> on-demand) and every executable gate stay. REV-1 had already made `claude-review` non-required,
+> so no merge machinery moves. Watch item: review latency now has no observability contract.
+
 > ✅ **2026-08-28 — round-4 answers received and relayed to the whole roster
 > (ADR-20260812-143619): OVH facts pending the founder's console check, #703 picked next, and
 > "Always stay quiet" recorded as
