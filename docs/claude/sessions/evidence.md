@@ -152,9 +152,10 @@ Three things worth carrying beyond this workflow:
   > Skipping action due to workflow validation: The workflow file must exist and have identical
   > content to the version on the repository's default branch.
 
-  So a PR that edits `claude-code-review.yml` disables its own reviewer, and any change to the
-  reviewer is unprovable until it is merged. Smoke-test it **after** the merge, from a branch that
-  does not touch the workflow. (Same reason the action restores `.claude/**`, `.mcp.json` and
+  So (while the CI auto-review existed — retired by ADR-20260828-091500; the property still holds
+  for `claude.yml` and any claude-action workflow) a PR that edits such a workflow disables its own
+  run, and any change to it is unprovable until it is merged. Smoke-test it **after** the merge,
+  from a branch that does not touch the workflow. (Same reason the action restores `.claude/**`, `.mcp.json` and
   `CLAUDE.md` from `origin/main` — "PR head is untrusted". Its config is `main`'s config, always.)
 - **Tool permissions belong in `claude_args: --allowedTools`, not `.claude/settings.json`** — the
   interactive allowlist is restored from `origin/main` and does not cover what the review plugin

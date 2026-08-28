@@ -207,8 +207,9 @@ Three things this session paid for (2026-08-17, #623):
   unavailable to an executor session. So the recovery ends with a green branch whose auto-merge is
   silently gone and no way to put it back: a coordinator round-trip, caused by the fix, on the
   failure this section exists to make cheap. Both also fire `pull_request: reopened` /
-  `ready_for_review`, two of the three triggers of `claude-code-review.yml`, spending one of
-  ADR-20260826-084500's three review rounds on a `429`. (An earlier version of this paragraph
+  `ready_for_review` — while the CI auto-review existed (retired by ADR-20260828-091500) that
+  spent one of ADR-20260826-084500's three review rounds on a `429`; the presentation events are
+  still the team's re-review signal. (An earlier version of this paragraph
   recommended close-and-reopen, eleven lines above the section that contradicts it.)
 
 ### An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff
