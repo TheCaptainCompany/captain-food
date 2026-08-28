@@ -1,16 +1,32 @@
 name: Claude Code Review
 
+# ONE REVIEW PASS PER PRESENTATION, NOT ONE PER PUSH. `synchronize` fires on EVERY push to an open
+# PR, which makes the review a function of the author's commit rate rather than of the work being
+# ready. That is a loop with no termination condition: a review always finds something (it is built
+# to), the author pushes the fix, the push fires the next review. On PR #679 it ran for a night and
+# 114 commits; the last four passes each concluded "no blocking defect in the shipped behaviour"
+# while the rounds themselves introduced three regressions the author then had to fix. The reviewer
+# was not wrong and the author was not lazy -- the trigger had no stopping rule, so there was none.
+#
+# `opened` / `ready_for_review` / `reopened` are the moments the author PRESENTS the work. A second
+# opinion after a substantial rewrite is still available and costs one deliberate act: convert to
+# draft and back to ready, which fires `ready_for_review` again. Deliberate is the whole point --
+# it is a decision to re-present, not a side effect of typing `git push`.
+#
+# Findings that arrive and are not blocking do not become another round: they become an issue.
+# The triage protocol is `.claude/skills/review-triage/SKILL.md`; the ruling is
+# ADR-20260826-084500. (Founder directive 2026-08-26.)
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, ready_for_review, reopened]
 
 jobs:
   claude-review:
-    # The code-review plugin bails out on DRAFT pull requests by design, and this repo opens a
-    # draft PR at claim time (docs/BACKLOG.md) and pushes to it for the whole life of the work.
-    # Every one of those pushes was paying for a review that could not produce anything.
-    if: github.event.pull_request.draft == false
-
+    # NO job-level `if:` -- deliberately. A skipped job reports `skipped`, and branch protection
+    # ACCEPTS `skipped` for a required check: the gate would be green having reviewed nothing.
+    # That is the #677 defect class, and a job-level condition is one of the ways into it. The
+    # draft condition that used to live here now guards the EXPENSIVE step instead (the action
+    # call), so the cost saving it bought is kept while the job still reports a real conclusion.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,6 +47,16 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude-review
+        # The code-review action bails out on DRAFT pull requests by design, and this repo opens a
+        # draft PR at claim time (docs/BACKLOG.md) and pushes to it for the whole life of the work.
+        # Every one of those pushes WAS paying for a review that could not produce anything -- past
+        # tense on purpose: `synchronize` is gone from the trigger above, so a push to a draft no
+        # longer starts this workflow at all. What this `if:` saves now is one action invocation per
+        # `opened`/`reopened`-while-draft, which is a fraction of what it saved when it was written.
+        # It stays because the reason it moved OFF the job is unchanged and is the load-bearing
+        # half: a skipped JOB reports `skipped`, and branch protection accepts that for a required
+        # check.
+        if: github.event.pull_request.draft == false
         uses: anthropics/claude-code-action@v1
         with:
           show_full_output: true
@@ -61,6 +87,21 @@ jobs:
             as a message is discarded unread by design (the action hides stdout).
             - `gh pr comment` for the summary. Post one EVERY time, including when you find
               nothing: "reviewed, no findings" is the signal that the reviewer ran.
+              That comment must contain this line, starting at the LEFT MARGIN (no indentation --
+              four or more leading spaces would make it a code block), not inside a ``` or ~~~
+              fence. Anything may follow it, including an attribution footer:
+
+            Reviewed-Commit: ${{ github.event.pull_request.head.sha }}
+
+              COPY THAT SHA FROM THIS PROMPT. Do not derive it from the working tree: on a
+              pull_request event the checkout is the MERGE commit, so `git rev-parse HEAD` reports
+              a different sha than the one named above. (The assertion accepts either, but the
+              prompt is the reliable source.)
+              A later step ASSERTS that marker and fails the job without it. It is what
+              distinguishes "this commit was reviewed" from "some earlier commit was reviewed":
+              comments survive pushes, so a bare "a review comment exists" is satisfied by a
+              verdict on a diff that no longer exists. Put the marker on a line of its own at the
+              left margin, outside any ``` fenced block.
             - `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) for each
               specific issue, anchored to the line it concerns.
             Be concrete about consequence: name what breaks, for whom, and under what input.
@@ -87,3 +128,134 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh api repos/TheCaptainCompany/captain-food:*),Bash(gh run view:*),Bash(gh run list:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob,Task"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+
+      # ── #677: a required check that can pass without doing its job ──────────────────────────
+      # The claude-code-action performs its own workflow validation and, when a PR modifies this
+      # very workflow file, REFUSES TO RUN AND EXITS 0. `claude-review` is a REQUIRED status check
+      # in the `main` ruleset, so such a PR reports a green review gate with no review performed --
+      # the check clears itself. The same green appears whenever the action cannot produce a
+      # verdict at all: credit exhaustion (`api_error_status: 429`, see the note above), a model
+      # outage, permission denials.
+      #
+      # WHAT THIS STEP ACTUALLY PROVES, stated exactly, because the name is shorter than the truth:
+      # that a comment authored by a GitHub App bot that carries, on a line outside any fenced
+      # block opened at column 0, a Reviewed-Commit marker naming this PR's head or merge
+      # commit, exists on this PR. Indented code, fences opened inside a blockquote or list, and
+      # HTML block forms all render as code and still COUNT -- an accepted, measured bias toward
+      # counting, because every no-verdict path this gate exists to catch (the self-skip, a 429, a
+      # model outage, permission denials) produces NO marker at all, so counting an ambiguous one
+      # cannot weaken it. (An earlier version of this line said "a false red here stops every merge
+      # in the repo". Review #10 found it surviving here after the same claim was retracted in
+      # three other files: a MATCHER false red blocks this PR until the reviewer re-posts; the
+      # repo-wide stop is the credit/outage case, which is a TRUE red.) It does NOT and CANNOT
+      # prove WHICH bot produced it -- this repo's own mob-lens sessions post under the identical
+      # `claude[bot]` identity, indistinguishable by any field available here. So the gate is a
+      # tripwire against the silent no-verdict paths above, not an authentication of the reviewer.
+      # Anyone quoting a marker line into a comment can satisfy it; do not do that (see below).
+      #
+      # WHAT IT DOES NOT FIX, so nobody reads it as more than it is: a workflow file cannot make
+      # itself required or un-required, and cannot stop the ruleset accepting `skipped`. This is a
+      # VERDICT-HONESTY fix. Requiredness lives in the `main` ruleset -- DECISIONS §45 REV-1
+      # and #593, still open.
+      #
+      # TWO RESIDUALS worth naming rather than discovering (review #10):
+      #  - The DRAFT path now reports `success` having reviewed nothing, where it used to report
+      #    `skipped` having reviewed nothing. Benign -- `ready_for_review` retriggers the workflow
+      #    -- but it converts one flavour of green-without-a-review into another rather than
+      #    removing it. The move was made because the ruleset ACCEPTS `skipped`, so a skipped job
+      #    was the worse of the two.
+      #  - `.github/scripts/**` is not this workflow file, so a PR that WEAKENS the matcher does
+      #    not trip the action's self-skip, and the assertion then runs the head's own matcher
+      #    against itself. The battery step above is what stands between that and a silent pass.
+      #
+      # `!cancelled()` rather than `always()`: a cancelled run (superseded push, manual cancel) is
+      # not a missing review, and labelling it one trains readers to discount this red.
+      # The matcher's own regressions (the battery prints its own count), no network, ~0.1s. If
+      # this reds the assertion below cannot be trusted -- the #677 failure mode, one level down.
+      # The assert step runs on `!cancelled()`, so it still executes when THIS step fails; the job
+      # is red either way, but do not read an `OK -` line from it as meaningful when this is red.
+      - name: Review-marker matcher self-test
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/assert_review_marker_test.py
+
+      - name: Assert a bot verdict naming this commit exists
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # `actions/checkout` on a pull_request event checks out the MERGE ref, so a reviewer that
+          # resolves "this commit" with `git rev-parse HEAD` reports THIS sha, not head.sha. Both
+          # are accepted; anything else is stale.
+          MERGE_SHA: ${{ github.sha }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "draft PR - the review step is skipped by design, nothing to assert."
+            exit 0
+          fi
+          # The matcher lives in .github/scripts/assert_review_marker.py, NOT here. As a regex
+          # inside jq inside this block scalar it was quadruple-escaped and impossible to run in
+          # place -- so six consecutive review rounds were each the first thing ever to execute
+          # it, and each found new defects (backtick closers with trailing content, tilde closers,
+          # blockquoted code blocks, list-item + indented code, an exemplar the matcher itself
+          # rejected). Round 8 stopped patching block rules and kept exactly ONE, biasing the
+          # residual toward counting; assert_review_marker_differential.py measures that bias
+          # against a real CommonMark parser. The battery in assert_review_marker_test.py carries
+          # every defect above as a regression and runs in the step above, before this one.
+          #
+          # `gh api --paginate` alone (no --jq): the filter would otherwise be applied PER PAGE.
+          # `--slurp` is rejected together with --jq, so the whole array comes back and python
+          # parses it once. No pipe into an early-exit reader, so the SIGPIPE class that caused
+          # the first false red cannot return.
+          comments="$(gh api --paginate "repos/$REPO/issues/$PR/comments")"
+          # A gh/API failure aborts under `set -e` above: an API error must never read as "no
+          # review", and must never read as a pass either.
+          hits="$(printf '%s' "$comments" | python3 .github/scripts/assert_review_marker.py "$HEAD_SHA" "$MERGE_SHA")"
+          case "$hits" in
+            ''|*[!0-9]*) echo "::error::could not count review comments (got: '$hits')."; exit 1 ;;
+          esac
+          if [ "$hits" -gt 0 ]; then
+            echo "OK - $hits bot verdict(s) name this commit (head $HEAD_SHA / merge $MERGE_SHA)."
+            exit 0
+          fi
+          echo "::error::No review was performed on this commit. No bot comment carries a Reviewed-Commit marker naming $HEAD_SHA (or merge $MERGE_SHA)."
+          {
+            echo "claude-review is a REQUIRED check, so a green here without a review is the #677 defect."
+            echo "A red here means NO VERDICT WAS PRODUCED. It does NOT mean the reviewer found a problem."
+            echo "Known causes, in the order worth checking:"
+            echo "  1. This PR modifies .github/workflows/claude-code-review.yml. The action performs"
+            echo "     workflow validation, refuses to run, and EXITS 0. Look for"
+            echo "     'Exiting due to workflow validation skip' in the review step log. This is the"
+            echo "     self-clearing case #677 exists for: it needs a human decision, never a carve-out"
+            echo "     in this file -- the carve-out IS the hole."
+            echo "  2. Credits exhausted: api_error_status 429 / out of usage credits. An account-level"
+            echo "     billing condition; no workflow edit fixes it. Restore the allowance."
+            echo "  3. Permission denials (permission_denials_count must be 0) -- the reviewer ran"
+            echo "     blindfolded and had nowhere to put its findings."
+            echo "  4. The reviewer ran but did not include the Reviewed-Commit line."
+            echo "     It must sit outside any fenced code block opened at the LEFT MARGIN"
+            echo "     (backtick or tilde). Indentation and blockquote/list nesting are tolerated."
+            echo "     THE MARKER MUST START ITS LINE. Only these prefixes may precede it:"
+            echo "       > (blockquote)  -  *  + (bullet)  1. (ordered)  # (heading)  ** _ \` (emphasis)"
+            echo "     Anything else in front of it does not count, even though it renders live:"
+            echo "       - prose before the marker  (\"Reviewed, no findings. Reviewed-Commit: ...\")"
+            echo "       - a task-list box          (\"- [x] Reviewed-Commit: ...\")"
+            echo "       - a GFM table cell         (\"| ok | Reviewed-Commit: ... |\")"
+            echo "     And a FENCE whose opener and closer are not both at column 0 swallows"
+            echo "     everything after it, in either direction:"
+            echo "       - opener at column 0, closer indented 1-3 spaces -> closer not seen;"
+            echo "       - opener indented 1-3 spaces (legal CommonMark), closer at column 0 ->"
+            echo "         the closer is read as a fresh OPENER."
+            echo "     REMEDY for both: open AND close every fence at column 0."
+            echo "     (Earlier versions of this hint said TWO shapes, then announced five and"
+            echo "      listed four, and told you to close the fence at column 0 for a case whose"
+            echo "      fence was already closed there. Review #11. Counting is not the point --"
+            echo "      the marker must start a live line, and fences must not straddle columns.)"
+            echo "     .github/scripts/assert_review_marker_test.py is the exact contract."
+            echo "DO NOT satisfy this gate by pasting a marker line into a comment. It is a tripwire"
+            echo "for the no-verdict paths above, and quoting one destroys the only signal it carries."
+          } >&2
+          exit 1

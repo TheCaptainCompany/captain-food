@@ -517,6 +517,24 @@ pub(crate) fn validate_decision_rows(
         let coupled = tstatus == "superseded" && target.get("superseded_by") == Some(&r.stem);
         match tstatus {
             "decided" | "withdrawn" => {}
+            // The OTHER half of the coupling. The `decided` challenge below is checked for a
+            // target that is not superseded by it; this is the mirror — a target superseded by a
+            // challenge that has not itself closed. Without it the register rests in a split
+            // state the README forbids and nothing sees: a superseded row whose authority points
+            // at a question still open, so the chain head is not an answer. Found by the
+            // independent review of PR #679, which asserted the coupling was total and proved
+            // empirically that only one direction was enforced.
+            "superseded" if coupled && !matches!(r.get("status"), Some("decided") | Some("superseded")) => issues.push(err(
+                rule,
+                r.path.clone(),
+                format!(
+                    "`{}` is superseded BY this row, but this row's status is `{}` — a supersession may only be executed by a challenge that ANSWERED its question. If this row is still `open`, the answer is coming: close it (`decided` + `decided_by`) rather than editing `{}` back, because `superseded_by` is the one legal edit to a decided row. If this row is `deferred` or `withdrawn`, no answer exists — a deferred row is parked behind its `until:` wake condition and a withdrawn one stopped being a question — so the flip was NEVER a legal supersession and reverting `{}` IS the repair; closing this row instead would fabricate a decision nobody took (docs/decisions/README.md).",
+                    target_key,
+                    r.get("status").unwrap_or(""),
+                    target_key,
+                    target_key
+                ),
+            )),
             "superseded" if coupled => {}
             "superseded" => issues.push(err(
                 rule,
@@ -568,6 +586,1212 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
     Some(register_content[after_marker..end_idx].trim().to_string())
 }
 
+/// THE ONE corpus behind `decision-superseded-authority`, derived from GIT rather than the disk.
+///
+/// It existed twice -- once in `main.rs`, once re-implemented inside the test that pins the rule --
+/// and the test copy lacked every guard. There is one now, and both callers use it.
+///
+/// IT READS `git ls-files`, NOT `read_dir`, and that is the actual fix. A filesystem walk sees
+/// every untracked and gitignored file under `.claude/`, so it reddened `make validate` on a
+/// leftover `.claude/worktrees/<wt>/` -- an untracked checkout of another branch that the operator
+/// cannot resolve from the diff, while CI stayed green because a runner has none. The first
+/// remedy was a four-name denylist (`worktrees | target | node_modules | .git`) plus a `.local.`
+/// match, and review #11 pointed out that this treats a symptom: the same failure recurs under any
+/// name not on the list. `.claude/wt-679/` is the ready example -- the root `.gitignore` already
+/// carries `wt*/`, so that shape is expected here -- as is any scratch `.md` holding a citation.
+///
+/// The rule's subject is COMMITTED content: the agent surface, where a stale citation is read as
+/// an instruction. Deriving the list from the index makes the local and CI corpora identical BY
+/// CONSTRUCTION rather than by maintaining a denylist, and it retires the prune list and the
+/// symlink guard together. CLAUDE.md's compiler-first order, applied to a gate: prefer making the
+/// divergence unrepresentable over enumerating the ways it shows up.
+///
+/// SCOPE, decided rather than defaulted:
+///   * `.claude/**` -- the agent surface, FILTERED BY EXTENSION to `md|sh|json|yaml|yml`. The
+///     filter is stated here because it is part of the scope, and this bullet used to say
+///     `.claude/**` flat while the code applied an allowlist the inline comment explained only for
+///     the ROOT files: a `.claude/**` file with no extension, or a `.txt`/`.toml`, sits outside a
+///     rule this section promised covered the whole tree. Nothing tracked under `.claude/` is
+///     excluded today, so it was latent -- which is exactly how the OTHER two-statements-of-one-
+///     scope divergences in this file started (review #19).
+///   * The root files that carry row references in prose: `.claudeignore` (one of the eight sites
+///     PR #679 fixed by hand, and NOT under `.claude/`), `.gitignore`, `CLAUDE.md` -- the resident
+///     index every session loads before anything else -- and the `Makefile`.
+///   * `docs/**` is deliberately OUT: a record ABOUT a supersession must name the superseded row,
+///     and redding those would make the rule unusable.
+///   * `.github/workflows/**` is IN, and the argument for excluding it was falsified by the diff
+///     that shipped it. The bullet used to say workflow row references are "provenance comments on
+///     decided work, not instructions to follow" -- while THIS change added, to `ci.yml`, directly
+///     above the step it governs: *"Authorized by decision row RETRIEVAL-QMD-CI ... that row
+///     authorizes THIS STEP AND ITS PIN AND NOTHING ELSE in CI."* That is a normative instruction
+///     to the next author, in the `row <KEY>` form this rule recognises everywhere else. Supersession
+///     on this chain is routine, not hypothetical -- `RETRIEVAL-QMD` was superseded two days after
+///     being decided -- so a session adding a second CI step would follow a dead row into
+///     `reconsiders: <superseded row>` and hit `decision-reconsiders-shape`, with `make validate`
+///     green the whole way. `SKILL.md` and `decision-lookup.sh` were fixed by hand for exactly that
+///     shape and put in corpus; `ci.yml` carried it and was not. (Review #21 of PR #679.)
+///
+/// A repo with no git available yields an empty corpus, i.e. the rule says nothing -- the same
+/// tolerant posture `load_model` takes, and the honest one: a corpus this cannot read is not a
+/// corpus it may judge.
+pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, String)>, bool, Vec<String>, Vec<String>, Vec<String>) {
+    let out = match std::process::Command::new("git")
+        .args([
+            "ls-files",
+            "-z",
+            "--",
+            ".claude",
+            ".claudeignore",
+            ".gitignore",
+            "CLAUDE.md",
+            "Makefile",
+            ".github/workflows",
+            // TELEMETRY IS A RECORD OF WHAT HAPPENED, NOT AN INSTRUCTION TO THE NEXT SESSION --
+            // the same reason `docs/**` is out, applied to the one subtree under `.claude/**` that
+            // is retrospective narration rather than a surface a session reads before working.
+            // `.claude/loop-budget/**` is 89 of this corpus' 139 tracked files and grows by ONE PER
+            // LOOP RUN, and its `note` fields are long prose written in the records' own house
+            // style: today they name `ADP-1`, `RSO-1`, `MOB-COST-1a`, `HIGH-CONSEQUENCE` and full
+            // ADR ids. None is in a CITING form right now -- checked, every declared key against
+            // every citing spelling, zero hits -- so this closes nothing that is open.
+            //
+            // What it closes is the FALSE RED, on the one surface where a false red has no honest
+            // escape. A future note writing `per row X` is entirely plausible given who writes
+            // them, and if `X` is later superseded the gate becomes a hard `make validate` error
+            // inside a COMMITTED, APPEND-ONLY TELEMETRY FILE -- where the only fixes are editing a
+            // historical record to appease a gate, or exempting it. This branch has retracted two
+            // false reds already and its own rule is that on a gate guarding the required check
+            // they cost more than a latent miss; here there is not even a miss to trade away,
+            // because a telemetry note cannot carry a live instruction by construction.
+            //
+            // AND IT CLOSES A SECOND HOLE THAT WAS NOT THE REASON FOR IT (review #69, arriving
+            // after the change and naming a consequence the change had not argued):
+            // `decision-citation-file-out-of-corpus` is TREE-caused and therefore inside the §17
+            // ratchet, on the stated reasoning that adding an out-of-corpus `.claude/**` file is
+            // "a deliberate, baseline-moving act". A file under `.claude/loop-budget/**` is not an
+            // act by an author at all -- the LOOP writes it. So a ledger sidecar with a different
+            // extension (a `.log`, a `.txt`, a `.lock`) would have exited `make validate` 1 with
+            // `0 -> 1 (NEW warning kind)` on a run nobody edited, printing a remedy that commits a
+            // baseline entry about a file that could never carry a citation. Excluded files never
+            // reach `skipped_ext`, so the ratchet cannot be moved by the loop. The corpus goes from
+            // 139 tracked files to 50; the three `loop-budget` NAMES that remain
+            // (`hooks/loop-budget.sh`, `hooks/loop-budget-selftest.sh`, `loop-budget.json`) are
+            // script and config, i.e. agent surface, and are correctly still in.
+            //
+            // A GIT PATHSPEC, NOT A NAME CHECK IN THE LOOP: the corpus is git's, not the disk's
+            // (the lesson an untracked worktree taught this rule), so the exclusion belongs in the
+            // same list the records and `the_records_state_the_same_citation_corpus_as_the_code`
+            // read. The review that surfaced this said the files were safe because "only `branch`
+            // is free text", which the tree falsifies -- right conclusion, wrong antecedent, third
+            // round running. (Review #67 of PR #679.)
+            ":(exclude).claude/loop-budget",
+        ])
+        .current_dir(root)
+        .output()
+    {
+        // FAIL OPEN, BUT NOT SILENTLY. Returning an empty corpus here is deliberate -- a corpus
+        // this cannot read is not a corpus it may judge -- but it used to be INVISIBLE, and that
+        // is what made a shimmed `git` a route rather than merely a limitation: exiting 0 with
+        // empty stdout yields no files, so the rule reports nothing at all and `make validate` is
+        // green with no error, no warning, and no "corpus unreadable" line. "No stale citations"
+        // and "did not look" printed identically. The `readable` flag lets the caller say which
+        // one happened; the posture is unchanged. (Review #27 of PR #679.)
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return (Vec::new(), false, Vec::new(), Vec::new(), Vec::new()),
+    };
+    let mut cited = Vec::new();
+    let mut unread: Vec<String> = Vec::new();
+    let mut unread_tree: Vec<String> = Vec::new();
+    let mut skipped_ext: Vec<String> = Vec::new();
+    for rel in String::from_utf8_lossy(&out).split('\0').filter(|s| !s.is_empty()) {
+        let tracked_ext = std::path::Path::new(rel)
+            .extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|e| matches!(e, "md" | "sh" | "json" | "yaml" | "yml"));
+        // The root files carry no extension filter -- `Makefile` has none, and `.gitignore` /
+        // `.claudeignore` are DOTFILES, which `Path::extension` reports as `None` (the whole name
+        // is the `file_stem`). This comment said they "are extensions rather than stems", the exact
+        // opposite, and in the direction that invites a wrong edit: a reader who believes it
+        // concludes the allowlist already covers them and deletes the `is_root_file` arm -- or adds
+        // `"gitignore"`/`"claudeignore"` to the extension list, which matches nothing. Either drops
+        // two files that carry live row citations today, with `make validate` green. (Review #63.)
+        let is_root_file = matches!(rel, ".claudeignore" | ".gitignore" | "CLAUDE.md" | "Makefile");
+        // THE FOURTH CORPUS-NARROWING PATH, AND THE LAST SILENT ONE. Every other way a tracked
+        // file leaves this corpus is now reported: `git ls-files` failing sets `readable = false`
+        // (review #27), an unreadable path lands in `unread` (#52), non-UTF-8 in `unread_tree`
+        // (#60). This `continue` was silent, so `make validate` printed an identical green whether
+        // the filter dropped nothing or dropped a `.claude/**` file citing a dead row.
+        //
+        // Not hypothetical in shape: an extensionless hook (`.claude/hooks/preflight`), a `*.txt`
+        // note, a `*.toml`, a `*.mdx` command. Any of them carrying `Per row <DEAD-ROW>, ...` is
+        // invisible -- and that is verbatim the motivating incident this rule exists for
+        // (`decision-lookup.sh`'s `activation_fail` sending a session into
+        // `reconsiders: <superseded row>`), arriving through the one door the rule did not report.
+        //
+        // It was also a records-vs-code divergence `the_records_state_the_same_citation_corpus_as_
+        // the_code` structurally cannot catch: that test asserts the PATHSPECS appear in the
+        // records, and both records state the corpus as `git ls-files` over six paths with NO
+        // filter -- i.e. WIDER than the code applies it, silently and permissively. Counted and
+        // warned now, and TREE-CAUSED so it sits inside the §17 ratchet by round 60's argument:
+        // adding an out-of-corpus `.claude/**` file becomes a deliberate, baseline-moving act.
+        // Zero such files are tracked today, so the warning starts silent. (Review #63.)
+        if !(tracked_ext || is_root_file) {
+            skipped_ext.push(rel.to_string());
+            continue;
+        }
+        // TRACKED BUT UNREADABLE IS NOT "CLEAN". `readable` distinguishes "git refused to look"
+        // from "looked"; it says nothing about "read ALL of it" versus "read SOME of it". A path
+        // the index lists but the filesystem cannot hand back was dropped here with no counter and
+        // no warning, so `make validate` printed an identical green whether the corpus was six
+        // files or sixty -- the same shape review #27 closed one level up, one level down.
+        // Reachable with no tampering at all: a SPARSE CHECKOUT keeps index rows for `.claude/**`
+        // while the worktree files are absent; a tracked symlink whose target is gone; a file the
+        // current user cannot read (a root-created file in a container stage); and non-UTF-8
+        // content, which `read_to_string` also rejects and which this repo's own T15g fixture
+        // builds deliberately. Fail open -- the posture is unchanged -- but SAY SO, because "did
+        // not look" and "found nothing" must not print identically. (Review #52 of PR #679.)
+        //
+        // CLASSIFIED BY CAUSE, because the two have different postures. `InvalidData` is
+        // `read_to_string` rejecting non-UTF-8 bytes -- DETERMINISTIC, identical on every host,
+        // i.e. a property of THIS TREE: a committed `.claude/**` file with one latin-1 byte leaves
+        // the corpus permanently. Everything else (a sparse checkout's absent worktree file, a
+        // dangling symlink, a permission drop) is the host. Lumping them made the tree case
+        // inherit the host case's ratchet exemption, so a committed non-UTF-8 file would have gone
+        // unread forever with `make validate` green at 0 errors and the ratchet unmoved -- "did
+        // not look" printing like "found nothing" for that file, which is the shape reviews #27
+        // and #52 closed at the two levels above it, re-entering through the exemption.
+        // (Review #60 of PR #679.)
+        match std::fs::read_to_string(root.join(rel)) {
+            Ok(text) => cited.push((rel.to_string(), text)),
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => unread_tree.push(rel.to_string()),
+            Err(_) => unread.push(rel.to_string()),
+        }
+    }
+    // AN EMPTY CORPUS IS "DID NOT LOOK", AND IT IS DECIDABLE. `readable` is false only when `git`
+    // FAILS -- and the motivating defect this whole flag was added for is a shimmed `git` that
+    // EXITS 0 with empty stdout. That takes the success arm, so the caller got `readable = true`,
+    // `cited = []`, no `unread`, and `main.rs` emitted NEITHER warning: the rule scanned zero files
+    // and printed an identical green to a clean run. The arm added to stop "no stale citations"
+    // and "did not look" printing identically did not close the route its own comment names.
+    //
+    // It needs no ambiguity tolerance: the pathspec includes `CLAUDE.md` and the `Makefile`, both
+    // tracked in every legitimate checkout of this repo, so an empty result cannot be a real corpus
+    // -- it is a git that did not answer. Also reached without tampering, by a tree whose index is
+    // empty (a `git archive` extraction re-`git init`ed but never `git add`ed), and that was the
+    // MORE mundane case while the less recoverable one (no `.git` at all) was the one that warned.
+    // (Review #61 of PR #679.)
+    if cited.is_empty() && unread.is_empty() && unread_tree.is_empty() {
+        // `skipped_ext` SURVIVES this return while the rest is discarded, because here it is the
+        // EXPLANATION for the empty corpus rather than a footnote to it: if git listed files and
+        // every one of them fell outside the allowlist, the reader needs the names to see why the
+        // gate says it could not look. The other vectors are cleared because `readable = false`
+        // already says the scan is not to be trusted. (Review #63.)
+        //
+        // THE CALLER MUST NOT RATCHET WHAT SURVIVES HERE, and for two rounds it did. The names are
+        // a DIAGNOSTIC on this path, not a finding about this tree: `readable = false` reaches the
+        // caller as `corpus_incomplete`, which makes `--write-warning-baseline` refuse -- so
+        // emitting them under the tree-caused, ratcheted `decision-citation-file-out-of-corpus`
+        // minted `0 -> N (NEW warning kind)` from a run that scanned nothing, with the printed
+        // remedy exiting 1 too. `main.rs` now picks the kind by `readable` and reports them under
+        // the exempt `decision-citation-corpus-unreadable` here. Stated at the SOURCE of the
+        // survival rather than only at the emission, because this comment is what justifies
+        // keeping the vector and a reader who changes that decision needs the constraint with it.
+        // (Review #90.)
+        return (Vec::new(), false, Vec::new(), Vec::new(), skipped_ext);
+    }
+    (cited, true, unread, unread_tree, skipped_ext)
+}
+
+/// Every way a file leaves the citation corpus, reported as issues -- ONE FUNCTION so the kinds,
+/// their ratchet postures and their GRANULARITY sit together and can be asserted by execution.
+///
+/// It was four inline blocks in `main.rs`, where the only instrument available was a test reading
+/// the source text -- and the property that broke is invisible to one: `warning_profile` counts
+/// ISSUES per rule, so an aggregated warn naming twelve files scores 1. The two TREE-caused kinds
+/// are inside the section 17 ratchet precisely so that adding a `.claude/**` file the rule cannot
+/// see "becomes a deliberate, baseline-moving act", and at granularity 1 that held for the FIRST
+/// such file only: once anyone legitimately accepted one with `make warning-baseline`, a second
+/// scored `1 -> 1` -- clean and silent. `decision-superseded-authority` never had the defect,
+/// because it pushes one issue per CITING SITE; the two reporters were the odd ones out and five
+/// separate comments asserted the stronger property of them. (Review #92 of PR #679.)
+pub(crate) fn corpus_scan_issues(
+    readable: bool,
+    unread: &[String],
+    unread_tree: &[String],
+    skipped_ext: &[String],
+) -> Vec<Issue> {
+    let mut issues: Vec<Issue> = Vec::new();
+    if !readable {
+        // A gate that cannot look must not read as a gate that looked and found nothing.
+        //
+        // WARNING-LEVEL AND RATCHET-EXEMPT, and the second half is not a detail: §17 is
+        // exact-match in BOTH directions, so a kind absent from the baseline scores
+        // `0 -> 1 (NEW warning kind)` and exits 1. This comment used to say "Not an error"
+        // over exactly that path -- `make validate` FAILED the first time `git ls-files`
+        // did, with a message naming the warning baseline rather than git, and the remedy
+        // it printed (`make warning-baseline`) would have committed a baseline asserting
+        // that this gate checked nothing, which then reds in the opposite direction on
+        // every host where git works. `RATCHET_EXEMPT` in `validate/warning_baseline.rs`
+        // carries the reasoning and the assertion; the claim is true now. (Review #35.)
+        //
+        // AND IT SAYS WHAT WAS OBSERVED, NOT WHAT WAS INFERRED. The message asserted
+        // "`git ls-files` failed" while `readable == false` has TWO producers: the
+        // `status.success()` guard, and review #61's empty-corpus early return -- which is
+        // reached with git having exited 0. Both of that return's non-tamper spellings are
+        // named in its own comment (an index with no matching entries; every listed file
+        // outside the extension allowlist, which is why it deliberately preserves
+        // `skipped_ext`). So on a `git archive` extraction -- the case that comment calls
+        // "the MORE mundane" one -- an operator met a message telling them to debug git,
+        // ownership and `safe.directory`, none of which was the cause, while the actual
+        // remedy sat in the sibling `decision-citation-file-out-of-corpus` line they had no
+        // reason to connect to it. That is review #35's class one attribution over: a gate
+        // reporting the wrong thing is not better than a gate reporting nothing, it is
+        // worse, because it spends the reader's time. (Review #65 of PR #679.)
+        issues.push(warn(
+            "decision-citation-corpus-unreadable",
+            "tools/codegen-rs".to_string(),
+            "The superseded-citation corpus came back EMPTY, so `decision-superseded-authority` checked nothing. Reported as OBSERVED rather than diagnosed, because this flag has more than one producer: `git ls-files` may have failed (git absent, not a repository, a dubious-ownership refusal on a bind-mounted checkout), OR it exited 0 and listed nothing this rule can read -- an index with no matching entries (a `git archive` extraction re-`git init`ed but never `git add`ed), or every listed file falling outside the extension allowlist. THE DISCRIMINATOR IS ALREADY COMPUTED and prints beside this line, under THIS SAME KIND: a second `decision-citation-corpus-unreadable` warning names the files the allowlist dropped, and its absence means git itself did not answer. (It is emitted under this kind rather than `decision-citation-file-out-of-corpus` precisely because that kind ratchets and this path scanned nothing -- see the emission site.) Not an error, and deliberately outside the section 17 warning ratchet (it depends on the HOST, not on this tree) -- but it is reported, because a silent empty corpus makes 'no stale citations' and 'did not look' print identically.".to_string(),
+        ));
+    }
+    // TRACKED, LISTED, AND NEVER OPENED. Same posture and same reason as the unreadable
+    // CORPUS above: fail open, report loudly, stay outside the §17 ratchet because the
+    // cause is the host (a sparse checkout, a dangling tracked symlink, a permission drop,
+    // non-UTF-8 content) and not this tree. Without it, `readable == true` reported the
+    // same green whether the rule scanned six files or sixty. (Review #52.)
+    if !unread.is_empty() {
+        issues.push(warn(
+            "decision-citation-corpus-unreadable",
+            "tools/codegen-rs".to_string(),
+            format!(
+                "{} tracked file(s) in the superseded-citation corpus could not be read, so `decision-superseded-authority` did not scan them: {}. Not an error, and outside the section 17 ratchet (the cause is the HOST -- a sparse checkout, a dangling symlink, a permission drop -- not this tree, so the count has no stable value to commit). Reported because a partial scan must not print like a clean one.",
+                unread.len(),
+                unread.join(", ")
+            ),
+        ));
+    }
+    // ONE ISSUE PER FILE FOR THE RATCHETED KINDS BELOW, and this aggregated one is the
+    // CONTRAST rather than an inconsistency: `warning_profile` counts ISSUES per rule, so an
+    // aggregated warn scores 1 whether it names one file or twelve. That is fine HERE --
+    // `decision-citation-corpus-unreadable` is `RATCHET_EXEMPT`, so its count never reaches
+    // the baseline at all -- and it was NOT fine for the two tree-caused kinds, which are
+    // inside the ratchet precisely so that "adding a `.claude/**` file the rule cannot see
+    // becomes a deliberate, baseline-moving act". At granularity 1 that property held for
+    // the FIRST such file and evaporated the moment anyone legitimately accepted one with
+    // `make warning-baseline`: from then on a second extensionless hook carrying
+    // `Per row <DEAD-ROW>, ...` scored `1 -> 1` -- clean, silent, the motivating incident
+    // class walking back in through the door the ratchet was built to close.
+    //
+    // `decision-superseded-authority` never had this defect: it pushes one issue per CITING
+    // SITE, so its count is already N, which is what makes `CITATION-RULE-LEVEL`'s claim
+    // that "a SECOND stale citation still reds after the first is baselined" true. The two
+    // reporters were the odd ones out and nothing said so. (Review #92 of PR #679.)
+    // TREE-CAUSED, SO IT RATCHETS. Non-UTF-8 bytes make `read_to_string` fail identically
+    // on every host, so unlike the host causes above this one HAS a stable committable
+    // value -- and lumping the two under one kind gave the deterministic case the
+    // host-only exemption, which would have hidden a committed latin-1 byte in a
+    // `.claude/**` file forever. A separate kind keeps the fail-open posture and puts the
+    // signal back where a `make validate` reader meets it. (Review #60.)
+    for rel in unread_tree {
+        issues.push(warn(
+            "decision-citation-file-not-utf8",
+            rel.clone(),
+            "is a tracked file in the superseded-citation corpus that is not valid UTF-8, so `decision-superseded-authority` cannot scan it. This is a property of the TREE, not the host -- it fails the same way everywhere -- so it stays inside the section 17 ratchet: fix the encoding, or accept it deliberately with `make warning-baseline` in the same commit. ONE ISSUE PER FILE, so the baseline carries the COUNT and a second such file still reds after the first is accepted.".to_string(),
+        ));
+    }
+    // THE EXTENSION FILTER, WHICH WAS THE LAST SILENT WAY OUT OF THE CORPUS. Deterministic
+    // and tree-caused, so it ratchets like `not-utf8` rather than being exempt like the
+    // host causes: adding a `.claude/**` file the rule cannot see becomes a deliberate act
+    // with a baseline diff, not a quiet one. Zero such files today. (Review #63.)
+    //
+    // BUT IT IS TREE-CAUSED ONLY WHEN THE TREE IS THIS REPO'S TREE, and on `!readable` it
+    // is not -- which is why the KIND is chosen here rather than fixed. `skipped_ext`
+    // deliberately survives review #61's empty-corpus early return, where it is the
+    // EXPLANATION for the empty corpus. That return also sets `readable = false`, and the
+    // caller turns that into `CorpusShortfall::Nothing`, which makes `--write-warning-baseline`
+    // REFUSE. Emitting the ratcheted kind there produced `0 -> N (NEW warning kind)` out of
+    // a run that, by that return's own statement, scanned nothing -- with the printed remedy
+    // (`make warning-baseline`) exiting 1 as well. That is verbatim the end state
+    // `CORPUS_DERIVED_KINDS` calls "WORSE than the reporters': the reader can no longer
+    // commit the bad 0, so they are left with a red they cannot clear", reached through the
+    // one vector that return keeps alive. The ratchet's whole justification is that the kind
+    // fails identically on every host BECAUSE it is a property of this tree; when not one
+    // corpus file was readable, the checkout is not this repo (`CLAUDE.md` and the
+    // `Makefile` are in the pathspec and tracked in every legitimate one), so that premise
+    // is false and the names are a DIAGNOSTIC, not a finding. They are reported under the
+    // exempt kind instead -- same information, same fail-open posture, no unclearable red.
+    // Latent today for the same reason the premise fails, and closed anyway on this file's
+    // own stated grounds: it arms itself on a later, unrelated commit, and the run that
+    // trips it looks like a validator regression on a tree nobody touched. (Review #90.)
+    let (skipped_kind, skipped_posture) = out_of_corpus_warning_kind(readable);
+    for rel in skipped_ext {
+        issues.push(warn(
+            skipped_kind,
+            rel.clone(),
+            format!(
+                "is a tracked file in the citation corpus' pathspecs but outside its extension allowlist, so `decision-superseded-authority` does not scan it. {} ONE ISSUE PER FILE, so the baseline carries the COUNT and a second such file still reds after the first is accepted.",
+                skipped_posture
+            ),
+        ));
+    }
+    issues
+}
+
+/// WHICH KIND REPORTS THE FILES THE EXTENSION ALLOWLIST DROPPED, and it depends on whether the
+/// corpus was readable at all. A FUNCTION rather than an `if` at the emission site so the property
+/// is assertable by execution: the sibling predicate in `main.rs` could only ever be checked by
+/// reading its source, and this file says out loud that a text assertion catches a deletion and
+/// not a rewrite.
+///
+/// * `readable` — `decision-citation-file-out-of-corpus`, TREE-caused and inside the §17 ratchet.
+///   The allowlist is deterministic, so the count has a stable committable value and adding a
+///   `.claude/**` file the rule cannot see becomes a deliberate, baseline-moving act.
+/// * `!readable` — the RATCHET-EXEMPT kind. `skipped_ext` deliberately survives the empty-corpus
+///   early return as the EXPLANATION for it, and that return also sets `readable = false`, which
+///   the caller turns into `corpus_incomplete` and `--write-warning-baseline` then REFUSES. Under
+///   the ratcheted kind that combination minted `0 -> N (NEW warning kind)` out of a run that
+///   scanned nothing, with the printed remedy exiting 1 as well — the end state
+///   `CORPUS_DERIVED_KINDS` calls worse than the reporters', because the reader cannot clear it.
+///   The ratchet's premise is that the kind is a property of THIS TREE; when not one corpus file
+///   was readable the checkout is not this repo (`CLAUDE.md` and the `Makefile` are in the
+///   pathspecs and tracked in every legitimate one), so the premise is false and the names are a
+///   diagnostic. (Review #90 of PR #679.)
+pub(crate) fn out_of_corpus_warning_kind(readable: bool) -> (&'static str, &'static str) {
+    if readable {
+        (
+            "decision-citation-file-out-of-corpus",
+            "If one of these is an instruction surface a session reads, it can point at a superseded row with `make validate` green -- widen the allowlist, or accept it deliberately with `make warning-baseline` in the same commit.",
+        )
+    } else {
+        (
+            "decision-citation-corpus-unreadable",
+            "THIS IS THE DIAGNOSTIC FOR THE EMPTY CORPUS REPORTED ABOVE, not a finding about this tree: not one file in the pathspecs was readable, and `CLAUDE.md` and the `Makefile` are in them and tracked in every legitimate checkout -- so what you are looking at is a checkout that is not this repository (a `git archive` extraction re-`git init`ed but never `git add`ed is the mundane case). Outside the section 17 ratchet deliberately: the allowlist count is a property of THIS TREE, and on this path the tree is not it -- ratcheting it would mint a `0 -> N (NEW warning kind)` red out of a run that scanned nothing, which `make warning-baseline` then refuses to clear because the corpus is incomplete. Fix the checkout.",
+        )
+    }
+}
+
+/// One scanning unit per BLOCK — consecutive wrapped lines joined, a new list item starting a new
+/// unit — with each line's leading comment or quote marker stripped so the join reads as the
+/// sentence the author actually wrote. `spans` maps a byte offset in the joined text back to the
+/// physical line it came from, so a finding still names the citing line and not the block's first.
+///
+/// THE RULE BELOW IS CLAUSE-SCOPED AND THE CORPUS IS HARD-WRAPPED AT ~100 COLUMNS. Scanning
+/// `content.lines()` decided everything inside one physical line, which broke the rule in both
+/// directions at a wrap (review #13 of PR #679), and both failures land as a HARD `make validate`
+/// error that blocks every push:
+///
+///   * FALSE RED. `cites` accepts a backticked key that OPENS a line. Wrap an ordinary sentence so
+///     that ``` `KEY` ``` lands at the start of the continuation line and it reds, though nothing
+///     on that line cites anything.
+///   * THE ESCAPE HATCH BECOMES UNREACHABLE. The exemption needs the word `superseded` in the
+///     clause around the occurrence. Write the sentence the docstring calls legal, wrap it so
+///     `superseded` falls to the next line, and the exemption never sees it. The author's only
+///     remaining moves are rewording or re-wrapping — a red whose escape is silence, on exactly
+///     the prose the rule wants people to write.
+///
+/// Today's corpus was green BY LUCK: two sites repeat "superseded" on both wrapped lines and one
+/// is a single long line. Every green control in the test was a single line, which is why the
+/// class was invisible to it.
+///
+/// A LIST ITEM STARTS A NEW UNIT, and the first version of this function got that wrong in the
+/// PERMISSIVE direction — the one that matters. It stripped `-`/`*` like a comment marker and
+/// joined bullets together, so the exemption window grew from a line to a whole paragraph and an
+/// ADJACENT BULLET could silence a live citation:
+///
+/// ```text
+/// - Per row OLD-ROW, open a reversal decision before changing the pin
+/// - (that row is superseded)
+/// ```
+///
+/// Neither `(` nor `)` is a clause boundary, so the joined unit put `superseded` inside the citing
+/// clause and the stale instruction went green — where scanning line 1 alone had redded it. That
+/// is `decision-lookup.sh`'s `activation_fail` shape, i.e. the motivating incident, and review #14
+/// caught it in the commit that introduced it. A markdown continuation is INDENTED, not re-marked,
+/// so treating `- `/`* `/`1. ` as a block start is both correct and what closes this. `#`, `//`
+/// and `>` stay continuation markers, because a shell comment block repeats them on every line.
+///
+/// So the honest statement of what joining buys: it fixes the two wrap failures above and catches
+/// a citation split across a wrap (`Decided by row` / `` `KEY` ``) that was missed before. It does
+/// NOT "strictly improve detection" — that claim was in the docstring one commit ago and this
+/// bullet rule is what makes it true.
+///
+/// AND THE CLASS IS NOT CLOSED — stated here because this paragraph read as if it were, and a
+/// reader who believes that stops looking. Three unit-ending signals exist (a list marker, a
+/// change of comment/quote marker — `#` -> `>` and marked -> unmarked alike, they are the same
+/// test on the marker token — and a table row), and they cover the layouts where the join is
+/// *structurally* wrong. Two adjacent lines carrying the SAME marker are not among them:
+///
+/// ```sh
+/// # kept for history: the old row is superseded
+/// # Per row OLD-ROW, open a reversal decision before changing the pin
+/// ```
+///
+/// Those join, and line 1's `superseded` exempts line 2's live instruction. Both gate scripts are
+/// written in `#` blocks, so this is the corpus the rule exists for — and it is NOT closed on
+/// purpose. A plain line break cannot be a boundary: review #13's motivating case is `superseded`
+/// landing on the next line of a hard wrap, and separating same-class lines needs a HEURISTIC
+/// (line length against the ~100-column wrap, or "the next line starts a sentence"), every one of
+/// which false-reds a legal wrap. On the gate that guards the required status check, a false red
+/// whose only escape is rewording costs more than a latent miss.
+///
+/// A table row is different in kind, not in degree, which is why it IS closed: GFM makes a row one
+/// physical line by grammar, so it can never be a wrap continuation, and the test needs no
+/// heuristic. A change of marker TYPE is closed for the same reason (review #89): a hard wrap
+/// repeats its own marker, so `>` followed by `#` is never a continuation. Latent today — no superseded key is cited anywhere in the corpus — and pinned as a
+/// residual in `a_superseded_row_may_not_be_cited_as_live_authority`, so closing it later is a
+/// deliberate edit rather than a rediscovery. (Review #64 of PR #679.)
+struct Unit {
+    text: String,
+    /// `(byte offset where this line's text starts in `text`, 1-based source line)`, ascending.
+    spans: Vec<(usize, usize)>,
+}
+
+impl Unit {
+    /// The physical line an offset in `text` came from.
+    fn line_at(&self, at: usize) -> usize {
+        self.spans
+            .iter()
+            .rev()
+            .find(|(start, _)| *start <= at)
+            .map_or(self.spans.first().map_or(1, |(_, l)| *l), |(_, l)| *l)
+    }
+}
+
+fn logical_units(content: &str) -> Vec<Unit> {
+    // `- foo`, `* foo`, `1. foo`, `2) foo` — and a bare marker on its own line.
+    fn starts_a_block(body: &str) -> bool {
+        if matches!(body, "-" | "*") || body.starts_with("- ") || body.starts_with("* ") {
+            return true;
+        }
+        let digits: String = body.chars().take_while(char::is_ascii_digit).collect();
+        !digits.is_empty()
+            && matches!(body[digits.len()..].chars().next(), Some('.') | Some(')'))
+            && body[digits.len() + 1..].starts_with(' ')
+    }
+
+    let mut out: Vec<Unit> = Vec::new();
+    let mut cur: Option<Unit> = None;
+    // The comment/quote marker the previous non-blank line carried (`""` for none). A CHANGE in
+    // that marker ends the unit -- see below.
+    let mut prev_marker = "";
+    // Whether the previous non-blank line was a markdown table row. A table row both OPENS and
+    // CLOSES a unit -- see below.
+    let mut prev_table = false;
+    for (i, raw) in content.lines().enumerate() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            if let Some(u) = cur.take() {
+                out.push(u);
+            }
+            continue;
+        }
+        // Comment and quote markers repeat on every wrapped line, so they are stripped and joined.
+        // The marker is kept as a TOKEN, not a boolean: see the marker-change note below.
+        let marker = if trimmed.starts_with("//") {
+            "//"
+        } else if trimmed.starts_with('#') {
+            "#"
+        } else if trimmed.starts_with('>') {
+            ">"
+        } else {
+            ""
+        };
+        let marked = !marker.is_empty();
+        let after_marker = trimmed
+            .trim_start_matches(|c: char| matches!(c, '#' | '/' | '>'))
+            .trim_start();
+        // A MARKER CLASS CHANGE ALSO ENDS A UNIT, and leaving it out was review #14's bullet defect
+        // reproduced one marker over. `#`/`//`/`>` are continuation markers on purpose (a shell
+        // comment block repeats them on every wrapped line), but nothing ended the unit when the
+        // marker STOPPED -- so a comment block and the executable line beneath it became one unit
+        // and the clause exemption read across the prose/code boundary:
+        //
+        // ```sh
+        // # kept for history: the old row is superseded
+        // echo "Per row OLD-ROW: open a reversal decision"
+        // ```
+        //
+        // No `;`, `—` or sentence dot anywhere in that join, so the whole thing was one clause, it
+        // contained `superseded`, and the LIVE citation in the `echo` went green -- where
+        // line-scoped it had redded. `decision-lookup.sh`'s `activation_fail` has exactly that
+        // layout, and stayed caught only because its comment happens to end in a sentence dot.
+        // A guard that depends on someone not reflowing a comment is not a guard. (Review #18.)
+        //
+        // THE COMPARISON IS ON THE MARKER ITSELF, NOT ON "IS THERE A MARKER". Written as a boolean
+        // the only transition it could see was marked <-> unmarked, so review #18's defect survived
+        // one marker over: a `>` quote block followed by a `#` comment block is two blocks of
+        // different KINDS that both set the boolean, nothing ended the unit between them, and a
+        // `superseded` in the quoted history exempted a LIVE instruction in the comment beneath it.
+        //
+        // ```md
+        // > kept for history: the predecessor is superseded
+        // # Per row OLD-ROW, open a reversal decision before changing the pin
+        // ```
+        //
+        // STRUCTURAL, NOT HEURISTIC, on the same footing as the table row and unlike the same-class
+        // residual below: a hard wrap REPEATS its own marker (a wrapped `#` comment continues with
+        // `#`, never with `>`), so a marker-type change can never be a wrap continuation and the
+        // boundary costs no false red. (Review #89 of PR #679.)
+        // A MARKDOWN TABLE ROW IS ITS OWN UNIT, in BOTH directions. Two adjacent rows are both
+        // unmarked and neither `starts_a_block`, so nothing ended the unit between them and they
+        // joined -- reopening reviews #14 and #18 one layout over, in the layout most of this
+        // corpus is written in (102 table rows across six tracked files today):
+        //
+        // ```md
+        // | `OLD-ROW` | superseded | replaced by the chain head |
+        // | next      | Per row `OLD-ROW`, open a reversal decision |
+        // ```
+        //
+        // Joined, there is no `;`, `—`, ` -- ` or sentence dot anywhere, so the clause is the whole
+        // unit, row 1's `superseded` lands inside it, and the LIVE instruction in row 2 goes green.
+        // Line-scoped it redded.
+        //
+        // STRUCTURAL, NOT HEURISTIC, which is why it is safe where a plain line break is not: a
+        // GFM table row is one physical line BY GRAMMAR -- wrapping it ends the table -- so it can
+        // never be the hard-wrap continuation that review #13 protects. The test is starts-with-`|`
+        // AND ends-with-`|`, not a bare ` | `: the review that raised this proposed ` | ` as a
+        // separator that "never appears mid-clause in this corpus", and the corpus falsifies that
+        // 152 times over -- every shell pipeline in `.claude/hooks/*.sh`, including inside comment
+        // prose (`register-check-selftest.sh:172`). A boundary there SHRINKS the exempt window,
+        // i.e. it false-reds, on the two gate scripts specifically. Both-ends matches all 102 table
+        // rows and nothing else in the corpus; `| tar -x ...` and `|| activation_fail ...` open
+        // with a pipe and do not close with one. (Review #64 of PR #679.)
+        let is_table_row = after_marker.starts_with('|') && after_marker.ends_with('|') && after_marker.len() > 1;
+        let opens = starts_a_block(after_marker) || marker != prev_marker || is_table_row || prev_table;
+        prev_marker = marker;
+        prev_table = is_table_row;
+        // The list marker itself is dropped from the text: `- \`KEY\`` must still read as a key
+        // opening the unit, which is one of the citation forms.
+        let body = if opens {
+            after_marker
+                .trim_start_matches(|c: char| matches!(c, '-' | '*' | ')' | '.'))
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_start_matches(|c: char| matches!(c, ')' | '.'))
+                .trim_start()
+        } else {
+            after_marker
+        };
+        // A MARKER-ONLY LINE IS THE PARAGRAPH SEPARATOR INSIDE A COMMENT BLOCK. A bare `#` trims to
+        // an empty body, `starts_a_block("")` is false, and it used to be joined as empty text --
+        // so `# ...end of a paragraph.` / `#` / `# \`KEY\` still governs.` was ONE unit, and the
+        // "a backticked key OPENS the unit" citation form could never fire for any paragraph after
+        // the first. That form is `SKILL.md:193`'s spelling and both gate scripts are long
+        // `#`-separated blocks, so the miss was in the corpus the rule exists for. One-directional
+        // (it misses, it never false-reds), which is why nothing surfaced it. (Review #20.)
+        if marked && after_marker.is_empty() {
+            if let Some(u) = cur.take() {
+                out.push(u);
+            }
+            continue;
+        }
+        if opens {
+            if let Some(u) = cur.take() {
+                out.push(u);
+            }
+        }
+        match cur.as_mut() {
+            Some(u) => {
+                u.text.push(' ');
+                u.spans.push((u.text.len(), i + 1));
+                u.text.push_str(body);
+            }
+            None => {
+                cur = Some(Unit {
+                    text: body.to_string(),
+                    spans: vec![(0, i + 1)],
+                })
+            }
+        }
+    }
+    if let Some(u) = cur {
+        out.push(u);
+    }
+    out
+}
+
+/// No file under `.claude/**` may cite a SUPERSEDED row as its live authority.
+///
+/// PR #679 flipped `RETRIEVAL-QMD` to `superseded` and rewrote the proposal to say, verbatim,
+/// *"name the head, never `RETRIEVAL-QMD` ... the old wording sent the next session straight into a
+/// gate error on the rollback path"*. That correction reached the proposal and stopped: seven
+/// sites under `.claude/**` still named the superseded row, including
+/// `decision-lookup.sh`'s RUNTIME failure message -- the string an operator reads on the exact
+/// rollback path the row's FAILURE PROTOCOL governs. Doing what it said produced
+/// `reconsiders: <superseded row>`, which `decision-reconsiders-shape` rejects.
+///
+/// CLAUDE.md already says to grep the old term after any reshape; the term lived in `.claude/**`,
+/// It is derived from row STATUS, not a hard-coded key list, so it keeps working as the chain
+/// grows links.
+///
+/// WHAT IT DOES NOT REACH, because the first version of this docstring claimed to be "the grep"
+/// and review #11 measured otherwise:
+///
+///   * Only the CITATION FORMS below are recognised — `row <KEY>`, `Per <KEY>`, `decided_by: <KEY>`,
+///     `the <KEY> decision` and the `docs/decisions/<KEY>.yaml` path. Prose that names a row some
+///     other way is missed. This is a high-signal spot check, not an exhaustive grep.
+///   * It sees only the files the caller hands it, and THE CALLER'S `SCOPE` SECTION IS THE ONLY
+///     STATEMENT OF WHAT THAT IS — see `claude_citation_corpus`. This bullet used to enumerate the
+///     set a second time and was already wrong in the commit that shipped it: it named
+///     `.claude/**`, `.claudeignore` and `.gitignore` while the corpus also read `CLAUDE.md` and
+///     the `Makefile`. Two lists of one scope diverge — the sentence this very change closes twice
+///     elsewhere — and the cost is specific: a superseded row named in `CLAUDE.md`, the resident
+///     index, reds `make validate` with a rule the reader has just been told does not reach that
+///     file. So there is now one list, and it is over there.
+///   * `docs/**` is deliberately NOT in scope: records *about* a supersession necessarily name the
+///     superseded row, and redding those would make the rule unusable. That asymmetry is the reason
+///     the scope is a caller decision rather than a walk from the repo root. **The argument is
+///     about records that NARRATE HISTORY, and not every `docs/**` subtree is one** — `docs/claude/**`
+///     are the topic authorities CLAUDE.md routes every session to *before it works*
+///     (`sessions.md` is marked operational), `docs/PLAYBOOK.md` sits in the same position, and
+///     `docs/dispatch/**` is a card a session executes. Those are instruction surfaces, which is
+///     the property that puts `.claude/**` in scope at all. None carries a row citation today, so
+///     the exclusion is not wrong on this tree — but it is not the enumerated exception space it
+///     reads as, and `DISPATCH-CARD-CITATION` is the open row that holds the question. It was
+///     opened for `docs/dispatch/**` alone and widened to the class, because naming exceptions one
+///     subtree at a time is how the next one goes unnamed. (Review #59 of PR #679.)
+///   * FENCED CODE IS **NOT** EXEMPT, and that is a decision, not an oversight. The sibling
+///     `decision-card-row` rule tracks fences and skips them, so the two rules disagree on purpose
+///     and the next author should not have to derive which is which (review #23). A card's fenced
+///     block is an ILLUSTRATION of a form; a `.claude/**` doc's fenced block is the thing a session
+///     COPIES — the motivating incident was a session doing exactly what a doc showed it. A fenced
+///     `reconsiders: <dead row>` is therefore the most dangerous spelling in the corpus, not the
+///     safest, so the exemption that is right for cards would be backwards here. Prose *about* a
+///     supersession still has the clause-scoped escape; a copyable example does not need one.
+/// (This block documented `struct Unit` for one round: it sits between the corpus reader and
+/// `logical_units`, so `cargo doc` and rust-analyzer attached the RULE's scope, its residual and
+/// the `docs/**` decision to a private helper struct, while the rule function itself carried no
+/// doc comment at all. That is the mis-binding the comment further down says was fixed by moving
+/// text, reproduced in mirror image by the move that fixed it -- and it matters because
+/// `DISPATCH-CARD-CITATION` is an open row whose whole subject is the scope sentence above.
+/// Review #53 of PR #679.)
+pub(crate) fn validate_no_superseded_row_is_cited_as_authority(
+    rows: &[DecisionRow],
+    files: &[(String, String)],
+) -> Vec<Issue> {
+    // A NON-EMPTY KEY, OR THIS FUNCTION NEVER RETURNS. `line[from..].find("")` is `Some(0)`
+    // unconditionally and the advance is `from = at + key.len()`, so a zero-length key spins on the
+    // first unit of the first file forever. It is reachable: `parse_decision_rows` accepts an
+    // explicit `key: ""` (only a YAML null is rejected as non-scalar) and `valid_key` is applied to
+    // the FILE STEM, not to this field -- so a template copy-paste with a blanked `key:` line and
+    // `status: "superseded"` would hang `make validate` locally and hang the `codegen`/`specs` jobs
+    // until GitHub's six-hour timeout, INSTEAD of reporting the `decision-key-file-mismatch` that
+    // was waiting in the same issue list. A gate that cannot report is the shape this whole change
+    // argues against. (Review #20 of PR #679.)
+    let superseded: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.get("status") == Some("superseded"))
+        .filter_map(|r| r.get("key"))
+        .filter(|k| !k.is_empty())
+        .collect();
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        for unit in logical_units(content) {
+            let line = unit.text.as_str();
+            for key in &superseded {
+                // BIND TO THE CITING POSITION, not to the line. A first attempt flagged any line
+                // mentioning the key alongside the word "row", which false-redded the very sentence
+                // that names the head and EXPLAINS the supersession -- the key appeared in a
+                // possessive clause. That is the key-presence instrument this repo has retracted
+                // three times, reproduced here on the first try. A citation is the key immediately
+                // after `row` (optionally backticked); anything else is prose about the row.
+                let mut from = 0;
+                while let Some(i) = line[from..].find(*key) {
+                    let at = from + i;
+                    from = at + key.len();
+                    // NOT A SUBSTRING OF A LONGER KEY, IN EITHER DIRECTION. This checked only the
+                    // character AFTER the key -- `RETRIEVAL-QMD` inside `RETRIEVAL-QMD-CI`, which
+                    // is the direction today's chain happens to grow. A superseded key that is a
+                    // SUFFIX of a live one matched inside it, and nothing looked at `line[..at]`.
+                    // Benign on this corpus only because the `cites` arms reject what the trim loop
+                    // leaves behind, i.e. by luck. The register is explicitly a chain-growing
+                    // structure, so the next key containing an older one is the expected state --
+                    // and "the guard was written in one direction only" is the class rounds 8, 14,
+                    // 18, 27, 38 and 42 spent themselves removing. This was the one surviving
+                    // instance. (Review #60 of PR #679.)
+                    let key_boundary = |c: Option<char>| {
+                        !matches!(c, Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    };
+                    if !key_boundary(line[at + key.len()..].chars().next())
+                        || !key_boundary(line[..at].chars().next_back())
+                    {
+                        continue;
+                    }
+                    // AN EXPLANATION IS NOT A CITATION -- but scope the exemption to the CLAUSE
+                    // around this occurrence, not the whole line. A whole-line test is a one-word
+                    // opt-out of a gate whose entire argument is that opt-outs must be explicit,
+                    // and it blinded the rule on the single most load-bearing line in the corpus:
+                    // SKILL.md's headline authority sentence cites the controlling row AND says
+                    // "never the superseded row" further along, so reverting that citation to the
+                    // dead row would have stayed green -- in the file whose stale citations
+                    // motivated this rule.
+                    // A `.` ENDS A CLAUSE ONLY WHEN IT ENDS A SENTENCE. The `docs/decisions/
+                    // <KEY>.yaml` arm added below puts a dot immediately AFTER the key, so an
+                    // unconditional `.` boundary truncated the clause to the path itself and the
+                    // `superseded` exemption could never see the rest of the line: the new arm and
+                    // the existing exemption did not compose, and `docs/decisions/OLD-ROW.yaml is
+                    // superseded -- read the head` redded. A sentence dot is followed by whitespace
+                    // or nothing; a filename dot is followed by a letter. `;` and `—` need no such
+                    // test. Found by the green control, not by reading the code.
+                    // ` -- ` IS A BOUNDARY TOO, and leaving it out made the exempt window enormous
+                    // in exactly the files this rule targets. `—` was a boundary; the ASCII `--`
+                    // that the shell and YAML side of the corpus writes throughout (the Makefile is
+                    // ASCII-only by rule) was not -- so a clause there was bounded only by `;` and
+                    // sentence dots and could run for five joined lines. `activation_fail` is that
+                    // span today: one `superseded` written two lines earlier exempts everything to
+                    // the end of the block, so any LIVE stale instruction landing anywhere in it is
+                    // silenced by a word with nothing to do with it. Same defect as the adjacent
+                    // bullet (review #14) and the comment-then-code join (review #18), one
+                    // punctuation mark over and INSIDE the unit. (Review #20.)
+                    //
+                    // Whitespace on BOTH sides, so `--no-filters` and `--depth=1` are not
+                    // boundaries: the dash-dash has to be a dash, not the head of a flag.
+                    // AN ABBREVIATION DOT IS INSIDE A SENTENCE AND IS FOLLOWED BY A SPACE, so the
+                    // whitespace test alone calls it a boundary and truncates the clause there.
+                    // `Per row \`OLD-ROW\`, i.e. the row superseded by \`NEW-ROW\`.` redded as a hard
+                    // error: `cites` fires on `row`, the forward scan stops at the dot in `e.`, and
+                    // the `superseded` that EXPLAINS the citation is outside the clause -- the "a
+                    // red whose escape is silence" shape this file argues against in five places,
+                    // with rewording or re-wrapping as the author's only move. Invisible to the
+                    // control set for the same reason review #25 gives for the em-dash: every green
+                    // control separates its explanation with `;`, ` -- ` or a plain sentence dot.
+                    //
+                    // Two rules, both structural rather than a taste call. INTERIOR DOTS: the token
+                    // ending at this dot itself contains one (`i.e`, `e.g`, `a.k.a`, `U.S`) -- a
+                    // sentence-final word never does. NAMED SINGLE-SEGMENT ABBREVIATIONS: a short
+                    // closed list. `no.`, `etc.` and `al.` are deliberately NOT on it -- each is
+                    // also an ordinary sentence-final word in this corpus, and admitting them would
+                    // extend clauses past real sentence ends, which is the permissive direction and
+                    // the one that makes a live stale citation exempt. A miss here costs a
+                    // reword; a false accept costs the gate. (Review #35.)
+                    // AN INTERIOR DOT IS NOT ENOUGH, AND THE COMMENT ABOVE STATED THE PREMISE IT
+                    // FAILS ON: "a sentence-final word never [contains a dot]". False of exactly
+                    // this corpus. `rsplit` splits on anything outside `[A-Za-z0-9.]`, so the token
+                    // before the dot in `... live in decision-lookup.sh.` is `lookup.sh` -- and so
+                    // are `ci.yml`, `SKILL.md`, `index.sqlite`, `qmd 2.8.3`, `README.md`, i.e. the
+                    // vocabulary of every file `claude_citation_corpus` scans. A sentence ending in
+                    // one stopped being a clause boundary, so the `superseded` exemption LEAKED
+                    // BACKWARDS ACROSS IT: a comment block whose first line says "the predecessor
+                    // is superseded, and the notes live in decision-lookup.sh." followed by a live
+                    // `Per row <DEAD-ROW>, ...` went GREEN -- and the identical text with `the
+                    // wrapper` in place of the filename reds correctly. The verdict decided by a
+                    // word the author did not think they were choosing, in the permissive
+                    // direction, through the arm added to fix `i.e.`. Same class as the
+                    // adjacent-bullet join (review #14) and the comment-then-code join (#18).
+                    //
+                    // So an interior-dot token must LOOK like an abbreviation: every dot-separated
+                    // segment is one or two ASCII letters. `i.e`, `e.g`, `a.k.a`, `U.S` qualify;
+                    // `lookup.sh`, `ci.yml`, `index.sqlite` and `2.8.3` do not (a digit is not a
+                    // letter, and `sh`/`yml` fail on the segment before them). Structural, not a
+                    // list. (Review #51 of PR #679.)
+                    const ABBREVIATIONS: [&str; 5] = ["cf", "vs", "viz", "resp", "approx"];
+                    let ends_an_abbreviation = |i: usize| {
+                        let word = line[..i]
+                            .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
+                            .next()
+                            .unwrap_or("");
+                        // EVERY SEGMENT EXACTLY ONE LETTER. The first version allowed one OR two,
+                        // which admits a two-letter-stem filename -- `db.md`, `de.md` -- and so
+                        // extends a clause past a real sentence end: the `lookup.sh` class of
+                        // review #51, one stem length over, in the fix for it. Every initialism
+                        // this rule exists for is single-letter segments (`i.e`, `e.g`, `a.k.a`,
+                        // `U.S`, `a.m`), so nothing is lost by the tighter form. Recorded rather
+                        // than filed by the review that spotted it, on the grounds that no token in
+                        // today's corpus hits it -- but the fix is one character and the direction
+                        // is the permissive one. (Review #55 of PR #679.)
+                        let dotted_initialism = word.contains('.')
+                            && word.split('.').all(|seg| {
+                                seg.len() == 1 && seg.chars().all(|c| c.is_ascii_alphabetic())
+                            });
+                        dotted_initialism || ABBREVIATIONS.contains(&word.to_lowercase().as_str())
+                    };
+                    let is_boundary = |i: usize, c: char| match c {
+                        ';' | '—' => true,
+                        '.' => {
+                            !ends_an_abbreviation(i)
+                                && line[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace)
+                        }
+                        '-' => {
+                            line[i..].starts_with("--")
+                                && line[..i].chars().next_back().is_none_or(char::is_whitespace)
+                                && line[i + 2..].chars().next().is_none_or(char::is_whitespace)
+                        }
+                        _ => false,
+                    };
+                    // `--` is two bytes wide; every other boundary is one char.
+                    let boundary_width = |c: char| if c == '-' { 2 } else { c.len_utf8() };
+                    // A DASH IS A BOUNDARY LOOKING BACK, NOT LOOKING FORWARD, and the asymmetry is
+                    // the point rather than a shortcut. `;` and a sentence dot separate independent
+                    // statements; a dash introduces an APPOSITIVE about the thing just named. So:
+                    //
+                    //   `KEY` — superseded by the chain head        <- the dash EXPLAINS `KEY`
+                    //   the old row is superseded -- and per row `KEY`, do X   <- it does NOT
+                    //
+                    // Treating a dash as a boundary in both directions made the first spelling --
+                    // the most idiomatic explanation in this repo -- a hard `make validate` error
+                    // with rewording as the only escape, because the clause ended at the dash before
+                    // `superseded` was ever seen. Treating it as a boundary in NEITHER direction
+                    // reopens review #21, where one `superseded` written earlier silenced a live
+                    // citation five joined lines later. Backward-only keeps both: an explanation
+                    // that FOLLOWS the key still exempts it, and one that PRECEDES a dash no longer
+                    // reaches past it. Every green control separated its explanation with `;`,
+                    // ` -- ` or a dot, and those three behave identically -- which is why the
+                    // control set was silent about the em-dash spelling specifically (review #25).
+                    let clause_end = line[at..]
+                        .char_indices()
+                        .find(|&(i, c)| !matches!(c, '-' | '—') && is_boundary(at + i, c))
+                        .map_or(line.len(), |(i, _)| at + i);
+                    // `i + 1` would land INSIDE the em-dash: `—` is three bytes, and slicing a
+                    // str on a non-boundary panics. The corpus contains em-dashes, so the
+                    // round-trip test caught this immediately -- which is the argument for having
+                    // run it against real content rather than fixtures alone.
+                    let clause_start = line[..at]
+                        .char_indices()
+                        .filter(|&(i, c)| is_boundary(i, c))
+                        .next_back()
+                        .map_or(0, |(i, c)| i + boundary_width(c));
+
+                    // TRIM TRAILING PUNCTUATION BEFORE LOOKING AT THE LAST TOKEN. A trailing colon
+                    // survived, which made `Decision row: <KEY>` invisible -- THE ENVELOPE FORMAT
+                    // this repo mandates and `.claude/hooks/register-check.sh` enforces as
+                    // `ENVELOPE='Decision row:'`. The single most load-bearing citation form under
+                    // `.claude/**` was the one the detector could not see (review #11).
+                    // Strip quoting marks first, THEN look for an opening bracket, because the
+                    // bracket is itself the citing signal in `(\`KEY\`, decided ...)`. Stripping
+                    // it away before testing is what made that form invisible.
+                    let raw_before = line[..at].trim_end();
+                    // THE BACKTICK IS THE CITING SIGNAL, and `[` is not one at all. Accepting any
+                    // `(` or `[` made a markdown LINK to the row's file -- `[KEY](path)`, the
+                    // ordinary way a doc points at a record -- and any parenthetical that merely
+                    // MENTIONS the key (`(KEY was the first attempt)`) into hard `make validate`
+                    // errors, on `CLAUDE.md` among others, with rewording as the only escape. That
+                    // is the "a red whose escape is silence" shape this file argues against
+                    // everywhere. The form the arm was added for is SKILL.md's `` (`KEY`, decided
+                    // ... `` -- a BACKTICKED key immediately inside a paren -- so require exactly
+                    // that. `[` goes entirely: a link's TARGET is a path, and the
+                    // `docs/decisions/<KEY>.yaml` arm below reaches it with the right semantics
+                    // (pointing a session at a dead row's file IS the defect); the link's TEXT is
+                    // not a citation on its own. Review #16 of PR #679; no green control covered
+                    // either spelling, which is why the class was invisible.
+                    let backticked = raw_before.ends_with('`');
+                    let quoted = raw_before.trim_end_matches(['`', '"', '\'']).trim_end();
+                    // ADJACENCY WAS AN ACCIDENT OF THE ONE SITE THE ARM WAS WRITTEN FOR.
+                    // `quoted.ends_with('(')` catches `` (`KEY`, decided ... `` -- SKILL.md:326 --
+                    // and misses `` (decided 2026-08-24, `KEY`) ``, which is SKILL.md:193, the
+                    // line the comment three screens up NAMES as the form the marker-only-line fix
+                    // restores. It is a wrapped markdown continuation, so `logical_units` joins it,
+                    // the key lands mid-unit, `,` is not in the trim set (so `before` is non-empty)
+                    // and `last` is a separator (so no citing token fires either): the site the
+                    // records cite to prove the corpus is covered was the one still missed. It was
+                    // caught in practice only because three OTHER SKILL.md lines red, so an author
+                    // fixing those passes over it -- coverage by accident, which is the property
+                    // this file spends thirty rounds removing from its neighbours. (Review #35.)
+                    //
+                    // BUT BARE CONTAINMENT WAS TOO WIDE, AND THE COMMENT THAT SHIPPED WITH IT WAS
+                    // FALSE. It said containment "does not widen the class the adjacent form
+                    // already accepted"; it does, and it re-admitted the exact sentence the
+                    // `the`-plus-citing-noun narrowing exists to keep green. `the pin was rewritten
+                    // (the `KEY` experiment was contaminated) in round 4` has `depth == 1` and a
+                    // backtick, so it became a HARD error -- while the identical clause WITHOUT the
+                    // parentheses stays green, because `last == "the"` and `experiment` is not a
+                    // citing noun. The docstring names `the <KEY> experiment was contaminated` as a
+                    // case that MUST stay green; punctuation the author did not think they were
+                    // choosing decided it. `decision-superseded-authority` WAS an ERROR when this
+                    // was written, so a false positive redded `specs` AND `docs-validate` and the
+                    // required `codegen` check with them, with rewording as the only escape -- "a
+                    // red whose escape is silence", from the arm added to
+                    // close a MISS. And the backtick is not a distinguisher here: the records state
+                    // that every row key in `CLAUDE.md`, `SKILL.md` and the register IS backticked,
+                    // so bare containment fires on the house style. (Review #40.)
+                    //
+                    // So a parenthetical must CITE, not merely CONTAIN: some citing word has to
+                    // appear inside it before the key. `(decided 2026-08-24, `KEY`)` and
+                    // `(see `KEY` and the ADR)` do; `(the `KEY` experiment was contaminated)` does
+                    // not. Adjacency keeps its own arm, so `` (`KEY`, decided ... `` -- where there
+                    // is nothing between the paren and the key to carry a signal -- is unaffected.
+                    // Green controls for the plain mention live beside the reds; there was none on
+                    // either side, which is why the class was invisible for a round.
+                    const PARENTHETICAL_CITES: [&str; 8] = [
+                        "row", "rows", "per", "see", "decided", "decided_by", "reconsiders", "superseded_by",
+                    ];
+                    // A STACK, SO `open_paren` IS THE INNERMOST ONE STILL OPEN. Overwriting it on
+                    // every `(` and clearing it only at depth 0 left it pointing at an INNER paren
+                    // that had already closed: for `` (see (the wrapper) `KEY`) `` the window
+                    // searched for a citing word was `the wrapper) `, which does not contain `see`,
+                    // so the citation went unreported. Permissive, and the intent -- "some citing
+                    // word has to appear inside the parenthetical before the key" -- describes the
+                    // enclosing one. (Review #51.)
+                    let mut open_stack: Vec<usize> = Vec::new();
+                    for (i, c) in line[clause_start..at].char_indices() {
+                        match c {
+                            '(' => open_stack.push(clause_start + i),
+                            ')' => {
+                                open_stack.pop();
+                            }
+                            _ => {}
+                        }
+                    }
+                    let depth = open_stack.len() as i32;
+                    // INNERMOST, NOT OUTERMOST -- AND ROUND 51 CHOSE THE OTHER ONE AND PLANTED IT.
+                    // The two differ only when an inner group is STILL OPEN at the key; for review
+                    // #51's motivating case the inner paren has already been popped, so the stack
+                    // holds one entry and the choice is invisible. Where they differ, `first()`
+                    // FALSE-REDS the spelling this file's docstring names as one that must stay
+                    // green: `(decided 2026-08-24 by ADR-... (the `KEY` experiment was
+                    // contaminated))` picks up `decided` from the OUTER group and reds a sentence
+                    // that is prose about the row. `decision-superseded-authority` WAS an ERROR when this was
+                    // written, so that redded `specs`, `docs-validate` and the required check, with
+                    // rewording as the only escape -- "a red whose escape is silence", through the arm added to
+                    // close a miss. `last()` gives the identical verdict on #51's case and the
+                    // right one here, because the intent -- "some citing word has to appear inside
+                    // IT before the key" -- is about the parenthetical the key is actually in.
+                    //
+                    // WHAT THIS GIVES UP, stated rather than left implied: a citing word in an
+                    // OUTER group with the key inside a still-open inner one -- `(see (the wrapper
+                    // `KEY`))` -- is now a MISS. That is the deliberate direction: this file has
+                    // ruled repeatedly that a false red on honest prose is the worse instrument,
+                    // and both spellings now carry a control so the trade is visible rather than
+                    // rediscovered. (Review #54 of PR #679, correcting review #51's choice.)
+                    let open_paren = open_stack.last().copied();
+                    let in_a_citing_parenthetical = backticked
+                        && depth > 0
+                        && open_paren.is_some_and(|o| {
+                            line[o + 1..at]
+                                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                                .any(|w| PARENTHETICAL_CITES.contains(&w.to_lowercase().as_str()))
+                        });
+                    let opens_a_parenthetical =
+                        (backticked && quoted.ends_with('(')) || in_a_citing_parenthetical;
+                    let mut before = quoted;
+                    loop {
+                        let next = before.trim_end().trim_end_matches([':', '(', '[', '*', '_', '-']);
+                        if next.len() == before.len() {
+                            break;
+                        }
+                        before = next;
+                    }
+                    let before = before.trim_end();
+                    let last = before
+                        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .next()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    // TOKEN equality, not a suffix test: `ends_with("row")` also matched `narrow`,
+                    // `borrow` and `arrow` -- the false-red class this file has retracted three
+                    // times, carried into the rule written to stop the previous one. Green controls
+                    // for all three live in `a_superseded_row_may_not_be_cited_as_live_authority`.
+                    // `the` IS NOT A CITING TOKEN ON ITS OWN -- it is the definite article, and
+                    // accepting it made this the false-red instrument the rest of this PR spends
+                    // nine rounds retracting: `mirrors the <KEY> rollout`, `the <KEY> experiment
+                    // was contaminated`, `narrower than the <KEY> surface` would each red
+                    // `make validate` as a hard error, with no escape but rewording or injecting
+                    // the word `superseded` into the clause. None of them tells a session to cite a
+                    // dead row. The green controls missed it because every one of them avoided
+                    // putting `the` immediately before the key. So `the <KEY>` counts only when the
+                    // word AFTER the key is a citing noun.
+                    // BOUNDED BY `clause_end`, the same boundary the exemption is scoped to. It
+                    // used to trim forward over ALL non-alphanumerics, which walks straight over
+                    // the sentence dot that ENDED the clause -- and, now that units are joined
+                    // blocks, over the end of the physical line -- to read a word from the next
+                    // sentence. So `narrower than the <KEY>. Decision rows are cheap...` matched
+                    // `the` + `decision` and redded as a hard error, while a `superseded` in that
+                    // following sentence could not exempt it because the clause was already over.
+                    // `narrower than the <KEY>` is named three lines below as a case that MUST stay
+                    // green; it did, only because of what the next word happened to be. No control
+                    // put `the` before the key with a sentence break after it. (Review #20.)
+                    let lookahead_end = clause_end.max(at + key.len());
+                    let next_word = line[at + key.len()..lookahead_end]
+                        .trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
+                        .split(|c: char| !c.is_ascii_alphanumeric())
+                        .next()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let the_plus_noun = last == "the"
+                        && matches!(next_word.as_str(), "decision" | "row" | "record" | "ruling");
+                    let cites = matches!(last.as_str(), "row" | "rows" | "per")
+                        || the_plus_noun
+                        // `reconsiders:` is the form the MOTIVATING INCIDENT produced -- the
+                        // docstring says so in as many words -- and it was the one field name not
+                        // recognised while its sibling `decided_by` was. It was dropped earlier
+                        // because it false-redded this PR's own retraction comment; the
+                        // clause-scoped `superseded` exemption now covers that, so it can come
+                        // back doing the job it was named for.
+                        || matches!(last.as_str(), "decided_by" | "reconsiders" | "superseded_by")
+                        || before.to_lowercase().ends_with("decided_by")
+                        // The key opening a line or a parenthetical, both live in SKILL.md today
+                        // (`(\`KEY\`, decided ...` and a line beginning with the key) and both
+                        // invisible to the first version of this rule.
+                        || opens_a_parenthetical
+                        // A BACKTICKED key opening a line is a citation (`SKILL.md:193`); a bare
+                        // one is ordinary prose ("OLD-ROW was the predecessor."). The distinction
+                        // is the backtick, and without it the green control for prose reds.
+                        // ...but NOT when a `[` was what the trim loop ate to empty `before`.
+                        // Review #16 narrowed `opens_a_parenthetical` to drop `[` on the grounds
+                        // that a link's TEXT is not a citation -- and this arm re-admitted it,
+                        // because `[` is in the trim set, so `` [`KEY`](target) `` left `before`
+                        // empty with a backtick behind it and redded. Both green controls used the
+                        // UNBACKTICKED `[KEY]`, i.e. the spelling nobody writes; every row key in
+                        // `CLAUDE.md`, `SKILL.md` and the register is backticked. A link to an ADR
+                        // or an issue would have been a hard error with rewording as the only
+                        // escape. (`` [`KEY`](docs/decisions/KEY.yaml) `` stays red on the PATH arm
+                        // below, which is the intended behaviour.) Review #20.
+                        || (before.is_empty()
+                            && line[..at].ends_with('`')
+                            && !raw_before.trim_end_matches('`').ends_with('['))
+                        // `docs/decisions/<KEY>.yaml` -- THE FORM THE REGISTER ITSELF MANDATES, and
+                        // the one arm this rule shipped without. `SKILL.md` and `CLAUDE.md` both
+                        // route resolution through "exact `docs/decisions/<KEY>.yaml` resolution",
+                        // so the HIGHEST-authority way for a `.claude/**` file to point a session
+                        // at a dead row -- a bare path, no verb, no backtick -- walked past a gate
+                        // whose whole subject is that pointer, while the weaker prose forms were
+                        // caught. `before` keeps its trailing `/` (the trim set is `:([*_-`), so
+                        // one arm closes it. Review #12 of PR #679.
+                        //
+                        // `decisions/` must be the DIRECTORY, not a suffix: a bare `ends_with`
+                        // also matched `docs/old-decisions/`, which is the suffix-not-token defect
+                        // this file already retracted once over `narrow`/`borrow`/`arrow`. The
+                        // preceding character decides, and the green control names the case.
+                        || before.strip_suffix("decisions/").is_some_and(|head| {
+                            head.chars()
+                                .next_back()
+                                .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                        });
+                    if !cites {
+                        continue;
+                    }
+                    // THE CITING TOKEN MAY NOT SUPPLY ITS OWN EXEMPTION. `superseded_by` contains
+                    // "superseded", and this test runs BEFORE `cites` -- so the `superseded_by` arm
+                    // added below could never fire: `last == "superseded_by"` guarantees the
+                    // substring sits in the clause, which guarantees `continue`. A `.claude/**`
+                    // file mirroring a row's fields as `superseded_by: <KEY>` therefore stayed
+                    // green after `<KEY>` was itself superseded further down the chain -- and this
+                    // change creates the register's FIRST two-link chain, so "the successor is
+                    // superseded later" is the next state, not a corner case. An arm dead by
+                    // construction reads as coverage it never provided (review #21).
+                    //
+                    // So the exempting word is looked for in the clause with the citing token
+                    // blanked out: an explanation still exempts, a field name no longer exempts
+                    // itself.
+                    // BLANK ON THE ORIGINAL SLICE, LOWERCASE AFTER. `lo`/`hi` are offsets into
+                    // `line`, and the first version applied them to `line[..].to_lowercase()` --
+                    // but Unicode lowercasing is NOT length-preserving (`ẞ` U+1E9E is 3 bytes and
+                    // lowercases to `ß` at 2; `İ` U+0130 is 2 and lowercases to `i̇` at 3), so one
+                    // such character anywhere before the citing token shifts every later offset.
+                    // `is_char_boundary` stops the panic and nothing else, so the blanking lands in
+                    // the wrong place or is skipped, SILENTLY -- and the permissive direction is
+                    // the one that bites: the guard is skipped, `superseded_by` is left intact, and
+                    // the arm this whole block exists to resurrect goes dead by construction again
+                    // (review #21's defect, reopened). Latent on today's ASCII-plus-em-dash corpus,
+                    // but the corpus includes `CLAUDE.md` and `.claude/**` prose by design, and no
+                    // control put a length-changing character before the token. Doing it in this
+                    // order makes the class unrepresentable rather than guarded. (Review #49.)
+                    let token_start = before.len().saturating_sub(last.len());
+                    let mut exempt_text = line[clause_start..clause_end].to_string();
+                    if token_start >= clause_start && before.len() <= clause_end {
+                        let lo = token_start - clause_start;
+                        let hi = before.len() - clause_start;
+                        if lo <= hi && hi <= exempt_text.len() && exempt_text.is_char_boundary(lo) && exempt_text.is_char_boundary(hi) {
+                            exempt_text.replace_range(lo..hi, &" ".repeat(hi - lo));
+                        }
+                    }
+                    // AND THE SAME RULE FOR THE PARENTHETICAL ARM, WHICH REOPENED THE CLASS ONE
+                    // SPELLING OVER. The blanking above reaches `last` only -- the token
+                    // immediately before the key. `in_a_citing_parenthetical` finds its citing word
+                    // ANYWHERE in `line[open_paren + 1..at]`, so in
+                    //
+                    //     (superseded_by ADR-20260824-205911, `KEY`)
+                    //
+                    // `cites` is true via the parenthetical arm, `last` is EMPTY (a separator sits
+                    // before the key), `lo == hi`, and the blanking above is a no-op -- leaving
+                    // `superseded_by` in the clause to exempt the very citation it created. Exactly
+                    // review #21's defect, in the arm added after it, which is why the
+                    // `"superseded_by"` entry in `PARENTHETICAL_CITES` could never fire in any
+                    // spelling the `last` arm did not already cover: a decorative list member.
+                    //
+                    // Not a corner case on this chain: `RETRIEVAL-QMD -> RETRIEVAL-QMD-CI` is the
+                    // register's first two-link chain, and the row itself calls "the head is
+                    // superseded later" the next state.
+                    //
+                    // Blanks EVERY list member in the window, not just the ones containing
+                    // "superseded", so adding a future citing word that happens to contain it
+                    // cannot reintroduce this. Same original-slice-before-lowercase order as above,
+                    // for the same non-length-preserving reason. (Review #68 of PR #679.)
+                    if let Some(o) = open_paren.filter(|_| in_a_citing_parenthetical) {
+                        let window = &line[o + 1..at];
+                        let mut tok_start: Option<usize> = None;
+                        for (i, c) in window.char_indices().chain(std::iter::once((window.len(), ' '))) {
+                            let is_word = c.is_ascii_alphanumeric() || c == '_';
+                            match (is_word, tok_start) {
+                                (true, None) => tok_start = Some(i),
+                                (false, Some(st)) => {
+                                    if PARENTHETICAL_CITES.contains(&window[st..i].to_lowercase().as_str()) {
+                                        let lo = (o + 1 + st).saturating_sub(clause_start);
+                                        let hi = (o + 1 + i).saturating_sub(clause_start);
+                                        if lo <= hi
+                                            && hi <= exempt_text.len()
+                                            && exempt_text.is_char_boundary(lo)
+                                            && exempt_text.is_char_boundary(hi)
+                                        {
+                                            exempt_text.replace_range(lo..hi, &" ".repeat(hi - lo));
+                                        }
+                                    }
+                                    tok_start = None;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    let exempt_text = exempt_text.to_lowercase();
+                    if exempt_text.contains("superseded") {
+                        continue;
+                    }
+                    // ERROR, BY RECORDED DECISION -- and the level is a directive, not a
+                    // preference. The rule SHIPPED at `warn` under CLAUDE.md's GATE-THEN-STABILIZE
+                    // (a new blocking rule on the path feeding the required check must not land
+                    // with its default flipped in the same commit; reviews #81/#82 of PR #679),
+                    // and `CITATION-RULE-LEVEL` was filed open and founder-owned to hold the flip.
+                    // The founder DECIDED it 2026-08-27 (call sheet, Q2: "Make it a hard error";
+                    // ADR-20260827-081500), after the parser had run over the real corpus and the
+                    // review rounds' live edits with zero false positives -- which is the smoking
+                    // the gated form was shipped to get.
+                    //
+                    // WHAT `err` BUYS BACK: the one-commit supersession coupling
+                    // `docs/decisions/README.md` requires is enforced ABSOLUTELY again -- a stale
+                    // citation can no longer land behind a baseline entry.
+                    //
+                    // WHAT IT COSTS, unchanged from the row and accepted with it: on a false
+                    // positive the only escape is rewording the prose, and on the docs-only lane
+                    // (a push to `main` with no PR) that red lands after the push. The residuals
+                    // are unchanged too -- the same-marker join, the fail-open corpus posture --
+                    // and the second half of `CITATION-RULE-LEVEL`'s question (an explicit marker
+                    // instead of the implicit word `superseded`) was NOT decided here and remains
+                    // open in the register's history for whoever takes it up.
+                    //
+                    // AN ERROR NEVER ENTERS `warning_profile`, so this rule left
+                    // `CORPUS_DERIVED_KINDS` and the §17 ratchet in the same change -- the
+                    // level<->list coupling reviews #84/#86 pinned, exercised in the direction it
+                    // was built for.
+                    issues.push(err(
+                        "decision-superseded-authority",
+                        path.clone(),
+                        format!(
+                            "cites `{}` as a live row, but that row is SUPERSEDED. Name the CHAIN HEAD instead: a `reconsiders:` pointing at a superseded row is rejected, so this sends the next session into a gate error on the path it is trying to help them down. From line {}, clause: {}",
+                            key,
+                            unit.line_at(at),
+                            line[clause_start..clause_end].trim()
+                        ),
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    issues
+}
+
+/// A DOC COMMENT BINDS TO THE FOLLOWING ITEM, and a blank line does NOT break the block: every
+/// preceding `///` run attaches to the next item. This paragraph was left two functions up, so it
+/// documented `validate_no_superseded_row_is_cited_as_authority` while this function had none --
+/// and the first attempt to fix it added a parenthetical DESCRIBING the mis-binding rather than
+/// moving the text, which is a comment asserting the opposite of what the compiler does. Moved.
 /// §22b: the committed index region must equal the fold over the source rows — at VALIDATE time,
 /// before check-drift, with the clearer message. Same emit function as generation, same
 /// `legacy_count` source, trimmed identically to the injector's `\n\n` framing, so the two gates
@@ -677,10 +1901,47 @@ pub(crate) fn emit_decisions_index(rows: &[DecisionRow], legacy_count: usize) ->
             "decided" | "superseded" => r.get("decided_by").unwrap_or(""),
             _ => "",
         };
-        let question = if closing.is_empty() {
-            r.get("question").unwrap_or("").to_string()
-        } else {
-            format!("{} -> {}", r.get("question").unwrap_or(""), closing)
+        // A SUPERSEDED ROW MUST NAME ITS SUCCESSOR HERE. The arrow was built from `decided_by`
+        // for `decided` and `superseded` alike, so a superseded row pointed at its OWN deciding
+        // record and gave the reader no route to the head. That is the one GENERATED surface --
+        // the thing `make generate` puts in front of the next session -- and it was the only
+        // surface this change did not rewrite to name the head, while simultaneously making both
+        // of the reader's next moves illegal: `reconsiders:` at a superseded row is rejected, and
+        // so is citing it under `.claude/**`. Pointed out on PR #679; the data is already on the
+        // row and `validate_decision_rows` guarantees it resolves.
+        //
+        // AND IT MUST NOT DROP THE DECIDING RECORD WHILE DOING SO. The first version REPLACED the
+        // `decided_by` arrow with the successor, which routed the reader correctly and deleted the
+        // only index reference to the predecessor's deciding record. For this chain that record is
+        // `PROP-20260822-171212` -- the option-space authority for the whole thing, rewritten in
+        // this same change to name the head -- and after the replacement it appeared NOWHERE in
+        // the register index. The routing argument justifies naming the successor FIRST, not
+        // dropping the record: a superseded ROW is a dead end (its `reconsiders:` is rejected and
+        // citing it under `.claude/**` is gate-rejected), but its deciding RECORD stays readable
+        // and is often the live design document. Both, successor first. (Review #42 of PR #679.)
+        let question = match (closing.is_empty(), r.get("superseded_by")) {
+            (true, Some(head)) if status == "superseded" => format!(
+                "{} -> superseded by `{}`",
+                r.get("question").unwrap_or(""),
+                head
+            ),
+            (false, Some(head)) if status == "superseded" => format!(
+                // "(this row decided by ...)", NOT "(decided by ...)". `closing` is THIS row's
+                // `decided_by`, and rendered bare inside parentheses immediately after the
+                // successor's key it reads as the SUCCESSOR's deciding record. The committed line
+                // said `superseded by `RETRIEVAL-QMD-CI` (decided by PROP-20260822-171212)` --
+                // false: the head was decided by `ADR-20260824-205911`, and the PROP decided the
+                // row that is now dead. On the one GENERATED surface a reader consults to find the
+                // live authority, on a chain where both of their other moves (`reconsiders:` at the
+                // dead row, citing it under `.claude/**`) are gate-rejected. Round 42 got the
+                // content right -- both, successor first -- and the binding wrong. (Review #59.)
+                "{} -> superseded by `{}` (this row decided by {})",
+                r.get("question").unwrap_or(""),
+                head,
+                closing
+            ),
+            (true, _) => r.get("question").unwrap_or("").to_string(),
+            (false, _) => format!("{} -> {}", r.get("question").unwrap_or(""), closing),
         };
         lines.push(format!(
             "| `{}` | {} | {} | {} | {} |",

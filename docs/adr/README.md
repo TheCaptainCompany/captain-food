@@ -287,6 +287,10 @@ New ADRs use a UTC date-time id (ADR-20260718-135417) and are listed here in id 
 | [20260818-210000](ADR-20260818-210000-the-ai-maintained-codebase-premise-prose-is-a-convention.md) | The AI-maintained-codebase premise: a rule that lives only in prose is a convention |
 | [20260818-233000](ADR-20260818-233000-the-ten-answers-per-head-monthly-invoice-and-a-cagnotte-that-exists-only-in-prose.md) | The founder's ten answers: per head, monthly invoice, stop checkout — and a cagnotte that exists only in prose |
 | [20260819-103112](ADR-20260819-103112-the-six-queue-answers-a-fiscal-host-in-the-money-path-and-a-refund-bearer-with-no-field.md) | The six queue answers: a fiscal host in the money path, a refund bearer with no field, and a margin rate that never had a consumer |
+| [20260824-205911](ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md) | The decision-lookup stub suite runs in CI; RETRIEVAL-QMD-CI becomes the controlling row |
+| [20260825-005323](ADR-20260825-005323-claude-review-hardens-while-still-required-the-bypass-over-the-recorded-path.md) | `claude-review` hardens while still required: the bypass, chosen over the recorded path |
+| [20260826-084500](ADR-20260826-084500-one-review-pass-per-presentation-and-findings-are-triaged-not-chased.md) | One review pass per presentation, and findings are triaged rather than chased |
+| [20260827-081500](ADR-20260827-081500-the-call-sheet-answers-gate-steps-move-and-the-citation-rule-hardens.md) | The call-sheet answers: gate steps move to a sibling job, and the citation rule hardens to an error |
 
 ## Proposed (deferred until app/runtime code exists)
 

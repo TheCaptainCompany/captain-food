@@ -193,9 +193,23 @@ Three things this session paid for (2026-08-17, #623):
   Every job passed at least once across the two runs, which is the evidence that mattered. Wait
   several minutes.
 - **`POST /actions/runs/{id}/rerun-failed-jobs` answers `403 Resource not accessible by
-  integration`**, so a session cannot re-run a job — the only lever is a new push, and `ci.yml`
-  triggers on EVERY branch push, so any commit does it (a `--allow-empty` one whose message records
-  the flake, if there is nothing real to land).
+  integration`**, so a session cannot re-run a job — the only lever is a new push, **and since
+  #681 it only works on a branch with an OPEN PR**. `ci.yml`'s `push` trigger is `[main]` now, so
+  a push to a branch is picked up by `pull_request: synchronize` and by nothing else. On a branch
+  with no PR yet — the claim-time window described below, where the claim commit lands before the
+  PR is opened — a push triggers NOTHING, and empty commits go into silence that reads exactly like
+  a GitHub outage. **Open the PR first** — that fires `opened` on the head, and the claim protocol
+  requires it anyway. Where a push does work, a `--allow-empty` commit whose message records the
+  flake is the form to use if there is nothing real to land.
+  **Do NOT close and reopen the PR to re-trigger, and do not use draft -> ready either**, though
+  both do fire the workflow. Closing DISABLES auto-merge and reopening does not restore it, and
+  re-arming is `enablePullRequestAutoMerge` — which the very next section of this file records as
+  unavailable to an executor session. So the recovery ends with a green branch whose auto-merge is
+  silently gone and no way to put it back: a coordinator round-trip, caused by the fix, on the
+  failure this section exists to make cheap. Both also fire `pull_request: reopened` /
+  `ready_for_review`, two of the three triggers of `claude-code-review.yml`, spending one of
+  ADR-20260826-084500's three review rounds on a `429`. (An earlier version of this paragraph
+  recommended close-and-reopen, eleven lines above the section that contradicts it.)
 
 ### An executor session CANNOT mark a PR ready for review or arm auto-merge — plan the handoff
 
@@ -543,7 +557,19 @@ trails and stale-decision citations stay decomposable defects); questions travel
 run reports, decision-queue sections, PR/issue comments, register rows, decision forms — are bound
 by the citation block every `.claude/agents/*.md` carries, whose presence (with this section's
 existence, the settings wiring, and the live row gate) is asserted by
-`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). The hook
+`.claude/hooks/register-check-selftest.sh` on every turn (`make hooks-test` directly). That script
+also compares all four gate scripts against their committed blobs before reporting, and REFUSES to
+report if one drifted. `make hooks-test` and `make stub-tests` pass the matching
+`REGISTER_CHECK_ALLOW_DIRTY=1` / `DECISION_LOOKUP_ALLOW_DIRTY=1` unconditionally, so editing a gate
+script and re-running still works. **`stop-gate.sh` opts out only when a gate script is DIRTY in the
+working tree** — on an ordinary turn it runs the comparison armed. What that catches is narrower
+than it first reads: an ordinary overwrite leaves the tree dirty, so it opts out and is caught at
+push; the armed path catches the tamper that *hides* from `git status` (`--assume-unchanged`,
+`--skip-worktree`), which is the stealthier class. CI invokes both directly and cannot be
+talked out of the comparison at all (`env_ok` forbids both opt-out names as `env:` keys). **A local green from
+either `make` target therefore EXCLUDES the gate-set comparison** — that is the point of the opt-out,
+and it is the one thing those targets do not prove. If you run either script by hand mid-edit, pass
+the variable; run it clean-tree without one to see what CI sees. The hook
 proves presence, shape and row status, never that a search happened — honesty stays with the mob
 briefing and the independent review, which is why the trail must name its artifact.
 

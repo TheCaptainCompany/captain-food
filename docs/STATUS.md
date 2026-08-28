@@ -8,7 +8,8 @@
 |---|---|---|
 | Render web service (Docker, Frankfurt) | ✅ | Blueprint IaC (`render.yaml`), cargo-chef cached build, verified live |
 | Supabase Postgres (Frankfurt, eu-central-1) | ✅ | Session pooler; Data API off (intentional) |
-| CI workflow `ci` (build+test+validate+drift; ex `codegen-consistency`) | ✅ | Gates deploys (`autoDeployTrigger: checksPass`) |
+| CI workflow `ci` (build+test+validate+drift; ex `codegen-consistency`) | ✅ | Gates deploys (`autoDeployTrigger: checksPass`); `changes` also runs the decision-lookup stub suite (#679) |
+| CI `Claude Code Review` | ✅ | Fires on `opened`/`ready_for_review`/`reopened` — **one pass per presentation, never per push** (ADR-20260826-084500). Re-request = draft → ready |
 | CI `db-migrate` (sqlx-cli, gated on green build) | ✅ | Applies `migrations/*.sql` out-of-band (ADR-0043) |
 | `/health` (schema-version readiness), `/ping`, `/projector` | ✅ | `>=` version gate; in-process projector |
 | GraphQL `/{role}/graphql` + `/{role}/voyager` | ✅ | Role-as-path; per-role filtered schema |
@@ -86,12 +87,31 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 > supervise checks until MERGED; the hourly stale-claim reaper releases claims silent for >24h.
 > Method: `BACKLOG.md`.
 
+## ✅ `claude-review` is no longer a required check — REV-1 executed (2026-08-26)
+
+> **If you are here because a PR is stuck on `claude-review`: it is no longer required, so that is
+> not what is blocking you.** [REV-1](decisions/REV-1.yaml) decided on 2026-08-17 to remove it and
+> was finally **executed by the founder on 2026-08-26**, nine days later, in the GitHub UI. Ruleset
+> `19179892` now requires `codegen`, `build-test` and `db-test` only.
+>
+> **The exposure this section used to carry is CLOSED**: a 429, a model outage, a permission denial
+> or the action's self-skip on a PR editing its own workflow is no longer a repo-wide merge stop.
+>
+> `claude-review` still RUNS on every PR and still posts findings — it just does not gate merges.
+> The compensating control is unchanged and is a process obligation, not a mechanism: the
+> independent reviewer pass stays MANDATORY before ready-for-review (founder directive 2026-08-01),
+> now at one pass per PRESENTATION rather than per push
+> (`ADR-20260826-084500`, [`review-triage`](../.claude/skills/review-triage/SKILL.md)).
+>
+> **A red on `claude-review` still means NO VERDICT WAS PRODUCED**, not that the reviewer found a
+> problem — #680 hardened it to fail rather than self-clear, which is why that distinction matters.
+
 ## 🗂️ Decision register & ask gate (2026-08-21)
 
 | Piece | Status | Notes |
 |---|---|---|
-| Machine-readable decision rows — **`docs/decisions/<KEY>.yaml` is the authority** | ✅ | One file per globally unique key, closed status vocabulary (`open\|decided\|deferred\|superseded\|withdrawn`), resolvable `decided_by`/`superseded_by`, `reconsiders` challenge chains ([ADR-20260821-095957](adr/ADR-20260821-095957-decision-register-rows-are-machine-readable-files.md)). Generated index injected into `DECISIONS.md` (§22b keeps it in sync); `_legacy.yaml` = 103 prose-only keys, a **migration boundary, never authority**; `_exempt.yaml` = self-pruning held-record citation exemptions |
-| Ask gate — founder decision questions carry `Decision row: <KEY>` on an OPEN row | ✅ | Fail-closed PreToolUse hook on `AskUserQuestion` (`.claude/hooks/register-check.sh`; envelope/trail/passive lanes, exit 0 allow / 2 block only) + selftest run by the stop-gate every turn **and by CI's always-run `changes` job on every push, docs-only included** ([ADR-20260821-010543](adr/ADR-20260821-010543-agents-check-the-register-before-asking.md), [ADR-20260821-103403](adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)). Boundary stated honestly: only the structured envelope is mechanically gated; free text is not |
+| Machine-readable decision rows — **`docs/decisions/<KEY>.yaml` is the authority** | ✅ | One file per globally unique key, closed status vocabulary (`open\|decided\|deferred\|superseded\|withdrawn`), resolvable `decided_by`/`superseded_by`, `reconsiders` challenge chains ([ADR-20260821-095957](adr/ADR-20260821-095957-decision-register-rows-are-machine-readable-files.md)). Generated index injected into `DECISIONS.md` (§22b keeps it in sync); `_legacy.yaml` = 102 prose-only keys, a **migration boundary, never authority**; `_exempt.yaml` = self-pruning held-record citation exemptions |
+| Ask gate — founder decision questions carry `Decision row: <KEY>` on an OPEN row | ✅ | Fail-closed PreToolUse hook on `AskUserQuestion` (`.claude/hooks/register-check.sh`; envelope/trail/passive lanes, exit 0 allow / 2 block only) + selftest run by the stop-gate every turn **and by CI's always-run `gate-scripts` job on every push, docs-only included** ([ADR-20260821-010543](adr/ADR-20260821-010543-agents-check-the-register-before-asking.md), [ADR-20260821-103403](adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)). Boundary stated honestly: only the structured envelope is mechanically gated; free text is not. **A SECOND always-run gate step joined 2026-08-26** — the decision-lookup hermetic stub suite (row `RETRIEVAL-QMD-CI`, [ADR-20260824-205911](adr/ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md)) — and both steps compare all four gate scripts against their committed blobs before reporting. That comparison is **mostly pre-merge**: `make hooks-test`/`make stub-tests` opt out unconditionally, and the stop-gate opts out only when a gate script is dirty. So an ordinary overwrite is still caught at push (it makes the tree dirty, which is what opts the turn out); what the in-session armed path catches is the tamper that HIDES from `git status` (`--assume-unchanged`, `--skip-worktree`), i.e. the stealthier class. CI is the only caller that cannot be talked out of it. Every job the `codegen` aggregator consumes now carries a `timeout-minutes`, because `always()` still waits. **The locus is DECIDED** — `GATE-STEP-LOCUS` option (a), founder 2026-08-27 ([ADR-20260827-081500](adr/ADR-20260827-081500-the-call-sheet-answers-gate-steps-move-and-the-citation-rule-hardens.md)): both steps live in the sibling always-run `gate-scripts` job, so a gate red still reds the required check but no longer skips every other job |
 | Citation ratchet + docs-only CI enforcement | ✅ | Validator §22/§23 on `make validate` (every full-form ADR/PROP citation across `docs/**` + `CLAUDE.md` resolves); the docs-only CI path runs the canonical validator (`docs-validate` job + by-name `codegen` aggregator assertion — the pre-2026-08-21 bypass is closed and pinned by shape tests) |
 
 ## 📋 Remaining work — todo & session split
@@ -185,3 +205,4 @@ then add it to the list below and place the entry at the top of the new file.
 - [`journal-2026-W32.md`](status/journal-2026-W32.md)
 - [`journal-2026-W33.md`](status/journal-2026-W33.md)
 - [`journal-2026-W34.md`](status/journal-2026-W34.md)
+- [`journal-2026-W35.md`](status/journal-2026-W35.md)

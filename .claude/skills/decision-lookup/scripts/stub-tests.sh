@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-# Hermetic stub tests for decision-lookup.sh (row RETRIEVAL-QMD).
+# Hermetic stub tests for decision-lookup.sh (row RETRIEVAL-QMD-CI, the chain head).
 # NEVER installs QMD, never calls the live package, never creates or modifies the real repo
 # .qmd/ cache, and does not depend on it: every case runs against a temporary
 # DECISION_LOOKUP_HOME with fake `qmd` executables; a fingerprint of the repo .qmd/ (if any)
 # is asserted byte-identical before and after the run.
 # Invocation (from the repo root):  bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+#   WHILE EDITING this suite or the wrapper, the gate-set comparison below correctly refuses
+#   to report, so a bare invocation exits 1 with zero cases run. Use `make stub-tests`, or:
+#     DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+#   THE PREVIOUS VERSION OF THIS LINE SAID "SKILL.md, workflow.md, the Makefile and stop-gate.sh
+#   all carry this". Three of the four carried nothing of the sort: they name
+#   REGISTER_CHECK_ALLOW_DIRTY, a different variable for the OTHER gate script, and none of them
+#   invokes this suite. Worse, the sentence hid the real gap -- the hook selftest got
+#   `make hooks-test` and a stop-gate step so its edit-and-re-run loop kept working, and the suite
+#   this whole change is ABOUT got neither. `make stub-tests` is that entrypoint; the claim above
+#   is now one a reader can check (review #13 of PR #679).
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W="$HERE/decision-lookup.sh"
@@ -12,14 +22,298 @@ REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 S="$(mktemp -d)"
 trap 'rm -rf "$S"' EXIT
 pass=0; fail=0; skip=0
+
+# ── The suite testifies about the WHOLE GATE SET ─────────────────────────────────────────────────
+# GATE-SELF-VERIFICATION-V3 -- pinned by `assert_gate_script_self_verifies` in
+# tools/codegen-rs/src/tests.rs, which runs under `cargo test --workspace` in the **build-test**
+# job: a DIFFERENT job with its own checkout, outside the blast radius of anything the `changes`
+# job does at runtime. THAT IS THE ONLY THING IT SAYS -- review #12 read it as claiming build-test
+# is itself governed, which it was not: its `env:`/`defaults.run` are now guarded at job and step
+# scope by the same helper, and a `build-test` step that rewrites the pin's own source before
+# `cargo test` remains a code-review residual, named in `tests.rs` beside the others. (Four sites on this branch said "the `codegen` job". That job is a pure
+# AGGREGATOR -- one step, no checkout, no cargo -- so the sentence named the wrong job, a
+# non-existent checkout and the wrong `if:`. Review #10. build-test carries
+# `if: needs.changes.outputs.docs_only != 'true'`, and a `.claude/**` change can never be
+# docs-only, so the pin always runs on any change able to disarm it.) Neither half is sufficient
+# alone.
+#
+# WHY ALL FOUR FILES AND NOT JUST THIS SCRIPT'S OWN PAIR. V2 had each gate script verify itself
+# and the script it guards. That cannot work, and the ninth review of PR #679 proved it in one
+# line: a block inside a script goes away when the script is REPLACED. `find . -name
+# 'register-check-selftest.sh' -exec cp exit0.sh {} +` left both gates green, which is the exact
+# mutant V2's own header claimed to answer. So each script now verifies the ENTIRE set, and
+# replacing either guard is caught by the other. `assert_gate_script_self_verifies` asserts both
+# scripts carry all four paths, so the two lists cannot drift apart.
+#
+# WHICH COMMIT, precisely: on a `pull_request` event `actions/checkout` checks out
+# `refs/pull/N/merge`, so `HEAD` is the MERGE commit, not the PR head. That is the right thing to
+# compare against -- the merge commit's tree IS the tree on disk, so this proves "these scripts
+# are the ones the workflow was triggered for". NO RUN IS CITED HERE any more: the citation used
+# to name run 32810599803, whose head is four commits behind and PREDATES the V3 block the sentence
+# describes -- a figure that was true when written and silently stopped being about this code
+# (review #10, ADR-20260817-105845). The behaviour is pinned by
+# `the_gate_self_verification_reds_on_a_tampered_script` instead, which is re-run on every commit.
+#
+# DEFAULT-ON, with an explicit opt-out. V1 ran only when GITHUB_ACTIONS=true, which fails OPEN:
+# the discriminator was an ordinary environment variable, settable from the same untrusted surface
+# the check defends against. Now it always runs and an editor opts out BY NAME. Both opt-out names
+# are forbidden as CI `env:` keys at every scope.
+#
+# WHEN IT IS ARMED, said plainly because "default-on" reads wider than it is -- AND REWRITTEN,
+# because the change that made it wrong shipped in this same branch and the sweep for it reached
+# `tests.rs` and not these three prose sites (review #77). What this paragraph used to say: "every
+# INTERACTIVE caller opts out ... CI is the only caller that runs this armed ... the protection is
+# PRE-MERGE, not in-session ... a session-local overwrite is caught on push and not before." All
+# four clauses were falsified by review #72.
+#
+# WHAT IS TRUE NOW. `make hooks-test` and `make stub-tests` opt out unconditionally -- they exist
+# for the edit-and-re-run loop, and an armed-only entrypoint gets DELETED rather than opted out of.
+# `stop-gate.sh` opts out ONLY when a gate script is dirty in the working tree, so on an ordinary
+# turn it runs this comparison ARMED. WHAT THAT BUYS IS NARROWER THAN REVIEW #72 CLAIMED AND THE
+# CLAIM IS RETRACTED HERE: an ordinary `cp exit0.sh <gate script>` leaves the tree DIRTY, so it opts
+# out and is still caught at push, not on the next turn. The two predicates are complements -- dirty
+# is exactly when the hash comparison would mismatch -- and no working-tree test can separate
+# editing from overwriting. What the armed path DOES catch is the tamper that hides from
+# `git status` (`--assume-unchanged`, `--skip-worktree`): clean status, different bytes. That is the
+# stealthier class, so the coverage is inverted from the naive reading -- the clumsy overwrite is
+# caught at push, the careful one on the next turn. (Reviews #72 and #79.)
+#
+# CI is still the caller that CANNOT be talked out of it -- `env_ok` forbids both opt-out names as
+# `env:` keys at every scope, which no local shell can. Default-on remains the right shape: the safe
+# state needs no cooperation, and an opt-out is a visible argument in a Makefile. The residual is
+# now narrow rather than total: a session that edits a gate script legitimately, and overwrites
+# another one in the same turn, is still only caught on push. (Reviews #51, #72 and #77 of PR #679.)
+#
+# WHAT THIS DOES NOT DO: it DETECTS the named overwrite routes. It is not a defence against
+# arbitrary code running before it. Closed so far, each because a review demonstrated it: a `git`
+# shell function via `env: BASH_ENV` (hence `unset -f`), a PATH shim (hence the fixed `_vpath`),
+# and `GIT_DIR` pointing the oracle at a decoy repo whose HEAD holds the tampered bytes (hence
+# `unset "${!GIT_@}"`, plus a `GIT_*` prefix ban in `env_ok`). "Arbitrary preamble" is not a
+# bounded set, and enumerating in one place only would repeat the mistake.
+if [ "${DECISION_LOOKUP_ALLOW_DIRTY:-}" = "1" ]; then
+  echo "self-verification: OPTED OUT (DECISION_LOOKUP_ALLOW_DIRTY=1) -- gate scripts NOT compared to HEAD."
+else
+  # Strip anything an inherited environment could have put between us and the verifier: shell
+  # functions shadowing the tools, a PATH pointing at a shim, and every GIT_* variable -- git
+  # obeys GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY and friends, so the ORACLE itself is
+  # redirectable even when the binary is not. The prefix form cannot be out-enumerated.
+  unset -f git tr command 2>/dev/null || true
+  unset "${!GIT_@}" 2>/dev/null || true
+  _vpath="/usr/bin:/bin:/usr/local/bin"
+  _git="$(PATH="$_vpath" command -v git || true)"
+  # `tr` IS PART OF THE ORACLE, so it is resolved on the same pinned PATH and `unset -f` above
+  # covers it: it performs the one translation this gate accepts (CR strip), and a `tr` function or
+  # shim could make a tampered file hash to the committed id. `cmp` used to be here and is gone --
+  # the comparison is object-id against object-id now, and requiring a binary nothing calls can
+  # only produce a false refusal.
+  _tr="$(PATH="$_vpath" command -v tr || true)"
+  if [ -z "$_git" ] || [ -z "$_tr" ]; then
+    echo "FATAL: git or tr not found on $_vpath -- refusing to report on scripts that cannot be verified." >&2
+    echo "  The PATH is pinned on purpose so this cannot be sent to a shim. On NixOS or a slim" >&2
+    echo "  container, re-run with DECISION_LOOKUP_ALLOW_DIRTY=1 rather than deleting this block." >&2
+    exit 1
+  fi
+  # WHICH COMMIT THE ORACLE READS is itself part of the defence. Comparing against `HEAD` lets a
+  # CI step move the oracle instead of hiding the file: `printf 'exit 0' > register-check.sh;
+  # git add -A && git commit` makes HEAD agree with the tampered disk, and both guards print OK
+  # over a gate that no longer does anything (review #10 reproduced it). In CI the runner sets
+  # GITHUB_SHA to the commit the workflow was triggered for, a later step cannot change it for an
+  # earlier one, and `env_ok` forbids it as a workflow/job/step `env:` key -- so pin to it when it
+  # is present and fall back to HEAD only for a local run, where the threat model is different.
+  _ref="${GITHUB_SHA:-HEAD}"
+  echo "self-verification: comparing all 4 gate scripts against their committed blobs at ${_ref}."
+  # THE GATE SET. Both gate scripts carry this identical list; the codegen pin asserts that.
+  # RESOLVE THE COMMIT BEFORE BLAMING A FILE. `cat-file -e "$ref:$path"` is false for two very
+  # different reasons -- the path is untracked there, or the COMMIT is absent from this checkout --
+  # and reporting both as "not tracked" sends the operator hunting a missing file that is present.
+  #
+  # THE `pull_request` MERGE-REF RACE CANNOT REACH THIS BRANCH, AND THE COMMENT THAT USED TO LIVE
+  # HERE SAID IT COULD. It read: "It is not hypothetical. On a `pull_request` run GITHUB_SHA is the
+  # merge commit GitHub computed when the run was QUEUED, while actions/checkout resolves
+  # refs/pull/N/merge when it FETCHES. If the base branch moves in between, the merge ref is
+  # recomputed and the workspace no longer holds the object GITHUB_SHA names." The first half is
+  # true; the conclusion is not, because `actions/checkout` verifies exactly that and REFUSES:
+  # after fetching it calls `testRef(git, settings.ref, settings.commit)`, retries once with a
+  # SHA-targeted refspec on a full fetch, and then throws `The ref '<ref>' does not point to the
+  # expected commit ...`. So either checkout fails -- and this step never runs -- or GITHUB_SHA is
+  # present, verified by checkout itself, and `rev-parse` below cannot fail for that reason. Read
+  # off `actions/checkout`'s `src/git-source-provider.ts`, not inferred (review #41 of PR #679
+  # raised the availability consequence of the race; the mechanism does not hold).
+  #
+  # The refusal stays, as defence in depth for the cases checkout does not cover: a LOCAL run with
+  # a stale GITHUB_SHA exported in the shell, and any future job whose checkout is reconfigured.
+  # The message still distinguishes itself from tampering, because a reader who meets it has no
+  # reason to know which of the two they are looking at.
+  #
+  # THE AVAILABILITY CONCERN THE REVIEW RAISED IS REAL AND UNCHANGED BY THIS: when checkout does
+  # fail, `changes` fails, every sibling job is skipped and `codegen` -- the required check -- reds,
+  # so nothing merges until a human re-runs. That is `actions/checkout`'s behaviour in EVERY job in
+  # this workflow, not something the GITHUB_SHA pin introduced, and it is `GATE-STEP-LOCUS` option
+  # (a) that bounds it. The fallback the review proposed -- read the oracle from
+  # `refs/remotes/pull/N/merge` when GITHUB_SHA is unresolvable -- is NOT taken: a local ref name is
+  # forgeable by any earlier step with `git update-ref`, which is precisely the property GITHUB_SHA
+  # was chosen for (review #10 moved HEAD by committing), so it would trade the oracle for an
+  # availability problem this path does not actually have.
+  # A `git fetch --no-tags --depth=1 origin "$_ref"` RECOVERY WAS ADDED HERE AND REMOVED AGAIN,
+  # and the reason is worth more than the code was. It was justified by the sentence "upload-pack
+  # serves fetch-by-SHA, so one fetch usually turns the refusal back into a verification" -- an
+  # antecedent-free claim of exactly the shape ADR-20260817-105845 governs, in a branch whose
+  # thesis is that no completeness claim ships before it is checked. The case it targeted is an
+  # ORPHANED merge commit: once the base moves, GitHub recomputes refs/pull/N/merge and the old
+  # commit is reachable from no ref, which is precisely the unadvertised-object case a server
+  # REFUSES. So the recovery most likely no-ops in the one situation it existed for. Nothing
+  # planted it either -- the only test on this path uses a fixture repo with no `origin` at all,
+  # so the fetch failed instantly on "no such remote" and proved only the refusal that already
+  # existed; deleting the whole block redded nothing. And `--depth=1` against a checkout
+  # deliberately fetched with `fetch-depth: 0` writes .git/shallow and shallows the workspace for
+  # every later step in the job. Removed rather than kept on a hope. (Reviews #11 and #15 of
+  # PR #679: #11 asked for it, #15 showed the argument for it did not hold.)
+  if ! "$_git" -C "$REPO_ROOT" rev-parse -q --verify "${_ref}^{commit}" >/dev/null 2>&1; then
+    echo "FATAL: commit ${_ref} is not present in this checkout -- cannot verify the gate set." >&2
+    echo "  This is NOT a tamper signal. On a pull_request run GITHUB_SHA is the merge commit as of" >&2
+    echo "  queue time, and the merge ref can be recomputed before checkout fetches it. RE-RUN the" >&2
+    echo "  job: that recomputes both and self-heals." >&2
+    exit 1
+  fi
+  for rel in \
+    .claude/hooks/register-check.sh \
+    .claude/hooks/register-check-selftest.sh \
+    .claude/skills/decision-lookup/scripts/decision-lookup.sh \
+    .claude/skills/decision-lookup/scripts/stub-tests.sh
+  do
+    _want="$("$_git" -C "$REPO_ROOT" rev-parse -q --verify "${_ref}:$rel" 2>/dev/null || true)"
+    if [ -z "$_want" ]; then
+      echo "FATAL: $rel is not tracked at ${_ref} -- refusing to report on a gate set CI cannot verify." >&2
+      exit 1
+    fi
+    # COMPARE OBJECT IDS, NOT BYTES. `cat-file blob | cmp` puts the RAW blob against a SMUDGED
+    # worktree file, so git's own EOL translation reads as tampering: the committed blobs are LF,
+    # this repo is authored on Windows (ci.yml's drift step says so, and stop-gate.sh carries a
+    # Cygwin branch), Git for Windows defaults to core.autocrlf=true and there is no
+    # .gitattributes -- so a COMPLETELY CLEAN checkout failed all four comparisons and printed the
+    # tamper message, with nothing anywhere mentioning line endings. The remedy a reader reaches
+    # for is deleting this block, which is exactly what the header asks them not to do. CI is
+    # Linux-only, so the plant-red fixture builds and reads on one platform and is structurally
+    # blind to the class. (Review #13 of PR #679.)
+    #
+    # `--no-filters`, AND THE CR STRIP DONE HERE RATHER THAN BY CONFIG. The first fix for the
+    # above was a bare `hash-object`, which runs git's clean filters -- and that is the knob that
+    # makes the comparison LIE. Git locates its global config through $XDG_CONFIG_HOME/git/config
+    # and $HOME/.gitconfig, neither of which is a GIT_* name, so `unset "${!GIT_@}"` does not
+    # touch them; global config can set core.attributesFile, an attributes file can bind a
+    # filter.<x>.clean driver, and a driver that re-emits `cat-file blob <ref>:<path>` reproduces
+    # the committed id for EVERY path. All four comparisons then match over tampered scripts and
+    # both guards print OK -- the GIT_DIR decoy of review #9, one config-lookup mechanism over
+    # (review #15). `--no-filters` disables clean filters AND eol conversion together, so no git
+    # configuration reachable from the environment, .git/config or an attributes file can affect
+    # this hash. The single translation this gate accepts is then applied EXPLICITLY below: strip
+    # CR and re-hash. `GIT_CONFIG_GLOBAL=/dev/null` was the tempting alternative and is wrong --
+    # it also drops core.autocrlf, reinstating the Windows false red this block just removed.
+    _have="$("$_git" -C "$REPO_ROOT" hash-object --no-filters -- "$REPO_ROOT/$rel" 2>/dev/null || true)"
+    if [ "$_have" != "$_want" ]; then
+      # THE ONE ACCEPTED TRANSLATION: a CRLF worktree over an LF blob. Narrower than a filter --
+      # it can only ever turn a CRLF checkout into its committed form, and the result still has to
+      # equal the committed id exactly.
+      _have="$("$_tr" -d '\r' < "$REPO_ROOT/$rel" | "$_git" -C "$REPO_ROOT" hash-object --no-filters --stdin 2>/dev/null || true)"
+    fi
+    if [ "$_have" != "$_want" ]; then
+      echo "FATAL: $rel differs from the committed blob at ${_ref}." >&2
+      echo "  Something modified a gate script between checkout and this run -- the disarm shape" >&2
+      echo "  this check exists to DETECT. A green here would be a lie." >&2
+      echo "  Editing it locally? Re-run with DECISION_LOOKUP_ALLOW_DIRTY=1." >&2
+      exit 1
+    fi
+  done
+  echo "self-verification: OK -- all 4 gate scripts are byte-identical to ${_ref}."
+fi
 verdict() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "PASS  $2"; else fail=$((fail+1)); echo "FAIL  $2"; fi }
 # A SKIP is ONLY for a setup the host FILESYSTEM/KERNEL forbids — never for a precondition the
 # harness could construct and didn't (those stay loud `verdict bad`, per T3/T15b). It does not
 # count as a failure, and it is printed so a green run always names what it did not cover.
 skipped() { skip=$((skip+1)); echo "SKIP  $1"; }
 
+# CAN THIS HOST MEASURE A CACHE FINGERPRINT AT ALL? `find -printf` is GNU-only and `md5sum` is
+# coreutils-only, and every fingerprint site swallows their failure with `2>/dev/null`, so on a
+# BSD/macOS host BOTH substitutions collapse to the EMPTY STRING and the before/after comparison
+# holds unconditionally. Round 36 closed that for the suite-level `fingerprint()` and left the same
+# construct at NINE case sites -- where it is not a headline clause but the verdict itself, and the
+# clause each case name advertises ("... cache untouched"). Half-applied sweep, same file, same
+# commit; found by review #42.
+#
+# The cases that depend on it SKIP rather than pass, so the completeness arithmetic stays balanced
+# and the coverage loss is loud (T15g's rule: a hard red on every Mac trains readers to discount
+# reds). CI is Linux, so none of this ever skips there -- which is exactly why the class was
+# invisible.
+can_fingerprint() {
+  command -v md5sum >/dev/null 2>&1 && find . -maxdepth 0 -printf '' >/dev/null 2>&1
+}
+# DROP THE CLAUSE, NOT THE CASE. Round 42 wrapped all nine cases in `if ! can_fingerprint; then
+# skipped`, which is the wrong scope and was measured as such: only ONE conjunct of each verdict
+# depends on the fingerprint. Before round 42, on a non-GNU host both substitutions collapsed to the
+# empty string, the comparison held vacuously -- and THE BEHAVIOURAL HALF STILL RAN. T15b still
+# proved the named python3-absent fallback; T15d/T15f/T15h/T15j/T15k still proved that an
+# unavailable or malformed probe is NOT a corruption verdict, which is the assertion standing
+# between a broken `sqlite3` shim and the wrapper's delete-wholesale path. Skipping the whole case
+# turned "behaviour proven, hermeticity vacuous" into "nothing proven at all", on exactly the host
+# the comment above names -- and `make stub-tests` is the entrypoint this change adds for that host.
+#
+# It was also two answers to one question in one commit: twenty lines down, `fingerprint()` returns
+# a sentinel and the headline still prints every verdict with `NOT MEASURED` as a named clause.
+# This is that answer, applied one scope down. A SKIP is reserved for what this file says a skip is
+# for -- a setup the host forbids (T15g's non-UTF-8 path) -- not for a missing instrument for one
+# clause of an otherwise fully constructible case. (Review #50 of PR #679.)
+fp_ok() { ! can_fingerprint || [ "$1" = "$2" ]; }
+# ONE CLAUSE, REPLACED -- NOT TWO, APPENDED. The headline was deliberately restructured so that
+# `untouched` and `NOT MEASURED` are mutually exclusive; one scope down this was a SUFFIX, so nine
+# case lines read `... healthy cache untouched, exit 0; cache hermeticity NOT MEASURED`. The leading
+# clause asserts bytes that were never hashed, and the retraction only overrides it on a careful
+# read -- while the failure mode this suite exists for is a QUOTABLE line that reads green over an
+# unmeasured claim, and a case name is quoted at least as often as the headline (T15c's clause IS
+# the case's whole point). Same shape as the headline fix, applied where it belongs. (Review #58.)
+HERM="cache untouched"
+can_fingerprint || HERM="cache hermeticity NOT MEASURED (no GNU find -printf / md5sum)"
+
+
+# THE MEASUREMENT MUST DISTINGUISH "unchanged" FROM "could not look" -- the same distinction this
+# whole suite is about, in its own hermeticity check. `find -printf` is GNU-only and `md5sum` is
+# coreutils-only: on a BSD/macOS host `find` errors, stderr goes to /dev/null, `md5sum` is not
+# found, and the substitution collapses to the EMPTY STRING -- for BEFORE and for AFTER alike. So
+# `[ "$BEFORE" = "$AFTER" ]` held unconditionally and the headline printed `repo .qmd/ untouched`
+# having measured nothing. Concretely: a maintainer on macOS who has run `decision-lookup.sh` once
+# (so `$REPO_ROOT/.qmd/` exists), edits the wrapper and runs `make stub-tests`; the suite writes to
+# the real cache and the quotable line says it did not. The `.qmd/`-absent case still caught
+# CREATION (`absent` is not the empty string); it is MODIFICATION OF AN EXISTING CACHE that went
+# silent -- the state a developer host is in and a CI runner never is, so CI could not see it
+# (the same structural blindness review #13 named for the CRLF class).
+#
+# A HOST CAPABILITY IS LOUD, NOT RED (T15g's rule): an unmeasurable host prints `NOT MEASURED` in
+# the headline's third clause rather than the word `untouched`. The ADR, the row and the PR body all
+# quote that line as the evidence, and round 22 moved this verdict ABOVE `RESULT:` precisely so it
+# cannot be green over a violation. (Review #36 of PR #679.)
 fingerprint() { # the real cache must be untouched by this suite, whether present or absent
-  if [ -e "$REPO_ROOT/.qmd" ]; then find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum; else echo absent; fi
+  # ONE STATEMENT OF THE PREDICATE. This line carried its own copy of `can_fingerprint`'s test, in
+  # the same commit that introduced `can_fingerprint` -- two statements of one thing, which is the
+  # divergence class this branch retracts five times elsewhere. They decide different things (that
+  # one gates NINE case verdicts, this one gates the headline hermeticity clause every record
+  # quotes), so a disagreement is review #42's finding re-created in the other direction: cases
+  # printing `cache untouched` under a headline saying `NOT MEASURED`, or the reverse. (Review #49.)
+  #
+  # CHEAP TEST FIRST: CREATION NEEDS NO HASHER. Putting the capability probe above the existence
+  # test threw away the one hermeticity signal that still worked on a non-GNU host, and the comment
+  # three screens up says so in as many words -- "the `.qmd/`-absent case still caught CREATION
+  # (`absent` is not the empty string)". True of the code before round 36 and false after it: a
+  # macOS maintainer with no `.qmd/` yet went from `BEFORE=absent` / `AFTER=""` -> `CHANGED --
+  # VIOLATION`, fail+1, exit non-zero, to `unmeasurable` both times -> `NOT MEASURED`, exit 0. The
+  # invariant this file's HEADER NAMES FIRST -- "never creates or modifies the real repo .qmd/
+  # cache" -- went from detected-and-red to silently unmeasured. `[ -e ]` is POSIX; only
+  # MODIFICATION of an existing cache needs GNU find + md5sum, and only that case may degrade.
+  # (Review #52 of PR #679, on a regression review #36 introduced while fixing the other half.)
+  if [ ! -e "$REPO_ROOT/.qmd" ]; then echo absent; return; fi
+  if ! can_fingerprint; then
+    echo unmeasurable
+    return
+  fi
+  find "$REPO_ROOT/.qmd" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum
 }
 BEFORE="$(fingerprint)"
 
@@ -70,7 +364,7 @@ out="$(DECISION_LOOKUP_HOME="$Q" "$W" "who bears the refund cost" 2>&1)"; rc=$?
 Q="$S/t3"; mkdir -p "$Q" "$S/t3-bin"
 if ! ln -s "$(command -v dirname)" "$S/t3-bin/dirname" 2>/dev/null || [ ! -x "$S/t3-bin/dirname" ] \
   || env PATH="$S/t3-bin" /bin/bash -c 'command -v bun' >/dev/null 2>&1; then
-  verdict bad "T3 no-bun install (precondition: controlled PATH not constructible or bun resolvable)"
+  verdict bad "T3 no-bun install (precondition HOST: controlled PATH not constructible or bun resolvable)"
 else
   out="$(env PATH="$S/t3-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] && echo "$out" | grep -q "ACTIVATION FAILED: bun runtime not present" \
@@ -94,7 +388,7 @@ printf '#!/bin/sh\nexit 0\n' > "$S/t3b-bin/bun"; chmod +x "$S/t3b-bin/bun"
 if [ ! -x "$S/t3b-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t3b-bin/dirname" 2>/dev/null || [ ! -x "$S/t3b-bin/dirname" ] \
   || ! ln -s "$(command -v mkdir)" "$S/t3b-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3b-bin/mkdir" ]; then
-  verdict bad "T3b no-python3 install (precondition: stub bun + symlinks unavailable)"
+  verdict bad "T3b no-python3 install (precondition HOST: stub bun + symlinks unavailable)"
 else
   out="$(env PATH="$S/t3b-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
@@ -118,7 +412,7 @@ printf '#!/bin/sh\nexit 0\n' > "$S/t3c-bin/bun"; chmod +x "$S/t3c-bin/bun"
 if [ ! -x "$S/t3c-bin/python3" ] || [ ! -x "$S/t3c-bin/bun" ] \
   || ! ln -s "$(command -v dirname)" "$S/t3c-bin/dirname" 2>/dev/null || [ ! -x "$S/t3c-bin/dirname" ] \
   || ! ln -s "$(command -v mkdir)" "$S/t3c-bin/mkdir" 2>/dev/null || [ ! -x "$S/t3c-bin/mkdir" ]; then
-  verdict bad "T3c broken-python3 install (precondition: controlled PATH not constructible)"
+  verdict bad "T3c broken-python3 install (precondition HOST: controlled PATH not constructible)"
 else
   out="$(env PATH="$S/t3c-bin" DECISION_LOOKUP_HOME="$Q" /bin/bash "$W" --install 2>&1)"; rc=$?
   [ $rc -ne 0 ] \
@@ -346,7 +640,7 @@ out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 Q="$S/t15"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
-  verdict bad "T15 corrupt-index rebuild (precondition: healthy build failed)"
+  verdict bad "T15 corrupt-index rebuild (precondition WRAPPER: healthy build failed)"
 else
   printf 'garbage-not-a-database' > "$Q/corpus/.qmd/index.sqlite"
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
@@ -383,8 +677,8 @@ else
   [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
     && echo "$out" | grep -q "openability probe and the strict results parser" \
     && ! echo "$out" | grep -q '^candidate ' \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15b no-python3 lookup: named fallback, healthy cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15b no-python3 lookup: named fallback, $HERM, exit $rc" \
     || verdict bad "T15b no-python3 lookup (rc=$rc)"
 fi
 
@@ -398,15 +692,15 @@ fi
 Q="$S/t15c"; mkfake "$Q" "$S/p5a.json"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # first lookup builds a healthy cache
 if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ] || [ ! -s "$Q/corpus/.qmd/index.sqlite" ]; then
-  verdict bad "T15c probe read-only (precondition: healthy build failed)"
+  verdict bad "T15c probe read-only (precondition WRAPPER: healthy build failed)"
 else
   printf 'garbage-not-a-wal-header' > "$Q/corpus/.qmd/index.sqlite-wal"
   fp_b="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   fp_a="$(find "$Q/corpus/.qmd" -name 'index.sqlite*' -printf '%p %s\n' -exec md5sum {} \; 2>/dev/null | sort)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15c probe is read-only: planted -wal survives a hit byte-identical" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15c probe is read-only: planted -wal survives a hit, $HERM" \
     || verdict bad "T15c probe read-only (rc=$rc)"
 fi
 
@@ -432,8 +726,8 @@ else
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
     && ! echo "$out" | grep -q "qmd unavailable" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15d sqlite3-module-absent: stamped hit accepted, $HERM, exit $rc" \
     || verdict bad "T15d probe-unavailable (rc=$rc)"
 fi
 
@@ -458,8 +752,8 @@ else
   [ $rc -eq 0 ] && echo "$out" | grep -q "python3 not usable" \
     && ! echo "$out" | grep -q '^candidate ' \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15e broken python3: named preflight fallback, cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15e broken python3: named preflight fallback, $HERM, exit $rc" \
     || verdict bad "T15e broken-python3 lookup (rc=$rc)"
 fi
 
@@ -481,8 +775,8 @@ else
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, cache untouched, exit $rc" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15f unknown probe exit (7): stamped hit accepted, $HERM, exit $rc" \
     || verdict bad "T15f unknown-probe-exit (rc=$rc)"
 fi
 
@@ -502,22 +796,22 @@ Q="$S/t15g$(printf '\375')"
 # succeeds AND the \375 name fails => a genuine filesystem-encoding refusal (skip). Control also
 # fails => the harness/host is broken, which is a loud failure like every other precondition.
 if ! mkdir -p "${Q%$(printf '\375')}-ascii-control" 2>/dev/null; then
-  verdict bad "T15g non-utf8 path (precondition: ASCII control mkdir failed — host/harness broken, not an encoding refusal)"
+  verdict bad "T15g non-utf8 path (precondition HOST: ASCII control mkdir failed — host/harness broken, not an encoding refusal; this is a LOUD failure by design (it stops ENOSPC/EROFS/EACCES being swallowed), never adapt it away)"
 elif ! mkdir -p "$Q" 2>/dev/null || [ ! -d "$Q" ]; then
   skipped "T15g non-utf8 cache path — filesystem rejects non-UTF-8 names (Linux-only case)"
 else
   mkfake "$Q" "$S/p5a.json"
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?   # seed a healthy stamped cache
   if [ $rc -ne 0 ] || [ ! -f "$Q/corpus/.sha" ]; then
-    verdict bad "T15g non-utf8 path (precondition: seeded build under \\375 path failed)"
+    verdict bad "T15g non-utf8 path (precondition: seeded build under the non-UTF-8 path failed)"
   else
     fp_b="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
     out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
     fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
     [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
       && ! echo "$out" | grep -q "rebuild failed" \
-      && [ "$fp_b" = "$fp_a" ] \
-      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, cache untouched, exit $rc" \
+      && fp_ok "$fp_b" "$fp_a" \
+      && verdict ok "T15g non-utf8 cache path: stamped hit accepted, $HERM, exit $rc" \
       || verdict bad "T15g non-utf8 path (rc=$rc)"
   fi
 fi
@@ -546,8 +840,8 @@ else
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, cache untouched" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15h call-site TypeError: not a verdict, stamped hit accepted, $HERM" \
     || verdict bad "T15h non-sqlite3 probe exception (rc=$rc)"
 fi
 
@@ -569,8 +863,8 @@ else
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15j sqlite3 module without Error: not a verdict, cache untouched" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15j sqlite3 module without Error: not a verdict, $HERM" \
     || verdict bad "T15j sqlite3 without Error (rc=$rc)"
 fi
 
@@ -592,8 +886,8 @@ else
   fp_a="$(find "$Q/corpus" "$Q/index" -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)"
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "rebuild failed" \
-    && [ "$fp_b" = "$fp_a" ] \
-    && verdict ok "T15k Error present but not a class: not a verdict, cache untouched" \
+    && fp_ok "$fp_b" "$fp_a" \
+    && verdict ok "T15k Error present but not a class: not a verdict, $HERM" \
     || verdict bad "T15k malformed Error attribute (rc=$rc)"
 fi
 
@@ -640,7 +934,7 @@ eval "$(sed -n '/^qmd_lock_binding_ok()/,/^}/p' "$W")"
 PIN16="$(sed -n 's/^PIN="\(.*\)" *#.*$/\1/p; s/^PIN="\(.*\)"$/\1/p' "$W" | head -1)"
 INTEG16="$(sed -n 's/^INTEGRITY="\(.*\)"$/\1/p' "$W" | head -1)"
 if [ -z "$PIN16" ] || [ -z "$INTEG16" ]; then
-  verdict bad "T16 (precondition: PIN/INTEGRITY not extractable from wrapper)"
+  verdict bad "T16 (precondition WRAPPER: PIN/INTEGRITY not extractable from wrapper)"
 else
   t16() { printf '%s' "$2" > "$S/t16.lock"; qmd_lock_binding_ok "$S/t16.lock" "$PIN16" "$INTEG16"; rc=$?; [ $rc -eq "$3" ] && verdict ok "T16 $1" || verdict bad "T16 $1 (rc=$rc, want $3)"; }
   t16 "valid binding -> pass" \
@@ -681,9 +975,39 @@ else
   # case-sensitive and alias-blind ("UTF-8" on glibc, musl/Alpine's C locale), so the guard could
   # declare an ASCII locale reached while the case ran under UTF-8 — passing vacuously with the
   # encoding= fix removed. This probe cannot be aliased away.
-  if env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
+  # AN ASCII CONTROL DECIDES WHY THE PROBE DID NOT RAISE, exactly as T15g's control decides why a
+  # mkdir failed -- and for the same reason, one class over. "No genuine ASCII locale on this host"
+  # is a HOST CAPABILITY, not a harness defect, and it used to `verdict bad`: a hard FAIL, in the
+  # one always-run job that `lint`, `specs`, `build-test`, `db-test` and `docs-validate` all
+  # `needs:`. So a runner-image bump would red `changes`, skip all five, red the required `codegen`
+  # check, and block every PR and every docs-only push to `main` -- the lane CLAUDE.md routes
+  # spec/doc work down with no PR to fall back on -- with no validator, build or test signal, for a
+  # reason unrelated to any diff.
+  #
+  # It is a WHEN, not an IF: PEP 686 makes UTF-8 mode the default from Python 3.15, so `PYTHONUTF8=0`
+  # stops restoring an ASCII locale by this route and the probe stops raising. Same on any
+  # musl/Alpine image. T15g already resolves its filesystem-encoding case with `skipped()` on the
+  # stated grounds that "a hard red on every Mac would train readers to discount reds"; this is that
+  # rule, applied to the locale. (Review #23 of PR #679.)
+  #
+  # THE SIBLING PRECONDITIONS WERE LOOKED AT AND KEPT LOUD, stated so the next reader knows this
+  # was a decision and not a sweep that stopped here: T3/T3b/T3c ("controlled PATH not
+  # constructible", "stub bun + symlinks unavailable") and T15g's own ASCII control are all
+  # "the harness could not build its setup", which is the class that must stay a FAIL -- a skip
+  # there would swallow ENOSPC/EROFS/EACCES and lose the case silently. T16's locale branch is the
+  # one precondition whose failure is a documented, dated property of a future interpreter rather
+  # than a broken host, which is what moves it and only it.
+  #
+  # The control keeps the skip honest: a PURE-ASCII read under the SAME env must succeed. If even
+  # that fails, python3 is broken here rather than merely UTF-8 by default, and THAT stays loud --
+  # otherwise a broken interpreter would be laundered into a skip and the coverage would vanish
+  # while the suite still exits 0, which is the swallow T15g's control exists to prevent.
+  printf 'ascii-only control\n' > "$S/t16-ascii-control.lock"
+  if ! env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-ascii-control.lock" >/dev/null 2>&1; then
+    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition HOST: the pure-ASCII control read FAILED under the probe env — python3 is broken here, not merely UTF-8 by default; LOUD by design, never adapt it away)"
+  elif env $ascii_locale python3 -c 'import sys; open(sys.argv[1]).read()' "$S/t16-utf8.lock" 2>/dev/null; then
     enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
-    verdict bad "T16 non-ASCII lockfile on ASCII locale (precondition: locale-dependent open did NOT raise; enc='$enc' — no genuine ASCII locale on this host)"
+    skipped "T16 non-ASCII lockfile on ASCII locale — host has NO genuine ASCII locale (enc='$enc'); the ASCII control read fine, so this is the interpreter's default, not a broken host. Expected from Python 3.15 (PEP 686) and on musl."
   else
     enc="$(env $ascii_locale python3 -c 'import locale; print(locale.getpreferredencoding(False))' 2>/dev/null)"
     ( eval "export $ascii_locale"; qmd_lock_binding_ok "$S/t16-utf8.lock" "$PIN16" "$INTEG16" ); rc=$?
@@ -694,7 +1018,80 @@ else
 fi
 
 echo "----"
-if [ "$skip" -gt 0 ]; then echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability)"; else echo "RESULT: $pass passed, $fail failed"; fi
+# THE HERMETICITY VERDICT IS COMPUTED BEFORE THE HEADLINE TOO, for exactly the reason the next
+# paragraph gives about completeness -- and it was left below for one round after that lesson was
+# learned, which is the half-applied sweep this branch keeps landing. The `.qmd/` fingerprint
+# comparison used to increment `fail` AFTER `RESULT:` had already printed, so a run that dirtied
+# the real repo cache emitted `RESULT: 54 passed, 0 failed -- 54/54 cases accounted for` and only
+# then `repo .qmd/ CHANGED during the suite -- VIOLATION`. The exit status was right; the line every
+# record quotes as the measurement was green over a violation of the invariant this file's own
+# header names FIRST ("never creates or modifies the real repo .qmd/ cache"). (Review #22.)
+# COUNT THE CASE VERDICTS BEFORE THE FINGERPRINT VERDICT, because a hermeticity violation is NOT a
+# case verdict. It used to `fail=$((fail + 1))` above this sum, and `fail` is one of the three terms
+# -- so 54 green cases plus a dirtied cache printed `55/54 cases accounted for` and then
+# `INCOMPLETE: ... the harness broke, or EXPECTED_CASES is stale`, which is false twice over. The
+# triage comment in ci.yml offers three classes and none of them is "the suite wrote to the real
+# cache", so the repair it invites is bumping EXPECTED_CASES to 55 -- which would hide the violation
+# permanently AND break the SKILL.md pin. The invariant stated 30 lines below says exactly why:
+# "a FAILURE IS A VERDICT, so real failures keep the count balanced" -- true of `verdict bad`, which
+# consumes a declared case, and false of this increment, which does not. (Review #25.)
+accounted=$((pass + fail + skip))
 AFTER="$(fingerprint)"
-if [ "$BEFORE" = "$AFTER" ]; then echo "repo .qmd/ untouched by this suite — confirmed"; else echo "repo .qmd/ CHANGED during the suite — VIOLATION"; fail=$((fail+1)); fi
+# COMPARE FIRST, CLASSIFY SECOND. Testing `unmeasurable` before the comparison threw the creation
+# signal away a second time, one function up from where review #52 restored it: with no hasher,
+# `absent` -> `unmeasurable` is a REAL transition (the suite created the cache) and the
+# unmeasurable-first branch reported `NOT MEASURED` over it. A DIFFERENCE is a violation whichever
+# side is unmeasurable -- it can only mean the cache appeared or vanished, which needs no hashing to
+# see. `NOT MEASURED` is then reserved for what it actually means: the cache existed before AND
+# after, and this host cannot tell whether its contents moved. Measured with `can_fingerprint`
+# forced false against a throwaway REPO_ROOT: `absent` -> created now reports the violation.
+if [ "$BEFORE" != "$AFTER" ]; then
+  hermetic="repo .qmd/ CHANGED -- VIOLATION"
+  fail=$((fail + 1))
+elif [ "$BEFORE" = unmeasurable ]; then
+  # Not a failure and not a pass: the question was never asked. Said out loud in the clause every
+  # record quotes, so nobody reads a green headline as a hermeticity guarantee it did not make.
+  hermetic="repo .qmd/ hermeticity NOT MEASURED (needs GNU find -printf + md5sum)"
+else
+  hermetic="repo .qmd/ untouched"
+fi
+# THE COMPLETENESS ARITHMETIC IS COMPUTED BEFORE THE HEADLINE, because the headline is the line
+# everything quotes. `RESULT:` used to print above the check, so an incomplete run emitted
+# `RESULT: 30 passed, 0 failed` and only then `INCOMPLETE: 30 of 54` -- and the PR body, the ADR and
+# RETRIEVAL-QMD-CI's evidence all cite THE `RESULT:` LINE as the measurement. A summary line that
+# can say "0 failed" over a run where two dozen cases never executed is this suite's own thesis
+# turned on itself. It now carries `<accounted>/<EXPECTED_CASES>`, so no quotable line is green on
+# an incomplete run. (Review #17 of PR #679.)
+EXPECTED_CASES=54
+if [ "$skip" -gt 0 ]; then
+  echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability) -- $accounted/$EXPECTED_CASES cases accounted for -- $hermetic"
+else
+  echo "RESULT: $pass passed, $fail failed -- $accounted/$EXPECTED_CASES cases accounted for -- $hermetic"
+fi
+# A verdict that can say "pass" without having asked the question is the defect class this suite
+# exists to catch, so it must not have it itself. `skipped()` is deliberately NOT a failure (see
+# T15g: a hard red on every Mac would train readers to discount reds), but that alone would let a
+# host on which preconditions become unconstructible print a green over a fraction of the cases.
+#
+# So the invariant is COMPLETENESS, not passes: every declared case must reach a verdict of some
+# kind. pass + fail + skip == EXPECTED_CASES means no case silently vanished; it stays true when
+# T15g legitimately skips, and it goes false the moment cases stop running at all.
+# Adding or removing a case must move this number in the same diff. (`EXPECTED_CASES` and
+# `accounted` are set just above the headline, so the headline can carry them.)
+if [ "$accounted" -ne "$EXPECTED_CASES" ]; then
+  echo "INCOMPLETE: $accounted of $EXPECTED_CASES declared cases reached a verdict ($pass passed, $fail failed, $skip skipped)."
+  echo "  Cases stopped running rather than failing — the harness broke, or EXPECTED_CASES is stale."
+  echo "  If a case was added or removed, the diff that did it must move EXPECTED_CASES too."
+  fail=$((fail + 1))
+elif [ "$skip" -gt 0 ]; then
+  # Loud, but NOT a failure — the suite's own rule, kept.
+  echo "NOTE: $skip case(s) SKIPPED on host capability (not a failure). Every declared case is accounted for."
+  echo "  A skip means the HOST changed (filesystem, locale, python3, PATH), not that the wrapper is wrong."
+  echo "  Adapt the case to the host; never delete it and never weaken its assertion to recover green."
+fi
+# Why this is keyed on `accounted` and not on `fail`: a FAILURE IS A VERDICT, so real failures keep
+# the count balanced and INCOMPLETE stays silent — the failures printed above are then the whole
+# diagnosis, with no "cases missing" line pointing the reader at the host. (If the count is ALSO
+# stale, both fire and INCOMPLETE does add one to `fail`; the exit status is then a count of
+# problems, not of failed cases, which is the honest reading of that state.)
 exit "$fail"

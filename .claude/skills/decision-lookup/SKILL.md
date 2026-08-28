@@ -14,7 +14,7 @@ description: >
 
 # decision-lookup — advisory retrieval over committed governing Markdown
 
-Decided by row `RETRIEVAL-QMD` (`decided_by: PROP-20260822-171212`, founder 2026-08-22). QMD is an
+Decided by row `RETRIEVAL-QMD-CI` (`decided_by: ADR-20260824-205911`, founder 2026-08-24) — the CHAIN HEAD, which carries `RETRIEVAL-QMD`'s controlling content forward in full. Name the head, never the superseded row: a `reconsiders:` pointing at a superseded row is rejected by the validator. QMD is an
 **advisory read path**; **decision YAML plus direct source reading is the authority path** — that
 sentence is the whole architecture.
 
@@ -166,7 +166,7 @@ reaches the controlling record even where retrieval alone missed it.
   verdict), or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and
   prints: *activation failed; remove `.qmd/` before any future approved retry*, plus the
-  reversal-decision instruction (row `RETRIEVAL-QMD`). A failed install may leave a partial
+  reversal-decision instruction (row `RETRIEVAL-QMD-CI`, the chain head). A failed install may leave a partial
   `.qmd/tool/`; it never claims "nothing changed".
 - **Post-update index assertion**: the corpus stamp is written only after the index database is
   verified present and non-empty; a successful `qmd update` that leaves no index at the expected
@@ -187,11 +187,38 @@ reaches the controlling record even where retrieval alone missed it.
 
 ## Hermetic test suite (stubs only — never installs, never touches the real `.qmd/`)
 
-The committed suite is the declared authority; re-run it after any wrapper change:
+The committed suite is the authority for this wrapper, and it is **executable in CI**: one step of
+`.github/workflows/ci.yml`'s always-run `gate-scripts` job runs it on every PR and on every push
+to `main` (GATE-STEP-LOCUS option (a), 2026-08-27 -- it lived in `changes` before), pinned by the
+`the_stub_suite_runs_in_the_always_run_gate_job` codegen test (decided 2026-08-24,
+`RETRIEVAL-QMD-CI`). Re-run it locally after any wrapper change:
 
 ```
-bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
 ```
+
+**The variable is not optional in that loop.** Before running a single case, the suite compares all
+FOUR gate scripts (`stub-tests.sh`, `decision-lookup.sh`, and the two `.claude/hooks/register-check*`
+scripts) against their committed blobs — at `$GITHUB_SHA` in CI, at `HEAD` locally — and refuses to
+report if any of them drifted: the overwrite class a review planted green twice. So the moment you
+edit the wrapper or this suite, a bare invocation exits 1 with
+`FATAL: ... differs from the committed blob at <ref>` and **zero cases run**. `DECISION_LOOKUP_ALLOW_DIRTY=1` opts out of that comparison for the edit-and-re-run loop and
+nothing else. CI invokes the script with no opt-out, and the codegen pin forbids the variable as a
+CI `env:` key at every scope, so the CI path cannot be talked out of verifying.
+
+The same applies on a host that keeps `git` or `tr` outside `/usr/bin:/bin:/usr/local/bin` — the
+block pins that PATH deliberately, so that neither can be sent to a shim, and exits 1 if either is
+absent. Nix and some containers will need the opt-out for that reason alone. (`cmp` was required
+here until the comparison became object-id against object-id; the sentence outlived the dependency
+by two commits, which would have sent a maintainer on a `git`-but-no-`cmp` host to opt OUT of the
+supply-chain gate on a host where it runs fine — the exact false refusal removing `cmp` was
+justified by, re-entering through the doc. Review #15.)
+
+**`make stub-tests`** is the interactive entrypoint and passes the opt-out for you. It exists
+because the trap above was fixed for `make hooks-test` and `workflow.md` and left open for the very
+suite this skill is about: a maintainer editing the wrapper ran the bare command, got
+`FATAL: … differs from the committed blob` with zero cases run, and had to have read this section
+to know why. Use the target while editing; CI runs the bare command, default-on, on purpose.
 
 **54 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
@@ -292,11 +319,15 @@ the ONLY skip the suite allows; every other precondition stays a loud failure. C
 ## What this skill must never grow without a NEW decision row
 
 Vector/semantic search, embeddings, model downloads, reranking, query expansion, MCP or any server
-process, hosted services, credentials, hooks or CI or validator or agent-contract changes, YAML
-decision-row indexing, or any mandatory-workflow rule.
+process, hosted services, credentials, hooks, **any other CI or workflow change that references or serves this
+integration** (this clause governs the QMD surface, not unrelated CI work), validator or
+agent-contract changes, YAML decision-row indexing, or any
+mandatory-workflow rule.
 
-**Open question, not yet decided**: nothing executable runs this suite, so its green is
-executor-side only — which is what "declared authority" above is worth today. Wiring it into CI
-is a **CI change**, which the clause above sends to a new decision row. That row is open —
-`RETRIEVAL-QMD-CI` (`docs/decisions/RETRIEVAL-QMD-CI.yaml`, `reconsiders: RETRIEVAL-QMD`) — and
-the wiring does not exist until it is decided.
+**The one CI change that IS authorized** (`RETRIEVAL-QMD-CI`, decided 2026-08-24 by
+`ADR-20260824-205911`): the single `bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step
+in the always-run `gate-scripts` job (its locus since `GATE-STEP-LOCUS` was decided,
+ADR-20260827-081500; the row named `changes` and the step moved without changing),
+plus the codegen test pinning it. It tests the **wrapper** — it
+runs no QMD, installs nothing, and never touches a live `.qmd/` cache. Anything else in CI still
+needs a new row.
