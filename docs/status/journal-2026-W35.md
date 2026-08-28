@@ -3,6 +3,20 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-27 — call-sheet round 2: the founder picked the recommended next item — finish the
+> JWKS single-flight ([#683 "JWKS single-flight can issue a second fetch: `arrived` is captured
+> after the staleness check"](https://github.com/TheCaptainCompany/captain-food/issues/683) /
+> [#684 "JWKS single-flight: capture the arrival instant before the caller's own check"](https://github.com/TheCaptainCompany/captain-food/pull/684)).**
+> A priority confirmation, not a new option space: the draft PR already carried the fix and both
+> planted-red tests from the session that diagnosed it. Synced with `main` (merge commit, no
+> conflicts), re-verified — auth suite 31/0, workspace 1339/0 with `DB_TESTS_REQUIRED=0`,
+> `make rust-quiet` exit 0 — and presented for the review pass on its way to merge.
+> Round 1's four decisions all merged in
+> [#690 "The call-sheet execution"](https://github.com/TheCaptainCompany/captain-food/pull/690)
+> after the independent review's five findings (one blocking: the always-run job guard had MOVED
+> to `gate-scripts` instead of covering both jobs — a one-line `if:` on `changes` could green the
+> required check with zero validation) were fixed the same day, plants first.
+
 > ✅ **2026-08-27 — the call sheet: the founder answered four questions through an artifact form,
 > and all four are executed.** Verbatim: *Move to a separate job · Make it a hard error · Fix both
 > now · "If the fix is small always do it now."* The last is a **standing instruction**, recorded in
