@@ -97,7 +97,7 @@ pub(crate) const RATCHET_EXEMPT: [&str; 1] = ["decision-citation-corpus-unreadab
 /// validator regression on a tree nobody touched. The fix is this file's own vocabulary applied one
 /// level down — "did not look" is not "found nothing", so on such a run these kinds are neither
 /// compared nor rewritten. (Review #80 of PR #679.)
-pub(crate) const CORPUS_DERIVED_KINDS: [&str; 2] = [
+pub(crate) const CORPUS_DERIVED_KINDS: [&str; 4] = [
     "decision-citation-file-not-utf8",
     "decision-citation-file-out-of-corpus",
     // `decision-superseded-authority` WAS the third member, and its arrival and departure are both
@@ -108,6 +108,16 @@ pub(crate) const CORPUS_DERIVED_KINDS: [&str; 2] = [
     // to `err` (ADR-20260827-081500): as an error it cannot appear in the profile, so keeping it
     // here would have been the reverse lie -- an unmeasured-kind floor over a kind the ratchet can
     // never see. The coupling test asserts membership tracks the level in BOTH directions.
+    //
+    // §24's two WARNING kinds (#712) joined for the identical reason `decision-superseded-authority`
+    // once did: both `adr-superseded-citation-in-part` and `adr-status-unparseable` are found by
+    // scanning `claude_citation_corpus`'s `cited` list, so on a run where that scan is short (a
+    // sparse checkout, `git ls-files` refusing) their counts are the same kind of LOWER BOUND the
+    // two tree-caused kinds above are -- absent rather than zero on `Nothing`, floored on `Partial`
+    // (see `unmeasured()`). `adr-superseded-citation` (the FULL-supersession sibling) stays OUT,
+    // same reasoning as its register-row cousin: it is an ERROR and never enters `warning_profile`.
+    "adr-superseded-citation-in-part",
+    "adr-status-unparseable",
 ];
 
 /// HOW SHORT THIS RUN'S CORPUS SCAN FELL, which is not a boolean and was one for four rounds.
@@ -170,10 +180,16 @@ impl CorpusShortfall {
             Self::None => &[],
             // Everything the unread files could have contributed to -- but NOT the extension
             // filter, which ran before the read attempt and is therefore exact.
-            // Only `not-utf8`: the extension filter is exact (runs before the read attempt), and
+            // `not-utf8`: the extension filter is exact (runs before the read attempt), and
             // `decision-superseded-authority` is an ERROR since 2026-08-27 -- errors never enter
-            // the profile, so there is no count to floor.
-            Self::Partial => &["decision-citation-file-not-utf8"],
+            // the profile, so there is no count to floor. §24's two WARNING kinds join it here for
+            // the same reason: both are found by scanning `cited`, so an unread file undercounts
+            // them exactly as it undercounts a register-row finding.
+            Self::Partial => &[
+                "decision-citation-file-not-utf8",
+                "adr-superseded-citation-in-part",
+                "adr-status-unparseable",
+            ],
             Self::Nothing => &CORPUS_DERIVED_KINDS,
         }
     }

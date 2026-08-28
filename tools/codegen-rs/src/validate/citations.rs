@@ -285,3 +285,259 @@ pub(crate) fn validate_record_stamps(corpus: &RecordCorpus) -> Vec<Issue> {
     }
     issues
 }
+
+// ─── §24 — an ADR cited in the instruction-surface corpus must still be LIVE (the unbuilt half of
+// #477 "No gate checks a citation of a superseded ADR by its own Status line", #712) ─────────────
+//
+// §23 above proves a citation RESOLVES to a real file; it says nothing about whether that file is
+// still the authority. `record_resolves`'s own docstring states the split: "resolution proves
+// existence, never authority". This section reads the RESOLVED ADR's own `Status:` line and
+// enforces the other half.
+//
+// DIVISION OF LABOR, mirroring the sentence `validate_no_superseded_row_is_cited_as_authority`
+// draws between itself and the register's status-coupling rules: an id that does not resolve at
+// all is §23's error and is never duplicated here; an id that resolves but names a SUPERSEDED
+// record is this section's.
+//
+// SCOPE: the INSTRUCTION-SURFACE corpus (`claude_citation_corpus`, decisions.rs, widened by #710)
+// — not the wider docs/** + CLAUDE.md corpus §23 scans. A stale citation inside a record that
+// NARRATES history (an ADR discussing its own predecessor, or `docs/adr/README.md`'s index) is not
+// the failure mode #477 named; a stale citation inside a file a SESSION READS AS AN INSTRUCTION
+// before working is — the same reasoning `claude_citation_corpus`'s own SCOPE section gives.
+
+/// One ADR's own authority, read from its `Status:` field.
+enum AdrAuthority {
+    Live,
+    SupersededInPart,
+    SupersededFully,
+    /// The Status field could not be located or parsed. Reported loudly — but ONLY for a file that
+    /// is actually CITED from the instruction-surface corpus, never a background sweep of the
+    /// whole `docs/adr/` tree: a rule that cannot tell whether an uncited record is live has
+    /// nothing to say about it.
+    Unparseable,
+}
+
+/// The prose of an ADR's own `Status:` field, tolerant of the shapes the real corpus writes it in
+/// — read from the tree before writing this parser, per #712's own instruction:
+///   * a `## Status` / `# Status` HEADING, value = the first paragraph beneath it
+///     (`20260720-004556-partner-reoffer-policy.md`: `## Status`, blank line, `Superseded by
+///     ADR-… (…) — …`);
+///   * an INLINE bold field, `**Status**: …` or `- **Status**: …`, possibly one of several
+///     `·`-separated bold fields on the same physical line
+///     (`ADR-20260808-195315-…`: `**Status**: Accepted · **Date**: … · **Deciders**: …`), and
+///     possibly continued on INDENTED lines below — a wrapped list item
+///     (`ADR-20260731-061609-…`: `- **Status**: **Superseded IN PART by […](…)**` then an indented
+///     continuation line starting `(product owner, 2026-08-06: …) — only point 1 …`).
+/// Returns `None` when NEITHER shape is found in the file.
+fn adr_status_text(content: &str) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    for (i, raw) in lines.iter().enumerate() {
+        let t = raw.trim();
+        if t.eq_ignore_ascii_case("## Status") || t.eq_ignore_ascii_case("# Status") {
+            let mut buf = String::new();
+            for l in &lines[i + 1..] {
+                let lt = l.trim();
+                if lt.is_empty() {
+                    if buf.is_empty() {
+                        continue;
+                    }
+                    break;
+                }
+                if lt.starts_with('#') {
+                    break;
+                }
+                if !buf.is_empty() {
+                    buf.push(' ');
+                }
+                buf.push_str(lt);
+            }
+            if !buf.is_empty() {
+                return Some(buf);
+            }
+            continue;
+        }
+        if let Some(idx) = t.find("**Status**") {
+            let rest = t[idx + "**Status**".len()..].trim_start();
+            let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+            let mut buf = match rest.find(" · **") {
+                Some(sep) => rest[..sep].to_string(),
+                None => rest.to_string(),
+            };
+            let mut j = i + 1;
+            while j < lines.len() {
+                let cont = lines[j];
+                let lt = cont.trim();
+                if lt.is_empty() || !(cont.starts_with(' ') || cont.starts_with('\t')) {
+                    break;
+                }
+                buf.push(' ');
+                buf.push_str(lt);
+                j += 1;
+            }
+            let buf = buf.trim().to_string();
+            if !buf.is_empty() {
+                return Some(buf);
+            }
+        }
+    }
+    None
+}
+
+/// Classify a `Status:` field's prose. Case-insensitive; every spelling the real corpus writes
+/// today (`Superseded by`, `**Superseded by […]**`, `Superseded IN PART by`, `Superseded in part
+/// by`) is caught by finding the bare word and checking a short window after it for "in part" — the
+/// corpus never hedges a FULL supersession with other qualifiers between the word and its target,
+/// so anything containing "superseded" without "in part" nearby is treated as full.
+fn classify_adr_status(status_text: &str) -> AdrAuthority {
+    let lower = status_text.to_lowercase();
+    let Some(idx) = lower.find("superseded") else {
+        return AdrAuthority::Live;
+    };
+    let window_end = (idx + "superseded".len() + 24).min(lower.len());
+    let window = &lower[idx..window_end];
+    if window.contains("in part") || window.contains("in-part") {
+        AdrAuthority::SupersededInPart
+    } else {
+        AdrAuthority::SupersededFully
+    }
+}
+
+/// Resolve an ADR id to its filename among `adr_files`, mirroring `record_resolves`'s ADR branch
+/// (full stamp, or legacy `ADR-00NN`) but returning the MATCH rather than a bool — needed here to
+/// go read the target's own Status line. `record_resolves` stays the one EXISTENCE check this repo
+/// asks anywhere else; this is its filename-returning twin, used only where the caller needs the
+/// file.
+fn resolve_adr_filename<'a>(id: &str, adr_files: &'a [String]) -> Option<&'a String> {
+    let rest = id.strip_prefix("ADR-")?;
+    if rest.len() == 4 && rest.chars().all(|c| c.is_ascii_digit()) {
+        let want = format!("{}-", rest);
+        return adr_files.iter().find(|f| f.starts_with(&want));
+    }
+    let is_stamp = rest.len() == 15
+        && rest.as_bytes()[8] == b'-'
+        && rest.chars().enumerate().all(|(i, c)| i == 8 || c.is_ascii_digit());
+    if is_stamp {
+        return adr_files.iter().find(|f| f.starts_with(id) || f.starts_with(rest));
+    }
+    None
+}
+
+/// Read every `docs/adr/*.md` file's content — the TARGET side of §24, distinct from
+/// `load_record_corpus`'s filenames-only list (that list proves existence; this one is read for
+/// authority). A missing directory yields an empty corpus (tolerant, like `load_model`).
+pub(crate) fn load_adr_status_corpus(root: &std::path::Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(root.join("docs/adr")) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                if name.ends_with(".md") {
+                    if let Ok(content) = fs::read_to_string(&p) {
+                        out.push((name.to_string(), content));
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// §24: a citation of a SUPERSEDED ADR, read as live authority anywhere in the instruction-surface
+/// corpus, sends the next session to follow a record that no longer speaks — #477's motivating
+/// class, verbatim: CLAUDE.md's architecture summary named `ADR-20260731-061609` for hosting after
+/// that ADR had been superseded, and the founder corrected a session by hand on a fact the repo
+/// should have supplied.
+///
+/// FULLY superseded is an ERROR: the citing text is flatly wrong about who is in charge. Superseded
+/// IN PART is a WARNING: some of the cited ADR may still hold, and there is no mechanical way to
+/// tell whether the citing clause lands on the surviving part or the reversed one, so this is a
+/// surfaced finding for a human read rather than an automatic error (#712's own instruction).
+///
+/// EXEMPTION — reusing `decision-superseded-authority`'s DESIGN rather than inventing a second
+/// mechanism (never a `_exempt.yaml`-style allowlist for this rule, never a blanket path
+/// exemption): a citation sitting inside a logical UNIT (`logical_units`, the exact
+/// paragraph/list-item/table-row join that rule uses) that ALSO narrates the supersession —
+/// contains "supersed" anywhere in the joined text — is a citation ABOUT the history, not a live
+/// pointer, and is not reported. `docs/claude/sessions/gates.md`'s own "measured cost" paragraph is
+/// exactly this shape: it cites `ADR-20260731-061609` explaining, in the same sentence, that the
+/// citation used to be stale — narration, not authority, and green without a manual exemption entry.
+///
+/// Scoped to the UNIT rather than the narrower CLAUSE `decision-superseded-authority` computes: an
+/// ADR id is an unambiguous citation on its own (no citing-form disambiguation the way a bare
+/// register key needs — `row OLD-ROW` versus a plain mention of `OLD-ROW` — because nothing else in
+/// this corpus looks like `ADR-YYYYMMDD-HHMMSS`), so the residual risk this trades for the simpler
+/// join is only an over-broad exemption from an unrelated "superseded" elsewhere in the same
+/// paragraph; narrowing to a clause is future work if the real corpus ever shows that miss.
+pub(crate) fn validate_no_superseded_adr_is_cited_as_authority(
+    files: &[(String, String)],
+    adr_files: &[(String, String)],
+) -> Vec<Issue> {
+    let adr_filenames: Vec<String> = adr_files.iter().map(|(f, _)| f.clone()).collect();
+    let mut issues = Vec::new();
+    for (path, content) in files {
+        let units = logical_units(content);
+        let mut reported: BTreeSet<(String, usize)> = BTreeSet::new();
+        for (id, line) in extract_citations(content) {
+            if !id.starts_with("ADR-") {
+                continue; // scope: ADR ids only — a PROP is an option space, never a supersedable record
+            }
+            let Some(fname) = resolve_adr_filename(&id, &adr_filenames) else {
+                continue; // unresolved: §23 already reports this, never duplicated here
+            };
+            let Some((_, target_content)) = adr_files.iter().find(|(f, _)| f == fname) else {
+                continue;
+            };
+            let status_text = adr_status_text(target_content);
+            let authority = status_text.as_deref().map(classify_adr_status).unwrap_or(AdrAuthority::Unparseable);
+            if matches!(authority, AdrAuthority::Live) {
+                continue;
+            }
+            let exempt = units
+                .iter()
+                .find(|u| u.spans.iter().any(|&(_, l)| l == line))
+                .map(|u| u.text.to_lowercase().contains("supersed"))
+                .unwrap_or(false);
+            if exempt || !reported.insert((id.clone(), line)) {
+                continue;
+            }
+            let superseding = status_text
+                .as_deref()
+                .map(extract_citations)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(i, _)| i)
+                .find(|i| i != &id);
+            match authority {
+                AdrAuthority::SupersededFully => issues.push(err(
+                    "adr-superseded-citation",
+                    format!("{}:{}", path, line),
+                    format!(
+                        "cites `{}` as live authority, but its own Status line says it is SUPERSEDED{}. Name the current record instead.",
+                        id,
+                        superseding.map(|s| format!(" (by `{}`)", s)).unwrap_or_default(),
+                    ),
+                )),
+                AdrAuthority::SupersededInPart => issues.push(warn(
+                    "adr-superseded-citation-in-part",
+                    format!("{}:{}", path, line),
+                    format!(
+                        "cites `{}` as live authority, but its own Status line says it is SUPERSEDED IN PART{} — check whether the cited point is one of the parts still standing, or narrow/replace the citation.",
+                        id,
+                        superseding.map(|s| format!(" (by `{}`)", s)).unwrap_or_default(),
+                    ),
+                )),
+                AdrAuthority::Unparseable => issues.push(warn(
+                    "adr-status-unparseable",
+                    format!("{}:{}", path, line),
+                    format!(
+                        "cites `{}`, whose own Status line (docs/adr/{}) this rule could not locate or parse — so it cannot tell whether the citation is still live. Fix the Status line's shape (a `## Status` heading, or a `**Status**:` inline field), or check by hand.",
+                        id, fname,
+                    ),
+                )),
+                AdrAuthority::Live => unreachable!(),
+            }
+        }
+    }
+    issues
+}
