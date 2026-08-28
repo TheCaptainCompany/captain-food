@@ -3,6 +3,19 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — IDENT-1 Phase A merged gated-off
+> ([#707](https://github.com/TheCaptainCompany/captain-food/pull/707), closing
+> [#641](https://github.com/TheCaptainCompany/captain-food/issues/641)) under the full mob loop:
+> 13-lens briefing, executor diff, independent reviewer PASS on round 1 (claim structurally
+> unread in the gated arm, fail-closed both classes, both transports on one seam, alert-actionable
+> contract).** `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` defaults false; the flip is the next
+> recorded decision, queued to the founder on call-sheet round 5 with the outage-state UX question
+> (ux+business vs the ADR's silent fail-closed) and the next-work pick. Also filed:
+> [#708 "No GDPR erasure flow exists for Customer…"](https://github.com/TheCaptainCompany/captain-food/issues/708)
+> (legal precondition, surfaced by the erasure check) — and the reviewer's non-blocking
+> observation that the role-path door still requires the claim to construct the identity at all
+> (the ADR's named residue, folded into the founder question).
+
 > ✅ **2026-08-28 — IDENT-1 Phase A landed:
 > [#641](https://github.com/TheCaptainCompany/captain-food/issues/641), `resolve_read_scope` can
 > now resolve a CUSTOMER's domain id from Postgres instead of trusting the JWT claim, gated OFF.**
