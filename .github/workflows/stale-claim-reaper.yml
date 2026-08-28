@@ -17,11 +17,14 @@
 # Both jobs FAIL LOUD AND COMPLETE, never fail-stop: a per-issue try/catch COLLECTS each error and
 # keeps processing every OTHER issue, then the run throws (failing loud) if any were collected --
 # one issue's API hiccup no longer stops the whole run from reaping/notifying everything else it
-# can see. The one exception is TARGETED, not a silent swallow: `removeLabel` returning 404 means
-# the `status/in-progress` label is ALREADY gone -- the exact end state this branch exists to
-# reach, most likely a concurrent re-claim or a second run racing this one -- so that one call
-# catches 404 specifically and rethrows anything else. No other API call is ever adapted around,
-# per the founder's "fix the generator/runtime, never the check" doctrine applied to CI scripts.
+# can see. TWO exceptions are TARGETED, not a silent swallow: `removeLabel` returning 404 means the
+# `status/in-progress` label is ALREADY gone -- the exact end state that branch exists to reach,
+# most likely a concurrent re-claim or a second run racing this one -- and `getBranch` returning
+# 404 for a `listBranches` candidate means the branch was deleted mid-run (routine: GitHub deletes
+# a merged PR's head branch), which is proof the branch is gone, not a liveness signal that failed
+# to resolve. Both catch 404 specifically and rethrow anything else. No other API call is ever
+# adapted around, per the founder's "fix the generator/runtime, never the check" doctrine applied
+# to CI scripts.
 name: stale-claim-reaper
 on:
   schedule:
@@ -76,7 +79,21 @@ jobs:
                 const candidates = allBranches.filter(b => b.name.startsWith(prefix));
                 const branches = [];
                 for (const b of candidates) {
-                  const { data } = await github.rest.repos.getBranch({ owner, repo, branch: b.name });
+                  let data;
+                  try {
+                    ({ data } = await github.rest.repos.getBranch({ owner, repo, branch: b.name }));
+                  } catch (err) {
+                    // TARGETED idempotence, same shape as `removeLabel` below: hoisting
+                    // `listBranches` out of the per-issue loop widened the snapshot->getBranch
+                    // window from milliseconds to the whole run, so a branch routinely deleted
+                    // mid-run (GitHub deletes a merged PR's head branch) now 404s here. That is
+                    // NOT a liveness signal failing to resolve -- it is proof the branch is gone,
+                    // which `decideClaimLiveness` already treats as "no proof of work" when
+                    // `latestCommitAt` is null. Drop the candidate; any other status is a real
+                    // failure and is rethrown, caught by the per-issue try/catch, and fails the run.
+                    if (err.status !== 404) throw err;
+                    continue;
+                  }
                   const commit = data.commit && data.commit.commit;
                   const latestCommitAt = commit && (commit.committer?.date || commit.author?.date) || null;
                   branches.push({ name: b.name, latestCommitAt });
