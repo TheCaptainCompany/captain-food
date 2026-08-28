@@ -587,3 +587,24 @@ by default; `haiku` for purely mechanical sweeps — renames, grep-and-fix, rege
 the coordinator model for: triage decisions, review verdicts, records (ADRs/journal/call sheet),
 and anything on the `HOLD: human` class. Cost asymmetry is the reason: a long diff-authoring run
 is mostly tool-echo tokens, which price the same on every tier and carry no judgment.
+
+## A serialized merge queue makes its own conflicts — check every armed PR's mergeable_state after each merge, never wait for an event (founder, 2026-08-28)
+
+The founder had to report a conflicted PR (#716) the coordinator was silently awaiting: *"Ensure
+to detect that the pr requires to resolve conflict to avoid await for nothing."* The mechanism is
+deterministic, not bad luck: when several PRs touching the same append-surfaces (tests.rs,
+main.rs, the current journal-W%V file, SPEC-LOG) are armed with auto-merge, EACH merge to main
+dirties the survivors, and GitHub sends NO webhook for the mergeable→dirty transition — the wake
+events are merges, CI completions and comments, so a conflicted PR just sits there while the
+session "waits" on an event that will never come. Rule, binding on the coordinator role:
+
+1. **The detection point is each merge event, not a timer**: on every `pull_request.closed`
+   (merged) wake, and after every direct push to main, fetch each still-open PR you armed and read
+   `mergeable_state`. `dirty` → resolve NOW (merge origin/main into the branch, keep both journal
+   entries newest-first, gate, push). `blocked` = CI running, fine. `unknown` = GitHub still
+   computing — re-fetch once after the next action rather than assuming either way.
+2. A check-in on an armed-but-open PR that finds `dirty` was already late — the merge event that
+   caused it was the moment to act.
+3. Costed at one founder interruption on 2026-08-28 (#716 waited conflicted while the session
+   idled); the same serialized-queue conflict had already been resolved three times that evening
+   (#700, #705, #711→#713 twice), so the pattern was established and the check was owed.
