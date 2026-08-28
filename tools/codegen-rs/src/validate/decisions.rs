@@ -618,7 +618,20 @@ pub(crate) fn extract_decisions_region(register_content: &str) -> Option<String>
 ///     PR #679 fixed by hand, and NOT under `.claude/`), `.gitignore`, `CLAUDE.md` -- the resident
 ///     index every session loads before anything else -- and the `Makefile`.
 ///   * `docs/**` is deliberately OUT: a record ABOUT a supersession must name the superseded row,
-///     and redding those would make the rule unusable.
+///     and redding those would make the rule unusable. THREE NAMED EXCEPTIONS TO THAT, decided by
+///     the team-owned register row `docs/decisions/DISPATCH-CARD-CITATION.yaml` (issue #477,
+///     founder directive 2026-08-28): `docs/dispatch/**`, `docs/claude/**` and `docs/PLAYBOOK.md`
+///     are INSTRUCTION SURFACES a session reads and executes BEFORE it works -- the exact property
+///     that puts `.claude/**` in the corpus -- not narration ABOUT a decision. A dispatch card
+///     tells an executor what to do; `docs/claude/**` is where CLAUDE.md itself routes every
+///     session ("Topic authorities -- read the relevant one before working") and marks
+///     `sessions.md` OPERATIONAL; `docs/PLAYBOOK.md` sits in the same position. The rest of
+///     `docs/**` -- ADRs, proposals, the register itself, STATUS.md, the journal -- stays OUT: their
+///     whole job is narrating history, including citing superseded rows to explain what changed. A
+///     citing site inside one of the three newly-in subtrees that is itself narrating a
+///     supersession (not instructing a live action) uses the same clause-scoped `superseded`
+///     exemption every other instruction surface already relies on -- this rule does not gain a
+///     second exemption mechanism, it gains three more pathspecs.
 ///   * `.github/workflows/**` is IN, and the argument for excluding it was falsified by the diff
 ///     that shipped it. The bullet used to say workflow row references are "provenance comments on
 ///     decided work, not instructions to follow" -- while THIS change added, to `ci.yml`, directly
@@ -646,6 +659,14 @@ pub(crate) fn claude_citation_corpus(root: &std::path::Path) -> (Vec<(String, St
             "CLAUDE.md",
             "Makefile",
             ".github/workflows",
+            // THE THREE `docs/**` INSTRUCTION-SURFACE EXCEPTIONS (issue #477,
+            // `docs/decisions/DISPATCH-CARD-CITATION.yaml`, founder directive 2026-08-28): a
+            // dispatch card is executed, not narrated, and `docs/claude/**` / `docs/PLAYBOOK.md`
+            // are the resident index's own routing targets, read before a session works. See the
+            // SCOPE section above for the full argument; the rest of `docs/**` stays OUT.
+            "docs/dispatch",
+            "docs/claude",
+            "docs/PLAYBOOK.md",
             // TELEMETRY IS A RECORD OF WHAT HAPPENED, NOT AN INSTRUCTION TO THE NEXT SESSION --
             // the same reason `docs/**` is out, applied to the one subtree under `.claude/**` that
             // is retrospective narration rather than a surface a session reads before working.
@@ -1039,10 +1060,13 @@ pub(crate) fn out_of_corpus_warning_kind(readable: bool) -> (&'static str, &'sta
 /// repeats its own marker, so `>` followed by `#` is never a continuation. Latent today — no superseded key is cited anywhere in the corpus — and pinned as a
 /// residual in `a_superseded_row_may_not_be_cited_as_live_authority`, so closing it later is a
 /// deliberate edit rather than a rediscovery. (Review #64 of PR #679.)
-struct Unit {
-    text: String,
+// `pub(crate)`: reused by `validate_no_superseded_adr_is_cited_as_authority` (citations.rs §24),
+// the ADR-id sibling of this rule -- it needs the same paragraph/list-item/table-row join to scope
+// ITS "superseded" narration exemption. One join, two callers (#712).
+pub(crate) struct Unit {
+    pub(crate) text: String,
     /// `(byte offset where this line's text starts in `text`, 1-based source line)`, ascending.
-    spans: Vec<(usize, usize)>,
+    pub(crate) spans: Vec<(usize, usize)>,
 }
 
 impl Unit {
@@ -1056,7 +1080,7 @@ impl Unit {
     }
 }
 
-fn logical_units(content: &str) -> Vec<Unit> {
+pub(crate) fn logical_units(content: &str) -> Vec<Unit> {
     // `- foo`, `* foo`, `1. foo`, `2) foo` — and a bare marker on its own line.
     fn starts_a_block(body: &str) -> bool {
         if matches!(body, "-" | "*") || body.starts_with("- ") || body.starts_with("* ") {

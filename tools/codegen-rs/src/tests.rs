@@ -8680,17 +8680,19 @@ fn an_unreadable_corpus_does_not_read_as_an_eliminated_warning_kind() {
     }
 
 
-    // The two kinds are exactly the corpus-derived ones, and neither is on the exempt list -- the
-    // two mechanisms are complementary and must not be collapsed into one.
+    // The kinds are exactly the corpus-derived ones, and none is on the exempt list -- the two
+    // mechanisms are complementary and must not be collapsed into one.
     let mut kinds = CORPUS_DERIVED_KINDS.to_vec();
     kinds.sort_unstable();
     assert_eq!(
         kinds,
         vec![
+            "adr-status-unparseable",
+            "adr-superseded-citation-in-part",
             "decision-citation-file-not-utf8",
             "decision-citation-file-out-of-corpus",
         ],
-        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on the corpus being fully read; adding one is a decision, and removing one reopens the `kind eliminated` trap for it. `decision-superseded-authority` LEFT this list when the founder decided CITATION-RULE-LEVEL to `err` (2026-08-27) -- an error never enters the warning profile, so there is no count to floor; the coupling assertion in `a_superseded_row_may_not_be_cited_as_live_authority` forces it back in if the level ever returns to `warn`"
+        "CORPUS_DERIVED_KINDS changed. It names the kinds whose measurement depends on the corpus being fully read; adding one is a decision, and removing one reopens the `kind eliminated` trap for it. `decision-superseded-authority` LEFT this list when the founder decided CITATION-RULE-LEVEL to `err` (2026-08-27) -- an error never enters the warning profile, so there is no count to floor; the coupling assertion in `a_superseded_row_may_not_be_cited_as_live_authority` forces it back in if the level ever returns to `warn`. `adr-superseded-citation-in-part` and `adr-status-unparseable` JOINED it (#712): both are found by scanning `claude_citation_corpus`'s `cited` list, exactly like the register-row rule was while it was still `warn`, so an incomplete scan under-counts them the same way."
     );
     for k in CORPUS_DERIVED_KINDS {
         assert!(
@@ -12033,6 +12035,218 @@ mod decision_ask_and_citations {
         let msgs: Vec<String> = issues.iter().map(|i| format!("{} {}", i.rule, i.location)).collect();
         assert!(msgs.is_empty(), "committed corpus must be citation-clean:\n{}", msgs.join("\n"));
         assert!(validate_record_stamps(&c).is_empty(), "record stamps must be unique per kind");
+    }
+}
+
+/// §24 — the ADR-id sibling of `decision-superseded-authority` (#477/#712): a citation of a
+/// superseded ADR in the instruction-surface corpus is judged by that ADR's OWN `Status:` line,
+/// never by a hard-coded id list, so it keeps working as the chain grows.
+mod adr_superseded_citation {
+    use crate::*;
+
+    // Fixture ADRs, planted per the injection template `decision_ask_and_citations::corpus()`
+    // establishes: no disk, no cwd assumption, pure data in and `Vec<Issue>` out.
+    const FULLY_SUPERSEDED: &str = "ADR-20990101-000001-old-hosting.md";
+    const FULLY_SUPERSEDED_BODY: &str =
+        "# ADR-20990101-000001 — Old hosting choice\n\n## Status\n\nSuperseded by ADR-20990101-000002 (new hosting) — replaced entirely.\n";
+    const IN_PART_SUPERSEDED: &str = "ADR-20990101-000003-hosting-migrates.md";
+    const IN_PART_SUPERSEDED_BODY: &str = "# ADR-20990101-000003 — Hosting migrates\n\n- **Status**: **Superseded IN PART by [ADR-20990101-000004](ADR-20990101-000004-x.md)**\n  (product owner) — only point 1, the destination, changes; the rest stands.\n";
+    const STILL_LIVE: &str = "ADR-20990101-000005-still-live.md";
+    const STILL_LIVE_BODY: &str = "# ADR-20990101-000005 — Still live\n\n## Status\n\nAccepted\n";
+    const NO_STATUS_FIELD: &str = "ADR-20990101-000006-no-status.md";
+    const NO_STATUS_FIELD_BODY: &str = "# ADR-20990101-000006 — No status field\n\nJust prose, never a Status section.\n";
+
+    fn adr_corpus() -> Vec<(String, String)> {
+        vec![
+            (FULLY_SUPERSEDED.to_string(), FULLY_SUPERSEDED_BODY.to_string()),
+            (IN_PART_SUPERSEDED.to_string(), IN_PART_SUPERSEDED_BODY.to_string()),
+            (STILL_LIVE.to_string(), STILL_LIVE_BODY.to_string()),
+            (NO_STATUS_FIELD.to_string(), NO_STATUS_FIELD_BODY.to_string()),
+        ]
+    }
+
+    fn check(path: &str, body: &str) -> Vec<Issue> {
+        validate_no_superseded_adr_is_cited_as_authority(&[(path.to_string(), body.to_string())], &adr_corpus())
+    }
+
+    /// RED — the issue's own case: a BARE citation of a fully-superseded ADR, no narration, must
+    /// ERROR and name the superseding record.
+    #[test]
+    fn a_fully_superseded_adr_cited_as_authority_is_an_error() {
+        let issues = check(".claude/x.md", "Per ADR-20990101-000001, do the migration this way.\n");
+        assert_eq!(issues.len(), 1, "got: {:?}", issues.iter().map(|i| i.rule).collect::<Vec<_>>());
+        assert_eq!(issues[0].rule, "adr-superseded-citation");
+        assert!(matches!(issues[0].level, Level::Error));
+        assert_eq!(issues[0].location, ".claude/x.md:1");
+        assert!(
+            issues[0].message.contains("ADR-20990101-000002"),
+            "the error must name the superseding record so the reader does not have to open the file to find it: {}",
+            issues[0].message
+        );
+    }
+
+    /// RED — the issue's own case, the WARN half: a BARE citation of an ADR superseded IN PART.
+    /// Some of the cited ADR may still hold, so this is a surfaced finding, not an error.
+    #[test]
+    fn an_adr_superseded_in_part_cited_as_authority_is_a_warning() {
+        let issues = check(".claude/x.md", "Per ADR-20990101-000003, do the migration this way.\n");
+        assert_eq!(issues.len(), 1, "got: {:?}", issues.iter().map(|i| i.rule).collect::<Vec<_>>());
+        assert_eq!(issues[0].rule, "adr-superseded-citation-in-part");
+        assert!(matches!(issues[0].level, Level::Warning));
+        assert!(issues[0].message.contains("ADR-20990101-000004"));
+    }
+
+    #[test]
+    fn a_live_adr_cited_as_authority_is_green() {
+        assert!(check(".claude/x.md", "Per ADR-20990101-000005, do it this way.\n").is_empty());
+    }
+
+    /// An id that resolves to NO file at all is §23's error (`record-citation-unresolved`), never
+    /// duplicated here — the division of labor the docstring states.
+    #[test]
+    fn an_unresolved_adr_id_is_silent_here() {
+        assert!(check(".claude/x.md", "Per ADR-20990101-999999, do it this way.\n").is_empty());
+    }
+
+    /// UNPARSEABLE, but LOUD ONLY WHEN CITED: an ADR with no locatable `Status:` field is reported
+    /// when a corpus file actually points at it, and never as a background sweep of every ADR —
+    /// the uncited fixtures above (`STILL_LIVE`, the two superseded ones) prove the sweep is not
+    /// happening, because they would all fire too if it were.
+    #[test]
+    fn an_unparseable_status_line_is_loud_only_when_cited() {
+        let cited = check(".claude/x.md", "Per ADR-20990101-000006, do it this way.\n");
+        assert_eq!(cited.len(), 1);
+        assert_eq!(cited[0].rule, "adr-status-unparseable");
+        assert!(matches!(cited[0].level, Level::Warning));
+        assert!(cited[0].message.contains("ADR-20990101-000006"));
+
+        // No citation anywhere in this file: the same unparseable ADR is never mentioned, and the
+        // rule has nothing to say about it.
+        assert!(check(".claude/y.md", "Nothing here cites anything.\n").is_empty());
+    }
+
+    /// GREEN — a legitimate narration of the supersession is not a live pointer, and needs no
+    /// second exemption mechanism: `logical_units`' own paragraph/list-item/table-row join is
+    /// reused exactly as `decision-superseded-authority` uses it. Covers both severities and a
+    /// hard-wrapped (multi-line) narration, since ordinary prose lines join into one unit.
+    #[test]
+    fn a_narration_of_the_supersession_needs_no_manual_exemption() {
+        assert!(
+            check(
+                ".claude/x.md",
+                "ADR-20990101-000001 was superseded; see ADR-20990101-000002 instead.\n"
+            )
+            .is_empty(),
+            "same-line narration (full supersession) must exempt"
+        );
+        assert!(
+            check(
+                ".claude/x.md",
+                "ADR-20990101-000003 covers the old plan, now superseded in part;\nonly the destination changed.\n"
+            )
+            .is_empty(),
+            "a hard-wrapped narration (in-part supersession) must exempt — logical_units joins the paragraph"
+        );
+        // THE REAL MOTIVATING SENTENCE (docs/claude/sessions/gates.md), reproduced verbatim in
+        // shape: the citation and the word "superseded" sit in the same sentence explaining a
+        // PAST incident, not pointing at the ADR as live authority today.
+        assert!(
+            check(
+                ".claude/x.md",
+                "on 2026-08-10 it still cited the superseded `ADR-20990101-000001` for hosting.\n"
+            )
+            .is_empty()
+        );
+    }
+
+    /// GREEN — the exemption is UNIT-scoped (the same join `logical_units` computes), not
+    /// PATH-scoped: an unrelated citation later in the SAME file, with no narration nearby, still
+    /// reds. A blanket path exemption would have hidden this.
+    #[test]
+    fn the_exemption_is_scoped_to_the_unit_not_the_whole_file() {
+        let body = "This paragraph explains ADR-20990101-000001 was superseded long ago.\n\nElsewhere, per ADR-20990101-000001, follow the old steps.\n";
+        let issues = check(".claude/x.md", body);
+        assert_eq!(
+            issues.len(),
+            1,
+            "the second, unrelated paragraph must still red: {:?}",
+            issues.iter().map(|i| (i.rule, i.location.as_str())).collect::<Vec<_>>()
+        );
+        assert_eq!(issues[0].location, ".claude/x.md:3");
+    }
+
+    /// PARSER VARIANCE — read straight off the real tree (per #712's own instruction: read a few
+    /// real superseded ADRs before writing the parser), covering the shapes the corpus actually
+    /// writes: a `## Status` heading (legacy prefixless filename), an inline bold field with a
+    /// markdown-linked full supersession, an inline bold field with a CAPS "IN PART", and an
+    /// inline bold field with lower-case "in part". None of the citing lines below narrates the
+    /// supersession, so a correct classification is the only thing that keeps them green/red.
+    #[test]
+    fn the_status_parser_tolerates_the_real_corpus_format_variance() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let read = |rel: &str| {
+            fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("fixture ADR moved or renamed: {} ({})", rel, e))
+        };
+        let adr_files = vec![
+            (
+                "20260720-004556-partner-reoffer-policy.md".to_string(),
+                read("docs/adr/20260720-004556-partner-reoffer-policy.md"),
+            ),
+            (
+                "ADR-20260731-061609-hosting-migrates-to-ovh-supabase-identity-only.md".to_string(),
+                read("docs/adr/ADR-20260731-061609-hosting-migrates-to-ovh-supabase-identity-only.md"),
+            ),
+            (
+                "ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md".to_string(),
+                read("docs/adr/ADR-20260806-151122-hosting-destination-is-clever-cloud-not-ovh.md"),
+            ),
+            (
+                "ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md".to_string(),
+                read("docs/adr/ADR-20260810-234225-business-metrics-for-every-feature-and-every-persona.md"),
+            ),
+        ];
+        let check_one = |id: &str| {
+            validate_no_superseded_adr_is_cited_as_authority(
+                &[(".claude/x.md".to_string(), format!("bare citation: {}\n", id))],
+                &adr_files,
+            )
+        };
+        let describe = |v: &[Issue]| v.iter().map(|i| (i.rule, i.location.clone())).collect::<Vec<_>>();
+        // Legacy prefixless filename, `## Status` heading, plain "Superseded by ADR-…": ERROR.
+        let a = check_one("ADR-20260720-004556");
+        assert_eq!(a.len(), 1, "heading-style Status parse failed: {:?}", describe(&a));
+        assert_eq!(a[0].rule, "adr-superseded-citation");
+        // Inline bold field, markdown-linked, CAPS "IN PART": WARNING.
+        let b = check_one("ADR-20260731-061609");
+        assert_eq!(b.len(), 1, "inline bold + CAPS in-part Status parse failed: {:?}", describe(&b));
+        assert_eq!(b[0].rule, "adr-superseded-citation-in-part");
+        // Inline bold field, markdown-linked, full supersession: ERROR.
+        let c = check_one("ADR-20260806-151122");
+        assert_eq!(c.len(), 1, "inline bold + full Status parse failed: {:?}", describe(&c));
+        assert_eq!(c[0].rule, "adr-superseded-citation");
+        // Inline bold field, lower-case "in part": WARNING.
+        let d = check_one("ADR-20260810-234225");
+        assert_eq!(d.len(), 1, "inline bold + lower-case in-part Status parse failed: {:?}", describe(&d));
+        assert_eq!(d[0].rule, "adr-superseded-citation-in-part");
+    }
+
+    /// TRIAGE — the real instruction-surface corpus, post-fix: after this change, every citation of
+    /// a superseded ADR anywhere `claude_citation_corpus` scans either resolves to a live record, or
+    /// sits in a clause that narrates the supersession. A regression here is a NEW stale citation,
+    /// not a pre-existing one — the whole tree was swept in the same commit that added the rule.
+    #[test]
+    fn the_committed_instruction_surface_carries_no_stale_adr_citation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let (cited, readable, _unread, _unread_tree, _skipped_ext) = claude_citation_corpus(&root);
+        if !readable {
+            return; // fail-open posture, matching every other corpus-derived rule in this file
+        }
+        assert!(!cited.is_empty(), "the corpus must not come back empty on a real checkout");
+        let adr_files = load_adr_status_corpus(&root);
+        assert!(!adr_files.is_empty(), "docs/adr/ must not come back empty on a real checkout");
+        let issues = validate_no_superseded_adr_is_cited_as_authority(&cited, &adr_files);
+        let msgs: Vec<String> = issues.iter().map(|i| format!("{} {}: {}", i.rule, i.location, i.message)).collect();
+        assert!(msgs.is_empty(), "stale ADR citation(s) in the instruction surface:\n{}", msgs.join("\n"));
     }
 }
 
