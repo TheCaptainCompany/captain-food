@@ -319,10 +319,21 @@ rules land here, not one: the supersession-coupling mirror arm, and
 `decision-superseded-authority`, which fails when any file **in the corpus named by
 `claude_citation_corpus`** — the one place that set is stated, and deliberately wider than the
 `.claude/** plus the ignore files` this paragraph first claimed. The walk is `git ls-files` over
-exactly six pathspecs — `.claude`, `.claudeignore`, `.gitignore`, `CLAUDE.md` (the resident index),
-`Makefile`, and `.github/workflows` — the last added by review #21, because `ci.yml`'s gate-step
-comment names the authorizing row as a live instruction to the next author rather than as
-provenance — **minus one pathspec exclusion, `:(exclude).claude/loop-budget`**. That exclusion is
+exactly nine pathspecs — `.claude`, `.claudeignore`, `.gitignore`, `CLAUDE.md` (the resident index),
+`Makefile`, `.github/workflows` (added by review #21, because `ci.yml`'s gate-step comment names
+the authorizing row as a live instruction to the next author rather than as provenance), and
+`docs/dispatch`, `docs/claude`, `docs/PLAYBOOK.md` (added 2026-08-28, decided by the team-owned
+register row `docs/decisions/DISPATCH-CARD-CITATION.yaml` per founder directive 2026-08-28 —
+issue [#477 "Validator gate: no first-read doc may cite a SUPERSEDED ADR (CLAUDE.md +
+docs/claude/\*\*)"](https://github.com/TheCaptainCompany/captain-food/issues/477): a dispatch card is
+an INSTRUCTION SURFACE a session executes rather than narration about a decision, and
+`docs/claude/**`/`docs/PLAYBOOK.md` are the resident index's own routing targets, read before a
+session works — the same property that put `.claude/**` in this corpus. The general `docs/**`
+exclusion (below) stands for the rest: ADRs, proposals, the register and the journal narrate
+history, including citing superseded rows to explain what changed, and a citing site inside these
+three subtrees that is itself narrating a supersession rather than instructing a live action uses
+the same clause-scoped `superseded` exemption every other instruction surface already relies on) —
+**minus one pathspec exclusion, `:(exclude).claude/loop-budget`**. That exclusion is
 the `docs/**` rule applied inside `.claude/`: telemetry is a record of what happened, not an
 instruction a session reads before working. It is 89 of the corpus' 139 tracked files and grows one
 per loop run, and its free-text `note` fields already name `ADP-1`, `RSO-1`, `MOB-COST-1a` and full

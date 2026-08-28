@@ -3,6 +3,28 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#477 "Validator gate: no first-read doc may cite a SUPERSEDED ADR (CLAUDE.md +
+> docs/claude/\*\*)"](https://github.com/TheCaptainCompany/captain-food/issues/477) widened: the
+> citation corpus now covers the instruction-surface class.** `docs/decisions/DISPATCH-CARD-CITATION.yaml`
+> decided ([ADR-20260828-213000](../adr/ADR-20260828-213000-citation-corpus-widened-to-instruction-surfaces.md)),
+> per the founder's 2026-08-28 directive ("work #477... ASAP, it influences agent behaviour")
+> landing on top of the case the row had already made: `claude_citation_corpus`
+> (`tools/codegen-rs/src/validate/decisions.rs`) grows three pathspecs — `docs/dispatch`,
+> `docs/claude`, `docs/PLAYBOOK.md` — as named exceptions to the general `docs/**` exclusion; the
+> rest of `docs/**` (ADRs, proposals, the register, the journal) stays excluded because narrating a
+> supersession there is legitimate. Both records `the_records_state_the_same_citation_corpus_as_the_code`
+> checks were updated in the same change. Verified against the real tree: `make validate` stays at
+> 0 errors, the 92-warning baseline is unmoved — no live citation of a superseded row exists today
+> in any of the three subtrees. **A scope gap surfaced by the red-first plant, left open rather than
+> silently absorbed**: the shipped `decision-superseded-authority` mechanism catches citations of
+> decision-register **row keys** (`docs/decisions/*.yaml`, `status: superseded`), never ADR ids —
+> planting a citation of `ADR-20260731-061609` (the issue's own motivating, superseded-IN-PART
+> example) inside a tracked `docs/claude/**` file does **not** red under the widened corpus, while
+> the same form citing the one live-superseded row key (`RETRIEVAL-QMD`) reds immediately as a hard
+> error. Issue #477's original "cite a superseded ADR by id" ask is therefore still unimplemented by
+> any gate; this change widened WHERE the shipped rule looks, not WHAT it looks for — flagged for
+> the architect to triage as separate work or an explicit closure.
+
 > ✅ **2026-08-28 — [#660 "STATUS.md's durable sections are stale and are now read first"](https://github.com/TheCaptainCompany/captain-food/issues/660)
 > corrected: STATUS.md contradicted itself within 170 lines.** The Deployment table still showed
 > Render (Frankfurt) / Supabase Postgres as ✅ current while the same file, further down, already
