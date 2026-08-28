@@ -12,8 +12,11 @@ founder question about a row that is not open.
 ## The schema — flat scalars, closed sets, unknown fields are errors
 
 ```yaml
-key: "CAPTAINNET-ZERO"        # == filename stem; v1 grammar ^[A-Z][A-Z0-9-]{2,63}$,
-                              #    no `--` (reserved for the future D1–D7 namespacing), no trailing -
+key: "CAPTAINNET-ZERO"        # == filename stem; v2 grammar ^[A-Z][A-Z0-9-]{2,63}$, no trailing -,
+                              #    and AT MOST ONE `--`, splitting `<PROPOSAL-ID>--<LOCAL>` (e.g.
+                              #    `PROP-20260809-003000--D1`) for the per-proposal D1-D7 family —
+                              #    the namespace half must resolve to a committed docs/proposals/
+                              #    file (ADR-20260828-153000, PROP-20260819-110442 D5 / slice 5)
 status: "open"                # open | decided | deferred | superseded | withdrawn (closed set)
 question: "One line, phrased as the ANSWERABLE question — never a topic label."
 owner: "founder"              # founder | team | counsel | external — who owes the NEXT MOVE on the

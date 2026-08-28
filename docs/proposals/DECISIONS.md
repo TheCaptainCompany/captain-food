@@ -20,7 +20,6 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `CONFLICTS-20260819` | open | 2026-08-19 | Which change carries each of the ten record conflicts (C1-C10) the six answers surfaced? | team |
 | `DELIV-THRESHOLD` | open | 2026-08-19 | The free-delivery threshold: which field, computed where, and the ninth money term — design team-owned, commercial parameters founder-owned (suggest, never cap). | team |
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
-| `KEY-NAMESPACE` | open | 2026-08-21 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? | team |
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
 | `ERASURE-LAUNCH-GATE` | open | 2026-08-28 | Does the Customer GDPR erasure flow (#708) ship BEFORE the first real order in Tours, or does the founder record an explicit, counsel-cleared acceptance of an exposure window? | founder |
 | `IDENT1-OUTAGE-EXPERIENCE` | open | 2026-08-28 | When the identity lookup FAILS (outage class, lookup_failed), does the customer keep the ADR-20260818-004646 silent fail-closed-to-Public experience, or get a visible 'couldn't load your account — retry' state? | founder |
@@ -31,7 +30,18 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `DISPATCH-CARD-CITATION` | decided | 2026-08-28 | WHICH `docs/**` SUBTREES ARE INSTRUCTION SURFACES for `decision-superseded-authority` — i.e. which of them should leave the `docs/**` exclusion and join `.claude/**` in the citation corpus? Opened for `docs/dispatch/**`; widened to the class after review #59 named `docs/claude/**` and `docs/PLAYBOOK.md` as the same exception with more weight. -> ADR-20260828-213000 | team |
 | `GATE-STEP-LOCUS` | decided | 2026-08-27 | Do executable gate steps live INSIDE the always-run `changes` job, or in a sibling always-run job that `codegen` aggregates equally? -> ADR-20260827-081500 | team |
 | `IDENT1-RESOLUTION-ACTIVATION` | decided | 2026-08-28 | When does RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES (the #707 gated path) flip ON? -> ADR-20260828-120500 | founder |
+| `KEY-NAMESPACE` | decided | 2026-08-28 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? -> ADR-20260828-153000 | team |
 | `MARGIN-MECHANISM` | decided | 2026-08-19 | What replaces the margin-proportional fee mechanism? -> ADR-20260819-103112 | founder |
+| `PROP-20260809-003000--D1` | decided | 2026-08-09 | The branching construct's shape -> ADR-20260809-050000 | founder |
+| `PROP-20260809-003000--D2` | decided | 2026-08-09 | Is a `default:`/catch-all arm allowed? -> ADR-20260809-050000 | founder |
+| `PROP-20260809-003000--D3` | decided | 2026-08-09 | Where the REFUND arms live -> ADR-20260809-050000 | founder |
+| `PROP-20260809-003000--D4` | decided | 2026-08-09 | How a computed discriminant is declared -> ADR-20260809-050000 | founder |
+| `PROP-20260809-003000--D5` | decided | 2026-08-09 | Nullable discriminants -> ADR-20260809-050000 | founder |
+| `PROP-20260809-003000--D6` | decided | 2026-08-09 | Sharing steps between arms -> ADR-20260809-050000 | founder |
+| `PROP-20260809-003000--D7` | decided | 2026-08-09 | Deterministic derived ids -> ADR-20260809-050000 | founder |
+| `PROP-20260809-021351--D1` | decided | 2026-08-09 | Where the demo runs -> ADR-20260809-050000 | founder |
+| `PROP-20260809-021351--D3` | decided | 2026-08-09 | How a stranger is identified -> ADR-20260809-050000 | founder |
+| `PROP-20260809-021351--D4` | decided | 2026-08-09 | Stripe mode -> ADR-20260809-050000 | founder |
 | `REFUND-BEARER` | decided | 2026-08-19 | Who bears a refund? -> ADR-20260819-103112 | founder |
 | `REG-1` | decided | 2026-08-21 | Does enforcement against re-asked questions go on the ask, or on the archive? -> ADR-20260821-010543 | founder |
 | `REG-2` | decided | 2026-08-21 | What shape does the register source take? -> ADR-20260821-095957 | founder |
@@ -44,8 +54,11 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REVIEW-GATES-CRATES-MERGE` | decided | 2026-08-28 | Should the independent review pass gate auto-merge on PRs touching crates/**, or keep merging on green CI with review findings landing as follow-up PRs? -> ADR-20260828-023258 | founder |
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
+| `PROP-20260809-021351--D2` | withdrawn | 2026-08-09 | Demo data isolation | team |
+| `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
+| `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 31 — 11 open · 18 decided · 1 superseded · 1 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 44 — 10 open · 29 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

@@ -3,6 +3,37 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#658 "The decision register cannot say what is still open: 62 of 148 rows carry
+> no status token, 22 keys are ambiguous, and nothing confronts a question with the register before
+> it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658) closes its
+> last outstanding row, `KEY-NAMESPACE`: the register key grammar now has a v2 form.** `--` stops
+> being bare-illegal and becomes the ONE reserved separator for the per-proposal `D1`-`D7` family —
+> `<PROPOSAL-ID>--<LOCAL>` (e.g. `PROP-20260809-003000--D1`); the namespace half must itself look
+> like a `PROP-YYYYMMDD-HHMMSS` stamp (pure syntax, `decision-key-grammar`) AND resolve to a
+> committed proposal file (semantic, new rule `decision-key-namespace-dangling`) — a bare local name
+> this short (`D1`, 2 chars) still fails the unchanged length floor on its own, so namespacing was
+> never a way to relax it. Red-first: a bare ambiguous key, a two-`--` key and a dangling-namespace
+> key each proved red before the green corpus was asserted (`tools/codegen-rs/src/tests.rs`,
+> `mod decisions_register`). [ADR-20260828-153000](../adr/ADR-20260828-153000-register-keys-namespace-by-proposal-with-a-double-dash.md).
+>
+> **Verified count, not re-quoted**: the dispatch's "22" traces to PROP-20260819-110442's own stat —
+> `docs/proposals/DECISIONS.md` carries 148 row-anchored keys, 126 unique, 22 duplicates, ALL in the
+> `D1`-`D7` family. Verified by grep: that family has exactly 29 physical row occurrences across the
+> document (7 distinct name strings), so "22" is `29 minus the 7 first-seen` — a corpus-health
+> statistic over occurrences, not a curated list of 22 rows to move while leaving 7 untouched (there
+> is no non-arbitrary way to pick which single `D1` is "the real one"). Of the four proposals whose
+> tables use bare `D1`-`D7` as their entire numbering scheme, **13 keys are fully migrated** to
+> `docs/decisions/<KEY>.yaml` in this change: `PROP-20260809-003000--D{1..7}` (all `decided`,
+> `ADR-20260809-050000`) and `PROP-20260809-021351--D{1,3,4}` (`decided`, same record) /
+> `--D{2,5,6}` (`withdrawn` — the proposal's own text says these three lapse with its deferral).
+> **`PROP-20260810-234225` and `PROP-20260811-000946`'s 14 `D1`-`D7` keys are deliberately NOT
+> migrated**: §27bis (`MET-R`) records that the `DECISIONS.md` §27 table's own D4/D6 text was
+> reversed by the later projection-vs-instrument decision, so promoting them from that stale table
+> text as `decided` would assert a superseded position as current — reported to the architect as a
+> follow-up needing a source-proposal reconciliation, not a mechanical namespace-and-copy. Zero
+> prior citations of any bare `D1`-`D7` existed anywhere in the repo as a formal register reference,
+> so the "update every citation" step of the dispatch found nothing to update.
+
 > ✅ **2026-08-28 — the founder's four-issue ADR-hygiene batch is landed and reported (call-sheet
 > round 6).** In one evening: [#660](https://github.com/TheCaptainCompany/captain-food/issues/660)
 > STATUS.md facts corrected (verified list in the commit);
