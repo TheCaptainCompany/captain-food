@@ -15035,3 +15035,237 @@ mod docs_only_ci_and_legacy_visibility {
         assert_eq!(body, emit_decisions_index(&rows, 103));
     }
 }
+
+// ─── §24 — the STATUS.md journal-split gate (#659/#711) ─────────────────────────────────────────
+mod status_journal_gate {
+    use super::super::*;
+
+    fn root() -> PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../")
+    }
+
+    /// `Issue` derives no `Debug` (same posture as `Level` elsewhere in this crate), so `.expect()`
+    /// cannot be used directly on a `Result<_, Issue>` — this is the test-only stand-in.
+    fn load_status_ok() -> (String, String) {
+        match load_status_file(&root()) {
+            Ok(v) => v,
+            Err(i) => panic!("docs/STATUS.md must be readable: {}: {}", i.rule, i.message),
+        }
+    }
+
+    // ─── date arithmetic sanity (cross-checked against `date -d '<date>' +%G-W%V`) ───────────────
+
+    #[test]
+    fn iso_year_week_matches_known_dates() {
+        assert_eq!(iso_year_week(2026, 8, 17), (2026, 34));
+        assert_eq!(iso_year_week(2026, 8, 19), (2026, 34));
+        assert_eq!(iso_year_week(2026, 8, 23), (2026, 34));
+        assert_eq!(iso_year_week(2026, 8, 24), (2026, 35)); // Monday -- the week rolls over
+        assert_eq!(iso_year_week(2026, 8, 30), (2026, 35)); // Sunday -- still week 35
+        assert_eq!(iso_year_week(2026, 1, 1), (2026, 1));
+        assert_eq!(iso_year_week(2026, 12, 31), (2026, 53)); // 2026 has a 53rd ISO week
+        assert_eq!(iso_year_week(2020, 12, 31), (2020, 53)); // a different 53-week year
+        assert_eq!(iso_year_week(2027, 1, 3), (2026, 53)); // spills BACK into 2026's last week
+        assert_eq!(iso_year_week(2027, 1, 4), (2027, 1)); // the Monday it rolls into 2027-W01
+    }
+
+    #[test]
+    fn is_valid_date_rejects_what_does_not_exist_on_the_calendar() {
+        assert!(is_valid_date(2026, 8, 24));
+        assert!(is_valid_date(2024, 2, 29)); // leap day
+        assert!(!is_valid_date(2026, 2, 29)); // 2026 is not a leap year
+        assert!(!is_valid_date(2026, 2, 30)); // no such day in any year
+        assert!(!is_valid_date(2026, 13, 1)); // no month 13
+        assert!(!is_valid_date(2026, 0, 15)); // no month 0
+        assert!(!is_valid_date(2026, 4, 31)); // April has 30 days
+    }
+
+    // ─── A2 — no journal-entry opener remains in docs/STATUS.md ───────────────────────────────────
+
+    #[test]
+    fn the_real_status_md_carries_no_journal_opener() {
+        let (path, content) = load_status_ok();
+        assert!(
+            validate_no_journal_opener_in_status(&path, &content).is_empty(),
+            "STATUS.md must carry no dated journal-entry opener"
+        );
+    }
+
+    /// Red-first (copying `an_eighth_break_in_the_real_register_is_caught`'s in-memory-injection
+    /// shape): a dated entry accidentally left in `STATUS.md` -- the ADR-20260819-... journal split
+    /// review's own class of defect -- must be caught, on the real file, at the exact line.
+    #[test]
+    fn a_journal_entry_stranded_in_status_md_is_caught() {
+        let (path, content) = load_status_ok();
+        let before = validate_no_journal_opener_in_status(&path, &content).len();
+        assert_eq!(before, 0, "baseline must be clean");
+
+        let mut lines: Vec<&str> = content.lines().collect();
+        let inject_at = lines.len() / 2;
+        lines.insert(inject_at, "> ✅ **2026-08-28 — orphaned entry accidentally left in STATUS.md**");
+        let injected = lines.join("\n");
+
+        let after = validate_no_journal_opener_in_status(&path, &injected);
+        assert_eq!(after.len(), 1, "exactly one stranded opener must be caught:\n{:?}", after.iter().map(|i| &i.location).collect::<Vec<_>>());
+        assert_eq!(after[0].rule, "status-journal-opener-in-status-md");
+        assert_eq!(after[0].location, format!("{}:{}", path, inject_at + 1));
+        assert!(after[0].level == Level::Error, "a stranded journal entry must be a gate failure (Error), got a Warning");
+    }
+
+    #[test]
+    fn missing_status_md_is_a_loud_failure_not_a_silent_zero() {
+        let nowhere = std::env::temp_dir().join(format!("cf-status-md-missing-{}", std::process::id()));
+        let issue = load_status_file(&nowhere).expect_err("a missing docs/STATUS.md must be a hard error");
+        assert_eq!(issue.rule, "status-md-unreadable");
+        assert!(issue.level == Level::Error);
+    }
+
+    // ─── A3 — every journal entry sits in the ISO-week file its own parsed date derives ───────────
+
+    #[test]
+    fn the_real_journal_corpus_has_every_entry_in_its_own_week() {
+        let files = load_journal_files(&root());
+        assert!(files.len() >= 6, "the journal corpus must contain the known week files");
+        let issues: Vec<String> =
+            validate_journal_entries_own_week(&files).iter().map(|i| format!("{} at {}: {}", i.rule, i.location, i.message)).collect();
+        assert!(issues.is_empty(), "every journal entry must sit in its own-date's ISO-week file:\n{}", issues.join("\n"));
+    }
+
+    /// Red-first: an entry dated 2026-08-19 (ISO week 34) planted into `journal-2026-W35.md` — the
+    /// exact defect class assertion 3 exists to catch — must be caught at the exact injected line,
+    /// with neither of the OTHER week files (which were not touched) producing any new finding.
+    #[test]
+    fn a_misbucketed_entry_planted_in_the_real_corpus_is_caught() {
+        let files = load_journal_files(&root());
+        let before = validate_journal_entries_own_week(&files).len();
+        assert_eq!(before, 0, "baseline must be clean");
+
+        let w35_path = "docs/status/journal-2026-W35.md".to_string();
+        let (_, w35_content) = files.iter().find(|(p, _)| p == &w35_path).expect("W35 file must be in the corpus");
+
+        // Insert right after the file's own header block (a blank line, then the injected entry,
+        // then a blank line) -- newest-first order is NOT relied on by the check (parse structure,
+        // never assume order), so a top-of-file insertion is as valid a plant as any other.
+        let mut lines: Vec<&str> = w35_content.lines().collect();
+        let header_end = lines.iter().position(|l| l.trim().is_empty()).expect("header ends in a blank line") + 1;
+        let injected_line = "> 🧪 **2026-08-19 — planted misbucketed entry (test only, never committed)**";
+        lines.insert(header_end, injected_line);
+        lines.insert(header_end + 1, "");
+        let injected_content = lines.join("\n");
+
+        let mut injected_files = files.clone();
+        for (p, c) in injected_files.iter_mut() {
+            if p == &w35_path {
+                *c = injected_content.clone();
+            }
+        }
+
+        let after = validate_journal_entries_own_week(&injected_files);
+        assert_eq!(after.len(), 1, "exactly one misbucketed entry must be caught:\n{:?}", after.iter().map(|i| &i.location).collect::<Vec<_>>());
+        assert_eq!(after[0].rule, "status-journal-entry-wrong-week");
+        assert_eq!(after[0].location, format!("{}:{}", w35_path, header_end + 1));
+        assert!(after[0].message.contains("2026-W34") || after[0].message.contains("34"), "{}", after[0].message);
+        assert!(after[0].level == Level::Error, "a misbucketed entry must be a gate failure (Error), got a Warning");
+    }
+
+    /// An opener-LOOKING line (blockquote, early bold run) whose date fragment does not fully
+    /// match the measured shape is a loud error, never a silent skip -- the corpus's own historical
+    /// break (`journal-2026-W30.md`'s former `**LANDED (2026-07-20):` opener, fixed in this same
+    /// change) is exactly this class, exercised here as a standalone fixture so the behaviour is
+    /// pinned independently of that one corpus row ever being touched again.
+    #[test]
+    fn an_opener_looking_line_with_an_unparseable_date_is_a_loud_error_not_a_skip() {
+        let content = "# Status journal — 2026-W30\n\nJournal entries for ISO week 2026-W30, newest first, in the order they were written.\nCurrent state: [`../STATUS.md`](../STATUS.md).\n\n> ✅ **LANDED (2026-07-20): command sourcing lands**\n> more text.\n";
+        let files = vec![("docs/status/journal-2026-W30.md".to_string(), content.to_string())];
+        let issues = validate_journal_entries_own_week(&files);
+        assert_eq!(issues.len(), 1, "{:?}", issues.iter().map(|i| &i.location).collect::<Vec<_>>());
+        assert_eq!(issues[0].rule, "status-journal-opener-unmatched");
+        assert_eq!(issues[0].location, "docs/status/journal-2026-W30.md:6");
+    }
+
+    /// A first paragraph line that is not opener-shaped at all (no early bold run) is simply not a
+    /// journal entry -- e.g. the header prose every week file carries -- and must never be flagged.
+    #[test]
+    fn non_opener_prose_is_never_flagged() {
+        let content = "# Status journal — 2026-W30\n\nJournal entries for ISO week 2026-W30, newest first, in the order they were written.\nCurrent state: [`../STATUS.md`](../STATUS.md).\n\n> A plain blockquote aside with no bold run at all.\n";
+        let files = vec![("docs/status/journal-2026-W30.md".to_string(), content.to_string())];
+        assert!(validate_journal_entries_own_week(&files).is_empty());
+    }
+
+    #[test]
+    fn unparseable_journal_filename_is_reported() {
+        let files = vec![("docs/status/journal-not-a-week.md".to_string(), "> ✅ **2026-08-24 — x**\n".to_string())];
+        let issues = validate_journal_entries_own_week(&files);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].rule, "status-journal-filename-unparseable");
+    }
+
+    // ─── A5 — the validator derives every count itself; a written number is checked, not trusted ──
+
+    #[test]
+    fn the_real_journal_corpus_declares_no_count_and_that_is_fine() {
+        let files = load_journal_files(&root());
+        let (status_path, status_content) = load_status_ok();
+        assert!(validate_journal_declared_counts(&files).is_empty(), "no file today declares its own count");
+        assert!(
+            validate_declared_entries_total(&(status_path, status_content), &files).is_empty(),
+            "no file today declares a corpus total"
+        );
+    }
+
+    /// Red-first: a false per-file "`<N> journal entries`" claim, planted into a real journal
+    /// file's own prose, must be caught against what this validator itself derives for that file.
+    #[test]
+    fn a_false_declared_per_file_count_is_caught() {
+        let files = load_journal_files(&root());
+        let w35_path = "docs/status/journal-2026-W35.md".to_string();
+        let (_, w35_content) = files.iter().find(|(p, _)| p == &w35_path).expect("W35 file must be in the corpus");
+
+        let false_count = 999; // never the real derived count for this file
+        let injected = format!("{}\n\n> This week carries {} journal entries (planted, test only).\n", w35_content, false_count);
+
+        let mut injected_files = files.clone();
+        for (p, c) in injected_files.iter_mut() {
+            if p == &w35_path {
+                *c = injected.clone();
+            }
+        }
+        let before = validate_journal_declared_counts(&files);
+        assert!(before.is_empty(), "baseline must be clean");
+        let after = validate_journal_declared_counts(&injected_files);
+        assert_eq!(after.len(), 1, "{:?}", after.iter().map(|i| &i.location).collect::<Vec<_>>());
+        assert_eq!(after[0].rule, "status-journal-declared-count-mismatch");
+        assert!(after[0].message.contains("999"));
+        assert!(after[0].level == Level::Error, "a declared-count mismatch must be a gate failure (Error), got a Warning");
+    }
+
+    /// Red-first: a false corpus-total "`<N> entries total`" claim, planted into `STATUS.md`, must
+    /// be caught against the sum this validator derives across every journal file.
+    #[test]
+    fn a_false_declared_corpus_total_is_caught() {
+        let files = load_journal_files(&root());
+        let (status_path, status_content) = load_status_ok();
+        let false_total = 1; // the real corpus has far more than one entry
+        let injected_status = format!("{}\n\nThe journal now carries {} entries total (planted, test only).\n", status_content, false_total);
+
+        let before = validate_declared_entries_total(&(status_path.clone(), status_content.clone()), &files);
+        assert!(before.is_empty(), "baseline must be clean");
+        let after = validate_declared_entries_total(&(status_path.clone(), injected_status), &files);
+        assert_eq!(after.len(), 1, "{:?}", after.iter().map(|i| &i.location).collect::<Vec<_>>());
+        assert_eq!(after[0].rule, "status-journal-declared-total-mismatch");
+        assert!(after[0].message.contains("declares 1 entries total"));
+        assert!(after[0].level == Level::Error, "a declared-total mismatch must be a gate failure (Error), got a Warning");
+    }
+
+    // ─── loader hygiene ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn load_journal_files_is_sorted_and_scoped_to_journal_prefixed_files() {
+        let files = load_journal_files(&root());
+        let paths: Vec<&String> = files.iter().map(|(p, _)| p).collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(paths, sorted, "load_journal_files must return a deterministic, sorted order");
+        assert!(paths.iter().all(|p| p.starts_with("docs/status/journal-") && p.ends_with(".md")));
+    }
+}

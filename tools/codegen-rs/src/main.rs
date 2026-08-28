@@ -189,6 +189,22 @@ fn main() {
         &contracts_classifying_by_span_error(&model),
         &load_span_source(&root),
     ));
+    // ─── §24 — the STATUS.md journal-split gate (docs/STATUS.md + docs/status/**, #659): binds A2
+    // (no journal-entry opener left in STATUS.md), A3 (every entry sits in its own-date's ISO-week
+    // file) and A5 (derive every count; a written number is checked, never trusted). A1's
+    // index-row term and A4 gate a rendered recent-changes index that was never merged to `main`
+    // (only drafted on an abandoned branch) -- not built here (coordinator decision on #659/#711,
+    // 2026-08-28). Errors, always-run, same posture as §13.
+    let journal_files = load_journal_files(&root);
+    match load_status_file(&root) {
+        Ok(status_file) => {
+            issues.extend(validate_no_journal_opener_in_status(&status_file.0, &status_file.1));
+            issues.extend(validate_declared_entries_total(&status_file, &journal_files));
+        }
+        Err(issue) => issues.push(issue),
+    }
+    issues.extend(validate_journal_entries_own_week(&journal_files));
+    issues.extend(validate_journal_declared_counts(&journal_files));
     let errors: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Error).collect();
     let warnings: Vec<&Issue> = issues.iter().filter(|i| i.level == Level::Warning).collect();
 
@@ -258,6 +274,10 @@ fn main() {
     eprintln!(
         "    - citations: full-form ADR/PROP citations across docs/** + CLAUDE.md resolve to record files; {} declared exemption(s); record stamps unique (§23)",
         load_citation_exemptions(&repo_root(&specs)).0.len()
+    );
+    eprintln!(
+        "    - status journal: {} docs/status/journal-*.md — no entry-opener left in STATUS.md, every entry in its own-date's ISO-week file, every declared count derived not trusted (§24)",
+        journal_files.len()
     );
     eprintln!(
         "    - warnings: per-rule ratchet vs {} — exact match both ways (§17)",
