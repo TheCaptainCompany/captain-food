@@ -505,6 +505,7 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
                         data-var-bindings=g(attrs::VAR_BINDINGS)
                         data-trigger=g(attrs::TRIGGER)
                         data-complete-len={if len.is_empty() { None } else { Some(len) }}
+                        data-on-success=g(attrs::ON_SUCCESS)
                     />
                 </label>
             }

@@ -33,8 +33,8 @@ pub struct PhoneParts {
 #[derive(Debug)]
 pub enum VerifyResult {
     /// Verified: the customer exists (created or resolved server-side) and `me` answered.
-    /// `message_id` is the acceptance handle — the pickup key for the httpOnly session cookie
-    /// (#112: `pickup_session` POSTs it to `/auth/session`; the browser stores the Set-Cookie).
+    /// `message_id` is the acceptance handle — the claim key for the httpOnly session cookie
+    /// (#112/#529: `claim_session` POSTs it to `/auth/session`; the browser stores the Set-Cookie).
     SignedIn { message_id: uuid::Uuid, profile: Value },
     /// The anticipated business rejection (wrong/expired code…) — normal UX flow: show the
     /// message, offer resend.
@@ -92,8 +92,8 @@ pub async fn verify_otp(
     match settle_with(transport, store, &handle, max_attempts, interval).await? {
         ActionOutcome::Succeeded { .. } => {
             // The proof is the read: `me` resolves the (new or returning) customer. The session
-            // cookie is picked up separately (pickup_session) — the identity read confirms
-            // sign-in regardless.
+            // cookie is claimed separately (claim_session) — the identity read confirms sign-in
+            // regardless.
             let profile = execute_resolver(transport, ResolverKey::MeProfile, Map::new()).await?;
             Ok(VerifyResult::SignedIn { message_id, profile })
         }
@@ -104,14 +104,15 @@ pub async fn verify_otp(
     }
 }
 
-/// Pick up the httpOnly session cookie after a `SignedIn` (#112, `hydrate` path): POST the
+/// Claim the httpOnly session cookie after a `SignedIn` (#112/#529, `hydrate` path): POST the
 /// acceptance `messageId` to `/auth/session` with the same `X-SESSION-ID` that journaled the
 /// verify — the server matches ownership, claims the parked session, and answers `Set-Cookie`
 /// (`captain_auth`, httpOnly) which the browser stores. The JS never sees the token. Best-effort:
 /// a failure leaves the customer identified-but-cookieless (they re-verify); it never unwinds the
-/// sign-in.
+/// sign-in. Wired from `interact.rs`'s `run_on_success` as the `ClaimSession` step's sink (#529 —
+/// this function previously had ZERO call sites).
 #[cfg(all(target_arch = "wasm32", feature = "hydrate"))]
-pub async fn pickup_session(origin: &str, message_id: uuid::Uuid, session: SessionId) -> bool {
+pub async fn claim_session(origin: &str, message_id: uuid::Uuid, session: SessionId) -> bool {
     let url = format!("{}/auth/session", origin.trim_end_matches('/'));
     let body = serde_json::json!({ "messageId": message_id }).to_string();
     let client = reqwest::Client::new();

@@ -190,6 +190,59 @@ fn collect_status_tokens(node: &Value, out: &mut Vec<(String, String)>) {
     }
 }
 
+/// The CLOSED `on_success.type` set (#529, evans — every reference to a bare token from a closed
+/// set stays a bare token, ADR-20260811-014129 clause 3): `navigate` / `close_sheet` / `show_toast`
+/// were already used informally (the post-delivery `rating_sheet`/`tip_order` flows, non-SDUI);
+/// `open_bottom_sheet` (the OTP sheet must OPEN on `send_otp`'s acceptance) and `claim_session`
+/// (POST /auth/session — claims the parked session, PROP-20260724-150500 + ADR-20260809-212810)
+/// are new with #529. Extending this list is ordinary spec work; the runtime's own executed subset
+/// (`crates/web/src/executor.rs`'s `OnSuccessStep`) may lag it — this gate only proves the SPEC
+/// never smuggles a typo/unknown type through undetected.
+const ON_SUCCESS_TYPES: &[&str] =
+    &["navigate", "open_bottom_sheet", "close_sheet", "show_toast", "claim_session"];
+
+/// Every `on_success` block anywhere in a screens file's tree — ONE typed action object
+/// (`{ type, ... }`) or an ORDERED LIST of them — as `(location, type)` pairs. Recurses like
+/// [`collect_screen_actions`], but over the WHOLE file value (bottom_sheets + global_components +
+/// screens), because `on_success` lives on buttons/triggers inside `bottom_sheets`, which
+/// `collect_screen_actions` (screen-`components`-only) never visits.
+fn collect_on_success_types(node: &Value, out: &mut Vec<(String, String)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_on_success_types(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            if let Some(os) = map.get(Value::String("on_success".to_string())) {
+                match os {
+                    Value::Mapping(m) => {
+                        if let Some(t) = m.get(Value::String("type".to_string())).and_then(|x| x.as_str()) {
+                            out.push(("on_success".to_string(), t.to_string()));
+                        }
+                    }
+                    Value::Sequence(items) => {
+                        for (i, item) in items.iter().enumerate() {
+                            if let Some(t) = item
+                                .as_mapping()
+                                .and_then(|m| m.get(Value::String("type".to_string())))
+                                .and_then(|x| x.as_str())
+                            {
+                                out.push((format!("on_success.{i}"), t.to_string()));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for (_, v) in map {
+                collect_on_success_types(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn collect_status_configs(node: &Value, out: &mut Vec<(String, Vec<String>)>) {
     match node {
         Value::Sequence(seq) => {
@@ -1880,6 +1933,31 @@ pub(crate) fn validate(model: &Model) -> Report {
                             loc.clone(),
                             format!("content $ref '{}' in a screen must be a translations key; it targets '{}'.", rf, other.unwrap_or("<local/unknown>")),
                         )),
+                    }
+                }
+            }
+
+            // --- `on_success` closed action-type set (#529, evans): a TYPED object/action —
+            // `{ type, ... }` — or an ORDERED LIST of them, on any `action`/`on_complete`/
+            // `on_change` block anywhere in the file (bottom_sheets included — `send_otp_btn`'s and
+            // `verify_otp`'s live there, not under `screens:`). The set is CLOSED here, at the
+            // loader/validator level: an unknown `type` is a VALIDATION ERROR, never a silent
+            // runtime skip (`crates/web/src/executor.rs`'s `OnSuccessStep` parser independently
+            // ignores anything outside what it executes — the spec-level gate is what makes an
+            // unknown type visible at all, rather than a silently-dead step).
+            if let Some(root) = cs {
+                let mut hits: Vec<(String, String)> = Vec::new();
+                collect_on_success_types(root, &mut hits);
+                for (loc, ty) in hits {
+                    if !ON_SUCCESS_TYPES.contains(&ty.as_str()) {
+                        issues.push(err(
+                            "screen-on-success-unknown-type",
+                            format!("{}/{}", sfkey, loc),
+                            format!(
+                                "on_success type '{}' is not one of {:?} — the closed action-type set enforced at the loader/validator level.",
+                                ty, ON_SUCCESS_TYPES
+                            ),
+                        ));
                     }
                 }
             }
