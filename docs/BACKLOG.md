@@ -106,7 +106,9 @@ isn't enough.
    - create branch `NN-slug` from latest `main`, push it, and **open a draft PR
      `NN-slug → main` right away** — body starting with **`Closes #NN`** plus the intended
      approach. From minute one the Development sidebar shows the branch + PR, the board flips to
-     In progress (native workflow), and the stale-claim reaper sees linked-PR activity.
+     In progress (native workflow), and pushing further commits to `NN-slug` feeds the stale-claim
+     reaper's branch-commit liveness signal (see "Stale-claim reaper" below) — the PR *link* itself
+     is never consulted; only a genuine issue comment or a commit on the branch counts.
      Draft status is the interlock: GitHub refuses to merge a draft, so the early PR can never
      merge half-done work. **Do NOT enable auto-merge here** — see the rule below.
 2. **Never work an issue that carries `status/in-progress`** — pick the next unclaimed rank.
@@ -142,14 +144,34 @@ the same action as marking the PR ready — never earlier, never separately.
 
 ## Stale-claim reaper
 
-**Known hole (2026-08-09, the #144 precedent):** a claim whose linked draft PR simply sits there
-survived **13 days** parked — the reaper never fired, so "carries `status/in-progress`" is NOT
-proof of an active session. Meeting a stale-looking claim with a long-quiet linked PR: check the
-claim comment's session link and the PR's last activity; if both are days old, re-claim explicitly
-with a fresh comment naming your branch and session (as #144 → PR #430 did) rather than treating
-the label as untouchable — and rather than silently working alongside it.
+**Closed (2026-08-28, issue #642 follow-up on the re-review of #697):** the 2026-08-09 #144
+precedent below survived #697's rewrite verbatim, because both liveness signals compared activity
+only against the moment of the claim, never against how recent it was — a claim comment and branch
+push at claim time (which the claim protocol above manufactures within a minute of every
+well-formed claim) therefore kept a claim "alive" forever, no matter how many days of silence
+followed. Liveness is now bound to the **trailing 24h window**, not merely "any point since the
+claim": see `.github/scripts/stale-claim-reaper-decide.js` (`liveAfter`) and its hermetic suite for
+the fixture that reproduces the #144 shape and proves it is now reaped.
 
-`.github/workflows/stale-claim-reaper.yml` (hourly): a `status/in-progress` issue with **>24h**
-of no activity (issue comments, linked-PR references — the reaper ignores its own comments)
-loses the label and gets a "claim expired" comment → back to the queue. A crashed session can
-never hold an issue hostage.
+**Historical shape of the hole (2026-08-09, the #144 precedent, kept for context):** a claim whose
+linked draft PR simply sat there survived **13 days** parked — the reaper never fired, so "carries
+`status/in-progress`" was NOT proof of an active session. Meeting a stale-looking claim with a
+long-quiet linked PR: check the claim comment's session link and the PR's last activity; if both
+are days old, re-claim explicitly with a fresh comment naming your branch and session (as #144 →
+PR #430 did) rather than treating the label as untouchable — and rather than silently working
+alongside it. This manual check remains good practice even though the automated reaper now closes
+the gap on its own.
+
+`.github/workflows/stale-claim-reaper.yml` (hourly): a `status/in-progress` issue with **no RECENT
+activity in the trailing 24h** — a genuine issue comment, or a commit landed on its own `NN-slug`
+branch, WITHIN the last 24h; the reaper ignores its own marker comments from either job, and
+`cross-referenced`/`referenced`/`connected` timeline events (an unrelated PR mentioning the issue
+number) are never consulted — loses the label and gets a "claim expired" comment → back to the
+queue. A crashed session can never hold an issue hostage. A second, independent job in the same
+workflow surfaces `status/blocked` issues silent for **over 72h** (a dead-man's-switch for parked
+items) with a "still blocked" comment, once per silence window.
+
+**Residual — `getBranch` reports the branch tip's COMMITTER date**, which `git rebase` rewrites
+even when no new work happened: a rebased-but-otherwise-idle branch reads as live. Not closed;
+distinguishing a genuine rebase from a genuine commit would need comparing tree contents across
+runs, which the reaper's stateless decision function does not do.

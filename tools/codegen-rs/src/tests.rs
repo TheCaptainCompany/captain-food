@@ -12746,6 +12746,7 @@ mod docs_only_ci_and_legacy_visibility {
         let gate_cmds = [
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
+            "node .github/scripts/stale-claim-reaper-decide.test.js",
         ];
         // ─── THE TWO ALWAYS-RUN JOBS, GUARDED AS A CLASS ─────────────────────────────────────
         //
@@ -14700,6 +14701,29 @@ mod docs_only_ci_and_legacy_visibility {
             expected_n >= MINIMUM_CASES,
             "stub-tests.sh declares EXPECTED_CASES={} but this suite has committed to at least {}. The completeness invariant is an EQUALITY, so deleting a case and decrementing the literal is green in one edit and the SKILL.md pin follows it down. If a case is genuinely obsolete, say why here and lower this floor in the same change -- that is the whole point of it being in a different file",
             expected_n, MINIMUM_CASES
+        );
+    }
+
+    /// Pins the stale-claim reaper's hermetic stub suite into the always-run `gate-scripts` job
+    /// (issue #642 follow-up, re-review of #697, finding 3): the workflow comment beside the step
+    /// already claimed "Pinned by `the_reaper_stub_suite_runs_in_the_always_run_gate_job`" with no
+    /// such test in the tree -- a prose-only pin is indistinguishable from no pin at all until the
+    /// day it stops being true. Mirrors `the_hook_selftest_runs_in_the_always_run_gate_job` /
+    /// `the_stub_suite_runs_in_the_always_run_gate_job`: same helper, same guarantees (parsed YAML,
+    /// key-set locked to `{name, run}`, both always-run jobs guarded as a class). The reaper's
+    /// `run:` command (`node .github/scripts/...`) names neither `.claude` nor `GITHUB_ENV` nor
+    /// `GITHUB_PATH`, so it needs no exemption from the needle scan the helper runs over every
+    /// non-gate step -- but it is still added to that scan's `gate_cmds` allowlist, alongside the
+    /// other two gate commands, so a FUTURE needle cannot false-red this step by accident the way a
+    /// literal `.claude` path would.
+    #[test]
+    fn the_reaper_stub_suite_runs_in_the_always_run_gate_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        assert_pinned_in_gate_job(
+            &ci,
+            "node .github/scripts/stale-claim-reaper-decide.test.js",
+            "the stale-claim reaper's hermetic stub suite -- required by a scheduled workflow that never runs in CI on a push or PR, so a regression here (e.g. re-widening liveness to a bare mention, or losing the recency bound) would otherwise ship silently until the next hourly run misbehaved for days",
         );
     }
 
