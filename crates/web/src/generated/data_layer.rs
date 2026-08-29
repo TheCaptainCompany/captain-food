@@ -346,6 +346,46 @@ impl ResolverKey {
             ResolverKey::MailboxPoisoned => None,
         }
     }
+
+    /// The UserType tokens (scalars.yaml#/UserType) the bound query admits (#472) —
+    /// verbatim from api.yaml `roles:`. Empty = open to every role path (or a `gap`
+    /// binding, which never reaches a transport at all). A refusal on a path whose role
+    /// is NOT in this set is a SKIP BY DESIGN, not a failure.
+    pub fn roles(&self) -> &'static [&'static str] {
+        match self {
+            ResolverKey::RestaurantsFeatured => &[],
+            ResolverKey::RestaurantsAll => &[],
+            ResolverKey::RestaurantsSearch => &[],
+            ResolverKey::CategoriesAll => &[],
+            ResolverKey::PromotionsActive => &[],
+            ResolverKey::DishesSearch => &[],
+            ResolverKey::OrdersByRestaurant => &["CUSTOMER", "RESTAURANT", "RESTAURANT_ACCOUNT", "ADMIN"],
+            ResolverKey::DeliveriesByRestaurant => &["RESTAURANT", "RESTAURANT_ACCOUNT"],
+            ResolverKey::RefundsPending => &["RESTAURANT", "ADMIN"],
+            ResolverKey::SatisfactionByRestaurant => &["RESTAURANT", "RESTAURANT_ACCOUNT", "ADMIN"],
+            ResolverKey::ConversationByOrder => &["CUSTOMER", "RESTAURANT", "RESTAURANT_ACCOUNT", "RIDER", "ADMIN"],
+            ResolverKey::ConversationInternalNotes => &["RESTAURANT", "RESTAURANT_ACCOUNT", "RIDER", "ADMIN"],
+            ResolverKey::ReclamationsQueue => &["RESTAURANT", "RESTAURANT_ACCOUNT", "ADMIN"],
+            ResolverKey::RestaurantLocations => &["ADMIN", "RESTAURANT_ACCOUNT"],
+            ResolverKey::ReclamationById => &["CUSTOMER", "RESTAURANT", "RESTAURANT_ACCOUNT", "ADMIN"],
+            ResolverKey::RestaurantBySlug => &[],
+            ResolverKey::CatalogByRestaurant => &[],
+            ResolverKey::CartCurrent => &["PUBLIC", "CUSTOMER"],
+            ResolverKey::CartsMine => &["CUSTOMER", "ADMIN"],
+            ResolverKey::OrderById => &["CUSTOMER", "RESTAURANT", "RESTAURANT_ACCOUNT", "ADMIN"],
+            ResolverKey::OrdersMine => &["CUSTOMER", "RESTAURANT", "RESTAURANT_ACCOUNT", "ADMIN"],
+            ResolverKey::MeProfile => &["CUSTOMER"],
+            ResolverKey::FavoritesMine => &["CUSTOMER"],
+            ResolverKey::OperationStatusByMessage => &[],
+            ResolverKey::PaymentStatusByOrder => &["PUBLIC", "CUSTOMER", "ADMIN"],
+            ResolverKey::ReclamationsMine => &["CUSTOMER"],
+            ResolverKey::RewardsBalance => &[],
+            ResolverKey::DeliveriesMine => &["RIDER"],
+            ResolverKey::DeliveryByOrder => &["CUSTOMER", "RESTAURANT", "RESTAURANT_ACCOUNT", "RIDER", "ADMIN"],
+            ResolverKey::MailboxLanes => &["ADMIN"],
+            ResolverKey::MailboxPoisoned => &["ADMIN"],
+        }
+    }
 }
 
 /// What an action DOES (spec `kind`): a client-side behaviour, a domain write, an

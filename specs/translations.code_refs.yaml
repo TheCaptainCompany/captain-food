@@ -18,3 +18,11 @@ code_refs:
     used_by: crates/web/src/tracking.rs
   - key: order.rate
     used_by: crates/web/src/tracking.rs
+  - key: order.error.tracking_stale
+    used_by: crates/web/src/tracking.rs
+  - key: cart.error.load
+    used_by: crates/web/src/renderer.rs
+  - key: common.error.data_unavailable
+    used_by: crates/web/src/renderer.rs
+  - key: common.error.retry
+    used_by: crates/web/src/renderer.rs

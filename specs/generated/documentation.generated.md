@@ -11157,7 +11157,7 @@ _criticality: **high**_
 | `auth.read_scope` | `INTERNAL` | ✅ | — | `business.role`*, `business.bridge_resolved`* |
 | `auth.scope_membership` | `INTERNAL` | ✅ | — | `business.scope_type`*, `business.role`*, `business.authorized`* |
 
-- **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `public_credential_degraded_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
+- **Metrics**: `read_authorization_denied_total` _(counter)_, `read_authorization_checks_total` _(counter)_, `read_authorization_bridge_unresolved_total` _(counter)_, `public_credential_degraded_total` _(counter)_, `sdui_degraded_render_total` _(counter)_, `read_authorization_check_ms` _(histogram)_ · **Business metrics**: `scope_membership_lag_positions` _(gauge)_
 - **Status rules**: success ⇐ spans [`auth.read_scope`, `auth.scope_membership`]
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 
@@ -12070,6 +12070,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-reorder"></a>`order.reorder` | — | Reorder | Recommander |
 | <a id="translation-order-help"></a>`order.help` | — | Get help | Obtenir de l'aide |
 | <a id="translation-order-not_found"></a>`order.not_found` | — | Order not found | Commande introuvable |
+| <a id="translation-cart-error-load"></a>`cart.error.load` | — | We couldn't load your cart | Impossible de charger votre panier |
+| <a id="translation-order-error-tracking_stale"></a>`order.error.tracking_stale` | — | Your order is safely recorded — tracking just isn't refreshing. | Votre commande est bien enregistrée — le suivi ne s'actualise pas. |
 | <a id="translation-order-history_title"></a>`order.history_title` | — | Your orders | Vos commandes |
 | <a id="translation-order-tab-active"></a>`order.tab.active` | — | Active | En cours |
 | <a id="translation-order-tab-past"></a>`order.tab.past` | — | Past | Passées |
@@ -12178,6 +12180,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-common-action-apply"></a>`common.action.apply` | — | Apply | Appliquer |
 | <a id="translation-common-action-submit"></a>`common.action.submit` | — | Submit | Envoyer |
 | <a id="translation-common-action-see_all"></a>`common.action.see_all` | — | See all | Tout voir |
+| <a id="translation-common-error-data_unavailable"></a>`common.error.data_unavailable` | — | We couldn't load this content. | Impossible de charger le contenu. |
+| <a id="translation-common-error-retry"></a>`common.error.retry` | — | Retry | Réessayer |
 | <a id="translation-common-filter-sort"></a>`common.filter.sort` | — | Sort | Trier |
 | <a id="translation-common-delivery-free"></a>`common.delivery.free` | — | Free delivery | Livraison gratuite |
 | <a id="translation-common-mode-delivery"></a>`common.mode.delivery` | — | Delivery | Livraison |

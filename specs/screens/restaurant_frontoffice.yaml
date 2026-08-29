@@ -393,7 +393,7 @@ screens:
       - type: order_summary_block
         rows:
           - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.subtotal' }, value: "{{ cart.breakdown.articles | format_currency }}" }
-          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.delivery_fee' }, value: "{{ cart.breakdown.delivery | format_currency }}", visible_when: selected_delivery_mode == delivery }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.delivery_fee' }, value: "{{ cart.breakdown.delivery | format_currency }}", visible_when: "selected_delivery_mode == 'delivery'" }
           - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.service_fee' }, value: "{{ cart.breakdown.serviceFee | format_currency }}" }
           - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.total' }, value: "{{ cart.breakdown.total | format_currency }}", style: { weight: bold, size: lg } }
       - type: sticky_bottom_bar
@@ -427,7 +427,7 @@ screens:
     actions_used: [place_order, set_delivery_address_saved]
     components:
       - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.title' } }
-      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_details' }, visible_when: selected_delivery_mode == delivery, content: [{ type: address_selector, id: delivery_address, trailing: { $ref: 'translations.yaml#/common.action.change' }, action: { type: open_bottom_sheet, sheet_id: location_picker } }] }
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_details' }, visible_when: "selected_delivery_mode == 'delivery'", content: [{ type: address_selector, id: delivery_address, trailing: { $ref: 'translations.yaml#/common.action.change' }, action: { type: open_bottom_sheet, sheet_id: location_picker } }] }
       - type: checkout_section
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.contact' }
         content:
@@ -437,7 +437,7 @@ screens:
               - { id: full_name, type: text_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.full_name' }, value: "{{ customer.fullName }}", required: true }
               - { id: phone, type: phone_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone' }, value: "{{ customer.phone }}", disabled: true, helper: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone_helper' } }
               - { id: email, type: email_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.email' }, value: "{{ customer.email }}", required: false }
-      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions' }, visible_when: selected_delivery_mode == delivery, content: [{ type: text_area, id: delivery_instructions, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions_ph' }, max_length: 200 }] }
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions' }, visible_when: "selected_delivery_mode == 'delivery'", content: [{ type: text_area, id: delivery_instructions, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions_ph' }, max_length: 200 }] }
       - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.order_summary' }, collapsible: true, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.breakdown.total | format_currency }}" }] }
       - type: checkout_section
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }

@@ -1576,6 +1576,27 @@ read-authorization:
     #                          decays toward zero; a floor that does NOT decay is a claim-stamping
     #                          failure, and customer_claim_stamp_failed_total is where that lives.
     - { name: "public_credential_degraded_total", type: counter, attributes: ["reason"] }
+    # #472 — the SSR render boundary's DEFECT counter (the checkout_degraded_render_total pattern):
+    # a page whose declared read FAILED (or whose declared condition expression cannot be parsed)
+    # renders its DEGRADED state — an error state distinct from the null-data empty state, per
+    # binding. Counted at the framework boundary (server hosts.rs, after `render_path_with` reports
+    # the degradations), never inside the renderer/evaluator: `web` compiles to wasm and stays
+    # telemetry-free. `screen` is the generated screen id (a closed set), `resolver` the spec's
+    # resolver key ("none" for condition defects), `correlation_id` the render's own id (minted per
+    # page render by SchemaTransport) so a degraded page joins its read-path spans.
+    # `reason` is the canonical bounded set:
+    #   resolver_failed        — emitted TODAY, server-side: a REAL transport/contract failure on a
+    #                            resolver this role path is allowed to ask. A role-refused read on
+    #                            the anonymous SSR transport is a SKIP BY DESIGN and is NOT counted.
+    #   condition_unparseable  — emitted TODAY, server-side: a `visible_when`/`disabled_when`/
+    #                            `condition` expression outside the corpus grammar reached a render
+    #                            (fails closed + loud DOM marker; the codegen corpus gate makes
+    #                            this unreachable from checked-in specs).
+    #   client_resolver_failed | client_condition_unparseable — the browser legs, RESERVED
+    #                            (documented-for-future): the hydrate path degrades identically but
+    #                            no beacon exists (no OTel in WASM).
+    # Alert on ANY sustained non-zero rate.
+    - { name: "sdui_degraded_render_total", type: counter, attributes: ["screen", "resolver", "reason", "correlation_id"] }
     - { name: "read_authorization_check_ms", type: histogram, attributes: ["scope_type"] }
 
   business_metrics:

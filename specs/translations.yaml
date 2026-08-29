@@ -27,6 +27,11 @@ common.action.change: { messages: { en: "Change",   fr: "Modifier" } }
 common.action.apply:  { messages: { en: "Apply",    fr: "Appliquer" } }
 common.action.submit: { messages: { en: "Submit",   fr: "Envoyer" } }
 common.action.see_all: { messages: { en: "See all",  fr: "Tout voir" } }
+# #472 — the SSR resolver-error state (rendered by crates/web/src/renderer.rs, never the raw
+# transport string): a generic per-binding error + a user-initiated retry. STATIC state — retry is
+# the user's act, never an auto-refetch loop (ADR-20260810-231300).
+common.error.data_unavailable: { messages: { fr: "Impossible de charger le contenu.", en: "We couldn't load this content." } }
+common.error.retry: { messages: { fr: "Réessayer", en: "Retry" } }
 common.filter.sort:   { messages: { en: "Sort",     fr: "Trier" } }
 common.delivery.free: { messages: { en: "Free delivery", fr: "Livraison gratuite" } }
 common.mode.delivery: { messages: { en: "Delivery", fr: "Livraison" } }
