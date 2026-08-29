@@ -2086,7 +2086,7 @@ _Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise i
 
 A restaurant's full catalog (categories → products → offers + option lists).
 
-- **Input**: 🧩 `CatalogQueryInput!` — `restaurantId`: [🔤 `RestaurantId`](#scalar-restaurantid)
+- **Input**: 🧩 `CatalogQueryInput` — `restaurantId?`: [🔤 `RestaurantId`](#scalar-restaurantid), `restaurantSlug?`: [🔤 `Slug`](#scalar-slug)
 - **Returns**: [🧩 `Catalog`](#type-catalog) · **reads** [🗄️ `Catalog`](#view-catalog)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
@@ -10881,10 +10881,12 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-commandfailurereason"></a>🔤 `CommandFailureReason` | enum (GATEWAY_REFUSED \| CARD_DECLINED \| PAYLOAD_UNDECODABLE \| UNCATALOGUED_INVARIANT \| TRANSIENT_INFRASTRUCTURE) | WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.  |
 | <a id="scalar-gatewaystatuscode"></a>🔤 `GatewayStatusCode` | integer | The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.  |
 
-### ⛔ Errors _(10)_
+### ⛔ Errors _(12)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
+| <a id="error-catalogselectorinvalid"></a>⛔ `CatalogSelectorInvalid` | The catalog query's selector is over- or under-specified: exactly one of 'restaurantId' or 'restaurantSlug' must be provided (#749). The check is GENERATED from the query's `argsExactlyOneOf` declaration — zero-of and two-of both land here, even an agreeing pair (exactly one means exactly one). An UNKNOWN slug is not this error: it answers null.  | 🇬🇧 Provide exactly one of restaurantId or restaurantSlug. | 🇫🇷 Fournissez exactement un des deux : restaurantId ou restaurantSlug. | — |
+| <a id="error-tenantselectormismatch"></a>⛔ `TenantSelectorMismatch` | The request arrived on a storefront host whose tenant is a DIFFERENT restaurant than the one the query's selector names (#749). On a tenant host the Host is the tenant selector (#469); a disagreeing client-sent selector is rejected — never silently overridden in either direction, because a silent pick is a cross-tenant read wearing a default.  | 🇬🇧 This storefront cannot serve another restaurant's catalog. | 🇫🇷 Cette boutique ne peut pas servir le catalogue d'un autre restaurant. | — |
 | <a id="error-unauthorized"></a>⛔ `Unauthorized` | No valid authentication for this path/role. | 🇬🇧 You must be signed in to do this. | 🇫🇷 Vous devez être connecté pour effectuer cette action. | — |
 | <a id="error-forbidden"></a>⛔ `Forbidden` | Authenticated, but not allowed to act on this resource (e.g. not the owner). | 🇬🇧 You are not allowed to perform this action. | 🇫🇷 Vous n'êtes pas autorisé à effectuer cette action. | — |
 | <a id="error-validationerror"></a>⛔ `ValidationError` | Input failed schema validation (type, format, required, bounds). | 🇬🇧 The field '{field}' is invalid. | 🇫🇷 Le champ '{field}' est invalide. | — |

@@ -26,6 +26,30 @@ pub(crate) struct ApiType {
     /// ADR-20260720-230000). Omitted edge = open (inherits the parent type's reachability).
     pub(crate) nav_roles: Vec<(String, Vec<String>)>,
 }
+/// A query's DSL-declared `argsExactlyOneOf` (#749): exactly ONE of the named optional args must
+/// be provided. Unspellable in GraphQL's argument type system (`@oneOf` covers input objects
+/// only), so the declaration drives a GENERATED resolver check (emit/server_graphql) plus an SDL
+/// description stating the contract — never ad-hoc resolver code.
+pub(crate) struct ExactlyOneOf {
+    /// The arg names (last segment of the declaration's `of:` $refs, which must point back at
+    /// this query's own args — validator-enforced).
+    pub(crate) args: Vec<String>,
+    /// The errors.yaml error zero-of/two-of reject with (last segment of the `throws:` $ref).
+    pub(crate) throws: String,
+}
+
+impl ExactlyOneOf {
+    /// The ONE human sentence stating the contract — shared by the SDL emitter and the server
+    /// input-type emitter so the two descriptions cannot drift.
+    pub(crate) fn sentence(&self) -> String {
+        format!(
+            "Exactly one of `{}` must be provided; zero or both reject with `{}`.",
+            self.args.join("`, `"),
+            self.throws
+        )
+    }
+}
+
 pub(crate) struct ApiQuery {
     pub(crate) name: String,
     pub(crate) description: Option<String>,
@@ -36,6 +60,8 @@ pub(crate) struct ApiQuery {
     pub(crate) reads: Vec<String>,
     pub(crate) roles: Vec<String>,
     pub(crate) slice: String,
+    /// `argsExactlyOneOf:` — `None` for the (vast) majority of queries.
+    pub(crate) exactly_one_of: Option<ExactlyOneOf>,
 }
 pub(crate) struct ApiMutation {
     pub(crate) name: String,
@@ -165,6 +191,10 @@ pub(crate) fn parse_api(model: &Model) -> Api {
             reads,
             roles: string_list(q.get("roles")),
             slice: q.get("slice").and_then(|x| x.as_str()).unwrap_or("V0").to_string(),
+            exactly_one_of: q.get("argsExactlyOneOf").map(|d| ExactlyOneOf {
+                args: name_list(d.get("of")),
+                throws: d.get("throws").map(ref_or_name).unwrap_or_default(),
+            }),
         }
     };
     let mut queries = Vec::new();
@@ -492,7 +522,14 @@ pub(crate) fn input_types_block(model: &Model, api: &Api) -> String {
             continue;
         }
         let fields: Vec<String> = q.args.iter().map(|a| format!("  {}: {}", a.name, api_field_type(model, a, true))).collect();
-        query_inputs.push(format!("input {}QueryInput {{\n{}\n}}", pascal(&q.name), fields.join("\n")));
+        // `argsExactlyOneOf` (#749): the one-of contract is unspellable in the type system, so the
+        // SDL DESCRIPTION states it — generated from the same declaration the resolver check is.
+        let one_of_doc = q
+            .exactly_one_of
+            .as_ref()
+            .map(|x| format!("\"\"\"\n{}\n\"\"\"\n", x.sentence()))
+            .unwrap_or_default();
+        query_inputs.push(format!("{}input {}QueryInput {{\n{}\n}}", one_of_doc, pascal(&q.name), fields.join("\n")));
         for a in &q.args {
             if a.is_ref && !scalars.contains(&a.ty) {
                 visit_inputs(model, &a.ty, "entities.yaml", &mut needed, &mut visited);

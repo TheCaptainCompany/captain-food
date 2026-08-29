@@ -14,6 +14,8 @@ pub use domain_payments::errors::*;
 
 /// Every anticipated error, in errors.yaml order.
 pub const ERRORS: &[ErrorDef] = &[
+    CATALOG_SELECTOR_INVALID,
+    TENANT_SELECTOR_MISMATCH,
     CATALOG_NOT_FOUND,
     CATALOG_SLUG_ALREADY_TAKEN,
     CURRENCY_MISMATCH,

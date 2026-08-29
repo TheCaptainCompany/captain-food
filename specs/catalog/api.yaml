@@ -84,7 +84,21 @@ queries:
   catalog:
     description: "A restaurant's full catalog (categories → products → offers + option lists)."
     args:
-      restaurantId: { $ref: 'scalars.yaml#/RestaurantId', required: true }
+      restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+      # `restaurantSlug`, NOT `slug` (#749, evans): Catalog already carries its own `slug` field
+      # (a path inside one storefront) — one word must not name two things. Resolved through the
+      # SAME path as the tenant host (current slug, then the SlugAlias fallback for superseded
+      # labels, ADR-20260728-011344), so a renamed storefront behaves identically on both paths.
+      restaurantSlug: { $ref: 'scalars.yaml#/Slug', description: "The restaurant's storefront slug — the tenant-host selector as an argument; superseded labels resolve like the host path does." }
+    # DSL-declared EXACTLY-ONE-OF (#749): unspellable in GraphQL's argument type system (`@oneOf`
+    # covers input objects only), so the codegen EMITS the resolver check from this declaration and
+    # the SDL description states the contract. Zero-of/two-of reject with the declared typed error;
+    # the return stays nullable — an unknown slug is null, never an error.
+    argsExactlyOneOf:
+      of:
+        - { $ref: 'api.yaml#/queries/catalog/args/restaurantId' }
+        - { $ref: 'api.yaml#/queries/catalog/args/restaurantSlug' }
+      throws: { $ref: 'errors.yaml#/CatalogSelectorInvalid' }
     returns: { $ref: '#/types/Catalog', nullable: true }
     slice: V0
 

@@ -1540,8 +1540,12 @@ input DenyRefundInput {
   reason: String!
 }
 
+"""
+Exactly one of `restaurantId`, `restaurantSlug` must be provided; zero or both reject with `CatalogSelectorInvalid`.
+"""
 input CatalogQueryInput {
-  restaurantId: RestaurantId!
+  restaurantId: RestaurantId
+  restaurantSlug: Slug
 }
 
 input CategoriesQueryInput {
@@ -1800,7 +1804,7 @@ input MetadataInput {
 # Queries — read side
 # ==============================================================================
 type Query {
-  catalog(input: CatalogQueryInput!): Catalog @public @reads(views: ["Catalog"])
+  catalog(input: CatalogQueryInput): Catalog @public @reads(views: ["Catalog"])
   categories(input: CategoriesQueryInput!): [CatalogCategory!]! @public @reads(views: ["Catalog"])
   mailboxLanes: [MailboxLane!]! @auth(requires: [ADMIN])
   poisonedMailboxMessages(input: PoisonedMailboxMessagesQueryInput): [PoisonedMailboxMessage!]! @auth(requires: [ADMIN])

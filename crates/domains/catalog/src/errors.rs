@@ -4,6 +4,20 @@
 
 use domain_common::errors::ErrorDef;
 
+/// The catalog query's selector is over- or under-specified: exactly one of 'restaurantId' or 'restaurantSlug' must be provided (#749). The check is GENERATED from the query's `argsExactlyOneOf` declaration — zero-of and two-of both land here, even an agreeing pair (exactly one means exactly one). An UNKNOWN slug is not this error: it answers null.
+pub const CATALOG_SELECTOR_INVALID: ErrorDef = ErrorDef {
+    code: "CatalogSelectorInvalid",
+    message_en: "Provide exactly one of restaurantId or restaurantSlug.",
+    message_fr: "Fournissez exactement un des deux : restaurantId ou restaurantSlug.",
+};
+
+/// The request arrived on a storefront host whose tenant is a DIFFERENT restaurant than the one the query's selector names (#749). On a tenant host the Host is the tenant selector (#469); a disagreeing client-sent selector is rejected — never silently overridden in either direction, because a silent pick is a cross-tenant read wearing a default.
+pub const TENANT_SELECTOR_MISMATCH: ErrorDef = ErrorDef {
+    code: "TenantSelectorMismatch",
+    message_en: "This storefront cannot serve another restaurant's catalog.",
+    message_fr: "Cette boutique ne peut pas servir le catalogue d'un autre restaurant.",
+};
+
 /// No catalog with this id (or it does not belong to the restaurant).
 /// Context: `catalogId`.
 pub const CATALOG_NOT_FOUND: ErrorDef = ErrorDef {

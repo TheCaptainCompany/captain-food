@@ -308,19 +308,11 @@ screens:
     route: "/r/:slug"
     title: "{{ restaurant.displayName }}"
     sdui: true
+    # #749: the catalog read now RUNS — `catalog` gained an optional `restaurantSlug` selector
+    # (exactly-one-of with `restaurantId`), fed by the host-injected `slug` param through the
+    # generated rename bridge, so the #745 skip declaration was EVICTED by the dead-man rule
+    # (the gate fired the moment the arg stopped being required — proof in the #749 PR).
     data_requirements: [restaurant.bySlug, catalog.byRestaurant]
-    # §25b (#745): the catalog read is PROVEN structurally unfulfillable — `catalog` requires
-    # `restaurantId!` and this screen's only param is `:slug` (verified against the real schema:
-    # the read failed GraphQL validation on EVERY storefront paint, SSR and hydrate, so the LIVE
-    # MENU never rendered from a real paint and #742's error state showed instead). Declared so
-    # the paint stops counting/erroring on a read that can never run; the MENU ITSELF is the
-    # URGENT defect #749 (slug-accepting catalog arg, or chained-read sourcing) — the moment it
-    # gives this read a source, this declaration becomes a validation ERROR and must go.
-    skipped_reads:
-      - resolver: { $ref: '#/resolvers/catalog.byRestaurant' }
-        missing_arg: { $ref: 'api.yaml#/queries/catalog/args/restaurantId' }
-        supplied_by: none
-        note: "restaurantId's only source is the restaurant.bySlug result (restaurant.id) — chained-read machinery the data layer does not have, or an additive slug arg on the catalog query. Tracked URGENT by #749; the dead-man rule removes this declaration the moment a source lands."
     gaps:
       # `isOpen` left this list with RSO-1 (DECISIONS §43): the open/closed affordance is served by
       # `restaurant.serviceWindow` (verdict at the request instant) — `isOpen` was a UI term
@@ -358,8 +350,12 @@ screens:
             schedule: "{{ restaurant.openingHours }}"
             labels: { open: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.open' }, closed: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.closed' }, opens_at: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.opens_at' } }
       - { type: sticky_category_nav, id: catalog_nav, items: "{{ catalog.categories }}" }
+      # #749: the menu content binds BOTH halves of the catalog read — the category tree AND the
+      # products (name, description, offer price) — so the paint carries the actual menu, not an
+      # empty tagged container over resolved data.
       - type: catalog_sections
         categories: "{{ catalog.categories }}"
+        products: "{{ catalog.products }}"
         item_type: catalog_item_row
         item_add_action: { type: open_bottom_sheet, sheet_id: item_detail_sheet, data: { item: "{{ item }}" } }
         disabled_overlay: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.unavailable' }

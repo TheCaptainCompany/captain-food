@@ -3,6 +3,23 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🍔 **2026-08-29 — [#749 "URGENT: storefront catalog read is structurally broken — the menu
+> never renders from a real paint"](https://github.com/TheCaptainCompany/captain-food/issues/749):
+> the MENU renders.** Founder-directed fix (verbatim: *"adding a facultative argument slug seems
+> to be the good approach"*): `catalog` gained an optional `restaurantSlug` selector,
+> exactly-one-of with the now-optional `restaurantId` — a new `argsExactlyOneOf` DSL surface whose
+> resolver check and SDL description are GENERATED from the declaration (one-of is unspellable in
+> GraphQL argument types). The slug resolves through the SAME path as the tenant host (SlugAlias
+> fallback included), host-vs-selector disagreement rejects with a typed error
+> (`TenantSelectorMismatch` — a silent pick is a cross-tenant read), and the #745 skip declaration
+> was EVICTED by the dead-man rule exactly as designed (the gate fired the moment `restaurantId`
+> stopped being required). Two finds along the way: the `catalog_sections` renderer kind had NO
+> arm — even resolved catalog data rendered an empty tagged container, so the schema fix alone
+> would have shown no menu (arm added: categories as headers, items with name/description/price);
+> and the smoke ladder gained L3c (tenant-root GET must carry the seeded item's display name in
+> the initial HTML). End-to-end pinned by `crates/server/tests/storefront_menu_paint.rs` — the
+> REAL composed schema, the renderer's actual query documents, seen RED first.
+
 > 🔧 **2026-08-29 — [#745 "Structurally-unfulfillable reads classify as `Failed`: checkout's
 > arg-less `paymentStatus.byOrder` bumps the degraded-render counter on every anonymous
 > paint"](https://github.com/TheCaptainCompany/captain-food/issues/745) (morning run, sixth
