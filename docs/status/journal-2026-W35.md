@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🧱 **2026-08-29 — Isolation first: the founder's directive is recorded and the plan is sequenced**
+> ([ADR-20260829-230418](../adr/ADR-20260829-230418-aggregates-own-the-facts-isolation-first.md),
+> register row [AGGREGATES-OWN-THE-FACTS](../decisions/AGGREGATES-OWN-THE-FACTS.yaml)). Founder,
+> verbatim, after his direct question on PMs appending in place of the responsible actor: *"We need
+> to resolve this isolation subject first to avoid any new bad development."* The property sentence
+> is the spec's own (`specs/common/processmanager.yaml:7-9` — aggregates own the facts). Plan:
+> C1 flip-run of the built Order-birth route (C1a = pre-flip evidence only; the default flip goes
+> to the founder with evidence, per dispatch card 598 §7/§9) → C2
+> [#595 "The reclamation replacement birth writes Order-{id} with no transaction and no lane — a second unlaned birth site, reachable today"](https://github.com/TheCaptainCompany/captain-food/issues/595)
+> → C3 the twelve remaining `deliver:` steps in target-actor groups (Payment ×7, DeliveryJob ×4,
+> Cart ×1), one PR each, per-route GENERATED gates, legacy arms deleted separately under golden
+> payload-equality → C4 the EventStore `save` capability leaves PM signatures (foreign-stream
+> append unspellable, subsumed gates deleted). Erasure: proposal approval proceeds, BUILD waits on
+> C1 + founder approval; timebox note banked (isolation fills the counsel-wait but must not
+> silently become the binding constraint). 13-lens Consulted block in the ADR.
+
 > 🔁 **2026-08-29 — ETA proposal, review round 1: FAIL folded in one edit round**
 > ([PROP-20260829-165042](../proposals/PROP-20260829-165042-pre-order-eta.md), living doc rewritten
 > in place per ADR-20260801-020000; substance verified sound — the hybrid confirmed as real scope
