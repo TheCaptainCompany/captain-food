@@ -286,7 +286,17 @@ describes: writes fail while the numbers still look fine. Three things worth kno
   `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` (`crates/infrastructure/tests/main/common.rs`),
   which is database-wide, not test-scoped. So when a neighbour's server is already up, do not reuse
   its database — `createdb cf<NN>` and point your `DATABASE_URL` at that, then `dropdb` when the run
-  is done. The isolation is per-DATABASE; the schema-level reset gives you none.
+  is done. The isolation is per-DATABASE; the schema-level reset gives you none. **And the CLUSTER
+  itself is the neighbour's to kill** (2026-08-29, #755/#756): mid-run the shared `ci-repro`
+  postmaster was restarted by the concurrent session on a DIFFERENT port (5433→5432) and later died
+  outright without a shutdown line, leaving a stale `postmaster.pid`. So probe port AND liveness
+  (`psql -tAc 'select 1'`) immediately before any DB-gated suite — a `DATABASE_URL` that worked an
+  hour ago proves nothing now. Know the disguise: a `PoolTimedOut` from `graphql_write_path.rs`
+  means "no Postgres", NOT pool exhaustion — connection-refused surfaces as a 60 s pool timeout per
+  test. Recovery is mechanical once `kill -0 <pid>` (pid from `postmaster.pid`) confirms the
+  postmaster is gone: `rm postmaster.pid`, `pg_ctl start` — both cluster recoveries were clean and
+  the neighbour's databases untouched. Cost of not probing first: two red-herring diagnoses and one
+  wasted full-suite re-run in a single run.
 - **`pgrep -f "<anything from your own command>"` always matches YOUR shell**, because every Bash tool
   call runs inside a wrapper whose full script text is its command line. An
   `until ! pgrep -f "cargo test --workspace"; do sleep 30; done` written to wait for a neighbour's
