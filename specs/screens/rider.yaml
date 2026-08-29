@@ -98,12 +98,16 @@ screens:
     requires_auth: true
     data_requirements: [delivery.byOrder]
     actions_used: [confirm_pickup, complete_delivery, phone_call]
+    gaps:
+      - "Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant."
     components:
       - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.job.title' } }
       - { type: status_chip, status: "{{ delivery.status }}" }
       - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress }}" }
       - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}" }
-      - { type: restaurant_contact_row, name: "{{ delivery.restaurantName }}", phone: "{{ delivery.restaurantPhone }}", action: { type: phone_call, number: "{{ delivery.restaurantPhone }}" } }
+      # #717: plain name row via the FK-derived navigation edge (DeliveryJob.restaurant: Restaurant!).
+      # Deliberately NOT a contact row — a rebound name beside a dead call button is a false signifier.
+      - { type: info_row, icon: store, label: { $ref: 'rider.translations.yaml#/rider.job.restaurant' }, value: "{{ delivery.restaurant.displayName }}" }
       - type: sticky_bottom_bar
         content:
           - { type: button, id: confirm_pickup_btn,   label: { $ref: 'rider.translations.yaml#/rider.job.picked_up' }, variant: primary, full_width: true, action: { type: confirm_pickup,    variables: { orderId: "{{ delivery.orderId }}" } } }

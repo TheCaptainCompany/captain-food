@@ -36,10 +36,13 @@ resolvers:
   refunds.pending:           { query: { $ref: 'api.yaml#/queries/pendingRefunds' } }
   satisfaction.byRestaurant: { query: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' } }
   # #129 — the per-order staff conversation: BOTH the PUBLIC thread and the INTERNAL notes. Staff read
-  # the full picture. `orderId` comes from the route `:orderId` (same-name convention). Both resolvers
-  # share the `conversation` data namespace (first segment), so their fields merge under `{{ conversation.* }}`.
-  conversation.byOrder:       { query: { $ref: 'api.yaml#/queries/orderConversation' } }
-  conversation.internalNotes: { query: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' } }
+  # the full picture. `orderId` comes from the route `:orderId` (same-name convention). TWO data
+  # namespaces on purpose (#717): the runtime stores each resolver's result under its name's FIRST
+  # segment, so two resolvers sharing one root silently shadow each other (last write wins) — the
+  # public thread reads `{{ conversation.* }}` (api OrderConversation), the staff-only notes read
+  # `{{ internal_notes.* }}` (api ConversationInternalNotes, absent from the CUSTOMER schema).
+  conversation.byOrder:    { query: { $ref: 'api.yaml#/queries/orderConversation' } }
+  internal_notes.byOrder:  { query: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' } }
   # #157 — the claims queue (this restaurant's customer claims, filterable by status/category) + one
   # claim's detail. `reclamationId` for the detail comes from the route `:reclamationId` (same-name).
   reclamations.queue: { query: { $ref: 'api.yaml#/queries/restaurantReclamations' } }
@@ -227,8 +230,9 @@ screens:
   # SCREEN 5 — Order conversation (#129): the STAFF side of the per-order chat. Unlike the customer's
   # single PUBLIC thread (restaurant_frontoffice `order_conversation`), staff read the FULL picture —
   # the PUBLIC timeline AND the INTERNAL staff notes — and can post to either visibility, pull in an
-  # admin (escalate) or mute a disruptive role. Two resolvers (byOrder + internalNotes) merge under the
-  # `conversation` namespace; `orderId` flows from the route `:orderId`.
+  # admin (escalate) or mute a disruptive role. Two resolvers under two roots (#717: `conversation` =
+  # the PUBLIC OrderConversation, `internal_notes` = the staff-only ConversationInternalNotes — one
+  # shared root would shadow whichever loads first); `orderId` flows from the route `:orderId`.
   #
   # Follow-up (nicety, not blocking): the mute control omits the optional `until` duration — every mute
   # is indefinite for now; a duration picker (bounded mute) is a later addition. The muted-participants
@@ -240,7 +244,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.title' }
     sdui: true
     requires_auth: true
-    data_requirements: [conversation.byOrder, conversation.internalNotes]
+    data_requirements: [conversation.byOrder, internal_notes.byOrder]
     actions_used: [post_message, escalate_to_admin, mute_participant]
     components:
       - { component: staff_topbar }
@@ -253,10 +257,10 @@ screens:
       - type: section
         id: moderation_banner
         content:
-          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.admin_invited' }, visible_when: "conversation.adminInvited" }
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.admin_invited' }, visible_when: "internal_notes.adminInvited" }
           - type: list
             title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.muted.title' }
-            items: "{{ conversation.mutedParticipants }}"
+            items: "{{ internal_notes.mutedParticipants }}"
 
       # PUBLIC timeline (customer-visible).
       - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.public.label' } }
@@ -271,7 +275,7 @@ screens:
       # INTERNAL staff notes (lock affordance in the label — staff-only).
       - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.internal.label' } }
       - type: message_bubble
-        items: "{{ conversation.notes }}"
+        items: "{{ internal_notes.notes }}"
         item_type: message_bubble
         translated_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.translated' }
         empty_state:

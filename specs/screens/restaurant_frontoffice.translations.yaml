@@ -67,9 +67,6 @@ restaurant.closed: { messages: { en: "Closed", fr: "Fermé" } }
 restaurant.opens_at:
   params: { time: "opening time" }
   messages: { en: "Opens at {time}", fr: "Ouvre à {time}" }
-restaurant.min_order:
-  params: { amount: "formatted minimum order amount" }
-  messages: { en: "Min. {amount}", fr: "Min. {amount}" }
 restaurant.unavailable: { messages: { en: "Unavailable", fr: "Indisponible" } }
 
 # ── cart ─────────────────────────────────────────────────────────────────────

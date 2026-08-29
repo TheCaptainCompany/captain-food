@@ -17,6 +17,7 @@ rider.jobs.empty.body:  { messages: { en: "Offered and assigned delivery jobs sh
 # ── job detail ───────────────────────────────────────────────────────────────
 rider.job.title:     { messages: { en: "Delivery", fr: "Course" } }
 rider.job.pickup:    { messages: { en: "Pickup", fr: "Retrait" } }
+rider.job.restaurant: { messages: { en: "Restaurant", fr: "Restaurant" } }
 rider.job.dropoff:   { messages: { en: "Drop-off", fr: "Livraison" } }
 rider.job.picked_up: { messages: { en: "Picked up", fr: "Commande récupérée" } }
 rider.job.delivered: { messages: { en: "Delivered", fr: "Livrée" } }

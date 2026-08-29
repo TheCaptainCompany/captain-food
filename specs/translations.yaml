@@ -33,6 +33,5 @@ common.action.see_all: { messages: { en: "See all",  fr: "Tout voir" } }
 common.error.data_unavailable: { messages: { fr: "Impossible de charger le contenu.", en: "We couldn't load this content." } }
 common.error.retry: { messages: { fr: "Réessayer", en: "Retry" } }
 common.filter.sort:   { messages: { en: "Sort",     fr: "Trier" } }
-common.delivery.free: { messages: { en: "Free delivery", fr: "Livraison gratuite" } }
 common.mode.delivery: { messages: { en: "Delivery", fr: "Livraison" } }
 common.mode.pickup:   { messages: { en: "Pickup",   fr: "À emporter" } }

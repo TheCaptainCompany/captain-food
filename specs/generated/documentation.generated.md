@@ -11384,7 +11384,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 | Kind | UI need | GraphQL operation |
 | --- | --- | --- |
 | read | `conversation.byOrder` | [🔎 `orderConversation`](#query-orderconversation) |
-| read | `conversation.internalNotes` | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
+| read | `internal_notes.byOrder` | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
 | write | `post_message` | [✏️ `postMessage`](#mutation-postmessage) |
 | write | `escalate_to_admin` | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
 | write | `mute_participant` | [✏️ `muteParticipant`](#mutation-muteparticipant) |
@@ -11503,10 +11503,9 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 ```
 ┌──────────────────────────────────────────┐
-│ {{ restaurant.name }}                    │
+│ {{ restaurant.displayName }}             │
 ├──────────────────────────────────────────┤
 │ back_button_header                       │
-│ hero_image                               │
 │ section                                  │
 │ sticky_category_nav                      │
 │ catalog_sections                         │
@@ -11523,7 +11522,11 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 | write | `toggle_favorite` | [✏️ `markRestaurantAsFavorite`](#mutation-markrestaurantasfavorite) |
 
 **Gaps**
-- ⚠️ Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges) are not on the domain Restaurant/api type yet.
+- ⚠️ Pre-order delivery ETA: no domain concept computes a customer-facing delivery estimate (preparationTimeMinutes is prep, not delivery — binding it would show a false ETA). The ETA slot is honestly empty; THE priority gap on this screen (the ETA is the product).
+- ⚠️ Merchandising imagery: the Restaurant type carries no coverUrl/logoUrl media fields (market-parity deficit vs incumbents, ADR-20260808-212741 §2).
+- ⚠️ Delivery fee display: no deliveryFee field exists on Restaurant — the removed row could render 'Livraison gratuite' as a false price claim.
+- ⚠️ Minimum order: no MinimumOrderAmount concept exists (tracked by docs/decisions/V0-PROMO-AND-MINIMUM.yaml); the removed row's translation needed an {amount} nothing supplies.
+- ⚠️ Badges: no badge/label concept on the Restaurant type.
 
 <a id="screen-cart"></a>
 ### 📱 `cart` · `/cart` · 📱 SDUI
@@ -11591,8 +11594,6 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 ├──────────────────────────────────────────┤
 │ order_status_hero                        │
 │ eta_bar — Estimated arrival              │
-│ order_timeline                           │
-│ restaurant_contact_row                   │
 │ order_items_summary                      │
 │ order_id_row — Order ID                  │
 │ section                                  │
@@ -11609,6 +11610,8 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 **Gaps**
 - ⚠️ `reorder` action has no backing op — the client re-adds past lines via add_to_cart.
+- ⚠️ Order status timeline: Order carries no event-history field (only status + statusChangedAt), so the timeline widget bound a field that does not exist; removed (#717). tracking.rs keeps an empty order_timeline slot. Needs a read-model decision (per-order status history).
+- ⚠️ Customer → restaurant contact: the api Restaurant type exposes no phone (the projection intent exists — DECISIONS STO-8 — but no api field), so the contact row bound dead fields and tracking.rs never rendered it; removed (#717). The concept: a customer mid-delivery needs to reach the restaurant.
 - ⚠️ Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code.
 
 <a id="screen-order_history"></a>
@@ -11785,7 +11788,7 @@ _Surface_ **`rider.yaml`**
 │ status_chip                              │
 │ info_row — Pickup                        │
 │ info_row — Drop-off                      │
-│ restaurant_contact_row                   │
+│ info_row — Restaurant                    │
 │ sticky_bottom_bar                        │
 └──────────────────────────────────────────┘
 ```
@@ -11795,6 +11798,9 @@ _Surface_ **`rider.yaml`**
 | read | `delivery.byOrder` | [🔎 `delivery`](#query-delivery) |
 | write | `confirm_pickup` | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 | write | `complete_delivery` | [✏️ `completeDelivery`](#mutation-completedelivery) |
+
+**Gaps**
+- ⚠️ Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant.
 
 _Surface_ **`system.yaml`**
 
@@ -12011,7 +12017,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-restaurant-open"></a>`restaurant.open` | — | Open | Ouvert |
 | <a id="translation-restaurant-closed"></a>`restaurant.closed` | — | Closed | Fermé |
 | <a id="translation-restaurant-opens_at"></a>`restaurant.opens_at` | `time` | Opens at {time} | Ouvre à {time} |
-| <a id="translation-restaurant-min_order"></a>`restaurant.min_order` | `amount` | Min. {amount} | Min. {amount} |
 | <a id="translation-restaurant-unavailable"></a>`restaurant.unavailable` | — | Unavailable | Indisponible |
 | <a id="translation-cart-title"></a>`cart.title` | — | Your cart | Votre panier |
 | <a id="translation-cart-empty-title"></a>`cart.empty.title` | — | Your cart is empty | Votre panier est vide |
@@ -12142,6 +12147,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-jobs-empty-body"></a>`rider.jobs.empty.body` | — | Offered and assigned delivery jobs show up here. | Les courses proposées et attribuées s'affichent ici. |
 | <a id="translation-rider-job-title"></a>`rider.job.title` | — | Delivery | Course |
 | <a id="translation-rider-job-pickup"></a>`rider.job.pickup` | — | Pickup | Retrait |
+| <a id="translation-rider-job-restaurant"></a>`rider.job.restaurant` | — | Restaurant | Restaurant |
 | <a id="translation-rider-job-dropoff"></a>`rider.job.dropoff` | — | Drop-off | Livraison |
 | <a id="translation-rider-job-picked_up"></a>`rider.job.picked_up` | — | Picked up | Commande récupérée |
 | <a id="translation-rider-job-delivered"></a>`rider.job.delivered` | — | Delivered | Livrée |
@@ -12183,7 +12189,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-common-error-data_unavailable"></a>`common.error.data_unavailable` | — | We couldn't load this content. | Impossible de charger le contenu. |
 | <a id="translation-common-error-retry"></a>`common.error.retry` | — | Retry | Réessayer |
 | <a id="translation-common-filter-sort"></a>`common.filter.sort` | — | Sort | Trier |
-| <a id="translation-common-delivery-free"></a>`common.delivery.free` | — | Free delivery | Livraison gratuite |
 | <a id="translation-common-mode-delivery"></a>`common.mode.delivery` | — | Delivery | Livraison |
 | <a id="translation-common-mode-pickup"></a>`common.mode.pickup` | — | Pickup | À emporter |
 
