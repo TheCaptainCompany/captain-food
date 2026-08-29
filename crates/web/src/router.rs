@@ -574,6 +574,59 @@ mod tests {
         assert!(!html.contains("js.stripe.com"), "no key, no Stripe request: {html}");
     }
 
+    /// #472 (graphql-architect, blocking severity): a transport `Err` on a resolver this role IS
+    /// allowed to ask must render an ERROR state — never the null-data empty state. A transient
+    /// failure must never tell a paid customer their cart/order does not exist. Seen RED against
+    /// the `if let Ok(value) = execute_resolver(...)` swallow (red evidence in the introducing
+    /// commit message).
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn a_transport_failure_renders_the_error_state_not_the_empty_state() {
+        use crate::graphql::test_support::FakeTransport;
+        // /cart declares exactly one read, `cart.current`, whose bound query admits PUBLIC — so a
+        // transport failure here is a REAL failure, not the documented anonymous-SSR skip.
+        let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Network(
+            "connection reset by peer".into(),
+        ))]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/cart", "fr", None)
+            .await
+            .expect("the cart route still renders — degraded, never 500");
+        assert!(html.contains("data-error=\"true\""), "an error state must render: {html}");
+        assert!(
+            html.contains("Impossible de charger votre panier"),
+            "the per-surface error copy (translation-keyed, fr): {html}"
+        );
+        assert!(html.contains("Réessayer"), "a user-initiated retry control: {html}");
+        // The transport string is server internals — it must NEVER reach the customer's HTML.
+        assert!(!html.contains("connection reset"), "no transport leak: {html}");
+        // Fail-closed composition: with the cart unresolvable, the checkout button's
+        // `disabled_when: cart.lines.length == 0` is unevaluatable → disabled.
+        assert!(html.contains("disabled"), "checkout must not be clickable over no data: {html}");
+    }
+
+    /// #472: error state and empty state are DISTINCT rendered states, per binding. A read that
+    /// ANSWERS (null or empty) is the empty state — no error marker, no retry.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn an_answered_empty_read_is_the_empty_state_not_the_error_state() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        for answered in [json!({ "current": null }), json!({ "current": { "lines": [] } })] {
+            let fake = FakeTransport::scripted(vec![Ok(answered.clone())]);
+            let html = render_path_with(&fake, "chez-test.captain.food", "/cart", "fr", None)
+                .await
+                .expect("the cart route renders");
+            assert!(
+                !html.contains("data-error=\"true\""),
+                "an ANSWERED read is never an error state ({answered}): {html}"
+            );
+            assert!(
+                !html.contains("Impossible de charger votre panier"),
+                "no error copy on an answered read ({answered}): {html}"
+            );
+        }
+    }
+
     #[cfg(feature = "ssr")]
     #[test]
     fn render_path_serves_every_surface_and_injects_the_hydrate_boot() {

@@ -970,6 +970,161 @@ mod tests {
         assert!(html.contains("var(--color-primary)"), "app.css consumes the token vars");
     }
 
+    // ── #472: condition evaluation (beck's red-first suite) ────────────────────
+    //
+    // A dead control stays live: the renderer consumed no `visible_when`/`disabled_when` at all,
+    // so every declared condition rendered as if true. These tests were seen RED against that
+    // behaviour before the evaluator existed (red evidence in the introducing commit message).
+
+    fn node_html(node: &Node, c: &RenderContext) -> String {
+        render_node(node, c).to_html()
+    }
+
+    #[test]
+    fn visible_when_false_hides() {
+        let node = Node {
+            kind: ComponentKind::Text,
+            props: &[
+                ("value", PropValue::Text("SECRET-CONTENT")),
+                ("visible_when", PropValue::Text("flag")),
+            ],
+            children: &[],
+        };
+        let mut c = ctx();
+        c.insert_resolved("flag", json!(false));
+        let html = node_html(&node, &c);
+        assert!(!html.contains("SECRET-CONTENT"), "visible_when=false must hide: {html}");
+    }
+
+    #[test]
+    fn visible_when_true_shows() {
+        let node = Node {
+            kind: ComponentKind::Text,
+            props: &[
+                ("value", PropValue::Text("SECRET-CONTENT")),
+                ("visible_when", PropValue::Text("flag")),
+            ],
+            children: &[],
+        };
+        let mut c = ctx();
+        c.insert_resolved("flag", json!(true));
+        let html = node_html(&node, &c);
+        assert!(html.contains("SECRET-CONTENT"), "visible_when=true must render: {html}");
+    }
+
+    /// The attribute assertion is DELIBERATE (mob briefing): in SSR HTML the `disabled` attribute
+    /// IS the behaviour — the delegated click driver never fires on a disabled control.
+    #[test]
+    fn disabled_when_disables() {
+        let node = Node {
+            kind: ComponentKind::Button,
+            props: &[
+                ("label", PropValue::Text("Pay")),
+                ("disabled_when", PropValue::Text("cart.lines.length == 0")),
+            ],
+            children: &[],
+        };
+        let mut c = ctx();
+        c.insert_resolved("cart", json!({ "lines": [] }));
+        let html = node_html(&node, &c);
+        assert!(html.contains("disabled"), "empty cart must disable the pay button: {html}");
+
+        let mut c = ctx();
+        c.insert_resolved("cart", json!({ "lines": [{ "offerId": "o1" }] }));
+        let html = node_html(&node, &c);
+        assert!(!html.contains("disabled"), "a non-empty cart must not disable: {html}");
+    }
+
+    /// An unknown construct fails LOUDLY — never silently-true. `a >= b` is outside the
+    /// corpus-exact grammar on purpose.
+    #[test]
+    fn unknown_construct_is_loud() {
+        let node = Node {
+            kind: ComponentKind::Text,
+            props: &[
+                ("value", PropValue::Text("SECRET-CONTENT")),
+                ("visible_when", PropValue::Text("a >= b")),
+            ],
+            children: &[],
+        };
+        let mut c = ctx();
+        c.insert_resolved("a", json!(1));
+        c.insert_resolved("b", json!(2));
+        let html = node_html(&node, &c);
+        assert!(
+            !html.contains("SECRET-CONTENT"),
+            "an unparseable condition must never render its content: {html}"
+        );
+        assert!(
+            html.contains("data-condition-error"),
+            "an unparseable condition must leave a loud, auditable marker: {html}"
+        );
+    }
+
+    /// Fail-safe semantics (beck + graphql, decided at the #472 briefing): a condition over
+    /// MISSING/unresolved data is not an unknown construct — it fails CLOSED. `visible_when`
+    /// unevaluatable → hidden; never default-visible.
+    #[test]
+    fn visible_when_over_missing_data_fails_closed_hidden() {
+        for expr in ["passkey_available", "order.serviceType == 'DELIVERY'"] {
+            let props: &'static [(&'static str, PropValue)] = match expr {
+                "passkey_available" => &[
+                    ("value", PropValue::Text("SECRET-CONTENT")),
+                    ("visible_when", PropValue::Text("passkey_available")),
+                ],
+                _ => &[
+                    ("value", PropValue::Text("SECRET-CONTENT")),
+                    ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")),
+                ],
+            };
+            let node = Node { kind: ComponentKind::Text, props, children: &[] };
+            let html = node_html(&node, &ctx());
+            assert!(!html.contains("SECRET-CONTENT"), "{expr}: missing data must hide: {html}");
+            assert!(
+                !html.contains("data-condition-error"),
+                "{expr}: missing data is NOT an unknown construct — no loud marker: {html}"
+            );
+        }
+    }
+
+    /// `disabled_when` unevaluatable → disabled; never default-enabled.
+    #[test]
+    fn disabled_when_over_missing_data_fails_closed_disabled() {
+        let node = Node {
+            kind: ComponentKind::Button,
+            props: &[
+                ("label", PropValue::Text("Pay")),
+                ("disabled_when", PropValue::Text("cart.lines.length == 0")),
+            ],
+            children: &[],
+        };
+        let html = node_html(&node, &ctx());
+        assert!(
+            html.contains("disabled"),
+            "an unevaluatable disabled_when must render disabled: {html}"
+        );
+    }
+
+    /// The Tours-facing pin: the marketplace home's cart FAB declares
+    /// `visible_when: cart_item_count > 0` — with no cart data (every anonymous first paint) it
+    /// must not render, and with items it must.
+    #[test]
+    fn the_home_cart_fab_obeys_its_declared_condition() {
+        let home = Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "home").unwrap();
+        let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), ctx());
+        assert!(
+            !html.contains("data-c=\"floating_action_button\""),
+            "no cart data → the cart FAB must be hidden (fail closed): {html}"
+        );
+        let mut c = ctx();
+        c.insert_resolved("cart_item_count", json!(2));
+        let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), c);
+        assert!(
+            html.contains("data-c=\"floating_action_button\""),
+            "a filled cart must show the FAB: {html}"
+        );
+    }
+
     #[test]
     fn money_formats_fr_style() {
         assert_eq!(format_currency(&json!({ "amountCents": 980, "currency": "EUR" })), "9,80 EUR");
