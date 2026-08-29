@@ -3,6 +3,25 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-29 — [#715 "DECISIONS.md §27/§28 D-rows: reconcile the stale summary tables against
+> §27bis before promoting the last 14 namespaced keys"](https://github.com/TheCaptainCompany/captain-food/issues/715)
+> closes the follow-up ADR-20260828-153000 raised: the last 14 `D1`-`D7` keys are migrated to
+> `docs/decisions/<KEY>.yaml`, reconciled against the SOURCE proposals + §27bis rather than copied
+> from the summary table.** Per-row current truth, not the table text: `PROP-20260810-234225`
+> (§27) D1/D2/D3/D5/D7 are `decided` (team-owned under the 2026-08-10 delegation, unaffected by
+> the reversal); **D4 and D6 are `decided` too, but to the OPPOSITE of what the §27 table still
+> says** — the table's own D4/D6 cells were never updated after the 2026-08-11 projection-vs-
+> instrument reversal (§27bis MET-R, [ADR-20260811-014129](../adr/ADR-20260811-014129-a-business-metric-is-a-projection-and-every-reference-is-a-ref.md)),
+> so promoting them as written would have asserted a superseded position as current — exactly what
+> ADR-20260828-153000 flagged and deferred. **Fixed in the same change**: the D4/D6 table cells now
+> carry an inline ⚠️ HISTORICAL flag, the original 2026-08-10 text, and the current decided
+> position, each pointing at its `docs/decisions/*.yaml` file. `PROP-20260811-000946` (§28) D1-D7
+> are all `decided` (team-owned, landed 2026-08-11 per that week's journal); D5 additionally
+> CONFIRMED and EXTENDED by [ADR-20260811-120828](../adr/ADR-20260811-120828-behaviour-tracking-isolated-end-to-end-and-a-faulted-worker-pre-diagnoses-itself.md)
+> (its own database AND its own projector worker) — its §28 table cell already matched, so no fix
+> was needed there. Zero rows were unresolvable. `make generate` regenerated the index region;
+> nothing else in `DECISIONS.md` needed a hand edit.
+
 > ✅ **2026-08-28 — [#658 "The decision register cannot say what is still open: 62 of 148 rows carry
 > no status token, 22 keys are ambiguous, and nothing confronts a question with the register before
 > it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658) closes its
