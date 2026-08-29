@@ -68,7 +68,7 @@ carries the open closure question.
 | Order pilot: `OrderExpired` → tombstone → stream deletion → `OrderDeleted` receipt | **Live in the spec** | `specs/ordering/actors.yaml:156-162` |
 | Customer `deletion:` block | **Absent** — no erasure path at all | `specs/customer/actors.yaml` (verified: no `deletion:` key) |
 | Identity | Supabase Auth, **wrapped, identity-only** — the handler calls Supabase through the supabase-acl adapter | ADR-0015, `specs/customer/actors.yaml:14-22` |
-| PM pattern: private state row per journey, per-leg Tells | **Established** (`PaymentProcessRow`, `DeliveryDispatchRow` in `crates/application/src/pm_state`) | `crates/application/src/process_managers/` |
+| PM pattern: private state row per journey, per-leg Tells | **Established** (`PaymentProcessRow`, `DeliveryDispatchRow` in `crates/application/src/generated/pm_state.rs`) | `crates/application/src/process_managers/` |
 | Retention-window catalog (MET-W) | **Approved, not landed** — sequenced with this work | [DECISIONS MET-W](DECISIONS.md), [BRIEF-20260811 §4](../legal/BRIEF-20260811-erasure-zone-and-retention.md) |
 | Backups | CNPG, WAL archiving + weekly restore drill recorded; **no recorded erasure-vs-PITR posture** | [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) |
 | Snapshots | **None in the tree**; SNAP-1 open (AMBER) | [DECISIONS §43 SNAP-1](DECISIONS.md) |
@@ -96,6 +96,10 @@ posted on [#708](https://github.com/TheCaptainCompany/captain-food/issues/708) p
   running → EXECUTING → ERASED (and, post-erasure, the receipt-backed answer — §3.6). Customer
   role only.
 
+A second `requestErasure` while one is pending is **idempotent** — it returns the SAME
+`ErasureRequestId` and records nothing new (acceptance-first absorbs the duplicate; a typed
+rejection would punish a double-tap for no gain). A fresh request after a cancel gets a fresh id.
+
 The **grace window** (≤30 days, defensible per
 [BRIEF-20260808-account-erasure-two-path.md §3](../legal/BRIEF-20260808-account-erasure-two-path.md))
 rides the recorded `deletion:` grammar: the trigger carries `after:` a
@@ -103,6 +107,23 @@ rides the recorded `deletion:` grammar: the trigger carries `after:` a
 when the customer logs back in and cancels (re-login-cancels is the user's act, never an admin
 resurrection). Disclosed at request time; skippable on explicit confirmed demand (counsel
 question E-series, already in the packet).
+
+**The precondition holds at PROMOTION, not only at request.** The request-time check alone
+leaves an up-to-30-day gap: a customer can log back in during grace and place a **paid** order,
+and a key shred at promotion would make that in-flight order's encrypted delivery address
+unreadable **mid-delivery** — money moved, nobody able to act, the exact failure mode CLAUDE.md
+names as the worst there is. Chosen posture — **re-check and PARK**: when the window elapses, the
+journey re-runs the open-order/funds-in-flight precondition **before any destructive leg** (leg 0,
+§3.3); on failure it parks (`PARKED(reason)` on the `ErasureProcessRow`, visible on the
+supervision surface and still on the §3.8 dead-man's clock — a parked erasure alerts, it never
+silently waits) and resumes when the blocking order records its terminal fact (the PM reacts to
+the order-terminal facts it parked on — push, not poll). A paid order placed during grace does
+**not** auto-cancel the erasure — the recorded intent stands until the customer cancels it; it
+only defers execution. The alternative — refusing new orders while an erasure is
+REQUESTED/CONFIRMED — is simpler and closes the gap at the door, but it punishes exactly the
+customer who changed their mind (a returning order is the strongest cancel-intent signal there
+is) and turns a privacy right into an ordering outage; it is the fallback if counsel objects to
+any execution delay past the window (§9).
 
 ### 3.2 The Customer `deletion:` block — the recorded grammar, reused
 
@@ -133,12 +154,16 @@ the same machinery."*
 
 The journey has multiple legs against multiple stores and one external party; a process manager
 owns it, in the established pattern (`crates/application/src/process_managers/`, private state in
-`crates/application/src/pm_state` — the `PaymentProcessRow` shape): an **`ErasureProcessRow`**
+`crates/application/src/generated/pm_state.rs` — the `PaymentProcessRow` shape): an
+**`ErasureProcessRow`**
 keyed by `ErasureRequestId`, one column per leg, fenced and idempotent (re-delivery re-asserts a
 completed leg as a no-op). Per-leg **Tells, one aggregate per transaction**; the identity leg is a
 **Tell with an inbound confirmation event, never an Ask** (PMW-3 stands not-adopted —
 [DECISIONS §42](DECISIONS.md)):
 
+0. **Re-check** — re-run the open-order/funds-in-flight precondition at promotion (§3.1). Failure
+   parks the journey (`PARKED(reason)`, alertable); resumption on the blocking order's terminal
+   fact. **No destructive leg runs before this passes.**
 1. **Unlink** — Tell the supabase-acl adapter to delete the identity at the provider (an Art. 28
    processor instruction). The provider's completion comes back as an **inbound integration
    event** `CustomerIdentityUnlinked` recorded through the ACL (an external fact that already
@@ -156,9 +181,12 @@ completed leg as a no-op). Per-leg **Tells, one aggregate per transaction**; the
    queryable, durable answer that outlives the streams — and it backs the post-erasure status
    response (§3.6).
 
-Ordering rationale: unlink **before** stream deletion (while our record of `authUserId` still
+Ordering rationale: the re-check strictly first (nothing irreversible happens against an
+in-flight order); unlink **before** stream deletion (while our record of `authUserId` still
 exists to address the instruction); shred before or with deletion (key destruction is what makes
-the retained streams' PII unreadable); the receipt strictly last.
+the retained streams' PII unreadable); the receipt strictly last. Third-party PII holders beyond
+Supabase (Stripe, HubRise, delivery partners, OVH SMS) are handled per the recipient/processor
+map (§9.6) — named, never silently absent.
 
 ### 3.4 Crypto-shred for `legalRetention`-bearing data (dba, legal)
 
@@ -184,11 +212,24 @@ Design:
   `events.yaml` entries naming the instrument and the window, `$ref`ing the MET-W approved
   retention-window catalog (the shape [BRIEF-20260811 §3](../legal/BRIEF-20260811-erasure-zone-and-retention.md)
   already specified). Two validator rules then write themselves, spec-keyed:
-  1. an actor whose `emits` reaches a `legalRetention` event may not declare a stream-deleting
-     `deletion:` block for the window's duration (this is also the gate that protects the
-     `RestaurantListingOptedOut` Art. 21 register from an Order-shaped deletion — the
+  1. **a `deletion:` trigger may not undercut retention** — scoped **per trigger**, not per
+     actor: the trigger's effective window (`after:` ref) must be at least the longest
+     `legalRetention` window among the events reachable from the actor's `emits`, and an
+     `indefinite` window (the Art. 21 register) bars stream deletion outright. Per-trigger
+     scoping is what reconciles the rule with the **live Order pilot**:
+     `ORDER_RETENTION_WINDOW_DAYS` defaults to **3650 days** — deliberately at the conservative
+     accounting horizon because the per-category split is open
+     (`specs/ordering/configuration.yaml:107-119`) — so the pilot's stream deletion never
+     precedes retention expiry and passes the rule as-is; the same rule is the gate that protects
+     the `RestaurantListingOptedOut` Art. 21 register from an Order-shaped deletion (the
      BLOCKER-on-arrival BRIEF-20260811 §3 recorded);
   2. every `legalRetention` event must name a window from the catalog.
+- **This closes the left-open item of
+  [ADR-20260731-160000](../adr/ADR-20260731-160000-order-erasure-tombstone-then-stream-deletion.md)**
+  ("personal data tombstones early while financial facts survive — OR the skeleton is exported
+  before phase 2"): the financial skeleton survives **in place** — plaintext financial facts on
+  retained streams, personal fields shredded — the G3 closure-(A) posture, held pending counsel's
+  G3 answer on which closure is more defensible.
 - **Which order fields are invoice data** (and must stay plaintext) vs personal data (encrypted,
   shredded) is **counsel's to confirm, not ours to decide** — named in §9, sharpening
   [G3](../legal/BRIEF-20260811-erasure-zone-and-retention.md). The proposal's default pending
@@ -223,7 +264,11 @@ The post-erasure status surface (and the confirmation email/SMS wording) states,
 erased (account, addresses, preferences, conversations, identity link) vs retained (the financial
 record of orders — instrument and window, from the `legalRetention:` declarations, so the screen
 is **generated from the same source as the enforcement** and cannot drift from it). Exact French
-wording: counsel question (§9). All copy via i18n keys (§6).
+wording: counsel question (§9). All copy via i18n keys (§6). On the do-not-contact suppression
+row of the carve-out table: **no customer-side prospection exists at V0** (prospection is
+restaurant-side SIRENE), so no customer suppression entry is retained — the Art. 21 register
+concern stays restaurant-side, protected by validator rule 1 (§3.4); if customer marketing ever
+ships, its suppression entry joins the retained list then.
 
 ### 3.7 The proof is a round-trip ABSENCE test, executed recurringly (beck, farley)
 
@@ -250,8 +295,13 @@ A `specs/observability.yaml` workflow (`feature: customer-erasure`, criticality 
 - **Identity is pseudonymous**: `aggregate_id` survives as the tombstone reference; **never**
   email/phone/name in span attributes.
 - **Metrics**: `erasure_duration_ms` (request→receipt), `erasure_store_failed_total{store}`.
-- **Dead-man**: the Art. 12(3) 30-day clock — an overdue erasure (confirmed + window elapsed +
-  no receipt) must fire on SILENCE, not on a signal arriving (the monitoring carve-out of
+- **Dead-man**: the Art. 12(3) 30-day clock, **anchored at `CustomerErasureRequested` receipt** —
+  the month runs from receipt of the request, and the confirmation step is OUR safeguard, so it
+  may not eat the subject's clock. The confirm token therefore expires (72 h proposed): an
+  unconfirmed request lapses visibly on the status view instead of silently consuming the month.
+  Overdue = requested + 30 d + no receipt and no recorded cancel/lapse; a `PARKED` journey (§3.1)
+  stays on the clock and alerts **with its parked reason**. Fires on SILENCE, not on a signal
+  arriving (the monitoring carve-out of
   [ADR-20260810-231300](../adr/ADR-20260810-231300-no-polling-only-pushing-polling-as-graceful-fallback.md)).
 - **Partial purge is `technical_error`, never silent**: any leg failed while others succeeded is
   a red status, on the supervision surface.
@@ -331,6 +381,7 @@ sequenceDiagram
     end
     participant SUPA as Supabase Auth (processor)
     Note over PM: grace window elapsed after CustomerErasureConfirmed — the engine promotes the due deletion
+    Note over PM: leg 0 RE-CHECK — the open-order/funds precondition re-runs BEFORE any destructive leg.<br/>Failure parks the journey (PARKED on ErasureProcessRow, visible + alertable, still on the dead-man clock).<br/>Resume on the blocking order's terminal fact (push, not poll)
     PM->>ACL: Tell — delete identity {authUserId} (Art. 28 processor instruction). Never an Ask.
     ACL->>SUPA: DELETE auth user
     SUPA-->>ACL: deleted (webhook / confirmed call)
@@ -349,7 +400,7 @@ sequenceDiagram
     REPO->>PG: append on erasure-ledger stream (outlives the deleted streams)
 ```
 
-<a href="https://mermaid.live/view#pako:eNqNVdtu4zYQ_ZWBn-SulTru9gI_LGDEwsJN4hXsTYECCwQ0ObK4lkgtL3GFIP_eoW523ASoAT9I5MyZOXPO6HnEtcDRHEYWf3hUHJeS7Q0rvymgH_NOK1_u0LTPO_0PsKoqJGdOagVcG2xPwq9ixkkuK6YcpPfALNx463SJJjHMeoOp0RythUgglwItfPOz6fVHqOhsAq8vbfQRslCQ-EBXy0o7VG78NtgmSb8EuA1W2kqnTQ0RFVCg2KPpYlCJUw9SZQTmjOeOEIEJVjk09u3si5u7kNz6iu2YxZjxoo-AiGpTTro63Hqnutvk7xC_9bvvyB0csAbHdsU7xCXrz-H2EgtsKEa1lwohcshzRbwXcNTmMLT1H96b6HSfPFFdW6IihGoQumRSPWJ4a-FD_0wUICvfS7X58meTzOhQuDY0uEwXAlyOkDHu7CW159Hbh3TRtt3SBgvvcoiqdrq6r39NcwX9RFSm93Mg5XGEo1SCpo8FqywKYFlg-kJKN1pl0pR03GkoFNVxRRglpbXNO-Hp35HZQqb38adPNK45fMWi6OObOwjDPJ9J-_mDRbMSLxAtjLuC2R8wlE8SavVDacdXsMbQAlOwsIerFoYQCCfQMIdlcpd8TYKdcvC2d1M4i_taWnwB0RF3udYH-Jnc1fdIYy_Gp7QUEyQ_B4PkQEG17LRXohnKQNSq6-RBFVIdQmapHBLDrayCEvrelSassmRKdCAhO4Gkn-fB7sN8Xw-rwD08rO9W69sQXTX0Ra1l-8QGqS1JATVIC4yAYl2Nz8ZA3gitE5W6JoedHBJxU1dOxzanHKFRR3qlxK1iSZSrFWU7glf0LIKdTmkHeix7wqjn4xbrZQt0qq8hjNi4XBb_o_9JsEdLQjfdMyHuUaGRvBfkd-2NwnoCi-Umnk1nv01__-U6nl1__HU6PSODrD8fdNWnIzSZ1UF4rQmB58gPlZbByBUtscGObSZKEipviqO-d9Q8VRB8e2obm4n8JfH4-BOYsGj1yWDxsyTFGyyp0UY0vLhqlPtoMBu_AhnogdN2GjAnoTDVbauOI3uJoo_2klrKPQmZt-tFGl9TIT-8pGrO5MoUaUXRcsi1I-lVNQhJbpeqoWK7uE_AGaYs469M_7Yswj452yJoSqmoDXIWyspNgFaQF1rVpfaW3maW9FLU7-kkiAnbDRW3iuoUC5H2Llih20qd2zs5j0cTGFExtJQFfYyfR3SnbD7LAjPmCzd6efkXzDOPIQ" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
+<a href="https://mermaid.live/view#pako:eNqNVmtvIkcQ_CstvmSdY23sXB5CkSVi9i6ObYzwOVKkk07DTANz7M7szcMEWf7v6d7ZBc4PKUh82MdUdVdXFzz2pFXYG0LP47eIRuJYi6UT1WcD9BExWBOrObp0Pbf_gqjrUksRtDUgrcP0hD-1cEFLXQsTYHoDwsNF9MFW6AonfHQ4dVai95AplFqhh8_xbHD6Hmp61ofvX5rZDSy4IPWOXq1qG9CEo9fJZsX0lulmWFuvg3VbyKiAEtUSXXsGjdr3oM2CyIKLMhAjCCXqgM6_jj66uGZwH2sxFx5zIcvuBGRUmwk6bPmtN6q7Kv7h83dx_hVlgDVuIYh5-YZwxeQjvz3GEhuJ0Sy1QcgCypUh3UvYWLfetfVC9-b0dFk8UF13JAUftaBsJbT5gnzXw7vumiRAUb0FNbv9qwFzlgu3jga3sKWCsEJYCBn8c2kPT9_dT0ep7SQbjGJYQVan6dqu_gnNFewDSTm9GQI5TyJstFE0fSxF7VGBWLDSz6x0Yc1Cu4oetx7iolqtiKMiWN_cU5G-rZivUZa4hAE5KL_4s7i4OkSzNZrcOoXuZBGN8oSL0hqlm7k4zF00Hv4oPtzOChBmSzTJUvoBGfb497k7Of8gdMkeI23WqaKvNjqDbNHR7KoYA4G9sH4fHrTXZBKalSjRNYbpgw-6LPlA0xkKlVeCtrC0cn2U6GboY4XdK3N-os0SmjZ-IH50lTZkIp4fTSP6VR-MDVDbsmxHMr3Jz8_JzkP4hMTWKtJoiLDz-yNlw-reo7tUT5CNXDiGs99gN15asVYMa46OYYKsN9U68uvjREMMxMM2GcK4uC4-FRw3K4i-Sxt-lne1JH4F2QbnK2vXcELp03mA1qKrnmHpDEfCEHhgTlEtc0sTTE13RrpsO7k3pTZrRtYmIDkwrR1vSte7scRVkdSqJWF0Ipl-HHIc7vz_0ln3k-vLyRWfrhv5shRpHbBDaovsQoGlPQgiym19OAbKjmHyld1SAu0TJJNuWweb-xVhcKOB9pmA00bT0l5eEtoGoqFrxe7Zw-7k8eIBs06PK9yOE9G-vkYwUuN5mP6P_vscH0mEdroHq7VEg07LbmHbjejDaDzLzwZnvwx-_ek0Pzt9__NgcCAGReNw56sOjtj0YsvGSyEFcoVyXVvNQVdTyO_iKiERCFfeFEd9z6l5qoBzbd82NhP5W-Pmy4_g-IfI7gMof9TkeIcVNdqYRpbHjXO_OFwcfUeykwf26b3j7HNhpk3zViP_nMVu_HNpCbvPyHeT0TQ_pUK-RU3VHNiVs8gbCs8VLba0NSWTpjTUKRPuRjcFBCeMF3Ifim_agqPpIGW7_KDNQl2HPlBER2XNtrLR092FJ7-U27d8wmbCFHZ5clTrWMhsDLwKbWq3297a-ajXhx4VQz9aiv6sPPbonar526JwIWIZek9P_wF6iPIy" target="_blank" rel="noopener noreferrer">Open this diagram with pan and zoom on mermaid.live — on github.com use Ctrl/Cmd+click or middle-click to get a NEW tab (GitHub strips target=_blank)</a>
 
 ## 5. Screen mockups (one per use case, ux journey)
 
@@ -481,7 +532,13 @@ What is deliberately **not** in the slice: Art. 18 restriction (G8 — designed 
 counsel answers whether filtered-at-read suffices), dormant-account auto-sunset (the ~3y
 notify-then-delete window — G6, its own scheduled work), and Restaurant/Cart retention sweeps
 (the same engine, separate dispatches). The `legalRetention:` marker + validator rules ARE in the
-slice because the deletion block is unsafe to generalize without them.
+slice because the deletion block is unsafe to generalize without them. **Third-party PII holders
+are in the slice as a drawn artifact, not silently absent**: the recipient/processor map (§9.6 —
+Stripe, HubRise, delivery partners, OVH SMS) is drawn with the realizing change and the Supabase
+instruction leg ships in it; outbound instructions/notifications to the OTHER holders ship per
+the map's counsel-confirmed answer — deferred per
+[BRIEF-20260808 §2](../legal/BRIEF-20260808-account-erasure-two-path.md)'s recorded grade-(b)
+"Art. 19: map, likely minimal", never by omission.
 
 ## 8. Drawbacks (why we might regret the whole thing)
 
@@ -521,12 +578,32 @@ retention`, `response wording`).
    not decided here.
 5. **Immediate execution on demand** (already in the E-packet, grade (c)): may the subject skip
    the grace window? Designed skippable pending counsel.
+6. **The recipient/processor map at erasure time** (new as a drawn artifact;
+   [BRIEF-20260808 §2](../legal/BRIEF-20260808-account-erasure-two-path.md) records the question:
+   *"Art. 19 recipient notifications: map, likely minimal (b)"* — cited, not re-asked): who holds
+   the subject's PII when an erasure runs — **Stripe** (name/payment PII from the first real
+   order; partly an independent controller for its own legal obligations), **HubRise** (order
+   payloads pushed to the partner POS), **delivery partners** (Uber Direct / CoopCycle job
+   payloads: name, address, phone), **Supabase** (the unlinking leg, already in-slice), **OVH
+   SMS** (message logs). Per holder: does an Art. 28 instruction or an Art. 19 notification
+   issue, on what trigger, and does the holder join the drill's enumeration? The map is drawn
+   with the realizing change; the brief's grade-(b) "likely minimal" is the presented default,
+   counsel confirms the per-holder answers.
+7. **Parking vs blocking during grace** (the §3.1 posture): does counsel accept a PARKED erasure
+   — execution deferred past the window by the subject's own in-flight paid order, alerting the
+   whole time — as Art. 12(3)-compliant handling, or does the fallback (refuse new orders while
+   an erasure is pending) become required?
 
 ## 10. Verification plan
 
 - `make validate` 0 errors on the realizing spec change (ADR-0032 completeness enforced: tests,
   stories, rules for every new command/event/error/mutation).
 - The round-trip absence drill (§3.7) green per-PR in CI before the PR that flips anything on.
+- **A mutant run proves the drill can fail**: run once with the shred leg (or one purge store)
+  deliberately skipped and assert the drill goes RED — a drill that cannot detect a skipped leg
+  proves nothing (beck: the proof is the absence assertion, not the run's existence).
+- **Flake posture**: a flaking absence drill is a BLOCKING failure, never a retry-until-green —
+  a nondeterministic "gone" is indistinguishable from "not gone".
 - `RUN_DELETION_ENGINE` stays gated: the Customer journey is smoked gated-ON in a non-production
   profile first; the default flip is its own one-line ADR (gate-then-stabilize — the recorded
   precedent on this exact toggle).

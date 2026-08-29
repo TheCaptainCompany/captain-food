@@ -3,6 +3,24 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔁 **2026-08-29 — erasure proposal, review round 1: FAIL folded in one edit round**
+> ([PROP-20260829-150752](../proposals/PROP-20260829-150752-customer-erasure.md), living doc
+> rewritten in place per ADR-20260801-020000; architecture unchanged). Two blocking findings
+> fixed: **(1)** the open-order precondition now re-runs at PROMOTION (leg 0) — a paid order
+> placed during the grace window PARKS the journey (visible, alertable, still on the Art. 12(3)
+> dead-man) instead of letting a key shred make an in-flight order's delivery address unreadable
+> mid-delivery; blocking-ordering-during-grace presented as the fallback, counsel question added
+> (§9.7). **(2)** Third-party PII holders are no longer silent: recipient/processor map row
+> (§9.6 — Stripe, HubRise, delivery partners, OVH SMS; Art. 19/28;
+> [BRIEF-20260808 §2](../legal/BRIEF-20260808-account-erasure-two-path.md)'s grade-(b) "likely
+> minimal" presented as the default) + an explicit §7 slice-boundary sentence. Six non-blocking
+> folded: retention validator rule scoped per-trigger (Order pilot reconciled via its 3650-day
+> window), idempotent double-request, dead-man anchored at REQUEST receipt with a 72 h token
+> bound, drill mutant run + flake-is-blocking posture, `pm_state` citation corrected to
+> `crates/application/src/generated/pm_state.rs`, customer-side suppression line (no customer
+> prospection at V0), and the ADR-20260731-160000 left-open financial-skeleton item named closed
+> by §3.4. Round-2 re-presentation next.
+
 > 🧾 **2026-08-29 — the Customer GDPR erasure proposal is drafted**
 > ([PROP-20260829-150752](../proposals/PROP-20260829-150752-customer-erasure.md), tracking
 > [#708 "No GDPR erasure flow exists for Customer"](https://github.com/TheCaptainCompany/captain-food/issues/708),
