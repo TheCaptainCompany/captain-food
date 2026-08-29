@@ -338,6 +338,26 @@ mod tests {
     }
 
     #[test]
+    fn a_collection_nav_edge_stops_the_walk_like_an_array_property() {
+        // The `n.list => return None` branch (checkpoint item, beck): a reverse-FK collection edge
+        // (`Cart.orders: [Order!]!`) stops the walk — per-item fields belong to a loop variable,
+        // not this root — exactly as a declared `array: true` property does.
+        let model = model_with(&[("breakdown", breakdown_ref())], &[("total", money_ref())]);
+        let mut nav: HashMap<String, Vec<NavField>> = HashMap::new();
+        nav.insert(
+            "Cart".into(),
+            vec![NavField { field: "orders".into(), target: "Order".into(), list: true, nullable: false }],
+        );
+        assert_eq!(first_unknown_segment(&model, &nav, "Cart", "api.yaml", &["orders", "anything"]), None);
+        // …and the collection edge is matched by NAME, not by mood: a typo'd segment on the SAME
+        // type, resolved against the SAME nav map, still fires rather than riding the edge's stop.
+        assert_eq!(
+            first_unknown_segment(&model, &nav, "Cart", "api.yaml", &["ordersz"]),
+            Some(("ordersz".to_string(), "Cart".to_string()))
+        );
+    }
+
+    #[test]
     fn simple_path_regex_accepts_dotted_identifiers_only() {
         let re = simple_path_regex();
         assert!(re.is_match("cart.breakdown.total"));
