@@ -466,6 +466,60 @@ mod tests {
         assert!(matches!(err, ResolverError::MissingOperation { operation: "me" }));
     }
 
+    /// #472 checkpoint (beck): classification is decided by the ROLE-vs-`roles()` check, never by
+    /// the error VARIANT. The renderer/router tests alone would let a mutant classifying
+    /// "Errors → skip, Network → fail" pass (their skip case happened to feed `Errors` and their
+    /// fail case `Network`), so this test crosses the variants both directions:
+    /// a role OUTSIDE the resolver's roles skips even on a Network error, and a role INSIDE them
+    /// fails even on an authorization-flavoured `Errors` payload.
+    #[test]
+    fn classification_is_decided_by_roles_not_by_the_error_variant() {
+        use crate::generated::data_layer::ResolverKey;
+        let network = || TransportError::Network("connection reset by peer".into()).into();
+        let auth_errors = || TransportError::Errors("Unauthorized: not for you".into()).into();
+
+        // orders.byRestaurant admits [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN] — never
+        // PUBLIC — so on the anonymous path EVERY error variant is a skip by design.
+        assert!(!ResolverKey::OrdersByRestaurant.roles().contains(&Role::Public.user_type()));
+        assert!(matches!(
+            classify_resolve(Role::Public, ResolverKey::OrdersByRestaurant, Err(network())),
+            ResolveOutcome::SkippedByDesign
+        ), "role outside roles(): even a NETWORK error is a skip, not a failure");
+        assert!(matches!(
+            classify_resolve(Role::Public, ResolverKey::OrdersByRestaurant, Err(auth_errors())),
+            ResolveOutcome::SkippedByDesign
+        ));
+
+        // cart.current admits [PUBLIC, CUSTOMER] — so on the SAME anonymous path every error
+        // variant is a REAL failure, including one whose text screams authorization.
+        assert!(ResolverKey::CartCurrent.roles().contains(&Role::Public.user_type()));
+        assert!(matches!(
+            classify_resolve(Role::Public, ResolverKey::CartCurrent, Err(auth_errors())),
+            ResolveOutcome::Failed(_)
+        ), "role inside roles(): even an 'Unauthorized' Errors payload is a failure, not a skip");
+        assert!(matches!(
+            classify_resolve(Role::Public, ResolverKey::CartCurrent, Err(network())),
+            ResolveOutcome::Failed(_)
+        ));
+
+        // And the SAME resolver flips on the role alone: a CUSTOMER asking orders.byRestaurant
+        // that gets a Network error is a real failure.
+        assert!(matches!(
+            classify_resolve(Role::Customer, ResolverKey::OrdersByRestaurant, Err(network())),
+            ResolveOutcome::Failed(_)
+        ));
+
+        // A declared gap skips before any role question arises.
+        assert!(matches!(
+            classify_resolve(
+                Role::Public,
+                ResolverKey::PromotionsActive,
+                Err(ResolverError::GapBinding { key: "promotions.active", note: "gap" }),
+            ),
+            ResolveOutcome::SkippedByDesign
+        ));
+    }
+
     #[test]
     fn http_transport_builds_the_role_path_endpoint() {
         let t = HttpTransport::new("https://tours.captain.food/", Role::Public, SessionId::mint());

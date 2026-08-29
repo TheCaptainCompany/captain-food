@@ -540,6 +540,59 @@ mod tests {
         assert_eq!(TrackingState::from_resolved(id, &Map::new()).order_id, id);
     }
 
+    /// #472 checkpoint (beck): `from_context` is a NEW paid-customer-facing state machine leg —
+    /// every branch seen here, natively: the happy path (Present), an answered null (Absent), a
+    /// classified failure (Failed), and the precedence rule that an ANSWER always beats the
+    /// failure mark (a failed re-read must not erase a real order).
+    #[test]
+    fn from_context_distinguishes_present_absent_failed_and_answers_win() {
+        let id = Uuid::now_v7();
+
+        // Happy path: the read answered with the order.
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_resolved("order.byId", order("ACCEPTED", "2026-08-09T19:30:00Z"));
+        let state = TrackingState::from_context(id, &ctx);
+        assert_eq!(state.status(), Some("ACCEPTED"));
+        assert_eq!(state.order_id, id);
+
+        // Answered null: the honest not-found state — classification never touched it.
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_resolved("order.byId", Value::Null);
+        assert_eq!(TrackingState::from_context(id, &ctx).order, OrderRead::Absent);
+
+        // A read `classify_resolve` marked FAILED: the staleness state, not Unresolved and
+        // NEVER Absent.
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_failed("order.byId");
+        assert_eq!(TrackingState::from_context(id, &ctx).order, OrderRead::Failed);
+
+        // Nothing at all (skip-by-design, today's anonymous SSR): the silent shell.
+        let ctx = crate::renderer::RenderContext::new("fr");
+        assert_eq!(TrackingState::from_context(id, &ctx).order, OrderRead::Unresolved);
+
+        // An answer BEATS a failure mark: only an unresolved read may become Failed.
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_resolved("order.byId", order("ACCEPTED", "2026-08-09T19:30:00Z"));
+        ctx.insert_failed("order.byId");
+        assert_eq!(TrackingState::from_context(id, &ctx).status(), Some("ACCEPTED"));
+    }
+
+    /// #472: the Failed state's RENDER — the reassurance copy plus retry, never the not-found
+    /// hero and never the transport's own words.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_failed_read_renders_the_staleness_reassurance_not_not_found() {
+        let id = Uuid::now_v7();
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_failed("order.byId");
+        let html = render_tracking_html(TrackingState::from_context(id, &ctx), "fr");
+        assert!(html.contains("Votre commande est bien enregistrée"), "{html}");
+        assert!(html.contains("Réessayer"), "user-initiated retry: {html}");
+        assert!(html.contains(r#"data-error="true""#), "{html}");
+        assert!(!html.contains("Commande introuvable"), "{html}");
+        assert!(!html.contains(r#"data-status="UNKNOWN""#), "{html}");
+    }
+
     /// graphql F3 (#167 / PR #586 checkpoint): a status this BUILD cannot render — the stale-WASM
     /// window where the server speaks a newer OrderStatus — must never tell a paid customer their
     /// order was not found. The order was READ and is Present; the page stays silent with the raw

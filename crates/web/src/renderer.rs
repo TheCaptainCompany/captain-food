@@ -314,6 +314,14 @@ fn condition_error_marker(expr: &str) -> AnyView {
 /// Render one generated node: the `visible_when` choke point, then registry dispatch. EVERY
 /// render path goes through here (screen roots, children, sheets), so a declared condition cannot
 /// be skipped by construction (#472).
+///
+/// LEGAL INVARIANT (#472 checkpoint, legal lens): a legally required element — an allergen
+/// declaration (EU FIC 1169/2011 distance selling), the total price, pre-contractual information —
+/// must NEVER be bound behind a failable condition. Fail-closed hiding is correct for UX
+/// affordances (a resend button, a cart FAB) and WRONG for mandatory information: a missing
+/// binding would silently remove a disclosure the law requires at the moment of ordering. Put
+/// mandatory information OUTSIDE conditions; if it ever needs one, that is a legal-surface change
+/// (`HOLD: human` class), not a screen tweak.
 pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
     match eval_condition_prop(node, "visible_when", ctx, false) {
         Some(Err(expr)) => return condition_error_marker(expr),
