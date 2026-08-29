@@ -3,6 +3,27 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-29 — [#709 "The register-check hook refuses a question whose controlling row is
+> already decided"](https://github.com/TheCaptainCompany/captain-food/issues/709) closes the gap
+> ADR-20260828-120500 named: `.claude/hooks/register-check.sh`'s TRAIL lane (Lane 2, non-decision
+> interactions) validated shape only — a trail self-citing `(<date>, decided)` in the canonical
+> format still ALLOWED the `AskUserQuestion` call, the exact round-5 call-sheet incident.** Verified
+> against the script first (beck's design step 1): the ENVELOPE (`Decision row: <KEY>`) and PASSIVE
+> lanes already refused non-open `docs/decisions/<KEY>.yaml` rows since 2026-08-21
+> (ADR-20260821-095957) — only the free-text trail (ADR/PROP/journal citations, which carry no
+> machine-readable status file) was unguarded. **Fix**: the hook now reads the trail's OWN
+> `(<date>, <status>)` clause and refuses when `<status>` is in the register's closed set
+> (`decided`/`superseded`/`deferred`/`withdrawn`) — new reason `trail-answered` — unless the trail
+> also carries a `premise-changed: <what changed>` line, which allows the question through logged
+> distinctly as `trail-premise-changed` (docs/claude/sessions/workflow.md trail-format section, new
+> escape hatch). Red-first: the pre-existing selftest case `3-record-id` (a decided-status trail)
+> flipped from a passing ALLOW to red under the new code before its expectation was corrected to
+> BLOCK; new cases `3b`/`3c`/`3d` prove the premise-changed escape, the open-status non-trigger, and
+> the full closed set (not just `decided`) respectively; cases `1`/`2`/`4`/`5`/`6`/`7` (missing/
+> hollow trail, legacy single-token citations, no-controlling-record, DECISIONS.md section) proved
+> unchanged. `make hooks-test` green, `make validate` 0 errors.
+> [ADR-20260828-120500](../adr/ADR-20260828-120500-an-answered-question-is-never-asked-again.md).
+
 > ✅ **2026-08-28 — [#658 "The decision register cannot say what is still open: 62 of 148 rows carry
 > no status token, 22 keys are ambiguous, and nothing confronts a question with the register before
 > it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658) closes its
