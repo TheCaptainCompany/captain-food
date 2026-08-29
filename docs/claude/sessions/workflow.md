@@ -275,6 +275,20 @@ independently isolated itself. **Nobody writes in the shared checkout while a di
 it, the coordinator included**; claim commits and docs commits are writes, and `git worktree add` is
 200 ms. The reviewer's isolation is a second belt, never the reason this was safe.
 
+**Sharpened 2026-08-29: the collision bit BOTH concurrent executors in one run, so the second
+session's landing mechanics are now fixed, not advisory.** A docs/spec executor and the #755 feature
+executor shared one checkout: the feature side's blanket-stage commit swept the other side's 14
+uncommitted files into a commit whose message asserted "No spec change" (caught and amended before
+push; ~20 min of forensics), and in the other direction the dirty shared tree made `check-drift` — a
+whole-tree `git diff --quiet` — structurally unpassable for the docs side's gate run. The rule:
+**concurrent executor runs must not share a checkout — the second session lands via
+`git worktree add`** (a linked worktree, with `CARGO_TARGET_DIR` pointed at the main checkout's
+`target/` so nothing rebuilds cold and check-drift is reproduced honestly on a clean tree);
+**staging is by explicit path list, never `git add -A`** — the sweep above is what a blanket stage
+does in a shared tree, and the path list is what caught it; and **the loop-budget timer is
+per-checkout and collides** — the second session does not fight over the shared timer, it records
+its own time with `stop --elapsed-seconds <n>`.
+
 ### Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified
 
 When a session dies mid-change, `git add` the touched files and commit as an explicit `wip:` whose
