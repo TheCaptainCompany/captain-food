@@ -184,6 +184,20 @@ pub async fn resume_pending(
     resumed
 }
 
+/// #758 (ADR-20260829-230418, C1a): does this client still hold an OPEN `PlaceOrder` intent for
+/// `order_id`? The persisted record IS the paid-context witness the tracking screen's
+/// answered-null guard keys on: it is written BEFORE the mutation is sent and cleared only on an
+/// observed terminal outcome, so its presence means "this customer just placed THIS order and no
+/// terminal verdict has been seen" — the one caller entitled to read a null `order.byId` as
+/// "the birth is still riding the lane" rather than "no such order". A stranger's URL has no
+/// record, so the not-found rendering is untouched.
+pub fn holds_place_order(store: &dyn PendingStore, order_id: Uuid) -> bool {
+    store.load().iter().any(|w| {
+        w.action == ActionKey::PlaceOrder
+            && w.input.get("orderId") == Some(&serde_json::json!(order_id))
+    })
+}
+
 /// The in-memory store: the test double AND the native/SSR default (a server render never
 /// persists client intents — the browser owns the queue, same split as `session.rs`).
 #[derive(Default)]
@@ -251,6 +265,30 @@ mod tests {
         let mut m = Map::new();
         m.insert("offerId".into(), json!("offer-1"));
         m
+    }
+
+    /// #758: the paid-context witness — an open PlaceOrder record for THE order answers true;
+    /// a different order, a different action, or a cleared record answers false.
+    #[test]
+    fn holds_place_order_matches_the_open_record_for_that_order_only() {
+        let store = MemoryPendingStore::default();
+        let order_id = Uuid::now_v7();
+        assert!(!holds_place_order(&store, order_id), "empty store: no paid context");
+
+        let mut place = Map::new();
+        place.insert("orderId".into(), json!(order_id));
+        store.save(&[
+            PendingWrite { message_id: Uuid::now_v7(), action: ActionKey::AddToCart, input: input() },
+            PendingWrite { message_id: Uuid::now_v7(), action: ActionKey::PlaceOrder, input: place },
+        ]);
+        assert!(holds_place_order(&store, order_id), "the open PlaceOrder record is the witness");
+        assert!(
+            !holds_place_order(&store, Uuid::now_v7()),
+            "another order's URL gets no paid context from this record"
+        );
+
+        store.save(&[]);
+        assert!(!holds_place_order(&store, order_id), "a settled (cleared) record withdraws it");
     }
 
     #[tokio::test]

@@ -157,6 +157,11 @@ order.not_found:  { messages: { en: "Order not found", fr: "Commande introuvable
 # translations.code_refs.yaml). The tracking line must never imply the order vanished.
 cart.error.load: { messages: { fr: "Impossible de charger votre panier", en: "We couldn't load your cart" } }
 order.error.tracking_stale: { messages: { fr: "Votre commande est bien enregistrée — le suivi ne s'actualise pas.", en: "Your order is safely recorded — tracking just isn't refreshing." } }
+# #758 (C1a, ADR-20260829-230418) — the paid-then-null handoff window: while the client still holds
+# its fresh PlaceOrder DispatchHandle, an ANSWERED-null order.byId renders this acceptance-first
+# reassurance, never order.not_found. The fr copy is the founder-approved GAP(copy) verbatim
+# (tracking.rs, riding #420's spec half); the en line is its translation.
+order.confirming: { messages: { fr: "Reçu ✓ — confirmation en cours…", en: "Received ✓ — confirmation in progress…" } }
 order.history_title: { messages: { en: "Your orders", fr: "Vos commandes" } }
 order.tab.active: { messages: { en: "Active", fr: "En cours" } }
 order.tab.past:   { messages: { en: "Past", fr: "Passées" } }

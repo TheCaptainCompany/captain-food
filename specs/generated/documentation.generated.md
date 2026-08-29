@@ -12084,6 +12084,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-not_found"></a>`order.not_found` | — | Order not found | Commande introuvable |
 | <a id="translation-cart-error-load"></a>`cart.error.load` | — | We couldn't load your cart | Impossible de charger votre panier |
 | <a id="translation-order-error-tracking_stale"></a>`order.error.tracking_stale` | — | Your order is safely recorded — tracking just isn't refreshing. | Votre commande est bien enregistrée — le suivi ne s'actualise pas. |
+| <a id="translation-order-confirming"></a>`order.confirming` | — | Received ✓ — confirmation in progress… | Reçu ✓ — confirmation en cours… |
 | <a id="translation-order-history_title"></a>`order.history_title` | — | Your orders | Vos commandes |
 | <a id="translation-order-tab-active"></a>`order.tab.active` | — | Active | En cours |
 | <a id="translation-order-tab-past"></a>`order.tab.past` | — | Past | Passées |

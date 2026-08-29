@@ -1095,6 +1095,10 @@
     "en": "Actor mailbox",
     "fr": "Boîte aux lettres des acteurs"
   },
+  "order.confirming": {
+    "en": "Received ✓ — confirmation in progress…",
+    "fr": "Reçu ✓ — confirmation en cours…"
+  },
   "order.count_total": {
     "en": "{count} items · {total}",
     "fr": "{count} articles · {total}"
