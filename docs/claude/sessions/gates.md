@@ -61,6 +61,16 @@ So the honest local pre-push gate for `crates/**` work is three commands, not on
 make rust && cargo test --workspace && cargo machete
 ```
 
+**A crates/web-only diff does NOT exempt you from the workspace gate when it touches read
+classification (2026-08-29, #729/#730):** any change to how `RenderContext` failure/answer
+semantics or `classify_resolve` outcomes are CONSUMED runs `make test-crates` regardless of diff
+footprint. `cargo test -p web` exercises resolvers through `FakeTransport` (scripted answers), so
+it cannot see what the real role-filtered schema does — arg-less required reads erroring, role
+guards refusing — and only the server's in-process schema tests (`crates/server/src/hosts.rs`,
+`web_ssr`) execute those classifications for real. Cost that earned this: a web-suite-green change
+gated `payment_unavailable_state` on a mark that the real schema sets on EVERY anonymous /checkout
+paint — caught only by the workspace gate, one full round plus a design reversal (~30 min).
+
 **…and the middle command is itself only half a gate without `DATABASE_URL` (2026-08-04):** the
 DB-gated suites take their early-return branch and report `ok`. On 2026-08-04 a local run reported
 **86 suites / 847 passed** and still missed the failure CI then hit — with a real database the

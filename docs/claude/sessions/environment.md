@@ -57,7 +57,14 @@ read `<datadir>/server.log` before suspecting your code, the harness or your con
 cause is two screens up and unmistakable, and it reads like the DB was never there; (b) it recovers
 with a single `pg_ctl start` **once space is free** — no `initdb`, no data loss — so free space FIRST
 and do not re-init in a panic. Free disk before a workspace build whenever a cluster is up. Cost here:
-one lost compile plus a recovery round, on top of the build that caused it.
+one lost compile plus a recovery round, on top of the build that caused it. **"A single `pg_ctl
+start`" is the recovery STORY, not a literal root-shell command (2026-08-29, #729/#730):** in a root
+session the bare form fails three ways in a row — `pg_ctl` is not on PATH (`/usr/lib/postgresql/16/bin/pg_ctl`),
+it refuses to run as root, and `sudo -u postgres` fails here too. The working form for an existing
+cluster (e.g. `/var/lib/postgresql/ci-repro`) is
+`su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/postgresql/ci-repro -l /var/lib/postgresql/pg-ci.log start"`
+— the same `su postgres -c` shape gates.md uses for initdb. Cost: three failed start attempts on a
+card that paraphrased this note as "pg_ctl start suffices".
 
 **ANY disturbance of `target/` can leave cargo serving a STALE artifact it believes is fresh — and
 the quiet failure is worse than the loud one** (2026-08-08 + 2026-08-16 #609, one rule; the two
