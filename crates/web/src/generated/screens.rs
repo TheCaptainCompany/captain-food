@@ -445,7 +445,7 @@ pub mod restaurant_frontoffice {
     pub const SCREENS: &[Screen] = &[
         Screen {
             id: "restaurant",
-            route: "/r/:slug",
+            route: "/",
             roles: &["PUBLIC", "CUSTOMER"],
             requires_auth: false,
             sdui: true,

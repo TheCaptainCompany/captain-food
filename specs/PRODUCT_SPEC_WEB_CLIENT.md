@@ -69,7 +69,9 @@ Constraints:
 
 - As a customer, I want to open a specific restaurant and view its catalog quickly.
 - UI:
-  - Restaurant page at `https://{slug}.captain.food` or `https://captain.food/r/{slug}`.
+  - Restaurant page at `https://{slug}.captain.food` — the ONE storefront address (founder
+    directive 2026-08-29, [#749](https://github.com/TheCaptainCompany/captain-food/issues/749):
+    the `/r/{slug}` path form is retired; any old link 301s to the canonical host).
   - Show:
     - Restaurant name, description, opening hours.
     - Catalog categories (starters, mains, desserts, drinks).

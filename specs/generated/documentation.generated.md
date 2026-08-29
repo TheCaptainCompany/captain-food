@@ -260,7 +260,7 @@ Discover: public list of restaurants. All args are optional filters resolved by 
 <a id="query-restaurant"></a>
 #### 🔎 Query: `restaurant`
 
-A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
+A restaurant + its catalog by slug (multi-tenant resolution by Host — the ONE storefront address since #749; old /r/{slug} links 301 to it).
 
 - **Input**: 🧩 `RestaurantQueryInput!` — `slug`: [🔤 `Slug`](#scalar-slug)
 - **Returns**: [🧩 `Restaurant`](#type-restaurant) · **reads** [🗄️ `Restaurant`](#view-restaurant)
@@ -11503,7 +11503,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 _Surface_ **`restaurant_frontoffice.yaml`**
 
 <a id="screen-restaurant"></a>
-### 📱 `restaurant` · `/r/:slug` · 📱 SDUI
+### 📱 `restaurant` · `/` · 📱 SDUI
 
 ```
 ┌──────────────────────────────────────────┐

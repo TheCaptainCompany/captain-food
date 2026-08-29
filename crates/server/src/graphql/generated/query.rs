@@ -302,7 +302,7 @@ impl QueryRoot {
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(|r| Restaurant::at(r, now, horizon)).collect())
     }
-    /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
+    /// A restaurant + its catalog by slug (multi-tenant resolution by Host — the ONE storefront address since #749; old /r/{slug} links 301 to it).
     #[graphql(name = "restaurant")]
     async fn restaurant(&self, ctx: &async_graphql::Context<'_>, input: RestaurantQueryInput) -> async_graphql::Result<Option<Restaurant>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded

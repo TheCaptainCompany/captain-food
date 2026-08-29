@@ -33,6 +33,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `IDENT1-RESOLUTION-ACTIVATION` | decided | 2026-08-28 | When does RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES (the #707 gated path) flip ON? -> ADR-20260828-120500 | founder |
 | `KEY-NAMESPACE` | decided | 2026-08-28 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? -> ADR-20260828-153000 | team |
 | `MARGIN-MECHANISM` | decided | 2026-08-19 | What replaces the margin-proportional fee mechanism? -> ADR-20260819-103112 | founder |
+| `PATH-ADDRESSED-STOREFRONT` | decided | 2026-08-29 | Does the storefront keep its path-addressed form (/r/{slug}) beside the tenant host, or is the host the one address? -> ADR-20260829-082615 | founder |
 | `PROP-20260809-003000--D1` | decided | 2026-08-09 | The branching construct's shape -> ADR-20260809-050000 | founder |
 | `PROP-20260809-003000--D2` | decided | 2026-08-09 | Is a `default:`/catch-all arm allowed? -> ADR-20260809-050000 | founder |
 | `PROP-20260809-003000--D3` | decided | 2026-08-09 | Where the REFUND arms live -> ADR-20260809-050000 | founder |
@@ -73,7 +74,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 59 — 11 open · 43 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 60 — 11 open · 44 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

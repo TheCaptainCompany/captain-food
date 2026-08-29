@@ -149,22 +149,14 @@ pub fn match_route(surface: Surface, path: &str) -> Option<RouteMatch> {
     None
 }
 
-/// Resolve `host` + `path` to a screen — the table match PLUS the tenant-root rule (#98): on a
-/// `{slug}.captain.food` storefront, `/` IS the restaurant screen, its `slug` param taken from the
-/// HOST (the ADR-0036 tenant model — the host is the tenant selector; the `/r/:slug` path route
-/// stays for path-addressed access). Both the SSR entry (`render_path`) and the hydrate entry go
-/// through here so the two paths cannot disagree.
+/// Resolve `host` + `path` to a screen. On a `{slug}.captain.food` storefront `/` IS the
+/// restaurant screen (#98 tenant-root rule — since #749 the screen's declared route, no special
+/// case: the ADR-0036 tenant model made the host the tenant selector, and the founder retired the
+/// `/r/:slug` path form outright — the server 301s old links to the canonical host). Both the SSR
+/// entry (`render_path`) and the hydrate entry go through here so the two paths cannot disagree.
 pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
     let surface = surface_for_host(host);
-    let mut matched = match_route(surface, path).or_else(|| {
-        let is_root = path.trim_end_matches('/').is_empty();
-        if surface == Surface::RestaurantFrontoffice && is_root {
-            let slug = Surface::slug_of(host)?;
-            let screen = surface.screens().iter().find(|s| s.id == "restaurant")?;
-            return Some(RouteMatch { screen, params: vec![("slug".into(), slug.to_string())] });
-        }
-        None
-    });
+    let mut matched = match_route(surface, path);
     // Tenant-host slug injection (#745, generalizing the tenant-root rule above): on a
     // `{slug}.captain.food` storefront the HOST is the tenant selector for EVERY route, so any
     // matched screen whose path did not capture a `:slug` gets the host's slug as a param. This
@@ -474,8 +466,11 @@ mod tests {
         let m = m.expect("tenant root must resolve");
         assert_eq!(m.screen.id, "restaurant");
         assert_eq!(m.param("slug"), Some("chez-marco"));
-        // The path route keeps working, and a non-root unknown path still 404s.
-        assert_eq!(resolve("chez-marco.captain.food", "/r/other").1.unwrap().screen.id, "restaurant");
+        // #749 (founder): the path-addressed form is GONE from the route tables — at this layer
+        // it resolves NOTHING (the SERVER 301s it to the canonical host; hosts.rs pins that).
+        // Seen RED while the `/r/:slug` route was still declared. A non-root unknown path 404s.
+        assert!(resolve("chez-marco.captain.food", "/r/other").1.is_none());
+        assert!(resolve("chez-marco.captain.food", "/r/chez-marco").1.is_none());
         assert!(resolve("chez-marco.captain.food", "/nope").1.is_none());
         // The marketplace root is untouched by the rule.
         assert_eq!(resolve("captain.food", "/").1.unwrap().screen.id, "home");
@@ -816,7 +811,7 @@ mod tests {
             Ok(json!({ "restaurant": null })),
             Ok(json!({ "catalog": { "categories": [] } })),
         ]);
-        let html = render_path_with(&fake, "chez-test.captain.food", "/r/chez-test", "fr", None)
+        let html = render_path_with(&fake, "chez-test.captain.food", "/", "fr", None)
             .await
             .expect("the storefront route renders")
             .html;

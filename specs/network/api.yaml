@@ -135,7 +135,7 @@ queries:
     slice: V0
 
   restaurant:
-    description: "A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug})."
+    description: "A restaurant + its catalog by slug (multi-tenant resolution by Host — the ONE storefront address since #749; old /r/{slug} links 301 to it)."
     args:
       slug: { $ref: 'scalars.yaml#/Slug', required: true }
     returns: { $ref: '#/types/Restaurant', nullable: true }
