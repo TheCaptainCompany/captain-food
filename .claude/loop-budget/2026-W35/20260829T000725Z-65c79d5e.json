@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 900,
+  "recordedAt": "2026-08-29T00:07:25.717Z",
+  "branch": "709-ask-gate-refuses-decided",
+  "note": "#709 register-check trail-status gate; timer closed by a concurrent session before this stop (shared git-common-dir timer race, documented pattern); elapsed is an estimate from session start (~23:52:28Z) to gates-green (00:07:10Z)"
+}
