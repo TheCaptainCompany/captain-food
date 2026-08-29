@@ -277,9 +277,13 @@ pub struct CheckoutViewState {
     /// `me.profile` FAILED: the contact fields stay EMPTY-EDITABLE (an error state blocking
     /// manual entry would hide the working path) with a small section notice.
     pub profile_failed: bool,
-    /// `paymentStatus.byOrder` FAILED: the payment section reuses the
-    /// `payment_unavailable_state` shape — the outcome read this page depends on right after
-    /// paying is broken, and "your cart is saved" is the promise the system keeps.
+    /// `paymentStatus.byOrder` FAILED. Carried for honesty but — deliberately — NOT a degrade
+    /// gate (#730 checkpoint finding): the query admits PUBLIC and takes a REQUIRED `orderId`
+    /// this route cannot supply (no route param, #420's reported DSL gap), so the read fails
+    /// STRUCTURALLY on every anonymous first paint — gating `payment_unavailable_state` on it
+    /// would close checkout permanently, the exact "cosmetic resolver failure blocks checkout"
+    /// the business rule forbids. Becomes a usable signal only once the read can carry its arg
+    /// (or is classified skip-by-design when it cannot).
     pub payment_status_failed: bool,
 }
 
@@ -384,15 +388,12 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     // control: the payment section renders `payment_unavailable_state` and the pay button is
     // disabled. `payment_unavailable` also covers a browser-side degrade (stripe.js failed) —
     // the hydrate mount flips the same state rather than inventing a second one.
-    // #730: a FAILED `paymentStatus.byOrder` read reuses the same `payment_unavailable_state`
-    // shape as the key-less shell — one degrade state, one promise ("your cart is saved"), and no
-    // element mounts into a payment flow whose outcome read is broken.
-    let payment_unavailable = state.publishable_key.is_none() || state.payment_status_failed;
-    let mount_key = (!payment_unavailable)
-        .then(|| state.publishable_key.as_ref().map(|k| k.as_str().to_string()))
-        .flatten();
-    let test_mode =
-        !payment_unavailable && state.publishable_key.as_ref().is_some_and(|k| k.is_test_mode());
+    // NOTE (#730): `payment_status_failed` is deliberately NOT part of this gate — see the field
+    // docs: the read fails structurally on every anonymous paint (arg-less by route), so keying
+    // the degrade on it would close checkout permanently.
+    let payment_unavailable = state.publishable_key.is_none();
+    let mount_key = state.publishable_key.as_ref().map(|k| k.as_str().to_string());
+    let test_mode = state.publishable_key.as_ref().is_some_and(|k| k.is_test_mode());
     // #730 (ux + legal): `place_order`'s variables bind `{{ cart.id }}` and `{{ restaurant.id }}`
     // — a failed read of either disables the pay button (an order priced on data the customer
     // never saw), with the translated reason as its tooltip. Merely-unresolved data keeps
@@ -927,23 +928,27 @@ mod tests {
         );
     }
 
-    /// #730: a failed `paymentStatus.byOrder` read reuses the `payment_unavailable_state` shape —
-    /// same copy, same "your cart is saved" promise, no Stripe element, disabled pay button —
-    /// never a second bespoke state.
+    /// #730 checkpoint finding, pinned: a failed `paymentStatus.byOrder` read must NOT degrade
+    /// the shell. The read is STRUCTURALLY arg-less on this route (required `orderId`, no route
+    /// param — #420's reported DSL gap) and the query admits PUBLIC, so the mark is set on every
+    /// anonymous first paint; gating `payment_unavailable_state` on it would close checkout
+    /// permanently — the exact "cosmetic resolver failure blocks checkout" the business rule
+    /// forbids. Caught by the server's own end-to-end body test
+    /// (`hosts::tests::the_served_checkout_body_carries_the_key_iff_the_service_is_configured`)
+    /// when a first draft did gate on it.
     #[cfg(feature = "ssr")]
     #[test]
-    fn a_failed_payment_status_read_reuses_the_payment_unavailable_state() {
+    fn a_failed_payment_status_read_does_not_degrade_the_shell() {
         let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
         let mut state = view_state(true, false).with_publishable_key(key);
         state.payment_status_failed = true;
         let html = render_checkout_html(state, "fr");
-        assert!(html.contains("id=\"payment_unavailable_state\""), "{html}");
-        assert!(html.contains("Paiement momentanément indisponible"), "{html}");
+        assert!(!html.contains("id=\"payment_unavailable_state\""), "{html}");
         assert!(
-            !html.contains(&format!("id=\"{}\"", crate::stripe::MOUNT_ID)),
-            "no element mounts into a flow whose outcome read is broken: {html}"
+            html.contains(&format!("id=\"{}\"", crate::stripe::MOUNT_ID)),
+            "the element still mounts — the mark is structural on this route: {html}"
         );
-        assert!(element_tag(&html, "place_order_btn").contains("disabled"), "{html}");
+        assert!(!element_tag(&html, "place_order_btn").contains("disabled"), "{html}");
     }
 
     /// The configured state (#440): a mountable key exists, so the spec tree INCLUDES the Stripe

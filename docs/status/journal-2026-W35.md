@@ -24,8 +24,14 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > failed data lies). An action whose `variables` bind a FAILED resolver renders DISABLED with the
 > translated reason (executor; failed ≠ merely-unresolved — form fields/mint tokens stay
 > dispatchable). Checkout (hand-written) reads through the context now: failed cart → summary
-> error + `place_order_btn` disabled; failed `me.profile` → fields empty-editable + notice; failed
-> `paymentStatus` → the `payment_unavailable_state` shape reused. Mailbox spec bindings repaired
+> error + `place_order_btn` disabled; failed `me.profile` → fields empty-editable + notice.
+> DEVIATION from the card, caught by the server's own end-to-end body test: `paymentStatus` does
+> NOT reuse `payment_unavailable_state` — the query admits PUBLIC and takes a required `orderId`
+> the route cannot supply, so the read fails STRUCTURALLY on every anonymous /checkout paint and
+> gating on the mark would close checkout permanently (pinned by
+> `a_failed_payment_status_read_does_not_degrade_the_shell`; the same structural failure bumps
+> `sdui_degraded_render_total{resolver=paymentStatus.byOrder}` on every paint — pre-existing
+> noise, morning queue). Mailbox spec bindings repaired
 > to the derived aliases (W35's dormant finding — SPEC-LOG row). All four dispatch reds seen
 > verbatim. ONE `Degradation` per failed resolver, emission unchanged upstream. Surprises vs the
 > card recorded on the PR: `restaurants.featured`/`restaurants.all` are a second live same-root
