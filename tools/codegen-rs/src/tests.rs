@@ -450,6 +450,53 @@ screens:
         assert!(pay.contains("tree: &[]"), "non-SDUI screens carry no tree");
     }
 
+    /// #725: `conditional_section` branches are REAL child node groups, named `if_true`/`if_false`
+    /// verbatim — never flattened into dotted props (the pre-#725 state left branch content
+    /// structurally unrenderable) and never desugared into sibling nodes with a synthesized
+    /// `visible_when` (that would erase the spec term and the `data-cond` audit referent).
+    #[test]
+    fn conditional_section_branches_emit_as_named_child_groups_not_dotted_props() {
+        let m = inline_model(&[
+            (
+                "screens/restaurant_frontoffice.yaml",
+                r#"
+component_registry:
+  layout: [section, conditional_section]
+  content: [text, list]
+screens:
+  - id: search
+    roles: [PUBLIC]
+    route: "/search"
+    sdui: true
+    data_requirements: []
+    components:
+      - type: conditional_section
+        condition: "search_input.value == ''"
+        if_true:
+          - { type: section, title: "Recent", content: [{ type: list, items: "{{ recent_searches }}" }] }
+        if_false:
+          - { type: text, value: "{{ search_input.value }}" }
+"#,
+            ),
+            ("api.yaml", "queries: {}\n"),
+        ]);
+        let out = emit_web_screens(&m);
+        // The branches are NOT dotted props any more…
+        assert!(!out.contains("(\"if_true.0.type\""), "branch content must not flatten: {out}");
+        assert!(!out.contains("(\"if_false.0.type\""), "branch content must not flatten: {out}");
+        // …they are NAMED child groups carrying real component nodes.
+        assert!(out.contains("(\"if_true\", &["), "if_true must be a named child group: {out}");
+        assert!(out.contains("(\"if_false\", &["), "if_false must be a named child group: {out}");
+        assert!(out.contains("ComponentKind::Section"), "branch children are real nodes: {out}");
+        // The condition itself STAYS a prop on the conditional_section node (the renderer's input).
+        assert!(
+            out.contains("(\"condition\", PropValue::Text(\"search_input.value == ''\"))"),
+            "{out}"
+        );
+        // A no-branch node keeps an empty branches slice — the field is total, never optional.
+        assert!(out.contains("branches: &[]"), "{out}");
+    }
+
     #[test]
     fn bottom_sheets_emit_into_the_surface_tables() {
         let mut m = screens_fixture();
@@ -15454,5 +15501,52 @@ mod nav_edge_selections {
                 sel(unbound)
             );
         }
+    }
+
+    /// #725 (5): a nav-edge binding INSIDE a `conditional_section` branch reaches the fetch shape.
+    /// `collect_screen_nav_selections` walks the RAW screen YAML (the same whole-subtree walk §25
+    /// resolves), and `if_true`/`if_false` live inside the screen node — so a branch-only binding
+    /// must widen its query's selection exactly like a top-level one, or the #731 round-1 defect
+    /// (validated-but-never-fetched) would be recreated inside branches. Positive proof: planting
+    /// `{{ order.restaurant.displayName }}` in a branch widens `order.byId`, which the test above
+    /// pins as UN-widened on the unmodified corpus.
+    #[test]
+    fn a_branch_only_nav_binding_widens_the_fetch_shape() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let branch: Value = serde_yaml::from_str(
+            r#"
+type: conditional_section
+condition: "order.status == 'DELIVERED'"
+if_true:
+  - { type: text, value: "{{ order.restaurant.displayName }}" }
+"#,
+        )
+        .expect("valid yaml");
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_frontoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("storefront screens");
+        let tracking = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("order_tracking"))
+            .expect("order_tracking screen");
+        tracking
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("components")
+            .push(branch);
+        let nav = collect_screen_nav_selections(&model);
+        let widened = nav
+            .get("order")
+            .and_then(|edges| edges.get("restaurant"))
+            .map(|parts| parts.contains("displayName"))
+            .unwrap_or(false);
+        assert!(
+            widened,
+            "a branch-only `order.restaurant.displayName` binding must sub-select the nav edge: {nav:?}"
+        );
     }
 }

@@ -241,7 +241,9 @@ fn truthiness(v: &Value) -> Option<bool> {
 }
 
 /// Whether a flattened prop KEY declares a condition — exact spelling or a dotted suffix
-/// (`rows.1.visible_when`, `item_badge.visible_when`, `if_true.0.visible_when`, …).
+/// (`rows.1.visible_when`, `item_badge.visible_when`, `item_components.4.visible_when`, …).
+/// `conditional_section` branches are NOT dotted props any more (#725: they emit as named branch
+/// child groups, walked as real nodes above) — the dotted arms stay for per-item CONFIG shapes.
 pub fn is_condition_prop(key: &str) -> bool {
     matches!(key, "visible_when" | "disabled_when" | "condition")
         || key.ends_with(".visible_when")
@@ -298,6 +300,11 @@ fn collect_defects(nodes: &[Node], out: &mut Vec<ConditionDefect>) {
             }
         }
         collect_defects(node.children, out);
+        // Branch child groups (#725): `conditional_section`'s `if_true`/`if_false` content is part
+        // of the gated corpus too — a walk that skipped them would silently narrow this gate.
+        for (_, group) in node.branches {
+            collect_defects(group, out);
+        }
     }
 }
 
@@ -441,6 +448,7 @@ mod tests {
             .map(|n| {
                 n.props.iter().filter(|(k, _)| is_condition_prop(k)).count()
                     + count_conditions(n.children)
+                    + n.branches.iter().map(|(_, g)| count_conditions(g)).sum::<usize>()
             })
             .sum()
     }
@@ -455,6 +463,7 @@ mod tests {
                 ("rows.1.visible_when", PropValue::Text("a >= b")),
             ],
             children: &[],
+            branches: &[],
         };
         let defects = condition_defects(&[planted]);
         assert_eq!(defects.len(), 2, "{defects:?}");

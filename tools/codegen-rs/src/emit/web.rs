@@ -838,6 +838,14 @@ pub(crate) enum EmittedProp {
 /// `status_config.*.icon`) and must flatten into props, not be forced through the registry.
 pub(crate) const CHILD_KEYS: [&str; 4] = ["components", "content", "fields", "sections"];
 
+/// The DSL keys whose sequences hold NAMED BRANCH child groups (#725): `conditional_section`'s
+/// `if_true`/`if_false`. Emitted VERBATIM as `(name, children)` groups on the node — never
+/// flattened into dotted props (that left branch content structurally unrenderable), and never
+/// desugared into sibling nodes with a synthesized `visible_when` (that would erase the spec term
+/// and the `data-cond` audit referent). Branch membership is semantic: the renderer evaluates the
+/// node's `condition:` and renders exactly one group.
+pub(crate) const BRANCH_KEYS: [&str; 2] = ["if_true", "if_false"];
+
 /// True when the sequence under a child-carrying key really is a list of component nodes (every
 /// mapping item carries `type` or `component`).
 pub(crate) fn is_component_seq(seq: &[Value]) -> bool {
@@ -881,13 +889,16 @@ pub(crate) fn flatten_screen_props(path: &str, v: &Value, props: &mut Vec<(Strin
         }
         Value::String(s) => {
             let t = s.trim();
-            if t.starts_with("{{") && t.ends_with("}}") {
-                props.push((
-                    path.to_string(),
-                    EmittedProp::Binding(t.trim_start_matches("{{").trim_end_matches("}}").trim().to_string()),
-                ));
-            } else {
-                props.push((path.to_string(), EmittedProp::Text(s.clone())));
+            // A whole-string SINGLE template is a Binding. A multi-template string
+            // ("{{ item.actorType }} / {{ item.partition }}") also starts with `{{` and ends with
+            // `}}` but is NOT one binding path — before #725 it mis-lexed into a garbage Binding
+            // the renderer could never resolve; it stays Text (the renderer interpolates).
+            let inner = t.strip_prefix("{{").and_then(|x| x.strip_suffix("}}"));
+            match inner {
+                Some(i) if !i.contains("{{") && !i.contains("}}") => {
+                    props.push((path.to_string(), EmittedProp::Binding(i.trim().to_string())));
+                }
+                _ => props.push((path.to_string(), EmittedProp::Text(s.clone()))),
             }
         }
         Value::Bool(b) => props.push((path.to_string(), EmittedProp::Text(b.to_string()))),
@@ -929,6 +940,7 @@ pub(crate) fn emit_screen_node(
 
     let mut props: Vec<(String, EmittedProp)> = Vec::new();
     let mut children: Vec<String> = Vec::new();
+    let mut branches: Vec<(String, Vec<String>)> = Vec::new();
     let pad = "    ".repeat(indent);
 
     for (k, v) in m {
@@ -938,6 +950,25 @@ pub(crate) fn emit_screen_node(
             None => continue,
         };
         match v {
+            // Named branch groups (#725): `if_true`/`if_false` component sequences travel as
+            // `(name, children)` groups, VERBATIM, so the renderer can pick exactly one and the
+            // condition-defect walk still traverses their content.
+            Value::Sequence(seq) if BRANCH_KEYS.contains(&key) && is_component_seq(seq) => {
+                let group: Vec<String> = seq
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| {
+                        emit_screen_node(
+                            item,
+                            globals,
+                            registry_types,
+                            &format!("{at}/{key}[{i}]"),
+                            indent + 1,
+                        )
+                    })
+                    .collect();
+                branches.push((key.to_string(), group));
+            }
             // Child-carrying shapes: a component sequence under a whitelisted key, or the chrome
             // `slots` map (each slot is a component sequence, flattened in slot order).
             Value::Sequence(seq) if CHILD_KEYS.contains(&key) && is_component_seq(seq) => {
@@ -992,8 +1023,19 @@ pub(crate) fn emit_screen_node(
     } else {
         format!("&[\n{}\n{pad}]", children.join(",\n"))
     };
+    let branches_lit = if branches.is_empty() {
+        "&[]".to_string()
+    } else {
+        let groups: Vec<String> = branches
+            .iter()
+            .map(|(name, nodes)| {
+                format!("(\"{}\", &[\n{}\n{pad}] as &[Node])", rust_str(name), nodes.join(",\n"))
+            })
+            .collect();
+        format!("&[{}]", groups.join(", "))
+    };
     format!(
-        "{pad}Node {{ kind: ComponentKind::{}, props: {props_lit}, children: {children_lit} }}",
+        "{pad}Node {{ kind: ComponentKind::{}, props: {props_lit}, children: {children_lit}, branches: {branches_lit} }}",
         pascal_snake(ty)
     )
 }
@@ -1023,7 +1065,7 @@ pub(crate) fn emit_web_screens(model: &Model) -> String {
     surfaces.sort();
 
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/screens) — do not edit\n// by hand. The SDUI SCREEN TREES (#87, ADR-0033): one module per surface, each screen's route,\n// roles, resolver bindings and component tree as static data. The renderer walks these trees and\n// dispatches on `ComponentKind`; `sdui: false` screens carry an EMPTY tree (their markup is\n// hand-written — checkout.rs / tracking.rs) but still register their route for the router.\n\nuse super::data_layer::ResolverKey;\nuse super::registry::ComponentKind;\n\n/// One flattened prop on a screen node: literal text, a translation key (resolve via the i18n\n/// catalog), or a `{{ path }}` binding into the screen's resolved resolver data.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum PropValue {\n    Text(&'static str),\n    I18n(&'static str),\n    Binding(&'static str),\n}\n\n/// One renderable node of a screen tree.\n#[derive(Debug, Clone, Copy)]\npub struct Node {\n    pub kind: ComponentKind,\n    /// Dotted-path props flattened from the DSL (`empty_state.title`, `action.type`, …).\n    pub props: &'static [(&'static str, PropValue)],\n    pub children: &'static [Node],\n}\n\n/// One bottom sheet of a surface (#94): the DSL `bottom_sheets` entry as a renderable tree — the\n/// renderer mounts every sheet HIDDEN into each of the surface's screens; `open_bottom_sheet`\n/// toggles them by id.\n#[derive(Debug, Clone, Copy)]\npub struct Sheet {\n    pub id: &'static str,\n    pub node: Node,\n}\n\n/// One screen of a surface.\n#[derive(Debug, Clone, Copy)]\npub struct Screen {\n    pub id: &'static str,\n    pub route: &'static str,\n    /// UserType tokens (scalars.yaml#/UserType) admitted to this screen.\n    pub roles: &'static [&'static str],\n    pub requires_auth: bool,\n    /// False = deliberately NOT SDUI-rendered (hand-written page); tree is empty.\n    pub sdui: bool,\n    pub data_requirements: &'static [ResolverKey],\n    pub tree: &'static [Node],\n}\n\nimpl Node {\n    /// The first value of a dotted prop path, if present.\n    pub fn prop(&self, key: &str) -> Option<PropValue> {\n        self.props.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)\n    }\n}\n",
+        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/screens) — do not edit\n// by hand. The SDUI SCREEN TREES (#87, ADR-0033): one module per surface, each screen's route,\n// roles, resolver bindings and component tree as static data. The renderer walks these trees and\n// dispatches on `ComponentKind`; `sdui: false` screens carry an EMPTY tree (their markup is\n// hand-written — checkout.rs / tracking.rs) but still register their route for the router.\n\nuse super::data_layer::ResolverKey;\nuse super::registry::ComponentKind;\n\n/// One flattened prop on a screen node: literal text, a translation key (resolve via the i18n\n/// catalog), or a `{{ path }}` binding into the screen's resolved resolver data.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum PropValue {\n    Text(&'static str),\n    I18n(&'static str),\n    Binding(&'static str),\n}\n\n/// One renderable node of a screen tree.\n#[derive(Debug, Clone, Copy)]\npub struct Node {\n    pub kind: ComponentKind,\n    /// Dotted-path props flattened from the DSL (`empty_state.title`, `action.type`, …).\n    pub props: &'static [(&'static str, PropValue)],\n    pub children: &'static [Node],\n    /// Named branch child groups (#725): `conditional_section`'s `if_true`/`if_false`, verbatim\n    /// from the DSL. The renderer evaluates the node's `condition:` prop and renders EXACTLY ONE\n    /// group (unevaluatable → neither, fail closed); the condition-defect walk traverses all.\n    pub branches: &'static [(&'static str, &'static [Node])],\n}\n\n/// One bottom sheet of a surface (#94): the DSL `bottom_sheets` entry as a renderable tree — the\n/// renderer mounts every sheet HIDDEN into each of the surface's screens; `open_bottom_sheet`\n/// toggles them by id.\n#[derive(Debug, Clone, Copy)]\npub struct Sheet {\n    pub id: &'static str,\n    pub node: Node,\n}\n\n/// One screen of a surface.\n#[derive(Debug, Clone, Copy)]\npub struct Screen {\n    pub id: &'static str,\n    pub route: &'static str,\n    /// UserType tokens (scalars.yaml#/UserType) admitted to this screen.\n    pub roles: &'static [&'static str],\n    pub requires_auth: bool,\n    /// False = deliberately NOT SDUI-rendered (hand-written page); tree is empty.\n    pub sdui: bool,\n    pub data_requirements: &'static [ResolverKey],\n    pub tree: &'static [Node],\n}\n\nimpl Node {\n    /// The first value of a dotted prop path, if present.\n    pub fn prop(&self, key: &str) -> Option<PropValue> {\n        self.props.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)\n    }\n\n    /// The named branch child group (`if_true`/`if_false`), if this node carries it (#725).\n    pub fn branch(&self, name: &str) -> Option<&'static [Node]> {\n        self.branches.iter().find(|(n, _)| *n == name).map(|(_, c)| *c)\n    }\n}\n",
     );
 
     for sf in &surfaces {

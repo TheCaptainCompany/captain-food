@@ -449,6 +449,21 @@ pub fn button_attrs(node: &Node, ctx: &RenderContext) -> (Vec<(&'static str, Str
     }
 }
 
+/// [`button_attrs`] for a click action rooted at an arbitrary prop PREFIX (#725): a List's
+/// per-item component templates flatten as `item_components.N.*`, so their buttons parse from
+/// `item_components.N.action.*` — same machinery, same DOM contract, resolved against the
+/// per-row context (the row travels as `item`).
+pub fn button_attrs_prefixed(
+    node: &Node,
+    ctx: &RenderContext,
+    prefix: &str,
+) -> (Vec<(&'static str, String)>, Option<String>) {
+    match ActionSpec::from_node_prefixed(node, ctx, prefix) {
+        Some(spec) => spec_attrs(&spec),
+        None => (Vec::new(), None),
+    }
+}
+
 /// A non-click TRIGGER action (#114): an action rooted at `prefix` (`on_complete`/`on_change`),
 /// stamped with `data-trigger` = the DOM event that fires it. `interact.rs` delegates `input`/
 /// `change` events to these exactly as it delegates clicks to `button_attrs`.

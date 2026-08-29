@@ -78,6 +78,7 @@ resolvers:
   # ── GAPS — UI data needs with no backing API query yet ──
   promotions.active: { gap: "No promotions/deals query — HubRise deals not modelled in V0 (home promo banners)." }
   dishes.search:     { gap: "No dish/product search query — only restaurant search (queries/restaurants) exists." }
+  searches.recent:   { gap: "Client-side recent-searches state has no producer, and set_search/search_query are not registered actions — needs the client-state producer plus action registration (#723)." }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA LAYER — ACTIONS (writes + client behaviours). Registered action-type allowlist; anything
@@ -241,9 +242,10 @@ screens:
     route: "/search"
     title: { $ref: 'translations.yaml#/common.nav.search' }
     sdui: true
-    data_requirements: [restaurants.search, categories.all, dishes.search]
+    data_requirements: [restaurants.search, categories.all, dishes.search, searches.recent]
     gaps:
       - "`dishes.search` (the \"Dishes\" results) has no backing query — only restaurant search exists."
+      - "`searches.recent` (the \"Recent searches\" branch) has no client-side producer and its set_search/search_query actions are unregistered (#723) — the section stays hidden rather than rendering a dead control."
     components:
       - { component: topbar }
       - { type: search_bar_active, id: search_input, placeholder: { $ref: 'captain_frontoffice.translations.yaml#/search.placeholder' }, autofocus: true, back_button: true, on_change: { type: search_query, query: "{{ search_input.value }}" } }
@@ -251,13 +253,16 @@ screens:
         condition: search_input.value == ''
         if_true:
           - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.recent' }, visible_when: recent_searches.length > 0, content: [{ type: list, items: "{{ recent_searches }}", item_action: { type: set_search, query: "{{ item }}" } }] }
-          - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ popular_categories }}", item_type: category_tile }] }
+          - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ categories }}", item_type: category_tile }] }   # rebound from the nonexistent `popular_categories` to the categories.all alias (#725)
         if_false:
           - type: search_results
             query: "{{ search_input.value }}"
             sections:
-              - { id: restaurant_results, title: { $ref: 'captain_frontoffice.translations.yaml#/search.restaurants' }, items: "{{ results.restaurants }}", item_type: restaurant_card }
-              - { id: dish_results, title: { $ref: 'captain_frontoffice.translations.yaml#/search.dishes' }, items: "{{ results.dishes }}", item_type: dish_row }
+              # Rebound from the nonexistent `results.*` roots (#725): `search_restaurants` is the
+              # restaurants.search alias (backed); `search_dishes` is the dishes.search alias — a
+              # DECLARED gap, which the renderer surfaces as gapped, never a live-looking empty list.
+              - { id: restaurant_results, title: { $ref: 'captain_frontoffice.translations.yaml#/search.restaurants' }, items: "{{ search_restaurants }}", item_type: restaurant_card }
+              - { id: dish_results, title: { $ref: 'captain_frontoffice.translations.yaml#/search.dishes' }, items: "{{ search_dishes }}", item_type: dish_row }
             empty_state: { icon: search_off, title: { $ref: 'captain_frontoffice.translations.yaml#/search.empty.title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/search.empty.body' } }
       - { component: bottom_nav }
 
