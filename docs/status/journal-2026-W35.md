@@ -3,6 +3,25 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 📝 **2026-08-29 — round-2 founder answers recorded + the commissioned ETA proposal is drafted.**
+> **(1)** The founder's answer sheet round 2 (verbatim): *"MIN-ORDER-SCOPE: A — Delivery only"* and
+> *"MIN-ORDER-PER-RESTAURANT: B — Platform default, restaurant may override later"* — appended to
+> [V0-PROMO-AND-MINIMUM](../decisions/V0-PROMO-AND-MINIMUM.yaml)'s evidence (schema-permitting; no
+> new deciding record needed). The minimum gates `PlaceOrder` only for `serviceType` DELIVERY, the
+> config shape stays a platform key in `specs/ordering/configuration.yaml` (1500 cents EUR default)
+> with the per-restaurant override as planned later work. Both answers match the presented team
+> recommendations. The erasure-proposal approval remains OPEN. **(2)** The commissioned pre-order
+> ETA proposal ([PROP-20260829-165042](../proposals/PROP-20260829-165042-pre-order-eta.md),
+> tracking [#733 "Storefront pre-order delivery ETA: the slot is now honestly empty — and the ETA
+> is the product"](https://github.com/TheCaptainCompany/captain-food/issues/733), founder answer
+> *"C — Team drafts the proposal with both options"*, ADR-20260829-145848): Declared/Computed
+> vocabulary (the `eta_bar` conflation named for fixing), the ETA-continuity journey spine, Option
+> B (computed — final vision, naming the prep-time GAP(read-model) and the PROP-172500 D1 geocoding
+> dependency) vs Option A (declared range, its Friday-peak staleness faced squarely), and the
+> hybrid argued in its ADR-20260808-235113-legitimate form — recommendation: B's shape now with a
+> declared-inputs evaluator (`basis: DECLARED`), measured upgrade as a follow-on slice. Awaiting
+> the reviewer pass, then presentation for approval.
+
 > 🔁 **2026-08-29 — erasure proposal, review round 1: FAIL folded in one edit round**
 > ([PROP-20260829-150752](../proposals/PROP-20260829-150752-customer-erasure.md), living doc
 > rewritten in place per ADR-20260801-020000; architecture unchanged). Two blocking findings
