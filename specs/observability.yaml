@@ -1593,7 +1593,11 @@ read-authorization:
     #                            tenant-host source, declared on the binding via `skipped_reads:`
     #                            and skipped BEFORE any network). Skip reasons feed the render's
     #                            TRACE (a per-skip event with screen/resolver/reason/
-    #                            correlation_id at the hosts.rs boundary), never a metric label:
+    #                            correlation_id at the hosts.rs boundary, at INFO — proven
+    #                            visible under the deployed LOG_LEVEL=info default by
+    #                            crates/server/tests/skip_trace_visibility.rs; a debug-gated
+    #                            emission was the #748-checkpoint blocking finding, the
+    #                            wired-never-to-scream class), never a metric label:
     #                            a metric reason wired to weigh zero is a signal wired never to
     #                            scream. The §25b dead-man rule keeps the skip honest — the
     #                            moment the spec gives the read a source, the declaration is a

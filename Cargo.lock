@@ -4795,6 +4795,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "uber-direct-adapter",
  "uuid",
  "web",

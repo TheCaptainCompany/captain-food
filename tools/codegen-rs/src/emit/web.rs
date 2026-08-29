@@ -743,6 +743,10 @@ pub(crate) fn emit_web_data_layer(model: &Model) -> String {
                 let mut accepts: BTreeSet<String> = BTreeSet::new();
                 accepts.insert(a.name.clone());
                 let bridge = camel(&a.ty);
+                // `is_ref` gate: the bridge alias exists only for $ref-typed args — a divergence
+                // from `param_feeds_arg`, which does not gate (#748 checkpoint, beck note).
+                // Corpus-safe under the $ref doctrine (every api.yaml arg types by $ref), named
+                // here so a future inline-typed arg makes the divergence deliberate, not latent.
                 if a.is_ref && !bridge.is_empty() && bridge != a.name {
                     accepts.insert(bridge);
                 }

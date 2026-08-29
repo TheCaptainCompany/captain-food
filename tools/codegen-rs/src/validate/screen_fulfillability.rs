@@ -120,6 +120,11 @@ pub(crate) fn screen_unfulfillable_reads(
             .filter(|(name, scalar)| {
                 let pinned = pins.contains(name);
                 let routed = params.iter().any(|p| param_feeds_arg(p, name, scalar));
+                // NARROWER than `param_feeds_arg` on purpose (#748 checkpoint, graphql note):
+                // the host supplies exactly one value — a `Slug` — so only an arg literally
+                // named `slug` of type `Slug` may claim it; the bridge's scalar-name alias does
+                // not apply to the host source. Harmless divergence today (the runtime consults
+                // the same generated table), named here so a future widening is deliberate.
                 let hosted = host_slug && name == "slug" && scalar == "Slug";
                 !(pinned || routed || hosted)
             })
