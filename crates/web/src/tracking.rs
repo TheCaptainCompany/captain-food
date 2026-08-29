@@ -95,15 +95,20 @@ impl TrackingState {
         Self { order_id, order }
     }
 
-    /// Build from a full [`RenderContext`] (#472) — [`from_resolved`](Self::from_resolved) plus
-    /// the failed-read distinction: a read `classify_resolve` marked FAILED becomes
+    /// Build from a full [`RenderContext`] (#472) — the [`from_resolved`](Self::from_resolved)
+    /// three-way plus the failed-read distinction: a read `classify_resolve` marked FAILED becomes
     /// [`OrderRead::Failed`], which renders the staleness state instead of the silent shell.
+    /// Reads through the context's own binding resolution (#729: data is keyed by the full
+    /// resolver key, `order.byId`, and the `order` template alias reaches it), and the
+    /// answer-beats-failure-mark precedence now lives in `binding_failed` itself.
     pub fn from_context(order_id: Uuid, ctx: &crate::renderer::RenderContext) -> Self {
-        let mut state = Self::from_resolved(order_id, &ctx.data);
-        if matches!(state.order, OrderRead::Unresolved) && ctx.binding_failed("order") {
-            state.order = OrderRead::Failed;
-        }
-        state
+        let order = match ctx.binding_json("order") {
+            None if ctx.binding_failed("order") => OrderRead::Failed,
+            None => OrderRead::Unresolved,
+            Some(Value::Null) => OrderRead::Absent,
+            Some(v) => OrderRead::Present(v),
+        };
+        Self { order_id, order }
     }
 
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.

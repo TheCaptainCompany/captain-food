@@ -17,10 +17,12 @@ use crate::*;
 // HONEST SCOPE (never guess-match names, per the dispatch): a screen never declares "the type of
 // `cart`" directly. What it declares is `data_requirements: [cart.current, …]`, each name a RESOLVER
 // binding whose `query.$ref` names an `api.yaml` query with a `returns: { $ref: '#/types/T' }`. The
-// RUNTIME then stores that query's result under BOTH the resolver name's first dotted segment and,
-// when the second segment is a plain lowercase/underscore word, the reversed `second_first` alias —
-// `crates/web/src/renderer.rs#RenderContext::insert_resolved` is the ONE place that decides this, so
-// `screen_binding_roots` below mirrors it exactly rather than inventing a second naming scheme. A
+// RUNTIME stores that query's result under the FULL resolver key (#729 — same-root siblings must
+// not overwrite each other) and resolves templates at READ time against the derived aliases: the
+// resolver name's first dotted segment and, when the second segment is a plain lowercase/underscore
+// word, the reversed `second_first` form — `crates/web/src/renderer.rs#resolver_aliases` (consumed
+// by `feeding_key`) is the ONE place that decides this, so `screen_binding_roots` below mirrors it
+// exactly rather than inventing a second naming scheme. A
 // screen's OTHER `{{ }}` roots (loop variables from `item_template`, plain UI/form state like
 // `selected_delivery_mode` or `promo_field.value`) are NOT data-requirement-derived and are simply not
 // in the roots map — those paths are left UNCHECKED, not flagged, which is the declared boundary this
@@ -38,7 +40,7 @@ use crate::*;
 /// `(api type, api.yaml query name)` — the type the walk resolves against, and the query whose
 /// generated client selection must FETCH what the walk approves (the emitter's consumer; #717
 /// round 1: validating a nav path the client never selects renders empty with the gate green).
-/// Mirrors `RenderContext::insert_resolved`. `gap` resolvers and resolvers whose query cannot be
+/// Mirrors `renderer.rs#resolver_aliases`. `gap` resolvers and resolvers whose query cannot be
 /// resolved contribute no root — they are legitimately outside the api's typed surface, not a
 /// defect this rule reports on.
 pub(crate) fn screen_binding_roots(

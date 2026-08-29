@@ -25,22 +25,34 @@ use crate::generated::registry::ComponentKind;
 use crate::generated::screens::{Node, PropValue, Screen};
 use crate::i18n;
 
-/// What a screen renders FROM: the resolver results keyed by BINDING NAME + the locale.
+/// What a screen renders FROM: the resolver results keyed by FULL RESOLVER KEY + the locale.
 ///
-/// Binding names: each resolver result is stored under its dotted spec key (`orders.byRestaurant`)
-/// AND its natural template aliases — the FIRST segment (`orders`) and, when the second segment is
-/// a plain lowercase word, the reversed `second_first` form (`restaurants.featured` →
-/// `featured_restaurants`) — matching how the DSL's `{{ … }}` templates name their data.
+/// Keying (#729): each resolver result is stored under its dotted spec key
+/// (`orders.byRestaurant`) and NOTHING else — the old first-segment alias storage let same-root
+/// siblings (`mailbox.lanes`/`mailbox.poisoned`) overwrite each other's entry. Template names
+/// reach the data through [`feeding_key`]'s ONE matching rule instead: the longest stored-key
+/// prefix of the binding path, else the stored key whose derived template alias
+/// ([`resolver_aliases`]) equals the binding's ROOT — so `{{ orders }}`,
+/// `{{ featured_restaurants }}` and `{{ cart.lines }}` all reach the entry their resolver stored.
 #[derive(Debug, Clone, Default)]
 pub struct RenderContext {
     pub data: Map<String, Value>,
     /// Resolver reads that FAILED for real (#472) — transport/contract failures on a read this
-    /// role path is allowed to ask, keyed like `data` (spec key + aliases). NOT the skip-by-design
+    /// role path is allowed to ask, keyed by FULL resolver key, exactly like `data` (#729 — the
+    /// parity `resolver_key_parity_between_data_and_failure_marks` pins). NOT the skip-by-design
     /// outcomes (declared gaps, role-refused reads on the anonymous SSR path), which leave no
     /// trace here: a failed binding renders its ERROR state, a skipped one its empty/shell state,
     /// and conflating the two is exactly the "Commande introuvable over a transient failure"
     /// defect this field exists to prevent.
     failed: BTreeSet<String>,
+    /// The per-render error-anchor assignment (#730, [`RenderContext::assign_error_anchors`]):
+    /// for each failed resolver, the ONE node (by address — screen trees are `'static`) that
+    /// renders its error affordance, plus the resolver keys that HAVE such an anchor. Inactive
+    /// (`anchors_assigned == false`) until a screen-level render assigns it, so direct
+    /// `render_node` calls keep their per-node semantics.
+    error_anchors: BTreeSet<usize>,
+    error_claimed: BTreeSet<String>,
+    anchors_assigned: bool,
     pub locale: String,
     /// The Stripe publishable TEST key the server was configured with, already PARSED (#440):
     /// `None` = absent/empty/malformed = the checkout shell renders its degraded state. Carried on
@@ -55,36 +67,52 @@ impl RenderContext {
         Self {
             data: Map::new(),
             failed: BTreeSet::new(),
+            error_anchors: BTreeSet::new(),
+            error_claimed: BTreeSet::new(),
+            anchors_assigned: false,
             locale: locale.to_string(),
             stripe_publishable_key: None,
         }
     }
 
-    /// Record one resolver read as FAILED (#472), under the same aliases `insert_resolved` uses.
+    /// Record one resolver read as FAILED (#472) — under the FULL resolver key only, exactly as
+    /// `insert_resolved` keys `data` (#729): the old per-alias marks made one failed resolver
+    /// shadow its same-root sibling's resolved data.
     pub fn insert_failed(&mut self, resolver_key: &str) {
-        let (first, reversed) = resolver_aliases(resolver_key);
-        if let Some(alias) = reversed {
-            self.failed.insert(alias);
-        }
-        self.failed.insert(first);
         self.failed.insert(resolver_key.to_string());
     }
 
-    /// Whether the resolver feeding this `{{ path }}` binding failed for real (#472) — matched on
-    /// the binding's ROOT segment, the name resolver results are stored under.
+    /// Whether the resolver feeding this `{{ path }}` binding failed for real (#472) — matched by
+    /// [`feeding_key`]'s longest-prefix/alias rule over the FULL resolver keys, never the bare
+    /// root (#729). Precedence: `answer_beats_failure_mark` (the tracking.rs sentence, now the
+    /// context's own rule) — a binding some stored ANSWER feeds is never failed, whatever marks
+    /// exist. Cross-resolver precedence only, never intra-resolver salvage: the rule is per
+    /// resolver KEY, and a null field inside Ok data stays legitimate absence, never a failure.
     pub fn binding_failed(&self, raw: &str) -> bool {
-        let path = raw.split('|').next().unwrap_or(raw).trim();
-        let root = path.split('.').next().unwrap_or(path);
-        self.failed.contains(root) || self.failed.contains(path)
+        self.failed_resolver_for(raw).is_some()
     }
 
-    /// Store one resolver result under its spec key + template aliases (see type docs).
-    pub fn insert_resolved(&mut self, resolver_key: &str, value: Value) {
-        let (first, reversed) = resolver_aliases(resolver_key);
-        if let Some(alias) = reversed {
-            self.data.insert(alias, value.clone());
+    /// The FAILED resolver key feeding this binding, `None` when an answer feeds it instead (or
+    /// nothing matches) — `binding_failed` plus the key the #730 anchor assignment claims once.
+    ///
+    /// Answers and marks compete under the SAME [`feeding_key`] rule: the longer match decides
+    /// which resolver the binding actually names (`{{ mailbox.lanes }}` names the failed
+    /// `mailbox.lanes`, never its answered sibling via the shared root), and an answer wins any
+    /// tie — the same resolver both answered and marked (a failed re-read) is answered.
+    fn failed_resolver_for(&self, raw: &str) -> Option<&str> {
+        let path = raw.split('|').next().unwrap_or(raw).trim();
+        let answered = feeding_key(self.data.keys().map(String::as_str), path);
+        let marked = feeding_key(self.failed.iter().map(String::as_str), path)?;
+        match answered {
+            Some((_, answered_len)) if answered_len >= marked.1 => None,
+            _ => Some(marked.0),
         }
-        self.data.insert(first, value.clone());
+    }
+
+    /// Store one resolver result under its FULL spec key — and nothing else (#729): sibling
+    /// resolvers sharing a root must never overwrite each other. Template aliases are resolved at
+    /// read time by [`feeding_key`].
+    pub fn insert_resolved(&mut self, resolver_key: &str, value: Value) {
         self.data.insert(resolver_key.to_string(), value);
     }
 
@@ -111,20 +139,70 @@ impl RenderContext {
         self.lookup(raw.split('|').next().unwrap_or(raw).trim()).cloned()
     }
 
-    /// Dotted-path walk into the data map (`order.status` → data["order"]["status"]).
+    /// Dotted-path walk into the data map: [`feeding_key`] picks the stored entry, the remaining
+    /// segments walk into its value (`order.status` → data["order.byId"]["status"] when
+    /// `order.byId` is the stored key `order` aliases to).
     fn lookup(&self, path: &str) -> Option<&Value> {
-        let mut segs = path.split('.');
-        let mut cur = self.data.get(segs.next()?)?;
-        for seg in segs {
+        let (key, consumed) = feeding_key(self.data.keys().map(String::as_str), path)?;
+        let mut cur = self.data.get(key)?;
+        for seg in path[consumed..].split('.').filter(|s| !s.is_empty()) {
             cur = cur.get(seg)?;
         }
         Some(cur)
     }
 }
 
-/// The template aliases a resolver key's result is stored under (see [`RenderContext`] type
-/// docs): `(first_segment, Option<reversed second_first form>)` — the ONE authority for the
-/// aliasing rule, shared by `insert_resolved`/`insert_failed` and the gap classification (#725).
+/// The stored key that FEEDS a binding path — the ONE matching rule shared by value lookup and
+/// failure-mark matching (#729), so the two can never disagree on which resolver a binding names.
+/// Returns the key + how many bytes of `path` it consumed (the rest is walked into the value).
+///
+///   1. **Longest dotted prefix** of the path among the stored keys (`mailbox.poisoned` beats the
+///      shared root `mailbox`; an exact key match beats both) — this is what keeps same-root
+///      siblings apart.
+///   2. Otherwise, a key whose derived template alias ([`resolver_aliases`]) equals the path's
+///      ROOT segment (`{{ orders }}` → `orders.byRestaurant`, `{{ featured_restaurants }}` →
+///      `restaurants.featured`).
+///
+/// Ties (two keys aliasing the same bare root, e.g. `{{ restaurants }}` over
+/// `restaurants.featured`/`restaurants.all`) resolve to the lexicographically smallest key —
+/// deterministic; no checked-in binding uses an ambiguous root (the corpus binds the reversed
+/// aliases).
+fn feeding_key<'k>(keys: impl Iterator<Item = &'k str>, path: &str) -> Option<(&'k str, usize)> {
+    let root_len = path.find('.').unwrap_or(path.len());
+    let root = &path[..root_len];
+    // (tier, consumed, Reverse-ordered key) — bigger wins; tier 2 = key-prefix, tier 1 = alias.
+    let mut best: Option<(u8, usize, &'k str)> = None;
+    for k in keys {
+        let candidate = if path == k
+            || (path.len() > k.len() && path.as_bytes()[k.len()] == b'.' && path.starts_with(k))
+        {
+            (2u8, k.len(), k)
+        } else {
+            let (first, reversed) = resolver_aliases(k);
+            if root == first || reversed.as_deref() == Some(root) {
+                (1u8, root_len, k)
+            } else {
+                continue;
+            }
+        };
+        let better = match best {
+            None => true,
+            Some((t, c, bk)) => {
+                (candidate.0, candidate.1) > (t, c)
+                    || ((candidate.0, candidate.1) == (t, c) && candidate.2 < bk)
+            }
+        };
+        if better {
+            best = Some(candidate);
+        }
+    }
+    best.map(|(_, consumed, k)| (k, consumed))
+}
+
+/// The template aliases a resolver key's result answers to (see [`RenderContext`] type docs):
+/// `(first_segment, Option<reversed second_first form>)` — the ONE authority for the aliasing
+/// rule, shared by [`feeding_key`] (lookup + failure marks, #729), the gap classification (#725)
+/// and mirrored by the §25 validator (`tools/codegen-rs/src/validate/screen_bindings.rs`).
 fn resolver_aliases(resolver_key: &str) -> (String, Option<String>) {
     let mut parts = resolver_key.splitn(2, '.');
     let first = parts.next().unwrap_or(resolver_key).to_string();
@@ -149,6 +227,144 @@ fn resolver_gap_for_root(root: &str) -> Option<&'static str> {
         let (first, reversed) = resolver_aliases(key);
         (root == key || root == first || reversed.as_deref() == Some(root)).then_some(note)
     })
+}
+
+// ─── #730: screen-level error-anchor assignment ────────────────────────────────────────────────
+
+impl RenderContext {
+    /// Assign, for each FAILED resolver, the ONE node that renders its error affordance — the
+    /// granularity is the RESOLVER, rendered ONCE, never per-scalar inline and never screen-level
+    /// (#730, the #472 pattern generalized past list kinds):
+    ///
+    ///   * the anchor is the first node (pre-order, visibility mirrored) whose OWN display props
+    ///     bind the failed resolver, PROMOTED to its nearest enclosing section — an error card
+    ///     where one label sat is noise, an error state where the section sat is legible;
+    ///   * a kind with a bespoke error state (the #472 list kinds, with per-surface copy like
+    ///     `cart.error.load`) anchors ITSELF and keeps rendering that state;
+    ///   * chrome (headers, nav, sheets) never anchors and never degrades — navigation survives a
+    ///     failed read;
+    ///   * every OTHER node fed by an anchored failed resolver renders ABSENT
+    ///     ([`render_node`]) — blank money and empty scalars over failed data are a lie, and the
+    ///     resolver's one error state already stands at its anchor.
+    ///
+    /// Action variables are NOT display bindings: a control whose `variables` bind a failed
+    /// resolver DISABLES instead (`executor::resolved_variables`) — a live button over failed
+    /// data is a false signifier.
+    pub fn assign_error_anchors(
+        &mut self,
+        screen: &Screen,
+        sheets: &[crate::generated::screens::Sheet],
+    ) {
+        let mut anchors = BTreeSet::new();
+        let mut claimed = BTreeSet::new();
+        let mut sections = Vec::new();
+        walk_error_anchors(self, screen.tree, &mut sections, &mut anchors, &mut claimed);
+        for sheet in sheets {
+            walk_error_anchors(
+                self,
+                std::slice::from_ref(&sheet.node),
+                &mut sections,
+                &mut anchors,
+                &mut claimed,
+            );
+        }
+        self.error_anchors = anchors;
+        self.error_claimed = claimed;
+        self.anchors_assigned = true;
+    }
+}
+
+/// A node's identity for the anchor set: its address (screen trees are `'static`; test-local
+/// nodes outlive their render pass).
+fn node_id(node: &Node) -> usize {
+    node as *const Node as usize
+}
+
+/// Kinds with a bespoke, per-surface-copy error state of their own (#472) — they anchor
+/// themselves and `render_node_kind` renders their state, never the generic affordance.
+fn bespoke_error_kind(kind: ComponentKind) -> bool {
+    matches!(
+        kind,
+        ComponentKind::List
+            | ComponentKind::RestaurantCardGrid
+            | ComponentKind::RestaurantCardList
+            | ComponentKind::SearchResults
+            | ComponentKind::OrderList
+            | ComponentKind::MessageBubble
+            | ComponentKind::CartLines
+    )
+}
+
+/// The FAILED resolvers feeding this node's OWN display bindings: `Binding` props outside the
+/// action/trigger/per-item namespaces (those disable their control or resolve per row instead).
+fn failed_display_resolvers(node: &Node, ctx: &RenderContext) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (key, prop) in node.props {
+        let PropValue::Binding(path) = prop else { continue };
+        let ns = key.split('.').next().unwrap_or(key);
+        if matches!(
+            ns,
+            "action" | "on_change" | "on_complete" | "on_success" | "item_components"
+                | "item_badge" | "item_action"
+        ) {
+            continue;
+        }
+        if let Some(r) = ctx.failed_resolver_for(path) {
+            if !out.iter().any(|x| x == r) {
+                out.push(r.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// The pre-order walk behind [`RenderContext::assign_error_anchors`] — mirrors the render's own
+/// visibility gates (a hidden subtree can anchor nothing) and the conditional section's
+/// one-branch rule.
+fn walk_error_anchors(
+    ctx: &RenderContext,
+    nodes: &[Node],
+    sections: &mut Vec<usize>,
+    anchors: &mut BTreeSet<usize>,
+    claimed: &mut BTreeSet<String>,
+) {
+    use crate::generated::registry::ComponentGroup;
+    for node in nodes {
+        match eval_condition_prop(node, "visible_when", ctx, false) {
+            Some(Err(_)) | Some(Ok(false)) => continue,
+            _ => {}
+        }
+        if node.kind.group() == ComponentGroup::Chrome {
+            continue; // headers/nav/sheets stay rendered — never an anchor
+        }
+        let is_section = matches!(
+            node.kind,
+            ComponentKind::Section | ComponentKind::CheckoutSection | ComponentKind::ConditionalSection
+        );
+        if is_section {
+            sections.push(node_id(node));
+        }
+        for resolver in failed_display_resolvers(node, ctx) {
+            if claimed.insert(resolver) {
+                let anchor = if bespoke_error_kind(node.kind) {
+                    node_id(node)
+                } else {
+                    sections.last().copied().unwrap_or_else(|| node_id(node))
+                };
+                anchors.insert(anchor);
+            }
+        }
+        walk_error_anchors(ctx, node.children, sections, anchors, claimed);
+        if let Some(Ok(Some(verdict))) = eval_condition_verdict(node, "condition", ctx) {
+            let branch = if verdict { "if_true" } else { "if_false" };
+            if let Some(group) = node.branch(branch) {
+                walk_error_anchors(ctx, group, sections, anchors, claimed);
+            }
+        }
+        if is_section {
+            sections.pop();
+        }
+    }
 }
 
 /// `{ amountCents, currency }` → "12,34 EUR" (fr-style decimal comma — V0 market). Non-Money
@@ -489,6 +705,29 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
         Some(Err(expr)) => return condition_error_marker(expr),
         Some(Ok(false)) => return ().into_any(), // hidden: absent, no DOM node at all
         Some(Ok(true)) | None => {}
+    }
+    // #730: screen-level error granularity — active only when a screen-level render assigned
+    // anchors ([`RenderContext::assign_error_anchors`]); direct per-node renders keep their
+    // per-node semantics.
+    if ctx.anchors_assigned {
+        if ctx.error_anchors.contains(&node_id(node)) {
+            if !bespoke_error_kind(node.kind) {
+                return binding_error_state(
+                    node.kind.as_str(),
+                    "common.error.data_unavailable",
+                    ctx,
+                );
+            }
+            // A bespoke kind IS its own anchor: fall through to its per-surface error state.
+        } else if node.kind.group() != crate::generated::registry::ComponentGroup::Chrome
+            && failed_display_resolvers(node, ctx)
+                .iter()
+                .any(|r| ctx.error_claimed.contains(r))
+        {
+            // Fed by an anchored failed resolver, not the anchor: ABSENT — blank money/scalars
+            // over failed data lie, and the resolver's ONE error state stands at its anchor.
+            return ().into_any();
+        }
     }
     render_node_kind(node, ctx)
 }
@@ -1056,6 +1295,10 @@ pub fn SduiScreen(
     sheets: &'static [crate::generated::screens::Sheet],
     ctx: RenderContext,
 ) -> impl IntoView {
+    let mut ctx = ctx;
+    // #730: the screen-level pass owns the error-granularity assignment (SSR and hydrate both
+    // enter here, so the two renders cannot disagree on where a failure surfaces).
+    ctx.assign_error_anchors(screen, sheets);
     let nodes: Vec<AnyView> = screen.tree.iter().map(|n| render_node(n, &ctx)).collect();
     let sheet_views: Vec<AnyView> = sheets.iter().map(|s| render_node(&s.node, &ctx)).collect();
     view! {
@@ -1355,18 +1598,60 @@ mod tests {
 
     #[test]
     fn resolver_alias_convention_feeds_the_marketplace_rails() {
-        // restaurants.featured → alias featured_restaurants (the template name on home).
+        // restaurants.featured → alias featured_restaurants (the template name on home). Since
+        // #729 the data map holds the FULL key only; the alias is resolved at read time.
         let mut c = ctx();
         c.insert_resolved(
             "restaurants.featured",
             json!([{ "displayName": "Chez Test", "slug": "chez-test", "address": { "city": "Tours" } }]),
         );
-        assert!(c.data.contains_key("featured_restaurants"));
-        assert!(c.data.contains_key("restaurants"));
         let home = Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "home").unwrap();
         let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), c);
         assert!(html.contains("Chez Test"), "{html}");
         assert!(html.contains("data-slug=\"chez-test\""));
+    }
+
+    /// #729 parity rule (graphql's second alias-derivation defect made a rule): for EVERY
+    /// resolver key, the names a resolved answer feeds and the names a failure mark matches are
+    /// IDENTICAL — the full key, its first-segment alias, and (when derived) its reversed alias.
+    /// A binding a resolver can answer under but not fail under (or vice versa) is exactly how
+    /// the mailbox bindings sat dormant.
+    #[test]
+    fn resolver_key_parity_between_data_and_failure_marks() {
+        use crate::generated::data_layer::ResolverKey;
+        for key in ResolverKey::ALL {
+            let key = key.as_str();
+            let mut answered = ctx();
+            answered.insert_resolved(key, json!({ "probe": "x" }));
+            answered.insert_failed(key); // the re-read-failed shape: the answer must win
+            let mut failed = ctx();
+            failed.insert_failed(key);
+
+            let mut names: Vec<String> = vec![key.to_string()];
+            let mut parts = key.splitn(2, '.');
+            let first = parts.next().unwrap_or(key).to_string();
+            if let Some(second) = parts.next() {
+                if !second.is_empty() && second.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                {
+                    names.push(format!("{second}_{first}"));
+                }
+            }
+            names.push(first);
+            for name in names {
+                assert!(
+                    answered.binding_json(&name).is_some(),
+                    "{key}: an answer must feed `{{{{ {name} }}}}`"
+                );
+                assert!(
+                    failed.binding_failed(&name),
+                    "{key}: a failure mark must match `{{{{ {name} }}}}`"
+                );
+                assert!(
+                    !answered.binding_failed(&name),
+                    "{key}: an answer beats a failure mark for `{{{{ {name} }}}}`"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1584,20 +1869,19 @@ mod tests {
             .find(|s| s.id == "mailbox_lanes")
             .expect("system mailbox screen");
         let mut c = ctx();
-        // Inserted under the template names the spec binds (`{{ mailbox_lanes }}` /
-        // `{{ mailbox_poisoned }}`). NOTE (adjacent finding, out of #725's scope): the resolver
-        // alias rule derives `lanes_mailbox` from `mailbox.lanes` — the spec's binding names do
-        // not match any alias, so the (currently placeholder-served) system surface would not
-        // hydrate these lists through `insert_resolved` as-is.
-        c.data.insert(
-            "mailbox_lanes".into(),
+        // Through the REAL resolver keys (#729): the spec now binds the derived reversed aliases
+        // (`{{ lanes_mailbox }}`/`{{ poisoned_mailbox }}` — the former `{{ mailbox_lanes }}`
+        // spelling matched no derived alias and lay dormant, journal W35), so this hydrates
+        // exactly as `insert_resolved` would in production.
+        c.insert_resolved(
+            "mailbox.lanes",
             json!([{ "actorType": "ORDER", "partition": "p-7", "registration": "SEEDED",
                      "claimedBy": "w-1", "leaseUntil": "2026-08-29T02:00:00Z",
                      "ownershipVersion": 4, "checkpoint": "m-100", "pending": 3, "scheduled": 0,
                      "oldestPendingAt": "2026-08-29T01:00:00Z" }]),
         );
-        c.data.insert(
-            "mailbox_poisoned".into(),
+        c.insert_resolved(
+            "mailbox.poisoned",
             json!([{ "messageType": "PlaceOrder", "actorType": "ORDER", "partition": "p-7",
                      "messageId": "m-poison-1", "attempts": 5, "errorCode": "CAP_EXCEEDED",
                      "receivedAt": "2026-08-29T00:00:00Z" }]),
@@ -1617,6 +1901,109 @@ mod tests {
         // Fail-closed per-item condition: no errorCode == null row here, so the error info_row
         // renders (visible_when "item.errorCode != null" is true for the poisoned row).
         assert!(html.contains("CAP_EXCEEDED"), "{html}");
+    }
+
+    // ── #729/#730: error-state granularity is the RESOLVER, never the shared root ──────────────
+    //
+    // beck's red-first list, written before the fix and seen RED against the root-alias matching
+    // (red evidence recorded in the PR/checkpoint report).
+
+    /// #729 red 1: a failed resolver must not mark its same-root SIBLING's bindings failed.
+    /// `mailbox.lanes` and `mailbox.poisoned` share the root `mailbox` — the only live same-root
+    /// pair in the corpus (plus `restaurants.featured`/`restaurants.all` on the marketplace home).
+    #[test]
+    fn a_failed_resolver_does_not_mark_its_same_root_sibling_failed() {
+        let mut c = ctx();
+        c.insert_resolved("mailbox.poisoned", json!([{ "messageId": "m-1" }]));
+        c.insert_failed("mailbox.lanes");
+        assert!(
+            !c.binding_failed("mailbox.poisoned"),
+            "poisoned ANSWERED — the lanes failure must not shadow its sibling's data"
+        );
+        assert!(c.binding_failed("mailbox.lanes"), "the failed resolver itself stays marked");
+    }
+
+    /// #729 red 2: `answer_beats_failure_mark` — an answer always beats a failure mark for the
+    /// same resolver (the tracking.rs precedence sentence, now a RenderContext-level rule).
+    /// Cross-resolver precedence only, never intra-resolver salvage: the rule is per resolver
+    /// KEY, and a null field inside Ok data stays legitimate absence, never a failure.
+    #[test]
+    fn an_answer_beats_a_failure_mark_for_the_same_resolver() {
+        let mut c = ctx();
+        c.insert_resolved("order.byId", json!({ "id": "o-1" }));
+        c.insert_failed("order.byId");
+        assert!(!c.binding_failed("order.byId"), "the answer wins on the full key");
+        assert!(!c.binding_failed("order.status"), "…and on the alias-rooted binding");
+    }
+
+    /// #729 red 3 (screen-level): one failed mailbox read renders ITS error state while the
+    /// same-root sibling's resolved rows still render. Forces the spec's dormant
+    /// `{{ mailbox_lanes }}`/`{{ mailbox_poisoned }}` bindings onto aliases the runtime derives.
+    #[test]
+    fn a_failed_lanes_read_renders_one_error_and_the_poisoned_rows_still_render() {
+        let screen = crate::generated::screens::system::SCREENS
+            .iter()
+            .find(|s| s.id == "mailbox_lanes")
+            .expect("system mailbox screen");
+        let mut c = ctx();
+        c.insert_failed("mailbox.lanes");
+        c.insert_resolved(
+            "mailbox.poisoned",
+            json!([{ "messageType": "PlaceOrder", "actorType": "ORDER", "partition": "p-7",
+                     "messageId": "m-poison-1", "attempts": 5, "errorCode": "CAP_EXCEEDED",
+                     "receivedAt": "2026-08-29T00:00:00Z" }]),
+        );
+        let html = render_screen_html(screen, &[], c);
+        // Element markup, never CSS substrings (app.css carries selectors on every page).
+        assert!(
+            html.contains("<div data-c=\"list\" data-error=\"true\""),
+            "the failed lanes list renders the error state: {html}"
+        );
+        assert!(html.contains("m-poison-1"), "the resolved poisoned row still renders: {html}");
+        assert_eq!(
+            html.matches("data-error=\"true\"").count(),
+            1,
+            "ONE error state — the failed resolver's, never its sibling's: {html}"
+        );
+    }
+
+    /// #730 red 4 (scalar affordance, Tours-facing): a failed `restaurant.bySlug` renders the
+    /// section-level error affordance ONCE — replacing `restaurant_info` — while the catalog
+    /// (a DIFFERENT resolver, resolved) still renders. Every error assertion pairs with a
+    /// positive sibling-renders assertion, else the test passes when the whole screen errors
+    /// (#729 in reverse).
+    #[test]
+    fn a_failed_restaurant_read_errors_the_info_section_and_the_catalog_still_renders() {
+        let screen = Surface::RestaurantFrontoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "restaurant")
+            .unwrap();
+        let mut c = ctx();
+        c.insert_failed("restaurant.bySlug");
+        c.insert_resolved(
+            "catalog.byRestaurant",
+            json!({ "categories": [{ "id": "starters", "name": "Starters" }] }),
+        );
+        let html = render_screen_html(screen, Surface::RestaurantFrontoffice.sheets(), c);
+        assert!(
+            html.contains("<div data-c=\"section\" data-error=\"true\""),
+            "the restaurant_info section renders the error affordance: {html}"
+        );
+        assert_eq!(
+            html.matches("data-error=\"true\"").count(),
+            1,
+            "the error renders ONCE, at the first section owning a failed binding: {html}"
+        );
+        assert!(
+            html.contains("data-c=\"catalog_sections\""),
+            "the catalog (its own resolver, resolved) must keep rendering: {html}"
+        );
+        // The action-disable half of the rule (a control whose variables bind the failed
+        // resolver) is pinned at the executor seam:
+        // `executor::tests::a_variable_bound_to_a_failed_resolver_disables_the_control` — this
+        // screen's header slots (where the favorite toggle lives) are not rendered by the
+        // back_button_header arm, so no such control exists in THIS DOM to assert on.
     }
 
     /// #725 (ux corpus repairs): the marketplace search screen's branch content renders HONESTLY.

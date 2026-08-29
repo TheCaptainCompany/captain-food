@@ -671,6 +671,13 @@ mod tests {
         // Fail-closed composition: with the cart unresolvable, the checkout button's
         // `disabled_when: cart.lines.length == 0` is unevaluatable → disabled.
         assert!(html.contains("disabled"), "checkout must not be clickable over no data: {html}");
+        // #730: ONE state, not two — the summary's price rows (blank money over the same failed
+        // read) render ABSENT; the cart_lines error above is the failure's single affordance.
+        assert!(
+            !html.contains("<div data-c=\"order_summary_block\""),
+            "no blank-money summary beside the error state: {html}"
+        );
+        assert_eq!(html.matches("data-error=\"true\"").count(), 1, "ONE error state: {html}");
     }
 
     /// #472: error state and empty state are DISTINCT rendered states, per binding. A read that
@@ -694,6 +701,32 @@ mod tests {
                 "no error copy on an answered read ({answered}): {html}"
             );
         }
+    }
+
+    /// #730: the scalar mirror of the list rule above — an ANSWERED null restaurant (unknown
+    /// slug) is the empty/shell state, never the error affordance. Only a read that FAILED may
+    /// render `data-error`.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn an_answered_null_restaurant_is_the_empty_state_not_the_error_state() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "restaurant": null })),
+            Ok(json!({ "catalog": { "categories": [] } })),
+        ]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/r/chez-test", "fr", None)
+            .await
+            .expect("the storefront route renders")
+            .html;
+        assert!(
+            !html.contains("data-error=\"true\""),
+            "an answered null is never an error state: {html}"
+        );
+        assert!(
+            !html.contains("Impossible de charger le contenu."),
+            "no error copy on an answered read: {html}"
+        );
     }
 
     #[cfg(feature = "ssr")]
