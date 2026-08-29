@@ -511,6 +511,42 @@ mod tests {
         assert_eq!(classify_host(""), HostRoute::Default);
     }
 
+    /// #755 (founder-decided, red-first): `.localhost` is dev's zero-config audience/tenant space —
+    /// browsers resolve `*.localhost` to loopback with no /etc/hosts entry — with label semantics
+    /// IDENTICAL to the apex: reserved audiences map to their routes, the off-platform/ingress
+    /// labels stay Unknown, any valid slug is a Tenant. Seen RED against the apex-only suffix.
+    #[test]
+    fn localhost_labels_are_audience_and_tenant_space_like_the_apex() {
+        assert_eq!(classify_host("live.localhost"), HostRoute::Live);
+        assert_eq!(classify_host("restos.localhost:8080"), HostRoute::Restos);
+        assert_eq!(classify_host("riders.localhost"), HostRoute::Riders);
+        assert_eq!(classify_host("system.localhost"), HostRoute::System);
+        assert_eq!(classify_host("api.localhost"), HostRoute::Api);
+        assert_eq!(classify_host("www.localhost"), HostRoute::Unknown("www".into()));
+        assert_eq!(classify_host("hooks.localhost"), HostRoute::Unknown("hooks".into()));
+        assert_eq!(
+            classify_host("tonton-pizza.localhost:8080"),
+            HostRoute::Tenant("tonton-pizza".into())
+        );
+        assert_eq!(classify_host("-bad.localhost"), HostRoute::Unknown("-bad".into()));
+        assert_eq!(classify_host("a.b.localhost"), HostRoute::Unknown("a.b".into()));
+        // Bare `localhost` stays the neutral default (also pinned in the table above): a ROOT is
+        // not a label, in dev exactly as `captain.food` bare apex is in prod.
+        assert_eq!(classify_host("localhost:8080"), HostRoute::Default);
+    }
+
+    /// #755 through the REAL fallback dispatch (`host_root`), in dev's own posture — NO database
+    /// (`TenantLookup(None)`): a `{slug}.localhost` host serves the storefront shell, exactly what
+    /// `{slug}.captain.food` does. Seen RED serving the marketplace shell instead.
+    #[tokio::test]
+    async fn a_slug_localhost_host_serves_the_storefront_through_the_real_dispatch() {
+        let response =
+            through_host_root(&TenantLookup(None), "chez-test.localhost:8080", "/").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = body_of(response).await;
+        assert!(html.contains("data-hydrate=\"restaurant\""), "{html}");
+    }
+
     #[test]
     fn marketing_and_malformed_labels_are_unknown() {
         assert_eq!(classify_host("www.captain.food"), HostRoute::Unknown("www".into()));

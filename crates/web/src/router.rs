@@ -9,7 +9,9 @@
 //!   * `riders.captain.food`  → the **rider app** (ADR-0036 reserved audience);
 //!   * any other `{slug}.captain.food` → that restaurant's **storefront** (`restaurant_frontoffice`),
 //!     the slug being the first label;
-//!   * localhost / IPs / unknown hosts → the marketplace (the safe anonymous default).
+//!   * `{label}.localhost` → the SAME mapping (#755): dev's zero-config audience/tenant space
+//!     ([`AUDIENCE_SPACE_ROOTS`] — browsers resolve `*.localhost` to loopback, no /etc/hosts);
+//!   * bare localhost / IPs / unknown hosts → the marketplace (the safe anonymous default).
 //!
 //! Path → screen: routes come from the GENERATED screen tables (`generated/screens.rs`), matched
 //! segment-wise with `:param` capture (`/orders/:orderId/confirmation`). Captured params feed
@@ -60,13 +62,14 @@ impl Surface {
         }
     }
 
-    /// The storefront tenant slug when this host is a `{slug}.captain.food` storefront.
+    /// The storefront tenant slug when this host is a `{slug}.{root}` storefront (any
+    /// [`AUDIENCE_SPACE_ROOTS`] root — the production apex or dev's `.localhost`, #755).
     /// Excludes every ADR-0036 reserved audience label (`live`/`restos`/`riders`/`system`/`api`),
     /// the off-server marketing hosts (`www`/`join`), and the integration ingress host
     /// (`hooks`, #385 — mirrors `server::hosts::classify_host`, same mirror-honesty rule).
     pub fn slug_of(host: &str) -> Option<&str> {
         let host = host.split(':').next().unwrap_or(host);
-        let label = host.strip_suffix(".captain.food")?;
+        let label = audience_label(host)?;
         (!label.contains('.')
             && !matches!(
                 label,
@@ -76,18 +79,39 @@ impl Surface {
     }
 }
 
+/// The roots under which `{label}.{root}` is audience/tenant space: the production apex, plus
+/// `localhost` (#755, founder-decided) — browsers resolve `*.localhost` to loopback with zero
+/// config, so dev serves storefronts Host-shaped, identically to prod, without /etc/hosts. The
+/// ONE authority for the suffix set: `surface_runtime::hosts::classify_host` consumes
+/// [`audience_label`] too, so the two host dispatchers cannot disagree on what audience space is.
+/// A bare root is NOT audience space (bare `localhost` stays the neutral/marketplace default,
+/// exactly like the bare apex). Production Hosts are never `.localhost`, so the second root
+/// changes no production behaviour.
+pub const AUDIENCE_SPACE_ROOTS: &[&str] = &["captain.food", "localhost"];
+
+/// The `{label}` when `host` (already port-stripped) is `{label}.{root}` for one of the
+/// [`AUDIENCE_SPACE_ROOTS`]. `None` for the bare roots and every other host. Label semantics
+/// (reserved audiences, slug validation) are the CALLER's — this is only the suffix authority.
+pub fn audience_label(host: &str) -> Option<&str> {
+    AUDIENCE_SPACE_ROOTS
+        .iter()
+        .find_map(|root| host.strip_suffix(root)?.strip_suffix('.'))
+        .filter(|label| !label.is_empty())
+}
+
 /// Resolve the serving surface from the request `Host`.
 pub fn surface_for_host(host: &str) -> Surface {
     let host = host.split(':').next().unwrap_or(host); // strip port
-    match host {
-        "captain.food" | "www.captain.food" | "live.captain.food" => Surface::CaptainFrontoffice,
-        "restos.captain.food" => Surface::RestaurantBackoffice,
-        "riders.captain.food" => Surface::Rider,
-        other => {
-            if Surface::slug_of(other).is_some() {
+    match audience_label(host) {
+        Some("restos") => Surface::RestaurantBackoffice,
+        Some("riders") => Surface::Rider,
+        _ => {
+            if Surface::slug_of(host).is_some() {
                 Surface::RestaurantFrontoffice
             } else {
-                // localhost / IPs / preview hosts: the marketplace is the anonymous-safe default.
+                // The bare roots, `live`/`www`, the non-web reserved labels (`system`/`api`/
+                // `hooks`/`join`), localhost / IPs / preview hosts: the marketplace is the
+                // anonymous-safe default (same set as before #755, table-pinned below).
                 Surface::CaptainFrontoffice
             }
         }
@@ -400,9 +424,19 @@ mod tests {
         assert_eq!(surface_for_host("riders.captain.food"), Surface::Rider);
         assert_eq!(surface_for_host("chez-test.captain.food"), Surface::RestaurantFrontoffice);
         assert_eq!(Surface::slug_of("chez-test.captain.food"), Some("chez-test"));
-        // Unknown hosts / localhost: anonymous-safe marketplace default.
+        // Unknown hosts / bare localhost: anonymous-safe marketplace default.
         assert_eq!(surface_for_host("localhost:8080"), Surface::CaptainFrontoffice);
         assert_eq!(surface_for_host("127.0.0.1"), Surface::CaptainFrontoffice);
+        // #755 (red-first): `.localhost` is dev's zero-config audience/tenant space, mapping
+        // IDENTICALLY to the apex — so the #745 host-slug injection works unchanged in dev.
+        assert_eq!(surface_for_host("chez-test.localhost:8080"), Surface::RestaurantFrontoffice);
+        assert_eq!(Surface::slug_of("chez-test.localhost:8080"), Some("chez-test"));
+        assert_eq!(surface_for_host("restos.localhost"), Surface::RestaurantBackoffice);
+        assert_eq!(surface_for_host("riders.localhost:8080"), Surface::Rider);
+        assert_eq!(surface_for_host("live.localhost"), Surface::CaptainFrontoffice);
+        assert_eq!(Surface::slug_of("restos.localhost"), None, "reserved, never a storefront");
+        assert_eq!(Surface::slug_of("hooks.localhost"), None, "reserved, never a storefront");
+        assert_eq!(Surface::slug_of("localhost:8080"), None, "a root is not a label");
         // `slug_of` takes a HOST, never an ORIGIN: it splits on `:` to strip a port, so an origin
         // reduces to "https" and the storefront label silently vanishes. The hydrate mount got this
         // wrong once (#420, caught in self-review, never shipped) — pinned so it cannot come back.

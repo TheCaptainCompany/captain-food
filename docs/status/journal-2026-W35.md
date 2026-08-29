@@ -3,6 +3,19 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🏠 **2026-08-29 — [#755 "Local dev: accept `{slug}.localhost` as tenant
+> space"](https://github.com/TheCaptainCompany/captain-food/issues/755)** (founder-decided, option
+> 1 of the post-#752 dev-access options): `.localhost` is now a second audience-space root with
+> label semantics IDENTICAL to the apex — `{slug}.localhost` serves the storefront, `restos.`/
+> `riders.`/etc. map the same, bare `localhost` stays the neutral default — so dev storefronts
+> paint with zero /etc/hosts config (browsers resolve `*.localhost` to loopback). ONE suffix
+> authority: `web::router::AUDIENCE_SPACE_ROOTS` + `audience_label`, consumed by both
+> `surface_for_host`/`slug_of` and `surface_runtime::hosts::classify_host` (which already depends
+> on `web`) — the former two-file mirror now shares its suffix set. Production Hosts are never
+> `.localhost`; the existing classification table pins prod behaviour unchanged. Red-first:
+> classification rows + a real-schema storefront paint through `chez-test.localhost` (the #752
+> harness).
+
 > 🍔 **2026-08-29 — [#749 "URGENT: storefront catalog read is structurally broken — the menu
 > never renders from a real paint"](https://github.com/TheCaptainCompany/captain-food/issues/749):
 > the MENU renders.** Founder-directed fix (verbatim: *"adding a facultative argument slug seems
