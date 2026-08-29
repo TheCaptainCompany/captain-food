@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-29 — C1a delivered: the pre-flip evidence for `ROUTE_ORDER_BIRTH_THROUGH_LANE` is merged**
+> ([#758 "C1a: pre-flip evidence for ROUTE_ORDER_BIRTH_THROUGH_LANE — birth-lag seen recorded, the paid-then-null tracking guard, split flip preconditions"](https://github.com/TheCaptainCompany/captain-food/issues/758),
+> PR [#761](https://github.com/TheCaptainCompany/captain-food/pull/761), squash-merged as `2408fc73`
+> after the team reviewer pass — the reviewer re-proved the seen-reds independently). What the flip
+> decision can now cite: `order_birth_lag_ms{routed="true"}` SEEN recorded by a test driving the
+> full routed checkout through the real lanes (**18 ms** this run, **21 ms** on the reviewer's
+> re-proof; red against the disconnected emitter: `left: []` vs `[({"routed": "true"}, 1)]`); the
+> paid-then-null tracking guard (an answered-null `order.byId` in the paid context renders "Reçu ✓
+> — confirmation en cours…" + a bounded re-check, never "Commande introuvable" — red-first, the
+> stranger-null pin unchanged); and `ENFORCE_ACCEPTANCE_TIMEOUT` precondition (5) split into
+> (5a) routing-flip/walk-stack evidence vs (5b) acceptance-timeout/production distributions
+> (ADR-20260817-105844 cited at the line). The DEFAULT flip itself remains the **founder's**
+> decision with this evidence attached (dispatch card 598 §7/§9, ADR-20260829-230418 C1). dba
+> follow-up filed as
+> [#760 "Observe inbound_messages dead-tuple churn: an n_dead_tup gauge (dba follow-up to the birth-lane flip)"](https://github.com/TheCaptainCompany/captain-food/issues/760).
+
 > 🧱 **2026-08-29 — Isolation first: the founder's directive is recorded and the plan is sequenced**
 > ([ADR-20260829-230418](../adr/ADR-20260829-230418-aggregates-own-the-facts-isolation-first.md),
 > register row [AGGREGATES-OWN-THE-FACTS](../decisions/AGGREGATES-OWN-THE-FACTS.yaml)). Founder,

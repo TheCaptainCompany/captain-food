@@ -28,7 +28,7 @@
 //! **SEEN RED** (the emitter disconnected — the semantic mutant, never a line range): delete the
 //! `super::record_order_birth_lag(...)` call at its sole `handler.rs` call site and the routed
 //! assertion dies on `left: []` vs one `routed="true"` measurement. Red output is quoted in PR
-//! #759's body; the mutant was applied to the committed tree and reverted with `git checkout --`.
+//! #761's body; the mutant was applied to the committed tree and reverted with `git checkout --`.
 //!
 //! Needs `DATABASE_URL`: since #474 a missing database FAILS this suite; only an explicit
 //! `DB_TESTS_REQUIRED=0` skips it, and that leaves a receipt (`crates/db_test_gate`).
