@@ -1270,6 +1270,77 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
             view! { <section data-c=ty><h2>{title}</h2><ul>{items}</ul></section> }.into_any()
         }
 
+        ComponentKind::CatalogSections => {
+            // The MENU (#749) — the content the storefront exists to show. Until this arm the
+            // kind fell into the generic tagged container, so even a RESOLVED catalog rendered an
+            // empty div: the schema fix alone would have unbroken the data and left the customer
+            // with no menu. Categories render as section headers with the products whose
+            // `categoryRef` names them; unmatched (or category-less) products render in one
+            // trailing run so no item is silently lost. Each item row carries the name,
+            // description and first-offer price — the add-to-cart affordance is hydrate-side
+            // (`item_add_action`), SSR renders what the customer decides on.
+            let bound_array = |key: &str| -> Vec<Value> {
+                match node.prop(key) {
+                    Some(PropValue::Binding(path)) => ctx
+                        .lookup(path.split('|').next().unwrap_or(path).trim())
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                }
+            };
+            let categories = bound_array("categories");
+            let products = bound_array("products");
+            let item_row = |p: &Value| -> AnyView {
+                let name = p.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let description =
+                    p.get("description").and_then(Value::as_str).unwrap_or("").to_string();
+                let price = p
+                    .get("offers")
+                    .and_then(Value::as_array)
+                    .and_then(|offers| offers.first())
+                    .and_then(|offer| offer.get("price"))
+                    .map(format_currency)
+                    .unwrap_or_default();
+                let has_description = !description.is_empty();
+                view! {
+                    <article data-c="catalog_item_row">
+                        <span data-c="item_name">{name}</span>
+                        {has_description
+                            .then(|| view! { <p data-c="item_description">{description.clone()}</p> })}
+                        <span data-c="item_price">{price}</span>
+                    </article>
+                }
+                .into_any()
+            };
+            let mut used: BTreeSet<usize> = BTreeSet::new();
+            let mut sections: Vec<AnyView> = Vec::new();
+            for c in &categories {
+                let cid = c.get("id").and_then(Value::as_str).unwrap_or("");
+                let cname = c.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let mut rows: Vec<AnyView> = Vec::new();
+                for (i, p) in products.iter().enumerate() {
+                    if !cid.is_empty()
+                        && p.get("categoryRef").and_then(Value::as_str) == Some(cid)
+                    {
+                        used.insert(i);
+                        rows.push(item_row(p));
+                    }
+                }
+                sections.push(
+                    view! { <section data-c="catalog_category"><h2>{cname}</h2>{rows}</section> }
+                        .into_any(),
+                );
+            }
+            let rest: Vec<AnyView> = products
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !used.contains(i))
+                .map(|(_, p)| item_row(p))
+                .collect();
+            view! { <div data-c=ty>{sections}{rest}</div> }.into_any()
+        }
+
         // ── everything else: the tagged generic container (visible + auditable) ─
         _ => {
             let text = {
@@ -1972,6 +2043,39 @@ mod tests {
             1,
             "ONE error state — the failed resolver's, never its sibling's: {html}"
         );
+    }
+
+    /// #749: the MENU renders — a resolved catalog's products reach the storefront HTML as item
+    /// rows (name + price), grouped under their category when `categoryRef` matches, with
+    /// unmatched products in the trailing run (no item silently lost). Before the
+    /// `CatalogSections` arm the kind fell into the generic container and a RESOLVED catalog
+    /// still rendered an empty div — the schema fix alone would not have shown a menu.
+    #[test]
+    fn the_catalog_sections_render_the_menu_items() {
+        let screen = Surface::RestaurantFrontoffice
+            .screens()
+            .iter()
+            .find(|s| s.id == "restaurant")
+            .unwrap();
+        let mut c = ctx();
+        c.insert_resolved(
+            "catalog.byRestaurant",
+            json!({
+                "categories": [{ "id": "starters", "name": "Starters" }],
+                "products": [
+                    { "name": "Burger maison", "categoryRef": "starters", "description": "Le classique",
+                      "offers": [{ "price": { "amountCents": 1500, "currency": "EUR" } }] },
+                    { "name": "Frites", "categoryRef": null,
+                      "offers": [{ "price": { "amountCents": 400, "currency": "EUR" } }] },
+                ],
+            }),
+        );
+        let html = render_screen_html(screen, Surface::RestaurantFrontoffice.sheets(), c);
+        assert!(html.contains("Burger maison"), "the categorized item renders: {html}");
+        assert!(html.contains("15,00 EUR"), "with its price: {html}");
+        assert!(html.contains("Starters"), "under its category header: {html}");
+        assert!(html.contains("Frites"), "the category-less item still renders: {html}");
+        assert!(html.contains("data-c=\"catalog_item_row\""), "as item rows: {html}");
     }
 
     /// #730 red 4 (scalar affordance, Tours-facing): a failed `restaurant.bySlug` renders the

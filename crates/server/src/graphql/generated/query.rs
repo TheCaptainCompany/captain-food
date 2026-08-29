@@ -16,22 +16,52 @@ pub struct QueryRoot;
 impl QueryRoot {
     /// A restaurant's full catalog (categories → products → offers + option lists).
     #[graphql(name = "catalog")]
-    async fn catalog(&self, ctx: &async_graphql::Context<'_>, input: CatalogQueryInput) -> async_graphql::Result<Option<Catalog>> {
+    async fn catalog(&self, ctx: &async_graphql::Context<'_>, input: Option<CatalogQueryInput>) -> async_graphql::Result<Option<Catalog>> {
+        // GENERATED from `argsExactlyOneOf` (#749): exactly one selector arg must be
+        // provided; zero or both reject with the declared typed error (P-10 shape).
+        if [input.as_ref().is_some_and(|i| i.restaurant_id.is_some()), input.as_ref().is_some_and(|i| i.restaurant_slug.is_some())].into_iter().filter(|p| *p).count() != 1 {
+            return Err(crate::graphql::typed_error(&domain::generated::errors::CATALOG_SELECTOR_INVALID));
+        }
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
         let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::CatalogReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let Some(row) = repo.by_restaurant(input.restaurant_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+        // The selector (post the generated exactly-one-of check, #749): an id, or a storefront
+        // slug resolved through the SAME path as the tenant host -- current slug first, then the
+        // SlugAlias fallback for a superseded label (ADR-20260728-011344). Two indexed point
+        // lookups, never a cross-scope join.
+        let (selector_id, selector_slug) = match input {
+            Some(i) => (i.restaurant_id, i.restaurant_slug),
+            None => (None, None),
+        };
+        let restaurant = match (selector_id, selector_slug) {
+            (Some(id), _) => restaurants.by_id(id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?,
+            (None, Some(slug)) => {
+                let slug: domain::generated::scalars::Slug = slug.into();
+                match restaurants.by_slug(slug.clone()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                    Some(r) => Some(r),
+                    None => restaurants.by_previous_slug(slug).await.map_err(|e| async_graphql::Error::new(e.to_string()))?,
+                }
+            }
+            // Unreachable past the generated one-of check; answers null defensively.
+            (None, None) => None,
+        };
+        // An unknown selector answers null -- the read is nullable, never an existence error.
+        let Some(restaurant) = restaurant else {
             return Ok(None);
         };
-        // The non-null `restaurant` navigation field: hydrate from the Restaurant read model (both rows
-        // are projections of the same domain log, so the FK target always exists).
-        let restaurant = restaurants
-            .by_id(row.restaurant_id)
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-            .ok_or_else(|| async_graphql::Error::new("catalog references an unknown restaurant"))?;
+        // Host precedence (#749 hard rule): on a tenant host the Host is the tenant selector
+        // (#469) -- a client selector naming ANOTHER restaurant REJECTS with the typed error,
+        // never a silent pick in either direction (a silent pick is a cross-tenant read).
+        if let Some(crate::graphql::tenant::TenantScope::Restaurant(tenant)) = ctx.data_opt::<crate::graphql::tenant::TenantScope>() {
+            if *tenant != restaurant.restaurant_id {
+                return Err(crate::graphql::typed_error(&domain::generated::errors::TENANT_SELECTOR_MISMATCH));
+            }
+        }
+        let Some(row) = repo.by_restaurant(restaurant.restaurant_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
         Ok(Some(Catalog::from((row, Restaurant::at(restaurant, now, horizon)))))
     }
     /// The category tree of a restaurant's catalog (for filtering & product discovery). Derived from Catalog.tree — categories are not a separate aggregate, so there is no dedicated view.
@@ -272,7 +302,7 @@ impl QueryRoot {
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(|r| Restaurant::at(r, now, horizon)).collect())
     }
-    /// A restaurant + its catalog by slug (multi-tenant resolution by Host or /r/{slug}).
+    /// A restaurant + its catalog by slug (multi-tenant resolution by Host — the ONE storefront address since #749; old /r/{slug} links 301 to it).
     #[graphql(name = "restaurant")]
     async fn restaurant(&self, ctx: &async_graphql::Context<'_>, input: RestaurantQueryInput) -> async_graphql::Result<Option<Restaurant>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded

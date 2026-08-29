@@ -9,6 +9,30 @@ description: >
 # Catalog (Catalog / CatalogCategory / Product / Offer / OptionList)
 # =====================================================================
 
+CatalogSelectorInvalid:
+  description: >
+    The catalog query's selector is over- or under-specified: exactly one of 'restaurantId' or
+    'restaurantSlug' must be provided (#749). The check is GENERATED from the query's
+    `argsExactlyOneOf` declaration — zero-of and two-of both land here, even an agreeing pair
+    (exactly one means exactly one). An UNKNOWN slug is not this error: it answers null.
+  context: {}
+  messages:
+    en: "Provide exactly one of restaurantId or restaurantSlug."
+    fr: "Fournissez exactement un des deux : restaurantId ou restaurantSlug."
+
+
+TenantSelectorMismatch:
+  description: >
+    The request arrived on a storefront host whose tenant is a DIFFERENT restaurant than the one
+    the query's selector names (#749). On a tenant host the Host is the tenant selector (#469);
+    a disagreeing client-sent selector is rejected — never silently overridden in either
+    direction, because a silent pick is a cross-tenant read wearing a default.
+  context: {}
+  messages:
+    en: "This storefront cannot serve another restaurant's catalog."
+    fr: "Cette boutique ne peut pas servir le catalogue d'un autre restaurant."
+
+
 CatalogNotFound:
   description: "No catalog with this id (or it does not belong to the restaurant)."
   context:

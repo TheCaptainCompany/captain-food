@@ -1164,11 +1164,15 @@ pub struct DenyRefundInput {
     pub reason: String,
 }
 
+/// Exactly one of `restaurantId`, `restaurantSlug` must be provided; zero or both reject with `CatalogSelectorInvalid`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogQueryInput {
     #[graphql(name = "restaurantId")]
-    pub restaurant_id: RestaurantId,
+    pub restaurant_id: Option<RestaurantId>,
+    /// The restaurant's storefront slug — the tenant-host selector as an argument; superseded labels resolve like the host path does.
+    #[graphql(name = "restaurantSlug")]
+    pub restaurant_slug: Option<Slug>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]

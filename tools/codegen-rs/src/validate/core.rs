@@ -579,6 +579,76 @@ pub(crate) fn validate(model: &Model) -> Report {
         for a in &q.args {
             check_inline(&mut issues, a, &format!("{}.args.{}", where_, a.name));
         }
+        // 4c-bis. `argsExactlyOneOf` (#749): the declaration the generated one-of resolver check
+        // and the SDL description are emitted from. Everything it names is a $ref (the doctrine:
+        // a reference is a $ref, including same-file), so all four legs are checkable:
+        //   of[]   — 'api.yaml#/queries/<this query>/args/<arg>', each an EXISTING, OPTIONAL arg
+        //            (a `required: true` member contradicts one-of), at least two of them;
+        //   throws — a resolvable 'errors.yaml#/<Error>'.
+        if let Some(x) = &q.exactly_one_of {
+            let ew = format!("{}.argsExactlyOneOf", where_);
+            let raw = model
+                .defs
+                .get("api.yaml")
+                .and_then(|v| v.get("queries"))
+                .and_then(|v| v.get(q.name.as_str()))
+                .and_then(|v| v.get("argsExactlyOneOf"));
+            let of_refs: Vec<String> = raw
+                .and_then(|d| d.get("of"))
+                .and_then(|s| s.as_sequence())
+                .map(|s| {
+                    s.iter()
+                        .filter_map(|e| e.get("$ref").and_then(|r| r.as_str()).map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if of_refs.len() < 2 {
+                issues.push(err(
+                    "api-args-exactly-one-of",
+                    ew.clone(),
+                    "`of:` must list at least two `{ $ref: 'api.yaml#/queries/<query>/args/<arg>' }` entries — a one-of over fewer than two selectors declares nothing.".into(),
+                ));
+            }
+            let want_prefix = format!("api.yaml#/queries/{}/args/", q.name);
+            for (r, name) in of_refs.iter().zip(&x.args) {
+                if !r.starts_with(&want_prefix) {
+                    issues.push(err(
+                        "api-args-exactly-one-of",
+                        ew.clone(),
+                        format!("`of:` entry '{}' must reference THIS query's own args ('{}<arg>').", r, want_prefix),
+                    ));
+                    continue;
+                }
+                match q.args.iter().find(|a| &a.name == name) {
+                    None => issues.push(err(
+                        "api-args-exactly-one-of",
+                        ew.clone(),
+                        format!("'{}' names no arg of query '{}'.", name, q.name),
+                    )),
+                    Some(a) if a.required => issues.push(err(
+                        "api-args-exactly-one-of",
+                        ew.clone(),
+                        format!("arg '{}' is `required: true` — a required arg contradicts exactly-one-of; make every member optional.", name),
+                    )),
+                    Some(_) => {}
+                }
+            }
+            let throws_ref = raw
+                .and_then(|d| d.get("throws"))
+                .and_then(|t| t.get("$ref"))
+                .and_then(|r| r.as_str())
+                .unwrap_or("");
+            let throws_ok = throws_ref.strip_prefix("errors.yaml#/").is_some_and(|n| {
+                model.defs.get("errors.yaml").and_then(|e| e.get(n)).is_some()
+            });
+            if !throws_ok {
+                issues.push(err(
+                    "api-args-exactly-one-of",
+                    ew,
+                    format!("`throws` must be a resolvable {{ $ref: 'errors.yaml#/<Error>' }} (got '{}') — the generated check rejects with THIS typed error.", throws_ref),
+                ));
+            }
+        }
     }
 
     // 4d. subscriptions

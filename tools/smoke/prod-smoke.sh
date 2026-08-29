@@ -446,6 +446,26 @@ l3b() {
   pass "L3b checkout shell: pk_test_ publishable key delivered on the Stripe mount div"
 }
 
+# --- L3c: the MENU paints (#749) ------------------------------------------------------------------
+# The storefront's whole point, asserted at the public interface: GET the tenant root and require
+# the SEEDED catalog item's display name in the INITIAL HTML. Until #749 the catalog read failed
+# GraphQL validation on every paint (router sent `slug` where the schema required `restaurantId!`),
+# so the menu had NEVER rendered from a real paint — the page shell looked healthy around a dead
+# menu, and no smoke layer would have caught it (L3 reads the catalog API, not the paint). Runs
+# after L3 (the fixture guarantees the item exists) and before the money path (a customer cannot
+# order what they cannot see).
+l3c() {
+  local out code body
+  out=$(curl -sS -m 20 -w $'\n%{http_code}' "$TENANT_BASE/" || true)
+  code="${out##*$'\n'}"; body="${out%$'\n'*}"
+  [ "$code" = "200" ] || fail "L3c: $TENANT_BASE/ returned HTTP $code — body: $(printf '%s' "$body" | head -c 300)"
+  printf '%s' "$body" | grep -q 'data-hydrate="restaurant"' \
+    || fail "L3c: the tenant root did not serve the storefront shell (misroute/claim landing?): $(printf '%s' "$body" | head -c 300)"
+  printf '%s' "$body" | grep -q 'Smoke Pizza' \
+    || fail "L3c: the seeded item 'Smoke Pizza' is NOT in the initial HTML — the MENU did not render from the paint (#749 regression: catalog read failing/skipped, or the catalog_sections renderer arm gone): $(printf '%s' "$body" | head -c 300)"
+  pass "L3c menu paint: seeded item 'Smoke Pizza' present in the initial storefront HTML"
+}
+
 # --- L4b: the read guard, executed in production (#144/#433) --------------------------------------
 # The only executable proof the closed vulnerability stays closed where it matters: a caller who is
 # NOT the order's member reads NOTHING — no by-id row, no list dump. Since #433 this runs as a
@@ -771,5 +791,6 @@ l1
 l2
 l3
 l3b
+l3c
 l4
 say "ALL LAYERS PASS"

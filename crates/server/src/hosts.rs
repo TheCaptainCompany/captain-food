@@ -61,6 +61,11 @@ pub async fn host_root(
     let accept_language =
         headers.get(header::ACCEPT_LANGUAGE).and_then(|v| v.to_str().ok());
     let locale = web::i18n::resolve_locale(None, cookie_locale.as_deref(), accept_language);
+    // The retired `/r/{slug}` form 301s to its canonical host BEFORE any host dispatch (#749):
+    // one rule for every host, because the address was handed out from more than one.
+    if let Some(redirect) = path_addressed_redirect(uri.path()) {
+        return redirect;
+    }
     match classify_host(raw) {
         HostRoute::Tenant(slug) => tenant_page(&lookup, &ssr, &slug, raw, uri.path(), locale).await,
         other => render(other, &ssr, raw, uri.path(), locale).await,
@@ -177,6 +182,30 @@ async fn tenant_page(
     }
     // Unclaimed: every path on the host gets the landing (the whole subdomain is the offer).
     Html(claim_landing(slug)).into_response()
+}
+
+/// The retired path-addressed storefront (`/r/{slug}`, #749 — founder directive 2026-08-29,
+/// verbatim: *"I don't want to have /r/<slug> possible we already have it in the
+/// <slug>.captain.food"*): the HOST is the tenant selector, so the path form is gone from the
+/// screen tables — but the address was HANDED OUT (printed menus, QR codes, old search results),
+/// so it 301s to the canonical host root instead of dead-ending (the ADR-20260728-011344
+/// precedent for superseded storefront addresses). Only a well-formed slug label redirects — the
+/// Location header is built from the path segment, so anything outside `[a-z0-9-]` (or with a
+/// deeper path) falls through to the ordinary 404 rather than being reflected.
+fn path_addressed_redirect(path: &str) -> Option<Response> {
+    let label = path.strip_prefix("/r/")?.trim_end_matches('/');
+    let well_formed = !label.is_empty()
+        && !label.contains('/')
+        && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !label.starts_with('-')
+        && !label.ends_with('-');
+    well_formed.then(|| {
+        (
+            StatusCode::MOVED_PERMANENTLY,
+            [(header::LOCATION, format!("https://{label}.{APEX}/"))],
+        )
+            .into_response()
+    })
 }
 
 async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, locale: &str) -> Response {
@@ -409,6 +438,49 @@ mod tests {
             assert!(!html.contains("data-pk="), "{html}");
             assert!(!html.contains("js.stripe.com"), "{html}");
         }
+    }
+
+    /// #749 (founder, verbatim: "I don't want to have /r/<slug> possible we already have it in
+    /// the <slug>.captain.food"): the path-addressed storefront is GONE — but a printed QR code,
+    /// bookmark or old search result must not dead-end, so any `/r/{slug}` path 301s to the
+    /// canonical host root (the ADR-20260728-011344 precedent: redirect, never 404, for an
+    /// address that was once handed out). Seen RED against the route still serving the screen.
+    #[tokio::test]
+    async fn a_path_addressed_storefront_redirects_to_its_canonical_host() {
+        let lookup = TenantLookup(Some(Arc::new(StubRestaurants {
+            registered: "chez-test",
+            erroring: false,
+            renamed_from: None,
+        })));
+        // Through PRODUCTION'S OWN entry (`host_root`), on the tenant's own host AND on any
+        // other app host: same 301, same target.
+        for host in ["chez-test.captain.food", "live.captain.food"] {
+            let response = through_host_root(&lookup, host, "/r/chez-test").await;
+            assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY, "{host}");
+            assert_eq!(
+                response.headers().get(axum::http::header::LOCATION).expect("Location"),
+                "https://chez-test.captain.food/",
+                "{host}"
+            );
+        }
+        // A malformed label is NOT reflected into a Location header — plain 404 (the storefront
+        // route no longer matches any path, and the redirect refuses non-slug labels).
+        let response =
+            through_host_root(&lookup, "chez-test.captain.food", "/r/Bad%20Label").await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Drive the REAL router fallback (`host_root`) — the production dispatch, no test fork.
+    async fn through_host_root(lookup: &TenantLookup, host: &str, path: &str) -> Response {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, host.parse().unwrap());
+        host_root(
+            Extension(lookup.clone()),
+            Extension(ssr()),
+            headers,
+            path.parse::<Uri>().unwrap(),
+        )
+        .await
     }
 
     #[test]

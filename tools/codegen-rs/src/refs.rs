@@ -529,6 +529,11 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("api.yaml", "types.*.readsInfrastructure[*]", TRANSIENT_READ_KINDS),
     ("api.yaml", "inputs.*.properties.**",  &[Kind::Scalar, Kind::EnumScalar, Kind::Entity, Kind::ApiInput]),
     ("api.yaml", "queries.*.args.*",        &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),
+    // `argsExactlyOneOf` (#749): the one-of group's members point back at the query's OWN args
+    // (same-query-ness is the `api-args-exactly-one-of` rule's check); `throws` names the typed
+    // error the GENERATED zero-of/two-of check rejects with.
+    ("api.yaml", "queries.*.argsExactlyOneOf.of[*]",  &[Kind::QueryArg]),
+    ("api.yaml", "queries.*.argsExactlyOneOf.throws", &[Kind::Error]),
     ("api.yaml", "queries.*.returns",       &[Kind::ApiType]),
     ("api.yaml", "mutations.*.command",     &[Kind::Command]),
     ("api.yaml", "mutations.*.args.*",      &[Kind::Scalar, Kind::EnumScalar, Kind::ApiInput]),

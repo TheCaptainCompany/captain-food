@@ -445,12 +445,12 @@ pub mod restaurant_frontoffice {
     pub const SCREENS: &[Screen] = &[
         Screen {
             id: "restaurant",
-            route: "/r/:slug",
+            route: "/",
             roles: &["PUBLIC", "CUSTOMER"],
             requires_auth: false,
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantBySlug, ResolverKey::CatalogByRestaurant],
-            skipped_reads: &[ResolverKey::CatalogByRestaurant],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("sticky", PropValue::Text("true")), ("right_slot.0.type", PropValue::Text("icon_button")), ("right_slot.0.icon", PropValue::Text("share")), ("right_slot.0.action.type", PropValue::Text("share")), ("right_slot.0.action.url", PropValue::Binding("canonical_url")), ("right_slot.1.type", PropValue::Text("icon_button")), ("right_slot.1.icon", PropValue::Text("heart")), ("right_slot.1.active_when", PropValue::Text("is_favorited")), ("right_slot.1.action.type", PropValue::Text("toggle_favorite")), ("right_slot.1.action.restaurant_id", PropValue::Binding("restaurant.id"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("restaurant_info"))], children: &[
@@ -460,7 +460,7 @@ pub mod restaurant_frontoffice {
                 Node { kind: ComponentKind::OpeningHoursRow, props: &[("window", PropValue::Binding("restaurant.serviceWindow")), ("on_undeclared", PropValue::Text("render_nothing")), ("schedule", PropValue::Binding("restaurant.openingHours")), ("labels.open", PropValue::I18n("restaurant.open")), ("labels.closed", PropValue::I18n("restaurant.closed")), ("labels.opens_at", PropValue::I18n("restaurant.opens_at"))], children: &[], branches: &[] }
             ], branches: &[] },
             Node { kind: ComponentKind::StickyCategoryNav, props: &[("id", PropValue::Text("catalog_nav")), ("items", PropValue::Binding("catalog.categories"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::CatalogSections, props: &[("categories", PropValue::Binding("catalog.categories")), ("item_type", PropValue::Text("catalog_item_row")), ("item_add_action.type", PropValue::Text("open_bottom_sheet")), ("item_add_action.sheet_id", PropValue::Text("item_detail_sheet")), ("item_add_action.data.item", PropValue::Binding("item")), ("disabled_overlay", PropValue::I18n("restaurant.unavailable"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::CatalogSections, props: &[("categories", PropValue::Binding("catalog.categories")), ("products", PropValue::Binding("catalog.products")), ("item_type", PropValue::Text("catalog_item_row")), ("item_add_action.type", PropValue::Text("open_bottom_sheet")), ("item_add_action.sheet_id", PropValue::Text("item_detail_sheet")), ("item_add_action.data.item", PropValue::Binding("item")), ("disabled_overlay", PropValue::I18n("restaurant.unavailable"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Spacer, props: &[("height", PropValue::Text("6rem"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::FloatingActionButton, props: &[("id", PropValue::Text("cart_fab")), ("visible_when", PropValue::Text("cart_item_count > 0")), ("label", PropValue::I18n("common.cart.view")), ("badge", PropValue::Binding("cart_item_count")), ("action.type", PropValue::Text("navigate")), ("action.route", PropValue::Text("/cart"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("bottom_nav")), ("visible_on.0", PropValue::Text("mobile")), ("items.0.id", PropValue::Text("home")), ("items.0.label", PropValue::I18n("common.nav.home")), ("items.0.icon", PropValue::Text("home")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("search")), ("items.1.label", PropValue::I18n("common.nav.search")), ("items.1.icon", PropValue::Text("search")), ("items.1.route", PropValue::Text("/search")), ("items.2.id", PropValue::Text("orders")), ("items.2.label", PropValue::I18n("common.nav.orders")), ("items.2.icon", PropValue::Text("receipt")), ("items.2.route", PropValue::Text("/orders")), ("items.2.requires_auth", PropValue::Text("true")), ("items.3.id", PropValue::Text("account")), ("items.3.label", PropValue::I18n("common.nav.account")), ("items.3.icon", PropValue::Text("user")), ("items.3.route", PropValue::Text("/account"))], children: &[], branches: &[] }

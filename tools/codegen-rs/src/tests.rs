@@ -15602,7 +15602,10 @@ mod screen_fulfillability {
         let emitted = emit_web_screens(&model);
         for (screen_line, skipped) in [
             ("id: \"checkout\"", "skipped_reads: &[ResolverKey::PaymentStatusByOrder]"),
-            ("id: \"restaurant\"", "skipped_reads: &[ResolverKey::CatalogByRestaurant]"),
+            // #749 evicted the restaurant screen's catalog skip: `restaurantId` stopped being
+            // required (optional `restaurantSlug` selector, host-fed), so the dead-man rule
+            // forced the declaration out and the read now RUNS on every paint.
+            ("id: \"restaurant\"", "skipped_reads: &[]"),
             ("id: \"home\"", "skipped_reads: &[ResolverKey::CategoriesAll]"),
             ("id: \"account\"", "skipped_reads: &[ResolverKey::FavoritesMine]"),
             ("id: \"order_tracking\"", "skipped_reads: &[]"),
