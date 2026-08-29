@@ -168,7 +168,7 @@ impl HandWrittenScreen {
     ) -> String {
         match self {
             HandWrittenScreen::Checkout => crate::checkout::render_checkout_html(
-                crate::checkout::CheckoutViewState::from_resolved(&ctx.data, tenant, locale)
+                crate::checkout::CheckoutViewState::from_context(ctx, tenant, locale)
                     // The delivery seam (#440): the parsed key rides the RenderContext from the
                     // server's config into the shell; None = the degraded state.
                     .with_publishable_key(ctx.stripe_publishable_key.clone()),
@@ -268,7 +268,8 @@ pub mod mount {
         // server-side intent). No resolved total ⇒ nothing to mount against — the element div
         // stays empty and the degrade state is NOT shown (the copy would lie: payment is not
         // "unavailable", the cart is empty/unresolved and the pay button leads nowhere anyway).
-        let total = ctx.data.get("cart").and_then(|c| c.get("totalAmount"));
+        let cart = ctx.binding_json("cart");
+        let total = cart.as_ref().and_then(|c| c.get("totalAmount"));
         let amount_cents =
             total.and_then(|t| t.get("amountCents")).and_then(serde_json::Value::as_i64);
         let currency = total
@@ -276,8 +277,8 @@ pub mod mount {
             .and_then(serde_json::Value::as_str)
             .map(str::to_string);
 
-        let state = crate::checkout::CheckoutViewState::from_resolved(
-            &ctx.data,
+        let state = crate::checkout::CheckoutViewState::from_context(
+            &ctx,
             tenant.as_deref(),
             &locale,
         )

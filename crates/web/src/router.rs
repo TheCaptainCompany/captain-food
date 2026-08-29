@@ -696,6 +696,32 @@ mod tests {
         }
     }
 
+    /// #730: the scalar mirror of the list rule above — an ANSWERED null restaurant (unknown
+    /// slug) is the empty/shell state, never the error affordance. Only a read that FAILED may
+    /// render `data-error`.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn an_answered_null_restaurant_is_the_empty_state_not_the_error_state() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "restaurant": null })),
+            Ok(json!({ "catalog": { "categories": [] } })),
+        ]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/r/chez-test", "fr", None)
+            .await
+            .expect("the storefront route renders")
+            .html;
+        assert!(
+            !html.contains("data-error=\"true\""),
+            "an answered null is never an error state: {html}"
+        );
+        assert!(
+            !html.contains("Impossible de charger le contenu."),
+            "no error copy on an answered read: {html}"
+        );
+    }
+
     #[cfg(feature = "ssr")]
     #[test]
     fn render_path_serves_every_surface_and_injects_the_hydrate_boot() {

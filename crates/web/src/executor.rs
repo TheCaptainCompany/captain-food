@@ -180,8 +180,21 @@ impl ActionSpec {
 
         let plan = match key.kind() {
             ActionKind::Mutation => {
-                let (input, unresolved_bindings) = resolved_variables(node, ctx, prefix);
-                ActionPlan::Mutation { key, input, unresolved_bindings }
+                let (input, unresolved_bindings, failed_binding) =
+                    resolved_variables(node, ctx, prefix);
+                match failed_binding {
+                    // #730 (ux + legal): a variable bound to a resolver that FAILED — not one
+                    // that is merely unresolved (form fields, mint tokens) — disables the
+                    // control, visibly and with the translated reason. A live button over
+                    // failed data is a false signifier: it would dispatch nulls where the
+                    // screen showed nothing, and on legally-priced surfaces (`place_order`'s
+                    // `{{ cart.id }}`/`{{ restaurant.id }}`) an order the customer never saw
+                    // priced.
+                    Some(_) => ActionPlan::Disabled {
+                        reason: crate::i18n::resolve("common.error.data_unavailable", &ctx.locale),
+                    },
+                    None => ActionPlan::Mutation { key, input, unresolved_bindings },
+                }
             }
             ActionKind::Client => match client_effect(key, node, ctx, prefix) {
                 Some(effect) => ActionPlan::Client(effect),
@@ -268,16 +281,21 @@ fn build_on_success_step(
 /// itself, not display text); an unresolved binding travels as `null` — the server's
 /// required-field validation is the authority — and is REPORTED in the bindings map so the driver
 /// can fill `{{ <field>.value }}` form references from the live DOM at dispatch time (#94).
+///
+/// The third return is the first variable whose binding's RESOLVER FAILED (#730 — distinct from
+/// merely-unresolved: a failed read means the value the screen would have shown never arrived),
+/// which turns the whole action into [`ActionPlan::Disabled`].
 fn resolved_variables(
     node: &Node,
     ctx: &RenderContext,
     prefix: &str,
-) -> (Map<String, Value>, Vec<(String, String)>) {
+) -> (Map<String, Value>, Vec<(String, String)>, Option<String>) {
     let explicit = format!("{prefix}.variables.");
     let bare = format!("{prefix}.");
     const RESERVED: [&str; 4] = ["type", "route", "sheet_id", "number"];
     let mut input = Map::new();
     let mut unresolved_bindings = Vec::new();
+    let mut failed_binding = None;
     for (path, prop) in node.props {
         let name = match path.strip_prefix(explicit.as_str()) {
             Some(name) if !name.contains('.') => name,
@@ -292,6 +310,9 @@ fn resolved_variables(
             PropValue::Binding(b) => {
                 let resolved = ctx.binding_json(b);
                 if resolved.is_none() {
+                    if failed_binding.is_none() && ctx.binding_failed(b) {
+                        failed_binding = Some((*b).to_string());
+                    }
                     unresolved_bindings.push((name.to_string(), (*b).to_string()));
                 }
                 resolved.unwrap_or(Value::Null)
@@ -301,7 +322,7 @@ fn resolved_variables(
         };
         input.insert(name.to_string(), value);
     }
-    (input, unresolved_bindings)
+    (input, unresolved_bindings, failed_binding)
 }
 
 /// The client-mint sentinel (#147): an action variable bound to `{{ $uuid }}` is NOT a screen
@@ -582,6 +603,24 @@ mod tests {
                 assert!(unresolved_bindings.is_empty(), "everything resolved from screen data");
             }
             other => panic!("expected a mutation plan, got {other:?}"),
+        }
+    }
+
+    /// #730 (ux + legal): a variable bound to a resolver that FAILED disables the control with
+    /// the translated reason — a live button over failed data is a false signifier. Distinct
+    /// from merely-UNRESOLVED (below), which stays dispatchable: form fields and mint tokens
+    /// are filled at dispatch time.
+    #[test]
+    fn a_variable_bound_to_a_failed_resolver_disables_the_control() {
+        let mut ctx = RenderContext::new("en");
+        ctx.insert_failed("order.byId");
+        ctx.data.insert("restaurant".into(), json!({ "id": "r-1" }));
+        let spec = ActionSpec::from_node(accept_button(), &ctx).expect("an action");
+        match &spec.plan {
+            ActionPlan::Disabled { reason } => {
+                assert_eq!(reason, "We couldn't load this content.", "the translated copy");
+            }
+            other => panic!("a failed `order.id` binding must disable, got {other:?}"),
         }
     }
 

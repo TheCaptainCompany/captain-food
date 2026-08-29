@@ -67,7 +67,11 @@ screens:
         content:
           - type: list
             id: lane_list
-            items: "{{ mailbox_lanes }}"
+            # `lanes_mailbox` is the runtime-derived reversed alias of the `mailbox.lanes`
+            # resolver (#729 — the corpus convention: `featured_restaurants`, `all_restaurants`,
+            # `search_restaurants`). The former `{{ mailbox_lanes }}` matched NO derived alias, so
+            # the binding was dormant: it could never resolve data nor carry the error state.
+            items: "{{ lanes_mailbox }}"
             # Reachable only in a build where NO actor declares a mailbox: the lane list is the
             # declared grid, so it is non-empty in every real deployment (#596). Kept, and its copy
             # rewritten, because "no rows" must not be read as "no workers have started" — that was
@@ -92,7 +96,8 @@ screens:
           - { type: text, value: { $ref: 'system.translations.yaml#/mailbox.poisoned.guide' } }
           - type: list
             id: poisoned_list
-            items: "{{ mailbox_poisoned }}"
+            # `poisoned_mailbox`: the derived reversed alias of `mailbox.poisoned` (#729, as above).
+            items: "{{ poisoned_mailbox }}"
             empty_state: { icon: check_circle, title: { $ref: 'system.translations.yaml#/mailbox.poisoned.empty.title' }, body: { $ref: 'system.translations.yaml#/mailbox.poisoned.empty.body' } }
             item_components:
               - { type: info_row, label: { $ref: 'system.translations.yaml#/mailbox.poisoned.message' },  value: "{{ item.messageType }}" }

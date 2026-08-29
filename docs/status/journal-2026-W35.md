@@ -3,6 +3,37 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-29 — [#729 "`binding_failed` matches on the root alias, so one failed resolver
+> renders the error state over its same-root sibling's resolved data"](https://github.com/TheCaptainCompany/captain-food/issues/729)
+> + [#730 "Scalar bindings from a failed resolver still render as empty strings — only list-like
+> components carry the error state"](https://github.com/TheCaptainCompany/captain-food/issues/730)
+> (overnight run, fifth chunk): error granularity is the RESOLVER — marks and data keyed by the
+> full resolver key, one affordance per failure, disabled controls over failed variables.**
+> `RenderContext` now stores answers AND failure marks under the FULL resolver key only (the old
+> per-alias storage let `mailbox.lanes`/`mailbox.poisoned` overwrite each other's data and shadow
+> each other's marks); templates resolve at read time through ONE matching rule (`feeding_key`:
+> longest stored-key prefix, else the derived alias — `resolver_aliases` stays the single
+> authority, §25's `screen_binding_roots` mirrors it). Precedence has one name,
+> `answer_beats_failure_mark` (tracking.rs's sentence, generalized): answers and marks compete
+> under the same rule, the longer match names the resolver, an answer wins ties — cross-resolver
+> only, never intra-resolver salvage; a null field inside Ok data stays legitimate absence. #730:
+> a failed resolver renders its error state ONCE, at the first section owning one of its display
+> bindings (`assign_error_anchors`, screen-level pre-order walk mirroring visibility; bespoke #472
+> list kinds anchor themselves and keep their per-surface copy; chrome never anchors — navigation
+> survives); every OTHER node fed by an anchored failed resolver renders ABSENT (blank money over
+> failed data lies). An action whose `variables` bind a FAILED resolver renders DISABLED with the
+> translated reason (executor; failed ≠ merely-unresolved — form fields/mint tokens stay
+> dispatchable). Checkout (hand-written) reads through the context now: failed cart → summary
+> error + `place_order_btn` disabled; failed `me.profile` → fields empty-editable + notice; failed
+> `paymentStatus` → the `payment_unavailable_state` shape reused. Mailbox spec bindings repaired
+> to the derived aliases (W35's dormant finding — SPEC-LOG row). All four dispatch reds seen
+> verbatim. ONE `Degradation` per failed resolver, emission unchanged upstream. Surprises vs the
+> card recorded on the PR: `restaurants.featured`/`restaurants.all` are a second live same-root
+> pair (home — design handles it), `add_to_cart` binds `{{ item.id }}` not `{{ restaurant.id }}`
+> (so it rightly stays orderable on a failed restaurant read), and the storefront header slots are
+> not rendered by the `back_button_header` arm, so the favorite-toggle disable is pinned at the
+> executor seam instead.
+
 > 🔧 **2026-08-29 — [#725 "The screens emitter flattens `conditional_section` branches and compound
 > sub-items into dotted props, leaving branch content structurally unrenderable"](https://github.com/TheCaptainCompany/captain-food/issues/725)
 > (overnight run, fourth chunk): branch content is renderable — named child groups, never

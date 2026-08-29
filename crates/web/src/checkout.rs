@@ -266,6 +266,21 @@ pub struct CheckoutViewState {
     /// render context by [`with_publishable_key`](Self::with_publishable_key) — it is a deployment
     /// fact, never resolver data.
     pub publishable_key: Option<crate::stripe::PublishableKey>,
+    /// `cart.current` FAILED (#730 — transport/contract failure, never an answered-empty cart):
+    /// the order summary renders the error affordance instead of blank money, and
+    /// `place_order_btn` disables (its `{{ cart.id }}` variable binds the failed read — an order
+    /// priced on data the customer never saw).
+    pub cart_failed: bool,
+    /// `restaurant.bySlug` FAILED: `place_order_btn` disables (`{{ restaurant.id }}`); nothing
+    /// else on this page displays that read, so no error section renders for it.
+    pub restaurant_failed: bool,
+    /// `me.profile` FAILED: the contact fields stay EMPTY-EDITABLE (an error state blocking
+    /// manual entry would hide the working path) with a small section notice.
+    pub profile_failed: bool,
+    /// `paymentStatus.byOrder` FAILED: the payment section reuses the
+    /// `payment_unavailable_state` shape — the outcome read this page depends on right after
+    /// paying is broken, and "your cart is saved" is the promise the system keeps.
+    pub payment_status_failed: bool,
 }
 
 impl CheckoutViewState {
@@ -281,12 +296,17 @@ impl CheckoutViewState {
     /// that restaurant's storefront) but it is a slug, not a display name; getting the real one
     /// needs the checkout screen's `resolvers` (or the Cart type) to carry it, which is a DSL change
     /// and is reported on #420 rather than smuggled in here.
-    pub fn from_resolved(
-        data: &Map<String, Value>,
+    pub fn from_context(
+        ctx: &crate::renderer::RenderContext,
         restaurant_fallback: Option<&str>,
         locale: &str,
     ) -> Self {
-        let cart = data.get("cart").filter(|v| !v.is_null());
+        // Through the context's own binding resolution (#729: data is keyed by full resolver
+        // key; `cart` / `paymentStatus` are the template aliases of `cart.current` /
+        // `paymentStatus.byOrder`), so this shell and the SDUI renderer can never disagree on
+        // which resolver feeds a name.
+        let cart_value = ctx.binding_json("cart").filter(|v| !v.is_null());
+        let cart = cart_value.as_ref();
         let str_at = |v: Option<&Value>, path: &[&str]| -> Option<String> {
             let mut cur = v?;
             for seg in path {
@@ -312,7 +332,8 @@ impl CheckoutViewState {
         let is_delivery = str_at(cart, &["serviceType"]).as_deref() != Some("COLLECTION");
         // The terminal refusal, from the screen's own `paymentStatus.byOrder` requirement — the
         // ONE thing on this page a customer must never be left guessing about.
-        let payment_failed = str_at(data.get("paymentStatus"), &["status"]).as_deref()
+        let payment_status = ctx.binding_json("paymentStatus");
+        let payment_failed = str_at(payment_status.as_ref(), &["status"]).as_deref()
             == Some(FAILED_PAYMENT_STATUS);
         Self {
             restaurant_name,
@@ -322,6 +343,12 @@ impl CheckoutViewState {
             payment_failed,
             locale: locale.to_string(),
             publishable_key: None,
+            // #730: failed ≠ unresolved — only a read `classify_resolve` marked FAILED degrades
+            // a section; the anonymous-SSR skip keeps today's empty shell.
+            cart_failed: ctx.binding_failed("cart"),
+            restaurant_failed: ctx.binding_failed("restaurant"),
+            profile_failed: ctx.binding_failed("me"),
+            payment_status_failed: ctx.binding_failed("paymentStatus"),
         }
     }
 
@@ -357,9 +384,28 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     // control: the payment section renders `payment_unavailable_state` and the pay button is
     // disabled. `payment_unavailable` also covers a browser-side degrade (stripe.js failed) —
     // the hydrate mount flips the same state rather than inventing a second one.
-    let mount_key = state.publishable_key.as_ref().map(|k| k.as_str().to_string());
-    let test_mode = state.publishable_key.as_ref().is_some_and(|k| k.is_test_mode());
-    let payment_unavailable = state.publishable_key.is_none();
+    // #730: a FAILED `paymentStatus.byOrder` read reuses the same `payment_unavailable_state`
+    // shape as the key-less shell — one degrade state, one promise ("your cart is saved"), and no
+    // element mounts into a payment flow whose outcome read is broken.
+    let payment_unavailable = state.publishable_key.is_none() || state.payment_status_failed;
+    let mount_key = (!payment_unavailable)
+        .then(|| state.publishable_key.as_ref().map(|k| k.as_str().to_string()))
+        .flatten();
+    let test_mode =
+        !payment_unavailable && state.publishable_key.as_ref().is_some_and(|k| k.is_test_mode());
+    // #730 (ux + legal): `place_order`'s variables bind `{{ cart.id }}` and `{{ restaurant.id }}`
+    // — a failed read of either disables the pay button (an order priced on data the customer
+    // never saw), with the translated reason as its tooltip. Merely-unresolved data keeps
+    // today's behaviour.
+    let data_failed = state.cart_failed || state.restaurant_failed;
+    let place_order_disabled = payment_unavailable || data_failed;
+    let disabled_reason =
+        data_failed.then(|| crate::i18n::resolve("common.error.data_unavailable", &state.locale));
+    let summary_failed = state.cart_failed;
+    let profile_failed = state.profile_failed;
+    let summary_error_copy = crate::i18n::resolve("common.error.data_unavailable", &state.locale);
+    let retry_copy = crate::i18n::resolve("common.error.retry", &state.locale);
+    let notice_copy = summary_error_copy.clone();
     view! {
         <main id="app" data-hydrate="checkout">
             <header data-c="back_button_header"><h1>"Checkout"</h1></header>
@@ -369,6 +415,13 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 </section>
             })}
             <section data-c="checkout_section" data-s="contact">
+                // #730: a failed `me.profile` read leaves the fields EMPTY-EDITABLE — the manual
+                // path keeps working — with a small notice, never a section-replacing error.
+                {profile_failed.then(|| view! {
+                    <p data-c="text" id="contact_prefill_notice" data-error="true" data-size="sm">
+                        {notice_copy.clone()}
+                    </p>
+                })}
                 <form data-c="form" id="contact_form">
                     <input data-c="text_input" id="full_name" required/>
                     <input data-c="phone_input" id="phone" disabled/>
@@ -376,7 +429,16 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 </form>
             </section>
             <section data-c="checkout_section" data-s="order_summary">
-                <div data-c="cart_summary_mini">{summary}" from "{state.restaurant_name}</div>
+                // #730: a FAILED cart read renders the #472 error affordance — never blank money
+                // in the summary a customer is about to pay against.
+                {if summary_failed { view! {
+                    <div data-c="cart_summary_mini" data-error="true">
+                        <p>{summary_error_copy.clone()}</p>
+                        <a href="" data-c="retry_button" role="button">{retry_copy.clone()}</a>
+                    </div>
+                }.into_any() } else { view! {
+                    <div data-c="cart_summary_mini">{summary}" from "{state.restaurant_name}</div>
+                }.into_any() }}
             </section>
             <section data-c="checkout_section" data-s="payment">
                 // The Stripe mount point: stripe.rs attaches the element here on hydrate, reading
@@ -455,9 +517,16 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 </section>
             })}
             <footer data-c="sticky_bottom_bar">
-                // Disabled while payment is unavailable (#440): a pay button over an unmountable
-                // element would place an order nothing can pay for.
-                <button data-c="button" id="place_order_btn" data-variant="primary" disabled=payment_unavailable>
+                // Disabled while payment is unavailable (#440: a pay button over an unmountable
+                // element would place an order nothing can pay for) or while the cart/restaurant
+                // read FAILED (#730: an order priced on data the customer never saw).
+                <button
+                    data-c="button"
+                    id="place_order_btn"
+                    data-variant="primary"
+                    disabled=place_order_disabled
+                    title=disabled_reason
+                >
                     "Place order - "{state.formatted_total}
                 </button>
             </footer>
@@ -674,6 +743,10 @@ mod tests {
             // No key — the presence-gated default; tests that need the configured state attach
             // one via `with_publishable_key`.
             publishable_key: None,
+            cart_failed: false,
+            restaurant_failed: false,
+            profile_failed: false,
+            payment_status_failed: false,
         }
     }
 
@@ -713,56 +786,164 @@ mod tests {
         assert!(!ok.contains("Paiement refusé"));
     }
 
-    /// #420: the shell is built from the screen's DECLARED resolvers. The end-to-end proof is
-    /// `router::tests::the_checkout_shell_carries_the_cart_it_is_about_to_charge_for`; this pins the
-    /// degradation cases that call site cannot easily reach — and the one that matters most is the
-    /// LAST: an unresolvable payment status must never be read as a failure.
+    /// #420: the shell is built from the screen's DECLARED resolvers (through the render
+    /// context's own binding resolution since #729 — data keyed by full resolver key). The
+    /// end-to-end proof is
+    /// `router::tests::the_checkout_shell_carries_the_cart_it_is_about_to_charge_for`; this pins
+    /// the degradation cases that call site cannot easily reach — and the one that matters most
+    /// is the LAST: an unresolvable payment status must never be read as a failure.
     #[test]
     fn the_shell_is_built_from_the_resolvers_and_degrades_without_lying() {
         let populated = |status: Value| {
-            let mut data = Map::new();
-            data.insert(
-                "cart".into(),
+            let mut ctx = crate::renderer::RenderContext::new("fr");
+            ctx.insert_resolved(
+                "cart.current",
                 json!({
                     "lines": [{ "offerId": "o1" }, { "offerId": "o2" }, { "offerId": "o3" }],
                     "totalAmount": { "amountCents": 1990, "currency": "EUR" },
                     "serviceType": "COLLECTION",
                 }),
             );
-            data.insert("paymentStatus".into(), status);
-            data
+            ctx.insert_resolved("paymentStatus.byOrder", status);
+            ctx
         };
 
         let state =
-            CheckoutViewState::from_resolved(&populated(Value::Null), Some("chez-marco"), "fr");
+            CheckoutViewState::from_context(&populated(Value::Null), Some("chez-marco"), "fr");
         assert_eq!(state.cart_line_count, 3);
         assert_eq!(state.formatted_total, "19,90 EUR");
         assert_eq!(state.restaurant_name, "chez-marco", "the host's tenant label is the fallback");
         assert!(!state.is_delivery, "COLLECTION hides the delivery sections");
         assert!(!state.payment_failed);
+        assert!(!state.cart_failed && !state.profile_failed && !state.payment_status_failed);
 
         // A name carried by the read WINS over the host fallback (forward-compatible with the
         // selection gap reported on #420).
         let mut named = populated(Value::Null);
-        named.insert("cart".into(), json!({ "restaurantName": "Chez Marco", "lines": [] }));
-        let state = CheckoutViewState::from_resolved(&named, Some("chez-marco"), "fr");
+        named.insert_resolved("cart.current", json!({ "restaurantName": "Chez Marco", "lines": [] }));
+        let state = CheckoutViewState::from_context(&named, Some("chez-marco"), "fr");
         assert_eq!(state.restaurant_name, "Chez Marco");
 
         // FAILED reaches the flag; every other status — including a read that could not be
         // answered at all — leaves it false. Telling a customer their payment failed when we simply
         // do not know is the one mistake on this page that costs more than saying nothing.
         let failed = populated(json!({ "status": "FAILED" }));
-        assert!(CheckoutViewState::from_resolved(&failed, None, "fr").payment_failed);
+        assert!(CheckoutViewState::from_context(&failed, None, "fr").payment_failed);
         for benign in [Value::Null, json!({ "status": "REQUIRES_CONFIRMATION" }), json!({})] {
-            let state = CheckoutViewState::from_resolved(&populated(benign.clone()), None, "fr");
+            let state = CheckoutViewState::from_context(&populated(benign.clone()), None, "fr");
             assert!(!state.payment_failed, "{benign} must not read as a failure");
         }
-        // Nothing resolved at all (an offline first paint): an empty shell, not a panic.
-        let empty = CheckoutViewState::from_resolved(&Map::new(), None, "fr");
+        // Nothing resolved at all (an offline first paint): an empty shell, not a panic — and
+        // NOT the failed state: unresolved ≠ failed (#730).
+        let empty =
+            CheckoutViewState::from_context(&crate::renderer::RenderContext::new("fr"), None, "fr");
         assert_eq!(empty.cart_line_count, 0);
         assert_eq!(empty.formatted_total, "");
         assert!(empty.is_delivery, "absent serviceType assumes the fuller DELIVERY form");
         assert!(!empty.payment_failed);
+        assert!(!empty.cart_failed, "skip-by-design must never read as a failure");
+    }
+
+    /// #730: the failure flags come from the context's failure marks, per resolver — and an
+    /// answer beats a failure mark (a failed re-read of an already-shown cart is answered).
+    #[test]
+    fn failure_marks_reach_the_view_state_per_resolver() {
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_failed("cart.current");
+        ctx.insert_failed("me.profile");
+        ctx.insert_resolved("restaurant.bySlug", json!({ "displayName": "Chez Test" }));
+        let state = CheckoutViewState::from_context(&ctx, None, "fr");
+        assert!(state.cart_failed);
+        assert!(state.profile_failed);
+        assert!(!state.restaurant_failed, "restaurant ANSWERED — its failure flag stays off");
+        assert!(!state.payment_status_failed, "paymentStatus was never read — unresolved ≠ failed");
+
+        let mut ctx = crate::renderer::RenderContext::new("fr");
+        ctx.insert_resolved("cart.current", json!({ "lines": [] }));
+        ctx.insert_failed("cart.current");
+        assert!(
+            !CheckoutViewState::from_context(&ctx, None, "fr").cart_failed,
+            "answer_beats_failure_mark"
+        );
+    }
+
+    /// #730 (Tours-facing, the money page): a FAILED cart read renders the #472 error affordance
+    /// in the order summary — never blank money — and `place_order_btn` disables with the
+    /// translated reason (its `{{ cart.id }}` variable binds the failed read). The contact form
+    /// and the rest of the page keep rendering.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_failed_cart_read_errors_the_summary_and_disables_place_order() {
+        let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
+        let mut state = view_state(true, false).with_publishable_key(key);
+        state.cart_failed = true;
+        state.formatted_total = String::new();
+        let html = render_checkout_html(state, "fr");
+        assert!(
+            html.contains("<div data-c=\"cart_summary_mini\" data-error=\"true\""),
+            "the summary renders the error affordance, element markup: {html}"
+        );
+        assert!(html.contains("Impossible de charger le contenu."), "{html}");
+        assert!(html.contains("Réessayer"), "a user-initiated retry: {html}");
+        assert!(
+            element_tag(&html, "place_order_btn").contains("disabled"),
+            "no order may be priced on data the customer never saw: {html}"
+        );
+        assert!(
+            element_tag(&html, "place_order_btn")
+                .contains("title=\"Impossible de charger le contenu.\""),
+            "the disable carries its translated reason: {html}"
+        );
+        assert!(html.contains("id=\"contact_form\""), "the rest of the page keeps rendering: {html}");
+
+        // A failed restaurant read alone: the summary stays (cart answered), the button disables
+        // — `{{ restaurant.id }}` is a place_order variable.
+        let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
+        let mut state = view_state(true, false).with_publishable_key(key);
+        state.restaurant_failed = true;
+        let html = render_checkout_html(state, "fr");
+        assert!(!html.contains("data-error=\"true\""), "no error section for a display-less read: {html}");
+        assert!(element_tag(&html, "place_order_btn").contains("disabled"), "{html}");
+    }
+
+    /// #730: a failed `me.profile` read leaves the contact fields EMPTY-EDITABLE (blocking manual
+    /// entry would hide the working path) with a small notice — never a section-replacing error.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_failed_profile_read_keeps_the_contact_fields_editable_with_a_notice() {
+        let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
+        let mut state = view_state(true, false).with_publishable_key(key);
+        state.profile_failed = true;
+        let html = render_checkout_html(state, "fr");
+        assert!(html.contains("id=\"contact_prefill_notice\""), "{html}");
+        assert!(html.contains("id=\"contact_form\""), "the form still renders: {html}");
+        assert!(
+            !element_tag(&html, "full_name").contains("disabled"),
+            "the manual path stays open: {html}"
+        );
+        assert!(
+            !element_tag(&html, "place_order_btn").contains("disabled"),
+            "a cosmetic prefill failure never blocks checkout (degraded-but-orderable): {html}"
+        );
+    }
+
+    /// #730: a failed `paymentStatus.byOrder` read reuses the `payment_unavailable_state` shape —
+    /// same copy, same "your cart is saved" promise, no Stripe element, disabled pay button —
+    /// never a second bespoke state.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_failed_payment_status_read_reuses_the_payment_unavailable_state() {
+        let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
+        let mut state = view_state(true, false).with_publishable_key(key);
+        state.payment_status_failed = true;
+        let html = render_checkout_html(state, "fr");
+        assert!(html.contains("id=\"payment_unavailable_state\""), "{html}");
+        assert!(html.contains("Paiement momentanément indisponible"), "{html}");
+        assert!(
+            !html.contains(&format!("id=\"{}\"", crate::stripe::MOUNT_ID)),
+            "no element mounts into a flow whose outcome read is broken: {html}"
+        );
+        assert!(element_tag(&html, "place_order_btn").contains("disabled"), "{html}");
     }
 
     /// The configured state (#440): a mountable key exists, so the spec tree INCLUDES the Stripe
