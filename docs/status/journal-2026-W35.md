@@ -3,6 +3,23 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🧾 **2026-08-29 — the Customer GDPR erasure proposal is drafted**
+> ([PROP-20260829-150752](../proposals/PROP-20260829-150752-customer-erasure.md), tracking
+> [#708 "No GDPR erasure flow exists for Customer"](https://github.com/TheCaptainCompany/captain-food/issues/708),
+> launch-blocking per [ERASURE-LAUNCH-GATE](../decisions/ERASURE-LAUNCH-GATE.yaml) decided *"A —
+> Erasure ships first"*). Option 1 (final vision) recommended: rejectable
+> `RequestCustomerErasure`/`ConfirmCustomerErasure` command pair (two-mutation GraphQL, grace
+> window, re-login-cancels) → `deletion:` block on the Customer actor (recorded grammar reused) →
+> `CustomerErasureProcess` PM with per-leg fenced Tells: **unlinking** (Supabase identity revoked
+> through the ACL, inbound confirmation fact) + **crypto-shred** (per-subject key; destruction =
+> erasure for `legalRetention`-bearing streams) + engine stream deletion + terminal
+> `CustomerErased` receipt; proof = a recurring round-trip ABSENCE drill (seed → erase → no PII in
+> any `View_*`, any replay, any role's GraphQL surface) and a new backup posture W
+> (erasure complete at deletion+W, PITR re-runs the sweep). Three counsel questions named
+> (invoice-field split, W's value, response wording); SNAP-1 stated as a dependency with a
+> requirement (same-transaction snapshot deletion), not decided. Status **Proposed** — awaiting
+> founder approval; no build dispatches before it.
+
 > 🗳️ **2026-08-29 — the founder's answer sheet: nine answers land as records**
 > ([ADR-20260829-145848](../adr/ADR-20260829-145848-the-founders-answer-sheet-of-2026-08-29.md),
 > 13-lens consult run in-session before relay; answers verbatim in the ADR). Decided:
