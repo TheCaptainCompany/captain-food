@@ -3,6 +3,29 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-29 — [#472 "A dead control stays live: the SDUI renderer evaluates no
+> `visible_when`/`disabled_when` and swallows resolver errors"](https://github.com/TheCaptainCompany/captain-food/issues/472)
+> Phase 1 (overnight run, checkpoint pending): the renderer now EVALUATES its declared
+> conditions, and a failed read renders an error state instead of an empty one.** The screens DSL
+> declares **35** show/hide/disable conditions (`grep -roE "visible_when|disabled_when|condition:"
+> specs/screens/*.yaml` excl. sidecars: 33 + 1 + 1 — the dispatch card's ux-lens figure was 34,
+> `UNVERIFIED input`, re-measured here) and the renderer consumed none of them: the auth sheet's
+> OTP error/resend/countdown controls all rendered at once, the cart FAB showed with no cart, the
+> checkout button stayed clickable over an empty cart. Landed red-first (7 tests seen red on
+> `main`, evidence in commit `3e7f5a60`): a corpus-exact evaluator (`crates/web/src/condition.rs`,
+> parse-only constructor, unknown constructs LOUD via a `data-condition-error` marker, missing
+> data fails CLOSED — hidden/disabled), a `visible_when` choke point every render path crosses, a
+> structural skip-vs-failure split for resolver reads (`ResolverKey::roles()` emitted from
+> api.yaml, `graphql::classify_resolve`), per-binding error states with fr-first copy + a
+> user-initiated retry (never the transport string, never "Commande introuvable" over a transient
+> failure — `OrderRead::Failed` on tracking), and `sdui_degraded_render_total` counted at
+> `hosts::app_page` with the render's correlation id. **Deliberately out tonight (per the #472
+> card): `variant_when`** (evans — its own chunk) **and #656/#521/gap-state work.** Adjacent
+> finding for the architect (noted, not fixed): the screens emitter FLATTENS
+> `conditional_section.if_true/if_false` into dotted props, so those branches are structurally
+> unrenderable — the `condition:` verdict is stamped as `data-cond` but branch content cannot
+> render until the emitter emits them as child nodes.
+
 > ✅ **2026-08-29 — [#715 "DECISIONS.md §27/§28 D-rows: reconcile the stale summary tables against
 > §27bis before promoting the last 14 namespaced keys"](https://github.com/TheCaptainCompany/captain-food/issues/715)
 > closes the follow-up ADR-20260828-153000 raised: the last 14 `D1`-`D7` keys are migrated to
