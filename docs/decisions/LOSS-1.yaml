@@ -4,5 +4,5 @@ question: "Permanent-capture-failure loss allocation: write-off threshold, retry
 owner: "founder"
 opened: "2026-08-14"
 register: "docs/proposals/DECISIONS.md §38"
-evidence: "FOUNDER-OWED — open 2026-08-14 ... KEPT OPEN / FOUNDER-FLAGGED, deliberately NOT closed under the 2026-08-14 delegation ... it commits Captain to absorbing real money and standing up a funded reserve"
-note: "Has a legal leg (CAP-7 recovery framing) no lens output can clear; the paging stopgap is acceptable only once the runbook exists."
+evidence: "FOUNDER-OWED — open 2026-08-14 ... KEPT OPEN / FOUNDER-FLAGGED, deliberately NOT closed under the 2026-08-14 delegation ... it commits Captain to absorbing real money and standing up a funded reserve. SHAPE CHOSEN 2026-08-29 (founder answer sheet, verbatim: 'A — Bounded write-off', note empty; ADR-20260829-145848): the write-off is bounded, but the threshold VALUE is UNSET and folds into the money-stack session — the row stays open until that value and the reserve are decided there. Business lens recommendation banked for that session: 30 EUR per-order cap; reserve priced at 0.3-0.5% GMV until a capture-failure-rate signal exists (that missing observability contract is named)."
+note: "Has a legal leg (CAP-7 recovery framing) no lens output can clear; the paging stopgap is acceptable only once the runbook exists. Threshold + reserve close in the money-stack session (founder: 'A — Yes, prepare the money-stack session', 2026-08-29)."

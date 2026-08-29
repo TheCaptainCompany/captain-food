@@ -3,6 +3,28 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🗳️ **2026-08-29 — the founder's answer sheet: nine answers land as records**
+> ([ADR-20260829-145848](../adr/ADR-20260829-145848-the-founders-answer-sheet-of-2026-08-29.md),
+> 13-lens consult run in-session before relay; answers verbatim in the ADR). Decided:
+> **ERASURE-LAUNCH-GATE** *"A — Erasure ships first"* —
+> [#708 "Customer GDPR erasure flow"](https://github.com/TheCaptainCompany/captain-food/issues/708)
+> is launch-blocking, reframed engine-exists-gated-OFF (ADR-20260731-214500);
+> **V0-PROMO-AND-MINIMUM** *"B — Minimum order only"*, note *"15"* (derived 15 EUR = 1500 cents
+> platform default; promo codes post-V0, retiring #468's `cart.discount` gap);
+> **IDENT1-OUTAGE-EXPERIENCE** *"B — Visible couldn't-load-your-account-retry"* (experience
+> amended, fail-closed posture stands). **LOSS-1 stays open**: shape chosen (*"A — Bounded
+> write-off"*), threshold folds into the money-stack session. Facts: OVH SMS *"500 / 500"* —
+> pack untouched, [#699](https://github.com/TheCaptainCompany/captain-food/issues/699) gauge is
+> pre-launch. Commissioned: the
+> [#733](https://github.com/TheCaptainCompany/captain-food/issues/733) ETA proposal (*"C — Team
+> drafts the proposal with both options"*); the
+> [#734](https://github.com/TheCaptainCompany/captain-food/issues/734)+[#741](https://github.com/TheCaptainCompany/captain-food/issues/741)
+> imagery+tiles work as ONE combined session deferred until the erasure proposal is in review
+> (holub's sequencing; the founder's draft-both answer standing); the money-stack session page;
+> the #708 full-mob `HOLD: human` proposal next.
+> [#743](https://github.com/TheCaptainCompany/captain-food/issues/743) closed on *"A — Keep it
+> orderable"*.
+
 > 📜 **2026-08-29 — the prose product spec is retired** (founder, verbatim: *"retire the product
 > spec file"* — given in the same message as the option-1 choice on
 > [#755 "Local dev: accept `{slug}.localhost` as tenant space so storefronts are viewable without

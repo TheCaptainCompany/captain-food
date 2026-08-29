@@ -21,15 +21,14 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `DELIV-THRESHOLD` | open | 2026-08-19 | The free-delivery threshold: which field, computed where, and the ninth money term — design team-owned, commercial parameters founder-owned (suggest, never cap). | team |
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
-| `ERASURE-LAUNCH-GATE` | open | 2026-08-28 | Does the Customer GDPR erasure flow (#708) ship BEFORE the first real order in Tours, or does the founder record an explicit, counsel-cleared acceptance of an exposure window? | founder |
-| `IDENT1-OUTAGE-EXPERIENCE` | open | 2026-08-28 | When the identity lookup FAILS (outage class, lookup_failed), does the customer keep the ADR-20260818-004646 silent fail-closed-to-Public experience, or get a visible 'couldn't load your account — retry' state? | founder |
-| `V0-PROMO-AND-MINIMUM` | open | 2026-08-28 | Does V0 ship promo codes and/or a minimum order amount, and at what rules/values? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
 | `CONTROLLER-HANDOVER` | decided | 2026-08-19 | Is the association-to-company controller handover made reconstructible in the event log? -> ADR-20260819-103112 | founder |
 | `DISPATCH-CARD-CITATION` | decided | 2026-08-28 | WHICH `docs/**` SUBTREES ARE INSTRUCTION SURFACES for `decision-superseded-authority` — i.e. which of them should leave the `docs/**` exclusion and join `.claude/**` in the citation corpus? Opened for `docs/dispatch/**`; widened to the class after review #59 named `docs/claude/**` and `docs/PLAYBOOK.md` as the same exception with more weight. -> ADR-20260828-213000 | team |
+| `ERASURE-LAUNCH-GATE` | decided | 2026-08-29 | Does the Customer GDPR erasure flow (#708) ship BEFORE the first real order in Tours, or does the founder record an explicit, counsel-cleared acceptance of an exposure window? -> ADR-20260829-145848 | founder |
 | `GATE-STEP-LOCUS` | decided | 2026-08-27 | Do executable gate steps live INSIDE the always-run `changes` job, or in a sibling always-run job that `codegen` aggregates equally? -> ADR-20260827-081500 | team |
+| `IDENT1-OUTAGE-EXPERIENCE` | decided | 2026-08-29 | When the identity lookup FAILS (outage class, lookup_failed), does the customer keep the ADR-20260818-004646 silent fail-closed-to-Public experience, or get a visible 'couldn't load your account — retry' state? -> ADR-20260829-145848 | founder |
 | `IDENT1-RESOLUTION-ACTIVATION` | decided | 2026-08-28 | When does RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES (the #707 gated path) flip ON? -> ADR-20260828-120500 | founder |
 | `KEY-NAMESPACE` | decided | 2026-08-28 | How are the 22 ambiguous D1-D7 keys namespaced and encoded in filenames (PROP-20260819-110442 D5, slice 5)? -> ADR-20260828-153000 | team |
 | `MARGIN-MECHANISM` | decided | 2026-08-19 | What replaces the margin-proportional fee mechanism? -> ADR-20260819-103112 | founder |
@@ -69,13 +68,14 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REV-1` | decided | 2026-08-17 | Does the `claude-review` bot check stay a REQUIRED status check on `main`? -> ADR-20260807-235930 | founder |
 | `REVIEW-GATE-BYPASS` | decided | 2026-08-24 | Does the #677 hardening of `claude-review` land BEFORE REV-1 is executed — merged by a one-time admin bypass, leaving the check required and newly able to fail — or does REV-1 execute first so the hardened check reds on a non-required gate? -> ADR-20260825-005323 | founder |
 | `REVIEW-GATES-CRATES-MERGE` | decided | 2026-08-28 | Should the independent review pass gate auto-merge on PRs touching crates/**, or keep merging on green CI with review findings landing as follow-up PRs? -> ADR-20260828-023258 | founder |
+| `V0-PROMO-AND-MINIMUM` | decided | 2026-08-29 | Does V0 ship promo codes and/or a minimum order amount, and at what rules/values? -> ADR-20260829-145848 | founder |
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
 | `PROP-20260809-021351--D2` | withdrawn | 2026-08-09 | Demo data isolation | team |
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 61 — 11 open · 45 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 61 — 8 open · 48 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
