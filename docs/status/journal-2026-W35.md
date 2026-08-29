@@ -3,6 +3,19 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔁 **2026-08-29 — ETA proposal, review round 1: FAIL folded in one edit round**
+> ([PROP-20260829-165042](../proposals/PROP-20260829-165042-pre-order-eta.md), living doc rewritten
+> in place per ADR-20260801-020000; substance verified sound — the hybrid confirmed as real scope
+> staging). One blocking finding fixed: §7 gained the RESTAURANT-actor mockup (7e, the backoffice
+> declared-inputs screen mapping to `UpdateRestaurant`, drawn generic on the zone-vs-restaurant
+> placement so unresolved question 1 is not presumed, with a last-updated neglect signal — the
+> staleness con made visible as the maintenance burden the founder is weighing). Two non-blocking
+> folded: the "scope staging is not shape staging" quote now cites ADR-20260808-235113's actual
+> boundary-sharpening line instead of the proposals-README paraphrase, and the degenerate baseline
+> (stay empty — the current live state) is enumerated in §4 as an explicit rejected option (zero
+> false-promise risk and zero running cost, rejected for the permanent peak-weighted conversion
+> tax). Round-2 re-presentation next.
+
 > 📝 **2026-08-29 — round-2 founder answers recorded + the commissioned ETA proposal is drafted.**
 > **(1)** The founder's answer sheet round 2 (verbatim): *"MIN-ORDER-SCOPE: A — Delivery only"* and
 > *"MIN-ORDER-PER-RESTAURANT: B — Platform default, restaurant may override later"* — appended to

@@ -70,6 +70,14 @@ specified once and appears wherever such a card exists.
 
 Final-vision option first (ADR-20260808-235113). The letters match the commissioning consult.
 
+**The degenerate baseline, rejected explicitly: stay empty (the current live state).** The #717
+posture — no widget, an honest declared gap — has real pros: zero false-promise risk and zero
+running cost (no evaluator, no staleness handling, no copy to maintain). It is rejected because
+the conversion tax is permanent and peak-weighted: every storefront session reaches checkout
+without the one number the customer decides on, and the ETA is the product. Honest silence was the
+right EMERGENCY fix for a false number; it is not a position to hold through more Friday peaks
+than the dependencies force.
+
 ### Option B — Computed delivery estimate (the final vision)
 
 `ComputedDeliveryEstimate` = prep signal + delivery leg, maintained as a read model and served
@@ -222,10 +230,11 @@ redo. The two forms of the hybrid are NOT equivalent:
   vocabulary carry **`ComputedDeliveryEstimate` from day one**, and at V0 its **evaluator** composes
   declared inputs only — declared prep + declared per-zone delivery leg — served with
   `basis: DECLARED`. When the measured prep fold and geocoding land, the EVALUATOR upgrades and
-  `basis` flips to `MEASURED`; no screen, no API field, no term changes. ADR-20260808-235113 itself
-  draws this line: *"Scope staging (thin slices of the final shape) is not shape staging (a
-  different shape you must redo)."* Option A's content ships; Option B's shape ships; nothing is
-  thrown away.
+  `basis` flips to `MEASURED`; no screen, no API field, no term changes. ADR-20260808-235113 draws
+  this line itself (boundary sharpening 1): *"Scope staging is not shape staging. Thin vertical
+  slices OF the final shape … are how the final vision ships — compliant. What the principle bans
+  is SHAPE staging: building a different shape that must be redone."* Option A's content ships;
+  Option B's shape ships; nothing is thrown away.
 
 The honest cost that stays: at V0 the hybrid's NUMBER is exactly Option A's number, so it inherits
 Option A's Friday-peak weakness until the measured upgrade — the difference is that the shape can
@@ -308,6 +317,37 @@ product.
 └──────────────────────────────────────┘
      eta_bar rebound to ComputedDeliveryEstimate with a freshness field;
      fresh state shows the live range, stale state shows this
+```
+
+### 7e. Restaurant backoffice — the declared inputs (maps to `UpdateRestaurant`)
+
+The restaurant actor's side of the hybrid: at V0 the customer-facing number is composed ENTIRELY
+of what this screen holds, so this control's maintenance burden IS the staleness con of §4 — a
+value set once at onboarding and never revisited is exactly how the declared range goes false at
+peak. The screen carries its own last-updated line to keep that visible to the restaurant too.
+
+```
+┌──────────────────────────────────────┐
+│  ← Réglages · Délais                 │
+│  ──────────────────────────────────  │
+│  Temps de préparation (base)         │
+│  ┌──────────┐                        │
+│  │  20 min  │                        │   ← preparationTimeMinutes
+│  └──────────┘                        │
+│  Trajet de livraison (déclaré)       │
+│  ┌──────────┐  ┌──────────┐          │
+│  │  10 min  │–│  15 min  │           │   ← declared delivery-leg range
+│  └──────────┘  └──────────┘          │     (placement — per zone vs per
+│                                      │      restaurant — is unresolved
+│  Affiché au client :                 │      question 1; drawn generic here)
+│  « environ 30–35 min »               │   ← live preview of the composed
+│                                      │     ComputedDeliveryEstimate
+│  Dernière mise à jour : il y a 47 j  │   ← the neglect signal, shown to the
+│                                      │     restaurant itself
+│  ┌────────────────────────────────┐  │
+│  │         Enregistrer            │  │   ← UpdateRestaurant
+│  └────────────────────────────────┘  │     (specs/network/commands.yaml)
+└──────────────────────────────────────┘
 ```
 
 (French copy in mockups is illustrative surface text for the Tours audience; actual strings land in
