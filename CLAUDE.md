@@ -85,8 +85,8 @@ platform keys in `specs/common/`). Cross-cutting: [stories.yaml](specs/stories.y
 story map: personas → activities → steps `$ref`ing api ops) · [tests.yaml](specs/tests.yaml)
 (Given/When/Then) · [screens/](specs/screens/) (SDUI per audience, gaps explicit) ·
 [translations.yaml](specs/translations.yaml) · [database/](specs/database/) (`View_*` = a SQL VIEW,
-unprefixed = a TABLE) · [PRODUCT_SPEC_WEB_CLIENT.md](specs/PRODUCT_SPEC_WEB_CLIENT.md). Whole-product
-navigable view: [documentation.generated.md](specs/generated/documentation.generated.md) (GENERATED).
+unprefixed = a TABLE). Whole-product navigable view:
+[documentation.generated.md](specs/generated/documentation.generated.md) (GENERATED).
 
 ## Architecture (summary)
 

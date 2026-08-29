@@ -3,6 +3,21 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 📜 **2026-08-29 — the prose product spec is retired** (founder, verbatim: *"retire the product
+> spec file"* — given in the same message as the option-1 choice on
+> [#755 "Local dev: accept `{slug}.localhost` as tenant space so storefronts are viewable without
+> /etc/hosts"](https://github.com/TheCaptainCompany/captain-food/issues/755), after a 13-lens
+> consult). `specs/PRODUCT_SPEC_WEB_CLIENT.md` deleted; unique content migrated first —
+> checkout gating + passkey/SMS-cost stance → `specs/integrations/supabase.md` §5-§6; the founding
+> ~2s-on-4G NFR → `docs/frontend/renderer-architecture.md` §3 (the other §4 numbers were already
+> the screens' executable `performance:`/`accessibility:` contracts); the unbuilt
+> `restos.captain.food/onboarding` destination → a declared gap on `partner_landing`. Live
+> references repointed (CLAUDE.md index, stripe `outbound.rs`, ordering `events.yaml`,
+> renderer-architecture); historical records keep their citations verbatim. Register row
+> `PRODUCT-SPEC-WEB-CLIENT-RETIRED`, ADR-20260829-092233; migration map + Consulted block in the
+> ADR. Nothing to migrate for the Cart/localStorage history (database.md already the authority)
+> and vernon's two boundary facts (already in the YAML).
+
 > 🏠 **2026-08-29 — [#755 "Local dev: accept `{slug}.localhost` as tenant
 > space"](https://github.com/TheCaptainCompany/captain-food/issues/755)** (founder-decided, option
 > 1 of the post-#752 dev-access options; his note on the alternative, verbatim: *"The /r/<slug>

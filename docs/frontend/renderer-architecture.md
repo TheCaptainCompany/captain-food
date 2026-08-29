@@ -102,7 +102,11 @@ sequenceDiagram
     Note over B,REG: same ComponentKind dispatch, now interactive
 ```
 
-**Why we need SSR (from the NFRs, `PRODUCT_SPEC_WEB_CLIENT.md` §4):**
+**Why we need SSR (the founding NFR: main flows load in **~2 seconds on 4G, mobile-first** — now
+declared as the customer surfaces' `performance:` contracts in
+`specs/screens/captain_frontoffice.yaml` and `specs/screens/restaurant_frontoffice.yaml`:
+`target_lighthouse_mobile: 90`, `rendering_strategy: SSR_first`, `max_ttfb_ms: 500`,
+`max_fcp_ms: 1500`, `max_lcp_ms: 2500`):**
 
 1. **First paint / mobile Lighthouse over 90** — the user sees a real menu, not a spinner waiting on a
    WASM download.
