@@ -62,14 +62,11 @@ impl RenderContext {
 
     /// Record one resolver read as FAILED (#472), under the same aliases `insert_resolved` uses.
     pub fn insert_failed(&mut self, resolver_key: &str) {
-        let mut parts = resolver_key.splitn(2, '.');
-        let first = parts.next().unwrap_or(resolver_key);
-        if let Some(second) = parts.next() {
-            if second.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-                self.failed.insert(format!("{second}_{first}"));
-            }
+        let (first, reversed) = resolver_aliases(resolver_key);
+        if let Some(alias) = reversed {
+            self.failed.insert(alias);
         }
-        self.failed.insert(first.to_string());
+        self.failed.insert(first);
         self.failed.insert(resolver_key.to_string());
     }
 
@@ -83,14 +80,11 @@ impl RenderContext {
 
     /// Store one resolver result under its spec key + template aliases (see type docs).
     pub fn insert_resolved(&mut self, resolver_key: &str, value: Value) {
-        let mut parts = resolver_key.splitn(2, '.');
-        let first = parts.next().unwrap_or(resolver_key);
-        if let Some(second) = parts.next() {
-            if second.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-                self.data.insert(format!("{second}_{first}"), value.clone());
-            }
+        let (first, reversed) = resolver_aliases(resolver_key);
+        if let Some(alias) = reversed {
+            self.data.insert(alias, value.clone());
         }
-        self.data.insert(first.to_string(), value.clone());
+        self.data.insert(first, value.clone());
         self.data.insert(resolver_key.to_string(), value);
     }
 
@@ -126,6 +120,35 @@ impl RenderContext {
         }
         Some(cur)
     }
+}
+
+/// The template aliases a resolver key's result is stored under (see [`RenderContext`] type
+/// docs): `(first_segment, Option<reversed second_first form>)` — the ONE authority for the
+/// aliasing rule, shared by `insert_resolved`/`insert_failed` and the gap classification (#725).
+fn resolver_aliases(resolver_key: &str) -> (String, Option<String>) {
+    let mut parts = resolver_key.splitn(2, '.');
+    let first = parts.next().unwrap_or(resolver_key).to_string();
+    let reversed = parts.next().and_then(|second| {
+        second
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_')
+            .then(|| format!("{second}_{first}"))
+    });
+    (first, reversed)
+}
+
+/// The declared `gap:` note of the resolver whose stored aliases would feed this binding ROOT
+/// (#725) — how the renderer tells "this section sits on a spec-declared gap" (render GAPPED,
+/// auditably) from "this section answered empty" (render the empty state). `None` = no gap
+/// resolver aliases to this root.
+fn resolver_gap_for_root(root: &str) -> Option<&'static str> {
+    use crate::generated::data_layer::ResolverKey;
+    ResolverKey::ALL.iter().find_map(|k| {
+        let note = k.gap()?;
+        let key = k.as_str();
+        let (first, reversed) = resolver_aliases(key);
+        (root == key || root == first || reversed.as_deref() == Some(root)).then_some(note)
+    })
 }
 
 /// `{ amountCents, currency }` → "12,34 EUR" (fr-style decimal comma — V0 market). Non-Money
@@ -170,6 +193,136 @@ fn items_of(node: &Node, ctx: &RenderContext) -> Vec<Value> {
 
 fn children_views(node: &Node, ctx: &RenderContext) -> Vec<AnyView> {
     node.children.iter().map(|c| render_node(c, ctx)).collect()
+}
+
+/// The per-row render context (#725): the row travels as `item`, everything else inherited — so
+/// per-item templates (`item_components`, `item_badge`) resolve `{{ item.* }}` bindings and
+/// `item.*` conditions through the SAME machinery every other binding uses.
+fn item_ctx(ctx: &RenderContext, row: &Value) -> RenderContext {
+    let mut c = ctx.clone();
+    c.data.insert("item".to_string(), row.clone());
+    c
+}
+
+/// Resolve every inline `{{ path }}` template in a literal string against the context (#725):
+/// the shape multi-template values use ("{{ item.actorType }} / {{ item.partition }}"), which is
+/// deliberately NOT one Binding (the emitter keeps it Text). Unresolvable paths render empty —
+/// bindings are data slots, not errors.
+fn interpolate_templates(s: &str, ctx: &RenderContext) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                out.push_str(&ctx.binding_text(after[..end].trim()));
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A per-item template prop as display text (#725): a Binding resolves against the row context; a
+/// literal Text may carry inline templates and interpolates.
+fn item_prop_text(node: &Node, key: &str, row_ctx: &RenderContext) -> String {
+    match node.prop(key) {
+        Some(PropValue::Text(s)) if s.contains("{{") => interpolate_templates(s, row_ctx),
+        _ => prop_text(node, key, row_ctx),
+    }
+}
+
+/// The `item_badge` per-item config of a List (#725/#160): the badge on rows whose declared
+/// condition holds — evaluated against THAT row (fail closed per #472: unevaluatable hides;
+/// unparseable is loud). `None` = no badge on this row (or none declared).
+fn item_badge_view(node: &Node, row_ctx: &RenderContext) -> Option<AnyView> {
+    node.prop("item_badge.text")?;
+    match eval_condition_prop(node, "item_badge.visible_when", row_ctx, false) {
+        Some(Err(expr)) => Some(condition_error_marker(expr)),
+        Some(Ok(false)) => None,
+        Some(Ok(true)) | None => {
+            let text = prop_text(node, "item_badge.text", row_ctx);
+            let variant = prop_text(node, "item_badge.variant", row_ctx);
+            Some(
+                view! { <span data-c="item_badge" data-variant=variant>{text}</span> }.into_any(),
+            )
+        }
+    }
+}
+
+/// The `item_components.N.*` per-item templates of a List (#725): each row renders the declared
+/// component sequence against its own context. `None` = the node declares none (the plain-line
+/// List shape). Supported types mirror the tiered markup rule: `info_row`/`badge` (label+value
+/// rows), `text`, and `button` (the full action DOM contract via the prefixed parser — the
+/// mailbox requeue intervention, #315). Anything else renders the tagged generic label+value
+/// container. `variant_when` is out of scope here, as at the #472 briefing (evans).
+fn item_component_views(node: &Node, row_ctx: &RenderContext) -> Option<Vec<AnyView>> {
+    node.prop("item_components.0.type")?;
+    let mut out: Vec<AnyView> = Vec::new();
+    for i in 0..32 {
+        let key = |suffix: &str| format!("item_components.{i}.{suffix}");
+        let Some(PropValue::Text(ty)) = node.prop(&key("type")) else { break };
+        match eval_condition_prop(node, &key("visible_when"), row_ctx, false) {
+            Some(Err(expr)) => {
+                out.push(condition_error_marker(expr));
+                continue;
+            }
+            Some(Ok(false)) => continue, // hidden on THIS row — fail closed like every condition
+            Some(Ok(true)) | None => {}
+        }
+        let label = prop_text(node, &key("label"), row_ctx);
+        match ty {
+            "text" => {
+                let value = item_prop_text(node, &key("value"), row_ctx);
+                out.push(view! { <p data-c=ty>{value}</p> }.into_any());
+            }
+            "button" => {
+                let (action_attrs, disabled_reason) =
+                    crate::executor::button_attrs_prefixed(node, row_ctx, &key("action"));
+                let get = |k: &str| {
+                    action_attrs.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone())
+                };
+                use crate::executor::attrs;
+                let variant = prop_text(node, &key("variant"), row_ctx);
+                let disabled = disabled_reason.is_some();
+                out.push(
+                    view! {
+                        <button
+                            data-c=ty
+                            data-variant=variant
+                            data-action=get(attrs::ACTION)
+                            data-vars=get(attrs::VARS)
+                            data-var-bindings=get(attrs::VAR_BINDINGS)
+                            data-loading=get(attrs::LOADING)
+                            data-on-success=get(attrs::ON_SUCCESS)
+                            data-route=get(attrs::ROUTE)
+                            data-sheet=get(attrs::SHEET)
+                            disabled=disabled
+                            title=disabled_reason
+                        >
+                            {label}
+                        </button>
+                    }
+                    .into_any(),
+                );
+            }
+            // info_row, badge, and any other labelled value template.
+            _ => {
+                let value = item_prop_text(node, &key("value"), row_ctx);
+                out.push(
+                    view! { <div data-c=ty><span>{label}</span><span>{value}</span></div> }
+                        .into_any(),
+                );
+            }
+        }
+    }
+    Some(out)
 }
 
 /// Whether the item-list binding this node renders from FAILED for real (#472) — checked on the
@@ -276,15 +429,16 @@ fn message_bubble_row(item: &Value, translated_label: &str) -> AnyView {
     .into_any()
 }
 
-/// Evaluate a node's condition prop over the resolved data. `None` = the node declares none.
-/// `Some(Ok(bool))` = evaluated (missing data already failed CLOSED per `polarity_on_unknown`);
-/// `Some(Err(expr))` = the expression is outside the corpus grammar — the caller must be LOUD.
-fn eval_condition_prop(
+/// Evaluate a node's condition prop over the resolved data, three-way. `None` = the node declares
+/// none. `Some(Err(expr))` = outside the corpus grammar — the caller must be LOUD.
+/// `Some(Ok(Some(bool)))` = evaluated; `Some(Ok(None))` = UNEVALUATABLE over the data at hand
+/// (missing data) — the caller fails CLOSED in whatever way its surface demands (#472: hidden for
+/// `visible_when`, disabled for `disabled_when`; #725: NEITHER branch for `condition:`).
+fn eval_condition_verdict(
     node: &Node,
     key: &str,
     ctx: &RenderContext,
-    on_unevaluatable: bool,
-) -> Option<Result<bool, &'static str>> {
+) -> Option<Result<Option<bool>, &'static str>> {
     let prop = node.prop(key)?;
     let PropValue::Text(expr) = prop else {
         // A binding/i18n value in a condition slot is invisible to the grammar — loud, like any
@@ -293,12 +447,20 @@ fn eval_condition_prop(
     };
     Some(match Condition::parse(expr) {
         Err(_) => Err(expr),
-        Ok(c) => Ok(c
-            .eval(&|path| ctx.lookup(path).cloned())
-            // Fail CLOSED over missing data (#472 briefing): hidden for visible_when
-            // (on_unevaluatable = false), disabled for disabled_when (on_unevaluatable = true).
-            .unwrap_or(on_unevaluatable)),
+        Ok(c) => Ok(c.eval(&|path| ctx.lookup(path).cloned())),
     })
+}
+
+/// [`eval_condition_verdict`] with the unevaluatable case already collapsed to the caller's
+/// fail-closed polarity (#472): hidden for `visible_when` (`on_unevaluatable = false`), disabled
+/// for `disabled_when` (`on_unevaluatable = true`).
+fn eval_condition_prop(
+    node: &Node,
+    key: &str,
+    ctx: &RenderContext,
+    on_unevaluatable: bool,
+) -> Option<Result<bool, &'static str>> {
+    Some(eval_condition_verdict(node, key, ctx)?.map(|v| v.unwrap_or(on_unevaluatable)))
 }
 
 /// The LOUD fail-closed render of an unparseable condition (#472): the content never renders
@@ -363,25 +525,40 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
 
         // ── layout ──────────────────────────────────────────────────────────────
         ComponentKind::Section | ComponentKind::CheckoutSection | ComponentKind::ConditionalSection => {
-            // `conditional_section` spells its predicate TWO ways in the spec today (#472):
+            // `conditional_section` spells its predicate TWO ways in the spec (#472):
             // `visible_when` (handled by the render_node choke point like every node) and
-            // `condition:` with if_true/if_false branches. Both route through the ONE evaluator.
-            // The branches arrive FLATTENED from the generator (`if_true.0.type`, …) — not
-            // renderable Nodes — so the honest render is the evaluated verdict stamped on the
-            // section (`data-cond`), with branch rendering left to the emitter follow-up noted on
-            // the PR. An unparseable `condition:` is loud, like any unknown construct.
-            match eval_condition_prop(node, "condition", ctx, false) {
+            // `condition:` with if_true/if_false branches — real named child groups since #725.
+            // Both route through the ONE evaluator. An unparseable `condition:` is loud, like any
+            // unknown construct.
+            match eval_condition_verdict(node, "condition", ctx) {
                 Some(Err(expr)) => return condition_error_marker(expr),
                 verdict => {
-                    let cond = verdict.map(|v| {
-                        if v.unwrap_or(false) { "true".to_string() } else { "false".to_string() }
+                    let cond = verdict.as_ref().map(|v| match v {
+                        Ok(Some(true)) => "true".to_string(),
+                        Ok(Some(false)) => "false".to_string(),
+                        Ok(None) | Err(_) => "unevaluatable".to_string(),
                     });
+                    // Mutual exclusion (#725, beck's trap): EXACTLY ONE branch renders — the
+                    // evaluated verdict picks it. Unevaluatable (missing data, e.g. client form
+                    // state on the SSR pass) fails CLOSED: NEITHER branch, `data-cond`
+                    // stamps "unevaluatable" (the loud marker stays reserved for unparseable
+                    // expressions, per the #472 missing-data semantics).
+                    let chosen = match &verdict {
+                        Some(Ok(Some(true))) => Some("if_true"),
+                        Some(Ok(Some(false))) => Some("if_false"),
+                        _ => None,
+                    };
+                    let branch_views: Vec<AnyView> = chosen
+                        .and_then(|name| node.branch(name))
+                        .map(|group| group.iter().map(|c| render_node(c, ctx)).collect())
+                        .unwrap_or_default();
                     let title = prop_text(node, "title", ctx);
                     let has_title = !title.is_empty();
                     return view! {
                         <section data-c=ty data-cond=cond>
                             {has_title.then(|| view! { <h2>{title.clone()}</h2> })}
                             {children_views(node, ctx)}
+                            {branch_views}
                         </section>
                     }
                     .into_any();
@@ -421,19 +598,41 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
             .into_any()
         }
         ComponentKind::List => {
-            // The generic titled list (location picker's address lists): rows from the bound items.
+            // The generic titled list (location picker's address lists, the backoffice claims
+            // list, the system mailbox lanes): rows from the bound items. Per-item templates
+            // (`item_components.N.*`) and per-item config (`item_badge.*`) render against each
+            // ROW's own context (#725) — before that they were declared and silently ignored.
             if items_binding_failed(node, ctx) {
                 return binding_error_state(ty, "common.error.data_unavailable", ctx);
             }
             let title = prop_text(node, "title", ctx);
-            let rows: Vec<AnyView> = items_of(node, ctx)
+            let items = items_of(node, ctx);
+            if items.is_empty() {
+                let empty_title = prop_text(node, "empty_state.title", ctx);
+                if !empty_title.is_empty() {
+                    // The DECLARED empty state (e.g. the mailbox's #596 copy) — previously
+                    // spec'd and never rendered.
+                    let body = prop_text(node, "empty_state.body", ctx);
+                    return view! {
+                        <div data-c=ty data-empty="true"><h3>{empty_title}</h3><p>{body}</p></div>
+                    }
+                    .into_any();
+                }
+            }
+            let rows: Vec<AnyView> = items
                 .iter()
                 .map(|item| {
+                    let row_ctx = item_ctx(ctx, item);
+                    let badge = item_badge_view(node, &row_ctx);
+                    if let Some(components) = item_component_views(node, &row_ctx) {
+                        return view! { <li data-c="list_item">{components}{badge}</li> }
+                            .into_any();
+                    }
                     let line = item
                         .as_str()
                         .map(str::to_string)
                         .unwrap_or_else(|| item.get("line1").and_then(Value::as_str).unwrap_or("").to_string());
-                    view! { <li>{line}</li> }.into_any()
+                    view! { <li>{line}{badge}</li> }.into_any()
                 })
                 .collect();
             view! { <div data-c=ty><h3>{title}</h3><ul>{rows}</ul></div> }.into_any()
@@ -486,12 +685,104 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
         }
 
         // ── discovery lists ─────────────────────────────────────────────────────
-        ComponentKind::RestaurantCardGrid | ComponentKind::RestaurantCardList | ComponentKind::SearchResults => {
+        ComponentKind::RestaurantCardGrid | ComponentKind::RestaurantCardList => {
             if items_binding_failed(node, ctx) {
                 return binding_error_state(ty, "common.error.data_unavailable", ctx);
             }
             let cards: Vec<AnyView> = items_of(node, ctx).iter().map(restaurant_card).collect();
             view! { <div data-c=ty>{cards}</div> }.into_any()
+        }
+        ComponentKind::SearchResults => {
+            // `sections.N.{id,title,items,item_type}` — flattened per-section config (#725).
+            // Each section renders HONESTLY: a binding on a spec-declared gap resolver renders
+            // GAPPED (visible and auditable via `data-gap`, never a permanently-empty
+            // live-looking list); a failed read renders the error state; a backed binding
+            // renders its rows. The node-level empty_state renders once when every backed
+            // section answered empty.
+            let mut sections: Vec<AnyView> = Vec::new();
+            let mut declared = false;
+            let mut backed = 0usize;
+            let mut backed_rows = 0usize;
+            for i in 0..12 {
+                let sk = |s: &str| format!("sections.{i}.{s}");
+                if node.prop(&sk("id")).is_none() && node.prop(&sk("title")).is_none() {
+                    break;
+                }
+                declared = true;
+                let sid = prop_text(node, &sk("id"), ctx);
+                let title = prop_text(node, &sk("title"), ctx);
+                let Some(PropValue::Binding(raw)) = node.prop(&sk("items")) else { continue };
+                let path = raw.split('|').next().unwrap_or(raw).trim();
+                let root = path.split('.').next().unwrap_or(path);
+                let rows_val = ctx.lookup(path).and_then(Value::as_array).cloned();
+                if rows_val.is_none() {
+                    if let Some(note) = resolver_gap_for_root(root) {
+                        let note = note.to_string();
+                        sections.push(
+                            view! {
+                                <section data-c="search_result_section" data-id=sid data-gap=note>
+                                    <h3>{title}</h3>
+                                </section>
+                            }
+                            .into_any(),
+                        );
+                        continue;
+                    }
+                    if ctx.binding_failed(path) {
+                        sections.push(binding_error_state(
+                            "search_result_section",
+                            "common.error.data_unavailable",
+                            ctx,
+                        ));
+                        continue;
+                    }
+                }
+                let rows = rows_val.unwrap_or_default();
+                backed += 1;
+                backed_rows += rows.len();
+                let item_type = prop_text(node, &sk("item_type"), ctx);
+                let cards: Vec<AnyView> = rows
+                    .iter()
+                    .map(|item| {
+                        if item_type == "restaurant_card" {
+                            restaurant_card(item)
+                        } else {
+                            let name = item
+                                .get("displayName")
+                                .or_else(|| item.get("name"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            let it = item_type.clone();
+                            view! { <div data-c=it>{name}</div> }.into_any()
+                        }
+                    })
+                    .collect();
+                sections.push(
+                    view! {
+                        <section data-c="search_result_section" data-id=sid>
+                            <h3>{title}</h3>
+                            {cards}
+                        </section>
+                    }
+                    .into_any(),
+                );
+            }
+            if !declared {
+                // The undeclared-sections shape: a bare `items` binding of restaurant rows.
+                if items_binding_failed(node, ctx) {
+                    return binding_error_state(ty, "common.error.data_unavailable", ctx);
+                }
+                let cards: Vec<AnyView> = items_of(node, ctx).iter().map(restaurant_card).collect();
+                return view! { <div data-c=ty>{cards}</div> }.into_any();
+            }
+            let empty = backed > 0 && backed_rows == 0;
+            let empty_view = empty.then(|| {
+                let t = prop_text(node, "empty_state.title", ctx);
+                let b = prop_text(node, "empty_state.body", ctx);
+                view! { <div data-empty="true"><h3>{t}</h3><p>{b}</p></div> }
+            });
+            view! { <div data-c=ty>{sections}{empty_view}</div> }.into_any()
         }
 
         // ── order lists ─────────────────────────────────────────────────────────
@@ -1171,6 +1462,7 @@ mod tests {
                 ("visible_when", PropValue::Text("flag")),
             ],
             children: &[],
+            branches: &[],
         };
         let mut c = ctx();
         c.insert_resolved("flag", json!(false));
@@ -1187,6 +1479,7 @@ mod tests {
                 ("visible_when", PropValue::Text("flag")),
             ],
             children: &[],
+            branches: &[],
         };
         let mut c = ctx();
         c.insert_resolved("flag", json!(true));
@@ -1205,6 +1498,7 @@ mod tests {
                 ("disabled_when", PropValue::Text("cart.lines.length == 0")),
             ],
             children: &[],
+            branches: &[],
         };
         let mut c = ctx();
         c.insert_resolved("cart", json!({ "lines": [] }));
@@ -1228,6 +1522,7 @@ mod tests {
                 ("visible_when", PropValue::Text("a >= b")),
             ],
             children: &[],
+            branches: &[],
         };
         let mut c = ctx();
         c.insert_resolved("a", json!(1));
@@ -1240,6 +1535,211 @@ mod tests {
         assert!(
             html.contains("data-condition-error"),
             "an unparseable condition must leave a loud, auditable marker: {html}"
+        );
+    }
+
+    /// #725 (beck): the backoffice claims list's `item_badge` is per-item CONFIG (correctly
+    /// flattened, no `type`) the List arm used to ignore — the overdue badge (#160) never
+    /// rendered. It renders per item, honoring its condition against THAT row: two rows,
+    /// overdue true/false → the badge on exactly one.
+    #[test]
+    fn list_item_badge_renders_per_item_honoring_its_condition() {
+        let node = Node {
+            kind: ComponentKind::List,
+            props: &[
+                ("items", PropValue::Binding("reclamations")),
+                ("item_badge.text", PropValue::Text("OVERDUE-BADGE")),
+                ("item_badge.visible_when", PropValue::Text("item.overdue")),
+                ("item_badge.variant", PropValue::Text("warning")),
+            ],
+            children: &[],
+            branches: &[],
+        };
+        let mut c = ctx();
+        c.insert_resolved(
+            "reclamations",
+            json!([
+                { "reclamationId": "c-1", "overdue": true },
+                { "reclamationId": "c-2", "overdue": false },
+            ]),
+        );
+        let html = node_html(&node, &c);
+        assert_eq!(
+            html.matches("OVERDUE-BADGE").count(),
+            1,
+            "the badge renders on exactly the overdue row: {html}"
+        );
+        assert!(html.contains("data-variant=\"warning\""), "{html}");
+    }
+
+    /// #725: the system mailbox lists declare per-item `item_components` TEMPLATES — the same
+    /// flattening class as `item_badge` — which the List arm ignored, leaving the poisoned-row
+    /// detail (and its ONE intervention, the allowlisted `requeue_mailbox_message` button,
+    /// system.yaml:48/#315) structurally unrenderable. They render per row against THAT row's
+    /// data, the button carrying the resolved action DOM contract.
+    #[test]
+    fn mailbox_item_components_render_per_row_and_the_requeue_button_dispatches() {
+        let screen = crate::generated::screens::system::SCREENS
+            .iter()
+            .find(|s| s.id == "mailbox_lanes")
+            .expect("system mailbox screen");
+        let mut c = ctx();
+        // Inserted under the template names the spec binds (`{{ mailbox_lanes }}` /
+        // `{{ mailbox_poisoned }}`). NOTE (adjacent finding, out of #725's scope): the resolver
+        // alias rule derives `lanes_mailbox` from `mailbox.lanes` — the spec's binding names do
+        // not match any alias, so the (currently placeholder-served) system surface would not
+        // hydrate these lists through `insert_resolved` as-is.
+        c.data.insert(
+            "mailbox_lanes".into(),
+            json!([{ "actorType": "ORDER", "partition": "p-7", "registration": "SEEDED",
+                     "claimedBy": "w-1", "leaseUntil": "2026-08-29T02:00:00Z",
+                     "ownershipVersion": 4, "checkpoint": "m-100", "pending": 3, "scheduled": 0,
+                     "oldestPendingAt": "2026-08-29T01:00:00Z" }]),
+        );
+        c.data.insert(
+            "mailbox_poisoned".into(),
+            json!([{ "messageType": "PlaceOrder", "actorType": "ORDER", "partition": "p-7",
+                     "messageId": "m-poison-1", "attempts": 5, "errorCode": "CAP_EXCEEDED",
+                     "receivedAt": "2026-08-29T00:00:00Z" }]),
+        );
+        let html = render_screen_html(screen, &[], c);
+        // The lane row renders its per-item values — including the MULTI-template lane label
+        // ("{{ item.actorType }} / {{ item.partition }}"), which pre-#725 mis-lexed into a
+        // garbage single binding and rendered empty.
+        assert!(html.contains("ORDER / p-7"), "lane label interpolates per row: {html}");
+        assert!(html.contains("m-poison-1"), "the poisoned messageId renders: {html}");
+        // The requeue button carries the action DOM contract with the ROW's id resolved.
+        assert!(html.contains("data-action=\"requeue_mailbox_message\""), "{html}");
+        assert!(
+            html.contains("&quot;targetMessageId&quot;:&quot;m-poison-1&quot;"),
+            "resolved per-row vars JSON: {html}"
+        );
+        // Fail-closed per-item condition: no errorCode == null row here, so the error info_row
+        // renders (visible_when "item.errorCode != null" is true for the poisoned row).
+        assert!(html.contains("CAP_EXCEEDED"), "{html}");
+    }
+
+    /// #725 (ux corpus repairs): the marketplace search screen's branch content renders HONESTLY.
+    /// Typed query → the if_false branch: backed restaurant results as cards, the "Dishes"
+    /// section GAPPED on the declared `dishes.search` gap (never a live-looking empty list).
+    /// Empty query → the if_true branch: popular categories (rebound to `categories.all`), the
+    /// recent-searches section hidden (its `searches.recent` producer is a declared gap, #723 —
+    /// fail-closed, no dead control).
+    #[test]
+    fn the_marketplace_search_screen_renders_branch_content_honestly() {
+        let search =
+            Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "search").unwrap();
+
+        // A typed query.
+        let mut c = ctx();
+        c.data.insert("search_input".into(), json!({ "value": "pizza" }));
+        c.insert_resolved(
+            "restaurants.search",
+            json!([{ "displayName": "Pizza Chez Test", "slug": "pizza-chez-test",
+                     "address": { "city": "Tours" } }]),
+        );
+        c.insert_resolved("categories.all", json!([{ "id": "pizza", "name": "Pizza" }]));
+        let html = render_screen_html(search, Surface::CaptainFrontoffice.sheets(), c);
+        assert!(html.contains("Pizza Chez Test"), "backed restaurant results render: {html}");
+        assert!(
+            html.contains("data-id=\"dish_results\" data-gap=\"No dish/product search query"),
+            "the dish section renders as its DECLARED gap: {html}"
+        );
+        assert!(!html.contains("Popular categories"), "if_true must not render: {html}");
+
+        // An empty query.
+        let mut c = ctx();
+        c.data.insert("search_input".into(), json!({ "value": "" }));
+        c.insert_resolved("categories.all", json!([{ "id": "pizza", "name": "Pizza" }]));
+        let html = render_screen_html(search, Surface::CaptainFrontoffice.sheets(), c);
+        assert!(html.contains("Popular categories"), "if_true renders popular categories: {html}");
+        assert!(
+            !html.contains("Recent searches"),
+            "the recent-searches section stays hidden on its declared gap (no dead control): {html}"
+        );
+        // NOTE: the inlined design-system CSS may mention the SELECTOR — target element markup.
+        assert!(!html.contains("<div data-c=\"search_results\""), "if_false must not render: {html}");
+    }
+
+    /// #725 (beck's trap): a `conditional_section` renders EXACTLY ONE branch — the moment the
+    /// emitter emits branch content, an unconditional children render would show BOTH. Asserted on
+    /// branch CONTENT, not on `data-cond`.
+    #[test]
+    fn conditional_section_renders_exactly_one_branch() {
+        let node = Node {
+            kind: ComponentKind::ConditionalSection,
+            props: &[("condition", PropValue::Text("search_input.value == ''"))],
+            children: &[],
+            branches: &[
+                (
+                    "if_true",
+                    &[Node {
+                        kind: ComponentKind::Text,
+                        props: &[("value", PropValue::Text("TRUE-BRANCH-SENTINEL"))],
+                        children: &[],
+                        branches: &[],
+                    }],
+                ),
+                (
+                    "if_false",
+                    &[Node {
+                        kind: ComponentKind::Text,
+                        props: &[("value", PropValue::Text("FALSE-BRANCH-SENTINEL"))],
+                        children: &[],
+                        branches: &[],
+                    }],
+                ),
+            ],
+        };
+        let mut c = ctx();
+        c.insert_resolved("search_input", json!({ "value": "" }));
+        let html = node_html(&node, &c);
+        assert!(html.contains("TRUE-BRANCH-SENTINEL"), "empty query → if_true renders: {html}");
+        assert!(!html.contains("FALSE-BRANCH-SENTINEL"), "empty query → if_false must NOT: {html}");
+
+        let mut c = ctx();
+        c.insert_resolved("search_input", json!({ "value": "pizza" }));
+        let html = node_html(&node, &c);
+        assert!(html.contains("FALSE-BRANCH-SENTINEL"), "a query → if_false renders: {html}");
+        assert!(!html.contains("TRUE-BRANCH-SENTINEL"), "a query → if_true must NOT: {html}");
+    }
+
+    /// #725 fail-closed leg: an UNEVALUATABLE `condition:` (missing data — e.g. client form state
+    /// on the SSR pass) renders NEITHER branch, per the #472 missing-data semantics (silent
+    /// fail-closed; the LOUD marker stays reserved for unparseable expressions).
+    #[test]
+    fn conditional_section_over_missing_data_renders_neither_branch() {
+        let node = Node {
+            kind: ComponentKind::ConditionalSection,
+            props: &[("condition", PropValue::Text("search_input.value == ''"))],
+            children: &[],
+            branches: &[
+                (
+                    "if_true",
+                    &[Node {
+                        kind: ComponentKind::Text,
+                        props: &[("value", PropValue::Text("TRUE-BRANCH-SENTINEL"))],
+                        children: &[],
+                        branches: &[],
+                    }],
+                ),
+                (
+                    "if_false",
+                    &[Node {
+                        kind: ComponentKind::Text,
+                        props: &[("value", PropValue::Text("FALSE-BRANCH-SENTINEL"))],
+                        children: &[],
+                        branches: &[],
+                    }],
+                ),
+            ],
+        };
+        let html = node_html(&node, &ctx());
+        assert!(!html.contains("TRUE-BRANCH-SENTINEL"), "unevaluatable → neither: {html}");
+        assert!(!html.contains("FALSE-BRANCH-SENTINEL"), "unevaluatable → neither: {html}");
+        assert!(
+            !html.contains("data-condition-error"),
+            "missing data is NOT an unknown construct — no loud marker: {html}"
         );
     }
 
@@ -1259,7 +1759,7 @@ mod tests {
                     ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")),
                 ],
             };
-            let node = Node { kind: ComponentKind::Text, props, children: &[] };
+            let node = Node { kind: ComponentKind::Text, props, children: &[], branches: &[] };
             let html = node_html(&node, &ctx());
             assert!(!html.contains("SECRET-CONTENT"), "{expr}: missing data must hide: {html}");
             assert!(
@@ -1279,6 +1779,7 @@ mod tests {
                 ("disabled_when", PropValue::Text("cart.lines.length == 0")),
             ],
             children: &[],
+            branches: &[],
         };
         let html = node_html(&node, &ctx());
         assert!(

@@ -11247,9 +11247,11 @@ _Surface_ **`captain_frontoffice.yaml`**
 | read | `restaurants.search` | [🔎 `restaurants`](#query-restaurants) |
 | read | `categories.all` | [🔎 `categories`](#query-categories) |
 | read | `dishes.search` | ⚠️ _gap: No dish/product search query — only restaurant search (queries/restaurants) exists._ |
+| read | `searches.recent` | ⚠️ _gap: Client-side recent-searches state has no producer, and set_search/search_query are not registered actions — needs the client-state producer plus action registration (#723)._ |
 
 **Gaps**
 - ⚠️ `dishes.search` (the "Dishes" results) has no backing query — only restaurant search exists.
+- ⚠️ `searches.recent` (the "Recent searches" branch) has no client-side producer and its set_search/search_query actions are unregistered (#723) — the section stays hidden rather than rendering a dead control.
 
 <a id="screen-partner_landing"></a>
 ### 📱 `partner_landing` · `/partner` · 📱 SDUI

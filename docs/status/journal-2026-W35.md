@@ -3,6 +3,29 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-29 — [#725 "The screens emitter flattens `conditional_section` branches and compound
+> sub-items into dotted props, leaving branch content structurally unrenderable"](https://github.com/TheCaptainCompany/captain-food/issues/725)
+> (overnight run, fourth chunk): branch content is renderable — named child groups, never
+> desugaring.** The emitter now carries `if_true`/`if_false` VERBATIM as `(name, children)` branch
+> groups on the generated `Node` (a walked field, so `condition_defects` and the render choke point
+> traverse them — never a sidecar the #472 gate would silently skip), and the renderer evaluates
+> `condition:` through the one evaluator and renders EXACTLY ONE branch (unevaluatable → NEITHER,
+> fail closed, `data-cond="unevaluatable"`; the loud marker stays reserved for unparseable). All
+> three dispatch reds seen verbatim: emitter fixture flattening (`("if_true.0.type"` present),
+> beck's both-branches trap (both sentinels in one naive render), and the ignored `item_badge`
+> (badge count 0 on an overdue row). Per-item templates render too: the List arm resolves
+> `item_components.N.*` / `item_badge.*` against a per-row context (the row travels as `item`), so
+> the mailbox poisoned-row requeue button (#315) finally carries its resolved action DOM contract —
+> and the multi-template lexing defect (`"{{ a }} / {{ b }}"` mis-read as ONE garbage binding) is
+> fixed at the emitter with renderer-side interpolation. Corpus repairs (ux): search's popular
+> categories rebound to `categories.all`, recent searches a DECLARED gap (`searches.recent`, #723
+> owns the producer), dish results render as their declared gap instead of a live-looking empty
+> list. Verified (#717/(5)): branch bindings DO reach `collect_screen_nav_selections` (raw-YAML
+> walk) — pinned by a positive widening test. Adjacent finding reported, not fixed: the system
+> mailbox bindings `{{ mailbox_lanes }}`/`{{ mailbox_poisoned }}` match no alias the
+> `insert_resolved` rule derives (`lanes_mailbox`/`poisoned_mailbox`) — dormant today (the system
+> host serves a placeholder), filed to the architect via the PR.
+
 > 🔧 **2026-08-29 — [#728 "The condition grammar accepts double-quoted string literals the
 > validator's status-completeness tokeniser never scans"](https://github.com/TheCaptainCompany/captain-food/issues/728)
 > (overnight run, third chunk): one grammar, one tokeniser — string literals in SDUI conditions are
