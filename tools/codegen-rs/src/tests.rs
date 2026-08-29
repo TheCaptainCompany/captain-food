@@ -15312,3 +15312,103 @@ mod status_journal_gate {
         assert!(paths.iter().all(|p| p.starts_with("docs/status/journal-") && p.ends_with(".md")));
     }
 }
+
+// ─── §25 — the screen-binding gate, wired full-strength (#468 mechanism, #717 wiring) ────────────
+mod screen_binding_gate {
+    use super::super::*;
+
+    /// Append one throwaway text component carrying a deliberately-typo'd binding to a named screen.
+    fn plant_typo(model: &mut Model, screens_file: &str, screen_id: &str, binding: &str) {
+        let screens = model
+            .defs
+            .get_mut(screens_file)
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .unwrap_or_else(|| panic!("{screens_file} declares screens"));
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some(screen_id))
+            .unwrap_or_else(|| panic!("screen {screen_id} exists in {screens_file}"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from(format!("{{{{ {binding} }}}}")));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .unwrap_or_else(|| panic!("screen {screen_id} has components"))
+            .push(Value::Mapping(node));
+    }
+
+    /// The rule is WIRED and the real corpus is CLEAN (#717): zero `screen-binding-unknown-field`
+    /// findings — the red-first hit list (21 bindings across 5 screens, PR #717) was paid down,
+    /// never skipped over. Then one deliberate typo per formerly-red screen proves each of those
+    /// screens' bindings are genuinely being walked (a gap resolver or an unresolvable query
+    /// contributes no root, which would silently UNCHECK a whole screen while the gate stayed
+    /// green — this is the coverage-honesty pin against exactly that false green). Two of the
+    /// plants sit past an FK-derived navigation edge (`cart.restaurant.*`,
+    /// `delivery.restaurant.*`: Cart/DeliveryJob declare no such property — the composed schema
+    /// generates it), pinning that the walk follows the SAME `nav_fields` derivation the SDL
+    /// emitter consumes rather than flagging every generated edge as unknown.
+    #[test]
+    fn screen_bindings_are_checked_and_the_corpus_is_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let hits = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "screen-binding-unknown-field")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus: {:?}", hits(&model));
+
+        let plants = [
+            ("screens/restaurant_backoffice.yaml", "order_conversation", "internal_notes.notez", "notez"),
+            ("screens/restaurant_frontoffice.yaml", "restaurant", "restaurant.displayNamez", "displayNamez"),
+            ("screens/restaurant_frontoffice.yaml", "cart", "cart.restaurant.displayNamez", "displayNamez"),
+            ("screens/restaurant_frontoffice.yaml", "order_tracking", "order.totalAmountz", "totalAmountz"),
+            ("screens/rider.yaml", "job_detail", "delivery.restaurant.displayNamez", "displayNamez"),
+        ];
+        for (file, screen, binding, _) in &plants {
+            plant_typo(&mut model, file, screen, binding);
+        }
+        let found = hits(&model);
+        assert_eq!(found.len(), plants.len(), "each planted typo fires exactly once: {:?}", found);
+        for (_, screen, _, seg) in &plants {
+            assert!(
+                found.iter().any(|h| h.contains(screen) && h.contains(seg)),
+                "typo on screen '{}' (segment '{}') must be flagged: {:?}",
+                screen,
+                seg,
+                found
+            );
+        }
+    }
+
+    /// RED-to-GREEN on the field, not the name: declaring the missing property clears exactly that
+    /// finding, proving the rule reads the api type rather than pattern-matching the binding.
+    #[test]
+    fn declaring_the_missing_field_clears_the_finding() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        plant_typo(&mut model, "screens/rider.yaml", "job_detail", "delivery.riderNickname");
+        let fires = |m: &Model| -> bool {
+            validate(m)
+                .issues
+                .iter()
+                .any(|i| i.rule == "screen-binding-unknown-field" && i.message.contains("riderNickname"))
+        };
+        assert!(fires(&model), "an undeclared DeliveryJob field must be flagged");
+        model
+            .defs
+            .get_mut("api.yaml")
+            .and_then(|v| v.get_mut("types"))
+            .and_then(|v| v.get_mut("DeliveryJob"))
+            .and_then(|v| v.get_mut("properties"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("DeliveryJob declares properties")
+            .insert(Value::from("riderNickname"), Value::from("placeholder"));
+        assert!(!fires(&model), "declaring the property must clear the finding");
+    }
+}

@@ -1,8 +1,6 @@
-// DELIBERATELY NOT WIRED into `validate()` yet (see the call site's comment in `validate/core.rs`'s
-// SDUI section): run against the whole real corpus this mechanism reds 13 times outside the `cart`
-// screen #468 fixes, none of them a same-file trivial rename — wiring it now would need weakening it
-// to go green. Kept here, proven by the unit tests below, as the evidence a scoped follow-up wires.
-#![allow(dead_code)]
+// Wired into `validate()` full-strength by #717 (no skip list, no warning-only): the run against
+// the real corpus that had kept it un-wired (21 dead bindings across 5 screens — the estimate was
+// "13") was paid down in the same PR, corpus first, wiring last, every commit green.
 
 use crate::*;
 
@@ -95,8 +93,9 @@ fn type_def<'a>(model: &'a Model, ctx_file: &str, type_name: &str) -> Option<&'a
 /// `Ok(None)` = the field exists but is a leaf for this walk's purposes (no `$ref`, an `array: true`
 /// collection, or a scalar with no further properties) — a trailing segment past it is left unchecked
 /// (the honest boundary, not a false-negative dodge: see the module doc). `Ok(Some(..))` = the field
-/// exists and names another object to keep walking. `Err(())` = no property of that name exists at all.
-fn step<'a>(model: &'a Model, type_val: &'a Value, ctx_file: &str, field: &str) -> Result<Option<(&'a Value, String)>, ()> {
+/// exists and names another object to keep walking (value, defining file, type name). `Err(())` = no
+/// property of that name exists at all.
+fn step<'a>(model: &'a Model, type_val: &'a Value, ctx_file: &str, field: &str) -> Result<Option<(&'a Value, String, String)>, ()> {
     let props = type_val.get("properties").and_then(|p| p.as_mapping()).ok_or(())?;
     let prop = props.get(Value::String(field.to_string())).ok_or(())?;
     if prop.get("array").and_then(|a| a.as_bool()) == Some(true) {
@@ -111,7 +110,7 @@ fn step<'a>(model: &'a Model, type_val: &'a Value, ctx_file: &str, field: &str) 
         return Ok(None); // a scalar's own shape is opaque here — nothing further to walk
     }
     match type_def(model, &next_ctx, &next_name) {
-        Some(v) => Ok(Some((v, next_ctx))),
+        Some(v) => Ok(Some((v, next_ctx, next_name))),
         None => Ok(None), // resolves to something this walk cannot see into — stop, don't guess
     }
 }
@@ -120,16 +119,49 @@ fn step<'a>(model: &'a Model, type_val: &'a Value, ctx_file: &str, field: &str) 
 /// the first segment that names no property anywhere along the walk; `None` = the whole path resolved
 /// (or the walk hit a declared leaf/unresolvable boundary before running out of segments — the honest
 /// "checks what it can" stop, not a pass on a guess).
-pub(crate) fn first_unknown_segment(model: &Model, type_name: &str, ctx_file: &str, segments: &[&str]) -> Option<String> {
+///
+/// `nav` is the FK-derived navigation-field map (`api::nav_fields`, the SAME derivation the SDL and
+/// server emitters consume, so this walk can never invent an edge the schema does not declare): a
+/// segment that names no declared property may still be a real generated field of the composed
+/// schema — `Cart.restaurant: Restaurant!`, `DeliveryJob.restaurant: Restaurant!` — and the walk
+/// follows a single-target edge into its api type (#717). A collection edge (`Restaurant.carts`)
+/// stops the walk like any `array: true` property.
+pub(crate) fn first_unknown_segment(
+    model: &Model,
+    nav: &HashMap<String, Vec<NavField>>,
+    type_name: &str,
+    ctx_file: &str,
+    segments: &[&str],
+) -> Option<(String, String)> {
     let mut cur = type_def(model, ctx_file, type_name)?;
     let mut cur_ctx = ctx_file.to_string();
+    let mut cur_name = type_name.to_string();
     for seg in segments {
         match step(model, cur, &cur_ctx, seg) {
-            Err(()) => return Some((*seg).to_string()),
+            Err(()) => {
+                let nav_field = if cur_ctx == "api.yaml" {
+                    nav.get(cur_name.as_str()).and_then(|nfs| nfs.iter().find(|n| n.field == *seg))
+                } else {
+                    None
+                };
+                match nav_field {
+                    None => return Some(((*seg).to_string(), cur_name)),
+                    Some(n) if n.list => return None, // per-item fields belong to a loop variable, not this path
+                    Some(n) => match type_def(model, "api.yaml", &n.target) {
+                        Some(v) => {
+                            cur = v;
+                            cur_ctx = "api.yaml".to_string();
+                            cur_name = n.target.clone();
+                        }
+                        None => return None, // target outside the walkable surface — stop, don't guess
+                    },
+                }
+            }
             Ok(None) => return None, // hit a leaf/unresolvable boundary — nothing left to check
-            Ok(Some((next, next_ctx))) => {
+            Ok(Some((next, next_ctx, next_name))) => {
                 cur = next;
                 cur_ctx = next_ctx;
+                cur_name = next_name;
             }
         }
     }
@@ -142,6 +174,56 @@ pub(crate) fn first_unknown_segment(model: &Model, type_name: &str, ctx_file: &s
 /// guessing at expression semantics is exactly the false-positive risk the dispatch ruled out.
 pub(crate) fn simple_path_regex() -> regex::Regex {
     regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$").unwrap()
+}
+
+/// The wired rule (§25): every simple dotted `{{ root.path }}` binding in one screen's subtree,
+/// whose root a `data_requirements` resolver actually feeds, must resolve on the api type that
+/// resolver's query returns. Anything outside that shape (loop variables, UI/form state, bare
+/// roots, expressions) is left unchecked — the declared honest boundary in the module doc.
+pub(crate) fn check_screen_bindings(
+    model: &Model,
+    issues: &mut Vec<Issue>,
+    sfkey: &str,
+    sid: &str,
+    screen: &Value,
+    resolvers: Option<&serde_yaml::Mapping>,
+    nav: &HashMap<String, Vec<NavField>>,
+) {
+    let data_requirements: Vec<String> = screen
+        .get("data_requirements")
+        .and_then(|x| x.as_sequence())
+        .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let roots = screen_binding_roots(model, resolvers, &data_requirements);
+    if roots.is_empty() {
+        return;
+    }
+    let mustache = regex::Regex::new(r"\{\{([^{}]+)\}\}").unwrap();
+    let simple = simple_path_regex();
+    let mut bindings: Vec<(String, String)> = Vec::new();
+    collect_template_bindings(screen, "", &mustache, &mut bindings);
+    for (loc, expr) in bindings {
+        let path = expr.split('|').next().unwrap_or("").trim();
+        if !simple.is_match(path) {
+            continue;
+        }
+        let mut segs = path.split('.');
+        let root = segs.next().unwrap_or("");
+        let Some(type_name) = roots.get(root) else { continue };
+        let rest: Vec<&str> = segs.collect();
+        if let Some((unknown, at_type)) = first_unknown_segment(model, nav, type_name, "api.yaml", &rest) {
+            issues.push(err(
+                "screen-binding-unknown-field",
+                format!("{}/screens/{}{}", sfkey, sid, loc),
+                format!(
+                    "binding '{{{{ {} }}}}' walks '{}', which type '{}' (root '{}': {}) declares neither \
+                     as a property nor as an FK-derived navigation field — the widget renders empty \
+                     while the spec reads as though it were bound (#468).",
+                    path, unknown, at_type, root, type_name
+                ),
+            ));
+        }
+    }
 }
 
 /// Every `{{ … }}` occurrence in a screen's component tree, with a location string built from map
@@ -215,15 +297,15 @@ mod tests {
             &[("breakdown", breakdown_ref())],
             &[("total", money_ref())],
         );
-        assert_eq!(first_unknown_segment(&model, "Cart", "api.yaml", &["breakdown", "total"]), None);
+        assert_eq!(first_unknown_segment(&model, &HashMap::new(), "Cart", "api.yaml", &["breakdown", "total"]), None);
     }
 
     #[test]
     fn flags_the_first_segment_that_names_no_property() {
         let model = model_with(&[("breakdown", breakdown_ref())], &[("total", money_ref())]);
         assert_eq!(
-            first_unknown_segment(&model, "Cart", "api.yaml", &["totalAmoun"]),
-            Some("totalAmoun".to_string())
+            first_unknown_segment(&model, &HashMap::new(), "Cart", "api.yaml", &["totalAmoun"]),
+            Some(("totalAmoun".to_string(), "Cart".to_string()))
         );
     }
 
@@ -231,8 +313,8 @@ mod tests {
     fn flags_a_field_two_levels_deep() {
         let model = model_with(&[("breakdown", breakdown_ref())], &[("total", money_ref())]);
         assert_eq!(
-            first_unknown_segment(&model, "Cart", "api.yaml", &["breakdown", "discount"]),
-            Some("discount".to_string())
+            first_unknown_segment(&model, &HashMap::new(), "Cart", "api.yaml", &["breakdown", "discount"]),
+            Some(("discount".to_string(), "PaymentBreakdown".to_string()))
         );
     }
 
@@ -243,7 +325,7 @@ mod tests {
         let mut restaurant_id = serde_yaml::Mapping::new();
         restaurant_id.insert(Value::from("$ref"), Value::from("scalars.yaml#/RestaurantId"));
         let model = model_with(&[("restaurantId", Value::Mapping(restaurant_id))], &[]);
-        assert_eq!(first_unknown_segment(&model, "Cart", "api.yaml", &["restaurantId", "anything"]), None);
+        assert_eq!(first_unknown_segment(&model, &HashMap::new(), "Cart", "api.yaml", &["restaurantId", "anything"]), None);
     }
 
     #[test]
@@ -252,7 +334,7 @@ mod tests {
         lines.insert(Value::from("$ref"), Value::from("entities.yaml#/OrderLineItem"));
         lines.insert(Value::from("array"), Value::from(true));
         let model = model_with(&[("lines", Value::Mapping(lines))], &[]);
-        assert_eq!(first_unknown_segment(&model, "Cart", "api.yaml", &["lines", "length"]), None);
+        assert_eq!(first_unknown_segment(&model, &HashMap::new(), "Cart", "api.yaml", &["lines", "length"]), None);
     }
 
     #[test]

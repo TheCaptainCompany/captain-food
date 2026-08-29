@@ -1615,6 +1615,10 @@ pub(crate) fn validate(model: &Model) -> Report {
         const APP_TYPES: [&str; 4] = ["web", "ios", "android", "windows"];
         let screens_files: Vec<String> =
             model.defs.keys().filter(|k| k.starts_with("screens/")).cloned().collect();
+        // FK-derived navigation fields (the SAME `api::nav_fields` derivation the SDL/server
+        // emitters consume), so §25's binding walk sees the schema's generated edges too (#717).
+        let nav_registered: HashSet<String> = api.types.iter().map(|t| t.name.clone()).collect();
+        let nav = nav_fields(&views, &nav_registered);
 
         for sfkey in &screens_files {
             let cs = model.defs.get(sfkey);
@@ -1820,23 +1824,11 @@ pub(crate) fn validate(model: &Model) -> Report {
                             }
                         }
                     }
-                    // `{{ root.path }}` template bindings vs the bound api type (§25, #468/#529 model):
-                    // the mechanism lives in `validate/screen_bindings.rs` (`screen_binding_roots` +
-                    // `first_unknown_segment`), proven by that module's unit tests and confirmed
-                    // red-first (a planted `cart.totalAmoun` typo passed `make validate` before this
-                    // rule existed). DELIBERATELY NOT WIRED HERE YET: run against the whole real
-                    // corpus it reds 13 times outside the `cart` screen this dispatch fixes —
-                    // `restaurant_backoffice.yaml#order_conversation` binds the STAFF-ONLY
-                    // `ConversationInternalNotes` root to the CUSTOMER-facing `OrderConversation`'s
-                    // `status`/`messages` fields (a real cross-type mixup, not a rename),
-                    // `restaurant_frontoffice.yaml#restaurant`'s `coverUrl`/`logoUrl`/`deliveryTime`
-                    // are an ALREADY-DECLARED gap (line ~316) whose widgets are still live (removing
-                    // them is its own screen's worth of #468-shaped work), and
-                    // `rider.yaml#job_detail`/`cart.restaurantName` want a `restaurantName` no
-                    // `DeliveryJob`/`Cart` field carries at all. None of the 13 is a same-file trivial
-                    // rename to an existing field, so wiring this now would need weakening it (skip
-                    // list, warning-only, or a single-screen carve-out) to go green — disallowed.
-                    // Left un-wired, evidenced by tests, for the architect to file as scoped follow-up.
+                    // `{{ root.path }}` template bindings vs the bound api type (§25, #468/#529
+                    // model, wired full-strength by #717 after the corpus was cleaned): every simple
+                    // dotted binding whose root a data_requirement feeds must name real fields on
+                    // the api type that resolver's query returns.
+                    check_screen_bindings(model, &mut issues, sfkey, &sid, s, resolvers, &nav);
                     // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
                     // ADR-0032-style bidirectional completeness). The defect class this kills
                     // forever: the map keyed a bare `CANCELLED` that matched NO enum member, so

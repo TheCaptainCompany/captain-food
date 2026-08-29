@@ -42,9 +42,7 @@ pub(crate) use reminders::*;
 pub(crate) use services::*;
 pub(crate) use schema_writers::*;
 pub(crate) use scopes::*;
-// screen_bindings: deliberately not re-exported — its rule is not yet wired into validate() (see
-// validate/core.rs's SDUI section and the module's own doc comment); its functions are reached
-// directly by their own #[cfg(test)] unit tests only.
+pub(crate) use screen_bindings::*;
 pub(crate) use shape::*;
 pub(crate) use span_error_status::*;
 pub(crate) use status::*;
