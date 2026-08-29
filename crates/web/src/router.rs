@@ -671,6 +671,13 @@ mod tests {
         // Fail-closed composition: with the cart unresolvable, the checkout button's
         // `disabled_when: cart.lines.length == 0` is unevaluatable → disabled.
         assert!(html.contains("disabled"), "checkout must not be clickable over no data: {html}");
+        // #730: ONE state, not two — the summary's price rows (blank money over the same failed
+        // read) render ABSENT; the cart_lines error above is the failure's single affordance.
+        assert!(
+            !html.contains("<div data-c=\"order_summary_block\""),
+            "no blank-money summary beside the error state: {html}"
+        );
+        assert_eq!(html.matches("data-error=\"true\"").count(), 1, "ONE error state: {html}");
     }
 
     /// #472: error state and empty state are DISTINCT rendered states, per binding. A read that
