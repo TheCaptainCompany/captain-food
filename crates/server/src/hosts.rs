@@ -81,14 +81,31 @@ async fn app_page(ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, loc
             }
         }
     }
-    web::router::render_path_with(
-        &ssr.transport(),
+    // ONE transport per page render (its correlation id is the render's id — see
+    // `SsrExec::transport`), held here so the degrade boundary below can name it.
+    let transport = ssr.transport();
+    let page = web::router::render_path_with(
+        &transport,
         raw_host,
         path,
         locale,
         ssr.stripe_publishable_key.as_ref(),
     )
-    .await
+    .await?;
+    // The #472 degrade boundary: a page whose declared read FAILED for real (never a
+    // role-refused skip-by-design) or whose declared condition could not be parsed shipped a
+    // degraded/error state. Counted HERE, the framework boundary, because `web` compiles to wasm
+    // and stays telemetry-free (specs/observability.yaml, read-authorization metrics).
+    let correlation_id = transport.correlation_id();
+    for d in &page.degraded {
+        telemetry::meters::read_authorization::sdui_degraded_render(
+            d.screen,
+            d.resolver,
+            d.reason.as_str(),
+            &correlation_id,
+        );
+    }
+    Some(page.html)
 }
 
 /// The tenant branch (#98): registered → storefront; positively-absent → the claim landing;

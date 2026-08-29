@@ -219,6 +219,11 @@ pub mod metric {
     /// [`READ_AUTHORIZATION_BRIDGE_UNRESOLVED_TOTAL`] because on the open path nothing is DENIED
     /// by it — and a rollout must not read as a provisioning incident.
     pub const PUBLIC_CREDENTIAL_DEGRADED_TOTAL: &str = "public_credential_degraded_total";
+    /// `read-authorization` contract (#472): the SSR render boundary's DEFECT counter — a page
+    /// whose declared read FAILED for real (never a role-refused skip-by-design) or whose declared
+    /// condition expression could not be parsed shipped its degraded/error state. The
+    /// [`CHECKOUT_DEGRADED_RENDER_TOTAL`] pattern, generalized to every SDUI page.
+    pub const SDUI_DEGRADED_RENDER_TOTAL: &str = "sdui_degraded_render_total";
     /// BAM gauge: projection lag on the ACL index — while it lags, a just-placed order's own
     /// customer is DENIED their order (`read-authorization` business_metrics).
     pub const SCOPE_MEMBERSHIP_LAG_POSITIONS: &str = "scope_membership_lag_positions";
