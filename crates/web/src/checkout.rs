@@ -255,6 +255,12 @@ pub struct CheckoutViewState {
     /// `paymentStatus.byOrder.status == FAILED` ([`PaymentIntent::is_failed`]) — renders the
     /// screen's `payment_failed_state` (#424 quick win 2). False on the data-less SSR shell: a
     /// customer who has not paid yet must never be shown a failure.
+    ///
+    /// LAYER NOTE (evans, #730 review): "failed" appears twice on this struct, one line apart,
+    /// in TWO different layers — this field is the DOMAIN outcome (the read ANSWERED, and what
+    /// it said is that the payment terminally failed); `payment_status_failed` below is the READ
+    /// mark (the transport/contract failed, nothing answered at all). Conflating them is the
+    /// "Commande introuvable over a transient failure" defect class.
     pub payment_failed: bool,
     /// The locale the failure copy resolves in. The rest of this shell is still hardcoded English
     /// (a pre-existing gap); the failure copy is translated because it is the one place on this
@@ -518,6 +524,15 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                 </section>
             })}
             <footer data-c="sticky_bottom_bar">
+                // #730 (business lens, checkpoint): the disable reason must be VISIBLE — a
+                // `title` tooltip is invisible on mobile touch, our primary surface. Same shape
+                // as the contact_prefill_notice above; covers the restaurant-only failure, where
+                // no summary error renders (that read has no display binding on this page).
+                {data_failed.then(|| view! {
+                    <p data-c="text" id="place_order_notice" data-error="true" data-size="sm">
+                        {notice_copy.clone()}
+                    </p>
+                })}
                 // Disabled while payment is unavailable (#440: a pay button over an unmountable
                 // element would place an order nothing can pay for) or while the cart/restaurant
                 // read FAILED (#730: an order priced on data the customer never saw).
@@ -898,12 +913,19 @@ mod tests {
         assert!(html.contains("id=\"contact_form\""), "the rest of the page keeps rendering: {html}");
 
         // A failed restaurant read alone: the summary stays (cart answered), the button disables
-        // — `{{ restaurant.id }}` is a place_order variable.
+        // — `{{ restaurant.id }}` is a place_order variable — and the reason is VISIBLE at the
+        // button (business lens, checkpoint: a `title` tooltip is invisible on mobile touch, our
+        // primary surface), not a section-replacing error for a display-less read.
         let key = crate::stripe::PublishableKey::parse(Some("pk_test_abc123"));
         let mut state = view_state(true, false).with_publishable_key(key);
         state.restaurant_failed = true;
         let html = render_checkout_html(state, "fr");
-        assert!(!html.contains("data-error=\"true\""), "no error section for a display-less read: {html}");
+        assert!(
+            !html.contains("<div data-c=\"cart_summary_mini\" data-error=\"true\""),
+            "no summary error for a display-less read: {html}"
+        );
+        assert!(html.contains("id=\"place_order_notice\""), "a VISIBLE reason at the button: {html}");
+        assert!(html.contains("Impossible de charger le contenu."), "{html}");
         assert!(element_tag(&html, "place_order_btn").contains("disabled"), "{html}");
     }
 
