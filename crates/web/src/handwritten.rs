@@ -373,7 +373,17 @@ pub mod mount {
         use crate::tracking::TrackingState;
 
         let order_id = super::order_id_of(&matched);
-        let state = RwSignal::new(TrackingState::from_context(order_id, &ctx));
+        // #758: the paid context — the browser still holds an OPEN PlaceOrder intent for this
+        // order (`pending.rs`: written before the send, cleared only on a terminal outcome). It
+        // licenses the "Reçu ✓ — confirmation en cours…" claim on an unresolved/answered-null
+        // read, and arms the bounded birth re-check below.
+        let birth_pending = crate::pending::holds_place_order(
+            &crate::pending::BrowserPendingStore,
+            order_id,
+        );
+        let state = RwSignal::new(
+            TrackingState::from_context(order_id, &ctx).with_birth_pending(birth_pending),
+        );
         {
             let locale = locale.clone();
             leptos::mount::mount_to_body(move || {
@@ -395,6 +405,38 @@ pub mod mount {
         // confirmation page that never updates is the worse of the two, and this is the honest fix
         // available without reshaping the interaction layer.
         let transport = Rc::new(transport);
+
+        // #758: the BOUNDED birth re-check — paid context only, and only until the pull produces
+        // the order. It stops on its own (`BIRTH_RECHECK_*`, the `await_payment_intent_with`
+        // precedent — a convergence read, not a standing poll, ADR-20260810-231300); the
+        // subscription below remains the push path and wins any race (an already-Present signal
+        // is never overwritten by this leg).
+        if birth_pending {
+            let transport = Rc::clone(&transport);
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut pulled = state.get_untracked();
+                if matches!(pulled.order, crate::tracking::OrderRead::Present(_)) {
+                    return;
+                }
+                let born = pulled
+                    .load_until_present(
+                        transport.as_ref(),
+                        crate::tracking::BIRTH_RECHECK_MAX_ATTEMPTS,
+                        crate::tracking::BIRTH_RECHECK_INTERVAL,
+                    )
+                    .await
+                    .unwrap_or(false);
+                if born
+                    && !matches!(
+                        state.get_untracked().order,
+                        crate::tracking::OrderRead::Present(_)
+                    )
+                {
+                    state.set(pulled);
+                }
+            });
+        }
+
         let mut vars = serde_json::Map::new();
         vars.insert("orderId".into(), serde_json::json!(order_id));
         Connection::open(

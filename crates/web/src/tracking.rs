@@ -25,6 +25,15 @@ use crate::generated::data_layer::{ActionKey, ResolverKey};
 use crate::graphql::{execute_resolver, ResolverError, Transport};
 use crate::subscriptions::SubscriptionEvent;
 
+/// The production bound for [`TrackingState::load_until_present`] (#758): 15 × 2 s = a 30 s
+/// ceiling. Antecedent, not a bare number: the declared handover budget on `order_birth_lag_ms`
+/// (`specs/observability.yaml`, `latency_budget` p99 = 12 000 ms) — the bound covers that p99 with
+/// margin; past it the reassurance stays on screen (render keys on `birth_pending`) and the
+/// `orderStatusChanged` subscription remains the push path.
+pub const BIRTH_RECHECK_MAX_ATTEMPTS: u32 = 15;
+/// See [`BIRTH_RECHECK_MAX_ATTEMPTS`].
+pub const BIRTH_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// What the `order.byId` read actually SAID — the three cases the confirmation page must tell
 /// apart, made unrepresentable-if-confused rather than collapsed into an `Option`
 /// (ADR-20260803-234035: the compiler first).
@@ -70,11 +79,27 @@ pub struct TrackingState {
     pub order_id: Uuid,
     /// What the `order.byId` read said — see [`OrderRead`].
     pub order: OrderRead,
+    /// The PAID context (#758, ADR-20260829-230418): the client still holds an OPEN `PlaceOrder`
+    /// intent for THIS order (`pending::holds_place_order` — the persisted `DispatchHandle`
+    /// record). Once `ROUTE_ORDER_BIRTH_THROUGH_LANE` flips, the birth rides the Order lane and
+    /// `order.byId` can honestly answer **null** for a beat after the card was charged. In that
+    /// window an ANSWERED null must render the acceptance reassurance — never the not-found hero,
+    /// which would tell a customer whose money just moved that their order does not exist.
+    /// A stranger's URL has no pending record, so the not-found pin is unchanged.
+    pub birth_pending: bool,
 }
 
 impl TrackingState {
     pub fn new(order_id: Uuid) -> Self {
-        Self { order_id, order: OrderRead::Unresolved }
+        Self { order_id, order: OrderRead::Unresolved, birth_pending: false }
+    }
+
+    /// Mark the paid context — see [`Self::birth_pending`]. Builder-shaped so every constructor
+    /// stays honest by default (`false`): only a call site that actually looked at the pending
+    /// store may claim it.
+    pub fn with_birth_pending(mut self, birth_pending: bool) -> Self {
+        self.birth_pending = birth_pending;
+        self
     }
 
     /// Build from an already-RESOLVED render context — the screen's own declared `order.byId`
@@ -92,7 +117,7 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v.clone()),
         };
-        Self { order_id, order }
+        Self { order_id, order, birth_pending: false }
     }
 
     /// Build from a full [`RenderContext`] (#472) — the [`from_resolved`](Self::from_resolved)
@@ -108,7 +133,7 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v),
         };
-        Self { order_id, order }
+        Self { order_id, order, birth_pending: false }
     }
 
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.
@@ -127,6 +152,33 @@ impl TrackingState {
             self.order = OrderRead::Present(order);
         }
         Ok(())
+    }
+
+    /// The BOUNDED birth re-check (#758): while the paid context holds ([`Self::birth_pending`])
+    /// and the last read answered null, re-run the pull until the order appears or the bound is
+    /// spent. Returns `Ok(true)` once the order is `Present`, `Ok(false)` when the bound ran out —
+    /// the render keys on [`Self::birth_pending`] either way, so exhaustion keeps the reassurance
+    /// on screen rather than ever degrading to the not-found hero.
+    ///
+    /// Bounded on the `checkout::await_payment_intent_with` precedent — a client-side convergence
+    /// read on the same saga, not a standing poll: the `orderStatusChanged` subscription remains
+    /// the push path (ADR-20260810-231300), and this loop stops on its own.
+    pub async fn load_until_present(
+        &mut self,
+        transport: &dyn Transport,
+        max_attempts: u32,
+        interval: std::time::Duration,
+    ) -> Result<bool, ResolverError> {
+        for attempt in 1..=max_attempts {
+            if attempt > 1 && !interval.is_zero() {
+                crate::actions::sleep(interval).await;
+            }
+            self.load(transport).await?;
+            if matches!(self.order, OrderRead::Present(_)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Fold one subscription event in. Returns `true` when the state changed (the screen's
@@ -331,10 +383,16 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
         .unwrap_or(0);
     let unresolved = matches!(state.order, OrderRead::Unresolved);
     let failed = matches!(state.order, OrderRead::Failed);
+    // #758: the PAID handoff window — the client holds its fresh PlaceOrder intent and no read
+    // has produced the order yet (Unresolved OR an honest answered-null while the birth rides the
+    // Order lane). Failed keeps its own staleness+retry state; Present renders the order.
+    let confirming =
+        state.birth_pending && matches!(state.order, OrderRead::Unresolved | OrderRead::Absent);
 
     let not_found = crate::i18n::resolve("order.not_found", &locale);
     let tracking_stale = crate::i18n::resolve("order.error.tracking_stale", &locale);
     let retry = crate::i18n::resolve("common.error.retry", &locale);
+    let confirming_copy = crate::i18n::resolve("order.confirming", &locale);
     view! {
         <main id="app" data-hydrate="order_tracking">
             {match hero {
@@ -347,16 +405,23 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
                         </section>
                     }.into_any()
                 }
+                // #758 (ADR-20260829-230418, C1a): the PAID handoff window. The client still holds
+                // its fresh PlaceOrder intent for this very order, so "Reçu" is a claim the page is
+                // entitled to make — and once ROUTE_ORDER_BIRTH_THROUGH_LANE flips, an ANSWERED
+                // null here is the honest between-two-lanes state, not a missing order. The copy is
+                // the founder-approved GAP(copy) this arm closes (it rode #420's spec half); the
+                // bounded re-check lives in `load_until_present`, driven by the mount.
+                None if confirming => view! {
+                    <section data-c="order_status_hero" data-status="PENDING" data-confirming="true">
+                        <p data-i18n="order.confirming">{confirming_copy.clone()}</p>
+                    </section>
+                }.into_any(),
                 // No renderable status. Two DIFFERENT states share this DOM slot, and conflating
                 // them is what the #427 mob review caught: only an ANSWERED read may say
-                // "not found". While the read is unresolved — which is every production render
-                // today, because `order.byId` is CUSTOMER-guarded and this transport is PUBLIC —
-                // the page makes no claim at all about a customer's order.
-                //
-                // GAP(copy): the right content here is the acceptance-first reassurance
-                // ("Reçu ✓ — confirmation en cours…"). It needs a translation key, and customer
-                // copy is approved verbatim by the product owner, so it rides #420's spec half
-                // rather than being invented here. Until then: silence, which is honest.
+                // "not found". While the read is unresolved WITHOUT the paid context — every
+                // anonymous production render, because `order.byId` is CUSTOMER-guarded and this
+                // transport is PUBLIC — the page makes no claim at all about a customer's order:
+                // silence, which is honest (the "Reçu ✓" claim above needs the pending intent).
                 None if unresolved => view! {
                     <section data-c="order_status_hero" data-status="PENDING"></section>
                 }.into_any(),
@@ -638,6 +703,91 @@ mod tests {
         assert!(absent.contains("Commande introuvable"), "an answered null still says so: {absent}");
     }
 
+    /// #758 (ADR-20260829-230418, C1a): the PAID-then-null handoff window. Once the birth rides
+    /// the Order lane, `order.byId` can honestly answer null for a beat after payment. While the
+    /// client still holds its fresh `PlaceOrder` intent, an ANSWERED null renders the
+    /// acceptance-first reassurance — the founder-approved copy, verbatim — and NEVER the
+    /// not-found hero. A stranger's answered null (no pending intent) keeps the not-found pin.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_paid_answered_null_renders_the_acceptance_reassurance_not_not_found() {
+        let id = Uuid::now_v7();
+        let mut answered = Map::new();
+        answered.insert("order".into(), Value::Null);
+
+        for (locale, copy, not_found) in [
+            ("fr", "Reçu ✓ — confirmation en cours…", "Commande introuvable"),
+            ("en", "Received ✓ — confirmation in progress…", "Order not found"),
+        ] {
+            let paid = TrackingState::from_resolved(id, &answered).with_birth_pending(true);
+            let html = render_tracking_html(paid, locale);
+            assert!(html.contains(copy), "{locale}: the reassurance renders: {html}");
+            assert!(
+                !html.contains(not_found),
+                "{locale}: a paid customer must never read 'not found' in the handoff window: {html}"
+            );
+            assert!(html.contains(r#"data-status="PENDING""#), "{locale}: {html}");
+            assert!(!html.contains(r#"data-status="UNKNOWN""#), "{locale}: {html}");
+            assert!(!html.contains("[order.confirming]"), "{locale}: no `[key]` marker: {html}");
+
+            // The stranger pin, UNCHANGED: the same answered null without the pending intent is
+            // the honest not-found state (#427 — never an existence oracle, and never weakened).
+            let stranger = TrackingState::from_resolved(id, &answered);
+            let html = render_tracking_html(stranger, locale);
+            assert!(html.contains(not_found), "{locale}: stranger-null still says so: {html}");
+        }
+
+        // The paid context also lifts the UNRESOLVED silence into the same reassurance — the
+        // GAP(copy) this test closes: a customer who just paid saw a blank hero until now.
+        let unresolved = TrackingState::new(id).with_birth_pending(true);
+        let html = render_tracking_html(unresolved, "fr");
+        assert!(html.contains("Reçu ✓ — confirmation en cours…"), "{html}");
+        assert!(!html.contains("Commande introuvable"), "{html}");
+
+        // An order that WAS read is untouched by the flag: the hero renders the order.
+        let mut present = TrackingState::new(id).with_birth_pending(true);
+        present.apply(&SubscriptionEvent::Next(order("ACCEPTED", "2026-08-29T19:30:00Z")));
+        let html = render_tracking_html(present, "fr");
+        assert!(html.contains("Commande acceptée"), "{html}");
+        assert!(!html.contains("Reçu ✓"), "a read order shows the order, not the wait copy: {html}");
+    }
+
+    /// #758: the bounded re-check — an answered null in the paid context re-pulls until the birth
+    /// lands or the bound is spent, and NEVER loops beyond it (the `await_payment_intent_with`
+    /// precedent; the subscription stays the push path).
+    #[tokio::test]
+    async fn load_until_present_rechecks_bounded_until_the_birth_lands() {
+        let id = Uuid::now_v7();
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "order": null })),
+            Ok(json!({ "order": null })),
+            Ok(json!({ "order": order("PLACED", "2026-08-29T19:00:00Z") })),
+        ]);
+        let mut state = TrackingState::new(id).with_birth_pending(true);
+        let born = state
+            .load_until_present(&fake, 5, std::time::Duration::ZERO)
+            .await
+            .expect("the re-check pulls cleanly");
+        assert!(born, "the third pull found the born order");
+        assert_eq!(state.status(), Some("PLACED"));
+        assert_eq!(fake.call_count(), 3, "stops at the first Present, not at the bound");
+
+        // Exhaustion: the bound is respected (an unscripted 3rd call would panic the fake), the
+        // state stays the honest Absent, and the caller's render still keys on birth_pending.
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "order": null })),
+            Ok(json!({ "order": null })),
+        ]);
+        let mut state = TrackingState::new(id).with_birth_pending(true);
+        let born = state
+            .load_until_present(&fake, 2, std::time::Duration::ZERO)
+            .await
+            .expect("exhaustion is not an error");
+        assert!(!born, "the bound ran out before a birth");
+        assert_eq!(state.order, OrderRead::Absent, "the read DID answer — Absent, honestly");
+        assert_eq!(fake.call_count(), 2, "BOUNDED: exactly max_attempts pulls, never a loop");
+    }
+
     /// #420: the hero renders WORDS. It used to emit `data-i18n` on empty elements and nothing
     /// anywhere turned those into text, so the page a customer landed on after paying was blank
     /// above the fold. The body is withheld rather than shipped with an unfilled `{param}`.
@@ -662,7 +812,7 @@ mod tests {
             // was never read renders no claim at all; that is
             // `an_unanswered_read_never_tells_a_customer_their_order_was_not_found`.
             let answered_null =
-                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent };
+                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false };
             let html = render_tracking_html(answered_null, locale);
             assert!(html.contains(not_found), "{locale}: {html}");
             assert!(!html.contains("[order.not_found]"), "{html}");
@@ -697,7 +847,7 @@ mod tests {
         // The two empty states are DIFFERENT (#427): a read that answered null is UNKNOWN; a read
         // that never answered makes no claim.
         let html = render_tracking_html(
-            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent },
+            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false },
             "fr",
         );
         assert!(html.contains("data-status=\"UNKNOWN\""));
