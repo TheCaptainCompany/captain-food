@@ -5039,7 +5039,7 @@ A customer has placed an order and payment was successfully authorized/captured.
 | <a id="event-orderplaced--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
 | <a id="event-orderplaced--ref"></a>`ref` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ |  |
 | <a id="event-orderplaced--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="event-orderplaced--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | The identified customer. REQUIRED (#144): checkout requires a verified phone (PRODUCT_SPEC_WEB_CLIENT.md), which registers or resolves the Customer, and OrderPlaced is emitted ONLY by PlaceOrderProcess — there is no import path that could produce an order without one. Previously nullable, which let the schema permit what the prose forbade and left an "order nobody owns" class the authorization index (ScopeMembership) could not grant.  |
+| <a id="event-orderplaced--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | The identified customer. REQUIRED (#144): checkout requires a verified phone (specs/integrations/supabase.md §5 — placeOrder is roles: [CUSTOMER] in the ordering api.yaml), which registers or resolves the Customer, and OrderPlaced is emitted ONLY by PlaceOrderProcess — there is no import path that could produce an order without one. Previously nullable, which let the schema permit what the prose forbade and left an "order nobody owns" class the authorization index (ScopeMembership) could not grant.  |
 | <a id="event-orderplaced--customercontact"></a>`customerContact` | [📦 `CustomerContact`](#entity-customercontact) | ✅ |  |
 | <a id="event-orderplaced--servicetype"></a>`serviceType` | [🔤 `ServiceType`](#scalar-servicetype) | ✅ |  |
 | <a id="event-orderplaced--deliveryaddress"></a>`deliveryAddress` | [📦 `Address`](#entity-address) | ⬜ |  |
@@ -11270,6 +11270,9 @@ _Surface_ **`captain_frontoffice.yaml`**
 ```
 
 
+
+**Gaps**
+- ⚠️ The apply CTA's destination — `https://restos.captain.food/onboarding`, the self-serve partner application form — does not exist: `restaurant_backoffice.yaml` declares no `/onboarding` screen and no owner self-signup story activity exists (stories.yaml onboarding is the admin-driven `OnboardRestaurants`), although the API already admits owner self-signup (`registerRestaurantAccount` roles include RESTAURANT_ACCOUNT). Until that surface is built the CTA lands on an unrouted host path.
 
 _Surface_ **`restaurant_backoffice.yaml`**
 

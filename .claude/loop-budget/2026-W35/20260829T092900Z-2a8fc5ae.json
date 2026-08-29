@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 830,
+  "recordedAt": "2026-08-29T09:29:00.432Z",
+  "branch": "755-localhost-tenant-space",
+  "note": "retire PRODUCT_SPEC_WEB_CLIENT.md (docs/specs lane, direct to main); NOTE: shared-checkout timer opened at session bootstrap, a parallel #755 run shares this tree"
+}

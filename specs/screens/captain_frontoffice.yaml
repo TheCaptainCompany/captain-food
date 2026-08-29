@@ -290,6 +290,8 @@ screens:
     title: { $ref: 'captain_frontoffice.translations.yaml#/partner.header' }
     sdui: true
     data_requirements: []
+    gaps:
+      - "The apply CTA's destination — `https://restos.captain.food/onboarding`, the self-serve partner application form — does not exist: `restaurant_backoffice.yaml` declares no `/onboarding` screen and no owner self-signup story activity exists (stories.yaml onboarding is the admin-driven `OnboardRestaurants`), although the API already admits owner self-signup (`registerRestaurantAccount` roles include RESTAURANT_ACCOUNT). Until that surface is built the CTA lands on an unrouted host path."
     components:
       - { type: back_button_header, title: { $ref: 'captain_frontoffice.translations.yaml#/partner.header' } }
       - { type: hero_section, image: "/assets/partner-hero.jpg", title: { $ref: 'captain_frontoffice.translations.yaml#/partner.hero_title' }, body: { $ref: 'captain_frontoffice.translations.yaml#/partner.hero_body' } }

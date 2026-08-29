@@ -50,10 +50,30 @@ abandoned magic links / admin-side Supabase changes (model it then like Stripe's
   shared codes like `+1` pick a primary). Authenticated sends use the **stored** locale
   (`ChangeLanguage` / `View_Customer.locale`) — no per-call language param.
 
-## 5. Gaps / decisions
+## 5. Checkout gating (account required)
+
+An account is required to place an order (Uber Eats model), and the account IS the verified phone:
+browsing restaurants, viewing catalogs and building a cart need no identification, but **checkout
+requires a verified phone** — `placeOrder` is `roles: [CUSTOMER]` (ordering `api.yaml`), and a
+CUSTOMER identity exists only through `VerifyPhone` (§2), which registers a new number
+(`CustomerRegistered`) or resolves a returning one (`CustomerIdentified`). An anonymous visitor is
+prompted to verify before paying; their open guest carts are bound on identification
+(`CartBindingProcess`, `rules.yaml#/GuestCartsBoundOnIdentification`). This gate is why
+`OrderPlaced.customerId` is REQUIRED (#144): no path can produce an order without an identified
+customer.
+
+## 6. Gaps / decisions
 
 - **Rate limiting / abuse**: handled by Supabase + cross-cutting `RateLimited`; not a domain event.
-- **Sessions / passkeys / social login**: provider concerns; post-V0.
+- **Sessions / passkeys / social login**: provider concerns; post-V0. When passkeys land (WebAuthn
+  via Supabase Auth — a **beta** feature there), enrolment and sign-in stay provider concerns and
+  are **NOT domain events** — the same stance as OTP sends and sessions. Their business case is SMS
+  cost and friction: every OTP sign-in costs one SMS (per-message pricing — the costed figures are
+  recorded in PROP-20260724-233605 and `crates/application/src/sms_guard.rs`), so a returning
+  customer re-authenticating with a device passkey (Face ID / Touch ID) sends **no SMS**, with
+  phone OTP as the fallback (new device, unsupported browser). The single-origin topology that
+  makes one passkey work across every `{slug}.captain.food` storefront (RP ID = bare
+  `captain.food`, small fixed origin set) is ADR-0036.
 - **Email-verified webhook**: deferred (see §3).
 - **Twilio templates**: per-locale OTP message templates configured in Supabase/Twilio; selected by the
   resolved locale.

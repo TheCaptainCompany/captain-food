@@ -7,8 +7,10 @@
 //!   HOLDS the funds, the money moves at capture), tagging the intent's `metadata` with the
 //!   [`ServiceCallMeta`] business refs (`orderId`/`restaurantId`/`cartId`, copied VERBATIM) so the
 //!   INBOUND webhook ACL (acl.rs) can map `payment_intent.*` facts back onto our aggregates.
-//!   `confirm=false`: the FRONTEND confirms with the returned `client_secret`
-//!   (specs/PRODUCT_SPEC_WEB_CLIENT.md checkout).
+//!   `confirm=false`: the FRONTEND confirms with the returned `client_secret`, served to the
+//!   initiator by `queries/paymentStatus` / `subscriptions/paymentStatusChanged`
+//!   (specs/payments/api.yaml, acceptance-first — ADR-20260720-015500; the storefront's
+//!   `stripe_express_checkout_element` does the confirm).
 //! - `payment.capture` → `POST {base}/v1/payment_intents/{id}/capture` (full authorized amount;
 //!   PaymentSettlementProcess's fulfilment leg); the settled `PaymentCaptured` stays an inbound
 //!   webhook fact. A failed capture ALSO bumps `payment_capture_failed_total{reason}` here — the
