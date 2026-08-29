@@ -16,6 +16,7 @@ pub(crate) mod proposals; // §13 docs/proposals hygiene
 pub(crate) mod read_targets; // §5c-bis read-target ownership (reads/readsInfrastructure, ADR-20260812-214500)
 pub(crate) mod schema_writers; // §16 writer/schema agreement (migrations vs *_store.rs, #474)
 pub(crate) mod scopes; // §14 per-scope spec folders (placement, DAG, kernel purity, api nesting)
+pub(crate) mod screen_bindings; // §25 screen `{{ }}` template bindings vs the bound api type (#468)
 pub(crate) mod reminders; // §2f reminders/schedules/deletion DSL
 pub(crate) mod services; // §2d service catalog
 pub(crate) mod shape; // api-shape helpers (roles, inline types, data shapes)
@@ -41,6 +42,9 @@ pub(crate) use reminders::*;
 pub(crate) use services::*;
 pub(crate) use schema_writers::*;
 pub(crate) use scopes::*;
+// screen_bindings: deliberately not re-exported — its rule is not yet wired into validate() (see
+// validate/core.rs's SDUI section and the module's own doc comment); its functions are reached
+// directly by their own #[cfg(test)] unit tests only.
 pub(crate) use shape::*;
 pub(crate) use span_error_status::*;
 pub(crate) use status::*;

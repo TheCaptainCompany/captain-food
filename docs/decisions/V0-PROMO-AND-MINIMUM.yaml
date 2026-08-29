@@ -1,0 +1,7 @@
+key: "V0-PROMO-AND-MINIMUM"
+status: "open"
+question: "Does V0 ship promo codes and/or a minimum order amount, and at what rules/values?"
+owner: "founder"
+opened: "2026-08-28"
+register: "docs/proposals/DECISIONS.md (raised in the #468 mob briefing, outcome recorded on the issue)"
+evidence: "business lens: promo codes are post-launch -- the co-op wedge Captain sells is fair fees (0% commission on food), not coupon wars against Uber Eats' subsidised discounting; a minimum order amount is a LAUNCH need instead, priced from rider economics upward (a rider cannot be dispatched profitably below some basket size), not an afterthought bolted on later. ux lens: a minimum order needs a domain rule (the amount, how it composes with the free-delivery threshold once that lands) plus a pre-checkout chip surfaced before real orders start flowing -- silently accepting a small order a rider cannot profitably deliver risks the paid-order-nobody-profits failure class the whole team is warned against; also field-check with Tours restaurateurs whether they expect promo-code surfacing at all before anyone builds it. Raised while fixing issue #468 'The cart screen cannot render a price: every summary binding names a field the API does not have': cart.discount and cart.minimumOrderMet were bound to fields the Cart api type does not carry -- no PromoCode/discount concept and no minimum-order rule exist at the domain level (no command, no entity field, no rule) -- so both were removed from the live cart screen and declared as `gaps:` entries rather than guessed at."

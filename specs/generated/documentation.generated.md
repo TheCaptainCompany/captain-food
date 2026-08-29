@@ -11537,7 +11537,6 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 │ promo_code_input — Promo code            │
 │ delivery_mode_toggle                     │
 │ order_summary_block                      │
-│ minimum_order_warning                    │
 │ sticky_bottom_bar                        │
 └──────────────────────────────────────────┘
 ```
@@ -11552,6 +11551,8 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 **Gaps**
 - ⚠️ `apply_promo_code` action + cart.discount/promoCode have no backing mutation — promo codes not modelled.
 - ⚠️ `set_delivery_mode` action has no backing mutation — serviceType is chosen at placeOrder, not stored on the cart.
+- ⚠️ cart.discount: no domain concept exists — no PromoCode entity, no discount field on Cart/PaymentBreakdown, no command or rule computes one — so the discount row is removed from order_summary_block rather than bound to a field that does not exist (#468). Unlocked once promo codes are modelled end to end (command, `price_cart` participation, api field) — tracked by `docs/decisions/V0-PROMO-AND-MINIMUM.yaml`.
+- ⚠️ cart.minimumOrderMet: no domain concept exists — no MinimumOrderAmount rule/command computes or enforces one — so the minimum-order warning widget and its `checkout_btn` disabled-when gate are removed (#468). Unlocked once a minimum-order rule is modelled — tracked by `docs/decisions/V0-PROMO-AND-MINIMUM.yaml`.
 
 <a id="screen-checkout"></a>
 ### 📱 `checkout` · `/checkout` · 🚫 not SDUI — Stripe Elements + payment security — a static React page, not runtime JSON. · 🔒 auth
@@ -12020,10 +12021,8 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-cart-promo_applied"></a>`cart.promo_applied` | `code`, `amount` | Code {code} applied — {amount} off | Code {code} appliqué — {amount} de réduction |
 | <a id="translation-cart-subtotal"></a>`cart.subtotal` | — | Subtotal | Sous-total |
 | <a id="translation-cart-delivery_fee"></a>`cart.delivery_fee` | — | Delivery fee | Frais de livraison |
-| <a id="translation-cart-service_fee"></a>`cart.service_fee` | — | Service fee | Frais de service |
-| <a id="translation-cart-discount"></a>`cart.discount` | — | Discount | Réduction |
+| <a id="translation-cart-service_fee"></a>`cart.service_fee` | — | Captain service fee | Frais de service Captain |
 | <a id="translation-cart-total"></a>`cart.total` | — | Total | Total |
-| <a id="translation-cart-min_warning"></a>`cart.min_warning` | `min`, `shortfall` | Minimum order is {min}. Add {shortfall} more. | Commande minimum : {min}. Ajoutez {shortfall}. |
 | <a id="translation-cart-checkout_cta"></a>`cart.checkout_cta` | `total` | Go to checkout — {total} | Passer au paiement — {total} |
 | <a id="translation-checkout-title"></a>`checkout.title` | — | Checkout | Paiement |
 | <a id="translation-checkout-delivery_details"></a>`checkout.delivery_details` | — | Delivery details | Détails de livraison |

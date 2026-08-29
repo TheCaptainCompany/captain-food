@@ -83,12 +83,10 @@ cart.promo_applied:
   messages: { en: "Code {code} applied — {amount} off", fr: "Code {code} appliqué — {amount} de réduction" }
 cart.subtotal:     { messages: { en: "Subtotal", fr: "Sous-total" } }
 cart.delivery_fee: { messages: { en: "Delivery fee", fr: "Frais de livraison" } }
-cart.service_fee:  { messages: { en: "Service fee", fr: "Frais de service" } }
-cart.discount:     { messages: { en: "Discount", fr: "Réduction" } }
+# ADR-0018's decided checkout-display wording ("Captain service fee" — the buyer-facing line that
+# replaces the commission platforms like Uber Eats take directly from the restaurant's dishes).
+cart.service_fee:  { messages: { en: "Captain service fee", fr: "Frais de service Captain" } }
 cart.total:        { messages: { en: "Total", fr: "Total" } }
-cart.min_warning:
-  params: { min: "formatted minimum order", shortfall: "formatted amount still needed" }
-  messages: { en: "Minimum order is {min}. Add {shortfall} more.", fr: "Commande minimum : {min}. Ajoutez {shortfall}." }
 cart.checkout_cta:
   params: { total: "formatted cart total" }
   messages: { en: "Go to checkout — {total}", fr: "Passer au paiement — {total}" }

@@ -3,6 +3,56 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> ✅ **2026-08-28 — [#468 "The cart screen cannot render a price: every summary binding names a
+> field the API does not have"](https://github.com/TheCaptainCompany/captain-food/issues/468) is
+> fixed: the cart screen renders real money.** `specs/screens/restaurant_frontoffice.yaml`'s `cart`
+> screen rebinds `order_summary_block` to the graphql-verified `cart.breakdown.*` path — subtotal →
+> `breakdown.articles`, delivery → `breakdown.delivery`, service fee → `breakdown.serviceFee`, total →
+> `breakdown.total` (never `cart.totalAmount`, which is the food subtotal only and collides in name
+> with `Order.totalAmount`, where only Order equates the two) — and the checkout screen's
+> `cart_summary_mini` total the same way. `breakdown.articles` is TTC
+> (`specs/common/entities.yaml`), so the bound total is the payable all-tax amount; no relabeling was
+> needed. The service-fee label now carries ADR-0018's decided wording ("Captain service fee" /
+> "Frais de service Captain"). **Two of the six broken fields had no domain concept to bind to at
+> all**: `cart.discount` (no PromoCode entity/command/rule) and `cart.minimumOrderMet` (no
+> minimum-order rule) are REMOVED from the live screen (the discount row, the
+> `minimum_order_warning` widget, and the `minimumOrderMet` half of `checkout_btn`'s `disabled_when`)
+> and declared as `gaps:` entries naming why and what unlocks them — a declared gap does not excuse a
+> still-live control (`CLAUDE.md`'s domain lens), so the widgets are gone, not just documented. Their
+> now-orphaned translation keys (`cart.discount`, `cart.min_warning`) are deleted. Filed
+> `docs/decisions/V0-PROMO-AND-MINIMUM.yaml` (open, owner founder): does V0 ship promo codes and/or a
+> minimum order amount, and at what rules/values.
+>
+> **New validator mechanism, deliberately left UN-WIRED** (`tools/codegen-rs/src/validate/
+> screen_bindings.rs`, §25): nothing in `make validate` resolved a screen's `{{ root.path }}` template
+> binding against the api type its `data_requirements` actually bind — every existing screens check
+> proves an action/resolver `$ref` resolves, never a content interpolation, which is exactly how
+> #468's six non-existent `Cart` fields passed at 0 errors. Red-first confirmed BEFORE the rule
+> existed: planting `{{ cart.totalAmoun | format_currency }}` (a one-character typo) into the fixed
+> screen and running `make validate` stayed green. The new mechanism mirrors
+> `crates/web/src/renderer.rs`'s `RenderContext::insert_resolved` root-aliasing exactly (never
+> guess-matches a root name) and walks `properties` through `entities.yaml`/`scalars.yaml`/another
+> api type, stopping honestly at an array field, a scalar leaf, or an unresolvable ref rather than
+> guessing further. Proven by 7 unit tests (`cargo test screen_bindings`) and, run against the WHOLE
+> real screens corpus, reds 13 times outside the `cart` screen this issue fixes — none of them a
+> same-file trivial rename (`restaurant_backoffice.yaml#order_conversation` binds the STAFF-ONLY
+> `ConversationInternalNotes` root to `OrderConversation`'s `status`/`messages` fields; `restaurant_
+> frontoffice.yaml#restaurant`'s `coverUrl`/`logoUrl`/`deliveryTime` are an ALREADY-declared gap whose
+> widgets are still live; `rider.yaml#job_detail` and the `cart` screen's own `restaurantName` want a
+> field neither `DeliveryJob` nor `Cart` carries at all). Wiring it now would need weakening it (a
+> skip list, warning-only, or a one-screen carve-out) to go green, which the dispatch ruled out —
+> left un-wired, evidenced by its tests, for the architect to file as scoped follow-up work.
+>
+> **Stop-condition checked, not triggered into a hold**: the cart screen's remaining
+> `delivery_fee` row (`visible_when: selected_delivery_mode == delivery`) and `checkout_btn`
+> (`disabled_when: cart.lines.length == 0`) both pre-date this change and both depend on
+> [#472 "A dead control stays live: the SDUI renderer evaluates no `visible_when`/`disabled_when` and
+> swallows resolver errors"](https://github.com/TheCaptainCompany/captain-food/issues/472) (open,
+> unchanged) to actually work — neither dependency is new here (the delivery-fee `visible_when`
+> pre-dates #468 entirely, and `cart.lines.length == 0` was already half of the compound
+> `disabled_when` this change simplifies, not something it adds). Reported per the dispatch's rule
+> rather than silently treated as resolved.
+>
 > ✅ **2026-08-28 — [#658 "The decision register cannot say what is still open: 62 of 148 rows carry
 > no status token, 22 keys are ambiguous, and nothing confronts a question with the register before
 > it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658) closes its

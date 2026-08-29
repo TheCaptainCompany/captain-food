@@ -23,6 +23,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
 | `ERASURE-LAUNCH-GATE` | open | 2026-08-28 | Does the Customer GDPR erasure flow (#708) ship BEFORE the first real order in Tours, or does the founder record an explicit, counsel-cleared acceptance of an exposure window? | founder |
 | `IDENT1-OUTAGE-EXPERIENCE` | open | 2026-08-28 | When the identity lookup FAILS (outage class, lookup_failed), does the customer keep the ADR-20260818-004646 silent fail-closed-to-Public experience, or get a visible 'couldn't load your account — retry' state? | founder |
+| `V0-PROMO-AND-MINIMUM` | open | 2026-08-28 | Does V0 ship promo codes and/or a minimum order amount, and at what rules/values? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
@@ -58,7 +59,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 44 — 10 open · 29 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 45 — 11 open · 29 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
