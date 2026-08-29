@@ -1587,7 +1587,21 @@ read-authorization:
     # `reason` is the canonical bounded set:
     #   resolver_failed        — emitted TODAY, server-side: a REAL transport/contract failure on a
     #                            resolver this role path is allowed to ask. A role-refused read on
-    #                            the anonymous SSR transport is a SKIP BY DESIGN and is NOT counted.
+    #                            the anonymous SSR transport is a SKIP BY DESIGN and is NOT counted
+    #                            — and so is a read the §25b validator proves STRUCTURALLY
+    #                            unfulfillable (#745: a required arg with no route-param/pin/
+    #                            tenant-host source, declared on the binding via `skipped_reads:`
+    #                            and skipped BEFORE any network). Skip reasons feed the render's
+    #                            TRACE (a per-skip event with screen/resolver/reason/
+    #                            correlation_id at the hosts.rs boundary, at INFO — proven
+    #                            visible under the deployed LOG_LEVEL=info default by
+    #                            crates/server/tests/skip_trace_visibility.rs; a debug-gated
+    #                            emission was the #748-checkpoint blocking finding, the
+    #                            wired-never-to-scream class), never a metric label:
+    #                            a metric reason wired to weigh zero is a signal wired never to
+    #                            scream. The §25b dead-man rule keeps the skip honest — the
+    #                            moment the spec gives the read a source, the declaration is a
+    #                            validation ERROR and the read runs (and may fail loudly) again.
     #   condition_unparseable  — emitted TODAY, server-side: a `visible_when`/`disabled_when`/
     #                            `condition` expression outside the corpus grammar reached a render
     #                            (fails closed + loud DOM marker; the codegen corpus gate makes

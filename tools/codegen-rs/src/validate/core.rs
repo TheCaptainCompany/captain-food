@@ -1829,6 +1829,11 @@ pub(crate) fn validate(model: &Model) -> Report {
                     // dotted binding whose root a data_requirement feeds must name real fields on
                     // the api type that resolver's query returns.
                     check_screen_bindings(model, &mut issues, sfkey, &sid, s, resolvers, &nav);
+                    // Read fulfillability + `skipped_reads` declarations (§25b, #745): a required
+                    // arg with no paint-time source is a read that fails on EVERY paint — it must
+                    // be declared (and the runtime skips it before network), and a declaration a
+                    // new source falsifies is itself an error (the dead-man's proof).
+                    check_screen_fulfillability(model, &mut issues, sfkey, &sid, s, resolvers);
                     // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
                     // ADR-0032-style bidirectional completeness). The defect class this kills
                     // forever: the map keyed a bare `CANCELLED` that matched NO enum member, so
@@ -1924,7 +1929,9 @@ pub(crate) fn validate(model: &Model) -> Report {
                 for (loc, rf) in &refs {
                     // A screen-level realtime binding (`subscription: { $ref: api.yaml#/subscriptions/… }`)
                     // is an API ref, not content — skip it (validated as an operation elsewhere).
-                    if loc.ends_with(".subscription") {
+                    // Likewise a `skipped_reads` declaration's refs (#745): its `resolver` /
+                    // `missing_arg` are data-layer refs, validated by §25b + the §1b ref contract.
+                    if loc.ends_with(".subscription") || loc.contains(".skipped_reads[") {
                         continue;
                     }
                     match ref_target_file(rf, sfkey).as_deref() {

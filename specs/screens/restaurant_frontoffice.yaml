@@ -309,6 +309,18 @@ screens:
     title: "{{ restaurant.displayName }}"
     sdui: true
     data_requirements: [restaurant.bySlug, catalog.byRestaurant]
+    # §25b (#745): the catalog read is PROVEN structurally unfulfillable — `catalog` requires
+    # `restaurantId!` and this screen's only param is `:slug` (verified against the real schema:
+    # the read failed GraphQL validation on EVERY storefront paint, SSR and hydrate, so the LIVE
+    # MENU never rendered from a real paint and #742's error state showed instead). Declared so
+    # the paint stops counting/erroring on a read that can never run; the MENU ITSELF is the
+    # URGENT defect #749 (slug-accepting catalog arg, or chained-read sourcing) — the moment it
+    # gives this read a source, this declaration becomes a validation ERROR and must go.
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/catalog.byRestaurant' }
+        missing_arg: { $ref: 'api.yaml#/queries/catalog/args/restaurantId' }
+        supplied_by: none
+        note: "restaurantId's only source is the restaurant.bySlug result (restaurant.id) — chained-read machinery the data layer does not have, or an additive slug arg on the catalog query. Tracked URGENT by #749; the dead-man rule removes this declaration the moment a source lands."
     gaps:
       # `isOpen` left this list with RSO-1 (DECISIONS §43): the open/closed affordance is served by
       # `restaurant.serviceWindow` (verdict at the request instant) — `isOpen` was a UI term
@@ -416,16 +428,22 @@ screens:
     sdui: false
     sdui_reason: "Stripe Elements + payment security — a static React page, not runtime JSON."
     requires_auth: true
-    # paymentStatus.byOrder: the payment-outcome read this screen ALREADY performs (the Stripe
-    # element binds payment_status.clientSecret below) — now declared. Its orderId arg is the
-    # client-minted PlaceOrder.orderId (supplied by the page at dispatch time; /checkout has no
-    # route param — see the place_order action note).
     # restaurant.bySlug (RSO-1): declared so the page can RE-EVALUATE serviceWindow at its
-    # validUntil (the slug resolves from the storefront Host, as everywhere on this surface) —
-    # declaration only: no blocking state, no countdown UI. The guard's own refusal is
+    # validUntil — the slug is injected from the storefront Host by the router for every matched
+    # route on this surface (#745), so the read carries its required arg at paint time.
+    # Declaration only: no blocking state, no countdown UI. The guard's own refusal is
     # POST-ENQUEUE (acceptance-first), so it surfaces through the operation outcome the
     # confirmation flow already watches, not through this page's synchronous error path.
     data_requirements: [cart.current, me.profile, paymentStatus.byOrder, restaurant.bySlug]
+    # §25b (#745): reads PROVEN structurally unfulfillable at paint time — a required query arg
+    # with no route-param/pin/host source. The runtime skips them BEFORE any network (never a
+    # degraded-render count); the validator errors BOTH directions, so a skip can never silently
+    # outlive its justification once the spec grows a source.
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/paymentStatus.byOrder' }
+        missing_arg: { $ref: 'api.yaml#/queries/paymentStatus/args/orderId' }
+        supplied_by: client_dispatch
+        note: "orderId is the client-minted PlaceOrder.orderId, supplied by the page at dispatch time (the Stripe flow polls paymentStatus with it — see the place_order action note); /checkout has no route param, so the paint-time read has nothing to ask about."
     actions_used: [place_order, set_delivery_address_saved]
     components:
       - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.title' } }
@@ -760,6 +778,16 @@ screens:
     sdui: true
     requires_auth: true
     data_requirements: [me.profile, favorites.mine, rewards.balance]
+    # §25b (#745): `favoriteRestaurants` requires `customerId!` — an identity fact this route
+    # carries nowhere (no param, no pin), so the read has failed structurally on every
+    # authenticated paint too, invisibly. Needs an identity-context arg source (#749's chained/
+    # context sourcing machinery, or a `mine`-semantics query that reads the caller's identity
+    # server-side like orders.mine does).
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/favorites.mine' }
+        missing_arg: { $ref: 'api.yaml#/queries/favoriteRestaurants/args/customerId' }
+        supplied_by: none
+        note: "customerId is the caller's own identity — a session fact the paint loop has no source for. Give the query me-semantics (identity resolved server-side) or land #749's declared arg sourcing; the dead-man rule then retires this declaration."
     actions_used: [set_delivery_address_saved, sign_out]
     gaps:
       - "`rewards.balance` (Captain Coins), referral and passkeys/notifications management are not modelled (deferred domains)."

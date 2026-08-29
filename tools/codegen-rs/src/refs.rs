@@ -43,6 +43,9 @@ pub(crate) enum Kind {
     Service,
     ServiceOperation,
     Query,
+    /// One declared ARG of an api.yaml query — `api.yaml#/queries/<q>/args/<a>` (#745): what a
+    /// screen's `skipped_reads` declaration names as the required arg it has no source for.
+    QueryArg,
     Mutation,
     Subscription,
     ApiType,
@@ -78,6 +81,9 @@ pub(crate) enum Kind {
     /// A column of any of the table kinds above.
     TableColumn,
     Screen,
+    /// A `screens/<surface>.yaml#/resolvers/<key>` data-layer read binding (#745): what a screen's
+    /// `skipped_reads` declaration points at with a same-file `$ref`.
+    Resolver,
     Persona,
     /// A `stories.yaml#/<persona>/activities/<Activity>` persona activity — the unit a business
     /// metric binds (ADR-20260810-234225 Decision 1 / ADR-20260811-014129).
@@ -113,6 +119,7 @@ impl Kind {
             Kind::Service => "service",
             Kind::ServiceOperation => "service operation",
             Kind::Query => "query",
+            Kind::QueryArg => "query arg",
             Kind::Mutation => "mutation",
             Kind::Subscription => "subscription",
             Kind::ApiType => "api output type",
@@ -132,6 +139,7 @@ impl Kind {
             Kind::Database => "database",
             Kind::TableColumn => "table column",
             Kind::Screen => "screen",
+            Kind::Resolver => "screen resolver binding",
             Kind::Persona => "persona",
             Kind::Activity => "persona activity",
             Kind::ObservabilityWorkflow => "observability workflow",
@@ -223,6 +231,7 @@ pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
         | Kind::Service
         | Kind::ServiceOperation
         | Kind::Query
+        | Kind::QueryArg
         | Kind::Mutation
         | Kind::Subscription
         | Kind::ApiType
@@ -235,6 +244,7 @@ pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
         | Kind::Database
         | Kind::TableColumn
         | Kind::Screen
+        | Kind::Resolver
         | Kind::Persona
         | Kind::Activity
         | Kind::ObservabilityWorkflow
@@ -318,6 +328,8 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
         }
         "api.yaml" => match (seg(0), path.len()) {
             (Some("queries"), 2) => Some(Kind::Query),
+            // `queries/<q>/args/<a>` — one declared query arg (#745, `skipped_reads.missing_arg`).
+            (Some("queries"), 4) if seg(2) == Some("args") => Some(Kind::QueryArg),
             (Some("mutations"), 2) => Some(Kind::Mutation),
             (Some("subscriptions"), 2) => Some(Kind::Subscription),
             (Some("types"), 2) => Some(Kind::ApiType),
@@ -367,6 +379,9 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
         }
         f if f.starts_with("screens/") => match (seg(0), path.len()) {
             (Some("screens"), 2) => Some(Kind::Screen),
+            // `resolvers/<key>` — one data-layer read binding (#745, `skipped_reads.resolver`,
+            // referenced same-file as `#/resolvers/<key>`).
+            (Some("resolvers"), 2) => Some(Kind::Resolver),
             _ => None,
         },
         _ => None,
@@ -596,6 +611,11 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("screens/*.yaml", "resolvers.**",     &[Kind::Query]),
     ("screens/*.yaml", "actions.**",       &[Kind::Mutation]),
     ("screens/*.yaml", "**.subscription",  &[Kind::Subscription]),
+    // A `skipped_reads` declaration (#745, §25b): `resolver` names the surface's own data-layer
+    // binding (same-file `#/resolvers/<key>`), `missing_arg` the REQUIRED api.yaml query arg the
+    // screen has no paint-time source for. Declared BEFORE the `**` catch-all — first match wins.
+    ("screens/*.yaml", "screens[*].skipped_reads[*].resolver",    &[Kind::Resolver]),
+    ("screens/*.yaml", "screens[*].skipped_reads[*].missing_arg", &[Kind::QueryArg]),
     ("screens/*.yaml", "**",               &[Kind::TranslationKey]),
 
     // C4 model (source DSL, not generated): containers/components bind to the actors they realize.
@@ -619,6 +639,7 @@ pub(crate) const STRUCTURAL_SEGMENTS: &[&str] = &[
     "reminders", "removedBy", "requires",
     "projections", "measures", "fold", "groupBy", "over", "activity", "value", "key",
     "ofDurationMs", "start", "end",
+    "missing_arg", "resolver", "skipped_reads",
     "properties", "queries", "read", "reads", "receives", "resolvers", "returns", "rules",
     "schedules", "screens", "send", "set", "state", "state_table", "status", "steps",
     "subscriptions", "tests", "then", "throws", "thrown", "to", "transitions", "triggers", "type",

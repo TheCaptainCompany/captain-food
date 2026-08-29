@@ -283,13 +283,13 @@ pub struct CheckoutViewState {
     /// `me.profile` FAILED: the contact fields stay EMPTY-EDITABLE (an error state blocking
     /// manual entry would hide the working path) with a small section notice.
     pub profile_failed: bool,
-    /// `paymentStatus.byOrder` FAILED. Carried for honesty but — deliberately — NOT a degrade
-    /// gate (#730 checkpoint finding): the query admits PUBLIC and takes a REQUIRED `orderId`
-    /// this route cannot supply (no route param, #420's reported DSL gap), so the read fails
-    /// STRUCTURALLY on every anonymous first paint — gating `payment_unavailable_state` on it
-    /// would close checkout permanently, the exact "cosmetic resolver failure blocks checkout"
-    /// the business rule forbids. Becomes a usable signal only once the read can carry its arg
-    /// (or is classified skip-by-design when it cannot).
+    /// `paymentStatus.byOrder` FAILED. Since #745 the PAINT loops never set this: the read is a
+    /// declared structurally-unfulfillable skip (`skipped_reads` on the checkout screen — its
+    /// required `orderId` is client-minted at dispatch), skipped before any network, so the
+    /// #730 "failed on every anonymous first paint" era is over. Kept, still deliberately NOT a
+    /// degrade gate: gating `payment_unavailable_state` on a payment-status read failure would
+    /// close checkout over a cosmetic read — the exact failure the business rule forbids — and
+    /// the flag becomes reachable again the day the read carries its arg at paint time.
     pub payment_status_failed: bool,
 }
 
@@ -951,11 +951,12 @@ mod tests {
     }
 
     /// #730 checkpoint finding, pinned: a failed `paymentStatus.byOrder` read must NOT degrade
-    /// the shell. The read is STRUCTURALLY arg-less on this route (required `orderId`, no route
-    /// param — #420's reported DSL gap) and the query admits PUBLIC, so the mark is set on every
-    /// anonymous first paint; gating `payment_unavailable_state` on it would close checkout
-    /// permanently — the exact "cosmetic resolver failure blocks checkout" the business rule
-    /// forbids. Caught by the server's own end-to-end body test
+    /// the shell. Since #745 the paint loops SKIP that read entirely (declared structurally
+    /// unfulfillable — `skipped_reads`), so production no longer sets this mark on first paint;
+    /// the pin stays because the rule is about the GATE, not the frequency: whenever the mark IS
+    /// set (a future arg-carrying read failing), `payment_unavailable_state` must not close
+    /// checkout over it — the exact "cosmetic resolver failure blocks checkout" the business
+    /// rule forbids. Caught by the server's own end-to-end body test
     /// (`hosts::tests::the_served_checkout_body_carries_the_key_iff_the_service_is_configured`)
     /// when a first draft did gate on it.
     #[cfg(feature = "ssr")]

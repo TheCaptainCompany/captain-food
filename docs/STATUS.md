@@ -23,7 +23,7 @@
 | `restaurants` / `restaurant` | ✅ | Real data once SIRENE runs |
 | `prospectionPipeline` | ✅ | Admin; fed by SIRENE registrations |
 | `pricingPolicy` / `uberEstimationPolicy` / `uberSplitPolicy` | ✅ | **Real seeded data** |
-| `catalog` / `categories` | ✅ | **Real nested data** — catalog `tree` projector (categories→products→offers/option-lists + derived `stockStatus`) |
+| `catalog` / `categories` | ✅ server-side / ⚠️ unreachable from the storefront paint | **Real nested data** — catalog `tree` projector (categories→products→offers/option-lists + derived `stockStatus`). ⚠️ [#749 "URGENT: storefront catalog read is structurally broken"](https://github.com/TheCaptainCompany/captain-food/issues/749): both queries require `restaurantId!` and no screen has a source for it, so the storefront MENU never renders from a real paint (declared §25b skip since [#745](https://github.com/TheCaptainCompany/captain-food/issues/745); needs a slug arg or chained-read sourcing) |
 | `carts` / `cart` / `orders` / `order` | ✅ wired | Populated as carts/orders are placed |
 | `me` / `favoriteRestaurants` | ✅ | `me` resolves the verified ADR-0047 `Principal` → Customer read model; `favoriteRestaurants` joins the customer's favourites |
 | Projection worker → registry (per-aggregate checkpoints) | ✅ | In-process; **no batch cap** (drains all pending per tick, loops 1.5s); hardened to **log-skip a poison event** so one bad record can't wedge projection. ⚠️ Free-tier **spin-down** pauses it when the app is idle >15 min → kept warm via **uptimerobot `/ping` every 5 min** |

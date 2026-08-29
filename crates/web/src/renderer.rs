@@ -1400,6 +1400,13 @@ pub fn hydrate() {
     wasm_bindgen_futures::spawn_local(async move {
         let mut ctx = RenderContext::new(&locale);
         for resolver in screen.data_requirements {
+            // #745: the generated §25b skip table — a structurally unfulfillable read (required
+            // arg, no paint-time source, declared on the binding) is skipped before any network
+            // on the hydrate leg exactly as on SSR: the two paths share the verdict table, so
+            // they cannot disagree about which reads run.
+            if screen.skipped_reads.contains(resolver) {
+                continue;
+            }
             let mut vars = serde_json::Map::new();
             for (k, v) in matched.param_args(*resolver) {
                 vars.insert(k, v);
@@ -1414,7 +1421,7 @@ pub fn hydrate() {
                 crate::graphql::ResolveOutcome::Resolved(value) => {
                     ctx.insert_resolved(resolver.as_str(), value)
                 }
-                crate::graphql::ResolveOutcome::SkippedByDesign => {}
+                crate::graphql::ResolveOutcome::SkippedByDesign(_) => {}
                 crate::graphql::ResolveOutcome::Failed(_) => ctx.insert_failed(resolver.as_str()),
             }
         }

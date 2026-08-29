@@ -3,6 +3,33 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-29 — [#745 "Structurally-unfulfillable reads classify as `Failed`: checkout's
+> arg-less `paymentStatus.byOrder` bumps the degraded-render counter on every anonymous
+> paint"](https://github.com/TheCaptainCompany/captain-food/issues/745) (morning run, sixth
+> chunk): fulfillability is a CODEGEN verdict, the skip table is generated, and the dead-man rule
+> makes every skip self-retiring.** Phase-0 verification against the REAL schema (in-process
+> `SchemaTransport`, not FakeTransport) confirmed all four briefed bumpers and found the corpus
+> is NINE unfulfillable bindings across three surfaces — including a LIVE MENU defect: the
+> storefront's `catalog.byRestaurant` sends `slug` where the schema requires `restaurantId!`, so
+> the menu has NEVER rendered from a real paint (SSR or hydrate) — filed URGENT as
+> [#749 "storefront catalog read is structurally broken"](https://github.com/TheCaptainCompany/captain-food/issues/749)
+> (fix needs chained-read machinery or an additive catalog arg, out of #745's scope by dispatch).
+> The chunk: `ResolverKey::required_args()` + the emitted `:orderId`→`id` rename bridge
+> (`arg_for_param`, replacing router.rs's hand-written map — and now DROPPING params no arg
+> accepts, which is what sent `slug` into `catalog`); tenant-host slug injection generalized from
+> the tenant-root rule to every storefront route (checkout's RSO-1 `restaurant.bySlug` read now
+> actually carries its arg); the screens DSL declares each unfulfillable binding
+> (`skipped_reads:` with `missing_arg` $ref, `supplied_by`, note), §25b validates BOTH directions
+> (undeclared-unfulfillable = error; declaration-with-a-source = error — a skip can never outlive
+> its justification), the emitted `Screen::skipped_reads` table is consulted before network in
+> all three paint loops, and `SkippedByDesign` now carries its reason
+> (declared_gap/role_refused/structurally_unfulfillable) to the render trace at the hosts.rs
+> boundary — never to a metric label. Also measured and filed separately:
+> [#750 "staff-surface SSR paints classify with the surface role over the PUBLIC
+> transport"](https://github.com/TheCaptainCompany/captain-food/issues/750) — those remain the
+> bumpers keeping `sdui_degraded_render_total` non-zero, so the contract's "alert on ANY
+> sustained non-zero rate" is still not actionable until #750 (and #749) land.
+
 > 🔧 **2026-08-29 — [#729 "`binding_failed` matches on the root alias, so one failed resolver
 > renders the error state over its same-root sibling's resolved data"](https://github.com/TheCaptainCompany/captain-food/issues/729)
 > + [#730 "Scalar bindings from a failed resolver still render as empty strings — only list-like

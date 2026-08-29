@@ -189,6 +189,16 @@ screens:
     title: { $ref: 'translations.yaml#/common.nav.home' }
     sdui: true
     data_requirements: [promotions.active, categories.all, restaurants.featured, restaurants.all]
+    # §25b (#745): `categories` requires `restaurantId!` — a PER-RESTAURANT category tree bound on
+    # the cross-restaurant marketplace, where no restaurant is in context. The read failed GraphQL
+    # validation on EVERY home paint (verified against the real schema) and bumped the degraded
+    # counter. What the UI actually wants is a GLOBAL discovery taxonomy, which no query serves —
+    # a spec design gap, kept visible by this declaration until one is modelled.
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/categories.all' }
+        missing_arg: { $ref: 'api.yaml#/queries/categories/args/restaurantId' }
+        supplied_by: none
+        note: "The marketplace has no restaurantId to give a per-restaurant category query; the category rail needs a global taxonomy query (unmodelled). The dead-man rule retires this declaration the moment a source (or a new query binding) lands."
     gaps:
       - "`promotions.active` (promo banners) has no backing query — deals deferred."
     components:
@@ -243,6 +253,13 @@ screens:
     title: { $ref: 'translations.yaml#/common.nav.search' }
     sdui: true
     data_requirements: [restaurants.search, categories.all, dishes.search, searches.recent]
+    # §25b (#745): same verdict as home — `categories` requires `restaurantId!` and search has no
+    # restaurant in context (see the home screen's declaration for the full rationale).
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/categories.all' }
+        missing_arg: { $ref: 'api.yaml#/queries/categories/args/restaurantId' }
+        supplied_by: none
+        note: "The search screen has no restaurantId for a per-restaurant category query; the filter rail needs a global taxonomy query (unmodelled) — see the home screen's declaration."
     gaps:
       - "`dishes.search` (the \"Dishes\" results) has no backing query — only restaurant search exists."
       - "`searches.recent` (the \"Recent searches\" branch) has no client-side producer and its set_search/search_query actions are unregistered (#723) — the section stays hidden rather than rendering a dead control."

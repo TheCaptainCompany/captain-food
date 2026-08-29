@@ -49,6 +49,12 @@ pub struct Screen {
     /// False = deliberately NOT SDUI-rendered (hand-written page); tree is empty.
     pub sdui: bool,
     pub data_requirements: &'static [ResolverKey],
+    /// The GENERATED skip table (#745, §25b): the subset of `data_requirements` PROVEN
+    /// structurally unfulfillable at paint time (a required query arg with no route-param, pin
+    /// or tenant-host source — each declared on the binding in the DSL). The paint loops skip
+    /// these BEFORE any network: the read would fail GraphQL validation on every paint and is
+    /// skipped by design, never counted as a degraded render.
+    pub skipped_reads: &'static [ResolverKey],
     pub tree: &'static [Node],
 }
 
@@ -76,6 +82,7 @@ pub mod captain_frontoffice {
             requires_auth: false,
             sdui: true,
             data_requirements: &[ResolverKey::PromotionsActive, ResolverKey::CategoriesAll, ResolverKey::RestaurantsFeatured, ResolverKey::RestaurantsAll],
+            skipped_reads: &[ResolverKey::CategoriesAll],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -107,6 +114,7 @@ pub mod captain_frontoffice {
             requires_auth: false,
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantsSearch, ResolverKey::CategoriesAll, ResolverKey::DishesSearch, ResolverKey::SearchesRecent],
+            skipped_reads: &[ResolverKey::CategoriesAll],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -135,6 +143,7 @@ pub mod captain_frontoffice {
             requires_auth: false,
             sdui: true,
             data_requirements: &[],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("partner.header"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::HeroSection, props: &[("image", PropValue::Text("/assets/partner-hero.jpg")), ("title", PropValue::I18n("partner.hero_title")), ("body", PropValue::I18n("partner.hero_body"))], children: &[], branches: &[] },
@@ -183,6 +192,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::OrdersByRestaurant],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -210,6 +220,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::DeliveriesByRestaurant],
+            skipped_reads: &[ResolverKey::DeliveriesByRestaurant],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -232,6 +243,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::RefundsPending],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -254,6 +266,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::SatisfactionByRestaurant],
+            skipped_reads: &[ResolverKey::SatisfactionByRestaurant],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -273,6 +286,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::ConversationByOrder, ResolverKey::InternalNotesByOrder],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -314,6 +328,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationsQueue],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -334,6 +349,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationById],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -364,6 +380,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantLocations],
+            skipped_reads: &[ResolverKey::RestaurantLocations],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -393,6 +410,7 @@ pub mod restaurant_backoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantLocations],
+            skipped_reads: &[ResolverKey::RestaurantLocations],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -432,6 +450,7 @@ pub mod restaurant_frontoffice {
             requires_auth: false,
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantBySlug, ResolverKey::CatalogByRestaurant],
+            skipped_reads: &[ResolverKey::CatalogByRestaurant],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("sticky", PropValue::Text("true")), ("right_slot.0.type", PropValue::Text("icon_button")), ("right_slot.0.icon", PropValue::Text("share")), ("right_slot.0.action.type", PropValue::Text("share")), ("right_slot.0.action.url", PropValue::Binding("canonical_url")), ("right_slot.1.type", PropValue::Text("icon_button")), ("right_slot.1.icon", PropValue::Text("heart")), ("right_slot.1.active_when", PropValue::Text("is_favorited")), ("right_slot.1.action.type", PropValue::Text("toggle_favorite")), ("right_slot.1.action.restaurant_id", PropValue::Binding("restaurant.id"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("restaurant_info"))], children: &[
@@ -454,6 +473,7 @@ pub mod restaurant_frontoffice {
             requires_auth: false,
             sdui: true,
             data_requirements: &[ResolverKey::CartCurrent],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("cart.title")), ("subtitle", PropValue::Binding("cart.restaurant.displayName"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::CartLines, props: &[("items", PropValue::Binding("cart.lines")), ("item_template.type", PropValue::Text("cart_line_row")), ("item_template.quantity_stepper.min", PropValue::Text("0")), ("item_template.quantity_stepper.on_change.type", PropValue::Text("change_cart_line_quantity")), ("item_template.quantity_stepper.on_change.line_id", PropValue::Binding("line.id")), ("item_template.quantity_stepper.on_change.quantity", PropValue::Binding("new_quantity"))], children: &[], branches: &[] },
@@ -472,6 +492,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: false,
             data_requirements: &[ResolverKey::CartCurrent, ResolverKey::MeProfile, ResolverKey::PaymentStatusByOrder, ResolverKey::RestaurantBySlug],
+            skipped_reads: &[ResolverKey::PaymentStatusByOrder],
             tree: &[],
         },
         Screen {
@@ -481,6 +502,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: false,
             data_requirements: &[ResolverKey::OrderById],
+            skipped_reads: &[],
             tree: &[],
         },
         Screen {
@@ -490,6 +512,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::OrdersMine],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -510,6 +533,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::ConversationByOrder],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("conversation.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("conversation.status"))], children: &[], branches: &[] },
@@ -529,6 +553,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::OrderById],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("claim.open.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::InfoRow, props: &[("label", PropValue::I18n("claim.order_ref")), ("value", PropValue::Binding("order.id"))], children: &[], branches: &[] },
@@ -546,6 +571,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationsMine],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -565,6 +591,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationById],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("claim.detail.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("reclamation.status"))], children: &[], branches: &[] },
@@ -592,6 +619,7 @@ pub mod restaurant_frontoffice {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::MeProfile, ResolverKey::FavoritesMine, ResolverKey::RewardsBalance],
+            skipped_reads: &[ResolverKey::FavoritesMine],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -669,6 +697,7 @@ pub mod rider {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::DeliveriesMine],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("rider_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -689,6 +718,7 @@ pub mod rider {
             requires_auth: true,
             sdui: true,
             data_requirements: &[ResolverKey::DeliveryByOrder],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.job.title"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("delivery.status"))], children: &[], branches: &[] },
@@ -719,6 +749,7 @@ pub mod system {
             requires_auth: false,
             sdui: true,
             data_requirements: &[ResolverKey::MailboxLanes, ResolverKey::MailboxPoisoned],
+            skipped_reads: &[],
             tree: &[
             Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("mailbox.title")), ("subtitle", PropValue::I18n("mailbox.subtitle"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("lanes")), ("title", PropValue::I18n("mailbox.lanes"))], children: &[

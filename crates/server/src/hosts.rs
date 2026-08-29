@@ -105,6 +105,25 @@ async fn app_page(ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, loc
             &correlation_id,
         );
     }
+    // Skips-by-design (#745): NEVER counted (a skip is the documented posture — a zero-weight
+    // metric reason is a signal wired never to scream), but always TRACEABLE: one event per skip
+    // carrying the same correlation id as the read-path spans, so a page that renders an empty
+    // slot can answer WHY from its own trace. At `info!` DELIBERATELY (#748 checkpoint,
+    // blocking): production pins LOG_LEVEL=info, so a `debug!` here reached neither the JSON
+    // logs nor OTLP under deployed defaults — the exact wired-never-to-scream class this comment
+    // opens with. Proven visible under the deployed filter by
+    // `tests/skip_trace_visibility.rs` (seen RED against the debug form). Volume is bounded by
+    // the skip table: at most `skipped_reads.len()` lines per page render, a static per-screen
+    // constant (0–1 across today's corpus).
+    for s in &page.skipped {
+        tracing::info!(
+            screen = s.screen,
+            resolver = s.resolver,
+            reason = s.reason.as_str(),
+            correlation_id = %correlation_id,
+            "sdui read skipped by design"
+        );
+    }
     Some(page.html)
 }
 

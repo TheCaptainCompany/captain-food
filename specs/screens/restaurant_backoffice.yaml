@@ -171,6 +171,15 @@ screens:
     sdui: true
     requires_auth: true
     data_requirements: [deliveries.byRestaurant]
+    # §25b (#745): `restaurantDeliveries` requires `restaurantId!` — the staff surface's own
+    # tenant identity, an auth-context fact the paint loop has no source for (no param, no pin).
+    # The read has failed structurally on every paint; needs identity-context arg sourcing
+    # (#749's machinery) or an identity-carrying transport (#750).
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/deliveries.byRestaurant' }
+        missing_arg: { $ref: 'api.yaml#/queries/restaurantDeliveries/args/restaurantId' }
+        supplied_by: none
+        note: "restaurantId is the signed-in staff's own tenant — an identity fact with no paint-time source. Land #749's arg sourcing (or #750's identity-carrying transport + server-side scoping) and the dead-man rule retires this declaration."
     actions_used: [escalate_delivery, mark_order_delivered]
     components:
       - { component: staff_topbar }
@@ -217,6 +226,13 @@ screens:
     sdui: true
     requires_auth: true
     data_requirements: [satisfaction.byRestaurant]
+    # §25b (#745): same verdict as the deliveries board — `restaurantDeliverySatisfaction`
+    # requires `restaurantId!`, an identity fact with no paint-time source on this route.
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/satisfaction.byRestaurant' }
+        missing_arg: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction/args/restaurantId' }
+        supplied_by: none
+        note: "restaurantId is the signed-in staff's own tenant — see the deliveries board's declaration; same fix, same dead-man retirement."
     components:
       - { component: staff_topbar }
       - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.title' } }
@@ -498,6 +514,14 @@ screens:
     sdui: true
     requires_auth: true
     data_requirements: [restaurant.locations]
+    # §25b (#745): `restaurantLocationsByAccount` requires `accountId!` — the signed-in account's
+    # own identity, with no paint-time source on this route (an identity-context fact, and — per
+    # the #618 IDOR note on the query itself — one the SERVER should resolve, never the client).
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/restaurant.locations' }
+        missing_arg: { $ref: 'api.yaml#/queries/restaurantLocationsByAccount/args/accountId' }
+        supplied_by: none
+        note: "accountId is the caller's own account — no paint-time source, and #618 says the resolver should derive it from the credential rather than trust an argument. Either fix retires this declaration via the dead-man rule."
     actions_used: [update_restaurant_profile]
     gaps:
       - "Same missing `restaurantById` query as the storefront screen: the only single-restaurant read is keyed by SLUG, so this screen reads `restaurantLocationsByAccount` and binds the selected location. A restaurant that has not yet chosen a storefront address has no slug to be fetched by."
@@ -569,6 +593,13 @@ screens:
     sdui: true
     requires_auth: true
     data_requirements: [restaurant.locations]
+    # §25b (#745): same verdict as the profile screen — `restaurantLocationsByAccount` requires
+    # `accountId!` with no paint-time source (see that screen's declaration and the #618 note).
+    skipped_reads:
+      - resolver: { $ref: '#/resolvers/restaurant.locations' }
+        missing_arg: { $ref: 'api.yaml#/queries/restaurantLocationsByAccount/args/accountId' }
+        supplied_by: none
+        note: "accountId is the caller's own account — see the profile screen's declaration; same fix, same dead-man retirement."
     actions_used: [configure_storefront_slug]
     gaps:
       - "Availability is not checked as the owner types: there is no `restaurantSlugAvailable` query, so the only feedback is the SlugAlreadyTaken rejection on submit. Deliberate -- an availability query is a public existence oracle over the tenant namespace and wants its own decision. The write side is authoritative either way."

@@ -327,6 +327,13 @@ pub mod mount {
     ) -> RenderContext {
         let mut ctx = RenderContext::new(locale);
         for resolver in matched.screen.data_requirements {
+            // #745: the generated §25b skip table — a structurally unfulfillable read is skipped
+            // before any network on this leg too (same authority as the SSR loop). The page's own
+            // dispatch-time reads (checkout's paymentStatus poll with its client-minted orderId)
+            // call `execute_resolver` directly and are untouched.
+            if matched.screen.skipped_reads.contains(resolver) {
+                continue;
+            }
             let mut vars = serde_json::Map::new();
             for (k, v) in matched.param_args(*resolver) {
                 vars.insert(k, v);
@@ -338,7 +345,7 @@ pub mod mount {
                 crate::graphql::ResolveOutcome::Resolved(value) => {
                     ctx.insert_resolved(resolver.as_str(), value)
                 }
-                crate::graphql::ResolveOutcome::SkippedByDesign => {}
+                crate::graphql::ResolveOutcome::SkippedByDesign(_) => {}
                 crate::graphql::ResolveOutcome::Failed(_) => ctx.insert_failed(resolver.as_str()),
             }
         }
