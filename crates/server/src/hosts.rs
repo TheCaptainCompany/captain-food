@@ -233,8 +233,11 @@ async fn render(route: HostRoute, ssr: &crate::web_ssr::SsrExec, raw_host: &str,
                 None => text("Captain.Food server — address a *.captain.food host"),
             }
         }
-        HostRoute::Unknown(sub) => {
-            (StatusCode::NOT_FOUND, format!("unknown host '{sub}.{APEX}'")).into_response()
+        HostRoute::Unknown(_) => {
+            // Name the host the request actually used — under WHICHEVER audience-space root it
+            // arrived on (#755 added `.localhost`), never a reconstruction that hard-codes the apex.
+            let host = raw_host.split(':').next().unwrap_or(raw_host).trim().to_ascii_lowercase();
+            (StatusCode::NOT_FOUND, format!("unknown host '{host}'")).into_response()
         }
     }
 }

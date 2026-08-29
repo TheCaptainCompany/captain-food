@@ -5,7 +5,9 @@ Current state: [`../STATUS.md`](../STATUS.md).
 
 > 🏠 **2026-08-29 — [#755 "Local dev: accept `{slug}.localhost` as tenant
 > space"](https://github.com/TheCaptainCompany/captain-food/issues/755)** (founder-decided, option
-> 1 of the post-#752 dev-access options): `.localhost` is now a second audience-space root with
+> 1 of the post-#752 dev-access options; his note on the alternative, verbatim: *"The /r/<slug>
+> could be useful for local dev if you need it"* — kept as a recorded fallback, not built):
+> `.localhost` is now a second audience-space root with
 > label semantics IDENTICAL to the apex — `{slug}.localhost` serves the storefront, `restos.`/
 > `riders.`/etc. map the same, bare `localhost` stays the neutral default — so dev storefronts
 > paint with zero /etc/hosts config (browsers resolve `*.localhost` to loopback). ONE suffix

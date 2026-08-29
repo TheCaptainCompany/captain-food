@@ -110,8 +110,10 @@ pub fn surface_for_host(host: &str) -> Surface {
                 Surface::RestaurantFrontoffice
             } else {
                 // The bare roots, `live`/`www`, the non-web reserved labels (`system`/`api`/
-                // `hooks`/`join`), localhost / IPs / preview hosts: the marketplace is the
-                // anonymous-safe default (same set as before #755, table-pinned below).
+                // `hooks`/`join`), bare localhost / IPs / preview hosts: the marketplace is the
+                // anonymous-safe default. #755 moved `x.localhost` out of this arm and into
+                // audience space — no NEW reachable outcome: every result is a class already
+                // reachable via `x.captain.food` (table-pinned below).
                 Surface::CaptainFrontoffice
             }
         }
