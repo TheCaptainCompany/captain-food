@@ -94,10 +94,20 @@ keys:
       producer now EXISTS but is gated — it is ROUTE_ORDER_BIRTH_THROUGH_LANE above, and while
       that is OFF the saga still appends OrderPlaced straight to the event store, so no acceptance
       clock is armed for any real order and precondition (3) cannot be satisfied at all — a flip
-      on an unarmed clock would change nothing while reading as shipped. So this precondition now
-      reads: ROUTE_ORDER_BIRTH_THROUGH_LANE is ON in production and births are observed arriving
-      on the Order lane (the birth-lag histogram, specs/observability.yaml#/place-order). It is
-      FIRST in dependency order even though it is listed last. Second, unfixed producer gap: the
+      on an unarmed clock would change nothing while reading as shipped. This precondition is TWO
+      distinct flips, split on purpose (#758, ADR-20260829-230418 C1a — the earlier fused wording
+      priced them as one): (5a) the ROUTING default flip — ROUTE_ORDER_BIRTH_THROUGH_LANE ON in
+      the WALK stack with births observed on the birth-lag histogram
+      (specs/observability.yaml#/place-order) is what licenses it, and that evidence is exactly
+      what the C1a chunk produces; "walk stack, not production" is a READING of the
+      suspended-production reality (ADR-20260817-105844: production stays suspended on purpose and
+      the first end-to-end reading happens locally, on one database — a reading, never a
+      certificate), and the flip decision itself is the founder's, with the evidence attached
+      (dispatch card 598 §7/§9). (5b) the ACCEPTANCE-TIMEOUT flip — THIS key's own default — still
+      waits on production time-to-accept distributions (precondition (4)), which no walk can
+      produce: the TTL is chosen from how long real restaurants take per daypart, and that number
+      only exists once real orders flow. (5a) is FIRST in dependency order even though it is
+      listed last. Second, unfixed producer gap: the
       reclamation PM calls place_replacement_order in-process from the polling runner, which owns
       no delivery transaction and therefore cannot use this seam — a replacement order's clock
       stays unarmed until issue #595 moves that route onto the mailbox. The flip is PROSPECTIVE only: occurrences
