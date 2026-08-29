@@ -340,6 +340,16 @@ This container has **no `gh` on PATH**, so every session drives the API with `cu
 hard stop rather than a CLI's guidance. Budget one extra commit, not a debugging round: the 422 body
 names the branch, so it reads like a bad ref rather than a missing commit.
 
+**Do not go hunting for a `gh` binary either** (2026-08-29, #728 run): `find / -name gh` surfaces
+`/tmp/t*/bin/gh`, and those are TEST-FIXTURE shims — ~150-byte bash scripts that exit 0 with **no
+output**, so a "successful" silent `gh` call means you hit a shim, not that the query returned
+empty. Cost: two dead-end invocations and a diagnosis detour before switching to `curl`. Go
+straight to REST: `$GITHUB_TOKEN` is present in the executor environment and works in an
+`Authorization: Bearer` header (and the proxy injects a credential on bare calls anyway, per
+below). Same run's second restriction: the proxy refuses the cross-repo search endpoint
+(`GET /search/issues` → "sessions bound to configured repositories"), so a duplicate-check lists
+`GET /repos/{owner}/{repo}/issues` and filters locally — REST list endpoints work, search does not.
+
 **The `curl` path is NOT coordinator-only — an executor does its own claim mechanics** (corrected
 2026-08-16 on #597, replacing the earlier "an executor session cannot reach GitHub at all"). Two
 different capabilities, and only one of them is missing:
