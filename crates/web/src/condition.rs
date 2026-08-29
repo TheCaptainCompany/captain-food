@@ -13,12 +13,14 @@
 //!   * negation                          — `!resend_available`
 //!   * integer compare (`>`, `==`, `!=`) — `cart_item_count > 0`, `cart.lines.length == 0`
 //!   * string equality vs a QUOTED literal — `order.serviceType == 'DELIVERY'`,
-//!     `search_input.value == ""`
+//!     `search_input.value == ''`
 //!   * null comparison                   — `item.errorCode != null`
 //!   * `in`-list of quoted literals      — `resolution.value in ['PARTIAL_REFUND','GOODWILL_CREDIT']`
 //!
-//! The single-quoted token form is the same one `tools/codegen-rs/src/validate/core.rs`
-//! (`collect_status_tokens`) tokenises — the renderer's grammar and the validator's must agree.
+//! String literals are single-quoted — the ONE spelling (#728); the same tokens
+//! `tools/codegen-rs/src/validate/core.rs` (`collect_status_tokens`) scans, so the renderer's
+//! grammar and the validator's are the SAME language. `"…"` is a loud [`ParseError`], not a
+//! synonym: a double-quoted literal would be invisible to the status-completeness tokeniser.
 //!
 //! **An unknown construct fails LOUDLY — never silently-true** (`a >= b` is a [`ParseError`], and
 //! the renderer pairs the fail-closed non-render with an auditable DOM marker). **A condition over
@@ -93,15 +95,15 @@ fn parse_path(s: &str) -> Result<String, ParseError> {
     }
 }
 
-/// A quoted string literal (single or double quotes — both occur in the corpus).
+/// A quoted string literal. Single quotes ONLY — the one spelling (#728): the same tokens
+/// `collect_status_tokens` scans. `"…"` is a loud ParseError, not a synonym.
 fn parse_quoted(s: &str) -> Option<String> {
     let s = s.trim();
-    for q in ['\'', '"'] {
-        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
-            let inner = &s[1..s.len() - 1];
-            if !inner.contains(q) {
-                return Some(inner.to_string());
-            }
+    let q = '\'';
+    if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
+        let inner = &s[1..s.len() - 1];
+        if !inner.contains(q) {
+            return Some(inner.to_string());
         }
     }
     None
@@ -349,7 +351,7 @@ mod tests {
             ("resolution.value in ['PARTIAL_REFUND','GOODWILL_CREDIT']", true),
             ("item.errorCode != null", false),
             ("item.oldestPendingAt != null", true),
-            ("search_input.value == \"\"", true),
+            ("search_input.value == ''", true),
             ("restaurant.rating", true),
             ("selected_delivery_mode == 'delivery'", true),
             ("stripe_publishable_key == null", true), // missing IS null for null comparisons
@@ -388,6 +390,7 @@ mod tests {
             "x in []",
             "",
             "a == 'unterminated",
+            "search_input.value == \"\"", // double quotes are NOT a synonym for single (#728)
         ] {
             assert!(Condition::parse(expr).is_err(), "{expr}: must be a loud parse error");
         }
