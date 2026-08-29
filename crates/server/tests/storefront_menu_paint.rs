@@ -434,6 +434,41 @@ async fn the_storefront_paint_carries_the_menu_item_from_a_real_schema() {
     );
 }
 
+/// #755 (founder-decided, red-first): the SAME paint through a `{slug}.localhost` host — dev's
+/// zero-config tenant space (browsers resolve `*.localhost` to loopback, no /etc/hosts entry).
+/// The Host carries the slug exactly as in production, so the #745 host-slug injection must feed
+/// the catalog read unchanged and the initial HTML must carry the live menu. Seen RED before the
+/// change: `.localhost` was not audience space, so the paint served the MARKETPLACE home instead
+/// of the storefront.
+#[tokio::test]
+async fn the_storefront_paint_works_identically_through_a_slug_localhost_host() {
+    let exec = server::SsrExec { schema: schema(), stripe_publishable_key: None };
+    let page = web::router::render_path_with(
+        &exec.transport(),
+        "chez-test.localhost:8080",
+        "/",
+        "fr",
+        None,
+    )
+    .await
+    .expect("the localhost tenant root renders");
+    assert!(
+        page.html.contains("data-hydrate=\"restaurant\""),
+        "a {{slug}}.localhost host must serve the STOREFRONT, not the marketplace: {}",
+        page.html
+    );
+    assert!(
+        page.html.contains("Burger maison"),
+        "the menu item's display name must be in the initial HTML, exactly like the apex paint \
+         (degraded: {:?}, skipped: {:?}): {}",
+        page.degraded,
+        page.skipped,
+        page.html
+    );
+    assert!(page.html.contains("15,00 EUR"), "the item's price renders with the name: {}", page.html);
+    assert!(page.degraded.is_empty(), "a working menu read must not degrade: {:?}", page.degraded);
+}
+
 // --- the exactly-one-of triple (DSL-declared, codegen-emitted) -----------------------------------
 
 /// slug-only → the catalog answers, resolved through the SAME slug path as the tenant host.

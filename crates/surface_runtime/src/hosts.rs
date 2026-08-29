@@ -9,7 +9,10 @@
 
 use axum::http::HeaderMap;
 
-/// The apex under which every audience/tenant host lives.
+/// The PRODUCTION apex under which every audience/tenant host lives — the address the product
+/// hands out (claim landings, superseded-slug 301 targets). Audience-space CLASSIFICATION spans
+/// one more root — dev's `.localhost` (#755) — whose one authority is
+/// `web::router::AUDIENCE_SPACE_ROOTS` (consumed below), never a second copy here.
 pub const APEX: &str = "captain.food";
 
 /// What a request `Host` resolves to. Pure data — see [`classify_host`].
@@ -21,10 +24,12 @@ pub enum HostRoute {
     System,
     Api,
     Tenant(String),
-    /// Non-`captain.food` host: an internal probe host, `localhost`, a direct IP. Neutral landing.
+    /// A host outside audience space: an internal probe host, a bare root (`localhost`, the bare
+    /// apex), a direct IP. Neutral landing.
     Default,
-    /// A `*.captain.food` label that is neither a reserved audience nor a valid slug (incl.
-    /// `www`/`join`, served off-platform, and the reserved integration host `hooks`).
+    /// An audience-space label (`*.captain.food` / `*.localhost`) that is neither a reserved
+    /// audience nor a valid slug (incl. `www`/`join`, served off-platform, and the reserved
+    /// integration host `hooks`).
     Unknown(String),
 }
 
@@ -32,10 +37,12 @@ pub enum HostRoute {
 /// in `server::hosts` (the monolith fallback) and consumed by every surface bin.
 pub fn classify_host(raw_host: &str) -> HostRoute {
     let host = raw_host.split(':').next().unwrap_or("").trim().to_ascii_lowercase();
-    // Only `<label>.captain.food` is audience/tenant space; anything else is the neutral default.
-    let sub = match host.strip_suffix(APEX).and_then(|p| p.strip_suffix('.')) {
-        Some(sub) if !sub.is_empty() => sub,
-        _ => return HostRoute::Default,
+    // Only `<label>.{root}` for an audience-space root (`web::router::AUDIENCE_SPACE_ROOTS` — the
+    // production apex + dev's `.localhost`, #755; ONE suffix authority shared with the web
+    // router's surface mapping) is audience/tenant space; anything else, the bare roots included,
+    // is the neutral default. Label semantics are IDENTICAL under every root.
+    let Some(sub) = web::router::audience_label(&host) else {
+        return HostRoute::Default;
     };
     match sub {
         "live" => HostRoute::Live,
