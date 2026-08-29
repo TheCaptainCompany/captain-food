@@ -34,15 +34,18 @@ use crate::*;
 // kind of name-matching this rule refuses to do); a property with no `$ref` (a plain scalar) likewise
 // stops the walk. Only a segment that names NO property at all on the current type is an error.
 
-/// Every root name a screen's `data_requirements` make available to `{{ }}` bindings, mapped to the
-/// api type it resolves to (mirrors `RenderContext::insert_resolved`). `gap` resolvers and resolvers
-/// whose query cannot be resolved contribute no root — they are legitimately outside the api's typed
-/// surface, not a defect this rule reports on.
+/// Every root name a screen's `data_requirements` make available to `{{ }}` bindings, mapped to
+/// `(api type, api.yaml query name)` — the type the walk resolves against, and the query whose
+/// generated client selection must FETCH what the walk approves (the emitter's consumer; #717
+/// round 1: validating a nav path the client never selects renders empty with the gate green).
+/// Mirrors `RenderContext::insert_resolved`. `gap` resolvers and resolvers whose query cannot be
+/// resolved contribute no root — they are legitimately outside the api's typed surface, not a
+/// defect this rule reports on.
 pub(crate) fn screen_binding_roots(
     model: &Model,
     resolvers: Option<&serde_yaml::Mapping>,
     data_requirements: &[String],
-) -> BTreeMap<String, String> {
+) -> BTreeMap<String, (String, String)> {
     let mut roots = BTreeMap::new();
     let Some(resolvers) = resolvers else { return roots };
     for dr in data_requirements {
@@ -69,10 +72,10 @@ pub(crate) fn screen_binding_roots(
         let first = parts.next().unwrap_or(dr.as_str()).to_string();
         if let Some(second) = parts.next() {
             if !second.is_empty() && second.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-                roots.insert(format!("{second}_{first}"), type_name.clone());
+                roots.insert(format!("{second}_{first}"), (type_name.clone(), query_name.to_string()));
             }
         }
-        roots.insert(first, type_name);
+        roots.insert(first, (type_name, query_name.to_string()));
     }
     roots
 }
@@ -209,7 +212,7 @@ pub(crate) fn check_screen_bindings(
         }
         let mut segs = path.split('.');
         let root = segs.next().unwrap_or("");
-        let Some(type_name) = roots.get(root) else { continue };
+        let Some((type_name, _query)) = roots.get(root) else { continue };
         let rest: Vec<&str> = segs.collect();
         if let Some((unknown, at_type)) = first_unknown_segment(model, nav, type_name, "api.yaml", &rest) {
             issues.push(err(
@@ -388,8 +391,8 @@ mod tests {
         resolvers.insert(Value::from("cart.current"), Value::Mapping(cart_current));
 
         let roots = screen_binding_roots(&model, Some(&resolvers), &["cart.current".to_string()]);
-        assert_eq!(roots.get("cart"), Some(&"Cart".to_string()));
+        assert_eq!(roots.get("cart"), Some(&("Cart".to_string(), "current".to_string())));
         // second segment "current" is lowercase-only, so the reversed alias is also registered.
-        assert_eq!(roots.get("current_cart"), Some(&"Cart".to_string()));
+        assert_eq!(roots.get("current_cart"), Some(&("Cart".to_string(), "current".to_string())));
     }
 }

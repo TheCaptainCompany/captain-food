@@ -15412,3 +15412,47 @@ mod screen_binding_gate {
         assert!(!fires(&model), "declaring the property must clear the finding");
     }
 }
+
+// ─── nav-edge sub-selections in the generated client data layer (#717 round-1 blocking fix) ──────
+mod nav_edge_selections {
+    use super::super::*;
+
+    /// The round-1 reviewer finding, pinned: the §25 rule VALIDATES `{{ cart.restaurant.displayName }}`
+    /// against the composed schema, but the generated client selection sets never FETCHED the nav
+    /// edge — the fetched JSON had no `restaurant` key, so the rebound widgets rendered empty: the
+    /// defect class this PR kills, one layer down. The emitter now sub-selects exactly the FK nav
+    /// edges screens ACTUALLY BIND (same `screen_binding_roots` + `api::nav_fields` derivation the
+    /// validator walks) — and NOTHING else: Order carries the same generated `restaurant` edge, but
+    /// no screen binds it, so `order.byId`/`orders.mine`/`deliveries.mine` stay un-widened (the
+    /// peak-read fence — no blanket over-fetch).
+    #[test]
+    fn screen_bound_nav_edges_are_sub_selected_and_nothing_else() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let (resolvers, _) = collect_web_data_layer(&model);
+        let sel = |key: &str| -> String {
+            resolvers
+                .iter()
+                .find(|r| r.key == key)
+                .and_then(|r| r.selection.clone())
+                .unwrap_or_else(|| panic!("resolver {key} has a selection"))
+        };
+        assert!(
+            sel("cart.current").contains("restaurant { displayName }"),
+            "cart.current must fetch the screen-bound nav edge (cart screen subtitle): {}",
+            sel("cart.current")
+        );
+        assert!(
+            sel("delivery.byOrder").contains("restaurant { displayName }"),
+            "delivery.byOrder must fetch the screen-bound nav edge (rider job_detail name row): {}",
+            sel("delivery.byOrder")
+        );
+        for unbound in ["order.byId", "orders.mine", "deliveries.mine", "carts.mine"] {
+            assert!(
+                !sel(unbound).contains("restaurant {"),
+                "{unbound} binds no nav edge on any screen — its fetch shape must not widen: {}",
+                sel(unbound)
+            );
+        }
+    }
+}
