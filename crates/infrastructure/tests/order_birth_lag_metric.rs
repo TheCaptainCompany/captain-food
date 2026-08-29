@@ -411,6 +411,8 @@ async fn a_routed_birth_records_exactly_one_routed_true_lag_point() {
         "a sane handover lag: now - received_at of a row enqueued moments ago must be \
          0 <= lag < 300000 ms, got {lag_ms}"
     );
+    // Walk evidence for the flip decision (dispatch card 598 §9; run with --nocapture to see it).
+    eprintln!("WALK EVIDENCE: order_birth_lag_ms{{routed=\"true\"}} recorded {lag_ms} ms");
 
     // ── a REDELIVERY measures nothing ───────────────────────────────────────────────────────────
     // The absorbed arm (AlreadyRecorded -> IGNORED) appends nothing, so it must not report a lag
