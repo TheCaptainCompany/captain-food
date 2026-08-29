@@ -396,6 +396,86 @@ impl ResolverKey {
             ResolverKey::MailboxPoisoned => &["ADMIN"],
         }
     }
+
+    /// The REQUIRED args of the bound query (#745, api.yaml `required: true`) — the
+    /// §25b fulfillability verdict's input. Empty = no required args (or a `gap`).
+    pub fn required_args(&self) -> &'static [&'static str] {
+        match self {
+            ResolverKey::RestaurantsFeatured => &[],
+            ResolverKey::RestaurantsAll => &[],
+            ResolverKey::RestaurantsSearch => &[],
+            ResolverKey::CategoriesAll => &["restaurantId"],
+            ResolverKey::PromotionsActive => &[],
+            ResolverKey::DishesSearch => &[],
+            ResolverKey::SearchesRecent => &[],
+            ResolverKey::OrdersByRestaurant => &[],
+            ResolverKey::DeliveriesByRestaurant => &["restaurantId"],
+            ResolverKey::RefundsPending => &[],
+            ResolverKey::SatisfactionByRestaurant => &["restaurantId"],
+            ResolverKey::ConversationByOrder => &["orderId"],
+            ResolverKey::InternalNotesByOrder => &["orderId"],
+            ResolverKey::ReclamationsQueue => &[],
+            ResolverKey::RestaurantLocations => &["accountId"],
+            ResolverKey::ReclamationById => &["reclamationId"],
+            ResolverKey::RestaurantBySlug => &["slug"],
+            ResolverKey::CatalogByRestaurant => &["restaurantId"],
+            ResolverKey::CartCurrent => &[],
+            ResolverKey::CartsMine => &["customerId"],
+            ResolverKey::OrderById => &["id"],
+            ResolverKey::OrdersMine => &[],
+            ResolverKey::MeProfile => &[],
+            ResolverKey::FavoritesMine => &["customerId"],
+            ResolverKey::OperationStatusByMessage => &["messageId"],
+            ResolverKey::PaymentStatusByOrder => &["orderId"],
+            ResolverKey::ReclamationsMine => &[],
+            ResolverKey::RewardsBalance => &[],
+            ResolverKey::DeliveriesMine => &[],
+            ResolverKey::DeliveryByOrder => &["orderId"],
+            ResolverKey::MailboxLanes => &[],
+            ResolverKey::MailboxPoisoned => &[],
+        }
+    }
+
+    /// The GraphQL arg a route `:param` of this resolver feeds (#745 — the EMITTED rename
+    /// bridge): the arg's own name, or the lowerCamel of the arg's scalar type
+    /// (`:orderId` feeds `order.byId`'s `id: OrderId`). `None` = no arg of the bound query
+    /// accepts the param — the router DROPS it instead of sending an unknown input field.
+    pub fn arg_for_param(&self, param: &str) -> Option<&'static str> {
+        match self {
+            ResolverKey::RestaurantsFeatured => match param { "search" => Some("search"), "tag" | "tags" => Some("tags"), "serviceType" => Some("serviceType"), "openNow" => Some("openNow"), "city" | "cityName" => Some("city"), "priceRange" => Some("priceRange"), "list" | "restaurantListKey" => Some("list"), "listingStatus" | "restaurantListingStatus" => Some("listingStatus"), "orderableOnly" => Some("orderableOnly"), "limit" | "pageLimit" => Some("limit"), "offset" | "pageOffset" => Some("offset"), _ => None },
+            ResolverKey::RestaurantsAll => match param { "search" => Some("search"), "tag" | "tags" => Some("tags"), "serviceType" => Some("serviceType"), "openNow" => Some("openNow"), "city" | "cityName" => Some("city"), "priceRange" => Some("priceRange"), "list" | "restaurantListKey" => Some("list"), "listingStatus" | "restaurantListingStatus" => Some("listingStatus"), "orderableOnly" => Some("orderableOnly"), "limit" | "pageLimit" => Some("limit"), "offset" | "pageOffset" => Some("offset"), _ => None },
+            ResolverKey::RestaurantsSearch => match param { "search" => Some("search"), "tag" | "tags" => Some("tags"), "serviceType" => Some("serviceType"), "openNow" => Some("openNow"), "city" | "cityName" => Some("city"), "priceRange" => Some("priceRange"), "list" | "restaurantListKey" => Some("list"), "listingStatus" | "restaurantListingStatus" => Some("listingStatus"), "orderableOnly" => Some("orderableOnly"), "limit" | "pageLimit" => Some("limit"), "offset" | "pageOffset" => Some("offset"), _ => None },
+            ResolverKey::CategoriesAll => match param { "restaurantId" => Some("restaurantId"), _ => None },
+            ResolverKey::PromotionsActive => None,
+            ResolverKey::DishesSearch => None,
+            ResolverKey::SearchesRecent => None,
+            ResolverKey::OrdersByRestaurant => match param { "customerId" => Some("customerId"), "restaurantId" => Some("restaurantId"), "orderStatus" | "status" => Some("status"), _ => None },
+            ResolverKey::DeliveriesByRestaurant => match param { "restaurantId" => Some("restaurantId"), "deliveryStatus" | "status" => Some("status"), _ => None },
+            ResolverKey::RefundsPending => match param { "restaurantId" => Some("restaurantId"), "refundStatus" | "status" => Some("status"), _ => None },
+            ResolverKey::SatisfactionByRestaurant => match param { "restaurantId" => Some("restaurantId"), "deliveryTimeliness" | "timeliness" => Some("timeliness"), _ => None },
+            ResolverKey::ConversationByOrder => match param { "orderId" => Some("orderId"), _ => None },
+            ResolverKey::InternalNotesByOrder => match param { "orderId" => Some("orderId"), _ => None },
+            ResolverKey::ReclamationsQueue => match param { "reclamationStatus" | "status" => Some("status"), "category" | "reclamationCategory" => Some("category"), "overdue" => Some("overdue"), _ => None },
+            ResolverKey::RestaurantLocations => match param { "accountId" | "restaurantAccountId" => Some("accountId"), _ => None },
+            ResolverKey::ReclamationById => match param { "reclamationId" => Some("reclamationId"), _ => None },
+            ResolverKey::RestaurantBySlug => match param { "slug" => Some("slug"), _ => None },
+            ResolverKey::CatalogByRestaurant => match param { "restaurantId" => Some("restaurantId"), _ => None },
+            ResolverKey::CartCurrent => None,
+            ResolverKey::CartsMine => match param { "customerId" => Some("customerId"), _ => None },
+            ResolverKey::OrderById => match param { "id" | "orderId" => Some("id"), _ => None },
+            ResolverKey::OrdersMine => match param { "customerId" => Some("customerId"), "restaurantId" => Some("restaurantId"), "orderStatus" | "status" => Some("status"), _ => None },
+            ResolverKey::MeProfile => None,
+            ResolverKey::FavoritesMine => match param { "customerId" => Some("customerId"), _ => None },
+            ResolverKey::OperationStatusByMessage => match param { "messageId" => Some("messageId"), _ => None },
+            ResolverKey::PaymentStatusByOrder => match param { "orderId" => Some("orderId"), _ => None },
+            ResolverKey::ReclamationsMine => None,
+            ResolverKey::RewardsBalance => None,
+            ResolverKey::DeliveriesMine => match param { "deliveryStatus" | "status" => Some("status"), _ => None },
+            ResolverKey::DeliveryByOrder => match param { "orderId" => Some("orderId"), _ => None },
+            ResolverKey::MailboxLanes => None,
+            ResolverKey::MailboxPoisoned => match param { "actorType" | "mailboxActorType" => Some("actorType"), "limit" | "pageLimit" => Some("limit"), _ => None },
+        }
+    }
 }
 
 /// What an action DOES (spec `kind`): a client-side behaviour, a domain write, an

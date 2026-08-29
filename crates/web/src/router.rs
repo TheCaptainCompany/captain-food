@@ -107,18 +107,20 @@ impl RouteMatch {
         self.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
     }
 
-    /// The GraphQL input args a route's params feed into one of its resolvers: by convention a
-    /// `:param` maps onto the arg OF THE SAME NAME; the one naming mismatch in the spec today is
-    /// `order.byId` (query arg `id`) fed by `:orderId`, mapped explicitly.
+    /// The GraphQL input args a route's params feed into one of its resolvers, through the
+    /// GENERATED rename bridge (`ResolverKey::arg_for_param`, #745 — one source of truth with the
+    /// codegen's §25b fulfillability verdict): a `:param` feeds the arg of the same name or the
+    /// arg whose scalar type it spells (`:orderId` → `order.byId`'s `id: OrderId`). A param NO
+    /// arg of the resolver accepts is DROPPED — before #745 it was passed through verbatim, so
+    /// `/r/:slug` sent `slug` into `catalog(input:)`, an unknown field the schema refused on
+    /// every storefront paint (#749).
     pub fn param_args(&self, resolver: ResolverKey) -> Vec<(String, serde_json::Value)> {
         self.params
             .iter()
-            .map(|(k, v)| {
-                let arg = match (resolver, k.as_str()) {
-                    (ResolverKey::OrderById, "orderId") => "id".to_string(),
-                    _ => k.clone(),
-                };
-                (arg, serde_json::Value::String(v.clone()))
+            .filter_map(|(k, v)| {
+                resolver
+                    .arg_for_param(k)
+                    .map(|arg| (arg.to_string(), serde_json::Value::String(v.clone())))
             })
             .collect()
     }
@@ -154,7 +156,7 @@ pub fn match_route(surface: Surface, path: &str) -> Option<RouteMatch> {
 /// through here so the two paths cannot disagree.
 pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
     let surface = surface_for_host(host);
-    let matched = match_route(surface, path).or_else(|| {
+    let mut matched = match_route(surface, path).or_else(|| {
         let is_root = path.trim_end_matches('/').is_empty();
         if surface == Surface::RestaurantFrontoffice && is_root {
             let slug = Surface::slug_of(host)?;
@@ -163,6 +165,22 @@ pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
         }
         None
     });
+    // Tenant-host slug injection (#745, generalizing the tenant-root rule above): on a
+    // `{slug}.captain.food` storefront the HOST is the tenant selector for EVERY route, so any
+    // matched screen whose path did not capture a `:slug` gets the host's slug as a param. This
+    // is what lets checkout's `restaurant.bySlug` (RSO-1) carry its required arg — before #745
+    // the read went out arg-less and failed GraphQL validation on every paint. The codegen's
+    // §25b fulfillability verdict counts this source (`TENANT_HOSTED_SURFACE` in
+    // tools/codegen-rs — the mirror-honesty rule), so the two cannot disagree.
+    if surface == Surface::RestaurantFrontoffice {
+        if let Some(m) = matched.as_mut() {
+            if m.param("slug").is_none() {
+                if let Some(slug) = Surface::slug_of(host) {
+                    m.params.push(("slug".into(), slug.to_string()));
+                }
+            }
+        }
+    }
     (surface, matched)
 }
 
@@ -180,6 +198,23 @@ const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } f
 pub struct RenderedPage {
     pub html: String,
     pub degraded: Vec<Degradation>,
+    /// The reads this render SKIPPED BY DESIGN (#745) — declared gaps, role-refused reads on
+    /// this transport, and §25b structurally-unfulfillable reads (skipped before any network).
+    /// Never counted (a skip is the documented posture, not a defect); the server boundary
+    /// attaches them to the render's trace with the correlation id, so a page that looks empty
+    /// can always answer WHY from its own trace.
+    pub skipped: Vec<SkippedRead>,
+}
+
+/// One skipped-by-design read of one page render (#745).
+#[cfg(feature = "ssr")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedRead {
+    /// The generated screen id (a closed set).
+    pub screen: &'static str,
+    /// The skipped resolver's spec key.
+    pub resolver: &'static str,
+    pub reason: crate::graphql::SkipReason,
 }
 
 /// One degraded fact of one page render (#472).
@@ -260,7 +295,21 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     let mut ctx = RenderContext::new(locale);
     ctx.stripe_publishable_key = stripe_publishable_key.cloned();
     let mut degraded: Vec<Degradation> = Vec::new();
+    let mut skipped: Vec<SkippedRead> = Vec::new();
     for resolver in matched.screen.data_requirements {
+        // The GENERATED skip table first (#745, §25b): a read PROVEN structurally unfulfillable
+        // (required arg, no paint-time source — declared on the binding) is skipped BEFORE any
+        // network. Consulted HERE, in the resolve loop, never inside `execute_resolver`: the
+        // checkout page's own dispatch-time paymentStatus poll goes through `execute_resolver`
+        // WITH its client-minted orderId and must keep working (checkout.rs's poll canary).
+        if matched.screen.skipped_reads.contains(resolver) {
+            skipped.push(SkippedRead {
+                screen: matched.screen.id,
+                resolver: resolver.as_str(),
+                reason: crate::graphql::SkipReason::StructurallyUnfulfillable,
+            });
+            continue;
+        }
         let mut vars = serde_json::Map::new();
         for (k, v) in matched.param_args(*resolver) {
             vars.insert(k, v);
@@ -268,7 +317,11 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
         let result = crate::graphql::execute_resolver(transport, *resolver, vars).await;
         match crate::graphql::classify_resolve(surface.role(), *resolver, result) {
             ResolveOutcome::Resolved(value) => ctx.insert_resolved(resolver.as_str(), value),
-            ResolveOutcome::SkippedByDesign => {}
+            ResolveOutcome::SkippedByDesign(reason) => skipped.push(SkippedRead {
+                screen: matched.screen.id,
+                resolver: resolver.as_str(),
+                reason,
+            }),
             ResolveOutcome::Failed(_) => {
                 ctx.insert_failed(resolver.as_str());
                 degraded.push(Degradation {
@@ -289,7 +342,7 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
             reason: DegradedReason::ConditionUnparseable,
         });
     }
-    Some(RenderedPage { html: render_matched(&matched, surface, ctx, host, locale), degraded })
+    Some(RenderedPage { html: render_matched(&matched, surface, ctx, host, locale), degraded, skipped })
 }
 
 /// Server-side render the page for `host` + `path` — the data-less entry (SSR SHELL only; the
@@ -434,9 +487,10 @@ mod tests {
         use crate::graphql::test_support::FakeTransport;
         use serde_json::json;
         // The marketplace home: data_requirements = [promotions.active (GAP — refused before any
-        // network), categories.all, restaurants.featured, restaurants.all] → 3 transport calls.
+        // network), categories.all (#745: a declared structurally-unfulfillable skip — the query
+        // requires a restaurantId the marketplace does not have; skipped before network),
+        // restaurants.featured, restaurants.all] → 2 transport calls.
         let fake = FakeTransport::scripted(vec![
-            Ok(json!({ "categories": [] })),
             Ok(json!({ "restaurants": [{ "displayName": "Chez Test", "slug": "chez-test",
                         "address": { "city": "Tours" } }] })),
             Ok(json!({ "restaurants": [] })),
@@ -445,10 +499,10 @@ mod tests {
         // The SSR HTML carries the restaurant — no client fetch needed for first paint (#92).
         assert!(html.contains("Chez Test"), "{html}");
         assert!(html.contains("data-slug=\"chez-test\""));
-        assert_eq!(fake.call_count(), 3, "one read per non-gap data requirement");
+        assert_eq!(fake.call_count(), 2, "one read per non-gap, non-skipped data requirement");
         // The featured rail's pinned arg travelled (the #82 contract, now exercised server-side).
-        assert!(fake.call(1).0.contains("$input: RestaurantsQueryInput!"));
-        assert_eq!(fake.call(1).1["input"]["list"], json!("RECOMMENDED"));
+        assert!(fake.call(0).0.contains("$input: RestaurantsQueryInput!"));
+        assert_eq!(fake.call(0).1["input"]["list"], json!("RECOMMENDED"));
 
         // A requires_auth screen ASKS its transport (since #420 — see `render_path_with`'s docs:
         // whether a session-scoped read can be answered is the transport's fact, not the screen's)
@@ -555,16 +609,17 @@ mod tests {
             }})
         };
 
+        // #745: paymentStatus.byOrder is a declared structurally-unfulfillable skip on this
+        // screen (orderId is client-minted at dispatch), so the paint performs 3 reads, not 4.
         let fake = FakeTransport::scripted(vec![
             Ok(cart()),
             Ok(profile()),
-            Ok(json!({ "paymentStatus": null })),
             Ok(restaurant()),
         ]);
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
             .expect("the checkout route renders").html;
-        assert_eq!(fake.call_count(), 4, "one read per declared resolver");
+        assert_eq!(fake.call_count(), 3, "one read per declared, non-skipped resolver");
         assert!(html.contains("2 items"), "the real line count: {html}");
         assert!(html.contains("23,50 EUR"), "the real total, formatted: {html}");
         assert!(html.contains("chez-test"), "the restaurant being ordered from: {html}");
@@ -573,25 +628,70 @@ mod tests {
             "no failure state before a failure: {html}"
         );
 
-        // A FAILED payment status now REACHES the shell — the state the unit test asserts is built
-        // by production, not only by a test.
-        let fake = FakeTransport::scripted(vec![
-            Ok(cart()),
-            Ok(profile()),
-            Ok(json!({ "paymentStatus": {
-                "paymentIntentId": "pi_1", "clientSecret": null, "status": "FAILED",
-            }})),
-            Ok(restaurant()),
-        ]);
+        // #745: the PAINT no longer reads paymentStatus at all (declared structural skip — its
+        // orderId exists only after dispatch), so a paint can never claim a payment failed. The
+        // FAILED state belongs to the dispatch flow, which polls paymentStatus WITH the
+        // client-minted orderId (`checkout.rs::a_failed_payment_ends_the_poll_immediately…`) and
+        // renders `payment_failed_state` from the answered status
+        // (`checkout.rs::the_shell_is_built_from_the_resolvers_and_degrades_without_lying`).
+        let fake = FakeTransport::scripted(vec![Ok(cart()), Ok(profile()), Ok(restaurant())]);
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
             .expect("the checkout route renders").html;
-        assert!(html.contains("id=\"payment_failed_state\""), "{html}");
-        assert!(html.contains("Paiement refusé"), "{html}");
-        assert!(html.contains("Votre carte n'a pas été débitée. Votre panier est intact."), "{html}");
         assert!(
-            !html.contains("[checkout.payment_failed"),
-            "no `[key]` fallback marker: {html}"
+            !html.contains("id=\"payment_failed_state\""),
+            "a first paint has no payment outcome to report: {html}"
+        );
+    }
+
+    /// #745 (red-first): a read the §25 verdict proves STRUCTURALLY unfulfillable on its screen
+    /// (checkout's `paymentStatus.byOrder`: required `orderId`, no route param, no pin, no host
+    /// source — the arg is client-minted at dispatch, declared on the binding) is SKIPPED BY
+    /// DESIGN before any network: it must never reach the transport and must never mark the page
+    /// degraded. Seen RED against the pre-#745 loop, where the read was sent arg-less, failed
+    /// GraphQL validation, and bumped `sdui_degraded_render_total` on every anonymous paint.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn an_anonymous_checkout_paint_skips_the_structurally_unfulfillable_read() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        // Scripted WITHOUT a paymentStatus response: if the loop still sends the read, the
+        // FakeTransport pops the wrong script entry and the call-log assertion below fails loudly.
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "current": { "lines": [{ "offerId": "o1" }],
+                       "totalAmount": { "amountCents": 1000, "currency": "EUR" } } })),
+            Ok(json!({ "me": null })),
+            Ok(json!({ "restaurant": {
+                "displayName": "Chez Test", "slug": "chez-test",
+                "serviceWindow": { "verdict": "HOURS_UNDECLARED", "opensAt": null, "lastOrderAt": null,
+                                   "evaluatedAt": "2026-01-06T12:00:00Z", "validUntil": "2026-01-06T12:15:00Z" },
+            }})),
+        ]);
+        let page = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
+            .await
+            .expect("the checkout route renders");
+        // The read was never SENT (skip-before-network kills the send-then-discard mutant)…
+        assert_eq!(fake.call_count(), 3, "cart + profile + restaurant — no paymentStatus read");
+        for i in 0..fake.call_count() {
+            assert!(
+                !fake.call(i).0.contains("paymentStatus"),
+                "the structurally unfulfillable read must never reach the transport: {}",
+                fake.call(i).0
+            );
+        }
+        // …and the page is NOT degraded by it (the #745 counter fix)…
+        assert!(
+            !page.degraded.iter().any(|d| d.resolver == "paymentStatus.byOrder"),
+            "a skipped-by-design read must not mark the page degraded: {:?}",
+            page.degraded
+        );
+        // …but the skip IS reported for the trace, with its structural reason: silent to the
+        // metric, never silent to the render's own telemetry.
+        assert!(
+            page.skipped.iter().any(|s| s.resolver == "paymentStatus.byOrder"
+                && s.reason == crate::graphql::SkipReason::StructurallyUnfulfillable),
+            "the skip must be traceable: {:?}",
+            page.skipped
         );
     }
 
@@ -614,8 +714,9 @@ mod tests {
                     "totalAmount": { "amountCents": 1000, "currency": "EUR" },
                 }})),
                 Ok(json!({ "me": null })),
-                Ok(json!({ "paymentStatus": null })),
-                // RSO-1: the checkout screen's 4th declared read (`restaurant.bySlug`).
+                // #745: no paymentStatus entry — the paint SKIPS that read (declared structural
+                // skip; its orderId is client-minted at dispatch).
+                // RSO-1: the checkout screen's declared `restaurant.bySlug` read.
                 Ok(json!({ "restaurant": {
                     "displayName": "Chez Test", "slug": "chez-test",
                     "serviceWindow": { "verdict": "HOURS_UNDECLARED", "opensAt": null, "lastOrderAt": null,

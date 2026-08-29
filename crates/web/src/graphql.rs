@@ -190,6 +190,36 @@ pub enum ResolverError {
     MissingOperation { operation: &'static str },
 }
 
+/// WHY a read was skipped by design (#745). Every reason renders IDENTICALLY (the binding stays
+/// silently unresolved — empty state, hydrate/dispatch owns the data); the reason exists for the
+/// TRACE, as an attribute on the render's boundary event alongside the correlation id — never as
+/// a metric label (a zero-weight metric reason is a signal wired never to scream, the exact
+/// defect class the #472 counter contract calls out).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// A declared spec `gap:` binding — fails closed at the dispatcher before any network.
+    DeclaredGap,
+    /// The bound query does not admit this path's role (`ResolverKey::roles()`) — the refusal is
+    /// the documented posture of the anonymous transport, not an incident.
+    RoleRefused,
+    /// The §25b verdict (#745): a required arg with no paint-time source — route param, pin or
+    /// tenant-host slug — declared on the binding (`skipped_reads:` in the screens DSL) and
+    /// emitted onto `Screen::skipped_reads`. Skipped BEFORE any network: the read would fail
+    /// GraphQL validation on every paint, which is a spec fact, not a runtime incident.
+    StructurallyUnfulfillable,
+}
+
+impl SkipReason {
+    /// The trace-attribute token.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SkipReason::DeclaredGap => "declared_gap",
+            SkipReason::RoleRefused => "role_refused",
+            SkipReason::StructurallyUnfulfillable => "structurally_unfulfillable",
+        }
+    }
+}
+
 /// One resolver read, CLASSIFIED (#472): the type that makes "skip" and "failure" different
 /// states, so no render path can conflate them again. Before this type existed every call site
 /// read `if let Ok(value) = execute_resolver(...)` — the else-branch was unwritable because a
@@ -199,11 +229,10 @@ pub enum ResolverError {
 pub enum ResolveOutcome {
     /// The read answered — bind it.
     Resolved(Value),
-    /// The read was never answerable ON THIS PATH, by design: a declared spec `gap` (fails closed
-    /// before any network) or a refusal of a resolver whose bound query does not admit this
-    /// path's role (`ResolverKey::roles()`). Silent — the shell renders and hydration owns the
-    /// data (the #92/#420 anonymous-SSR posture).
-    SkippedByDesign,
+    /// The read was never answerable ON THIS PATH, by design — the [`SkipReason`] says why, for
+    /// the trace only. Silent — the shell renders and hydration owns the data (the #92/#420
+    /// anonymous-SSR posture).
+    SkippedByDesign(SkipReason),
     /// A REAL failure on a read this role IS allowed to ask — network, HTTP, GraphQL contract,
     /// malformed envelope. The caller renders the ERROR state (distinct from the empty state) and
     /// the SSR boundary counts it. Never silent.
@@ -221,13 +250,15 @@ pub fn classify_resolve(
     match result {
         Ok(value) => ResolveOutcome::Resolved(value),
         // A declared gap fails closed before any network — the screen's gap fallback owns it.
-        Err(ResolverError::GapBinding { .. }) => ResolveOutcome::SkippedByDesign,
+        Err(ResolverError::GapBinding { .. }) => {
+            ResolveOutcome::SkippedByDesign(SkipReason::DeclaredGap)
+        }
         Err(e) => {
             let roles = key.roles();
             if !roles.is_empty() && !roles.contains(&role.user_type()) {
                 // This path's role may not ask this query at all: the refusal is the documented
                 // posture, not an incident. (Empty `roles` = open to every path.)
-                ResolveOutcome::SkippedByDesign
+                ResolveOutcome::SkippedByDesign(SkipReason::RoleRefused)
             } else {
                 ResolveOutcome::Failed(e)
             }
@@ -483,11 +514,11 @@ mod tests {
         assert!(!ResolverKey::OrdersByRestaurant.roles().contains(&Role::Public.user_type()));
         assert!(matches!(
             classify_resolve(Role::Public, ResolverKey::OrdersByRestaurant, Err(network())),
-            ResolveOutcome::SkippedByDesign
+            ResolveOutcome::SkippedByDesign(SkipReason::RoleRefused)
         ), "role outside roles(): even a NETWORK error is a skip, not a failure");
         assert!(matches!(
             classify_resolve(Role::Public, ResolverKey::OrdersByRestaurant, Err(auth_errors())),
-            ResolveOutcome::SkippedByDesign
+            ResolveOutcome::SkippedByDesign(SkipReason::RoleRefused)
         ));
 
         // cart.current admits [PUBLIC, CUSTOMER] — so on the SAME anonymous path every error
@@ -516,7 +547,7 @@ mod tests {
                 ResolverKey::PromotionsActive,
                 Err(ResolverError::GapBinding { key: "promotions.active", note: "gap" }),
             ),
-            ResolveOutcome::SkippedByDesign
+            ResolveOutcome::SkippedByDesign(SkipReason::DeclaredGap)
         ));
     }
 

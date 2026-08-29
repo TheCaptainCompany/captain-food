@@ -105,6 +105,19 @@ async fn app_page(ssr: &crate::web_ssr::SsrExec, raw_host: &str, path: &str, loc
             &correlation_id,
         );
     }
+    // Skips-by-design (#745): NEVER counted (a skip is the documented posture — a zero-weight
+    // metric reason is a signal wired never to scream), but always TRACEABLE: one event per skip
+    // on the render's span, carrying the same correlation id as the read-path spans, so a page
+    // that renders an empty slot can answer WHY from its own trace.
+    for s in &page.skipped {
+        tracing::debug!(
+            screen = s.screen,
+            resolver = s.resolver,
+            reason = s.reason.as_str(),
+            correlation_id = %correlation_id,
+            "sdui read skipped by design"
+        );
+    }
     Some(page.html)
 }
 

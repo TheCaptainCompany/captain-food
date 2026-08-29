@@ -15460,6 +15460,160 @@ mod screen_binding_gate {
     }
 }
 
+// ─── §25b — screen read fulfillability + `skipped_reads` declarations (#745) ─────────────────────
+mod screen_fulfillability {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn screen_mut<'a>(model: &'a mut Model, file: &str, id: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut(file)
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|s| {
+                s.iter_mut().find(|x| x.get("id").and_then(|i| i.as_str()) == Some(id))
+            })
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("screen {file}/{id}"))
+    }
+
+    fn hits(model: &Model, rule: &str) -> Vec<String> {
+        validate(model)
+            .issues
+            .iter()
+            .filter(|i| i.rule == rule)
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The wired rule is CLEAN on the real corpus: every provably-unfulfillable read is declared
+    /// (`skipped_reads`), and no declaration is stale. The red-first hit list (9 bindings across
+    /// 3 surfaces — checkout paymentStatus.byOrder, storefront catalog.byRestaurant (#749),
+    /// home/search categories.all, account favorites.mine, and 4 backoffice identity-arg reads)
+    /// was declared in the same change that wired the rule, never skipped over (#717's pattern).
+    #[test]
+    fn read_fulfillability_is_checked_and_the_corpus_is_clean() {
+        let model = real_model();
+        for rule in [
+            "screen-read-unfulfillable-undeclared",
+            "screen-skipped-read-fulfillable",
+            "screen-skipped-read-shape",
+        ] {
+            assert!(hits(&model, rule).is_empty(), "clean corpus for {rule}: {:?}", hits(&model, rule));
+        }
+    }
+
+    /// RED plant, direction 1: removing checkout's declaration must re-fire the undeclared-read
+    /// error AT that binding — this is the exact defect #745 fixes (an arg-less
+    /// `paymentStatus.byOrder` failing on every anonymous paint), pinned so it cannot return
+    /// silently.
+    #[test]
+    fn an_undeclared_unfulfillable_read_is_an_error() {
+        let mut model = real_model();
+        screen_mut(&mut model, "screens/restaurant_frontoffice.yaml", "checkout")
+            .remove(Value::from("skipped_reads"))
+            .expect("checkout declares skipped_reads — the removal must not be a no-op");
+        let found = hits(&model, "screen-read-unfulfillable-undeclared");
+        assert!(
+            found.iter().any(|h| h.contains("checkout") && h.contains("paymentStatus.byOrder") && h.contains("orderId")),
+            "the undeclared unfulfillable read must fire at checkout/paymentStatus.byOrder: {:?}",
+            found
+        );
+    }
+
+    /// RED plant, direction 2 (the dead-man's proof) — AND the bridge-consumption pin (beck):
+    /// `order_tracking` binds `order.byId`, whose required arg is `id` fed by the route's
+    /// `:orderId` ONLY through the scalar rename bridge (`OrderId` → `orderId`). Declaring a skip
+    /// there must be REFUSED as fulfillable. A rule that did not consume the bridge would compute
+    /// `order.byId` unfulfillable, accept the declaration, and the runtime would skip the ONE
+    /// read the confirmation page exists to perform.
+    #[test]
+    fn a_declaration_over_a_fulfillable_read_is_an_error_and_the_bridge_is_consumed() {
+        let mut model = real_model();
+        let decl: Value = serde_yaml::from_str(
+            "- resolver: { $ref: '#/resolvers/order.byId' }\n  missing_arg: { $ref: 'api.yaml#/queries/order/args/id' }\n  supplied_by: none\n  note: 'planted — must be refused'\n",
+        )
+        .unwrap();
+        let prev = screen_mut(&mut model, "screens/restaurant_frontoffice.yaml", "order_tracking")
+            .insert(Value::from("skipped_reads"), decl);
+        assert!(prev.is_none(), "order_tracking must not already declare skips — vacuous plant");
+        let found = hits(&model, "screen-skipped-read-fulfillable");
+        assert!(
+            found.iter().any(|h| h.contains("order_tracking") && h.contains("order.byId")),
+            "declaring a skip over the bridge-fulfilled order.byId must be an error: {:?}",
+            found
+        );
+        // And the clean corpus never flagged order_tracking as UNDECLARED — the two together pin
+        // that the verdict consumes the bridge rather than string-matching arg names.
+        let model = real_model();
+        assert!(
+            !hits(&model, "screen-read-unfulfillable-undeclared").iter().any(|h| h.contains("order_tracking")),
+            "order.byId is fulfillable via the :orderId → id bridge"
+        );
+    }
+
+    /// The fulfillability predicate, both ways per source (kills the classify-by-name mutant):
+    /// same-name param, bridge param, pin, and the tenant-host slug — each flips the verdict.
+    #[test]
+    fn the_predicate_counts_each_source_and_nothing_else() {
+        assert!(param_feeds_arg("orderId", "orderId", "OrderId"), "same-name");
+        assert!(param_feeds_arg("orderId", "id", "OrderId"), "the scalar rename bridge");
+        assert!(!param_feeds_arg("slug", "restaurantId", "RestaurantId"), "no name match, no bridge");
+        assert!(!param_feeds_arg("id", "orderId", "OrderId"), "the bridge is directional: a bare :id does not spell OrderId");
+
+        // Host-slug: the SAME screen shape is fulfillable on the tenant-hosted surface and
+        // unfulfillable on any other — the surface is part of the verdict, not decoration.
+        let model = real_model();
+        let screen: Value = serde_yaml::from_str("{ id: x, route: '/checkout', data_requirements: [restaurant.bySlug] }").unwrap();
+        let resolvers: serde_yaml::Mapping = serde_yaml::from_str(
+            "restaurant.bySlug: { query: { $ref: 'api.yaml#/queries/restaurant' } }",
+        )
+        .unwrap();
+        let on_tenant = screen_unfulfillable_reads(&model, TENANT_HOSTED_SURFACE, &screen, Some(&resolvers));
+        assert!(on_tenant.is_empty(), "host slug fulfills `slug` on the tenant-hosted surface: {on_tenant:?}");
+        let elsewhere = screen_unfulfillable_reads(&model, "screens/captain_frontoffice.yaml", &screen, Some(&resolvers));
+        assert_eq!(
+            elsewhere,
+            vec![("restaurant.bySlug".to_string(), vec!["slug".to_string()])],
+            "no host source off the tenant surface"
+        );
+
+        // A pin fulfills exactly the pinned arg.
+        let pinned: serde_yaml::Mapping = serde_yaml::from_str(
+            "restaurant.bySlug: { query: { $ref: 'api.yaml#/queries/restaurant' }, args: { slug: chez-test } }",
+        )
+        .unwrap();
+        let with_pin = screen_unfulfillable_reads(&model, "screens/captain_frontoffice.yaml", &screen, Some(&pinned));
+        assert!(with_pin.is_empty(), "a DSL pin is a paint-time source: {with_pin:?}");
+    }
+
+    /// The generated skip table IS the validator's verdict: `Screen::skipped_reads` in the
+    /// emitted screens.rs must list exactly the corpus's declared-and-proven skips — the runtime
+    /// consults this table before any network, so a drift here is a read silently skipped (or
+    /// silently sent) with the gate green.
+    #[test]
+    fn the_emitted_skip_table_matches_the_declared_corpus() {
+        let model = real_model();
+        let emitted = emit_web_screens(&model);
+        for (screen_line, skipped) in [
+            ("id: \"checkout\"", "skipped_reads: &[ResolverKey::PaymentStatusByOrder]"),
+            ("id: \"restaurant\"", "skipped_reads: &[ResolverKey::CatalogByRestaurant]"),
+            ("id: \"home\"", "skipped_reads: &[ResolverKey::CategoriesAll]"),
+            ("id: \"account\"", "skipped_reads: &[ResolverKey::FavoritesMine]"),
+            ("id: \"order_tracking\"", "skipped_reads: &[]"),
+        ] {
+            let at = emitted.find(screen_line).unwrap_or_else(|| panic!("{screen_line} emitted"));
+            let tail = &emitted[at..at + 2000.min(emitted.len() - at)];
+            assert!(tail.contains(skipped), "{screen_line} must carry `{skipped}`");
+        }
+    }
+}
+
 // ─── nav-edge sub-selections in the generated client data layer (#717 round-1 blocking fix) ──────
 mod nav_edge_selections {
     use super::super::*;
