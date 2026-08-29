@@ -306,32 +306,34 @@ screens:
   - id: restaurant
     roles: [PUBLIC, CUSTOMER]   # which UserTypes may see this screen (ADR-0037)
     route: "/r/:slug"
-    title: "{{ restaurant.name }}"
+    title: "{{ restaurant.displayName }}"
     sdui: true
     data_requirements: [restaurant.bySlug, catalog.byRestaurant]
     gaps:
       # `isOpen` left this list with RSO-1 (DECISIONS §43): the open/closed affordance is served by
       # `restaurant.serviceWindow` (verdict at the request instant) — `isOpen` was a UI term
       # colonising the domain, and keeping it declared as a gap would contradict the field.
-      - "Restaurant presentation fields the UI reads (coverUrl, logoUrl, deliveryTime, deliveryFee, minimumOrder, badges) are not on the domain Restaurant/api type yet."
+      # #717: the widgets that bound the fields below were REMOVED, not left rendering dead — a
+      # gapped concept with a live widget is a false signifier. Each entry names the CONCEPT.
+      - "Pre-order delivery ETA: no domain concept computes a customer-facing delivery estimate (preparationTimeMinutes is prep, not delivery — binding it would show a false ETA). The ETA slot is honestly empty; THE priority gap on this screen (the ETA is the product)."
+      - "Merchandising imagery: the Restaurant type carries no coverUrl/logoUrl media fields (market-parity deficit vs incumbents, ADR-20260808-212741 §2)."
+      - "Delivery fee display: no deliveryFee field exists on Restaurant — the removed row could render 'Livraison gratuite' as a false price claim."
+      - "Minimum order: no MinimumOrderAmount concept exists (tracked by docs/decisions/V0-PROMO-AND-MINIMUM.yaml); the removed row's translation needed an {amount} nothing supplies."
+      - "Badges: no badge/label concept on the Restaurant type."
     components:
       - type: back_button_header
         sticky: true
         right_slot:
           - { type: icon_button, icon: share, action: { type: share, url: "{{ canonical_url }}" } }
           - { type: icon_button, icon: heart, active_when: is_favorited, action: { type: toggle_favorite, restaurant_id: "{{ restaurant.id }}" } }
-      - { type: hero_image, cover: "{{ restaurant.coverUrl }}", logo: "{{ restaurant.logoUrl }}", aspect_ratio: "16/7" }
       - type: section
         id: restaurant_info
         content:
-          - { type: text, value: "{{ restaurant.name }}", style: { size: "2xl", weight: bold } }
-          - { type: text, value: "{{ restaurant.categories | join(' · ') }}", style: { size: sm, color: text_secondary } }
+          - { type: text, value: "{{ restaurant.displayName }}", style: { size: "2xl", weight: bold } }
+          - { type: text, value: "{{ restaurant.tags | join(' · ') }}", style: { size: sm, color: text_secondary } }
           - type: info_row
             items:
               - { icon: star, value: "{{ restaurant.rating }}", visible_when: restaurant.rating }
-              - { icon: clock, value: "{{ restaurant.deliveryTime }}–{{ restaurant.deliveryTime + 10 }} min" }
-              - { icon: truck, value: "{{ restaurant.deliveryFee == 0 ? '' : restaurant.deliveryFee | format_currency }}", empty_ref: { $ref: 'translations.yaml#/common.delivery.free' } }
-              - { icon: shopping_bag, value: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.min_order' } }   # params: { amount }
           # RSO-1 (DECISIONS §43): the open/closed BADGE binds the server-evaluated
           # `restaurant.serviceWindow` — `verdict` is the ONLY discriminator, and the THIRD branch
           # is explicit: HOURS_UNDECLARED renders NOTHING in this customer slot (never "Fermé" for
@@ -343,9 +345,9 @@ screens:
             on_undeclared: render_nothing
             schedule: "{{ restaurant.openingHours }}"
             labels: { open: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.open' }, closed: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.closed' }, opens_at: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.opens_at' } }
-      - { type: sticky_category_nav, id: catalog_nav, items: "{{ restaurant.catalog.categories }}" }
+      - { type: sticky_category_nav, id: catalog_nav, items: "{{ catalog.categories }}" }
       - type: catalog_sections
-        categories: "{{ restaurant.catalog.categories }}"
+        categories: "{{ catalog.categories }}"
         item_type: catalog_item_row
         item_add_action: { type: open_bottom_sheet, sheet_id: item_detail_sheet, data: { item: "{{ item }}" } }
         disabled_overlay: { $ref: 'restaurant_frontoffice.translations.yaml#/restaurant.unavailable' }
@@ -371,7 +373,7 @@ screens:
       body: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.empty.body' }
       action: { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.empty.browse' }, route: "/" }
     components:
-      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.title' }, subtitle: "{{ cart.restaurantName }}" }
+      - { type: back_button_header, title: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.title' }, subtitle: "{{ cart.restaurant.displayName }}" }
       - type: cart_lines
         items: "{{ cart.lines }}"
         item_template:
@@ -509,6 +511,8 @@ screens:
     actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
       - "`reorder` action has no backing op — the client re-adds past lines via add_to_cart."
+      - "Order status timeline: Order carries no event-history field (only status + statusChangedAt), so the timeline widget bound a field that does not exist; removed (#717). tracking.rs keeps an empty order_timeline slot. Needs a read-model decision (per-order status history)."
+      - "Customer → restaurant contact: the api Restaurant type exposes no phone (the projection intent exists — DECISIONS STO-8 — but no api field), so the contact row bound dead fields and tracking.rs never rendered it; removed (#717). The concept: a customer mid-delivery needs to reach the restaurant."
       - "Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code."
     components:
       - type: order_status_hero
@@ -530,15 +534,13 @@ screens:
           # is released, the customer was never charged; no promised bank date.
           CANCELLED_BY_TIMEOUT:    { icon: clock_x,  title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.body' } }
       - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
-      - { type: order_timeline, events: "{{ order.timeline }}" }
-      - { type: restaurant_contact_row, name: "{{ order.restaurant.name }}", phone: "{{ order.restaurant.phone }}", action: { type: phone_call, number: "{{ order.restaurant.phone }}" } }
-      - { type: order_items_summary, lines: "{{ order.lines }}", total: "{{ order.total | format_currency }}" }
+      - { type: order_items_summary, lines: "{{ order.items }}", total: "{{ order.totalAmount | format_currency }}" }
       - { type: order_id_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.id_label' }, value: "{{ order.id }}", action: { type: copy_to_clipboard } }
       - type: section
         id: post_order_actions
         content:
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.rate' }, variant: outline, icon: star, visible_when: "order.status == 'DELIVERED'", action: { type: open_bottom_sheet, sheet_id: rating_sheet, data: { orderId: "{{ order.id }}" } } }
-          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED_BY_CUSTOMER','CANCELLED_BY_RESTAURANT','CANCELLED_BY_TIMEOUT']", action: { type: reorder, cart_lines: "{{ order.lines }}" } }
+          - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.reorder' }, variant: outline, icon: refresh, visible_when: "order.status in ['DELIVERED','CANCELLED_BY_CUSTOMER','CANCELLED_BY_RESTAURANT','CANCELLED_BY_TIMEOUT']", action: { type: reorder, cart_lines: "{{ order.items }}" } }
           - { type: button, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.help' }, variant: ghost, icon: life_buoy, action: { type: navigate, route: "/help/orders/{{ order.id }}" } }
 
   # SCREEN 5 — Order history

@@ -831,10 +831,6 @@
     "en": "View cart",
     "fr": "Voir le panier"
   },
-  "common.delivery.free": {
-    "en": "Free delivery",
-    "fr": "Livraison gratuite"
-  },
   "common.error.data_unavailable": {
     "en": "We couldn't load this content.",
     "fr": "Impossible de charger le contenu."
@@ -1335,10 +1331,6 @@
     "en": "Closed",
     "fr": "Fermé"
   },
-  "restaurant.min_order": {
-    "en": "Min. {amount}",
-    "fr": "Min. {amount}"
-  },
   "restaurant.open": {
     "en": "Open",
     "fr": "Ouvert"
@@ -1370,6 +1362,10 @@
   "rider.job.pickup": {
     "en": "Pickup",
     "fr": "Retrait"
+  },
+  "rider.job.restaurant": {
+    "en": "Restaurant",
+    "fr": "Restaurant"
   },
   "rider.job.title": {
     "en": "Delivery",

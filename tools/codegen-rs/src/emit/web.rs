@@ -269,6 +269,138 @@ pub(crate) fn query_selection(model: &Model, query: &str) -> Option<String> {
     selection_fields(model, target, &file, SELECTION_MAX_DEPTH, &mut path)
 }
 
+/// The FK-derived navigation sub-selections screens ACTUALLY BIND, per api.yaml query:
+/// query name → nav field → the selection parts under it (#717 round-1 blocking fix).
+///
+/// The §25 validator approves `{{ cart.restaurant.displayName }}` against the composed schema
+/// (`Cart.restaurant: Restaurant!` is a generated FK edge, not a declared property), but
+/// `query_selection` expands PROPERTIES only — so the client never fetched the edge and the
+/// approved binding rendered empty: the #468 defect class, one layer down. This walk closes the
+/// loop with the SAME derivations the validator uses (`screen_binding_roots` for root→query/type,
+/// `api::nav_fields` for the edges), BOUNDED on purpose to what screens bind (the peak-read
+/// fence): a nav edge is sub-selected only when some screen's simple dotted binding walks it —
+/// never blanket-selected, so `Order.restaurant` (same edge, bound by no screen) adds nothing to
+/// any fetch. First-segment-after-root nav edges only — the shape the screens DSL uses, and the
+/// same walk §25 resolves, so a deeper nav binding lands here together with its validation.
+/// Collection edges (`list: true`) are loop-variable territory, not this fetch shape.
+pub(crate) fn collect_screen_nav_selections(
+    model: &Model,
+) -> BTreeMap<String, BTreeMap<String, BTreeSet<String>>> {
+    let mut out: BTreeMap<String, BTreeMap<String, BTreeSet<String>>> = BTreeMap::new();
+    let api = parse_api(model);
+    let registered: HashSet<String> = api.types.iter().map(|t| t.name.clone()).collect();
+    let views = parse_views(model);
+    let nav = nav_fields(&views, &registered);
+    let mustache = regex::Regex::new(r"\{\{([^{}]+)\}\}").expect("static regex");
+    let simple = simple_path_regex();
+    let api_types = model.defs.get("api.yaml").and_then(|v| v.get("types"));
+    let prop_node = |ty: &str, field: &str| -> Option<Value> {
+        api_types?.get(ty)?.get("properties")?.get(field).cloned()
+    };
+
+    let mut surfaces: Vec<&String> = model.defs.keys().filter(|k| k.starts_with("screens/")).collect();
+    surfaces.sort();
+    for sf in surfaces {
+        let doc = match model.defs.get(sf) {
+            Some(d) => d,
+            None => continue,
+        };
+        let resolvers = doc.get("resolvers").and_then(|v| v.as_mapping());
+        for screen in doc.get("screens").and_then(|v| v.as_sequence()).into_iter().flatten() {
+            let drs: Vec<String> = screen
+                .get("data_requirements")
+                .and_then(|x| x.as_sequence())
+                .map(|s| s.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let roots = screen_binding_roots(model, resolvers, &drs);
+            if roots.is_empty() {
+                continue;
+            }
+            let mut bindings: Vec<(String, String)> = Vec::new();
+            collect_template_bindings(screen, "", &mustache, &mut bindings);
+            for (_, expr) in bindings {
+                let path = expr.split('|').next().unwrap_or("").trim();
+                if !simple.is_match(path) {
+                    continue;
+                }
+                let mut segs = path.split('.');
+                let root = segs.next().unwrap_or("");
+                let Some((type_name, query)) = roots.get(root) else { continue };
+                let segs: Vec<&str> = segs.collect();
+                if segs.len() < 2 {
+                    continue; // a nav USE is `root.edge.field…` — anything shorter is property land
+                }
+                if prop_node(type_name, segs[0]).is_some() {
+                    continue; // a declared property — the base selection already fetches it
+                }
+                let Some(nf) = nav
+                    .get(type_name.as_str())
+                    .and_then(|nfs| nfs.iter().find(|n| n.field == segs[0] && !n.list))
+                else {
+                    continue; // not an edge either — §25's error, not a fetch concern
+                };
+                // The bound field on the edge's target type: a leaf selects by name; an object
+                // property expands through the SAME `selection_fields` walk the base selection
+                // uses (bounded depth, cycle-guarded) so the two shapes cannot drift.
+                let Some(node) = prop_node(&nf.target, segs[1]) else { continue };
+                let unwrapped = if node.get("type").and_then(|t| t.as_str()) == Some("array") {
+                    node.get("items").cloned().unwrap_or(node.clone())
+                } else {
+                    node.clone()
+                };
+                let part = match unwrapped.get("$ref").and_then(|r| r.as_str()) {
+                    None => segs[1].to_string(),
+                    Some(rf) => {
+                        let file = ref_target_file(rf, "api.yaml");
+                        match file.as_deref() {
+                            Some("scalars.yaml") | None => segs[1].to_string(),
+                            Some(f) => match resolve_ref(model, rf, "api.yaml") {
+                                Some(target) if target.get("properties").is_some() => {
+                                    let mut path_guard = match selection_ref_key(rf, "api.yaml") {
+                                        Some(k) => vec![k],
+                                        None => continue,
+                                    };
+                                    match selection_fields(model, target, f, SELECTION_MAX_DEPTH - 2, &mut path_guard)
+                                    {
+                                        Some(sub) => format!("{} {}", segs[1], sub),
+                                        None => continue, // nothing selectable — omit, never emit bare
+                                    }
+                                }
+                                _ => segs[1].to_string(),
+                            },
+                        }
+                    }
+                };
+                out.entry(query.clone()).or_default().entry(nf.field.clone()).or_default().insert(part);
+            }
+        }
+    }
+    out
+}
+
+/// `query_selection` plus the screen-bound nav edges for that query, spliced inside the outer
+/// braces (`{ …props… restaurant { displayName } }`). The base shape is untouched when no screen
+/// binds an edge on the query's return type.
+pub(crate) fn query_selection_with_nav(
+    model: &Model,
+    query: &str,
+    nav_needs: &BTreeMap<String, BTreeMap<String, BTreeSet<String>>>,
+) -> Option<String> {
+    let base = query_selection(model, query)?;
+    let Some(edges) = nav_needs.get(query) else { return Some(base) };
+    let extra: Vec<String> = edges
+        .iter()
+        .map(|(field, parts)| {
+            format!("{} {{ {} }}", field, parts.iter().cloned().collect::<Vec<_>>().join(" "))
+        })
+        .collect();
+    if extra.is_empty() {
+        return Some(base);
+    }
+    // base is `{ … }` — drop the closing brace, append the edges, close again.
+    Some(format!("{}{} }}", &base[..base.len() - 1], extra.join(" ")))
+}
+
 /// One action binding, flattened from `screens/*.yaml#/actions/<key>`.
 pub(crate) struct ActionDef {
     pub(crate) key: String,
@@ -316,6 +448,10 @@ pub(crate) fn collect_web_data_layer(model: &Model) -> (Vec<ResolverDef>, Vec<Ac
 
     let mut resolvers: Vec<ResolverDef> = Vec::new();
     let mut actions: Vec<ActionDef> = Vec::new();
+    // Screen-bound FK nav edges, folded into each query's selection (#717 round 1): global across
+    // surfaces, so the cross-surface identical-binding rule below still holds — the same query
+    // always carries the same selection wherever it is bound.
+    let nav_needs = collect_screen_nav_selections(model);
     let mut r_seen: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
     let mut a_seen: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
 
@@ -331,9 +467,10 @@ pub(crate) fn collect_web_data_layer(model: &Model) -> (Vec<ResolverDef>, Vec<Ac
                     None => continue,
                 };
                 let query = v.get("query").and_then(ref_op_name);
-                // Derived from the query alone, so identical queries always carry identical
-                // selections — no need to fold it into the cross-surface fingerprint.
-                let selection = query.as_deref().and_then(|q| query_selection(model, q));
+                // Derived from the query plus the GLOBAL screen-bound nav-edge map, so identical
+                // queries always carry identical selections — no need to fold it into the
+                // cross-surface fingerprint.
+                let selection = query.as_deref().and_then(|q| query_selection_with_nav(model, q, &nav_needs));
                 let def = ResolverDef {
                     key: key.clone(),
                     query,

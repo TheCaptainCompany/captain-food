@@ -3,6 +3,39 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-29 — [#717 "Wire the screen-binding gate: 13 template bindings on three screens name
+> fields their types don't have"](https://github.com/TheCaptainCompany/captain-food/issues/717)
+> (overnight run, checkpoint pending): the §25 screen-binding rule is WIRED full-strength and the
+> corpus debt is paid — which was 21 hits on 5 screens, not the card's 13** (the card's figure was
+> `UNVERIFIED input` per ADR-20260817-105845 and traced to the #468-era prose in `validate/core.rs`;
+> re-measured red-first before any fix, the delta being one whole screen the card never named —
+> `restaurant_frontoffice.yaml#order_tracking`, 7 hits — plus the screen `title:` bindings the old
+> estimate's walk missed). Verbatim antecedent (binding → treatment): order_conversation
+> `conversation.status`/`.messages` → resolve after the namespace split (`internal_notes.byOrder`
+> root for the staff notes; `visible_when: internal_notes.adminInvited` moved BY HAND — a bare
+> expression no mustache sweep sees); restaurant `restaurant.name`×2 → `displayName`,
+> `restaurant.categories` → `tags` (discovery only), `restaurant.catalog.categories`×2 →
+> `catalog.categories` (the Catalog root was already resolved on the screen),
+> `coverUrl`/`logoUrl`/`deliveryTime` → widgets REMOVED + concept gaps (prep time is NOT an ETA — a
+> false ETA is worse than an empty slot; the fee row's `empty_ref` could claim "Livraison gratuite"
+> off a nonexistent field, and the min-order row's `{amount}` had no supplier — both removed inside
+> the touched widget); cart `cart.restaurantName` → `cart.restaurant.displayName` (FK-derived nav
+> edge — the checker now WALKS `api::nav_fields`, the same derivation the SDL emitter consumes,
+> rather than flagging generated edges); order_tracking `order.timeline` → removed + gap (no
+> event-history field on Order), `order.restaurant.name`/`.phone`×2 → contact row removed + gap
+> (tracking.rs never rendered it; Restaurant exposes no phone), `order.lines`×2/`order.total` →
+> `items`/`totalAmount` (what tracking.rs already reads); rider job_detail
+> `delivery.restaurantName`/`restaurantPhone`×2 → contact row removed, plain name row via
+> `delivery.restaurant.displayName`, gap citing the STO-8 register row (the projection INTENT
+> exists; no api field carries the phone). **Gap-ranking (ux + business): the storefront ETA slot is
+> THE priority gap — the ETA is the product and its slot is now honestly empty pre-order; imagery is
+> a market-parity deficit (medium); rider pickup contact is low-conversion but real
+> support-minutes.** Tests: per-screen deliberate-typo smokes (coverage honesty — a gap resolver or
+> unresolvable query contributes no root and would silently UNCHECK a screen) + a red-to-green
+> plant through `validate(&model)`; nav-edge plants on cart and rider pin the walk. Zero-widening
+> audit clean: `schema.generated.graphql`, `operation_scopes.rs`, gateway bins byte-identical.
+> Follow-ups filed from the removals; `#618` IDOR untouched either way.
+
 > 🔧 **2026-08-29 — [#472 "A dead control stays live: the SDUI renderer evaluates no
 > `visible_when`/`disabled_when` and swallows resolver errors"](https://github.com/TheCaptainCompany/captain-food/issues/472)
 > Phase 1 (overnight run, checkpoint pending): the renderer now EVALUATES its declared
