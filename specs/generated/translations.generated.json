@@ -563,10 +563,6 @@
     "en": "Delivery fee",
     "fr": "Frais de livraison"
   },
-  "cart.discount": {
-    "en": "Discount",
-    "fr": "Réduction"
-  },
   "cart.empty.body": {
     "en": "Add items from a restaurant to get started.",
     "fr": "Ajoutez des articles d'un restaurant pour commencer."
@@ -579,10 +575,6 @@
     "en": "Your cart is empty",
     "fr": "Votre panier est vide"
   },
-  "cart.min_warning": {
-    "en": "Minimum order is {min}. Add {shortfall} more.",
-    "fr": "Commande minimum : {min}. Ajoutez {shortfall}."
-  },
   "cart.promo_applied": {
     "en": "Code {code} applied — {amount} off",
     "fr": "Code {code} appliqué — {amount} de réduction"
@@ -592,8 +584,8 @@
     "fr": "Code promo"
   },
   "cart.service_fee": {
-    "en": "Service fee",
-    "fr": "Frais de service"
+    "en": "Captain service fee",
+    "fr": "Frais de service Captain"
   },
   "cart.subtotal": {
     "en": "Subtotal",

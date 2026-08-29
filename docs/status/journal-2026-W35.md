@@ -22,6 +22,79 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > was needed there. Zero rows were unresolvable. `make generate` regenerated the index region;
 > nothing else in `DECISIONS.md` needed a hand edit.
 
+
+> ✅ **2026-08-29 — [#709 "The register-check hook refuses a question whose controlling row is
+> already decided"](https://github.com/TheCaptainCompany/captain-food/issues/709) closes the gap
+> ADR-20260828-120500 named: `.claude/hooks/register-check.sh`'s TRAIL lane (Lane 2, non-decision
+> interactions) validated shape only — a trail self-citing `(<date>, decided)` in the canonical
+> format still ALLOWED the `AskUserQuestion` call, the exact round-5 call-sheet incident.** Verified
+> against the script first (beck's design step 1): the ENVELOPE (`Decision row: <KEY>`) and PASSIVE
+> lanes already refused non-open `docs/decisions/<KEY>.yaml` rows since 2026-08-21
+> (ADR-20260821-095957) — only the free-text trail (ADR/PROP/journal citations, which carry no
+> machine-readable status file) was unguarded. **Fix**: the hook now reads the trail's OWN
+> `(<date>, <status>)` clause and refuses when `<status>` is in the register's closed set
+> (`decided`/`superseded`/`deferred`/`withdrawn`) — new reason `trail-answered` — unless the trail
+> also carries a `premise-changed: <what changed>` line, which allows the question through logged
+> distinctly as `trail-premise-changed` (docs/claude/sessions/workflow.md trail-format section, new
+> escape hatch). Red-first: the pre-existing selftest case `3-record-id` (a decided-status trail)
+> flipped from a passing ALLOW to red under the new code before its expectation was corrected to
+> BLOCK; new cases `3b`/`3c`/`3d` prove the premise-changed escape, the open-status non-trigger, and
+> the full closed set (not just `decided`) respectively; cases `1`/`2`/`4`/`5`/`6`/`7` (missing/
+> hollow trail, legacy single-token citations, no-controlling-record, DECISIONS.md section) proved
+> unchanged. `make hooks-test` green, `make validate` 0 errors.
+> [ADR-20260828-120500](../adr/ADR-20260828-120500-an-answered-question-is-never-asked-again.md).
+
+
+> ✅ **2026-08-28 — [#468 "The cart screen cannot render a price: every summary binding names a
+> field the API does not have"](https://github.com/TheCaptainCompany/captain-food/issues/468) is
+> fixed: the cart screen renders real money.** `specs/screens/restaurant_frontoffice.yaml`'s `cart`
+> screen rebinds `order_summary_block` to the graphql-verified `cart.breakdown.*` path — subtotal →
+> `breakdown.articles`, delivery → `breakdown.delivery`, service fee → `breakdown.serviceFee`, total →
+> `breakdown.total` (never `cart.totalAmount`, which is the food subtotal only and collides in name
+> with `Order.totalAmount`, where only Order equates the two) — and the checkout screen's
+> `cart_summary_mini` total the same way. `breakdown.articles` is TTC
+> (`specs/common/entities.yaml`), so the bound total is the payable all-tax amount; no relabeling was
+> needed. The service-fee label now carries ADR-0018's decided wording ("Captain service fee" /
+> "Frais de service Captain"). **Two of the six broken fields had no domain concept to bind to at
+> all**: `cart.discount` (no PromoCode entity/command/rule) and `cart.minimumOrderMet` (no
+> minimum-order rule) are REMOVED from the live screen (the discount row, the
+> `minimum_order_warning` widget, and the `minimumOrderMet` half of `checkout_btn`'s `disabled_when`)
+> and declared as `gaps:` entries naming why and what unlocks them — a declared gap does not excuse a
+> still-live control (`CLAUDE.md`'s domain lens), so the widgets are gone, not just documented. Their
+> now-orphaned translation keys (`cart.discount`, `cart.min_warning`) are deleted. Filed
+> `docs/decisions/V0-PROMO-AND-MINIMUM.yaml` (open, owner founder): does V0 ship promo codes and/or a
+> minimum order amount, and at what rules/values.
+>
+> **New validator mechanism, deliberately left UN-WIRED** (`tools/codegen-rs/src/validate/
+> screen_bindings.rs`, §25): nothing in `make validate` resolved a screen's `{{ root.path }}` template
+> binding against the api type its `data_requirements` actually bind — every existing screens check
+> proves an action/resolver `$ref` resolves, never a content interpolation, which is exactly how
+> #468's six non-existent `Cart` fields passed at 0 errors. Red-first confirmed BEFORE the rule
+> existed: planting `{{ cart.totalAmoun | format_currency }}` (a one-character typo) into the fixed
+> screen and running `make validate` stayed green. The new mechanism mirrors
+> `crates/web/src/renderer.rs`'s `RenderContext::insert_resolved` root-aliasing exactly (never
+> guess-matches a root name) and walks `properties` through `entities.yaml`/`scalars.yaml`/another
+> api type, stopping honestly at an array field, a scalar leaf, or an unresolvable ref rather than
+> guessing further. Proven by 7 unit tests (`cargo test screen_bindings`) and, run against the WHOLE
+> real screens corpus, reds 13 times outside the `cart` screen this issue fixes — none of them a
+> same-file trivial rename (`restaurant_backoffice.yaml#order_conversation` binds the STAFF-ONLY
+> `ConversationInternalNotes` root to `OrderConversation`'s `status`/`messages` fields; `restaurant_
+> frontoffice.yaml#restaurant`'s `coverUrl`/`logoUrl`/`deliveryTime` are an ALREADY-declared gap whose
+> widgets are still live; `rider.yaml#job_detail` and the `cart` screen's own `restaurantName` want a
+> field neither `DeliveryJob` nor `Cart` carries at all). Wiring it now would need weakening it (a
+> skip list, warning-only, or a one-screen carve-out) to go green, which the dispatch ruled out —
+> left un-wired, evidenced by its tests, for the architect to file as scoped follow-up work.
+>
+> **Stop-condition checked, not triggered into a hold**: the cart screen's remaining
+> `delivery_fee` row (`visible_when: selected_delivery_mode == delivery`) and `checkout_btn`
+> (`disabled_when: cart.lines.length == 0`) both pre-date this change and both depend on
+> [#472 "A dead control stays live: the SDUI renderer evaluates no `visible_when`/`disabled_when` and
+> swallows resolver errors"](https://github.com/TheCaptainCompany/captain-food/issues/472) (open,
+> unchanged) to actually work — neither dependency is new here (the delivery-fee `visible_when`
+> pre-dates #468 entirely, and `cart.lines.length == 0` was already half of the compound
+> `disabled_when` this change simplifies, not something it adds). Reported per the dispatch's rule
+> rather than silently treated as resolved.
+>
 > ✅ **2026-08-28 — [#658 "The decision register cannot say what is still open: 62 of 148 rows carry
 > no status token, 22 keys are ambiguous, and nothing confronts a question with the register before
 > it reaches the founder"](https://github.com/TheCaptainCompany/captain-food/issues/658) closes its

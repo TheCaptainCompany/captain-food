@@ -6,7 +6,9 @@
 # (ADR-20260821-095957), and decision-ask-unregistered (ADR-20260821-103403 — the envelope): a
 # founder-directed decision question must reference EXACTLY ONE declared register row, and that
 # row must be OPEN. The failure all three gate was banked twice (ADR-20260818-210000 coordinator
-# defect 2; DECISIONS.md §48 / PROP-20260819-110442).
+# defect 2; DECISIONS.md §48 / PROP-20260819-110442). A fourth, 2026-08-28
+# (ADR-20260828-120500 / #709): the TRAIL lane validated shape only, so a trail that self-cited a
+# CLOSED status in the canonical `(<date>, <status>)` form still passed — closed below.
 #
 # THE LANES, in order:
 #   1. ENVELOPE — a decision question carries one `Decision row: <KEY>` line. Exactly one token,
@@ -23,7 +25,11 @@
 #      in-flight directive, an external-clock relay, a mechanical choice) and carries the trail of
 #      docs/claude/sessions/workflow.md; since 2026-08-21 the negative trail ASSERTS "this is not
 #      a decision question" (tiebreaker at the declaration site: would the answer bind future
-#      work? then it is a decision question and needs a row).
+#      work? then it is a decision question and needs a row). Since 2026-08-28 a trail whose OWN
+#      `(<date>, <status>)` clause self-declares a CLOSED status (decided/superseded/deferred/
+#      withdrawn — the register's closed set) is refused too, citing it back: the trail is, in its
+#      own words, an answered question. The escape is a `premise-changed: <what changed>` line in
+#      the same trail — never a silent re-ask.
 #   3. PASSIVE — any OTHER declared key referenced in the text is checked by status (defense in
 #      depth); legacy keys mentioned as CONTEXT pass, logged (`key-legacy`) — ask-vs-cite is
 #      distinguished by the envelope, not by the key.
@@ -33,6 +39,10 @@
 # prose question that omits the envelope (the honest hole: misclassifying a decision question as
 # a clarification is a prose dodge, caught by review, not by this gate), and cannot see questions
 # travelling as free text. Row files are read at the point of need — never the generated index.
+# The Lane-2 status check trusts the trail's OWN prose (an ADR/PROP/journal citation has no
+# machine-readable status file to read, unlike a docs/decisions/<KEY>.yaml row) — it cannot prove
+# the cited status is current or that `premise-changed:` names a real change; that stays with
+# review, the same honesty limit as the rest of this gate.
 #
 # VERDICTS. Exit 0 = allow. Exit 2 = block, stderr fed back. NEVER exit 1 (any other nonzero
 # allows with a warning — ADR-20260810-231300's silent-fallback class). Empty input and a broken
@@ -50,6 +60,12 @@ RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|DECISIONS
 NO_RECORD='[Nn]o (controlling|candidate) record'
 ENVELOPE='Decision row:'
 KEY_GRAMMAR='[A-Z][A-Z0-9-]{2,63}'
+# ADR-20260828-120500 / #709: the register's own closed set (docs/decisions/README.md). `open` is
+# the only status a TRAIL may cite and still ask; any other self-declared status means the cited
+# record IS the answer, so citing it in the canonical `(<date>, <status>)` shape and asking anyway
+# is the exact incident the ADR names (the round-5 call-sheet gap).
+CLOSED_STATUS='decided|superseded|deferred|withdrawn'
+PREMISE_MARKER='premise-changed:'
 
 payload="$(cat 2>/dev/null || true)"
 session="$(printf '%s' "$payload" | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
@@ -161,6 +177,29 @@ if [ -n "$payload" ] && [ "$env_count" -eq 0 ]; then
     block "trail-missing" "register-check: this question carries no \`Decision row:\` envelope and no register-check trail."
   elif ! printf '%s' "$payload" | grep -qE "$RECORD_ID" && ! printf '%s' "$payload" | grep -qE "$NO_RECORD"; then
     block "trail-hollow" "register-check: the trail names no record id and no explicit negative — a bare marker is not a trail."
+  else
+    # Shape is fine; the STATUS the trail itself reports is not yet checked. A trail written in
+    # the canonical `(<date>, <status>)` shape that self-declares a CLOSED status is, by its own
+    # words, citing an answer — asking anyway is the redundant re-ask ADR-20260828-120500 names.
+    # This never opens a file: the trail's own prose is the only oracle a free-text citation (an
+    # ADR/PROP/journal id, not a docs/decisions/<KEY>.yaml row -- those go through the envelope
+    # and Lane 3 already) has, so trusting it is the honest floor, same limit the top-of-file
+    # comment states for the rest of this gate.
+    trail_line="$(printf '%s' "$payload" | grep -oE "${MARKER}[^\"\\\\]*" | head -1)"
+    trail_status="$(printf '%s' "$trail_line" | grep -oE "\([^()]*,[[:space:]]*($CLOSED_STATUS)\)" | tail -1 | sed 's/.*,[[:space:]]*//; s/)$//')"
+    if [ -n "$trail_status" ]; then
+      trail_record="$(printf '%s' "$trail_line" | grep -oE "$RECORD_ID" | head -1)"
+      keys_hit="${keys_hit:+$keys_hit }${trail_record:-?}"
+      if printf '%s' "$payload" | grep -qF "$PREMISE_MARKER"; then
+        # The escape hatch (workflow.md trail-format section): the answer exists but the premise
+        # that produced it has changed. Never proved here -- honesty stays with review, like every
+        # other trail claim -- but LOGGED distinctly so a hollow "premise-changed: (blank)" is a
+        # decomposable defect, not invisible inside a plain ALLOW.
+        reasons="${reasons:+$reasons,}trail-premise-changed"
+      else
+        block "trail-answered" "register-check: the trail cites \`${trail_record:-that record}\` as $trail_status (\"$trail_line\") — a $trail_status record is not a question: report the citation instead. If the answer's premise has changed, add a \`premise-changed: <what changed and why the old answer no longer holds>\` line to the trail and re-issue."
+      fi
+    fi
   fi
 fi
 

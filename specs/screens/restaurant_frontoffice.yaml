@@ -139,7 +139,7 @@ component_registry:
   content: [text, image, hero_image, badge, badge_row, rating_badge, dot_separator, promo_card, cta_banner, cta_section, value_props, hero_section, info_row, opening_hours_row, list]   # cta_section (#87) + list (#94, the location-picker address lists): both were used unregistered — caught by the emitter's fail-closed check
   discovery: [hero_search_bar, search_bar_active, filter_bar, category_pill, category_tile, category_grid, restaurant_card, restaurant_card_grid, restaurant_card_list, dish_row, search_results]
   catalog: [sticky_category_nav, catalog_sections, catalog_item_row, item_thumbnail, add_button, item_header, option_groups, quantity_selector]
-  cart: [cart_lines, cart_line_row, quantity_stepper, promo_code_input, delivery_mode_toggle, order_summary_block, minimum_order_warning, cart_summary_mini]
+  cart: [cart_lines, cart_line_row, quantity_stepper, promo_code_input, delivery_mode_toggle, order_summary_block, cart_summary_mini]
   checkout: [checkout_section, address_selector, form, text_input, phone_input, email_input, text_area, stripe_express_checkout_element]
   order: [order_status_hero, eta_bar, order_timeline, restaurant_contact_row, order_items_summary, order_id_row, order_list, order_card, order_card_status, status_chip, message_bubble, quick_reply_chips]   # message_bubble + quick_reply_chips (#145): the per-order in-app conversation timeline + quick replies; order_card_status (#167, renamed from order_card_state on the evans STOP — `state:` must keep one meaning per surface): a per-card STATUS treatment rendered only for bound orders actually holding the declared status (the backoffice "expired — no response" surfacing)
   account: [account_header, menu_section, sign_out_button]
@@ -363,6 +363,8 @@ screens:
     gaps:
       - "`apply_promo_code` action + cart.discount/promoCode have no backing mutation — promo codes not modelled."
       - "`set_delivery_mode` action has no backing mutation — serviceType is chosen at placeOrder, not stored on the cart."
+      - "cart.discount: no domain concept exists — no PromoCode entity, no discount field on Cart/PaymentBreakdown, no command or rule computes one — so the discount row is removed from order_summary_block rather than bound to a field that does not exist (#468). Unlocked once promo codes are modelled end to end (command, `price_cart` participation, api field) — tracked by `docs/decisions/V0-PROMO-AND-MINIMUM.yaml`."
+      - "cart.minimumOrderMet: no domain concept exists — no MinimumOrderAmount rule/command computes or enforces one — so the minimum-order warning widget and its `checkout_btn` disabled-when gate are removed (#468). Unlocked once a minimum-order rule is modelled — tracked by `docs/decisions/V0-PROMO-AND-MINIMUM.yaml`."
     empty_state:
       icon: shopping_cart_outline
       title: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.empty.title' }
@@ -382,14 +384,18 @@ screens:
         options:
           - { label: { $ref: 'translations.yaml#/common.mode.delivery' }, value: delivery, icon: truck }
           - { label: { $ref: 'translations.yaml#/common.mode.pickup' }, value: pickup, icon: walking }
+      # Rebound to the graphql-verified `cart.breakdown.*` paths (#468): `cart.totalAmount` is the
+      # FOOD SUBTOTAL only (it collides in name with `Order.totalAmount`, where totalAmount ==
+      # breakdown.total — only Order equates them), so the payable TOTAL binds `breakdown.total`,
+      # never `totalAmount`. Row order and the four-line shape (articles/delivery/service fee/total)
+      # follow ADR-0018's decided checkout display; `breakdown.articles` is TTC per
+      # `specs/common/entities.yaml#/PaymentBreakdown`, so `total` is the all-tax payable amount.
       - type: order_summary_block
         rows:
-          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.subtotal' }, value: "{{ cart.subtotal | format_currency }}" }
-          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.delivery_fee' }, value: "{{ cart.deliveryFee | format_currency }}", visible_when: selected_delivery_mode == delivery }
-          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.service_fee' }, value: "{{ cart.serviceFee | format_currency }}" }
-          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.discount' }, value: "–{{ cart.discount | format_currency }}", color: success, visible_when: cart.discount > 0 }
-          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.total' }, value: "{{ cart.total | format_currency }}", style: { weight: bold, size: lg } }
-      - { type: minimum_order_warning, visible_when: "!cart.minimumOrderMet", message: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.min_warning' } }   # params: { min, shortfall }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.subtotal' }, value: "{{ cart.breakdown.articles | format_currency }}" }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.delivery_fee' }, value: "{{ cart.breakdown.delivery | format_currency }}", visible_when: selected_delivery_mode == delivery }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.service_fee' }, value: "{{ cart.breakdown.serviceFee | format_currency }}" }
+          - { label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.total' }, value: "{{ cart.breakdown.total | format_currency }}", style: { weight: bold, size: lg } }
       - type: sticky_bottom_bar
         content:
           - type: button
@@ -397,7 +403,7 @@ screens:
             label: { $ref: 'restaurant_frontoffice.translations.yaml#/cart.checkout_cta' }   # params: { total }
             variant: primary
             full_width: true
-            disabled_when: "!cart.minimumOrderMet || cart.lines.length == 0"
+            disabled_when: "cart.lines.length == 0"
             action: { type: conditional, if_authenticated: { type: navigate, route: "/checkout" }, if_guest: { type: open_bottom_sheet, sheet_id: auth_sheet, on_success: { type: navigate, route: "/checkout" } } }
 
   # SCREEN 3 — Checkout (NOT SDUI — Stripe Elements + payment security)
@@ -432,7 +438,7 @@ screens:
               - { id: phone, type: phone_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone' }, value: "{{ customer.phone }}", disabled: true, helper: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone_helper' } }
               - { id: email, type: email_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.email' }, value: "{{ customer.email }}", required: false }
       - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions' }, visible_when: selected_delivery_mode == delivery, content: [{ type: text_area, id: delivery_instructions, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions_ph' }, max_length: 200 }] }
-      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.order_summary' }, collapsible: true, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.total | format_currency }}" }] }
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.order_summary' }, collapsible: true, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.breakdown.total | format_currency }}" }] }
       - type: checkout_section
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }
         content:

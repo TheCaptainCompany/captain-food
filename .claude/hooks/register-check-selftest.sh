@@ -316,13 +316,27 @@ TRAIL='Register check: no controlling record -- terms: fixture; nearest: none'
 expect 1-no-trail 2 "$FIX" '{"questions":[{"question":"Which funding model applies to tips?"}]}' trail-missing
 # 2 BLOCK: bare marker token without a record id or the explicit negative -- the cargo-cult trail.
 expect 2-hollow-trail 2 "$FIX" '{"questions":[{"question":"Which funding model? Register check: done"}]}' trail-hollow
-# 3 ALLOW: trail citing a controlling record id.
-expect 3-record-id 0 "$FIX" '{"questions":[{"question":"Confirm scope. Register check: ADR-20260819-103112 (2026-08-19, decided) -- covers refunds, silent on thresholds"}]}'
-# 4 ALLOW: legacy ADR id form.
+# 3 BLOCK (FLIPPED 2026-08-28, ADR-20260828-120500 / #709): a trail that self-cites a controlling
+#    record id AND self-declares it DECIDED, in the canonical `(<date>, <status>)` shape, is by its
+#    own words an answered question -- asking anyway is the round-5 call-sheet gap the ADR names.
+#    Before this change the hook only checked trail SHAPE and this case sat green as an ALLOW; #709
+#    is the tracking issue and this is its red-before / green-after case.
+expect 3-record-id 2 "$FIX" '{"questions":[{"question":"Confirm scope. Register check: ADR-20260819-103112 (2026-08-19, decided) -- covers refunds, silent on thresholds"}]}' trail-answered
+# 3b ALLOW: the escape hatch -- a `premise-changed:` line names what changed, logged distinctly
+#    rather than folded into a plain ALLOW (a hollow marker is then a decomposable defect too).
+expect 3b-premise-changed 0 "$FIX" '{"questions":[{"question":"Confirm scope. Register check: ADR-20260819-103112 (2026-08-19, decided) -- covers refunds, silent on thresholds. premise-changed: HubRise dropped split payouts, invalidating the funding assumption."}]}' trail-premise-changed
+# 3c ALLOW: the same two-part `(<date>, <status>)` shape citing OPEN is exactly what the trail is
+#    for -- only the register's CLOSED statuses (decided/superseded/deferred/withdrawn) refuse.
+expect 3c-trail-open 0 "$FIX" '{"questions":[{"question":"Any nuance left? Register check: ADR-20260820-999999 (2026-08-20, open) -- covers X, silent on Y"}]}'
+# 3d BLOCK: the check spans the WHOLE closed set, not just `decided` -- a `superseded` self-citation
+#    is equally an answer (the successor record is the one to ask about).
+expect 3d-trail-superseded 2 "$FIX" '{"questions":[{"question":"Still valid? Register check: ADR-20260810-999999 (2026-08-10, superseded) -- covers X"}]}' trail-answered
+# 4 ALLOW: legacy ADR id form -- a single-token parenthetical (no comma) carries no status clause
+#    to parse, so it is untouched by the new check.
 expect 4-legacy-id 0 "$FIX" '{"questions":[{"question":"... Register check: ADR-0032 (completeness) covers this"}]}'
 # 5 ALLOW: explicit negative with terms -- a genuinely new question is the system working.
 expect 5-no-record 0 "$FIX" '{"questions":[{"question":"New option space. Register check: no controlling record -- terms: payout, settlement, virement; nearest: none"}]}'
-# 6 ALLOW: DECISIONS register section citation.
+# 6 ALLOW: DECISIONS register section citation -- single-token parenthetical, same as case 4.
 expect 6-register-row 0 "$FIX" '{"questions":[{"question":"... Register check: DECISIONS.md section 48 (open)"}]}'
 # 7 BLOCK: empty stdin -- fail closed, never fail open (ADR-20260810-231300).
 expect 7-empty-input 2 "$FIX" '' empty-input

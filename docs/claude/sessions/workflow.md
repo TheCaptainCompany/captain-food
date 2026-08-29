@@ -481,6 +481,27 @@ Register check: <record id> (<date>, <status>) -- covers <X>, silent on <Y>
 Register check: no controlling record -- terms: <terms searched>; nearest: <record id or none>
 ```
 
+**The `<status>` clause is READ, not decorative (2026-08-28, ADR-20260828-120500 / #709).** A trail
+in the two-part `(<date>, <status>)` shape that self-declares a CLOSED status — `decided`,
+`superseded`, `deferred` or `withdrawn`, the register's own closed set (docs/decisions/README.md);
+`open` is the only status that still asks — is, by its own words, citing an answer, and the hook
+refuses it: asking anyway is the round-5 call-sheet incident ADR-20260828-120500 names ("ensure
+agents do not ask questions already answered"). A single-token parenthetical with no comma (the
+pre-2026-08-21 citation style, e.g. `ADR-0032 (completeness)`) carries no status clause and is
+untouched. **The escape is a stated premise change, never a silent re-ask**: add a line
+
+```
+premise-changed: <what changed, and why the old answer no longer holds>
+```
+
+to the same trail. The hook trusts this line's PRESENCE (it cannot prove a real change happened,
+the same honesty limit as the rest of this gate) and allows the question through, logged under the
+distinct reason `trail-premise-changed` rather than folded into a plain allow — a hollow marker is
+then a decomposable defect too, not an invisible one. This mirrors, at trail weight, the envelope
+lane's `reconsiders: <OLD-KEY>` reversal path — the trail's version is cheaper because a Lane-2
+question is by definition not a decision question, so opening a new register row would be
+ceremony a clarification, relay or mechanical choice does not need.
+
 **The ENVELOPE, and the dated meaning-shift (2026-08-21 evening, ADR-20260821-103403 —
 decision-ask-unregistered).** A **decision question** — the published tiebreaker: *would the
 answer bind future work? then it is one* — carries the envelope line instead of a trail:
@@ -552,7 +573,9 @@ above stay the search surface for them.
 `AskUserQuestion` tool path is gated by `.claude/hooks/register-check.sh` (PreToolUse, fail-closed:
 the trail's presence and shape, plus the row gate above, reading the row FILES at the point of
 need — never the generated index; one log line per firing in `.claude/register-check.log` with a
-closed reason taxonomy — `trail-missing`, `trail-hollow`, `key-decided`, `key-superseded`,
+closed reason taxonomy — `trail-missing`, `trail-hollow`, `trail-answered` (a trail whose OWN
+`(<date>, <status>)` clause self-declares a closed status, ADR-20260828-120500 / #709; ALLOW logs
+`trail-premise-changed` when the escape hatch fires), `key-decided`, `key-superseded`,
 `key-deferred`, `key-withdrawn`, `key-counsel-owned`, `key-legacy` — plus the keys hit, so hollow
 trails and stale-decision citations stay decomposable defects); questions travelling as PROSE —
 run reports, decision-queue sections, PR/issue comments, register rows, decision forms — are bound

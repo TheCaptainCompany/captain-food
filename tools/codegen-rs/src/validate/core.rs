@@ -1820,6 +1820,23 @@ pub(crate) fn validate(model: &Model) -> Report {
                             }
                         }
                     }
+                    // `{{ root.path }}` template bindings vs the bound api type (§25, #468/#529 model):
+                    // the mechanism lives in `validate/screen_bindings.rs` (`screen_binding_roots` +
+                    // `first_unknown_segment`), proven by that module's unit tests and confirmed
+                    // red-first (a planted `cart.totalAmoun` typo passed `make validate` before this
+                    // rule existed). DELIBERATELY NOT WIRED HERE YET: run against the whole real
+                    // corpus it reds 13 times outside the `cart` screen this dispatch fixes —
+                    // `restaurant_backoffice.yaml#order_conversation` binds the STAFF-ONLY
+                    // `ConversationInternalNotes` root to the CUSTOMER-facing `OrderConversation`'s
+                    // `status`/`messages` fields (a real cross-type mixup, not a rename),
+                    // `restaurant_frontoffice.yaml#restaurant`'s `coverUrl`/`logoUrl`/`deliveryTime`
+                    // are an ALREADY-DECLARED gap (line ~316) whose widgets are still live (removing
+                    // them is its own screen's worth of #468-shaped work), and
+                    // `rider.yaml#job_detail`/`cart.restaurantName` want a `restaurantName` no
+                    // `DeliveryJob`/`Cart` field carries at all. None of the 13 is a same-file trivial
+                    // rename to an existing field, so wiring this now would need weakening it (skip
+                    // list, warning-only, or a single-screen carve-out) to go green — disallowed.
+                    // Left un-wired, evidenced by tests, for the architect to file as scoped follow-up.
                     // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
                     // ADR-0032-style bidirectional completeness). The defect class this kills
                     // forever: the map keyed a bare `CANCELLED` that matched NO enum member, so
