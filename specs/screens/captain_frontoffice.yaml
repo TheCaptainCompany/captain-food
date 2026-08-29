@@ -248,7 +248,7 @@ screens:
       - { component: topbar }
       - { type: search_bar_active, id: search_input, placeholder: { $ref: 'captain_frontoffice.translations.yaml#/search.placeholder' }, autofocus: true, back_button: true, on_change: { type: search_query, query: "{{ search_input.value }}" } }
       - type: conditional_section
-        condition: search_input.value == ""
+        condition: search_input.value == ''
         if_true:
           - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.recent' }, visible_when: recent_searches.length > 0, content: [{ type: list, items: "{{ recent_searches }}", item_action: { type: set_search, query: "{{ item }}" } }] }
           - { type: section, title: { $ref: 'captain_frontoffice.translations.yaml#/search.popular' }, content: [{ type: category_grid, columns: 4, items: "{{ popular_categories }}", item_type: category_tile }] }

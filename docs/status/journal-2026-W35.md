@@ -3,6 +3,21 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔧 **2026-08-29 — [#728 "The condition grammar accepts double-quoted string literals the
+> validator's status-completeness tokeniser never scans"](https://github.com/TheCaptainCompany/captain-food/issues/728)
+> (overnight run, third chunk): one grammar, one tokeniser — string literals in SDUI conditions are
+> single-quoted ONLY.** Option B (one spelling) over option A (teach `collect_status_tokens` double
+> quotes): a synonym every future scanner must know is a standing tax; shrinking the grammar to what
+> the corpus says costs one respelled utterance. Red-first: `parse_quoted` narrowed, both reds seen
+> verbatim (`every_generated_condition_parses` on `captain_frontoffice/search`'s
+> `search_input.value == ""` — the corpus-walk gate catching the double-quoted form — and
+> `the_corpus_shapes_parse_and_evaluate` panicking at the same expression); then the one corpus
+> utterance respelled to `== ''` (eval-identical), `== ""` pinned into
+> `unknown_constructs_are_parse_errors` as a permanent red-path case. The trade (beck): a
+> double-quoted status token is now caught by the web corpus gate (`make rust`) as a loud ParseError
+> + fail-closed render, not by `screen-status-token-unknown` (`make validate`) — never a silent
+> pass.
+
 > 🔧 **2026-08-29 — [#717 "Wire the screen-binding gate: 13 template bindings on three screens name
 > fields their types don't have"](https://github.com/TheCaptainCompany/captain-food/issues/717)
 > (overnight run, checkpoint pending): the §25 screen-binding rule is WIRED full-strength and the
