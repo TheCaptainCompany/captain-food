@@ -37,10 +37,15 @@ use crate::subscriptions::SubscriptionEvent;
 /// the page may not say it is.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum OrderRead {
-    /// Nobody has answered yet: not attempted, errored, or refused by the transport. The page
-    /// makes NO claim about the order in this state.
+    /// Nobody has answered yet: not attempted, or refused by design (the anonymous transport
+    /// asking the CUSTOMER-guarded read). The page makes NO claim about the order in this state.
     #[default]
     Unresolved,
+    /// The read FAILED for real (#472, `graphql::classify_resolve`): a transport/contract failure
+    /// on a path that IS allowed to ask. Renders the staleness reassurance — the order is
+    /// recorded, tracking is not refreshing — NEVER the not-found hero: a transient failure must
+    /// never tell a paid customer their order vanished.
+    Failed,
     /// The read answered, explicitly: no such order is visible to this caller. Renders the
     /// not-found state — never an existence oracle (a stranger and a bad id look identical).
     Absent,
@@ -79,8 +84,8 @@ impl TrackingState {
     /// not-found hero regardless of what the order was actually doing (PROP-20260809-021351 §2, G6).
     ///
     /// The three cases are separable HERE and nowhere downstream, because `render_path_with`
-    /// distinguishes them by construction: a resolver `Err` (refused, transport error) leaves the
-    /// key ABSENT from the map, while a resolver that answers null inserts `Value::Null`.
+    /// distinguishes them by construction: a skipped/failed resolver leaves the key ABSENT from
+    /// the map, while a resolver that answers null inserts `Value::Null`.
     pub fn from_resolved(order_id: Uuid, data: &Map<String, Value>) -> Self {
         let order = match data.get("order") {
             None => OrderRead::Unresolved,
@@ -88,6 +93,17 @@ impl TrackingState {
             Some(v) => OrderRead::Present(v.clone()),
         };
         Self { order_id, order }
+    }
+
+    /// Build from a full [`RenderContext`] (#472) — [`from_resolved`](Self::from_resolved) plus
+    /// the failed-read distinction: a read `classify_resolve` marked FAILED becomes
+    /// [`OrderRead::Failed`], which renders the staleness state instead of the silent shell.
+    pub fn from_context(order_id: Uuid, ctx: &crate::renderer::RenderContext) -> Self {
+        let mut state = Self::from_resolved(order_id, &ctx.data);
+        if matches!(state.order, OrderRead::Unresolved) && ctx.binding_failed("order") {
+            state.order = OrderRead::Failed;
+        }
+        state
     }
 
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.
@@ -309,8 +325,11 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
         .map(Vec::len)
         .unwrap_or(0);
     let unresolved = matches!(state.order, OrderRead::Unresolved);
+    let failed = matches!(state.order, OrderRead::Failed);
 
     let not_found = crate::i18n::resolve("order.not_found", &locale);
+    let tracking_stale = crate::i18n::resolve("order.error.tracking_stale", &locale);
+    let retry = crate::i18n::resolve("common.error.retry", &locale);
     view! {
         <main id="app" data-hydrate="order_tracking">
             {match hero {
@@ -335,6 +354,16 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
                 // rather than being invented here. Until then: silence, which is honest.
                 None if unresolved => view! {
                     <section data-c="order_status_hero" data-status="PENDING"></section>
+                }.into_any(),
+                // The read FAILED for real (#472): the reassurance state — the order is recorded,
+                // the tracking read is not refreshing. STATIC, user-initiated retry (a same-URL
+                // anchor), never an auto-refetch loop (ADR-20260810-231300). Distinct from the
+                // not-found hero below, which only an ANSWERED read may claim.
+                None if failed => view! {
+                    <section data-c="order_status_hero" data-status="PENDING" data-error="true">
+                        <p data-i18n="order.error.tracking_stale">{tracking_stale.clone()}</p>
+                        <a href="" data-c="retry_button" role="button">{retry.clone()}</a>
+                    </section>
                 }.into_any(),
                 // The order WAS read and exists — the bundle just has no words for its status
                 // (graphql F3, PR #586 checkpoint: a STALE WASM bundle served next to a newer

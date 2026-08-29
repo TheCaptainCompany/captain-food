@@ -175,10 +175,9 @@ impl HandWrittenScreen {
                 locale,
             ),
             HandWrittenScreen::OrderTracking => crate::tracking::render_tracking_html(
-                crate::tracking::TrackingState::from_resolved(
-                    order_id_of(matched),
-                    &ctx.data,
-                ),
+                // #472: from_context, so a FAILED order read renders the staleness reassurance
+                // instead of the silent shell (and never the not-found hero).
+                crate::tracking::TrackingState::from_context(order_id_of(matched), ctx),
                 locale,
             ),
         }
@@ -235,7 +234,7 @@ pub mod mount {
         let tenant = crate::router::Surface::slug_of(&host).map(str::to_string);
 
         wasm_bindgen_futures::spawn_local(async move {
-            let ctx = resolve_requirements(&transport, &matched, &locale).await;
+            let ctx = resolve_requirements(&transport, role, &matched, &locale).await;
             match hand_written {
                 HandWrittenScreen::Checkout => mount_checkout(tenant, locale, ctx),
                 HandWrittenScreen::OrderTracking => {
@@ -321,6 +320,7 @@ pub mod mount {
     /// the same loop the SDUI path runs, so a hand-written screen is not a second data model.
     async fn resolve_requirements(
         transport: &HttpTransport,
+        role: Role,
         matched: &RouteMatch,
         locale: &str,
     ) -> RenderContext {
@@ -330,8 +330,15 @@ pub mod mount {
             for (k, v) in matched.param_args(*resolver) {
                 vars.insert(k, v);
             }
-            if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
-                ctx.insert_resolved(resolver.as_str(), value);
+            // #472: same classification as the SDUI paths — skip-by-design stays silent, a real
+            // failure marks the binding failed (tracking's staleness state, checkout untouched).
+            let result = crate::graphql::execute_resolver(transport, *resolver, vars).await;
+            match crate::graphql::classify_resolve(role, *resolver, result) {
+                crate::graphql::ResolveOutcome::Resolved(value) => {
+                    ctx.insert_resolved(resolver.as_str(), value)
+                }
+                crate::graphql::ResolveOutcome::SkippedByDesign => {}
+                crate::graphql::ResolveOutcome::Failed(_) => ctx.insert_failed(resolver.as_str()),
             }
         }
         ctx
@@ -358,7 +365,7 @@ pub mod mount {
         use crate::tracking::TrackingState;
 
         let order_id = super::order_id_of(&matched);
-        let state = RwSignal::new(TrackingState::from_resolved(order_id, &ctx.data));
+        let state = RwSignal::new(TrackingState::from_context(order_id, &ctx));
         {
             let locale = locale.clone();
             leptos::mount::mount_to_body(move || {

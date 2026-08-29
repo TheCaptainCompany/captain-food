@@ -49,6 +49,21 @@ impl Role {
             Role::External => "external",
         }
     }
+
+    /// The `scalars.yaml#/UserType` token this role path carries (#472) — the vocabulary
+    /// `ResolverKey::roles()` (api.yaml `roles:`, verbatim) speaks. Mirrors `segment()`'s
+    /// mirror-honesty rule: one closed set, spelled once.
+    pub fn user_type(&self) -> &'static str {
+        match self {
+            Role::Public => "PUBLIC",
+            Role::Customer => "CUSTOMER",
+            Role::RestaurantAccount => "RESTAURANT_ACCOUNT",
+            Role::Restaurant => "RESTAURANT",
+            Role::Rider => "RIDER",
+            Role::Admin => "ADMIN",
+            Role::External => "EXTERNAL",
+        }
+    }
 }
 
 /// What can go wrong BELOW the resolver layer — network, HTTP, or the GraphQL envelope itself.
@@ -173,6 +188,51 @@ pub enum ResolverError {
     /// allowlist and the served schema (should be impossible while the validator gates both).
     #[error("response data has no `{operation}` field")]
     MissingOperation { operation: &'static str },
+}
+
+/// One resolver read, CLASSIFIED (#472): the type that makes "skip" and "failure" different
+/// states, so no render path can conflate them again. Before this type existed every call site
+/// read `if let Ok(value) = execute_resolver(...)` — the else-branch was unwritable because a
+/// role-guard refusal (expected, documented: the anonymous SSR transport asking a
+/// CUSTOMER-guarded read) and a real transport failure arrived as the same `Err`.
+#[derive(Debug)]
+pub enum ResolveOutcome {
+    /// The read answered — bind it.
+    Resolved(Value),
+    /// The read was never answerable ON THIS PATH, by design: a declared spec `gap` (fails closed
+    /// before any network) or a refusal of a resolver whose bound query does not admit this
+    /// path's role (`ResolverKey::roles()`). Silent — the shell renders and hydration owns the
+    /// data (the #92/#420 anonymous-SSR posture).
+    SkippedByDesign,
+    /// A REAL failure on a read this role IS allowed to ask — network, HTTP, GraphQL contract,
+    /// malformed envelope. The caller renders the ERROR state (distinct from the empty state) and
+    /// the SSR boundary counts it. Never silent.
+    Failed(ResolverError),
+}
+
+/// Classify one resolver outcome for the role path that asked (#472). Structural, not textual:
+/// the skip/failure split reads the spec's own `roles:` declaration (emitted onto
+/// [`ResolverKey::roles`]), never the error string.
+pub fn classify_resolve(
+    role: Role,
+    key: ResolverKey,
+    result: Result<Value, ResolverError>,
+) -> ResolveOutcome {
+    match result {
+        Ok(value) => ResolveOutcome::Resolved(value),
+        // A declared gap fails closed before any network — the screen's gap fallback owns it.
+        Err(ResolverError::GapBinding { .. }) => ResolveOutcome::SkippedByDesign,
+        Err(e) => {
+            let roles = key.roles();
+            if !roles.is_empty() && !roles.contains(&role.user_type()) {
+                // This path's role may not ask this query at all: the refusal is the documented
+                // posture, not an incident. (Empty `roles` = open to every path.)
+                ResolveOutcome::SkippedByDesign
+            } else {
+                ResolveOutcome::Failed(e)
+            }
+        }
+    }
 }
 
 /// Execute an allowlisted resolver: the ONLY public read entry point of the crate.

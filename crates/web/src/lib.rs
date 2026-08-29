@@ -19,6 +19,7 @@ use shared_types::HealthDto;
 pub mod actions;
 pub mod auth;
 pub mod checkout;
+pub mod condition;
 pub mod executor;
 pub mod generated;
 pub mod graphql;

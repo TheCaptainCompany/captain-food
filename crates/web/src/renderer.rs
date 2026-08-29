@@ -15,9 +15,12 @@
 //! auditable against the spec, restyled without re-architecture. Non-SDUI screens (`sdui: false`)
 //! never reach this renderer: checkout.rs / tracking.rs own their markup.
 
+use std::collections::BTreeSet;
+
 use leptos::prelude::*;
 use serde_json::{Map, Value};
 
+use crate::condition::Condition;
 use crate::generated::registry::ComponentKind;
 use crate::generated::screens::{Node, PropValue, Screen};
 use crate::i18n;
@@ -31,6 +34,13 @@ use crate::i18n;
 #[derive(Debug, Clone, Default)]
 pub struct RenderContext {
     pub data: Map<String, Value>,
+    /// Resolver reads that FAILED for real (#472) — transport/contract failures on a read this
+    /// role path is allowed to ask, keyed like `data` (spec key + aliases). NOT the skip-by-design
+    /// outcomes (declared gaps, role-refused reads on the anonymous SSR path), which leave no
+    /// trace here: a failed binding renders its ERROR state, a skipped one its empty/shell state,
+    /// and conflating the two is exactly the "Commande introuvable over a transient failure"
+    /// defect this field exists to prevent.
+    failed: BTreeSet<String>,
     pub locale: String,
     /// The Stripe publishable TEST key the server was configured with, already PARSED (#440):
     /// `None` = absent/empty/malformed = the checkout shell renders its degraded state. Carried on
@@ -42,7 +52,33 @@ pub struct RenderContext {
 
 impl RenderContext {
     pub fn new(locale: &str) -> Self {
-        Self { data: Map::new(), locale: locale.to_string(), stripe_publishable_key: None }
+        Self {
+            data: Map::new(),
+            failed: BTreeSet::new(),
+            locale: locale.to_string(),
+            stripe_publishable_key: None,
+        }
+    }
+
+    /// Record one resolver read as FAILED (#472), under the same aliases `insert_resolved` uses.
+    pub fn insert_failed(&mut self, resolver_key: &str) {
+        let mut parts = resolver_key.splitn(2, '.');
+        let first = parts.next().unwrap_or(resolver_key);
+        if let Some(second) = parts.next() {
+            if second.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                self.failed.insert(format!("{second}_{first}"));
+            }
+        }
+        self.failed.insert(first.to_string());
+        self.failed.insert(resolver_key.to_string());
+    }
+
+    /// Whether the resolver feeding this `{{ path }}` binding failed for real (#472) — matched on
+    /// the binding's ROOT segment, the name resolver results are stored under.
+    pub fn binding_failed(&self, raw: &str) -> bool {
+        let path = raw.split('|').next().unwrap_or(raw).trim();
+        let root = path.split('.').next().unwrap_or(path);
+        self.failed.contains(root) || self.failed.contains(path)
     }
 
     /// Store one resolver result under its spec key + template aliases (see type docs).
@@ -136,6 +172,33 @@ fn children_views(node: &Node, ctx: &RenderContext) -> Vec<AnyView> {
     node.children.iter().map(|c| render_node(c, ctx)).collect()
 }
 
+/// Whether the item-list binding this node renders from FAILED for real (#472) — checked on the
+/// `items` prop (and `cart_lines`' alternative `lines` prop).
+fn items_binding_failed(node: &Node, ctx: &RenderContext) -> bool {
+    ["items", "lines"].iter().any(|key| match node.prop(key) {
+        Some(PropValue::Binding(path)) => ctx.binding_failed(path),
+        _ => false,
+    })
+}
+
+/// The per-binding ERROR state (#472, graphql-architect blocking finding): a read that FAILED
+/// renders this — DISTINCT from the empty state a read that ANSWERED empty renders. The copy is
+/// translation-keyed (never the transport string — that is server internals), and the state is
+/// STATIC: retry is the user's act (a same-URL anchor reload), never an auto-refetch loop
+/// (ADR-20260810-231300). Ugly-but-visible ships (holub).
+fn binding_error_state(ty: &str, copy_key: &str, ctx: &RenderContext) -> AnyView {
+    let message = i18n::resolve(copy_key, &ctx.locale);
+    let retry = i18n::resolve("common.error.retry", &ctx.locale);
+    let ty = ty.to_string();
+    view! {
+        <div data-c=ty data-error="true">
+            <p>{message}</p>
+            <a href="" data-c="retry_button" role="button">{retry}</a>
+        </div>
+    }
+    .into_any()
+}
+
 /// One restaurant row/card (discovery lists) — the fields every Restaurant read carries.
 fn restaurant_card(item: &Value) -> AnyView {
     let name = item.get("displayName").and_then(Value::as_str).unwrap_or("").to_string();
@@ -213,8 +276,55 @@ fn message_bubble_row(item: &Value, translated_label: &str) -> AnyView {
     .into_any()
 }
 
-/// Render one generated node — the registry-dispatch heart of the renderer.
+/// Evaluate a node's condition prop over the resolved data. `None` = the node declares none.
+/// `Some(Ok(bool))` = evaluated (missing data already failed CLOSED per `polarity_on_unknown`);
+/// `Some(Err(expr))` = the expression is outside the corpus grammar — the caller must be LOUD.
+fn eval_condition_prop(
+    node: &Node,
+    key: &str,
+    ctx: &RenderContext,
+    on_unevaluatable: bool,
+) -> Option<Result<bool, &'static str>> {
+    let prop = node.prop(key)?;
+    let PropValue::Text(expr) = prop else {
+        // A binding/i18n value in a condition slot is invisible to the grammar — loud, like any
+        // unknown construct (the corpus gate keeps checked-in specs out of this branch).
+        return Some(Err("<non-literal condition>"));
+    };
+    Some(match Condition::parse(expr) {
+        Err(_) => Err(expr),
+        Ok(c) => Ok(c
+            .eval(&|path| ctx.lookup(path).cloned())
+            // Fail CLOSED over missing data (#472 briefing): hidden for visible_when
+            // (on_unevaluatable = false), disabled for disabled_when (on_unevaluatable = true).
+            .unwrap_or(on_unevaluatable)),
+    })
+}
+
+/// The LOUD fail-closed render of an unparseable condition (#472): the content never renders
+/// (never silently-true), and an auditable — but invisible — marker records the expression for
+/// review tooling and tests. The SSR boundary counts it (`sdui_degraded_render_total{reason=
+/// condition_unparseable}`, emitted server-side from the static pre-scan, not from here — the
+/// renderer compiles to wasm and stays telemetry-free).
+fn condition_error_marker(expr: &str) -> AnyView {
+    let expr = expr.to_string();
+    view! { <span data-condition-error=expr hidden=true></span> }.into_any()
+}
+
+/// Render one generated node: the `visible_when` choke point, then registry dispatch. EVERY
+/// render path goes through here (screen roots, children, sheets), so a declared condition cannot
+/// be skipped by construction (#472).
 pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
+    match eval_condition_prop(node, "visible_when", ctx, false) {
+        Some(Err(expr)) => return condition_error_marker(expr),
+        Some(Ok(false)) => return ().into_any(), // hidden: absent, no DOM node at all
+        Some(Ok(true)) | None => {}
+    }
+    render_node_kind(node, ctx)
+}
+
+/// Registry dispatch for a node whose visibility gate already passed.
+fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
     let ty = node.kind.as_str();
     match node.kind {
         // ── chrome ──────────────────────────────────────────────────────────────
@@ -245,15 +355,30 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
 
         // ── layout ──────────────────────────────────────────────────────────────
         ComponentKind::Section | ComponentKind::CheckoutSection | ComponentKind::ConditionalSection => {
-            let title = prop_text(node, "title", ctx);
-            let has_title = !title.is_empty();
-            view! {
-                <section data-c=ty>
-                    {has_title.then(|| view! { <h2>{title.clone()}</h2> })}
-                    {children_views(node, ctx)}
-                </section>
+            // `conditional_section` spells its predicate TWO ways in the spec today (#472):
+            // `visible_when` (handled by the render_node choke point like every node) and
+            // `condition:` with if_true/if_false branches. Both route through the ONE evaluator.
+            // The branches arrive FLATTENED from the generator (`if_true.0.type`, …) — not
+            // renderable Nodes — so the honest render is the evaluated verdict stamped on the
+            // section (`data-cond`), with branch rendering left to the emitter follow-up noted on
+            // the PR. An unparseable `condition:` is loud, like any unknown construct.
+            match eval_condition_prop(node, "condition", ctx, false) {
+                Some(Err(expr)) => return condition_error_marker(expr),
+                verdict => {
+                    let cond = verdict.map(|v| {
+                        if v.unwrap_or(false) { "true".to_string() } else { "false".to_string() }
+                    });
+                    let title = prop_text(node, "title", ctx);
+                    let has_title = !title.is_empty();
+                    return view! {
+                        <section data-c=ty data-cond=cond>
+                            {has_title.then(|| view! { <h2>{title.clone()}</h2> })}
+                            {children_views(node, ctx)}
+                        </section>
+                    }
+                    .into_any();
+                }
             }
-            .into_any()
         }
         ComponentKind::StickyBottomBar => {
             view! { <footer data-c=ty>{children_views(node, ctx)}</footer> }.into_any()
@@ -289,6 +414,9 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
         }
         ComponentKind::List => {
             // The generic titled list (location picker's address lists): rows from the bound items.
+            if items_binding_failed(node, ctx) {
+                return binding_error_state(ty, "common.error.data_unavailable", ctx);
+            }
             let title = prop_text(node, "title", ctx);
             let rows: Vec<AnyView> = items_of(node, ctx)
                 .iter()
@@ -351,12 +479,20 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
 
         // ── discovery lists ─────────────────────────────────────────────────────
         ComponentKind::RestaurantCardGrid | ComponentKind::RestaurantCardList | ComponentKind::SearchResults => {
+            if items_binding_failed(node, ctx) {
+                return binding_error_state(ty, "common.error.data_unavailable", ctx);
+            }
             let cards: Vec<AnyView> = items_of(node, ctx).iter().map(restaurant_card).collect();
             view! { <div data-c=ty>{cards}</div> }.into_any()
         }
 
         // ── order lists ─────────────────────────────────────────────────────────
         ComponentKind::OrderList => {
+            if items_binding_failed(node, ctx) {
+                // A failed read is NEVER the empty state: "no orders" over a transient failure is
+                // a lie to both sides of the marketplace.
+                return binding_error_state(ty, "common.error.data_unavailable", ctx);
+            }
             let items = items_of(node, ctx);
             if items.is_empty() {
                 let title = prop_text(node, "empty_state.title", ctx);
@@ -406,6 +542,9 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
         ComponentKind::MessageBubble => {
             // The order chat timeline: one bubble per message (mirrors OrderList → order_card),
             // its empty state when the thread has no messages yet.
+            if items_binding_failed(node, ctx) {
+                return binding_error_state(ty, "common.error.data_unavailable", ctx);
+            }
             let items = items_of(node, ctx);
             if items.is_empty() {
                 let title = prop_text(node, "empty_state.title", ctx);
@@ -433,6 +572,10 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
 
         // ── cart ────────────────────────────────────────────────────────────────
         ComponentKind::CartLines => {
+            if items_binding_failed(node, ctx) {
+                // The cart's own copy (ux, #472): never "your cart is empty" over a failed read.
+                return binding_error_state(ty, "cart.error.load", ctx);
+            }
             let rows: Vec<AnyView> = match node.prop("lines") {
                 Some(PropValue::Binding(path)) => ctx
                     .lookup(path.trim())
@@ -461,7 +604,17 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
                 action_attrs.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone())
             };
             use crate::executor::attrs;
-            let disabled = disabled_reason.is_some();
+            // #472: `disabled_when` through the one evaluator. Fail CLOSED: unevaluatable (missing
+            // data) disables; an unparseable expression disables AND stamps the loud marker — in
+            // SSR HTML the `disabled` attribute IS the behaviour (the delegated driver never
+            // fires on a disabled control).
+            let (condition_disabled, condition_error) =
+                match eval_condition_prop(node, "disabled_when", ctx, true) {
+                    None => (false, None),
+                    Some(Ok(b)) => (b, None),
+                    Some(Err(expr)) => (true, Some(expr.to_string())),
+                };
+            let disabled = disabled_reason.is_some() || condition_disabled;
             view! {
                 <button
                     data-c=ty
@@ -474,6 +627,7 @@ pub fn render_node(node: &Node, ctx: &RenderContext) -> AnyView {
                     data-route=get(attrs::ROUTE)
                     data-sheet=get(attrs::SHEET)
                     data-number=get(attrs::NUMBER)
+                    data-condition-error=condition_error
                     disabled=disabled
                     title=disabled_reason
                 >
@@ -708,8 +862,18 @@ pub fn hydrate() {
             for (k, v) in matched.param_args(*resolver) {
                 vars.insert(k, v);
             }
-            if let Ok(value) = crate::graphql::execute_resolver(&transport, *resolver, vars).await {
-                ctx.insert_resolved(resolver.as_str(), value);
+            // #472: classify — a role-refused read on this anonymous path stays a silent skip;
+            // a REAL failure marks the binding failed so the client render shows the error
+            // state, not the empty state. No new fetch volume: the loop shape is unchanged.
+            // (The client degradation legs are RESERVED in the observability contract — no
+            // OTel in WASM, so nothing is emitted here.)
+            let result = crate::graphql::execute_resolver(&transport, *resolver, vars).await;
+            match crate::graphql::classify_resolve(surface.role(), *resolver, result) {
+                crate::graphql::ResolveOutcome::Resolved(value) => {
+                    ctx.insert_resolved(resolver.as_str(), value)
+                }
+                crate::graphql::ResolveOutcome::SkippedByDesign => {}
+                crate::graphql::ResolveOutcome::Failed(_) => ctx.insert_failed(resolver.as_str()),
             }
         }
         leptos::mount::mount_to_body(move || SduiScreen(SduiScreenProps { screen, sheets, ctx }));
@@ -930,9 +1094,19 @@ mod tests {
         assert!(!html.contains("No rider availability mutation"), "{html}");
 
         // A still-declared gap DOES render disabled with its note (the fail-closed proof moved to
-        // the passkey button, executor tests) — here: the auth sheet's passkey control.
+        // the passkey button, executor tests) — here: the auth sheet's passkey control. Since
+        // #472 the button also declares `visible_when: passkey_available`, which fails CLOSED
+        // over missing data — so the gap-note proof now supplies the condition's data, and the
+        // unresolved render is asserted hidden (the new, correct behaviour).
         let cart = Surface::RestaurantFrontoffice.screens().iter().find(|s| s.id == "cart").unwrap();
         let html = render_screen_html(cart, Surface::RestaurantFrontoffice.sheets(), ctx());
+        assert!(
+            !html.contains("WebAuthn"),
+            "passkey_available unresolved → the passkey control is hidden (fail closed): {html}"
+        );
+        let mut c = ctx();
+        c.insert_resolved("passkey_available", json!(true));
+        let html = render_screen_html(cart, Surface::RestaurantFrontoffice.sheets(), c);
         assert!(html.contains("WebAuthn"), "the passkey gap note must surface: {html}");
     }
 
@@ -1111,16 +1285,18 @@ mod tests {
     #[test]
     fn the_home_cart_fab_obeys_its_declared_condition() {
         let home = Surface::CaptainFrontoffice.screens().iter().find(|s| s.id == "home").unwrap();
+        // NOTE: the inlined design system CSS mentions the [data-c="floating_action_button"]
+        // SELECTOR on every page, so the assertion targets the rendered ELEMENT markup.
         let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), ctx());
         assert!(
-            !html.contains("data-c=\"floating_action_button\""),
+            !html.contains("<button data-c=\"floating_action_button\""),
             "no cart data → the cart FAB must be hidden (fail closed): {html}"
         );
         let mut c = ctx();
         c.insert_resolved("cart_item_count", json!(2));
         let html = render_screen_html(home, Surface::CaptainFrontoffice.sheets(), c);
         assert!(
-            html.contains("data-c=\"floating_action_button\""),
+            html.contains("<button data-c=\"floating_action_button\""),
             "a filled cart must show the FAB: {html}"
         );
     }
