@@ -507,6 +507,32 @@ pub mod read_authorization {
     pub fn lag_positions(lag: i64) {
         lag_gauge().record(lag, &[]);
     }
+
+    fn sdui_degraded_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::SDUI_DEGRADED_RENDER_TOTAL).build())
+    }
+
+    /// `sdui_degraded_render_total{screen, resolver, reason, correlation_id}` (#472) — a DEFECT
+    /// counter, the `checkout_degraded_render_total` pattern at the SSR render boundary: a page
+    /// whose declared read FAILED for real (or whose declared condition expression could not be
+    /// parsed) shipped its degraded/error state. A role-refused read on the anonymous SSR
+    /// transport is a SKIP BY DESIGN and is never counted. `reason` is the contract's bounded set
+    /// (`resolver_failed` | `condition_unparseable`; `client_*` legs reserved, no OTel in WASM);
+    /// `correlation_id` is the render's own id so a degraded page joins its read-path spans.
+    /// Emitted from `server::hosts` (the framework boundary) — `web` compiles to wasm and stays
+    /// telemetry-free. Alert on any sustained non-zero rate.
+    pub fn sdui_degraded_render(screen: &str, resolver: &str, reason: &str, correlation_id: &str) {
+        sdui_degraded_counter().add(
+            1,
+            &[
+                KeyValue::new("screen", screen.to_string()),
+                KeyValue::new("resolver", resolver.to_string()),
+                KeyValue::new("reason", reason.to_string()),
+                KeyValue::new("correlation_id", correlation_id.to_string()),
+            ],
+        );
+    }
 }
 
 /// Technical metrics for the `cart-price` contract (#451): the read-side pricing seam.

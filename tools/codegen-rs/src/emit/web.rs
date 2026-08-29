@@ -536,6 +536,32 @@ pub(crate) fn emit_web_data_layer(model: &Model) -> String {
         };
         out.push_str(&format!("            ResolverKey::{} => {},\n", dotted_variant(&r.key), v));
     }
+    out.push_str("        }\n    }\n\n");
+
+    // #472: the bound query's `roles:` list, verbatim from api.yaml — so the CLIENT can tell a
+    // role-refused read (skip by design on that path, e.g. the anonymous SSR transport asking a
+    // CUSTOMER-guarded query) from a REAL transport failure, structurally, with no error-string
+    // matching. Empty = the query declares no roles (open to every path), or a `gap` binding.
+    let query_roles: BTreeMap<&str, &Vec<String>> =
+        api.queries.iter().map(|q| (q.name.as_str(), &q.roles)).collect();
+    out.push_str("    /// The UserType tokens (scalars.yaml#/UserType) the bound query admits (#472) —\n");
+    out.push_str("    /// verbatim from api.yaml `roles:`. Empty = open to every role path (or a `gap`\n");
+    out.push_str("    /// binding, which never reaches a transport at all). A refusal on a path whose role\n");
+    out.push_str("    /// is NOT in this set is a SKIP BY DESIGN, not a failure.\n");
+    out.push_str("    pub fn roles(&self) -> &'static [&'static str] {\n        match self {\n");
+    for r in &resolvers {
+        let roles = r
+            .query
+            .as_deref()
+            .and_then(|q| query_roles.get(q))
+            .map(|rs| rs.iter().map(|x| format!("\"{}\"", rust_str(x))).collect::<Vec<_>>())
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "            ResolverKey::{} => &[{}],\n",
+            dotted_variant(&r.key),
+            roles.join(", ")
+        ));
+    }
     out.push_str("        }\n    }\n}\n");
 
     // ── Actions (writes + client behaviours) ─────────────────────────────────────────────────

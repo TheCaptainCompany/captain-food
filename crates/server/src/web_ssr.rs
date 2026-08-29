@@ -68,6 +68,15 @@ pub struct SchemaTransport {
     request_now: crate::graphql::service_clock::RequestNow,
 }
 
+impl SchemaTransport {
+    /// The render's ONE correlation id (#472) — the same id every binding's read-path spans
+    /// carry, exposed so the SSR degrade boundary (`hosts::app_page`) can stamp it on
+    /// `sdui_degraded_render_total` and a degraded page joins its own reads in telemetry.
+    pub fn correlation_id(&self) -> String {
+        self.correlation_id.0.to_string()
+    }
+}
+
 #[async_trait]
 impl Transport for SchemaTransport {
     async fn execute(&self, document: &str, variables: Value) -> Result<Value, TransportError> {

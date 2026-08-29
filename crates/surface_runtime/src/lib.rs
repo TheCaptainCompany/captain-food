@@ -106,7 +106,12 @@ async fn ssr_page(gateway_url: &str, raw_host: &str, path: &str, locale: &str) -
     // would serve the DEGRADED checkout. Wiring the key into the bin that SSRs checkout is a
     // deploy-surface decision (widen the bin's scopes, or re-home/consume the key), recorded on
     // #440 rather than smuggled in here. The deployed monolith threads it (server::hosts).
-    web::router::render_path_with(&ssr_transport(gateway_url), raw_host, path, locale, None).await
+    // #472: the surface bins have no OTLP pipeline yet (the standalone-adapter telemetry gap is
+    // recorded on #358) — the page's degradations are dropped here, not counted twice; the
+    // deployed monolith (`server::hosts::app_page`) is the counting boundary today.
+    web::router::render_path_with(&ssr_transport(gateway_url), raw_host, path, locale, None)
+        .await
+        .map(|page| page.html)
 }
 
 /// Router fallback: resolve the request `Host` + path for THIS audience and serve the SDUI app —

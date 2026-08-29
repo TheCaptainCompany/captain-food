@@ -575,6 +575,10 @@
     "en": "Your cart is empty",
     "fr": "Votre panier est vide"
   },
+  "cart.error.load": {
+    "en": "We couldn't load your cart",
+    "fr": "Impossible de charger votre panier"
+  },
   "cart.promo_applied": {
     "en": "Code {code} applied — {amount} off",
     "fr": "Code {code} appliqué — {amount} de réduction"
@@ -830,6 +834,14 @@
   "common.delivery.free": {
     "en": "Free delivery",
     "fr": "Livraison gratuite"
+  },
+  "common.error.data_unavailable": {
+    "en": "We couldn't load this content.",
+    "fr": "Impossible de charger le contenu."
+  },
+  "common.error.retry": {
+    "en": "Retry",
+    "fr": "Réessayer"
   },
   "common.filter.sort": {
     "en": "Sort",
@@ -1102,6 +1114,10 @@
   "order.empty.title": {
     "en": "No orders yet",
     "fr": "Aucune commande"
+  },
+  "order.error.tracking_stale": {
+    "en": "Your order is safely recorded — tracking just isn't refreshing.",
+    "fr": "Votre commande est bien enregistrée — le suivi ne s'actualise pas."
   },
   "order.eta": {
     "en": "Estimated arrival",

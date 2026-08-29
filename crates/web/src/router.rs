@@ -172,12 +172,59 @@ pub fn resolve(host: &str, path: &str) -> (Surface, Option<RouteMatch>) {
 #[cfg(feature = "ssr")]
 const HYDRATE_SCRIPT: &str = "<script type=\"module\">import init, { hydrate } from '/assets/web.js'; await init(); hydrate();</script>";
 
+/// One SSR'd page + what degraded while building it (#472). The renderer stays telemetry-free
+/// (it compiles to wasm), so the DEGRADATIONS travel out to the server boundary, which counts
+/// them (`sdui_degraded_render_total{screen, resolver, reason}` — specs/observability.yaml,
+/// read-authorization).
+#[cfg(feature = "ssr")]
+pub struct RenderedPage {
+    pub html: String,
+    pub degraded: Vec<Degradation>,
+}
+
+/// One degraded fact of one page render (#472).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Degradation {
+    /// The generated screen id (a closed set).
+    pub screen: &'static str,
+    /// The failing resolver's spec key — `"none"` for condition defects, which belong to the
+    /// screen tree, not a read.
+    pub resolver: &'static str,
+    pub reason: DegradedReason,
+}
+
+/// The contract's bounded server-leg reason set (`client_*` legs are reserved in the contract,
+/// unemitted — no OTel in WASM).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DegradedReason {
+    /// A REAL transport/contract failure on a read this role path is allowed to ask
+    /// (`graphql::classify_resolve` — a role-refused read is a skip by design, never counted).
+    ResolverFailed,
+    /// A declared condition expression outside the corpus grammar reached a render (fails closed
+    /// + loud DOM marker; the codegen corpus gate keeps checked-in specs out of here).
+    ConditionUnparseable,
+}
+
+impl DegradedReason {
+    /// The contract's label value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DegradedReason::ResolverFailed => "resolver_failed",
+            DegradedReason::ConditionUnparseable => "condition_unparseable",
+        }
+    }
+}
+
 /// Server-side render with LIVE data (#92): resolve the matched screen's `data_requirements`
 /// through the given transport (the BFF passes its in-process `SchemaTransport` — no loopback
 /// HTTP) before rendering, exactly like the hydrate path (route `:params` feed resolver args), so
 /// the initial HTML carries the real content the screens spec contracts
-/// (`rendering_strategy: SSR_first`). A resolver error or a null skips that one binding (the shell
-/// slot renders empty; hydrate retries) — SSR must degrade, never 500.
+/// (`rendering_strategy: SSR_first`). Since #472 a resolver outcome is CLASSIFIED
+/// (`graphql::classify_resolve`): a skip-by-design (declared gap, role-refused read on this
+/// anonymous transport) leaves the binding silently unresolved (the shell slot renders empty;
+/// hydrate retries), while a REAL failure marks the binding FAILED — the renderer shows its error
+/// state, never the empty state — and is reported on [`RenderedPage::degraded`]. Either way SSR
+/// must degrade, never 500.
 ///
 /// #420 removed BOTH conditions this fetch used to carry, and each removal is a separate decision:
 ///
@@ -205,22 +252,44 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
     path: &str,
     locale: &str,
     stripe_publishable_key: Option<&crate::stripe::PublishableKey>,
-) -> Option<String> {
+) -> Option<RenderedPage> {
+    use crate::graphql::ResolveOutcome;
     use crate::renderer::RenderContext;
     let (surface, matched) = resolve(host, path);
     let matched = matched?;
     let mut ctx = RenderContext::new(locale);
     ctx.stripe_publishable_key = stripe_publishable_key.cloned();
+    let mut degraded: Vec<Degradation> = Vec::new();
     for resolver in matched.screen.data_requirements {
         let mut vars = serde_json::Map::new();
         for (k, v) in matched.param_args(*resolver) {
             vars.insert(k, v);
         }
-        if let Ok(value) = crate::graphql::execute_resolver(transport, *resolver, vars).await {
-            ctx.insert_resolved(resolver.as_str(), value);
+        let result = crate::graphql::execute_resolver(transport, *resolver, vars).await;
+        match crate::graphql::classify_resolve(surface.role(), *resolver, result) {
+            ResolveOutcome::Resolved(value) => ctx.insert_resolved(resolver.as_str(), value),
+            ResolveOutcome::SkippedByDesign => {}
+            ResolveOutcome::Failed(_) => {
+                ctx.insert_failed(resolver.as_str());
+                degraded.push(Degradation {
+                    screen: matched.screen.id,
+                    resolver: resolver.as_str(),
+                    reason: DegradedReason::ResolverFailed,
+                });
+            }
         }
     }
-    Some(render_matched(&matched, surface, ctx, host, locale))
+    // Condition-defect pre-scan (#472): parseability is a STATIC property of the screen tree
+    // (never data-dependent), so one pure walk reports every expression the renderer will fail
+    // closed on — the `condition_unparseable` leg of the degradation counter.
+    for _defect in crate::condition::condition_defects(matched.screen.tree) {
+        degraded.push(Degradation {
+            screen: matched.screen.id,
+            resolver: "none",
+            reason: DegradedReason::ConditionUnparseable,
+        });
+    }
+    Some(RenderedPage { html: render_matched(&matched, surface, ctx, host, locale), degraded })
 }
 
 /// Server-side render the page for `host` + `path` — the data-less entry (SSR SHELL only; the
@@ -372,7 +441,7 @@ mod tests {
                         "address": { "city": "Tours" } }] })),
             Ok(json!({ "restaurants": [] })),
         ]);
-        let html = render_path_with(&fake, "captain.food", "/", "fr", None).await.expect("home renders");
+        let html = render_path_with(&fake, "captain.food", "/", "fr", None).await.expect("home renders").html;
         // The SSR HTML carries the restaurant — no client fetch needed for first paint (#92).
         assert!(html.contains("Chez Test"), "{html}");
         assert!(html.contains("data-slug=\"chez-test\""));
@@ -391,7 +460,7 @@ mod tests {
         ))]);
         let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr", None)
             .await
-            .expect("order history renders");
+            .expect("order history renders").html;
         assert!(html.contains("data-hydrate=\"order_history\""));
         assert_eq!(fake.call_count(), 1, "the screen's declared read is attempted");
         assert!(html.contains("data-empty=\"true\""), "a refused read degrades, never 500s: {html}");
@@ -425,7 +494,7 @@ mod tests {
             let fake = FakeTransport::scripted(vec![Ok(order())]);
             let html = render_path_with(&fake, "chez-test.captain.food", path, locale, None)
                 .await
-                .expect("the confirmation route renders");
+                .expect("the confirmation route renders").html;
             assert_eq!(fake.call_count(), 1, "the page must READ the order it is about: {locale}");
             assert!(html.contains(sentence), "{locale}: no human status sentence in {html}");
             assert!(html.contains("data-status=\"ACCEPTED\""), "{locale}: {html}");
@@ -444,7 +513,7 @@ mod tests {
         let fake = FakeTransport::scripted(vec![Ok(json!({ "order": null }))]);
         let html = render_path_with(&fake, "chez-test.captain.food", path, "fr", None)
             .await
-            .expect("the confirmation route still renders");
+            .expect("the confirmation route still renders").html;
         assert!(html.contains("data-status=\"UNKNOWN\""), "{html}");
         assert!(html.contains("Commande introuvable"), "the not-found copy is resolved too: {html}");
     }
@@ -494,7 +563,7 @@ mod tests {
         ]);
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
-            .expect("the checkout route renders");
+            .expect("the checkout route renders").html;
         assert_eq!(fake.call_count(), 4, "one read per declared resolver");
         assert!(html.contains("2 items"), "the real line count: {html}");
         assert!(html.contains("23,50 EUR"), "the real total, formatted: {html}");
@@ -516,7 +585,7 @@ mod tests {
         ]);
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
-            .expect("the checkout route renders");
+            .expect("the checkout route renders").html;
         assert!(html.contains("id=\"payment_failed_state\""), "{html}");
         assert!(html.contains("Paiement refusé"), "{html}");
         assert!(html.contains("Votre carte n'a pas été débitée. Votre panier est intact."), "{html}");
@@ -560,7 +629,7 @@ mod tests {
         let html =
             render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", key.as_ref())
                 .await
-                .expect("checkout renders");
+                .expect("checkout renders").html;
         assert!(html.contains("data-pk=\"pk_test_abc123\""), "{html}");
         assert!(html.contains("js.stripe.com"), "the checkout shell carries stripe.js: {html}");
         assert!(!html.contains("payment_unavailable_state"), "{html}");
@@ -568,10 +637,63 @@ mod tests {
         let fake = scripted();
         let html = render_path_with(&fake, "chez-test.captain.food", "/checkout", "fr", None)
             .await
-            .expect("checkout renders");
+            .expect("checkout renders").html;
         assert!(html.contains("id=\"payment_unavailable_state\""), "{html}");
         assert!(!html.contains("data-pk="), "{html}");
         assert!(!html.contains("js.stripe.com"), "no key, no Stripe request: {html}");
+    }
+
+    /// #472 (graphql-architect, blocking severity): a transport `Err` on a resolver this role IS
+    /// allowed to ask must render an ERROR state — never the null-data empty state. A transient
+    /// failure must never tell a paid customer their cart/order does not exist. Seen RED against
+    /// the `if let Ok(value) = execute_resolver(...)` swallow (red evidence in the introducing
+    /// commit message).
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn a_transport_failure_renders_the_error_state_not_the_empty_state() {
+        use crate::graphql::test_support::FakeTransport;
+        // /cart declares exactly one read, `cart.current`, whose bound query admits PUBLIC — so a
+        // transport failure here is a REAL failure, not the documented anonymous-SSR skip.
+        let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Network(
+            "connection reset by peer".into(),
+        ))]);
+        let html = render_path_with(&fake, "chez-test.captain.food", "/cart", "fr", None)
+            .await
+            .expect("the cart route still renders — degraded, never 500").html;
+        assert!(html.contains("data-error=\"true\""), "an error state must render: {html}");
+        assert!(
+            html.contains("Impossible de charger votre panier"),
+            "the per-surface error copy (translation-keyed, fr): {html}"
+        );
+        assert!(html.contains("Réessayer"), "a user-initiated retry control: {html}");
+        // The transport string is server internals — it must NEVER reach the customer's HTML.
+        assert!(!html.contains("connection reset"), "no transport leak: {html}");
+        // Fail-closed composition: with the cart unresolvable, the checkout button's
+        // `disabled_when: cart.lines.length == 0` is unevaluatable → disabled.
+        assert!(html.contains("disabled"), "checkout must not be clickable over no data: {html}");
+    }
+
+    /// #472: error state and empty state are DISTINCT rendered states, per binding. A read that
+    /// ANSWERS (null or empty) is the empty state — no error marker, no retry.
+    #[cfg(feature = "ssr")]
+    #[tokio::test]
+    async fn an_answered_empty_read_is_the_empty_state_not_the_error_state() {
+        use crate::graphql::test_support::FakeTransport;
+        use serde_json::json;
+        for answered in [json!({ "current": null }), json!({ "current": { "lines": [] } })] {
+            let fake = FakeTransport::scripted(vec![Ok(answered.clone())]);
+            let html = render_path_with(&fake, "chez-test.captain.food", "/cart", "fr", None)
+                .await
+                .expect("the cart route renders").html;
+            assert!(
+                !html.contains("data-error=\"true\""),
+                "an ANSWERED read is never an error state ({answered}): {html}"
+            );
+            assert!(
+                !html.contains("Impossible de charger votre panier"),
+                "no error copy on an answered read ({answered}): {html}"
+            );
+        }
     }
 
     #[cfg(feature = "ssr")]
