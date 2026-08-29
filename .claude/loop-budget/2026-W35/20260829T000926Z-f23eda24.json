@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 3300,
+  "recordedAt": "2026-08-29T00:09:26.816Z",
+  "branch": "715-d-row-reconciliation",
+  "note": "issue #715 D-row reconciliation: 14 keys promoted, two stale table cells fixed; own start blocked by a live concurrent timer (worktree-agent-a189fef4c22b71cd6, then worktree-agent-a48db410b480d1fd8), sandbox classifier refused stop/reset of another session's timer"
+}
