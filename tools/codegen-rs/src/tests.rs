@@ -4326,7 +4326,7 @@ keys:
     /// it turns "someone would have to be reviewed adding a second call" from a hope into a build
     /// failure.
     #[test]
-    fn trigger_envelope_laned_has_exactly_one_call_site() {
+    fn trigger_envelope_laned_call_sites_are_audited() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .canonicalize()
@@ -4387,20 +4387,45 @@ keys:
             }
         }
 
-        assert_eq!(
-            call_sites.len(),
-            1,
-            "`TriggerEnvelope::laned` must have EXACTLY ONE call site; found {}:\n{}\n\n\
-             A SECOND CALL SITE IS A DESIGN EVENT, NOT A LINT. `laned` means: *I hold the fenced \
-             delivery transaction, and whatever this sink buffers I will flush into it before I \
-             commit.* The type system cannot check that claim (ADR-20260816-040239 constraint 1; \
+        // The ALLOWLIST, not a count (#595). Two routes now own a transaction to flush into, and a
+        // bare `assert_eq!(len, 2)` would let a THIRD, wrong caller land simply by deleting one of
+        // these two — the count would still read 2. Each entry is a file that has been audited
+        // against the claim `laned` makes, and the audit is recorded next to it.
+        const AUDITED: &[(&str, &str)] = &[
+            (
+                "crates/infrastructure/src/mailbox/handler.rs",
+                "handle_pm_fact — owns the fenced DELIVERY transaction; flushes via                  flush_lane_enqueues_in_tx before the verdict commits (ADR-20260816-040239).",
+            ),
+            (
+                "crates/infrastructure/src/process_manager/runner.rs",
+                "apply_record — the polling runner's LEG transaction (#595 `commit_leg`): the                  staged enqueues and the checkpoint advance commit together, so a door row can                  never outlive a position that was not consumed.",
+            ),
+        ];
+        let found: Vec<String> = call_sites
+            .iter()
+            .map(|s| s.trim_start().split(':').next().unwrap_or("").to_string())
+            .collect();
+        let unaudited: Vec<&String> =
+            found.iter().filter(|f| !AUDITED.iter().any(|(p, _)| *p == f.as_str())).collect();
+        let missing: Vec<&str> =
+            AUDITED.iter().map(|(p, _)| *p).filter(|p| !found.iter().any(|f| f == p)).collect();
+        assert!(
+            unaudited.is_empty() && missing.is_empty(),
+            "`TriggerEnvelope::laned` may only be called from an AUDITED site.\n\
+             unaudited callers: {:?}\nlisted sites that no longer call it: {:?}\n\
+             all call sites found:\n{}\n\n\
+             A NEW CALL SITE IS A DESIGN EVENT, NOT A LINT. `laned` means: *I hold a fenced \
+             transaction, and whatever this sink buffers I will flush into it before I commit.* \
+             The type system cannot check that claim (ADR-20260816-040239 constraint 1; \
              `application` cannot name a Postgres transaction), so the claim is audited by there \
-             being one place to audit. If the new caller genuinely owns a transaction and flushes \
-             the sink into it, update this guard's expected count IN THE SAME COMMIT and say so in \
-             the message — and if it does not, you have just written the bug this guard exists to \
-             catch: an enqueue that survives a verdict which never committed, i.e. a paid order \
-             with a birth message for an order that does not exist.",
-            call_sites.len(),
+             being a listed place to audit. If the new caller genuinely owns a transaction and \
+             flushes the sink into it, add it to AUDITED with the sentence that says WHICH \
+             transaction, IN THE SAME COMMIT — and if it does not, you have just written the bug \
+             this guard exists to catch: an enqueue that survives a verdict which never \
+             committed, i.e. a birth message for an order that does not exist. A site that \
+             DISAPPEARS is also a failure: a stale allowlist entry is a guard protecting nothing.",
+            unaudited,
+            missing,
             call_sites.join("\n")
         );
     }

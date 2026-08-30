@@ -9,8 +9,9 @@
 //!
 //! Declared HERE, with nothing else in the module, the guarantee is unconditional: no code anywhere
 //! — this crate included — can attach a lane sink except through [`TriggerEnvelope::laned`], and
-//! `laned` has a single call site the `trigger_envelope_laned_has_exactly_one_call_site` guard
-//! holds to one.
+//! `laned` has only AUDITED call sites — the `trigger_envelope_laned_call_sites_are_audited` guard
+//! holds it to a named allowlist, each entry carrying the sentence that says WHICH transaction that
+//! caller flushes into (#595 added the second).
 
 /// The trigger's ENVELOPE bits an event leg may reference (`from_envelope`, ADR-0041): the
 /// `domain_events` row's id (dedup keys, `cause_id`), its correlation and its occurrence time.
@@ -26,13 +27,17 @@ pub struct TriggerEnvelope {
     pub occurred_at: chrono::DateTime<chrono::Utc>,
     /// Where a ROUTED `deliver:` step stages its lane enqueue (ADR-20260816-040239). It lives on
     /// the envelope rather than in a leg parameter because it is a property of the INVOCATION
-    /// ROUTE, not of the saga: a mailbox delivery owns a fenced transaction to stage into, the
-    /// polling `ProcessManagerRunner` owns none.
+    /// ROUTE, not of the saga: a mailbox delivery owns a fenced transaction to stage into, and so
+    /// — since #595 — does the polling `ProcessManagerRunner`, whose `commit_leg` pairs the flush
+    /// with the checkpoint advance. A route that owns NO transaction (a unit test, `prepare`) still
+    /// cannot build a laned envelope, which is the whole point of the private field.
     ///
     /// `None` — the DEFAULT, and the only value on any route that cannot stage — means the routed
     /// branch is off and the legacy foreign-stream append runs unchanged. That is the
-    /// gate-then-stabilize rollback path: `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`
-    /// resolves to `None` here when OFF, so flipping it back is a config flip, never a redeploy.
+    /// gate-then-stabilize rollback path: the route's own gate
+    /// (`configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` on the mailbox route,
+    /// `#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` on the runner's) resolves to `None` here when OFF,
+    /// so flipping it back is a config flip, never a redeploy.
     ///
     /// **PRIVATE on purpose (#597)** — ADR-20260816-040239's constraint 1 ("the enqueue is never in
     /// `prepare`") used to hold by structural reading alone, guarded by nothing: any construction
@@ -57,8 +62,8 @@ impl PartialEq for TriggerEnvelope {
 }
 
 impl TriggerEnvelope {
-    /// The envelope of a trigger delivered on a route with NO lane sink (the polling runner, unit
-    /// tests): routed `deliver:` steps fall back to the legacy append.
+    /// The envelope of a trigger delivered on a route with NO lane sink (a gated-OFF route, unit
+    /// tests): routed `deliver:`/`sends:` steps fall back to the legacy append.
     ///
     /// The DEFAULT shape, and the only one a route that owns no transaction can build.
     pub fn unlaned(
@@ -69,8 +74,9 @@ impl TriggerEnvelope {
         Self { event_id, correlation_id, occurred_at, lanes: None }
     }
 
-    /// The envelope of a trigger delivered on a route that OWNS THE DELIVERY TRANSACTION the sink's
-    /// staged enqueues will be flushed into (`infrastructure::mailbox::handler::handle_pm_fact`).
+    /// The envelope of a trigger delivered on a route that OWNS THE TRANSACTION the sink's staged
+    /// enqueues will be flushed into (`infrastructure::mailbox::handler::handle_pm_fact`, and since
+    /// #595 `infrastructure::process_manager::runner`'s `commit_leg`).
     ///
     /// Calling this is a claim about the CALLER, and the claim is exactly ADR-20260816-040239's
     /// constraint 1: *I hold a fenced transaction, and whatever this sink buffers I will flush into
@@ -82,7 +88,7 @@ impl TriggerEnvelope {
     /// write, so a lane enqueue can only appear on a route that names this constructor. What it
     /// cannot carry is the claim itself: `application` cannot name a Postgres transaction without
     /// inverting the dependency rule, so there is no value for `laned` to demand as proof. The
-    /// single call site is the review surface, and this doc is its contract.
+    /// audited call-site list is the review surface, and this doc is its contract.
     pub fn laned(
         event_id: uuid::Uuid,
         correlation_id: uuid::Uuid,
@@ -92,9 +98,9 @@ impl TriggerEnvelope {
         Self { event_id, correlation_id, occurred_at, lanes: Some(lanes) }
     }
 
-    /// The lane sink a ROUTED `deliver:` step stages into, or `None` on a route that cannot stage.
-    /// Crate-internal: the generated step pipeline is the only reader, and the only writers are the
-    /// two constructors above.
+    /// The lane sink a ROUTED `deliver:` or `sends:` step stages into, or `None` on a route that
+    /// cannot stage. Crate-internal: the generated step pipeline and the hand-written wrapper seams
+    /// are the only readers, and the only writers are the two constructors above.
     pub(crate) fn lane_sink(&self) -> Option<&std::sync::Arc<dyn crate::lanes::LaneSink>> {
         self.lanes.as_ref()
     }

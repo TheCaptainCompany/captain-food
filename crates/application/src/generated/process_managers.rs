@@ -32,6 +32,7 @@ pub struct RoutedLane {
 /// when something was routed is a lane whose silence is ambiguous.
 pub const ROUTED_LANES: &[RoutedLane] = &[
     RoutedLane { actor_type: "Order", event_type: "OrderPlaced", source: "pm:PlaceOrderProcess:OrderPlaced" },
+    RoutedLane { actor_type: "Order", event_type: "PlaceReplacementOrder", source: "pm:ReclamationProcess:PlaceReplacementOrder" },
 ];
 
 /// Generated step pipelines for `processmanager.yaml#/DeliveryDispatchProcess`.

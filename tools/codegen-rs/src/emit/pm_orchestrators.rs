@@ -81,6 +81,11 @@ pub(crate) struct PmLegDef {
     pub(crate) msg: String,
     pub(crate) description: Option<String>,
     pub(crate) steps: Vec<PmStepDef>,
+    /// Commands the leg's hand-written wrapper sends that no step can express (`sends:`, #595) —
+    /// bare command names. They are NOT steps and generate no pipeline code; they are carried so
+    /// the DECLARED routed-lane table below sees them, because a lane that is watched only
+    /// because some OTHER route happens to address it is a lane one deletion away from unwatched.
+    pub(crate) sends: Vec<String>,
 }
 
 pub(crate) struct PmOrchDef {
@@ -303,11 +308,20 @@ pub(crate) fn parse_pm_orchestrators(model: &Model) -> Vec<PmOrchDef> {
                     other => panic!("{}: unknown step kind '{}'", sloc, other),
                 });
             }
+            let sends: Vec<String> = leg
+                .get("sends")
+                .and_then(|x| x.as_sequence())
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c.get("$ref").and_then(|r| r.as_str()))
+                .filter_map(|r| r.strip_prefix("commands.yaml#/").map(|n| n.to_string()))
+                .collect();
             legs.push(PmLegDef {
                 msg_file: pr.file.clone(),
                 msg,
                 description: leg.get("description").and_then(|d| d.as_str()).map(|s| s.to_string()),
                 steps,
+                sends,
             });
         }
         out.push(PmOrchDef { name: name.to_string(), state_table, ports, legs });
@@ -1639,7 +1653,17 @@ pub(crate) fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (Stri
     (trait_code, fn_code)
 }
 
-/// Emit `ROUTED_LANES` — the mailbox lanes a ROUTED `deliver:` addresses, DECLARED at runtime
+/// The `sends:` commands ROUTED through the target actor's mailbox lane — `(command, target
+/// actor)` (#595, ADR-20260829-230418 C2).
+///
+/// The `deliver:` twin of this list is [`PM_LANE_ROUTED_DELIVERS`] and it exists for the same
+/// reason: gate-then-stabilize prices a route move one route at a time, so the routed set is a
+/// RECORD of which pairs have been moved, not a predicate that sweeps every pair the moment the
+/// grammar allows it.
+pub(crate) const SENDS_LANE_ROUTED: &[(&str, &str)] = &[("PlaceReplacementOrder", "Order")];
+
+/// Emit `ROUTED_LANES` — the mailbox lanes a ROUTED `deliver:` or `sends:` addresses, DECLARED at
+/// runtime
 /// (#598).
 ///
 /// Until this table existed the routed set lived only in the codegen's own
@@ -1668,18 +1692,32 @@ fn emit_routed_lanes(pms: &[PmOrchDef]) -> String {
                     }
                 }
             }
+            // Declared wrapper-seam sends (#595): a `sends:` command addresses the lane of the
+            // actor that RECEIVES it — the same addressing `flush_lane_enqueues_in_tx` resolves —
+            // so the route is declared here on the same footing as a routed `deliver:`.
+            for command in &leg.sends {
+                if let Some(actor) = SENDS_LANE_ROUTED.iter().find_map(|(c, a)| (c == command).then_some(*a))
+                {
+                    rows.push((
+                        actor.to_string(),
+                        command.clone(),
+                        format!("pm:{}:{}", pm.name, command),
+                    ));
+                }
+            }
         }
     }
     rows.sort();
     rows.dedup();
     let mut out = String::from(
-        "\n/// One ROUTED `deliver:` target — the lane a process manager hands a fact to instead of\n\
-         /// appending to that aggregate's stream itself (ADR-20260816-040239).\n\
+        "\n/// One ROUTED target — the lane a process manager hands a message to instead of acting on\n\
+         /// that aggregate's stream itself (ADR-20260816-040239; `sends:` routes added by #595).\n\
          #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n\
          pub struct RoutedLane {\n\
          \x20   /// `actors.yaml` key of the TARGET — its mailbox lane receives the message.\n\
          \x20   pub actor_type: &'static str,\n\
-         \x20   /// `events.yaml` key of the fact handed over.\n\
+         \x20   /// The message handed over: an `events.yaml` key for a routed `deliver:` (a FACT), a\n\
+         \x20   /// `commands.yaml` key for a routed `sends:` (a REQUEST the target may refuse).\n\
          \x20   pub event_type: &'static str,\n\
          \x20   /// FROZEN door identity, first half: `pm:{ProcessManager}:{Event}`.\n\
          \x20   pub source: &'static str,\n\
