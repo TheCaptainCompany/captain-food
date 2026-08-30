@@ -31,16 +31,29 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > docs-only complement — executing
 > [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)'s
 > intent rather than deciding anything new, so no ADR. The compiler-first half is where the
-> declaration list lives: **Rust source, on purpose.** Adding an exemption can no longer be a
-> docs-only diff, because it must touch `tools/**`, which flips the path filter and un-skips the
-> whole matrix — the mechanism that hid the bug is what now makes it unspellable.
+> declaration list lives: **Rust source, on purpose.** Adding an exemption *with its declaration*
+> can no longer be a docs-only diff, because it must touch `tools/**`, which flips the path filter
+> and un-skips the whole matrix. **It is a check, not an impossibility, and the word "unspellable"
+> is reserved** (ADR-20260803-234035): a docs-only push that adds an exemption and *skips* the
+> declaration is still perfectly spellable and still lands on `main`, because that lane is a push
+> with no PR — what changed is that it now goes **loudly red on `docs-validate`, the lane that
+> edits the file**, instead of silently skipping the only job that could see it.
 >
 > **The finding that outlives this chunk**: `_exempt.yaml` was not the only `docs/**` file read by a
-> Rust test. Every other real-corpus test routes through a loader `main.rs` also calls, so
-> `make validate` covers it — but `gates_md_does_not_state_the_length_of_a_list_it_introduces` reads
-> `docs/claude/sessions/gates.md`, and `the_ride_along_count_matches_the_clauses_named` reads
+> Rust test — and the first inventory of the rest, compiled by *reading* `main.rs` for loader call
+> sites rather than by executing anything, was itself short and shipped as complete. The residue is
+> therefore recorded as a **property**: no real `docs/**` path is read from disk in `tests.rs`
+> outside a loader `main.rs` also calls, and no test requires a NAMED `docs/**` file to be present
+> in a corpus it loads. `tests.rs` breaks it in at least four places —
+> `gates_md_does_not_state_the_length_of_a_list_it_introduces` reads
+> `docs/claude/sessions/gates.md`; `the_ride_along_count_matches_the_clauses_named` reads
 > `docs/decisions/RETRIEVAL-QMD-CI.yaml` and asserts a **derived count**, the exact shape just
-> removed. Either can red `main` from a docs-only push while `ci` stays green. Reported, not fixed:
+> removed; and the review found `the_records_state_the_same_citation_corpus_as_the_code` and
+> `the_status_parser_tolerates_the_real_corpus_format_variance` by PLANTING a docs-only mutation
+> instead of reading — rewriting `.github/workflows` to a nonexistent pathspec inside
+> `ADR-20260824-205911`, after which `docs-validate`'s literal command exits **0** and `cargo test`
+> **FAILS**, reproduced on this branch. Any of them reds `main` from a docs-only push while `ci`
+> stays green. Reported, not fixed:
 > [#804](https://github.com/TheCaptainCompany/captain-food/issues/804). Work on
 > [#802](https://github.com/TheCaptainCompany/captain-food/issues/802) /
 > PR [#803](https://github.com/TheCaptainCompany/captain-food/pull/803).

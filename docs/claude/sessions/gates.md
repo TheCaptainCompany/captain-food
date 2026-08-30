@@ -6,7 +6,7 @@ Part of [`../sessions.md`](../sessions.md).
 
 | Change touches | Gate | Cost |
 |---|---|---|
-| `docs/**` only (no regeneration) | nothing, or `make validate` | seconds |
+| `docs/**` only (no regeneration) | `make validate` — never *nothing*, see below | seconds |
 | `specs/**` | `make validate`, then `make rust` before pushing | seconds, then minutes |
 | `crates/**`, `tools/**`, CI, deploy | `make rust` | minutes — **much** worse from a cold cache |
 
@@ -48,10 +48,22 @@ leaves is short: **before putting a real `docs/**` path in a Rust test, put the 
 validate` instead** — and prefer membership to a count, because a governed file that legitimately
 arrives and retires reds a count assertion on both halves of its cycle (#802's fifth exemption
 arrived and deposited within one session, so a bumped count would have gone red again hours later,
-looking like a fresh bug). Still open at that boundary:
-`gates_md_does_not_state_the_length_of_a_list_it_introduces` reads this very file, and
-`the_ride_along_count_matches_the_clauses_named` reads `docs/decisions/RETRIEVAL-QMD-CI.yaml` and
-asserts a derived count — either can red `main` from a docs-only push while `ci` stays green.
+looking like a fresh bug).
+
+What is still open at that boundary is a **property, not a list**: *no real `docs/**` path may be
+read from disk in `tools/codegen-rs/src/tests.rs` outside a loader `main.rs` also calls, and no test
+may require a NAMED `docs/**` file to be present in a corpus it loads.* `tests.rs` breaks it in at
+least four places today, and the figure is the least reliable part of that sentence — **the first
+inventory of them was compiled by READING `main.rs` for loader call sites, said there were only
+`_exempt.yaml`'s two neighbours, and shipped as complete.** A single planted docs-only mutation
+found others within minutes: rewriting `.github/workflows` to a nonexistent pathspec inside an ADR
+leaves `docs-validate`'s literal command at exit 0 while `cargo test` FAILS. **That is the general
+lesson, one level up from the path filter — an inventory of what a gate covers is worth what it was
+EXECUTED against; a coverage claim derived by reading runs in the permissive direction.** Any
+instance reds `main` from a docs-only push while `ci` stays green. Tracked, with the guard that
+would make the property executable rather than prose, as
+[#804 "`docs/**` files gated only by a Rust test: the docs-only filter can hide their red (#802's
+class, remaining instances)"](https://github.com/TheCaptainCompany/captain-food/issues/804).
 
 **CLAUDE.md's architecture summary can be STALE — check it against `docs/STATUS.md` whenever
 hosting, storage or deployment topology matters.** Nothing regenerates that paragraph and no gate

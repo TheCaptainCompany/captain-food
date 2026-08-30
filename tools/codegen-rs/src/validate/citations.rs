@@ -101,11 +101,31 @@ pub(crate) fn parse_citation_exemptions(content: &str) -> (Vec<CitationExemption
 ///     because "5 != 4" tells a reader nothing about whether the new entry is legitimate.
 ///
 /// And the list is deliberately kept in RUST SOURCE rather than in a data file: adding an exemption
-/// now cannot be a docs-only diff, because it must touch `tools/**` — which flips the path filter
-/// and un-skips the whole matrix. The thing that hid this bug is what now makes it unspellable.
+/// TOGETHER WITH ITS DECLARATION cannot be a docs-only diff, because it must touch `tools/**` —
+/// which flips the path filter and un-skips the whole matrix.
+///
+/// WHAT THIS IS NOT: it is not "unspellable", and the word is reserved
+/// (ADR-20260803-234035 — compiler-first, a check is the fallback). Adding an exemption WITHOUT the
+/// declaration is still perfectly spellable, is still a docs-only push, and still lands on `main`,
+/// because that lane is a push with no PR. What changed is where it becomes visible: it is now
+/// LOUDLY RED ON THE LANE THAT EDITS THE FILE — `docs-validate` runs `make validate`'s command
+/// verbatim on exactly the docs-only complement — instead of skipping the only job that could see
+/// it. A check placed on the right lane, which is the level the type system cannot reach here: the
+/// authors of `_exempt.yaml` entries are YAML rows, not Rust call sites, so there is no value to
+/// witness and nothing to seal.
 ///
 /// A declared id no longer present in the file is NOT an error (that is the shrink direction);
 /// prune it opportunistically when its record deposits.
+///
+/// THAT PRUNING LINE IS PROSE, AND IT IS THIS DESIGN'S ACCEPTED RESIDUAL rather than an oversight:
+/// a declaration left behind after its record deposits keeps that id permanently pre-authorised, so
+/// it could re-enter `_exempt.yaml` later on a docs-only push with nothing to say. It is recorded
+/// rather than closed because every gate that would close it is worse than the hole. A rule that
+/// reds on shrinkage REPRODUCES #802 IN THE OPPOSITE DIRECTION — the file is a self-pruning queue,
+/// so retirement is the ordinary case and the red would fire on correct behaviour, at a moment
+/// decided by some other PR's merge. A warning is no escape either: the warning baseline is a
+/// ratchet, so an unbaselined warning is red and a baselined one is invisible. Open, with the
+/// narrower question of whether RE-ENTRY can be distinguished from RETIREMENT, as issue #805.
 pub(crate) const DECLARED_EXEMPTIONS: &[(&str, &str)] = &[
     (
         "ADR-20260817-232744",

@@ -12122,18 +12122,33 @@ mod decision_ask_and_citations {
             .map(|l| l.split_once("//").map_or(l, |(before, _)| before))
             .collect::<Vec<_>>()
             .join("\n");
-        for needle in [
-            "claude_citation_corpus(&root)",
-            "validate_no_superseded_row_is_cited_as_authority(",
+        // THE CONSEQUENCE CLAUSE IS PER-NEEDLE, not shared. It read "would stop running the
+        // superseded-citation rule" for all three, so two thirds of this guard named the wrong rule
+        // in the message a reader gets at the exact moment they have no other information -- §19
+        // #10's class, in the assertion whose whole job is to explain what just stopped being
+        // checked. (Round 2 of PR #803.)
+        for (needle, what_stops) in [
+            (
+                "claude_citation_corpus(&root)",
+                "the §23 citation ratchet would stop being fed the instruction surface, so every rule over it silently checks nothing",
+            ),
+            (
+                "validate_no_superseded_row_is_cited_as_authority(",
+                "`make validate` would stop running the superseded-citation rule",
+            ),
             // §23d (#802): the exemption ratchet is only worth anything where `docs-validate` can
             // reach it. Unwiring it here would return the gate to a test job the docs-only filter
             // skips -- the exact state in which `main` reported green while red, twice.
-            "validate_exemption_ratchet(&exemptions, DECLARED_EXEMPTIONS)",
+            (
+                "validate_exemption_ratchet(&exemptions, DECLARED_EXEMPTIONS)",
+                "the §23d exemption ratchet would return to a gate the docs-only filter skips -- the exact state in which `main` reported green while red, twice",
+            ),
         ] {
             assert!(
                 code.contains(needle),
-                "main.rs no longer contains the EXECUTABLE `{}` (a copy inside a comment does not count) -- `make validate` would stop running the superseded-citation rule with every test still green",
-                needle
+                "main.rs no longer contains the EXECUTABLE `{}` (a copy inside a comment does not count) -- {}, with every test still green",
+                needle,
+                what_stops
             );
         }
     }
