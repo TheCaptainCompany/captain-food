@@ -20,7 +20,8 @@ use application::payments::RecordOutcome;
 
 use actor_client::status_bus::{OperationStatusBus, OperationUpdate};
 
-use crate::generated::command_router::{dispatch_command, CommandDeps};
+use crate::generated::command_router::CommandDeps;
+use crate::inbox::InboxOutcome;
 use crate::persistence::event_bus::{AppendedEvent, EventBus};
 
 use super::activation::{ActivationSettings, DeliveryActivation};
@@ -115,6 +116,42 @@ impl MessageHandler for MailboxCommandHandler {
         message: &InboundMessage,
         prepared: actor_runtime::Prepared,
     ) -> Result<Delivery, sqlx::Error> {
+        // THE DOOR (#771). One parse, taking the LANE and the message type together, before any
+        // routing decision. Until #771 the router took `message.message_type` and never
+        // `message.actor_type`, so a row on lane A could drive a handler that writes aggregate B —
+        // under A's fence. That is ADR-20260829-230418 ("Aggregates own the facts") violated by the
+        // transport itself, and the fix is that a lane/message pair the spec does not declare is a
+        // value that cannot be constructed. The enqueue side already refused undeclared pairs
+        // (`mailbox_address`, `ACTOR_INBOUND_FACTS`); this closes the consuming side.
+        let inbox = match application::generated::inboxes::ActorInbox::parse(
+            &message.actor_type,
+            &message.message_type,
+            &message.payload,
+        ) {
+            Ok(inbox) => inbox,
+            // TRANSIENT, NEVER TERMINAL. During a rolling deploy an OLD consumer legitimately meets
+            // a message type a NEWER producer already emits; terminal-failing it buries a paid
+            // order. Aborting the delivery leaves the row RECEIVED, so the runtime retries it with
+            // exponential backoff and — if the other side of the deploy never arrives — flips it at
+            // `max_delivery_attempts` into the POISON queue, which is loud by construction:
+            // `mailbox_poison_failed_total{actor_type}`, the ADMIN `poisonedMailboxMessages` read
+            // and `RequeueMailboxMessage` as the operator's way back. No new status and no
+            // migration: park is the existing poison path, reached by aborting instead of failing.
+            Err(e) if e.is_transient() => {
+                return Err(sqlx::Error::Protocol(format!(
+                    "mailbox: {e} -- TRANSIENT (rolling deploy?); retrying, then parking on the \
+                     poison queue rather than burying the row"
+                )));
+            }
+            // A DECLARED message whose payload does not deserialize is a deterministic shape
+            // failure of a message this build DOES understand: retrying cannot fix it.
+            Err(e) => {
+                return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+                    "code": "Internal",
+                    "context": { "detail": e.to_string() }
+                }))));
+            }
+        };
         if message.kind == "COMMAND" && pm_delivery::is_pm_command(&message.message_type) {
             // A PM command's effects were computed in prepare; this phase only commits them.
             let prepared = prepared
@@ -153,21 +190,42 @@ impl MessageHandler for MailboxCommandHandler {
         let mut deps = self.deps.clone();
         deps.store = staging.clone() as Arc<dyn EventStore>;
 
-        let outcome = dispatch_command(
+        // The typed route (#771): a CLOSED enum into a match the compiler proves exhaustive. There
+        // is no "unroutable command type" arm any more, because there is no unroutable command:
+        // a message an actor declares it receives and nobody consumes is now an E0004 build
+        // failure in `crate::inbox`, not a FAILED row a customer pays for.
+        let outcome = crate::inbox::route(
             &deps,
-            &message.message_type,
-            &message.payload,
+            inbox,
             &actor,
-            message.session_id,
+            &crate::inbox::RouterEnv { session_id: message.session_id },
         )
         .await;
 
         let delivery = match outcome {
-            None => Delivery::of(HandlerVerdict::Failed(serde_json::json!({
+            // DECLARED received, handler deliberately not built yet (actors.yaml `deferred:`).
+            // Terminal on purpose: unlike an unknown type, no deploy on the other side will grow a
+            // handler for it, so retrying would only burn the poison budget. The deferral carries
+            // its reason and tracking issue in the spec.
+            InboxOutcome::Deferred => Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                 "code": "Internal",
-                "context": { "detail": format!("unroutable command type '{}'", message.message_type) }
+                "context": {
+                    "detail": format!(
+                        "'{}' is DECLARED on the '{}' inbox with its handler deferred (actors.yaml `deferred:`)",
+                        message.message_type, message.actor_type
+                    )
+                }
             }))),
-            Some(Ok(())) => {
+            // A fact/PM leg cannot reach the COMMAND door: the kind branches above return first.
+            // Reaching here is a wiring bug, not a business outcome — abort so it retries and then
+            // parks loudly, rather than recording a terminal verdict for our own mistake.
+            InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg => {
+                return Err(sqlx::Error::Protocol(format!(
+                    "mailbox: '{}' on the '{}' COMMAND door routed to a non-command outcome (wiring bug)",
+                    message.message_type, message.actor_type
+                )));
+            }
+            InboxOutcome::Handled(Ok(())) => {
                 let staged = staging.take_staged();
                 // Freshness guard BEFORE the flush: after it, MAX(version) would include this
                 // delivery's own appends and a legitimate append would read as stale.
@@ -232,10 +290,10 @@ impl MessageHandler for MailboxCommandHandler {
             // call) aborts the delivery for retry — only deterministic outcomes may land a
             // terminal verdict. A terminal FAILED here would be absorbed by the enqueue-side pk
             // dedupe on redelivery, turning one DB blip into a permanently lost message.
-            Some(Err(DomainError::Repository(detail))) => {
+            InboxOutcome::Handled(Err(DomainError::Repository(detail))) => {
                 return Err(sqlx::Error::Protocol(detail));
             }
-            Some(Err(e)) => {
+            InboxOutcome::Handled(Err(e)) => {
                 // A deterministic rejection stages nothing, so no UNIQUE race can catch a stale
                 // fold — the freshness guard is the ONLY fence between a held state and a
                 // durably wrong REJECTED (reviewer CRITICAL, 2026-08-01).

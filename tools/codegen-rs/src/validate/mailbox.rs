@@ -183,6 +183,73 @@ pub(crate) fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>
 /// opts the actor out of the ACTOR_ACTIVATIONS-gated held-state cache; a mapping tunes it
 /// (`enabled`, `idle_seconds` — the per-actor passivation override). Anything else is a shape
 /// error: a knob that parses to nothing would silently run the global defaults.
+/// `receives[].deferred: { reason, issue }` — the DSL successor of the retired `UNWIRED_MUTATIONS`
+/// const (#771). It says: this actor DOES receive this message, and the handler is deliberately not
+/// built yet.
+///
+/// It is validated rather than trusted because a deferral is the one shape whose whole value is
+/// being reviewable. `UNWIRED_MUTATIONS` was a bare list of names in an emitter — no reason, no
+/// tracking issue, and nobody read it. A `deferred:` with no reason or no issue would reproduce
+/// exactly that, one file over: the CLOSED key set and both required fields are what make the
+/// deferral answerable ("why, and who is going to finish it?").
+pub(crate) fn validate_receives_deferrals(model: &Model, issues: &mut Vec<Issue>) {
+    let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return };
+    for (k, node) in actors {
+        let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+        for (i, entry) in
+            node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten().enumerate()
+        {
+            let Some(deferred) = entry.get("deferred") else { continue };
+            let loc = format!("actors.yaml/{}/receives[{}]/deferred", name, i);
+            let Some(map) = deferred.as_mapping() else {
+                issues.push(err(
+                    "receives-deferred-shape",
+                    loc,
+                    "`deferred:` must be a mapping `{ reason, issue }` — it replaces the \
+                     UNWIRED_MUTATIONS const, whose whole defect was being an unexplained list."
+                        .to_string(),
+                ));
+                continue;
+            };
+            for key in map.keys().filter_map(|k| k.as_str()) {
+                if !matches!(key, "reason" | "issue") {
+                    issues.push(err(
+                        "receives-deferred-shape",
+                        loc.clone(),
+                        format!(
+                            "unknown key '{key}' on `deferred:` — the key set is CLOSED (reason | issue)."
+                        ),
+                    ));
+                }
+            }
+            let reason = map.get("reason").and_then(|v| v.as_str()).unwrap_or_default();
+            if reason.trim().is_empty() {
+                issues.push(err(
+                    "receives-deferred-shape",
+                    loc.clone(),
+                    "`deferred:` needs a `reason:` — a deferral nobody can evaluate is the \
+                     UNWIRED_MUTATIONS failure with new syntax."
+                        .to_string(),
+                ));
+            }
+            let issue = map.get("issue").and_then(|v| v.as_str()).unwrap_or_default();
+            // A FULL CLICKABLE LINK, per CLAUDE.md: GitHub does not auto-link a bare `#NN` outside
+            // issues/PRs/commits, and this string is rendered into generated documentation.
+            if !issue.starts_with("https://github.com/TheCaptainCompany/captain-food/issues/") {
+                issues.push(err(
+                    "receives-deferred-shape",
+                    loc,
+                    format!(
+                        "`deferred:` needs an `issue:` naming the tracking issue as a FULL URL \
+                         (https://github.com/TheCaptainCompany/captain-food/issues/NN) — got \
+                         '{issue}'. A deferral with no owner is a permanent one."
+                    ),
+                ));
+            }
+        }
+    }
+}
+
 pub(crate) fn validate_mailbox_activations(node: &Value, name: &str, issues: &mut Vec<Issue>) {
     let Some(act) = node.get("mailbox").and_then(|m| m.get("activations")) else {
         return;

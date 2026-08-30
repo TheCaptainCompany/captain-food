@@ -169,7 +169,10 @@ pub(crate) fn inbox_actors(model: &Model) -> Vec<InboxActor> {
                 let deferred = entry.get("deferred").and_then(|d| {
                     let reason = d.get("reason").and_then(|v| v.as_str())?;
                     let issue = d.get("issue").and_then(|v| v.as_str())?;
-                    Some((reason.to_string(), issue.to_string()))
+                    // A YAML folded scalar keeps its newlines; the reason is rendered into a `///`
+                    // doc comment, where one newline would silently truncate it and turn the rest
+                    // into a syntax error. Flatten to one line.
+                    Some((reason.split_whitespace().collect::<Vec<_>>().join(" "), issue.to_string()))
                 });
                 messages.push(InboxMessage { name: vname, kind, payload_type, deferred });
             }

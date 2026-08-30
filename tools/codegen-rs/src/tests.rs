@@ -5672,42 +5672,59 @@ Catalog:
     }
 
     #[test]
-    fn every_api_mutation_has_a_handler() {
-        // The silent half of the "declared but does nothing" family. `wired_mutation_dispatch`
-        // returns None for any mutation missing from its table, and the emitter then writes an
-        // `Err("not implemented")` body with no command_router arm -- while api.yaml declares the
-        // mutation, a story step covers it and a role guard protects it. Nothing in the SPEC gates
-        // can see that, because the table lives in the emitter.
+    fn every_enqueueable_row_can_be_parsed_by_its_actor_inbox() {
+        // SUCCESSOR to `every_api_mutation_has_a_handler` (#771). That test asked "does this
+        // mutation have a row in `wired_mutation_dispatch`?" -- and the table it consulted no
+        // longer exists, because "does an addressed message reach a handler?" is the COMPILER's
+        // question now: a message an actor declares it receives with no arm in the human-owned
+        // `infrastructure::inbox` is an E0004 build failure over ALL received commands, not only
+        // the ones a mutation happens to reach. (The ten in that gap on `main` were precisely the
+        // ones the old assert could not see.)
         //
-        // recordDeliverySatisfaction and escalateDelivery sat in exactly that state with their
-        // handlers already written in application::commands, missing only a table row.
+        // What the compiler CANNOT see is whether the ENQUEUE side and the CONSUME side agree on
+        // the same (actor, message) pairs: they are two independent scans of actors.yaml in two
+        // crates, and a row the enqueue door accepts but no inbox declares would abort delivery
+        // forever and poison the lane. That is a cross-artifact question, so it is a gate.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        let api = parse_api(&model);
 
-        let declared: std::collections::BTreeSet<&str> =
-            crate::emit::server_graphql::UNWIRED_MUTATIONS.iter().copied().collect();
-        let unwired: Vec<&str> = api
+        let inboxes: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+            inbox_actors(&model)
+                .into_iter()
+                .map(|a| (a.name, a.messages.into_iter().map(|m| m.name).collect()))
+                .collect();
+
+        // Every COMMAND the enqueue side can address (`mailbox_address`, from `command_addressing`)
+        // must be a variant of the addressed actor's inbox.
+        for (command, addr) in command_addressing(&model) {
+            let declared = inboxes.get(&addr.actor_type).unwrap_or_else(|| {
+                panic!("command `{command}` is addressed to `{}`, which has no inbox", addr.actor_type)
+            });
+            assert!(
+                declared.contains(&command),
+                "the enqueue door addresses `{command}` to `{}`, but that actor's inbox has no \
+                 such variant -- an enqueued row would abort delivery forever and poison the lane",
+                addr.actor_type
+            );
+        }
+
+        // Every api.yaml mutation's command must be addressable: a mutation only ENQUEUES, so
+        // addressing is what makes its resolver generatable at all (the emitter panics otherwise;
+        // this says so with the spec's vocabulary instead of a codegen backtrace).
+        let api = parse_api(&model);
+        let addressing = command_addressing(&model);
+        let unaddressed: Vec<&str> = api
             .mutations
             .iter()
+            .filter(|m| !addressing.contains_key(&m.command))
             .map(|m| m.name.as_str())
-            .filter(|n| crate::emit::server_graphql::wired_mutation_dispatch(n).is_none())
-            .filter(|n| !declared.contains(n))
             .collect();
         assert!(
-            unwired.is_empty(),
-            "every api.yaml mutation needs a handler in `wired_mutation_dispatch`, or an explicit \
-             UNWIRED_MUTATIONS entry saying it is deliberately not wired yet. Undeclared: {:?}",
-            unwired
+            unaddressed.is_empty(),
+            "every api.yaml mutation's command must be received by an actor with `identity` + \
+             `mailbox.partitions` -- otherwise the resolver has no lane to enqueue on. \
+             Unaddressed: {unaddressed:?}"
         );
-
-        // The allowlist is a pressure valve, not a parking lot: an entry that is actually wired is
-        // stale and must be removed, or it silently permits a future regression on that name.
-        let stale: Vec<&&str> = declared
-            .iter()
-            .filter(|n| crate::emit::server_graphql::wired_mutation_dispatch(n).is_some())
-            .collect();
-        assert!(stale.is_empty(), "these UNWIRED_MUTATIONS entries are wired -- remove them: {:?}", stale);
     }
 
     #[test]
@@ -16259,6 +16276,88 @@ mod typed_actor_inbox_e0004 {
             "crates/infrastructure/src/inbox.rs must never absorb inbox variants with a wildcard arm \
              -- a wildcard makes the match exhaustive by construction and the E0004 guard \
              (#771) stops catching anything. Offending lines: {offenders:?}"
+        );
+    }
+}
+
+// ─── #771: the `deferred:` grammar, the DSL successor of UNWIRED_MUTATIONS ───────────────────────
+
+#[cfg(test)]
+mod receives_deferred_grammar {
+    use super::*;
+
+    fn rules_of_issues(issues: &[Issue]) -> Vec<&str> {
+        issues.iter().map(|i| i.rule).collect()
+    }
+
+    fn issues_for(deferred_block: &str) -> Vec<Issue> {
+        let actors = format!(
+            "DeliveryJob:\n  type: aggregate\n  identity: {{ $ref: '#/DeliveryJob/state/deliveryJobId' }}\n  mailbox:\n    partitions: 5\n  receives:\n    - message: {{ $ref: 'commands.yaml#/UpdateDeliveryStatus' }}\n      emits: []\n{deferred_block}"
+        );
+        let model = inline_model(&[("actors.yaml", &actors)]);
+        let mut issues = Vec::new();
+        validate_receives_deferrals(&model, &mut issues);
+        issues
+    }
+
+    /// The rule, seen RED for each way a deferral can be unanswerable. `UNWIRED_MUTATIONS` was a
+    /// bare list of names with no reason and no owner, and its whole defect was that nobody could
+    /// evaluate an entry; a `deferred:` block missing either field reproduces exactly that one file
+    /// over, so the grammar is only worth having if these fail.
+    #[test]
+    fn a_deferral_without_a_reason_or_an_owner_is_an_error() {
+        let ok = issues_for(
+            "      deferred:\n        reason: \"no handler for the rider/admin correction path\"\n        issue: \"https://github.com/TheCaptainCompany/captain-food/issues/777\"\n",
+        );
+        assert!(ok.is_empty(), "a well-formed deferral must pass: {:?}", rules_of_issues(&ok));
+
+        let no_reason = issues_for(
+            "      deferred:\n        issue: \"https://github.com/TheCaptainCompany/captain-food/issues/777\"\n",
+        );
+        assert_eq!(rules_of_issues(&no_reason), vec!["receives-deferred-shape"]);
+        assert!(no_reason[0].message.contains("reason"), "{}", no_reason[0].message);
+
+        let no_issue = issues_for("      deferred:\n        reason: \"because\"\n");
+        assert_eq!(rules_of_issues(&no_issue), vec!["receives-deferred-shape"]);
+
+        // A bare `#NN` is not a link: GitHub does not auto-link it outside issues/PRs/commits
+        // (CLAUDE.md), and this string is rendered into generated documentation.
+        let bare_number =
+            issues_for("      deferred:\n        reason: \"because\"\n        issue: \"#777\"\n");
+        assert_eq!(rules_of_issues(&bare_number), vec!["receives-deferred-shape"]);
+
+        let unknown_key = issues_for(
+            "      deferred:\n        reason: \"because\"\n        issue: \"https://github.com/TheCaptainCompany/captain-food/issues/777\"\n        owner: \"someone\"\n",
+        );
+        assert_eq!(rules_of_issues(&unknown_key), vec!["receives-deferred-shape"]);
+        assert!(unknown_key[0].message.contains("CLOSED"), "{}", unknown_key[0].message);
+
+        let not_a_mapping = issues_for("      deferred: true\n");
+        assert_eq!(rules_of_issues(&not_a_mapping), vec!["receives-deferred-shape"]);
+    }
+
+    /// The real corpus carries exactly one deferral, and it is the one #771 surfaced. If this ever
+    /// grows without a reason, the grammar has become a parking lot — which is what
+    /// `UNWIRED_MUTATIONS` degenerated into.
+    #[test]
+    fn the_only_declared_deferral_is_the_one_771_surfaced() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let deferred: Vec<(String, String)> = inbox_actors(&model)
+            .into_iter()
+            .flat_map(|a| {
+                let actor = a.name.clone();
+                a.messages
+                    .into_iter()
+                    .filter(|m| m.deferred.is_some())
+                    .map(move |m| (actor.clone(), m.name))
+            })
+            .collect();
+        assert_eq!(
+            deferred,
+            vec![("DeliveryJob".to_string(), "UpdateDeliveryStatus".to_string())],
+            "the deferral set changed -- every entry must carry a reason a reviewer can evaluate \
+             and an issue that will close it"
         );
     }
 }

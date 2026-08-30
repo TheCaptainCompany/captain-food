@@ -131,6 +131,21 @@ DeliveryJob:
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
         - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
+      # The FIRST use of the #771 deferral grammar, and the reason it exists. This command was one
+      # of ten declared here with no dispatch arm at all: before #771 an enqueued row landed
+      # FAILED "unroutable command type" with every spec gate green. The other nine had their
+      # handlers already written; this one does not, so the gap is DECLARED rather than hidden --
+      # the variant and its router arm still exist (the compiler will not let the message go
+      # unconsumed), and the row is rejected naming this deferral instead of a misleading
+      # "unroutable". Successor to the `UNWIRED_MUTATIONS` const, which was an unexplained list of
+      # names in an emitter nobody read.
+      deferred:
+        reason: >
+          No handler exists for the rider/admin status-correction path. Writing it needs the
+          lifecycle guard (`via: status`, ADR-20260721-093027) and its own behaviour test, and
+          nothing enqueues the command today -- no mutation and no process-manager `sends:` --
+          so no live path is broken by the gap.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/777"
 
     - message: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }]
