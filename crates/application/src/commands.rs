@@ -4191,8 +4191,12 @@ mod verify_phone_claim_stamp_tests {
 // THESE THREE HANDLERS REFUSE, AND REFUSING IS THE FEATURE — not a stub.
 //
 // The DSL surface for erasure landed ahead of its journey: the aggregate declares the facts, the
-// deletion block arms on them, the retention gate protects them, and the subject's status view can
-// answer. What does NOT exist yet in this build is the journey that executes an erasure — the
+// retention gate protects them, and the subject's status view can answer. The `deletion:` block is
+// DEFERRED — `specs/customer/actors.yaml:163-190` records why, and `Order` remains the ONLY declared
+// deletion block: `DeletionEngine::new` validates every declared policy at construction, so a
+// Customer block with no receipt builder fails to construct and takes ORDER erasure — a working,
+// legally-required journey — down with it; and the block needs `cancelled_on:`, whose undo pass does
+// not exist. What does NOT exist yet in this build is the journey that executes an erasure — the
 // process manager, the crypto-shred, the identity unlink, the receipt.
 //
 // So the only honest handler is a TYPED REFUSAL (farley, binding). The tempting alternative — accept
@@ -4202,8 +4206,10 @@ mod verify_phone_claim_stamp_tests {
 // chasing a right they believe is being honoured, which is strictly worse than being told no. A
 // paid order nobody is told about, in the shape of a legal right.
 //
-// `ErasureEngineUnavailable` says exactly that, in both languages, and points the subject at a human
-// — a refusal a screen can render honestly, never a generic failure.
+// `ErasureEngineUnavailable` says exactly that, in both languages — a refusal a screen can render
+// honestly, never a generic failure. Its copy promises NOTHING operational and names no intake
+// channel on purpose (`specs/customer/errors.yaml:157-171`): there is no runbook, no request
+// register and no owner behind one, so advertising it would owe an Art. 12(3) path we cannot run.
 //
 // WHAT LANDS WITH THE JOURNEY, and why it is not here: the `RUN_DELETION_ENGINE` gate parameter
 // (the handler will take it the way `place_order` takes `enforce_service_hours_guard` — resolved at

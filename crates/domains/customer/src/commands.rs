@@ -135,7 +135,7 @@ pub struct SetCustomerPaymentMethod {
     pub payment_method_id: PaymentMethodId,
 }
 
-/// Ask for this account and its personal data to be erased (GDPR Art. 17). Acceptance-first: the mutation returns the `erasureRequestId` and the fact is recorded by the aggregate, which is what lets the status surface answer immediately. IDEMPOTENT while one request is pending — a second ask returns the SAME id and records nothing new, because a double-tap on a delete button is a nervous customer, not a second intention. Rejected with `ErasureBlockedByOpenOrder` when an order is in flight, and with `ErasureEngineUnavailable` when the deletion engine is gated OFF in this deployment.
+/// Ask for this account and its personal data to be erased (GDPR Art. 17). Acceptance-first: the mutation returns the `erasureRequestId` and the fact is recorded by the aggregate, which is what lets the status surface answer immediately. IDEMPOTENT while one request is pending — a second ask returns the SAME id and records nothing new, because a double-tap on a delete button is a nervous customer, not a second intention. IN THIS DEPLOYMENT THE HANDLER REFUSES UNCONDITIONALLY with `ErasureEngineUnavailable` and records nothing: it reads no gate, because the journey that executes an erasure is the next chunk — a typed refusal, never a silent accept. `RUN_DELETION_ENGINE` gates the deletion ENGINE POD, not this mutation. `ErasureBlockedByOpenOrder` is the declared refusal for an order in flight; its precondition needs a read model that lands with that journey.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestCustomerErasure {

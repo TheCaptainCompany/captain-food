@@ -234,4 +234,3 @@ claim.detail.reason:      { messages: { en: "Reason", fr: "Motif" } }
 claim.detail.open_thread: { messages: { en: "Open the conversation", fr: "Ouvrir la conversation" } }
 claim.reopen.label:     { messages: { en: "Reopen", fr: "Rouvrir" } }
 claim.reopen.reason_ph: { messages: { en: "Why are you reopening? (optional)", fr: "Pourquoi rouvrez-vous ? (facultatif)" } }
-
