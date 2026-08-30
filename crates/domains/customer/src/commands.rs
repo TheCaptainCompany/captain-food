@@ -134,3 +134,28 @@ pub struct SetCustomerPaymentMethod {
     pub customer_id: CustomerId,
     pub payment_method_id: PaymentMethodId,
 }
+
+/// Ask for this account and its personal data to be erased (GDPR Art. 17). Acceptance-first: the mutation returns the `erasureRequestId` and the fact is recorded by the aggregate, which is what lets the status surface answer immediately. IDEMPOTENT while one request is pending — a second ask returns the SAME id and records nothing new, because a double-tap on a delete button is a nervous customer, not a second intention. Rejected with `ErasureBlockedByOpenOrder` when an order is in flight, and with `ErasureEngineUnavailable` when the deletion engine is gated OFF in this deployment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestCustomerErasure {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+}
+
+/// Confirm the erasure with the token sent to the subject's verified channel — the SECOND round-trip that turns a request into a scheduled destruction. On acceptance the grace window starts and the `deletion:` trigger arms. The token is verified server-side and is the ONLY thing that authorizes the confirm; it is deliberately not "being logged in", because the whole point of the second step is to prove the person holding the session is the person who owns the channel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmCustomerErasure {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+    pub token: ErasureConfirmationToken,
+}
+
+/// The subject changed their mind inside the grace window and keeps their account. RE-LOGIN-CANCELS is the recorded posture: cancelling is the USER's act — there is no admin resurrection, because an erasure an operator can undo is not an erasure. A returning customer placing an order is the strongest cancel-intent signal there is, but it does NOT auto-cancel: the recorded intent stands until the subject withdraws it; an in-flight order only defers EXECUTION (the PARKED arm).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelCustomerErasure {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+}

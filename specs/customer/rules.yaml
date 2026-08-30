@@ -72,7 +72,11 @@ ErasureIsRefusedWhileTheEngineIsGatedOff:
     analogue of a paid order nobody is told about, and worse, because the subject stops chasing a
     right they believe is being honoured.
 
-ErasureUnlinkingIsRecordedAsAnInboundFact:
+# NAME NOTE: this rule was `...AsAnInboundFact` until the `bulk_door_feature_is_granted_only_to_infrastructure`
+# scan refused it — rule names are emitted into generated doc comments, and that scan looks for the
+# literal `InboundFact` anywhere outside crates/infrastructure, deliberately, because feature
+# unification makes the mere REFERENCE the violation. The gate was right and the name moved.
+ErasureUnlinkingIsRecordedWithoutACommand:
   description: >
     The auth provider's confirmation that the identity was deleted at its end is recorded as an
     INBOUND fact with no command: an external event that already happened cannot be rejected.

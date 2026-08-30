@@ -2512,6 +2512,225 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
+    #[graphql(name = "requestErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn request_erasure(&self, ctx: &async_graphql::Context<'_>, input: RequestCustomerErasureInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        // command.receive (SERVER). Opened before any fallible work so an input that fails to
+        // deserialize still leaves a span naming the command that was attempted.
+        let __receive = telemetry::spans::command_receive(
+            "RequestCustomerErasure",
+            crate::graphql::acl::request_role(ctx).api_name(),
+            telemetry::CHANNEL_GRAPHQL,
+        );
+        let __rx = __receive.clone();
+        async move {
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RequestCustomerErasure = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RequestCustomerErasure: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
+        let __envelope = actor_client::mailbox::Envelope {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
+        };
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            actor_client::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RequestCustomerErasure");
+                return Err(conflict_error(env.message_id));
+            }
+            actor_client::EnqueueOutcome::Deduplicated(status) => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            actor_client::EnqueueOutcome::Enqueued => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
+        .instrument(__receive)
+        .await
+    }
+    #[graphql(name = "confirmErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn confirm_erasure(&self, ctx: &async_graphql::Context<'_>, input: ConfirmCustomerErasureInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        // command.receive (SERVER). Opened before any fallible work so an input that fails to
+        // deserialize still leaves a span naming the command that was attempted.
+        let __receive = telemetry::spans::command_receive(
+            "ConfirmCustomerErasure",
+            crate::graphql::acl::request_role(ctx).api_name(),
+            telemetry::CHANNEL_GRAPHQL,
+        );
+        let __rx = __receive.clone();
+        async move {
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ConfirmCustomerErasure = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ConfirmCustomerErasure: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
+        let __envelope = actor_client::mailbox::Envelope {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
+        };
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            actor_client::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ConfirmCustomerErasure");
+                return Err(conflict_error(env.message_id));
+            }
+            actor_client::EnqueueOutcome::Deduplicated(status) => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            actor_client::EnqueueOutcome::Enqueued => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
+        .instrument(__receive)
+        .await
+    }
+    #[graphql(name = "cancelErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn cancel_erasure(&self, ctx: &async_graphql::Context<'_>, input: CancelCustomerErasureInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        // command.receive (SERVER). Opened before any fallible work so an input that fails to
+        // deserialize still leaves a span naming the command that was attempted.
+        let __receive = telemetry::spans::command_receive(
+            "CancelCustomerErasure",
+            crate::graphql::acl::request_role(ctx).api_name(),
+            telemetry::CHANNEL_GRAPHQL,
+        );
+        let __rx = __receive.clone();
+        async move {
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        let payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::CancelCustomerErasure = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("customerId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("CancelCustomerErasure: identity property 'customerId' missing or not a uuid -- unaddressable"))?;
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated CustomerClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = client_customer::CustomerClient::new(mailbox, actor_id);
+        let __envelope = actor_client::mailbox::Envelope {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
+        };
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            actor_client::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("CancelCustomerErasure");
+                return Err(conflict_error(env.message_id));
+            }
+            actor_client::EnqueueOutcome::Deduplicated(status) => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            actor_client::EnqueueOutcome::Enqueued => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
+        .instrument(__receive)
+        .await
+    }
     #[graphql(name = "changeRiderStatus", guard = "RoleGuard::new(ALLOW_RIDER_ADMIN)", visible = "visible_rider_admin")]
     async fn change_rider_status(&self, ctx: &async_graphql::Context<'_>, input: ChangeRiderStatusInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to

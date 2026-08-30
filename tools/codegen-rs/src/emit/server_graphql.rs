@@ -1149,6 +1149,15 @@ pub(crate) fn wired_mutation_dispatch(name: &str) -> Option<String> {
             ("RecordDeliverySatisfaction", "record_delivery_satisfaction", Extra::None)
         }
         "escalateDelivery" => ("EscalateDelivery", "escalate_delivery", Extra::None),
+        // GDPR erasure (#708). WIRED ON PURPOSE rather than parked in UNWIRED_MUTATIONS: an unwired
+        // mutation answers `Err("not implemented")`, which is a refusal a screen cannot render and a
+        // data subject cannot act on. These handlers refuse with a TYPED, translated error that
+        // points the person at a human. Refusing is the shipped behaviour of this chunk, not a gap:
+        // accepting an erasure the journey cannot execute would start the Art. 12(3) clock on
+        // nothing (PROP-20260829-150752; see the handlers' doc comment).
+        "requestErasure" => ("RequestCustomerErasure", "request_customer_erasure", Extra::None),
+        "confirmErasure" => ("ConfirmCustomerErasure", "confirm_customer_erasure", Extra::None),
+        "cancelErasure" => ("CancelCustomerErasure", "cancel_customer_erasure", Extra::None),
         _ => return None,
     };
     // The extra argument beyond the EventStore — the router's prelude binds each of these local

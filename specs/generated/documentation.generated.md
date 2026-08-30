@@ -83,6 +83,10 @@ An authenticated person who orders food via Captain.Food.
 |  | SendMessage | [✏️ `postMessage`](#mutation-postmessage) |
 |  | TranslateMessage | [✏️ `recordMessageTranslation`](#mutation-recordmessagetranslation) |
 |  | ReadThread | [🔎 `orderConversation`](#query-orderconversation) |
+| 🧭 **EraseMyAccount** | RequestErasure | [✏️ `requestErasure`](#mutation-requesterasure) |
+|  | ConfirmErasure | [✏️ `confirmErasure`](#mutation-confirmerasure) |
+|  | KeepMyAccount | [✏️ `cancelErasure`](#mutation-cancelerasure) |
+|  | TrackErasure | [🔎 `erasureStatus`](#query-erasurestatus) |
 | 🧭 **RaiseAClaim** | OpenClaim | [✏️ `openReclamation`](#mutation-openreclamation) |
 |  | AttachEvidence | [✏️ `attachReclamationEvidence`](#mutation-attachreclamationevidence) |
 |  | ReopenClaim | [✏️ `reopenReclamation`](#mutation-reopenreclamation) |
@@ -7845,7 +7849,7 @@ _Refuses to requeue a mailbox row that does not exist_
 
 _Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding._
 
-### 🧰 API operations _(23)_
+### 🧰 API operations _(27)_
 
 <a id="query-me"></a>
 #### 🔎 Query: `me`
@@ -7854,6 +7858,16 @@ The signed-in customer's own profile (resolves the session authRef → Customer 
 
 - **Input**: _(none)_
 - **Returns**: [🧩 `CustomerProfile`](#type-customerprofile) · **reads** [🗄️ `Customer`](#view-customer)
+- **Roles**: CUSTOMER · **slice** V1
+
+<a id="query-erasurestatus"></a>
+#### 🔎 Query: `erasureStatus`
+
+The authenticated customer's own erasure request, or null when none exists. NO ARGS BY DESIGN: the subject is derived from AUTH CONTEXT server-side, never supplied by the client. A required `customerId!` here would be exactly the #745 unfulfillable class — an identity fact the account route has no source for, so the read would fail structurally on every paint — AND it would let any authenticated caller ask about somebody else's deletion, which is a disclosure of the most sensitive thing this product knows about a person. Answers before AND after the erasure completes: pre-receipt from the folded request row, post-receipt from the same row now carrying the receipt's policy and retained-under limbs. CONFIRM-WHILE-LOGGED-OUT is deliberately NOT served here (see the mutation roles): this query is CUSTOMER-only, so a subject who has signed out follows their emailed link, confirms, and then sees the status by signing in — the status surface never becomes an unauthenticated lookup of "what is happening to this account".
+
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `CustomerErasure`](#type-customererasure) · **reads** [🗄️ `View_CustomerErasure`](#view-view_customererasure)
 - **Roles**: CUSTOMER · **slice** V1
 
 <a id="query-favoriterestaurants"></a>
@@ -8023,6 +8037,27 @@ The authenticated customer's store-credit balance (#158, Part B of #207). No arg
 - **Roles**: CUSTOMER · **slice** V1
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-requesterasure"></a>
+#### ✏️ Mutation: `requestErasure`
+
+- **Command**: [📩 `RequestCustomerErasure`](#command-requestcustomererasure) → handled by [🎭 `Customer`](#actor-customer)
+- **Roles**: CUSTOMER · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-confirmerasure"></a>
+#### ✏️ Mutation: `confirmErasure`
+
+- **Command**: [📩 `ConfirmCustomerErasure`](#command-confirmcustomererasure) → handled by [🎭 `Customer`](#actor-customer)
+- **Roles**: CUSTOMER · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-cancelerasure"></a>
+#### ✏️ Mutation: `cancelErasure`
+
+- **Command**: [📩 `CancelCustomerErasure`](#command-cancelcustomererasure) → handled by [🎭 `Customer`](#actor-customer)
+- **Roles**: CUSTOMER · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="subscription-paymentstatuschanged"></a>
 #### 🔔 Subscription: [`paymentStatusChanged`](#subscription-paymentstatuschanged)
 
@@ -8033,7 +8068,7 @@ Checkout payment-state changes for one order (the push counterpart of queries/pa
 - **Streams**: [🧩 `PaymentIntent`](#type-paymentintent)
 - **Roles**: PUBLIC, CUSTOMER, ADMIN · **slice** V0
 
-### 🧩 Output types _(1)_
+### 🧩 Output types _(2)_
 
 <a id="type-customerprofile"></a>
 #### 🧩 Type: `CustomerProfile`
@@ -8052,6 +8087,22 @@ A customer's own profile (display name + contact). Backed by the identity read m
 | <a id="type-customerprofile--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |
 | <a id="type-customerprofile--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ⬜ |
 | <a id="type-customerprofile--timezone"></a>`timezone` | [🔤 `TimeZone`](#scalar-timezone) | ⬜ |
+
+<a id="type-customererasure"></a>
+#### 🧩 Type: `CustomerErasure`
+
+The state of ONE erasure request, as the data subject is entitled to see it (Art. 12/15), plus the disclosure limb of §3.6 once the receipt exists: what was retained and under which instrument. Every field is PSEUDONYMOUS — this type must keep answering after the customer's stream is gone, so a name or an address here would either have to die with the stream (leaving the subject unable to check the erasure they asked for) or survive it (making the erasure a lie).
+
+
+- **Read model**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-customererasure--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |
+| <a id="type-customererasure--status"></a>`status` | [🔤 `ErasureStatus`](#scalar-erasurestatus) | ✅ |
+| <a id="type-customererasure--cancelledat"></a>`cancelledAt` | `string` _date-time_ | ⬜ |
+| <a id="type-customererasure--policy"></a>`policy` | `string` | ⬜ |
+| <a id="type-customererasure--retainedunder"></a>`retainedUnder` | `array` | ✅ |
 
 ### 🎭 Actors _(2)_
 
@@ -8076,6 +8127,24 @@ _🧩 aggregate_ — A customer identity, keyed by phone number and linked to th
 | [📩 `SetCustomerAddress`](#command-setcustomeraddress) | [⚡ `CustomerAddressSet`](#event-customeraddressset) | — |
 | [📩 `RemoveCustomerAddress`](#command-removecustomeraddress) | [⚡ `CustomerAddressRemoved`](#event-customeraddressremoved) | — |
 | [📩 `SetCustomerPaymentMethod`](#command-setcustomerpaymentmethod) | [⚡ `CustomerPaymentMethodSet`](#event-customerpaymentmethodset) | — |
+| [📩 `RequestCustomerErasure`](#command-requestcustomererasure) | [⚡ `CustomerErasureRequested`](#event-customererasurerequested) | [⛔ `ErasureBlockedByOpenOrder`](#error-erasureblockedbyopenorder), [⛔ `ErasureEngineUnavailable`](#error-erasureengineunavailable) |
+| [📩 `ConfirmCustomerErasure`](#command-confirmcustomererasure) | [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed), ⏰ schedules `CustomerErasureDue` | [⛔ `InvalidErasureConfirmationToken`](#error-invaliderasureconfirmationtoken), [⛔ `ErasureNotRequested`](#error-erasurenotrequested), [⛔ `ErasureEngineUnavailable`](#error-erasureengineunavailable) |
+| [📩 `CancelCustomerErasure`](#command-cancelcustomererasure) | [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled) | [⛔ `ErasureNotRequested`](#error-erasurenotrequested) |
+| [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked) | [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked) | — |
+| ⏰ `CustomerErasureDue` _(reminder)_ | [⚡ `CustomerErasureDue`](#event-customererasuredue) | — |
+
+Reminders (self-scheduled facts — ADR-20260731-214500):
+
+| Reminder | Payload | After | Reschedule |
+| --- | --- | --- | --- |
+| ⏰ `CustomerErasureDue` | [⚡ `CustomerErasureDue`](#event-customererasuredue) | ⚙️ `CUSTOMER_ERASURE_GRACE_WINDOW_DAYS` | keep |
+
+Deletion (declarative, generic engine — ADR-20260731-214500):
+
+| On | Window | Cancelled on | Match |
+| --- | --- | --- | --- |
+| [⚡ `CustomerErasureDue`](#event-customererasuredue) | _immediate (propagation)_ | [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled) | [⚡ `CustomerErasureDue`.`customerId`](#event-customererasuredue--customerid) ↔ `state.customerId` |
+- **Receipt**: [⚡ `CustomerErased`](#event-customererased)
 
 <a id="actor-cartbindingprocess"></a>
 #### 🎭 Actor: `CartBindingProcess`
@@ -8105,7 +8174,25 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(1)_
+### 🗄️ Views (read models) _(2)_
+
+<a id="view-view_customererasure"></a>
+#### 🗄️ View: `View_CustomerErasure`
+
+- **Source**: [🎭 `Customer`](#actor-customer) · 🔭 V1
+- **Rules**: `status` is derived from the latest recorded fact: REQUESTED -> CONFIRMED -> EXECUTING (the first destructive leg reported) -> ERASED. A CustomerErasureCancelled stamps cancelled_at and ends the row's life as a request; nothing further folds onto it. PARKED is ABSENT on purpose: parking is process-row state (ErasureProcessStatus), not a fact, and the subject is owed the state of their RIGHT, not of our scheduler. Every column is pseudonymous. The row must survive the deletion of the Customer stream, which is exactly why it may never carry personal data.
+- **Fed by**: [⚡ `CustomerErasureRequested`](#event-customererasurerequested), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed), [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled), [⚡ `CustomerErasureDue`](#event-customererasuredue), [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked), [⚡ `CustomerErased`](#event-customererased)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ | [⚡ `CustomerErasureRequested`.`customerId`](#event-customererasurerequested--customerid) | PK | The accountability reference the query scopes on — resolved from the authenticated principal, never from a client argument. |
+| `erasure_request_id` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) _(derived)_ | [⚡ `CustomerErasureRequested`.`erasureRequestId`](#event-customererasurerequested--erasurerequestid) | — | The subject's pseudonymous reference for the right they exercised; quotable back to us after everything else is gone. |
+| `status` | [🔤 `ErasureStatus`](#scalar-erasurestatus) | [⚡ `CustomerErasureRequested`](#event-customererasurerequested), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed), [⚡ `CustomerErasureDue`](#event-customererasuredue), [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked), [⚡ `CustomerErased`](#event-customererased) | — | Derived from the latest fact. The grace window elapsing is what turns the answer to EXECUTING — the subject can no longer cancel from that moment, so telling them otherwise would be false. The unlink leg keeps it there. |
+| `cancelled_at` | `timestamptz` | [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled) | nullable | occurrence: when the subject withdrew the request inside the window. A separate TIMESTAMP rather than a member of ErasureStatus: a cancelled request is not a phase of an erasure, it is the absence of one — and the moment they changed their mind is the fact worth keeping, not merely that they did.  |
+| `policy` | `text` _(derived)_ | [⚡ `CustomerErased`.`policy`](#event-customererased--policy) | nullable | The window the erasure ran under; null until the receipt exists. |
+| `retained_under` | `jsonb` _(derived)_ | [⚡ `CustomerErased`.`retainedUnder`](#event-customererased--retainedunder) | nullable | The approved retention windows under which data about this subject survives, by catalog name — the disclosure limb of §3.6, generated from the same declarations that enforce it, so the screen cannot drift from the behaviour. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
 <a id="view-customer"></a>
 #### 🗄️ View: `Customer`
@@ -8133,7 +8220,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(14)_
+### 📩 Commands _(17)_
 
 <a id="command-requestphoneverification"></a>
 #### 📩 Command: `RequestPhoneVerification`
@@ -8345,7 +8432,50 @@ Customer sets or updates their preferred Stripe payment method.
 | <a id="command-setcustomerpaymentmethod--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="command-setcustomerpaymentmethod--paymentmethodid"></a>`paymentMethodId` | [🔤 `PaymentMethodId`](#scalar-paymentmethodid) | ✅ |  |
 
-### ⚡ Events _(12)_
+<a id="command-requestcustomererasure"></a>
+#### 📩 Command: `RequestCustomerErasure`
+
+Ask for this account and its personal data to be erased (GDPR Art. 17). Acceptance-first: the mutation returns the `erasureRequestId` and the fact is recorded by the aggregate, which is what lets the status surface answer immediately. IDEMPOTENT while one request is pending — a second ask returns the SAME id and records nothing new, because a double-tap on a delete button is a nervous customer, not a second intention. Rejected with `ErasureBlockedByOpenOrder` when an order is in flight, and with `ErasureEngineUnavailable` when the deletion engine is gated OFF in this deployment.
+
+- **Dispatched by**: [✏️ `requestErasure`](#mutation-requesterasure) · **handled by** [🎭 `Customer`](#actor-customer)
+- **Emits**: [⚡ `CustomerErasureRequested`](#event-customererasurerequested)
+- **Throws**: [⛔ `ErasureBlockedByOpenOrder`](#error-erasureblockedbyopenorder), [⛔ `ErasureEngineUnavailable`](#error-erasureengineunavailable)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-requestcustomererasure--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | The subject — resolved server-side from the authenticated principal, never taken from the client. |
+| <a id="command-requestcustomererasure--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ | The journey id the acceptance returns; deterministic per pending request so a retry re-resolves the same one. |
+
+<a id="command-confirmcustomererasure"></a>
+#### 📩 Command: `ConfirmCustomerErasure`
+
+Confirm the erasure with the token sent to the subject's verified channel — the SECOND round-trip that turns a request into a scheduled destruction. On acceptance the grace window starts and the `deletion:` trigger arms. The token is verified server-side and is the ONLY thing that authorizes the confirm; it is deliberately not "being logged in", because the whole point of the second step is to prove the person holding the session is the person who owns the channel.
+
+- **Dispatched by**: [✏️ `confirmErasure`](#mutation-confirmerasure) · **handled by** [🎭 `Customer`](#actor-customer)
+- **Emits**: [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed)
+- **Throws**: [⛔ `InvalidErasureConfirmationToken`](#error-invaliderasureconfirmationtoken), [⛔ `ErasureNotRequested`](#error-erasurenotrequested), [⛔ `ErasureEngineUnavailable`](#error-erasureengineunavailable)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-confirmcustomererasure--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="command-confirmcustomererasure--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+| <a id="command-confirmcustomererasure--token"></a>`token` | [🔤 `ErasureConfirmationToken`](#scalar-erasureconfirmationtoken) | ✅ |  |
+
+<a id="command-cancelcustomererasure"></a>
+#### 📩 Command: `CancelCustomerErasure`
+
+The subject changed their mind inside the grace window and keeps their account. RE-LOGIN-CANCELS is the recorded posture: cancelling is the USER's act — there is no admin resurrection, because an erasure an operator can undo is not an erasure. A returning customer placing an order is the strongest cancel-intent signal there is, but it does NOT auto-cancel: the recorded intent stands until the subject withdraws it; an in-flight order only defers EXECUTION (the PARKED arm).
+
+- **Dispatched by**: [✏️ `cancelErasure`](#mutation-cancelerasure) · **handled by** [🎭 `Customer`](#actor-customer)
+- **Emits**: [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled)
+- **Throws**: [⛔ `ErasureNotRequested`](#error-erasurenotrequested)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-cancelcustomererasure--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="command-cancelcustomererasure--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+
+### ⚡ Events _(17)_
 
 <a id="event-customerregistered"></a>
 #### ⚡ Event: `CustomerRegistered`
@@ -8526,7 +8656,76 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="event-customerpaymentmethodset--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-customerpaymentmethodset--paymentmethodid"></a>`paymentMethodId` | [🔤 `PaymentMethodId`](#scalar-paymentmethodid) | ✅ |  |
 
-### 🔤 Scalars _(7)_
+<a id="event-customererasurerequested"></a>
+#### ⚡ Event: `CustomerErasureRequested`
+
+The customer asked to be erased (Art. 17). Recorded on acceptance, which is what starts the Art. 12(3) month — the clock is anchored HERE, at receipt of the request, and the confirmation step never re-anchors it: the confirmation is our safeguard, so it may not eat the subject's time.
+
+- **Emitted by**: [🎭 `Customer`](#actor-customer)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customererasurerequested--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="event-customererasurerequested--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+
+<a id="event-customererasureconfirmed"></a>
+#### ⚡ Event: `CustomerErasureConfirmed`
+
+The subject confirmed the erasure with their token. THIS is the fact the machinery reacts to: the `deletion:` trigger arms on it and the grace window runs from it. A request alone never destroys anything.
+
+- **Emitted by**: [🎭 `Customer`](#actor-customer)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customererasureconfirmed--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="event-customererasureconfirmed--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+
+<a id="event-customererasurecancelled"></a>
+#### ⚡ Event: `CustomerErasureCancelled`
+
+The subject withdrew the erasure inside the grace window (re-login-cancels — the user's act, never an admin resurrection). Listed in the deletion block's `cancelled_on:`, so a pending deletion goes SCHEDULED → CANCELLED.
+
+- **Emitted by**: [🎭 `Customer`](#actor-customer)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customererasurecancelled--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="event-customererasurecancelled--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+
+<a id="event-customererasuredue"></a>
+#### ⚡ Event: `CustomerErasureDue`
+
+THE GRACE WINDOW ELAPSED — a recorded business fact, delivered by the Customer's own `CustomerErasureDue` reminder and recorded on acceptance (record semantics, never rejected). It exists as a FACT rather than as an engine-internal timer for the reason ADR-20260731-160000 §2 gives for the Order pilot: projections must be able to FOLD the moment the journey became due — an internal timer would move read models with no foldable cause in the log, and the subject's status screen would change for no reason anyone could replay. This is what the erasure journey's first destructive leg reacts to, and what the `deletion:` trigger fires on. IT CARRIES THE IDENTITY ONLY. A reminder is one actor talking to ITSELF, and its payload is built generically from the actor's identity — so `erasureRequestId` is deliberately absent rather than declared and left unfillable. The journey is found from the subject, which is sound because a customer may have at most one live erasure at a time (the process row's `customer_id` is UNIQUE).
+
+- **Emitted by**: [🎭 `Customer`](#actor-customer)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customererasuredue--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+
+<a id="event-customeridentityunlinked"></a>
+#### ⚡ Event: `CustomerIdentityUnlinked`
+
+INBOUND INTEGRATION FACT, recorded through the identity ACL with NO command (ADR-0004): the auth provider confirmed the subject's identity was deleted at its end. An external fact that already happened is never a command — there is nothing left to reject. THE NAME CARRIES THE DISTINCTION AND MUST NOT BE "ERASED" (evans): erasure is data destroyed on our side; UNLINKING is the identity mapping severed at the provider. Erasing our stream without provider-side revocation would leave the foreign model holding exactly what we deleted, so this is a mandatory leg of the journey and not a nicety. The instruction that provokes it is an Art. 28 processor instruction — a Tell, never an Ask.
+
+- **Emitted by**: [🎭 `Customer`](#actor-customer)
+- **Consumed by**: [🎭 `Customer`](#actor-customer)
+- **Projected into**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customeridentityunlinked--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
+| <a id="event-customeridentityunlinked--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+
+### 🔤 Scalars _(11)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -8537,8 +8736,12 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
+| <a id="scalar-erasurerequestid"></a>🔤 `ErasureRequestId` | string _uuid_ | Identifies ONE erasure journey, from the request through to the receipt. It is the customer's reference for a right they exercised, so it must outlive the customer: after stream deletion this id is the only handle joining the surviving tombstone, the `CustomerErased` receipt and the subject's own "is it done?" question. Pseudonymous by construction — it identifies a REQUEST, never a person. A second request while one is pending returns the SAME id (acceptance-first absorbs the duplicate; a typed rejection would punish a double-tap for no gain); a fresh request after a cancel gets a fresh one.  |
+| <a id="scalar-erasureconfirmationtoken"></a>🔤 `ErasureConfirmationToken` | string | The one-shot token proving the SECOND round-trip of an irreversible act — deliberately its own scalar and NOT `EmailVerificationToken`, because these are different secrets with different lifetimes and blast radii, and one name means one thing. It expires (the confirm window) so an unconfirmed request LAPSES VISIBLY on the status view instead of silently eating the subject's Art. 12(3) month: the confirmation step is OUR safeguard, so it may not consume their clock.  |
+| <a id="scalar-erasurestatus"></a>🔤 `ErasureStatus` | enum (REQUESTED \| CONFIRMED \| EXECUTING \| ERASED) | The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is `ErasureProcessStatus` on the process row, and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.  |
+| <a id="scalar-hasopenorders"></a>🔤 `HasOpenOrders` | enum (NONE \| PRESENT) | The open-order verdict for one customer, as an ENUM rather than a boolean or a count — because a process-manager `guard.that` admits only `{ const: <ENUM_MEMBER> }` (specs/common/processmanager.yaml). Expressing the re-check as a declared enum column keeps the erasure re-check inside the LIVE lane grammar instead of forcing a grammar extension for one saga (vernon). The read side derives it; nothing stores it.  |
 
-### ⛔ Errors _(9)_
+### ⛔ Errors _(13)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -8551,8 +8754,12 @@ Customer set or updated their preferred Stripe payment method.
 | <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification) |
 | <a id="error-emailalreadyinuse"></a>⛔ `EmailAlreadyInUse` | The email is already linked to another customer. | 🇬🇧 The email '{email}' is already in use by another account. | 🇫🇷 L'e-mail '{email}' est déjà utilisé par un autre compte. | [📩 `RequestEmailVerification`](#command-requestemailverification) |
 | <a id="error-phonealreadyinuse"></a>⛔ `PhoneAlreadyInUse` | The phone number is already linked to another customer (on change). | 🇬🇧 The phone number '{phone}' is already in use by another account. | 🇫🇷 Le numéro '{phone}' est déjà utilisé par un autre compte. | [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
+| <a id="error-erasureblockedbyopenorder"></a>⛔ `ErasureBlockedByOpenOrder` | The customer asked to be erased while an order of theirs is still in flight (or money is still settling). A set-based precondition the write side checks, which is exactly why erasure begins as a rejectable COMMAND and not an event: an event cannot be refused, a command can. NOT a refusal of the right — a refusal of the TIMING, and the message must say so, because a person exercising Art. 17 who reads "no" will not ask twice. The same precondition re-runs at promotion, where failing it PARKS the journey rather than rejecting it (the request already stands by then; only execution waits).  | 🇬🇧 You have an order in progress. You can request deletion once it is complete — your request has not been recorded. | 🇫🇷 Vous avez une commande en cours. Vous pourrez demander la suppression une fois celle-ci terminée — votre demande n'a pas été enregistrée. | [📩 `RequestCustomerErasure`](#command-requestcustomererasure) |
+| <a id="error-invaliderasureconfirmationtoken"></a>⛔ `InvalidErasureConfirmationToken` | The erasure confirmation token does not verify, or its window has expired. DELIBERATELY NOT `InvalidVerificationToken`, which already means the email magic link: one name, one meaning. Overloading it would render "this email verification link is invalid" to a customer who is trying to delete their account — a lie at the highest-stakes tap in the product, and one that would send them to the wrong recovery path.  | 🇬🇧 This deletion confirmation link is invalid or has expired. Please request deletion again. | 🇫🇷 Ce lien de confirmation de suppression est invalide ou a expiré. Veuillez redemander la suppression. | [📩 `ConfirmCustomerErasure`](#command-confirmcustomererasure) |
+| <a id="error-erasurenotrequested"></a>⛔ `ErasureNotRequested` | A confirm or cancel arrived with no erasure request outstanding for this customer — the request was already confirmed, already cancelled, or never made. Typed rather than silent because both commands are irreversible-adjacent: a cancel that quietly does nothing would let a customer believe they had kept an account that is still scheduled for deletion.  | 🇬🇧 There is no deletion request to act on for this account. | 🇫🇷 Aucune demande de suppression n'est en cours pour ce compte. | [📩 `ConfirmCustomerErasure`](#command-confirmcustomererasure), [📩 `CancelCustomerErasure`](#command-cancelcustomererasure) |
+| <a id="error-erasureengineunavailable"></a>⛔ `ErasureEngineUnavailable` | Erasure is declared but its engine is not running in this deployment (`configuration.yaml#/RUN_DELETION_ENGINE` is OFF — the single gate, gate-then-stabilize). THE MUTATIONS SHIP DARK BEHIND THAT SAME FLAG, AND DARK MEANS A TYPED REFUSAL, NEVER A SILENT ACCEPT (farley). Accepting a request the engine cannot execute would start the Art. 12(3) thirty-day clock on a journey nothing will ever run, and produce a status screen that says "scheduled" forever: the erasure analogue of a paid order nobody is told about — and worse here, because the subject stops chasing a right they believe is being honoured. Refusing loudly keeps the failure OURS instead of moving it onto the customer. A second flag was rejected on purpose: one blast radius, one decision surface.  | 🇬🇧 Account deletion is temporarily unavailable. Please contact us and we will handle your request. | 🇫🇷 La suppression de compte est temporairement indisponible. Contactez-nous et nous traiterons votre demande. | [📩 `RequestCustomerErasure`](#command-requestcustomererasure), [📩 `ConfirmCustomerErasure`](#command-confirmcustomererasure) |
 
-### 📐 Business rules _(10)_
+### 📐 Business rules _(14)_
 
 <a id="rule-guestcartsboundonidentification"></a>
 #### 📐 Rule: `GuestCartsBoundOnIdentification`
@@ -8623,6 +8830,34 @@ _A customer can add/update and remove saved delivery addresses._
 _A customer's payment method can be stored._
 
 - **Verified by**: [🧪 `TestCustomerPaymentMethodSet`](#test-testcustomerpaymentmethodset)
+
+<a id="rule-erasureisrequestedconfirmedthenexecuted"></a>
+#### 📐 Rule: `ErasureIsRequestedConfirmedThenExecuted`
+
+_Erasure takes TWO round-trips before anything is destroyed: a request that can be REFUSED (an open order or funds in flight), then a confirmation proved by a one-shot token. Only the confirmation arms the deletion; a request alone never destroys anything, and a token that does not verify is rejected with its own typed error — never the email magic link's, which means a different secret entirely._
+
+- **Verified by**: [🧪 `TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt`](#test-testcustomerrequesterasureisrefusedwhilethejourneyisunbuilt), [🧪 `TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt`](#test-testcustomerconfirmerasureisrefusedwhilethejourneyisunbuilt)
+
+<a id="rule-erasureiscancellablebythesubjectwithinthewindow"></a>
+#### 📐 Rule: `ErasureIsCancellableByTheSubjectWithinTheWindow`
+
+_Inside the grace window the subject, and ONLY the subject, can withdraw the erasure (re-login-cancels). There is no admin resurrection: an erasure an operator can undo is not an erasure. Cancelling stays available whatever state the deletion engine is in — a customer must always be able to stop a deletion in progress, which is why the cancel path alone does not refuse when the engine is gated off._
+
+- **Verified by**: [🧪 `TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine`](#test-testcustomercancelerasureanswersabouttheaccountnottheengine), [🧪 `TestCustomerErasureWindowElapses`](#test-testcustomererasurewindowelapses)
+
+<a id="rule-erasureisrefusedwhiletheengineisgatedoff"></a>
+#### 📐 Rule: `ErasureIsRefusedWhileTheEngineIsGatedOff`
+
+_While the deletion engine is gated OFF, the erasure mutations REFUSE with a typed error instead of accepting. Accepting a request nothing can execute would start the Art. 12(3) thirty-day clock on a journey that will never run and show the subject "scheduled" forever — the erasure analogue of a paid order nobody is told about, and worse, because the subject stops chasing a right they believe is being honoured._
+
+- **Verified by**: [🧪 `TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt`](#test-testcustomerrequesterasureisrefusedwhilethejourneyisunbuilt)
+
+<a id="rule-erasureunlinkingisrecordedwithoutacommand"></a>
+#### 📐 Rule: `ErasureUnlinkingIsRecordedWithoutACommand`
+
+_The auth provider's confirmation that the identity was deleted at its end is recorded as an INBOUND fact with no command: an external event that already happened cannot be rejected. Unlinking is a distinct act from erasure and a mandatory leg — erasing our stream without provider-side revocation leaves the foreign model holding exactly what we deleted._
+
+- **Verified by**: [🧪 `TestCustomerIdentityUnlinkedIsRecorded`](#test-testcustomeridentityunlinkedisrecorded)
 
 ### 🧪 Tests _(2)_
 
@@ -8857,6 +9092,56 @@ _Sets the customer's preferred Stripe payment method_
 - **When**: [📩 `SetCustomerPaymentMethod`](#command-setcustomerpaymentmethod)
 - **Then**: [⚡ `CustomerPaymentMethodSet`](#event-customerpaymentmethodset)
 - **Verifies**: [📐 `PaymentMethodStorage`](#rule-paymentmethodstorage)
+
+<a id="test-testcustomerrequesterasureisrefusedwhilethejourneyisunbuilt"></a>
+#### 🧪 Test: `TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt`
+
+_Refuses an erasure request while no journey can execute it -- typed, renderable, and records NOTHING_
+
+- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered)
+- **When**: [📩 `RequestCustomerErasure`](#command-requestcustomererasure)
+- **Thrown**: [⛔ `ErasureEngineUnavailable`](#error-erasureengineunavailable), [⛔ `ErasureBlockedByOpenOrder`](#error-erasureblockedbyopenorder)
+- **Verifies**: [📐 `ErasureIsRequestedConfirmedThenExecuted`](#rule-erasureisrequestedconfirmedthenexecuted), [📐 `ErasureIsRefusedWhileTheEngineIsGatedOff`](#rule-erasureisrefusedwhiletheengineisgatedoff)
+
+<a id="test-testcustomerconfirmerasureisrefusedwhilethejourneyisunbuilt"></a>
+#### 🧪 Test: `TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt`
+
+_Refuses a confirmation while no request can exist to confirm -- with erasure's OWN token error, never the email magic link's_
+
+- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerErasureRequested`](#event-customererasurerequested)
+- **When**: [📩 `ConfirmCustomerErasure`](#command-confirmcustomererasure)
+- **Thrown**: [⛔ `ErasureEngineUnavailable`](#error-erasureengineunavailable), [⛔ `InvalidErasureConfirmationToken`](#error-invaliderasureconfirmationtoken), [⛔ `ErasureNotRequested`](#error-erasurenotrequested)
+- **Verifies**: [📐 `ErasureIsRequestedConfirmedThenExecuted`](#rule-erasureisrequestedconfirmedthenexecuted)
+
+<a id="test-testcustomercancelerasureanswersabouttheaccountnottheengine"></a>
+#### 🧪 Test: `TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine`
+
+_A cancel is answered about the ACCOUNT, never about our engine -- a customer must always be able to stop a deletion_
+
+- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed), [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled)
+- **When**: [📩 `CancelCustomerErasure`](#command-cancelcustomererasure)
+- **Thrown**: [⛔ `ErasureNotRequested`](#error-erasurenotrequested)
+- **Verifies**: [📐 `ErasureIsCancellableByTheSubjectWithinTheWindow`](#rule-erasureiscancellablebythesubjectwithinthewindow)
+
+<a id="test-testcustomererasurewindowelapses"></a>
+#### 🧪 Test: `TestCustomerErasureWindowElapses`
+
+_The grace window elapsing is RECORDED as a fact, not left to an internal timer_
+
+- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed)
+- **When**: [📩 `CustomerErasureDue`](#command-customererasuredue)
+- **Then**: [⚡ `CustomerErasureDue`](#event-customererasuredue)
+- **Verifies**: [📐 `ErasureIsCancellableByTheSubjectWithinTheWindow`](#rule-erasureiscancellablebythesubjectwithinthewindow)
+
+<a id="test-testcustomeridentityunlinkedisrecorded"></a>
+#### 🧪 Test: `TestCustomerIdentityUnlinkedIsRecorded`
+
+_Records the auth provider's confirmation that the identity was deleted at its end (inbound fact, no command)_
+
+- **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed)
+- **When**: [📩 `CustomerIdentityUnlinked`](#command-customeridentityunlinked)
+- **Then**: [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked)
+- **Verifies**: [📐 `ErasureUnlinkingIsRecordedWithoutACommand`](#rule-erasureunlinkingisrecordedwithoutacommand)
 
 **[🎭 `CartBindingProcess`](#actor-cartbindingprocess)**
 
@@ -10756,7 +11041,24 @@ Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0
 | <a id="type-ubersplitpolicy--platformfeepct"></a>`platformFeePct` | `number` | ✅ |
 | <a id="type-ubersplitpolicy--effectivefrom"></a>`effectiveFrom` | `string` _date-time_ | ✅ |
 
-### ⚡ Events _(1)_
+### ⚡ Events _(2)_
+
+<a id="event-customererased"></a>
+#### ⚡ Event: `CustomerErased`
+
+THE RECEIPT — the terminal fact, recorded on the DELETION LEDGER stream (never on the Customer stream, which no longer exists by then), mirroring `OrderDeleted` (ADR-20260731-160000 §6). This is what makes "is this customer really gone?" a durable, queryable answer that OUTLIVES the streams, and it is the record the post-erasure status response is served from — so every field a rebuilt read side needs must be here, PSEUDONYMOUSLY. Domain references only: never the erased payloads, which are gone. It is also the worklist a restore re-executes: after any PITR to a point before a deletion, the receipts are what say which subjects must be swept again (§3.5).
+
+- **Emitted by**: _inbound / external_
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_CustomerErasure`](#view-view_customererasure)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-customererased--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ | The accountability reference, not personal data — the same posture as OrderDeleted.customerId. |
+| <a id="event-customererased--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
+| <a id="event-customererased--policy"></a>`policy` | `string` | ✅ | The configuration key naming the grace window under which erasure ran (CUSTOMER_ERASURE_GRACE_WINDOW_DAYS). |
+| <a id="event-customererased--retainedunder"></a>`retainedUnder` | [`string`] | ⬜ | The approved retention windows under which data about this subject SURVIVES, by catalog name (`configuration.yaml#/retention_windows`). This is the disclosure limb of the receipt: it is what lets the post-erasure answer say WHAT was kept and under WHICH instrument once the streams are gone, generated from the same declarations that enforce it — so the copy cannot drift from the behaviour.  |
+| <a id="event-customererased--tombstoneeventid"></a>`tombstoneEventId` | `string` | ⬜ | The technical tombstone event that instructed the stream deletion — the receipt's 'deleted, thanks to tombstone <id>' stamp. |
 
 <a id="event-orderdeleted"></a>
 #### ⚡ Event: `OrderDeleted`
@@ -10821,7 +11123,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(55)_
+### 🔤 Scalars _(57)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10880,6 +11182,8 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-commandfailureseam"></a>🔤 `CommandFailureSeam` | enum (PAYMENT_GATEWAY \| COMMAND_PAYLOAD \| DOMAIN_INVARIANT \| INFRASTRUCTURE) | WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here. EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers are the three staged-flush arms of [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix. It comes back with #628, in the change that emits it.  |
 | <a id="scalar-commandfailurereason"></a>🔤 `CommandFailureReason` | enum (GATEWAY_REFUSED \| CARD_DECLINED \| PAYLOAD_UNDECODABLE \| UNCATALOGUED_INVARIANT \| TRANSIENT_INFRASTRUCTURE) | WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.  |
 | <a id="scalar-gatewaystatuscode"></a>🔤 `GatewayStatusCode` | integer | The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.  |
+| <a id="scalar-erasureprocessstatus"></a>🔤 `ErasureProcessStatus` | enum (AWAITING_CONFIRMATION \| SCHEDULED \| PARKED \| RUNNING \| COMPLETED \| CANCELLED) | State of ONE CustomerErasureProcess run (the `customer_erasure_process_manager` row). This is ROW state, not event-sourced bookkeeping (young): the request/confirm/cancel FACTS live on the Customer stream, the phase ladder does not. PARKED is a state, never a fact — a parked run alerts with its reason and its dead-man clock keeps running; it never silently waits.  |
+| <a id="scalar-erasureparkreason"></a>🔤 `ErasureParkReason` | enum (OPEN_ORDER \| FUNDS_IN_FLIGHT) | Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.  |
 
 ### ⛔ Errors _(12)_
 
@@ -10898,7 +11202,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(10)_
+### 📡 Observability _(11)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -11190,6 +11494,34 @@ _criticality: **high**_
 - **Status rules**: success ⇐ spans [`reminder.promote`]
 - **SLOs**: p95 ≤ 500ms · p99 ≤ 2000ms · error rate ≤ 1%
 
+<a id="obs-customer-erasure"></a>
+#### 📡 Contract: `customer-erasure`
+
+_criticality: **high**_
+
+- **Workflow**: 
+- **Emits**: — · **Inbound**: [⚡ `CustomerErasureRequested`](#event-customererasurerequested), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed), [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled), [⚡ `CustomerErasureDue`](#event-customererasuredue), [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked)
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `event.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `customer_id` | `domain.aggregate_id` | ✅ | [🔤 `CustomerId`](#scalar-customerid) |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `command.receive` | `SERVER` | ✅ | — | `business.command_type`*, `business.correlation_id`* |
+| `erasure.store.purge` | `CLIENT` | ✅ | — | `business.store`*, `business.result`* |
+| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`* |
+
+- **Metrics**: `erasure_duration_ms` _(histogram)_, `erasure_store_failed_total` _(counter)_, `erasure_request_parked_total` _(counter)_, `erasure_overdue_age_seconds` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans [`erasure.store.purge`, `event.store.append`]
+- **SLOs**: p95 ≤ 5000ms · p99 ≤ 15000ms · error rate ≤ 0%
+
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)
 
@@ -11229,6 +11561,7 @@ _Surface_ **`captain_frontoffice.yaml`**
 
 **Gaps**
 - ⚠️ `promotions.active` (promo banners) has no backing query — deals deferred.
+- ⚠️ GDPR account deletion (#708) has no entry point on this audience: the topbar and bottom_nav route to `/account`, which this file declares no screen for, so the three erasure screens and the four ops (`requestErasure`, `confirmErasure`, `cancelErasure`, `erasureStatus`) are unreachable here. The account surface itself is the missing piece; the erasure screens land with it.
 
 <a id="screen-search"></a>
 ### 📱 `search` · `/search` · 📱 SDUI
@@ -11761,6 +12094,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 **Gaps**
 - ⚠️ `rewards.balance` (Captain Coins), referral and passkeys/notifications management are not modelled (deferred domains).
+- ⚠️ GDPR account deletion is specified but not yet rendered here (#708): the three screens (request `/account/delete`, confirm `/account/delete/confirm`, status `/account/delete/status`) and the four ops (`requestErasure`, `confirmErasure`, `cancelErasure`, `erasureStatus`) exist in the DSL, and the mutations ship DARK behind `RUN_DELETION_ENGINE`. No control is bound until the engine chunk lands — a Delete button that cannot delete is a promise to a data subject we would not be keeping.
 
 _Surface_ **`rider.yaml`**
 

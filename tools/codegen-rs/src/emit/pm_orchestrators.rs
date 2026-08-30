@@ -714,6 +714,30 @@ pub(crate) fn pm_value_expr(ctx: &PmEmit, scope: &PmScope, val: &PmVal, target_f
             let src = ctx.read_field_ty(alias, col);
             pm_adapt(model, expr, &src, target_full)
         }
+        PmVal::FromEnvelope(kind) if kind == "occurred_at" => {
+            // The TRIGGER's own occurrence, not wall-clock-now. The distinction matters wherever a
+            // stamped time is a DEADLINE ANCHOR (the erasure journey's Art. 12(3) clock, #708):
+            // `Utc::now()` would silently restart the clock at whatever moment a worker happened to
+            // drain the lane, so a slow queue would buy us time that is not ours to take.
+            // `TriggerEnvelope.occurred_at` has carried this value all along — only this arm was
+            // missing, so the grammar documented a value the generator refused to emit.
+            let base = target_full
+                .strip_prefix("Option<")
+                .and_then(|t| t.strip_suffix('>'))
+                .unwrap_or(target_full);
+            assert!(
+                base == "chrono::DateTime<chrono::Utc>",
+                "{}: from_envelope occurred_at must target a timestamptz column (got {})",
+                loc,
+                base
+            );
+            let e = "env.occurred_at".to_string();
+            if target_full.starts_with("Option<") {
+                format!("Some({})", e)
+            } else {
+                e
+            }
+        }
         PmVal::FromEnvelope(kind) => {
             assert!(kind == "event_id", "{}: from_envelope {} not supported by the generator yet", loc, kind);
             let base = target_full

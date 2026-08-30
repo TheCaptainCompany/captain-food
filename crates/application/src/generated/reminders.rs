@@ -47,6 +47,7 @@ pub struct ReminderSchedule {
 }
 
 pub const REMINDER_SCHEDULES: &[ReminderSchedule] = &[
+    ReminderSchedule { actor_type: "Customer", on_message: "ConfirmCustomerErasure", reminder: "CustomerErasureDue", payload_event: "CustomerErasureDue", identity_prop: "customerId", after_key: "CUSTOMER_ERASURE_GRACE_WINDOW_DAYS", after_default: std::time::Duration::from_secs(30 * 86_400), reschedule: ReschedulePolicy::Keep },
     ReminderSchedule { actor_type: "Order", on_message: "OrderPlaced", reminder: "OrderAcceptanceTimedOut", payload_event: "OrderAcceptanceTimedOut", identity_prop: "orderId", after_key: "ORDER_ACCEPTANCE_TIMEOUT_SECONDS", after_default: std::time::Duration::from_secs(300), reschedule: ReschedulePolicy::Keep },
     ReminderSchedule { actor_type: "Order", on_message: "PlaceReplacementOrder", reminder: "OrderAcceptanceTimedOut", payload_event: "OrderAcceptanceTimedOut", identity_prop: "orderId", after_key: "ORDER_ACCEPTANCE_TIMEOUT_SECONDS", after_default: std::time::Duration::from_secs(300), reschedule: ReschedulePolicy::Keep },
     ReminderSchedule { actor_type: "Order", on_message: "MarkOrderDelivered", reminder: "OrderExpired", payload_event: "OrderExpired", identity_prop: "orderId", after_key: "ORDER_RETENTION_WINDOW_DAYS", after_default: std::time::Duration::from_secs(3650 * 86_400), reschedule: ReschedulePolicy::InPlace },

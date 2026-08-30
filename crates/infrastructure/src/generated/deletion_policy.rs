@@ -36,6 +36,14 @@ pub struct DeletionPolicy {
 
 pub const DELETION_POLICIES: &[DeletionPolicy] = &[
     DeletionPolicy {
+        actor_type: "Customer",
+        identity: "customerId",
+        triggers: &[
+            DeletionTrigger { on: &["CustomerErasureDue"], after_config_key: None, cancelled_on: &["CustomerErasureCancelled"], match_event_property: Some("customerId"), match_state_field: Some("customerId") },
+        ],
+        receipt: "CustomerErased",
+    },
+    DeletionPolicy {
         actor_type: "Order",
         identity: "orderId",
         triggers: &[

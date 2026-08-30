@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use actor_client::mailbox::{Envelope, Mailbox};
-use actor_client::{ActorDoor, EnqueueOutcome};
+use actor_client::{ActorDoor, EnqueueOutcome, ScheduleOutcome};
 use domain::shared::errors::DomainError;
 
 /// The privacy SEAL: `Sealed` lives in a private module, so it cannot be named -- let alone
@@ -30,11 +30,14 @@ mod sealed {
     pub trait Sealed {}
 }
 
+impl sealed::Sealed for domain::generated::commands::CancelCustomerErasure {}
 impl sealed::Sealed for domain::generated::commands::ChangeLanguage {}
+impl sealed::Sealed for domain::generated::commands::ConfirmCustomerErasure {}
 impl sealed::Sealed for domain::generated::commands::ConfirmEmailVerification {}
 impl sealed::Sealed for domain::generated::commands::ConfirmPhoneChange {}
 impl sealed::Sealed for domain::generated::commands::MarkRestaurantAsFavorite {}
 impl sealed::Sealed for domain::generated::commands::RemoveCustomerAddress {}
+impl sealed::Sealed for domain::generated::commands::RequestCustomerErasure {}
 impl sealed::Sealed for domain::generated::commands::RequestEmailVerification {}
 impl sealed::Sealed for domain::generated::commands::RequestPhoneChange {}
 impl sealed::Sealed for domain::generated::commands::RequestPhoneVerification {}
@@ -44,6 +47,7 @@ impl sealed::Sealed for domain::generated::commands::SetCustomerPreferences {}
 impl sealed::Sealed for domain::generated::commands::UnmarkRestaurantAsFavorite {}
 impl sealed::Sealed for domain::generated::commands::UpdateCustomerInfo {}
 impl sealed::Sealed for domain::generated::commands::VerifyPhone {}
+impl sealed::Sealed for domain::generated::events::CustomerIdentityUnlinked {}
 
 /// GENERATED from actors.yaml `Customer.receives`: marker for every COMMAND the `Customer` actor
 /// receives. SEALED (private supertrait) so no impl can exist outside this generated crate --
@@ -53,8 +57,16 @@ pub trait CustomerCommand: sealed::Sealed + serde::Serialize + Send {
     const MESSAGE_TYPE: &'static str;
 }
 
+impl CustomerCommand for domain::generated::commands::CancelCustomerErasure {
+    const MESSAGE_TYPE: &'static str = "CancelCustomerErasure";
+}
+
 impl CustomerCommand for domain::generated::commands::ChangeLanguage {
     const MESSAGE_TYPE: &'static str = "ChangeLanguage";
+}
+
+impl CustomerCommand for domain::generated::commands::ConfirmCustomerErasure {
+    const MESSAGE_TYPE: &'static str = "ConfirmCustomerErasure";
 }
 
 impl CustomerCommand for domain::generated::commands::ConfirmEmailVerification {
@@ -71,6 +83,10 @@ impl CustomerCommand for domain::generated::commands::MarkRestaurantAsFavorite {
 
 impl CustomerCommand for domain::generated::commands::RemoveCustomerAddress {
     const MESSAGE_TYPE: &'static str = "RemoveCustomerAddress";
+}
+
+impl CustomerCommand for domain::generated::commands::RequestCustomerErasure {
+    const MESSAGE_TYPE: &'static str = "RequestCustomerErasure";
 }
 
 impl CustomerCommand for domain::generated::commands::RequestEmailVerification {
@@ -109,6 +125,25 @@ impl CustomerCommand for domain::generated::commands::VerifyPhone {
     const MESSAGE_TYPE: &'static str = "VerifyPhone";
 }
 
+/// GENERATED from actors.yaml `Customer.receives`: marker for every inbound FACT (an
+/// `events.yaml#/...` ref -- an external fact that already happened) the `Customer` actor records.
+/// SEALED for the same reason as [`CustomerCommand`].
+pub trait CustomerFact: sealed::Sealed + serde::Serialize + Send {
+    /// The mailbox `message_type` (the events.yaml key) -- also the `DomainEvent` adjacent tag.
+    const EVENT_TYPE: &'static str;
+    /// The fact wrapped in ITS `DomainEvent` variant -- so the adjacently-tagged wire form comes
+    /// from the domain enum's own serde representation, never from a hand-built literal that
+    /// could drift from it.
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent;
+}
+
+impl CustomerFact for domain::generated::events::CustomerIdentityUnlinked {
+    const EVENT_TYPE: &'static str = "CustomerIdentityUnlinked";
+    fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        domain::generated::events::DomainEvent::CustomerIdentityUnlinked(self)
+    }
+}
+
 /// GENERATED from actors.yaml: the strongly-typed client for ONE `Customer` mailbox lane --
 /// `actor_id` is the addressed instance and the partition is derived by `declared_lane` from the
 /// DECLARED `mailbox.partitions` width. The only door to this actor.
@@ -142,5 +177,59 @@ impl CustomerClient {
         self.door
             .send_command("Customer", self.actor_id, M::MESSAGE_TYPE, payload, env)
             .await
+    }
+
+    /// Record one inbound FACT (kind EVENT, channel EXTERNAL, adjacently-tagged `DomainEvent`
+    /// payload). `message_id` is ALWAYS the deterministic `inbound_message_id(source,
+    /// external_id)` -- never caller-supplied -- and provenance is a REQUIRED parameter, because
+    /// the `(source, external_id)` dedupe key is what makes redelivery safe. The acting principal
+    /// is the per-source system user, stamped by the shared `inbound_entry` constructor.
+    pub async fn record<F: CustomerFact>(
+        &self,
+        fact: F,
+        source: &str,
+        external_id: &str,
+        correlation_id: uuid::Uuid,
+    ) -> Result<EnqueueOutcome, DomainError> {
+        let tagged = serde_json::to_value(fact.into_domain_event())
+            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", F::EVENT_TYPE)))?;
+        self.door
+            .record_fact(
+                "Customer",
+                self.actor_id,
+                F::EVENT_TYPE,
+                tagged,
+                source,
+                external_id,
+                correlation_id,
+            )
+            .await
+    }
+
+    /// Schedule one typed COMMAND for LATER delivery: a SCHEDULED row (`position` NULL) the
+    /// promotion pass delivers when due; a still-SCHEDULED identity reschedules IN PLACE
+    /// (ADR-20260731-150500).
+    pub async fn schedule<M: CustomerCommand>(
+        &self,
+        msg: M,
+        env: Envelope,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<ScheduleOutcome, DomainError> {
+        let payload = serde_json::to_value(&msg)
+            .map_err(|e| DomainError::Repository(format!("{} payload: {e}", M::MESSAGE_TYPE)))?;
+        self.door.assert_addressed("CustomerClient", self.actor_id, M::MESSAGE_TYPE, &payload)?;
+        self.door
+            .schedule_command("Customer", self.actor_id, M::MESSAGE_TYPE, payload, env, at)
+            .await
+    }
+
+    /// Withdraw a SCHEDULED reminder (`SCHEDULED -> CANCELLED`, ADR-20260731-150500 section 3).
+    /// `false` = absent, delivered or already cancelled -- the caller decides whether losing that
+    /// race matters. Named `cancel_scheduling` (product-owner decision 2026-08-02, #308): the name
+    /// says exactly what it withdraws -- a scheduled reminder, never an in-flight command. Keyed
+    /// by `message_id` like the port beneath it: the id is minted by `schedule`, so holding it IS
+    /// the capability (decided over lane-scoping, #308).
+    pub async fn cancel_scheduling(&self, message_id: uuid::Uuid) -> Result<bool, DomainError> {
+        self.door.cancel_scheduling(message_id).await
     }
 }

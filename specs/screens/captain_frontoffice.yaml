@@ -201,6 +201,12 @@ screens:
         note: "The marketplace has no restaurantId to give a per-restaurant category query; the category rail needs a global taxonomy query (unmodelled). The dead-man rule retires this declaration the moment a source (or a new query binding) lands."
     gaps:
       - "`promotions.active` (promo banners) has no backing query — deals deferred."
+      # The marketplace audience declares NO /account screen at all, while its topbar avatar and its
+      # bottom_nav both route to `/account`. So the erasure entry point is unreachable on this
+      # audience for a second, independent reason — worth stating here rather than only on the
+      # storefront, because a data subject who only ever uses the marketplace host would find no way
+      # to exercise Art. 17 and nothing in the spec would say so.
+      - "GDPR account deletion (#708) has no entry point on this audience: the topbar and bottom_nav route to `/account`, which this file declares no screen for, so the three erasure screens and the four ops (`requestErasure`, `confirmErasure`, `cancelErasure`, `erasureStatus`) are unreachable here. The account surface itself is the missing piece; the erasure screens land with it."
     components:
       - { component: topbar }
       - { type: hero_search_bar, id: hero_search, placeholder: { $ref: 'captain_frontoffice.translations.yaml#/home.search_placeholder' }, action: { type: navigate, route: "/search" } }

@@ -462,6 +462,7 @@ View_CustomerErasure:
     - { $ref: 'events.yaml#/CustomerErasureRequested' }
     - { $ref: 'events.yaml#/CustomerErasureConfirmed' }
     - { $ref: 'events.yaml#/CustomerErasureCancelled' }
+    - { $ref: 'events.yaml#/CustomerErasureDue' }
     - { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
     - { $ref: 'events.yaml#/CustomerErased' }
   rules:
@@ -471,26 +472,32 @@ View_CustomerErasure:
   indexes:
     - [customer_id, status]   # the caller's own request, resolved from auth context (no client-supplied subject)
   columns:
-    erasure_request_id:
-      from: [{ $ref: 'events.yaml#/CustomerErasureRequested/properties/erasureRequestId' }]
-      pk: true
+    # KEYED BY THE SUBJECT, not by the request: a customer has at most one live erasure journey, the
+    # query asks "what is happening to MY request", and the reminder that reports the window elapsing
+    # carries only the identity. Keying by request id would have left that fact unable to find its
+    # own row.
     customer_id:
       from: [{ $ref: 'events.yaml#/CustomerErasureRequested/properties/customerId' }]
-      index: true
+      pk: true
       note: "The accountability reference the query scopes on — resolved from the authenticated principal, never from a client argument."
+    erasure_request_id:
+      from: [{ $ref: 'events.yaml#/CustomerErasureRequested/properties/erasureRequestId' }]
+      note: "The subject's pseudonymous reference for the right they exercised; quotable back to us after everything else is gone."
     status:
       type: { $ref: 'scalars.yaml#/ErasureStatus' }
       derive:
         CustomerErasureRequested: REQUESTED
         CustomerErasureConfirmed: CONFIRMED
+        CustomerErasureDue: EXECUTING
         CustomerIdentityUnlinked: EXECUTING
         CustomerErased: ERASED
       from:
         - { $ref: 'events.yaml#/CustomerErasureRequested' }
         - { $ref: 'events.yaml#/CustomerErasureConfirmed' }
+        - { $ref: 'events.yaml#/CustomerErasureDue' }
         - { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
         - { $ref: 'events.yaml#/CustomerErased' }
-      note: "Derived from the latest fact. The unlink leg is the first externally observable destructive step, so it is what turns the answer to EXECUTING."
+      note: "Derived from the latest fact. The grace window elapsing is what turns the answer to EXECUTING — the subject can no longer cancel from that moment, so telling them otherwise would be false. The unlink leg keeps it there."
     cancelled_at:
       type: timestamptz
       from: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]

@@ -710,6 +710,23 @@ pub struct CustomerProfile {
     pub timezone: Option<TimeZone>,
 }
 
+/// The state of ONE erasure request, as the data subject is entitled to see it (Art. 12/15), plus the disclosure limb of §3.6 once the receipt exists: what was retained and under which instrument. Every field is PSEUDONYMOUS — this type must keep answering after the customer's stream is gone, so a name or an address here would either have to die with the stream (leaving the subject unable to check the erasure they asked for) or survive it (making the erasure a lie).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerErasure {
+    #[graphql(name = "erasureRequestId")]
+    pub erasure_request_id: ErasureRequestId,
+    #[graphql(name = "status")]
+    pub status: ErasureStatus,
+    #[graphql(name = "cancelledAt")]
+    pub cancelled_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "policy")]
+    pub policy: Option<String>,
+    /// Approved retention-window catalog names — the source the 'what was retained and why' copy interpolates its instrument and horizon from, so the screen and the enforcement cannot drift apart.
+    #[graphql(name = "retainedUnder")]
+    pub retained_under: String,
+}
+
 /// One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves the rider job list, the restaurant delivery board and admin.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]

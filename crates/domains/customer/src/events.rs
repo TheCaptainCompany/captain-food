@@ -115,3 +115,54 @@ pub struct CustomerPaymentMethodSet {
     pub customer_id: CustomerId,
     pub payment_method_id: PaymentMethodId,
 }
+
+/// The customer asked to be erased (Art. 17). Recorded on acceptance, which is what starts the Art. 12(3) month — the clock is anchored HERE, at receipt of the request, and the confirmation step never re-anchors it: the confirmation is our safeguard, so it may not eat the subject's time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerErasureRequested {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+}
+
+/// The subject confirmed the erasure with their token. THIS is the fact the machinery reacts to: the `deletion:` trigger arms on it and the grace window runs from it. A request alone never destroys anything.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerErasureConfirmed {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+}
+
+/// The subject withdrew the erasure inside the grace window (re-login-cancels — the user's act, never an admin resurrection). Listed in the deletion block's `cancelled_on:`, so a pending deletion goes SCHEDULED → CANCELLED.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerErasureCancelled {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+}
+
+/// THE GRACE WINDOW ELAPSED — a recorded business fact, delivered by the Customer's own `CustomerErasureDue` reminder and recorded on acceptance (record semantics, never rejected). It exists as a FACT rather than as an engine-internal timer for the reason ADR-20260731-160000 §2 gives for the Order pilot: projections must be able to FOLD the moment the journey became due — an internal timer would move read models with no foldable cause in the log, and the subject's status screen would change for no reason anyone could replay. This is what the erasure journey's first destructive leg reacts to, and what the `deletion:` trigger fires on. IT CARRIES THE IDENTITY ONLY. A reminder is one actor talking to ITSELF, and its payload is built generically from the actor's identity — so `erasureRequestId` is deliberately absent rather than declared and left unfillable. The journey is found from the subject, which is sound because a customer may have at most one live erasure at a time (the process row's `customer_id` is UNIQUE).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerErasureDue {
+    pub customer_id: CustomerId,
+}
+
+/// INBOUND INTEGRATION FACT, recorded through the identity ACL with NO command (ADR-0004): the auth provider confirmed the subject's identity was deleted at its end. An external fact that already happened is never a command — there is nothing left to reject. THE NAME CARRIES THE DISTINCTION AND MUST NOT BE "ERASED" (evans): erasure is data destroyed on our side; UNLINKING is the identity mapping severed at the provider. Erasing our stream without provider-side revocation would leave the foreign model holding exactly what we deleted, so this is a mandatory leg of the journey and not a nicety. The instruction that provokes it is an Art. 28 processor instruction — a Tell, never an Ask.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerIdentityUnlinked {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+}
+
+/// THE RECEIPT — the terminal fact, recorded on the DELETION LEDGER stream (never on the Customer stream, which no longer exists by then), mirroring `OrderDeleted` (ADR-20260731-160000 §6). This is what makes "is this customer really gone?" a durable, queryable answer that OUTLIVES the streams, and it is the record the post-erasure status response is served from — so every field a rebuilt read side needs must be here, PSEUDONYMOUSLY. Domain references only: never the erased payloads, which are gone. It is also the worklist a restore re-executes: after any PITR to a point before a deletion, the receipts are what say which subjects must be swept again (§3.5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerErased {
+    pub customer_id: CustomerId,
+    pub erasure_request_id: ErasureRequestId,
+    pub policy: String,
+    #[serde(default)]
+    pub retained_under: Vec<String>,
+    pub tombstone_event_id: Option<String>,
+}

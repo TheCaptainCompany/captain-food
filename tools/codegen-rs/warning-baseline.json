@@ -1,14 +1,14 @@
 {
   "doc": "GENERATED warning ratchet (validator section 17) -- do not hand-edit. `make validate` fails when the live per-rule warning histogram differs from this one, in EITHER direction. To change it, run `make warning-baseline` and commit the result in the SAME commit as the spec/code change that moved the number; a deliberate INCREASE is recorded by that diff plus one line in the PR body saying why the warning is accepted.",
-  "total": 92,
+  "total": 97,
   "by_rule": {
     "action-missing-required-input": 10,
     "action-unknown-input": 7,
     "command-no-mutation": 11,
     "event-not-projected": 9,
     "identity-property-not-on-command": 1,
-    "obs-metric-no-emitter": 42,
-    "obs-technical-error-unreachable": 11,
+    "obs-metric-no-emitter": 46,
+    "obs-technical-error-unreachable": 12,
     "view-fedby-unused": 1
   }
 }

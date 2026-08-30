@@ -27,6 +27,31 @@ fn fx_customer_info_updated() -> DomainEvent {
     DomainEvent::CustomerInfoUpdated(evs::CustomerInfoUpdated { customer_id: sc::CustomerId(support::uid("cust-1")), display_name: Some(sc::CustomerDisplayName("Johnny B.".into())) })
 }
 
+/// tests.yaml#/fixtures/customerErasureRequested — events.yaml#/CustomerErasureRequested
+fn fx_customer_erasure_requested() -> DomainEvent {
+    DomainEvent::CustomerErasureRequested(evs::CustomerErasureRequested { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) })
+}
+
+/// tests.yaml#/fixtures/customerErasureConfirmed — events.yaml#/CustomerErasureConfirmed
+fn fx_customer_erasure_confirmed() -> DomainEvent {
+    DomainEvent::CustomerErasureConfirmed(evs::CustomerErasureConfirmed { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) })
+}
+
+/// tests.yaml#/fixtures/customerErasureCancelled — events.yaml#/CustomerErasureCancelled
+fn fx_customer_erasure_cancelled() -> DomainEvent {
+    DomainEvent::CustomerErasureCancelled(evs::CustomerErasureCancelled { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) })
+}
+
+/// tests.yaml#/fixtures/customerErasureDue — events.yaml#/CustomerErasureDue
+fn fx_customer_erasure_due() -> DomainEvent {
+    DomainEvent::CustomerErasureDue(evs::CustomerErasureDue { customer_id: sc::CustomerId(support::uid("cust-1")) })
+}
+
+/// tests.yaml#/fixtures/customerIdentityUnlinked — events.yaml#/CustomerIdentityUnlinked
+fn fx_customer_identity_unlinked() -> DomainEvent {
+    DomainEvent::CustomerIdentityUnlinked(evs::CustomerIdentityUnlinked { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) })
+}
+
 /// tests.yaml#/fixtures/customerEmailVerified — events.yaml#/CustomerEmailVerified
 fn fx_customer_email_verified() -> DomainEvent {
     DomainEvent::CustomerEmailVerified(evs::CustomerEmailVerified { customer_id: sc::CustomerId(support::uid("cust-1")), email: sc::EmailAddress("johnny@example.com".into()) })
@@ -4820,5 +4845,82 @@ async fn test_requeue_of_unknown_message_is_rejected() {
     let err = result.expect_err("TestRequeueOfUnknownMessageIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRequeueOfUnknownMessageIsRejected", &err, &["MailboxMessageNotFound"]);
     bed.assert_appended("TestRequeueOfUnknownMessageIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt — "Refuses an erasure request while no journey can execute it -- typed, renderable, and records NOTHING"
+/// rules: ErasureIsRequestedConfirmedThenExecuted, ErasureIsRefusedWhileTheEngineIsGatedOff
+#[tokio::test]
+async fn test_customer_request_erasure_is_refused_while_the_journey_is_unbuilt() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Customer-{}", support::uid("cust-1")), vec![fx_customer_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestCustomerErasure { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) };
+    let result = crate::commands::request_customer_erasure(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt: the spec expects a typed rejection");
+    support::assert_thrown("TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt", &err, &["ErasureEngineUnavailable", "ErasureBlockedByOpenOrder"]);
+    bed.assert_appended("TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt — "Refuses a confirmation while no request can exist to confirm -- with erasure's OWN token error, never the email magic link's"
+/// rules: ErasureIsRequestedConfirmedThenExecuted
+#[tokio::test]
+async fn test_customer_confirm_erasure_is_refused_while_the_journey_is_unbuilt() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Customer-{}", support::uid("cust-1")), vec![fx_customer_registered(), fx_customer_erasure_requested()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmCustomerErasure { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")), token: sc::ErasureConfirmationToken("erasure-token-1".into()) };
+    let result = crate::commands::confirm_customer_erasure(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt: the spec expects a typed rejection");
+    support::assert_thrown("TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt", &err, &["ErasureEngineUnavailable", "InvalidErasureConfirmationToken", "ErasureNotRequested"]);
+    bed.assert_appended("TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine — "A cancel is answered about the ACCOUNT, never about our engine -- a customer must always be able to stop a deletion"
+/// rules: ErasureIsCancellableByTheSubjectWithinTheWindow
+#[tokio::test]
+async fn test_customer_cancel_erasure_answers_about_the_account_not_the_engine() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Customer-{}", support::uid("cust-1")), vec![fx_customer_registered(), fx_customer_erasure_confirmed(), fx_customer_erasure_cancelled()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::CancelCustomerErasure { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) };
+    let result = crate::commands::cancel_customer_erasure(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine: the spec expects a typed rejection");
+    support::assert_thrown("TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine", &err, &["ErasureNotRequested"]);
+    bed.assert_appended("TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestCustomerErasureWindowElapses — "The grace window elapsing is RECORDED as a fact, not left to an internal timer"
+/// rules: ErasureIsCancellableByTheSubjectWithinTheWindow
+#[tokio::test]
+async fn test_customer_erasure_window_elapses() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Customer-{}", support::uid("cust-1")), vec![fx_customer_registered(), fx_customer_erasure_confirmed()]).await;
+    let before = bed.snapshot();
+    let ev = evs::CustomerErasureDue { customer_id: sc::CustomerId(support::uid("cust-1")) };
+    let result = bed.record_fact(&format!("Customer-{}", support::uid("cust-1")), DomainEvent::CustomerErasureDue(ev)).await;
+    let _ = result.expect("TestCustomerErasureWindowElapses: the spec expects acceptance");
+    bed.assert_appended("TestCustomerErasureWindowElapses", &before, &[
+        (format!("Customer-{}", support::uid("cust-1")), fx_customer_erasure_due()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestCustomerIdentityUnlinkedIsRecorded — "Records the auth provider's confirmation that the identity was deleted at its end (inbound fact, no command)"
+/// rules: ErasureUnlinkingIsRecordedWithoutACommand
+#[tokio::test]
+async fn test_customer_identity_unlinked_is_recorded() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Customer-{}", support::uid("cust-1")), vec![fx_customer_registered(), fx_customer_erasure_confirmed()]).await;
+    let before = bed.snapshot();
+    let ev = evs::CustomerIdentityUnlinked { customer_id: sc::CustomerId(support::uid("cust-1")), erasure_request_id: sc::ErasureRequestId(support::uid("erasure-1")) };
+    let result = bed.record_fact(&format!("Customer-{}", support::uid("cust-1")), DomainEvent::CustomerIdentityUnlinked(ev)).await;
+    let _ = result.expect("TestCustomerIdentityUnlinkedIsRecorded: the spec expects acceptance");
+    bed.assert_appended("TestCustomerIdentityUnlinkedIsRecorded", &before, &[
+        (format!("Customer-{}", support::uid("cust-1")), fx_customer_identity_unlinked()),
+    ]);
 }
 

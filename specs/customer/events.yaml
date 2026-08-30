@@ -248,7 +248,30 @@ CustomerErasureCancelled:
   required: [customerId, erasureRequestId]
 
 
+CustomerErasureDue:
+  description: >
+    THE GRACE WINDOW ELAPSED — a recorded business fact, delivered by the Customer's own
+    `CustomerErasureDue` reminder and recorded on acceptance (record semantics, never rejected).
+    It exists as a FACT rather than as an engine-internal timer for the reason ADR-20260731-160000 §2
+    gives for the Order pilot: projections must be able to FOLD the moment the journey became due —
+    an internal timer would move read models with no foldable cause in the log, and the subject's
+    status screen would change for no reason anyone could replay.
+    This is what the erasure journey's first destructive leg reacts to, and what the `deletion:`
+    trigger fires on.
+    IT CARRIES THE IDENTITY ONLY. A reminder is one actor talking to ITSELF, and its payload is built
+    generically from the actor's identity — so `erasureRequestId` is deliberately absent rather than
+    declared and left unfillable. The journey is found from the subject, which is sound because a
+    customer may have at most one live erasure at a time (the process row's `customer_id` is UNIQUE).
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+  required: [customerId]
+
+
 CustomerIdentityUnlinked:
+
+
   description: >
     INBOUND INTEGRATION FACT, recorded through the identity ACL with NO command (ADR-0004): the auth
     provider confirmed the subject's identity was deleted at its end. An external fact that already

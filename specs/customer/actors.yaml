@@ -114,7 +114,9 @@ Customer:
         - { $ref: 'errors.yaml#/InvalidErasureConfirmationToken' }
         - { $ref: 'errors.yaml#/ErasureNotRequested' }
         - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
-      effect: "Verify the token server-side, then record the confirmation — the fact the deletion trigger arms on. The grace window runs from here."
+      effect: "Verify the token server-side, then record the confirmation. The grace window is scheduled from here as a REMINDER, so the moment it elapses becomes a recorded fact rather than an engine-internal timer."
+      schedules:
+        - { $ref: '#/Customer/reminders/CustomerErasureDue' }
     - message: { $ref: 'commands.yaml#/CancelCustomerErasure' }
       emits: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
       throws:
@@ -126,6 +128,12 @@ Customer:
     - message: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
       emits: [{ $ref: 'events.yaml#/CustomerIdentityUnlinked' }]
       effect: "Record the auth provider's confirmation that the subject's identity was deleted at its end (Art. 28 processor instruction completed). Idempotent under re-delivery."
+    # The grace window elapsing is a RECORDED fact, not an engine-internal timer — record semantics,
+    # never rejected (ADR-20260731-153000 §1a). It is what projections fold to move the subject's
+    # status, and what the deletion trigger fires on.
+    - message: { $ref: '#/Customer/reminders/CustomerErasureDue' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureDue' }]
+      effect: "The grace window elapsed: record it. CustomerErasureProcess then re-checks the open-order precondition and, only if it passes, begins the destructive legs."
 
   # The `deletion:` block — the recorded grammar of ADR-20260731-214500, reused, not reinvented.
   # The engine's journey is unchanged (tombstone through projections, including View_Customer.auth_ref
@@ -134,15 +142,24 @@ Customer:
   # hatch of §4: "an aggregate needing bespoke steps falls back to a hand-written PM — `deletion:` is
   # sugar over the same machinery." Those legs are CustomerErasureProcess.
   #
-  # `after:` is on the TRIGGER here, not on a reminder as in the Order pilot, because the customer is
-  # TOLD the window ("you have N days to change your mind"): the delay is part of the promise made to
-  # the subject, not an internal expiry schedule.
+  # The grace window lives on the REMINDER, exactly as the Order pilot's does — NOT on the trigger.
+  # The reason is ADR-20260731-160000 §2's, and it applies with more force here: the expiry must be a
+  # recorded business fact projections can fold, because it is the moment the subject's own status
+  # screen changes from "you can still cancel" to "this is running". An engine-internal timer would
+  # move that screen with no foldable cause in the log.
+  # `reschedule: keep` on purpose (#167's shape, not the pilot's `in-place`): a redelivered,
+  # duplicate-absorbed confirmation must NOT push the deletion date out again — the FIRST
+  # scheduled_at wins, because the subject was told a date and re-delivery is not a new decision.
+  reminders:
+    CustomerErasureDue:
+      payload: { $ref: 'events.yaml#/CustomerErasureDue' }
+      after: { $ref: 'configuration.yaml#/keys/CUSTOMER_ERASURE_GRACE_WINDOW_DAYS' }
+      reschedule: keep
   deletion:
     triggers:
-      - on: [{ $ref: 'events.yaml#/CustomerErasureConfirmed' }]
-        after: { $ref: 'configuration.yaml#/keys/CUSTOMER_ERASURE_GRACE_WINDOW_DAYS' }
+      - on: [{ $ref: 'events.yaml#/CustomerErasureDue' }]
         cancelled_on: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
         match:
-          event: { $ref: 'events.yaml#/CustomerErasureConfirmed/properties/customerId' }
+          event: { $ref: 'events.yaml#/CustomerErasureDue/properties/customerId' }
           state: { $ref: '#/Customer/state/customerId' }
     receipt: { $ref: 'events.yaml#/CustomerErased' }

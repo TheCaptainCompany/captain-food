@@ -22,8 +22,10 @@ use serde_json::json;
 use domain::catalog::CatalogState;
 use domain::customer::CustomerState;
 use domain::generated::commands::{
-    ActivateRestaurant, AddCatalogCategory, AddOptionList, AddProduct, ChangeLanguage,
+    ActivateRestaurant, AddCatalogCategory, AddOptionList, AddProduct,
+    CancelCustomerErasure, ChangeLanguage,
     ChangeOrderAcceptanceMode, ChangeRestaurantListingStatus, ClaimRestaurantListing,
+    ConfirmCustomerErasure, RequestCustomerErasure,
     ConfigureGoogleBusinessProfileOrderLink, ConfirmEmailVerification, ConfirmPhoneChange,
     ConfigureCatalogSlug, ConfigureRestaurantSlug, CreateCatalog, DeactivateRestaurant,
     DeleteRestaurantAccount,
@@ -4182,4 +4184,63 @@ mod verify_phone_claim_stamp_tests {
              (stamp BEFORE rotate; park ONLY the rotated token)"
         );
     }
+}
+
+// ─── GDPR erasure (PROP-20260829-150752; #708) ──────────────────────────────────────────────────
+//
+// THESE THREE HANDLERS REFUSE, AND REFUSING IS THE FEATURE — not a stub.
+//
+// The DSL surface for erasure landed ahead of its journey: the aggregate declares the facts, the
+// deletion block arms on them, the retention gate protects them, and the subject's status view can
+// answer. What does NOT exist yet in this build is the journey that executes an erasure — the
+// process manager, the crypto-shred, the identity unlink, the receipt.
+//
+// So the only honest handler is a TYPED REFUSAL (farley, binding). The tempting alternative — accept
+// the request, record the fact, "the engine will pick it up later" — is the specific failure this
+// product names as its worst: it would start the Art. 12(3) thirty-day clock on a journey nothing
+// will ever run, and show the data subject "scheduled" on a screen forever. The customer stops
+// chasing a right they believe is being honoured, which is strictly worse than being told no. A
+// paid order nobody is told about, in the shape of a legal right.
+//
+// `ErasureEngineUnavailable` says exactly that, in both languages, and points the subject at a human
+// — a refusal a screen can render honestly, never a generic failure.
+//
+// WHAT LANDS WITH THE JOURNEY, and why it is not here: the `RUN_DELETION_ENGINE` gate parameter
+// (the handler will take it the way `place_order` takes `enforce_service_hours_guard` — resolved at
+// the composition root, never read from the environment inside a handler), and the
+// open-order/funds-in-flight precondition that throws `ErasureBlockedByOpenOrder`. That precondition
+// needs a read model this chunk does not ship, and a handler that ACCEPTED without it could schedule
+// a key destruction over a live delivery.
+
+/// Handle `commands.yaml#/RequestCustomerErasure`. Refuses with
+/// `errors.yaml#/ErasureEngineUnavailable` while the erasure journey is not built in this
+/// deployment — never accepts, because an accepted request starts a statutory clock nothing serves.
+pub async fn request_customer_erasure(
+    _store: &dyn EventStore,
+    _cmd: RequestCustomerErasure,
+    _actor: &Actor,
+) -> Result<(), DomainError> {
+    Err(reject("ErasureEngineUnavailable", json!({})))
+}
+
+/// Handle `commands.yaml#/ConfirmCustomerErasure`. Refuses for the same reason: with no request
+/// recordable, there is nothing a token could confirm.
+pub async fn confirm_customer_erasure(
+    _store: &dyn EventStore,
+    _cmd: ConfirmCustomerErasure,
+    _actor: &Actor,
+) -> Result<(), DomainError> {
+    Err(reject("ErasureEngineUnavailable", json!({})))
+}
+
+/// Handle `commands.yaml#/CancelCustomerErasure`. Refuses with
+/// `errors.yaml#/ErasureNotRequested` — deliberately NOT `ErasureEngineUnavailable`: a customer must
+/// always be able to stop a deletion whatever state our machinery is in, so the honest answer here
+/// is the truthful one about THEIR account ("there is nothing to cancel"), not one about our engine.
+pub async fn cancel_customer_erasure(
+    _store: &dyn EventStore,
+    _cmd: CancelCustomerErasure,
+    _actor: &Actor,
+) -> Result<(), DomainError> {
+    Err(reject("ErasureNotRequested", json!({})))
 }

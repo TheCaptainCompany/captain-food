@@ -1032,6 +1032,7 @@ name = "client-customer"
 version = "0.1.0"
 dependencies = [
  "actor_client",
+ "chrono",
  "domain",
  "serde",
  "serde_json",

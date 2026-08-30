@@ -6225,14 +6225,25 @@ Catalog:
         let reminders = parse_reminders(&model);
         assert_eq!(
             reminders.iter().map(|r| (r.actor.as_str(), r.name.as_str())).collect::<Vec<_>>(),
-            vec![("Order", "OrderExpired"), ("Order", "OrderAcceptanceTimedOut")],
-            "the declared reminders: the retention pilot + the #167 acceptance deadline"
+            vec![
+                // The GDPR erasure grace window (#708): the window lives on the REMINDER, exactly as
+                // the pilot's does, so the moment it elapses is a RECORDED fact projections can fold
+                // — not an engine-internal timer that would move the subject's status screen with no
+                // foldable cause in the log.
+                ("Customer", "CustomerErasureDue"),
+                ("Order", "OrderExpired"),
+                ("Order", "OrderAcceptanceTimedOut"),
+            ],
+            "the declared reminders: the retention pilot, the #167 acceptance deadline, the #708 erasure window"
         );
         let deletions = parse_deletions(&model);
         assert_eq!(
             deletions.iter().map(|d| d.actor.as_str()).collect::<Vec<_>>(),
-            vec!["Order"],
-            "the Order pilot is the one declared deletion block"
+            // Customer joins Order as a declared deletion block (#708). The list stays EXACT on
+            // purpose: a third actor gaining the power to delete its own streams is a decision, and
+            // it should have to be made here, in a diff someone reads.
+            vec!["Customer", "Order"],
+            "the declared deletion blocks: the Order retention pilot and the Customer erasure journey"
         );
         let table = emit_infra_deletion_policy(&model).expect("Order declares deletion → table emitted");
         assert!(table.contains("receipt: \"OrderDeleted\""), "{}", table);

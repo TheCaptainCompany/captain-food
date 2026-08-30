@@ -2085,6 +2085,160 @@ impl From<EmailVerificationToken> for ds::EmailVerificationToken {
     }
 }
 
+/// Identifies ONE erasure journey, from the request through to the receipt. It is the customer's reference for a right they exercised, so it must outlive the customer: after stream deletion this id is the only handle joining the surviving tombstone, the `CustomerErased` receipt and the subject's own "is it done?" question. Pseudonymous by construction — it identifies a REQUEST, never a person. A second request while one is pending returns the SAME id (acceptance-first absorbs the duplicate; a typed rejection would punish a double-tap for no gain); a fresh request after a cancel gets a fresh one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ErasureRequestId(pub uuid::Uuid);
+async_graphql::scalar!(ErasureRequestId, "ErasureRequestId", "Identifies ONE erasure journey, from the request through to the receipt. It is the customer's reference for a right they exercised, so it must outlive the customer: after stream deletion this id is the only handle joining the surviving tombstone, the `CustomerErased` receipt and the subject's own \"is it done?\" question. Pseudonymous by construction — it identifies a REQUEST, never a person. A second request while one is pending returns the SAME id (acceptance-first absorbs the duplicate; a typed rejection would punish a double-tap for no gain); a fresh request after a cancel gets a fresh one.");
+impl From<ds::ErasureRequestId> for ErasureRequestId {
+    fn from(v: ds::ErasureRequestId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ErasureRequestId> for ds::ErasureRequestId {
+    fn from(v: ErasureRequestId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The one-shot token proving the SECOND round-trip of an irreversible act — deliberately its own scalar and NOT `EmailVerificationToken`, because these are different secrets with different lifetimes and blast radii, and one name means one thing. It expires (the confirm window) so an unconfirmed request LAPSES VISIBLY on the status view instead of silently eating the subject's Art. 12(3) month: the confirmation step is OUR safeguard, so it may not consume their clock.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ErasureConfirmationToken(pub String);
+async_graphql::scalar!(ErasureConfirmationToken, "ErasureConfirmationToken", "The one-shot token proving the SECOND round-trip of an irreversible act — deliberately its own scalar and NOT `EmailVerificationToken`, because these are different secrets with different lifetimes and blast radii, and one name means one thing. It expires (the confirm window) so an unconfirmed request LAPSES VISIBLY on the status view instead of silently eating the subject's Art. 12(3) month: the confirmation step is OUR safeguard, so it may not consume their clock.");
+impl From<ds::ErasureConfirmationToken> for ErasureConfirmationToken {
+    fn from(v: ds::ErasureConfirmationToken) -> Self {
+        Self(v.0)
+    }
+}
+impl From<ErasureConfirmationToken> for ds::ErasureConfirmationToken {
+    fn from(v: ErasureConfirmationToken) -> Self {
+        Self(v.0)
+    }
+}
+
+/// The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is `ErasureProcessStatus` on the process row, and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ErasureStatus {
+    #[graphql(name = "REQUESTED")]
+    REQUESTED,
+    #[graphql(name = "CONFIRMED")]
+    CONFIRMED,
+    #[graphql(name = "EXECUTING")]
+    EXECUTING,
+    #[graphql(name = "ERASED")]
+    ERASED,
+}
+impl From<ds::ErasureStatus> for ErasureStatus {
+    fn from(v: ds::ErasureStatus) -> Self {
+        match v {
+            ds::ErasureStatus::REQUESTED => Self::REQUESTED,
+            ds::ErasureStatus::CONFIRMED => Self::CONFIRMED,
+            ds::ErasureStatus::EXECUTING => Self::EXECUTING,
+            ds::ErasureStatus::ERASED => Self::ERASED,
+        }
+    }
+}
+impl From<ErasureStatus> for ds::ErasureStatus {
+    fn from(v: ErasureStatus) -> Self {
+        match v {
+            ErasureStatus::REQUESTED => Self::REQUESTED,
+            ErasureStatus::CONFIRMED => Self::CONFIRMED,
+            ErasureStatus::EXECUTING => Self::EXECUTING,
+            ErasureStatus::ERASED => Self::ERASED,
+        }
+    }
+}
+
+/// State of ONE CustomerErasureProcess run (the `customer_erasure_process_manager` row). This is ROW state, not event-sourced bookkeeping (young): the request/confirm/cancel FACTS live on the Customer stream, the phase ladder does not. PARKED is a state, never a fact — a parked run alerts with its reason and its dead-man clock keeps running; it never silently waits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ErasureProcessStatus {
+    #[graphql(name = "AWAITING_CONFIRMATION")]
+    AWAITING_CONFIRMATION,
+    #[graphql(name = "SCHEDULED")]
+    SCHEDULED,
+    #[graphql(name = "PARKED")]
+    PARKED,
+    #[graphql(name = "RUNNING")]
+    RUNNING,
+    #[graphql(name = "COMPLETED")]
+    COMPLETED,
+    #[graphql(name = "CANCELLED")]
+    CANCELLED,
+}
+impl From<ds::ErasureProcessStatus> for ErasureProcessStatus {
+    fn from(v: ds::ErasureProcessStatus) -> Self {
+        match v {
+            ds::ErasureProcessStatus::AWAITING_CONFIRMATION => Self::AWAITING_CONFIRMATION,
+            ds::ErasureProcessStatus::SCHEDULED => Self::SCHEDULED,
+            ds::ErasureProcessStatus::PARKED => Self::PARKED,
+            ds::ErasureProcessStatus::RUNNING => Self::RUNNING,
+            ds::ErasureProcessStatus::COMPLETED => Self::COMPLETED,
+            ds::ErasureProcessStatus::CANCELLED => Self::CANCELLED,
+        }
+    }
+}
+impl From<ErasureProcessStatus> for ds::ErasureProcessStatus {
+    fn from(v: ErasureProcessStatus) -> Self {
+        match v {
+            ErasureProcessStatus::AWAITING_CONFIRMATION => Self::AWAITING_CONFIRMATION,
+            ErasureProcessStatus::SCHEDULED => Self::SCHEDULED,
+            ErasureProcessStatus::PARKED => Self::PARKED,
+            ErasureProcessStatus::RUNNING => Self::RUNNING,
+            ErasureProcessStatus::COMPLETED => Self::COMPLETED,
+            ErasureProcessStatus::CANCELLED => Self::CANCELLED,
+        }
+    }
+}
+
+/// Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum ErasureParkReason {
+    #[graphql(name = "OPEN_ORDER")]
+    OPEN_ORDER,
+    #[graphql(name = "FUNDS_IN_FLIGHT")]
+    FUNDS_IN_FLIGHT,
+}
+impl From<ds::ErasureParkReason> for ErasureParkReason {
+    fn from(v: ds::ErasureParkReason) -> Self {
+        match v {
+            ds::ErasureParkReason::OPEN_ORDER => Self::OPEN_ORDER,
+            ds::ErasureParkReason::FUNDS_IN_FLIGHT => Self::FUNDS_IN_FLIGHT,
+        }
+    }
+}
+impl From<ErasureParkReason> for ds::ErasureParkReason {
+    fn from(v: ErasureParkReason) -> Self {
+        match v {
+            ErasureParkReason::OPEN_ORDER => Self::OPEN_ORDER,
+            ErasureParkReason::FUNDS_IN_FLIGHT => Self::FUNDS_IN_FLIGHT,
+        }
+    }
+}
+
+/// The open-order verdict for one customer, as an ENUM rather than a boolean or a count — because a process-manager `guard.that` admits only `{ const: <ENUM_MEMBER> }` (specs/common/processmanager.yaml). Expressing the re-check as a declared enum column keeps the erasure re-check inside the LIVE lane grammar instead of forcing a grammar extension for one saga (vernon). The read side derives it; nothing stores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum HasOpenOrders {
+    #[graphql(name = "NONE")]
+    NONE,
+    #[graphql(name = "PRESENT")]
+    PRESENT,
+}
+impl From<ds::HasOpenOrders> for HasOpenOrders {
+    fn from(v: ds::HasOpenOrders) -> Self {
+        match v {
+            ds::HasOpenOrders::NONE => Self::NONE,
+            ds::HasOpenOrders::PRESENT => Self::PRESENT,
+        }
+    }
+}
+impl From<HasOpenOrders> for ds::HasOpenOrders {
+    fn from(v: HasOpenOrders) -> Self {
+        match v {
+            HasOpenOrders::NONE => Self::NONE,
+            HasOpenOrders::PRESENT => Self::PRESENT,
+        }
+    }
+}
+
 /// Identifies one DeliveryJob (a single delivery of an order from restaurant to customer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryJobId(pub uuid::Uuid);
