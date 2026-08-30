@@ -29,6 +29,10 @@ pub use crate::generated::rows::OrderConversationRow;
 pub use crate::generated::rows::OrderTrackingRow;
 pub use crate::generated::rows::ProspectionPipelineRow;
 pub use crate::generated::rows::RestaurantRow;
+/// The rider identity read model (#639 part A, ADR-20260818-004646): the `auth_ref -> rider_id`
+/// bridge, read by the request seam rather than by any GraphQL query — see `projectors::rider`.
+/// Written and not yet read: the resolver lands with the rider sign-in door.
+pub use crate::generated::rows::RiderRow;
 
 /// Optional filters for public restaurant discovery — mirrors the `restaurants` query args in api.yaml.
 /// V0 applies a subset (the rest are accepted and ignored until the read model backs them).

@@ -446,6 +446,85 @@ Customer:
     payment_method_id:
       from: [{ $ref: 'events.yaml#/CustomerPaymentMethodSet/properties/paymentMethodId' }]
       nullable: true
+
+Rider:
+  projector: app   # mechanically foldable, no computed column — the RiderCompute impl is empty (SlugAlias precedent); `app` for uniformity with every other table here
+  aggregate: Rider
+  slice: V0
+  # STO-2 closure: co-located with Customer, and derived from readers rather than from the
+  # resemblance. Reader classes: (1) the request seam -- `resolve_read_scope`
+  # (crates/server/src/auth.rs), once per GraphQL request and once per WS connect; (2) the write-side
+  # seam -- `MailboxCommandHandler::resolve_actor`, which already resolves the CUSTOMER `authRef`
+  # against this same database. One identity-lookup class, exactly Customer's reader set, so: the
+  # same database, and NOT `replicated: read-databases` (resolution happens ONCE at the edge, not per
+  # subgraph -- the >= 2 reader-class test is not met). Recorded trigger: if edge resolution ever
+  # moves INTO the subgraphs after the physical split, this table joins the replicated class.
+  # NOT captain_write, even though that would dodge a wall crossing: this is a fold of the log, so
+  # its recovery is `replay`, and a PITR of a `pitr` database would restore an identity mapping that
+  # disagrees with the log's head -- riders resolving to stale bindings after a restore.
+  # READER SET = LOWER BOUND, not a closed set: an APP holds CONNECT, so a scope-granular claim is
+  # not a grant-granular one, and hand-written seams escape the walker. Derive it mechanically, never
+  # from this comment -- DECISIONS §32 "the method finding".
+  database: { $ref: 'database/databases.yaml#/read_common' }
+  internal: true   # an identity/authorization index, never a GraphQL `reads` target — the ScopeMembership class. Its reader is the request seam (`resolve_read_scope`) and the mailbox `resolve_actor`, neither of which any api.yaml output type can speak for. STATED PLAINLY, because `internal: true` must not become a way to hide it: as of #639 part A the table is WRITTEN AND NOT YET READ. The resolver arrives with the rider sign-in door (part C), and no c4-l3 `reads:` is declared for it here because the declaration follows the code, not the intention (the prospection-worker precedent). A green part A is therefore NOT evidence that rider sign-in works.
+  note: >
+    The rider identity read model: the auth subject -> riderId mapping the authenticated request path
+    resolves against (ADR-20260818-004646 -- no business identifier lives in the identity provider, so
+    the mapping resolves in OUR Postgres), plus the rider's profile and availability. `RiderRegistered`
+    has always carried `authRef` as required; until #639 nothing projected it, so `auth_ref` occurred
+    exactly once in the whole projection set, on Customer, and the RIDER role had no sign-in-capable
+    identity at all. A TABLE and not a `View_*` for the reason SlugAlias states three declarations up:
+    this is read on EVERY authenticated request and must never fold on read -- peak is Friday/Saturday
+    19:00-21:30. Recovery is REPLAY, so there is no backup of it and there must not be one.
+  fedBy:
+    - { $ref: 'events.yaml#/RiderRegistered' }
+    - { $ref: 'events.yaml#/RiderInfoUpdated' }
+    - { $ref: 'events.yaml#/RiderStatusChanged' }
+  rules:
+    - "This table answers WHO this connection is. It must never become the anchor for WHAT that connection may see -- the distinction the mapping exists to preserve. Concretely: the resolver reads `auth_ref -> rider_id` and NOTHING else. `status` sits in the same row and will tempt a `SUSPENDED => deny` check onto the auth path; that check belongs in the handler folding the `Rider-{id}` stream, which owns the transition table (delivery/actors.yaml) and reads it anyway. A read model is not an authorization oracle, and revocation is separately recorded as unrepresentable today -- there is no unbinding fact for anyone in the model (ADR-20260818-094500 finding 5)."
+    - "`auth_ref` is UNIQUE, not merely indexed, and the difference is a security property rather than a performance one: the repository lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- plan-dependent, no error -- and `ScopeMembership` keys its grants on `member_id = rider_id`, so a duplicate would hand one rider another rider's order scope. The constraint converts a silent breach into a visible denial. It does NOT create the invariant: nothing on the write side prevents two `RiderRegistered` with the same `authRef` and different `riderId`s (`register_rider` guards `riderId` existence only), and the write-side reservation that would is designed but unbuilt -- see the Rider sign-in door, tracked on #639 part C. Uniqueness over a POPULATION is not an aggregate's to enforce."
+    - "`phone` carries NO unique constraint and NO index, deliberately, and this is where copying Customer would inject a defect: Customer.phone is UNIQUE because it is that aggregate's identity key, whereas a rider is keyed by `authRef` precisely so the phone never becomes a domain key. French mobile numbers are recycled, so a unique phone here is a scheduled future projector fault on a number's second owner."
+    - "Rebuild by RESETTING THE CHECKPOINT, never by TRUNCATE. The fold is an upsert keyed on `rider_id` and `RiderRegistered` is the only creating arm, so a from-zero replay rewrites every row in place and no rider is ever denied mid-rebuild. TRUNCATE + replay does the opposite: every rider fails closed to Public for the length of the drain, and the fleet cannot sign in."
+    - "ERASURE, named here so the sweep cannot miss an app-projected table the generated dispatch skips (the ScopeMembership precedent): `display_name` and `phone` are a natural person's data held OUTSIDE the stream, and the deletion engine deletes streams, not projection rows. Delivery declares no `deletion:` block for Rider today, so there is nothing to build yet -- but a rider tombstone fold is OWED the moment one is declared."
+  columns:
+    rider_id:
+      from: [{ $ref: 'events.yaml#/RiderRegistered/properties/riderId' }]
+      pk: true
+    auth_ref:
+      from: [{ $ref: 'events.yaml#/RiderRegistered/properties/authRef' }]
+      unique: true
+      # NOT NULL (RiderRegistered requires authRef -- unlike Customer, which is nullable because
+      # guest customers exist) and deliberately NO `index: true` beside `unique:`: the two are
+      # separate emitter passes, so declaring both emits the constraint's implicit btree AND a
+      # redundant second one on the same column. The UNIQUE constraint's own index serves the lookup.
+      note: "Auth provider user id (Supabase Auth) -> Rider. The lookup key of the identity bridge; see the `auth_ref` rule above for why the constraint is UNIQUE and what it does and does not guarantee."
+    display_name:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/displayName' }
+        - { $ref: 'events.yaml#/RiderInfoUpdated/properties/displayName' }
+      # NOT NULL, and that is load-bearing rather than tidiness. The projector emitter branches on
+      # the COLUMN's nullability, not the event field's: a nullable column gets a blind assignment
+      # and a NOT NULL one gets an `if let Some(v)` guard. `RiderInfoUpdated` is a PARTIAL update
+      # (both fields optional) despite the `*Updated` replace convention, so a nullable column here
+      # would mean a rider who changes only their phone silently loses their name -- deterministically,
+      # live AND on every replay. `RiderRegistered` requires it, so creation always initialises it.
+      note: "Rider's display name; RiderInfoUpdated overwrites it only when it carries one."
+    phone:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/phone' }
+        - { $ref: 'events.yaml#/RiderInfoUpdated/properties/phone' }
+      note: "Contact number, a profile attribute and never a lookup key -- see the `phone` rule above. NOT NULL for the same partial-update reason as display_name."
+    status:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/status' }
+        - { $ref: 'events.yaml#/RiderStatusChanged/properties/status' }
+      # Sourced with `from:` off the payload, NEVER a `derive:` event->literal map. Both events carry
+      # the target state in the payload (`via: status`, ADR-20260721-093027), so this column is
+      # last-writer-wins by global position: idempotent and order-independent under replay. A
+      # `derive:` map would be a SECOND copy of the Rider lifecycle transition table
+      # (delivery/actors.yaml) living on the read side, and the two would drift.
+      note: "Availability/lifecycle status, straight off the payload of whichever event wrote last."
+
 Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog

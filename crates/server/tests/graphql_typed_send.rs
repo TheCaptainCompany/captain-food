@@ -15,6 +15,15 @@ use domain::generated::commands::{AddCartLine, CartLine};
 use domain::generated::scalars::{CartId, CartLineId, OfferId, RestaurantId, SessionId};
 use server::graphql_acl::RequestRole;
 
+/// The role-guard witness the transports inject (#639 part B). There is no way to fabricate an
+/// `ActingRole`: it comes from a `Principal` or it does not exist, so a test that exercises a role
+/// has to name a caller actually BOUND to it. Roles carrying no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn acting(role: RequestRole) -> server::ActingRole {
+    server::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+        .acting_role(role)
+}
+
 /// An `EventStore` the acceptance path must NEVER reach: the mailbox-routed resolvers enqueue and
 /// answer PENDING — the worker (absent here) owns delivery. Any call is the test failing loudly.
 struct UntouchableEventStore;
@@ -109,7 +118,7 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     let resp = schema
         .execute(
             async_graphql::Request::new(mutation(2))
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(server::graphql_session::SessionHeader(Some(session))),
         )
         .await;
@@ -195,7 +204,7 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     let resp = schema
         .execute(
             async_graphql::Request::new(mutation(2))
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(server::graphql_session::SessionHeader(Some(session))),
         )
         .await;
@@ -210,7 +219,7 @@ async fn typed_send_lands_the_command_entry_row_and_keeps_the_acceptance_contrac
     let resp = schema
         .execute(
             async_graphql::Request::new(mutation(3))
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(server::graphql_session::SessionHeader(Some(session))),
         )
         .await;
@@ -242,7 +251,7 @@ async fn a_retry_with_an_absent_optional_replays_as_duplicate_not_conflict() {
 
     let schema = schema_over(mailbox.clone());
     let resp = schema
-        .execute(async_graphql::Request::new(mutation.clone()).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(mutation.clone()).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "the first accept errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
@@ -252,7 +261,7 @@ async fn a_retry_with_an_absent_optional_replays_as_duplicate_not_conflict() {
 
     // Same messageId + same input: a replay, not a client bug.
     let resp = schema
-        .execute(async_graphql::Request::new(mutation).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(mutation).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "the retry must not Conflict: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");

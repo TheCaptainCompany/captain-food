@@ -63,16 +63,36 @@ impl RequestRole {
     }
 }
 
-/// The request's role, as injected by `routes.rs` from the URL path. A context without a role (direct
-/// schema execution outside the HTTP surface, e.g. tests) fails CLOSED to the unauthenticated PUBLIC
-/// surface.
+/// The role this request may ACT as — the single role value in the GraphQL context, and the input
+/// to every guard, every `visible_*` and the `command.receive` span.
+///
+/// It reads an [`ActingRole`], **not** a `RequestRole` (#639 part B). That is the whole fix: a
+/// `RequestRole` is a plain public enum that any code can mint from the URL path, and `routes.rs`
+/// did exactly that — so a token asserting RESTAURANT with no `restaurant_id`
+/// ([`crate::auth::Identity::Unbound`]) satisfied `approveRefund`'s guard and could approve any
+/// pending refund. An `ActingRole` can only come from
+/// [`Principal::acting_role`](crate::auth::Principal::acting_role), whose unbound arm yields
+/// PUBLIC, so the privileged value cannot reach this function for such a caller.
+///
+/// A context with no `ActingRole` (direct schema execution outside the HTTP surface) fails CLOSED
+/// to the unauthenticated PUBLIC surface. The transports cannot forget to inject one: it is
+/// returned by `routes::authorize_and_resolve_scope`, which both destructure, so dropping it is a
+/// compile error rather than a silent 403.
 pub fn request_role(ctx: &Context<'_>) -> RequestRole {
-    ctx.data_opt::<RequestRole>().copied().unwrap_or(RequestRole::Public)
+    ctx.data_opt::<crate::auth::ActingRole>()
+        .copied()
+        .map(crate::auth::ActingRole::get)
+        .unwrap_or(RequestRole::Public)
 }
 
-/// True when `allowed` (an operation's api.yaml `roles`) admits the request's role. The list is
-/// LITERAL (ADR-20260720-191500): `RequestRole::Public` in it admits only the anonymous PUBLIC path
-/// — an operation open to every role carries no guard at all (roles omitted in the spec).
+/// True when `allowed` (an operation's api.yaml `roles`) admits the role the request may ACT as.
+/// The list is LITERAL (ADR-20260720-191500): `RequestRole::Public` in it admits only the anonymous
+/// PUBLIC path — an operation open to every role carries no guard at all (roles omitted in the
+/// spec).
+///
+/// Shared by the execution guard and the generated `visible_*` introspection predicates ON PURPOSE:
+/// a field hidden but callable, or visible but guarded, are both wrong, so one seam answers both
+/// doors and one change moves them together.
 pub fn role_allows(ctx: &Context<'_>, allowed: &[RequestRole]) -> bool {
     allowed.contains(&request_role(ctx))
 }

@@ -60,6 +60,7 @@
         "PricingPolicy",
         "ProspectionPipeline",
         "Restaurant",
+        "Rider",
         "ScopeMembership",
         "SlugAlias",
         "UberEstimationPolicy",
@@ -215,6 +216,13 @@
       "placement": "declared",
       "databases": [
         "captain_write"
+      ]
+    },
+    "Rider": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
       ]
     },
     "RuntimePosture": {

@@ -37,8 +37,8 @@ impl SubscriptionRoot {
         );
         let wanted = input.message_id.0;
         let admin = matches!(
-            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
-            Some(crate::graphql::acl::RequestRole::Admin)
+            crate::graphql::acl::request_role(ctx),
+            crate::graphql::acl::RequestRole::Admin
         );
         let principal_uuid = ctx
             .data_opt::<crate::auth::Principal>()
@@ -220,8 +220,8 @@ impl SubscriptionRoot {
         let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?.clone();
         let order_id: domain::generated::scalars::OrderId = input.order_id.into();
         let admin = matches!(
-            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
-            Some(crate::graphql::acl::RequestRole::Admin)
+            crate::graphql::acl::request_role(ctx),
+            crate::graphql::acl::RequestRole::Admin
         );
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
         // The caller's Customer identity comes from the ReadScope resolved ONCE at connection

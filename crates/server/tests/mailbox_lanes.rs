@@ -22,6 +22,15 @@ use infrastructure::{
     PgRestaurantRepository, PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository,
 };
 use server::graphql_acl::RequestRole;
+
+/// The role-guard witness the transports inject (#639 part B). There is no way to fabricate an
+/// `ActingRole`: it comes from a `Principal` or it does not exist, so a test that exercises a role
+/// has to name a caller actually BOUND to it. Roles carrying no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn acting(role: RequestRole) -> server::ActingRole {
+    server::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+        .acting_role(role)
+}
 use sqlx::PgPool;
 
 /// Both tests in this binary drop and reseed the SAME mailbox tables; cargo runs them on
@@ -257,7 +266,7 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     let schema = schema_over(&pool);
     let query = "{ mailboxLanes { actorType partition ownershipVersion claimedBy checkpoint pending scheduled oldestPendingAt registration } }";
     let resp = schema
-        .execute(async_graphql::Request::new(query).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(query).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "admin mailboxLanes errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
@@ -290,7 +299,7 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     // 3) The guard: every non-ADMIN role is refused — the supervision surface never leaks.
     for role in every_non_admin_role() {
         let resp = schema
-            .execute(async_graphql::Request::new(query).data(role))
+            .execute(async_graphql::Request::new(query).data(acting(role)))
             .await;
         assert_eq!(resp.errors.len(), 1, "{role:?} should be refused: {:?}", resp.errors);
     }
@@ -321,7 +330,7 @@ async fn poisoned_mailbox_messages_detail_and_admin_guard() {
     let schema = schema_over(&pool);
     let query = "{ poisonedMailboxMessages { messageId errorCode } }";
     let resp = schema
-        .execute(async_graphql::Request::new(query).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(query).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "admin poisonedMailboxMessages errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
@@ -332,7 +341,7 @@ async fn poisoned_mailbox_messages_detail_and_admin_guard() {
 
     for role in every_non_admin_role() {
         let resp = schema
-            .execute(async_graphql::Request::new(query).data(role))
+            .execute(async_graphql::Request::new(query).data(acting(role)))
             .await;
         assert_eq!(resp.errors.len(), 1, "{role:?} should be refused: {:?}", resp.errors);
     }

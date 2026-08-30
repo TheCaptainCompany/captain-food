@@ -505,10 +505,18 @@ Mode:
 # Caller user type (a.k.a. persona / role). Established by the GraphQL path: the master
 # api.yaml is filtered per user type via @auth / @public, and `domain_events.user_type`
 # records which one authored an event. EXTERNAL = third-party ACL callers (Stripe, HubRise, Avelo37).
+#
+# READING `domain_events`: since #639 part B, `user_type = PUBLIC` no longer implies a NULL
+# `user_id`. An authenticated caller whose token proves a role but carries no domain binding is
+# recorded as PUBLIC — stamping the asserted role would be a false author in an immutable log — and
+# it keeps its auth subject, because it did authenticate. So the pair (PUBLIC, user_id = <sub>) is
+# inhabited and means "a credential proved no usable role". Any fold that infers "no subject" from
+# PUBLIC — a distinct-identity denominator grouped by user_type is the obvious one — must read
+# `user_id` rather than the role.
 UserType:
   type: string
   enum:
-    - PUBLIC             # anonymous visitor                       -> /public/graphql
+    - PUBLIC             # no role proved: an anonymous visitor, OR an authenticated caller with no domain binding -> /public/graphql
     - CUSTOMER           # authenticated end user                  -> /customer/graphql
     - RESTAURANT_ACCOUNT # account: locations + catalog          -> /restaurant-account/graphql
     - RESTAURANT         # single location: order ops            -> /restaurant/graphql
