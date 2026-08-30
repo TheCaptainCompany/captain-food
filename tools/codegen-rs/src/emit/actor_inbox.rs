@@ -291,6 +291,110 @@ pub(crate) fn inbox_enum_impl(actor: &InboxActor) -> String {
     out
 }
 
+/// One actor's FACT sub-inbox: the `receives:` entries of kind Fact/Reminder ONLY.
+///
+/// **WHY A SECOND ENUM AND NOT A MATCH OVER `ActorInbox` (#780).** The obvious implementation of
+/// the fact-record route is a match over the composite with lane arms — and it defeats the whole
+/// mechanism. `ActorInbox::Payment(_) => Failed("no route")` is a total catch-all over every
+/// message the Payment lane can ever carry, it compiles clean, and #776's scan approves it
+/// (`is_catch_all` reads only the pattern's top level, `names_inbox_variant` only its head
+/// segment). Rather than gate that shape, this REMOVES THE TEMPTATION: over `<Actor>FactInbox` a
+/// command variant is UNSPELLABLE, so no arm ever needs to say "not a fact" and no lane wildcard is
+/// ever wanted (compiler-first, ADR-20260803-234035; the scan stays as the fallback for the
+/// residue).
+///
+/// Same division of labour as [`inbox_enum_decl`]: this emitter writes the VARIANTS and the total
+/// projections; the human-owned `infrastructure::inbox::fact_route` writes what each one DOES, and
+/// E0004 is what makes a new declared fact impossible to ignore.
+pub(crate) fn fact_enum_name(actor: &InboxActor) -> String {
+    format!("{}FactInbox", actor.name)
+}
+
+/// This actor's FACT/REMINDER messages, in emission order. Empty = the actor's lane carries
+/// commands only, and no fact enum is emitted for it (an uninhabited enum would buy nothing and
+/// would force every consumer to reason about a variant that cannot exist).
+pub(crate) fn facts_of(actor: &InboxActor) -> Vec<&InboxMessage> {
+    actor.messages.iter().filter(|m| m.kind != InboxKind::Command).collect()
+}
+
+/// The DECLARATION of one actor's fact sub-inbox — separated from its impl for the same reason
+/// [`inbox_enum_decl`] is: the E0004 proof compiles a mutated declaration against an unmutated arm
+/// set (`tests.rs::a_widened_receives_set_of_a_fact_is_a_compile_error_in_the_fact_match`).
+pub(crate) fn fact_enum_decl(actor: &InboxActor) -> String {
+    let facts = facts_of(actor);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "/// GENERATED — the FACT half of `{name}`'s inbox: every `receives:` entry of kind FACT or\n/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is\n/// unspellable there and no arm ever needs a lane wildcard (#780).\n///\n/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in\n/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the\n/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match\n/// over `DomainEvent` ending in `_ => Failed(\"no delivery route\")`, so a declared fact nobody\n/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by\n/// `RequeueMailboxMessage`.\n#[derive(Debug, Clone, PartialEq)]\npub enum {enum_name} {{\n",
+        name = actor.name,
+        enum_name = fact_enum_name(actor)
+    ));
+    for m in &facts {
+        let tag = match m.kind {
+            InboxKind::Reminder => "REMINDER",
+            _ => "inbound FACT",
+        };
+        match &m.deferred {
+            Some((reason, issue)) => out.push_str(&format!(
+                "    /// {tag} `{name}` — HANDLER DEFERRED (actors.yaml `deferred:`): {reason} Tracked by {issue}.\n    {name}({ty}),\n",
+                tag = tag, name = m.name, reason = reason, issue = issue, ty = m.payload_type
+            )),
+            None => out.push_str(&format!(
+                "    /// {tag} `{name}`.\n    {name}({ty}),\n",
+                tag = tag, name = m.name, ty = m.payload_type
+            )),
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// The fact sub-inbox's inherent impl plus the OWNING inbox's `into_fact` projection.
+///
+/// Every match in here is a TOTAL PROJECTION from the variant set — name, lane, the carried
+/// `DomainEvent` — so none of them encodes a decision a human could get wrong. `into_fact` is the
+/// one the whole design rests on: it is generated precisely BECAUSE "is this variant a fact?" is
+/// answered by the `receives:` ref path and by nothing else, exactly like `message_type()`.
+pub(crate) fn fact_enum_impl(actor: &InboxActor) -> String {
+    let facts = facts_of(actor);
+    let enum_name = fact_enum_name(actor);
+    let owner = actor.enum_name();
+    let mut out = String::new();
+    out.push_str(&format!("impl {enum_name} {{\n"));
+    out.push_str(&format!(
+        "    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.\n    pub const ACTOR_TYPE: &'static str = \"{}\";\n\n",
+        actor.name
+    ));
+    out.push_str("    /// The wire `message_type` — a total projection of the variant set.\n    pub fn message_type(&self) -> &'static str {\n        match self {\n");
+    for m in &facts {
+        out.push_str(&format!("            Self::{name}(_) => \"{name}\",\n", name = m.name));
+    }
+    out.push_str("        }\n    }\n\n");
+    out.push_str("    /// The carried business fact as the tagged `DomainEvent` the recorders take.\n    /// A total projection: the variant IS the tag, so this can never disagree with\n    /// `message_type()` the way a re-parse of the raw payload could.\n    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {\n        match self {\n");
+    for m in &facts {
+        out.push_str(&format!(
+            "            Self::{name}(e) => domain::generated::events::DomainEvent::{name}(e),\n",
+            name = m.name
+        ));
+    }
+    out.push_str("        }\n    }\n}\n\n");
+    // The owning inbox's projection.
+    out.push_str(&format!(
+        "impl {owner} {{\n    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the\n    /// variant set, generated for the same reason `message_type()` is: it carries no decision.\n    pub fn into_fact(self) -> Option<{enum_name}> {{\n        match self {{\n"
+    ));
+    for m in &actor.messages {
+        if m.kind == InboxKind::Command {
+            out.push_str(&format!("            Self::{name}(_) => None,\n", name = m.name));
+        } else {
+            out.push_str(&format!(
+                "            Self::{name}(e) => Some({enum_name}::{name}(e)),\n",
+                name = m.name
+            ));
+        }
+    }
+    out.push_str("        }\n    }\n}\n");
+    out
+}
+
 /// The whole emitted file.
 pub(crate) fn emit_app_inboxes(model: &Model) -> String {
     let actors = inbox_actors(model);
@@ -302,6 +406,16 @@ pub(crate) fn emit_app_inboxes(model: &Model) -> String {
         out.push_str(&inbox_enum_decl(actor));
         out.push('\n');
         out.push_str(&inbox_enum_impl(actor));
+        // The FACT half (#780) — only for lanes that actually declare one. An actor whose
+        // `receives:` set is commands only gets NO fact enum: an uninhabited one would force every
+        // consumer to reason about a variant that cannot exist, and `ActorInbox::into_fact`
+        // answers `None` for that lane directly.
+        if !facts_of(actor).is_empty() {
+            out.push('\n');
+            out.push_str(&fact_enum_decl(actor));
+            out.push('\n');
+            out.push_str(&fact_enum_impl(actor));
+        }
     }
     // The cross-actor envelope.
     out.push_str("\n/// One parsed mailbox row, ATTRIBUTED TO ITS LANE: the actor type is not a string the router\n/// carries alongside the message any more, it is the outer variant. A `PlaceOrder` payload on a\n/// `Cart` lane is not a mis-routed value here — it is a value that cannot be constructed.\n#[derive(Debug, Clone, PartialEq)]\npub enum ActorInbox {\n");
@@ -341,6 +455,61 @@ pub(crate) fn emit_app_inboxes(model: &Model) -> String {
         out.push_str(&format!("            Self::{name}(m) => m.kind(),\n", name = actor.name));
     }
     out.push_str("        }\n    }\n}\n");
+
+    // ─── The FACT envelope (#780) ────────────────────────────────────────────────────────────
+    let fact_actors: Vec<&InboxActor> =
+        actors.iter().filter(|a| !facts_of(a).is_empty()).collect();
+    out.push_str("\n/// One parsed mailbox row that carries a FACT, attributed to its lane — the composite the\n/// human-owned `fact_route` dispatches on (#780).\n///\n/// It exists so that a COMMAND variant is UNSPELLABLE in the fact match. Matching the fact route\n/// over `ActorInbox` instead would need a lane arm per command-only lane and, worse, would make\n/// `ActorInbox::Payment(_) => Failed(\"no route\")` both compilable and gate-clean while absorbing\n/// every message the Payment lane can ever carry. Removing the temptation beats gating it\n/// (compiler-first, ADR-20260803-234035).\n///\n/// A lane whose `receives:` set is commands only has no variant here at all.\n#[derive(Debug, Clone, PartialEq)]\npub enum ActorFactInbox {\n");
+    for actor in &fact_actors {
+        out.push_str(&format!(
+            "    /// A FACT row on a `{name}` lane.\n    {name}({enum_name}),\n",
+            name = actor.name,
+            enum_name = fact_enum_name(actor)
+        ));
+    }
+    out.push_str("}\n\nimpl ActorFactInbox {\n");
+    out.push_str("    /// The lane this fact was delivered ON — read from the ROW's `actor_type` through\n    /// `ActorInbox::parse`, never derived from the payload. A fact parsed into the wrong lane is\n    /// the foreign-stream append wearing a typed hat, and the enum cannot catch it because the\n    /// enum would be right and the lane wrong (vernon, #780).\n    pub fn actor_type(&self) -> &'static str {\n        match self {\n");
+    for actor in &fact_actors {
+        out.push_str(&format!(
+            "            Self::{name}(_) => {enum_name}::ACTOR_TYPE,\n",
+            name = actor.name,
+            enum_name = fact_enum_name(actor)
+        ));
+    }
+    out.push_str("        }\n    }\n\n");
+    out.push_str("    /// The wire `message_type` — a total projection of the variant set.\n    pub fn message_type(&self) -> &'static str {\n        match self {\n");
+    for actor in &fact_actors {
+        out.push_str(&format!("            Self::{name}(m) => m.message_type(),\n", name = actor.name));
+    }
+    out.push_str("        }\n    }\n\n");
+    out.push_str("    /// The carried business fact as the tagged `DomainEvent` the recorders take.\n    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {\n        match self {\n");
+    for actor in &fact_actors {
+        out.push_str(&format!("            Self::{name}(m) => m.into_domain_event(),\n", name = actor.name));
+    }
+    out.push_str("        }\n    }\n}\n\n");
+    out.push_str("impl ActorInbox {\n    /// The FACT half of this row, or `None` for a COMMAND — the TOTAL generated projection the\n    /// fact route runs on (#780). Generated because it carries no decision: whether a `receives:`\n    /// entry is a fact is answered by its `$ref` path and by nothing else, exactly like\n    /// `message_type()`. The DECISION — what each fact DOES — stays human-owned, and E0004 over\n    /// `ActorFactInbox` is what makes a new declared fact impossible to ignore.\n    pub fn into_fact(self) -> Option<ActorFactInbox> {\n        match self {\n");
+    for actor in &actors {
+        if facts_of(actor).is_empty() {
+            out.push_str(&format!(
+                "            // The `{name}` lane declares no fact.\n            Self::{name}(_) => None,\n",
+                name = actor.name
+            ));
+        } else {
+            out.push_str(&format!(
+                "            Self::{name}(m) => m.into_fact().map(ActorFactInbox::{name}),\n",
+                name = actor.name
+            ));
+        }
+    }
+    out.push_str("        }\n    }\n}\n");
+
+    out.push_str("\n/// Every FACT an actor DECLARES it receives — `(actor_type, message_type)`, sorted.\n///\n/// The DECLARED population a route gate measures itself against: a routed `deliver:` target must\n/// be in here AND must have a real record arm, and a gate that derives its own population from the\n/// artifact under test is measuring nothing (#780).\npub const DECLARED_FACTS: &[(&str, &str)] = &[\n");
+    for actor in &fact_actors {
+        for m in facts_of(actor) {
+            out.push_str(&format!("    (\"{}\", \"{}\"),\n", actor.name, m.name));
+        }
+    }
+    out.push_str("];\n");
 
     // The DEFERRED table — the DSL successor of the retired `UNWIRED_MUTATIONS` const (#771).
     out.push_str("\n/// Messages an actor DECLARES it receives whose handler is deliberately not built yet\n/// (`actors.yaml` `receives[].deferred: { reason, issue }`) — `(actor_type, message_type, reason,\n/// issue)`.\n///\n/// This replaces the retired `UNWIRED_MUTATIONS` const in the codegen crate. A deferral is now\n/// REVIEWABLE SPEC CONTENT — it sits next to the declaration it qualifies, carries a reason and a\n/// tracking issue, and is rendered onto the variant it qualifies — instead of a Rust const in an\n/// emitter that nobody reads. (It reaches the GENERATED Rust doc comment and this table; it does\n/// NOT reach `specs/generated/documentation.generated.md`, which has no `deferred:` reader.) The\n/// variant and its router arm still exist: what is deferred is what the arm DOES, and the compiler\n/// still refuses to let the message go unconsumed.\npub const DEFERRED_MESSAGES: &[(&str, &str, &str, &str)] = &[\n");

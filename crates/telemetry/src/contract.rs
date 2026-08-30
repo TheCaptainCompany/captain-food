@@ -127,6 +127,13 @@ pub mod metric {
     /// A mailbox delivery terminally FAILED by the attempts cap (PROP-20260802-223522 D4) — an
     /// operator event, attribute `actor_type`.
     pub const MAILBOX_POISON_FAILED_TOTAL: &str = "mailbox_poison_failed_total";
+    /// A DECLARED inbound FACT that did not reach its aggregate (#780, `mailbox-delivery`).
+    /// Attributes `actor_type`, `message_type` and a CLOSED `reason`
+    /// (`deferred` | `unparsable_payload`). `deferred` must be permanently zero in production:
+    /// every increment is a routed `deliver:` that landed before the receiving aggregate's fold
+    /// rule did. The two reasons stay in SEPARATE series -- collapsing them is how a
+    /// must-be-zero counter becomes noise and gets ignored.
+    pub const MAILBOX_FACT_UNRECORDED_TOTAL: &str = "mailbox_fact_unrecorded_total";
     /// The mailbox push listener lost delivery continuity (attribute `reason`: connection_lost |
     /// canary_timeout | connection_healed — the last is sqlx's silent in-place reconnect, where
     /// `live` never flapped but the gap's notifications are gone and a catch-up nudge ran).

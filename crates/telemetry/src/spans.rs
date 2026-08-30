@@ -132,6 +132,54 @@ pub fn order_lane_enqueue(event_type: &str, aggregate_id: &str) -> Span {
     )
 }
 
+/// `message.deliver` (CONSUMER) — ONE mailbox EVENT/MESSAGE delivery
+/// (`specs/observability.yaml#/mailbox-delivery`, #780).
+///
+/// The whole fact-record route was uninstrumented before this: `handle_recorded_fact` opened no
+/// span, and `StatusBusObserver::committed` returns early for any row whose kind is not COMMAND, so
+/// `command_completion_ms{status="FAILED"}` was never recorded for an EVENT/MESSAGE row. A lost
+/// fact was a ZERO-SIGNAL event.
+///
+/// `business.verdict` is late-bound and DECLARED `Empty` here for the reason validator §21 exists:
+/// `tracing` cannot add a field that was not declared at construction, and a silent no-op `record`
+/// is the hole that makes a contract pass review and fail in production.
+pub fn message_deliver(
+    actor_type: &str,
+    message_type: &str,
+    kind: &str,
+    message_id: &str,
+    correlation_id: &str,
+) -> Span {
+    tracing::info_span!(
+        "message.deliver",
+        otel.kind = "consumer",
+        messaging.system = "captain.mailbox",
+        business.actor_type = actor_type,
+        business.message_type = message_type,
+        business.message_kind = kind,
+        business.message_id = message_id,
+        business.correlation_id = correlation_id,
+        business.verdict = Empty,
+        // DECLARED at construction so the contract's `technical_error: any_span_errors` rule can
+        // actually fire (validator §21): `tracing` cannot record a field that was not declared
+        // here, so without this every failed delivery would export as a plain, successful span and
+        // the dashboard would be empty because nothing could populate it.
+        otel.status_code = Empty,
+    )
+}
+
+/// The delivery failed technically — the `mailbox-delivery` contract's `technical_error` class.
+/// Set on a PARK and on a terminal payload failure; never on a business verdict.
+pub fn record_message_deliver_error(span: &Span) {
+    span.record("otel.status_code", "ERROR");
+}
+
+/// The delivery's outcome on its `message.deliver` span: `recorded` | `duplicate` | `ignored` |
+/// `pm_leg` | `parked`. `parked` is the one the `mailbox-delivery` contract's success rule excludes.
+pub fn record_message_deliver_verdict(span: &Span, verdict: &str) {
+    span.record("business.verdict", verdict);
+}
+
 /// `event.publish` (PRODUCER) — publishing an appended event onto the bus.
 pub fn event_publish(event_type: &str) -> Span {
     tracing::info_span!(

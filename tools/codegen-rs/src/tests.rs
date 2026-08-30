@@ -16255,34 +16255,26 @@ mod typed_actor_inbox_e0004 {
         )
     }
 
-    /// The FACT half's proof program. TODAY'S SHAPE, deliberately: the enum declaration, the
-    /// command match, and the fact route AS IT IS IN THE TREE -- a match over the adjacently-tagged
-    /// `DomainEvent` ending in the `_ =>` catch-all of
-    /// `crates/infrastructure/src/mailbox/handler.rs`. It is written this way so the assertion
-    /// about WHICH TYPE rustc names goes red for the real reason (#780) rather than never being
-    /// written at all.
+    /// The FACT half's proof program: the payload shims, BOTH enum declarations (the command inbox
+    /// and its fact sub-inbox), and BOTH matches with arms taken from `arms_from`.
+    ///
+    /// It carries both matches ON PURPOSE. A fact-shaped mutation breaks the COMMAND match too, so
+    /// a program with only that match would produce `error[E0004]` and prove nothing whatsoever
+    /// about fact delivery — the vacuously green "proof" beck predicted. What carries the claim is
+    /// which TYPE rustc names, which is why the fact match is here and why the test asserts on it.
     fn fact_proof_program(actor: &InboxActor, arms_from: &InboxActor) -> String {
-        let facts: Vec<&InboxMessage> =
-            actor.messages.iter().filter(|m| m.kind != InboxKind::Command).collect();
-        let fact_variants = facts
+        let fact_arms = facts_of(arms_from)
             .iter()
-            .map(|m| format!("    {}(domain::generated::events::{}),\n", m.name, m.name))
-            .collect::<String>();
-        // The arms come from the UNMUTATED actor, and they dispatch on `DomainEvent` with a
-        // catch-all -- exactly the route under test.
-        let fact_arms = arms_from
-            .messages
-            .iter()
-            .filter(|m| m.kind != InboxKind::Command)
-            .map(|m| format!("        DomainEvent::{}(_) => {{}}\n", m.name))
+            .map(|m| format!("        {}::{}(_) => {{}}\n", fact_enum_name(actor), m.name))
             .collect::<String>();
         format!(
-            "{decl_program}\n\
-             pub enum DomainEvent {{\n{fact_variants}}}\n\n\
-             /// The fact-record route, as it is in the tree.\n\
-             fn record(event: DomainEvent) {{\n    match event {{\n{fact_arms}        _ => {{}}\n    }}\n}}\n",
-            decl_program = proof_program(actor, arms_from),
-            fact_variants = fact_variants,
+            "{command_program}\n\
+             {fact_decl}\n\
+             /// The HUMAN-OWNED fact route, in miniature.\n\
+             fn fact_route(fact: {fact_enum}) {{\n    match fact {{\n{fact_arms}    }}\n}}\n",
+            command_program = proof_program(actor, arms_from),
+            fact_decl = fact_enum_decl(actor),
+            fact_enum = fact_enum_name(actor),
             fact_arms = fact_arms,
         )
     }
@@ -16759,6 +16751,211 @@ mod typed_actor_inbox_e0004 {
     }
 }
 
+// ─── #780 FACT-ROUTE GATES: the const, the DSL and the human-owned arms held equal ───────────────
+
+/// The three gates the fact-record route needs and that no existing check covers.
+///
+/// All three read the HUMAN-OWNED `crates/infrastructure/src/inbox.rs` with `syn` and compare it to
+/// the MODEL. The direction matters and is the whole design: the model is the oracle and the source
+/// file is the artifact under test. A gate that derived its population from `ROUTED_LANES` — the
+/// very const it is checking — would be measuring nothing (beck).
+#[cfg(test)]
+mod fact_route_gate {
+    use super::*;
+
+    fn router() -> syn::File {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = std::fs::read_to_string(root.join("crates/infrastructure/src/inbox.rs"))
+            .expect("the human-owned inbox router must exist");
+        syn::parse_file(&src).expect("the human-owned inbox router must parse")
+    }
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// Every `(lane, message)` pair whose arm in `fact_route` resolves to `FactLeg::Unrecorded` —
+    /// scraped from the ARM PATTERN (`<Lane>FactInbox::<Message>`), never from the arm's text, so a
+    /// renamed helper cannot silently empty the set.
+    fn unrecorded_arms(file: &syn::File) -> std::collections::BTreeSet<(String, String)> {
+        #[derive(Default)]
+        struct V(std::collections::BTreeSet<(String, String)>);
+        impl<'ast> syn::visit::Visit<'ast> for V {
+            fn visit_arm(&mut self, arm: &'ast syn::Arm) {
+                if let syn::Pat::TupleStruct(t) = &arm.pat {
+                    let segs: Vec<String> =
+                        t.path.segments.iter().map(|s| s.ident.to_string()).collect();
+                    if segs.len() == 2 {
+                        if let Some(lane) = segs[0].strip_suffix("FactInbox") {
+                            let body = quote::quote!(#arm).to_string();
+                            // `unrecorded(..)` is the constructor of `FactLeg::Unrecorded`; both
+                            // spellings count so a future inlining cannot slip past.
+                            if body.contains("unrecorded (") || body.contains("Unrecorded") {
+                                self.0.insert((lane.to_string(), segs[1].clone()));
+                            }
+                        }
+                    }
+                }
+                syn::visit::visit_arm(self, arm);
+            }
+        }
+        let mut v = V::default();
+        syn::visit::Visit::visit_file(&mut v, file);
+        v.0
+    }
+
+    /// Every `(lane, message)` the DSL declares `deferred:` — from the model.
+    fn declared_deferrals(model: &Model) -> std::collections::BTreeSet<(String, String)> {
+        inbox_actors(model)
+            .into_iter()
+            .flat_map(|a| {
+                let actor = a.name.clone();
+                a.messages
+                    .into_iter()
+                    .filter(|m| m.deferred.is_some())
+                    .map(move |m| (actor.clone(), m.name))
+            })
+            .collect()
+    }
+
+    /// **T3 (#780) — a ROUTED `deliver:` target may not be a parked fact.**
+    ///
+    /// `ROUTED_LANES` is what the runtime believes it hands to a lane; the `Unrecorded` arms are
+    /// what that lane does with it. If the two disagree, the fact is enqueued and then parked at
+    /// delivery — the lane wedges until the attempts cap, on a path a founder-flipped config
+    /// already sends real traffic down (`ROUTE_ORDER_BIRTH_THROUGH_LANE`).
+    ///
+    /// The routed population is recomputed from the MODEL through the emitter's own
+    /// `deliver_is_lane_routed`, so the const under test never stands in for its own oracle.
+    #[test]
+    fn a_routed_deliver_target_is_never_a_parked_fact() {
+        let model = real_model();
+        let parked = unrecorded_arms(&router());
+        let offenders: Vec<(String, String)> = routed_fact_targets(&model)
+            .into_iter()
+            .filter(|pair| parked.contains(pair))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "a ROUTED `deliver:` addresses a lane whose fact route PARKS it -- the message would \
+             be enqueued and then wedge its lane until the attempts cap. Add the aggregate's fold \
+             rule and a record arm BEFORE routing the deliver: {offenders:?}"
+        );
+        // Non-vacuous: there must BE a routed fact target to check.
+        assert!(
+            !routed_fact_targets(&model).is_empty(),
+            "no routed `deliver:` fact target found -- the gate is reading nothing"
+        );
+    }
+
+    /// RED for the gate above: route a `deliver:` to one of the parked facts and it must fire.
+    #[test]
+    fn red_routing_a_deliver_to_a_parked_fact_is_refused() {
+        let parked = unrecorded_arms(&router());
+        assert!(
+            parked.contains(&("DeliveryJob".into(), "DeliveryRequested".into())),
+            "the planted pair must actually be parked, or this test is vacuous"
+        );
+        // The planted route: what `emit_routed_lanes` would produce if the pair were added to
+        // `PM_LANE_ROUTED_DELIVERS`.
+        let planted = vec![("DeliveryJob".to_string(), "DeliveryRequested".to_string())];
+        let offenders: Vec<_> = planted.iter().filter(|p| parked.contains(p)).collect();
+        assert_eq!(offenders.len(), 1, "routing a parked fact must be caught");
+    }
+
+    /// **The two halves of a deferral, held equal in BOTH directions** — closing, for the fact
+    /// half, [#781](https://github.com/TheCaptainCompany/captain-food/issues/781) ("nothing binds a
+    /// `Deferred` ARM to its declaration, in either direction").
+    ///
+    /// A `deferred:` in the DSL with a record arm in Rust is a stale promise; a parked arm with no
+    /// declaration is exactly the unreviewable `UNWIRED_MUTATIONS` parking lot the grammar replaced.
+    #[test]
+    fn every_unrecorded_arm_is_a_declared_deferral() {
+        let declared = declared_deferrals(&real_model());
+        let parked = unrecorded_arms(&router());
+        assert_eq!(
+            parked, declared,
+            "the `FactLeg::Unrecorded` arms in crates/infrastructure/src/inbox.rs and the \
+             `deferred:` declarations in specs/*/actors.yaml must be the SAME set. Left = arms, \
+             right = declarations."
+        );
+        assert!(!declared.is_empty(), "the comparison must not be vacuous");
+    }
+
+    /// **THE ALLOW-LIST that replaced #771's corpus-declares-no-deferral ratchet.**
+    ///
+    /// evans, #780 briefing, and the instruction is followed literally: *"replace it with an
+    /// explicit allow-list of the deferrals you argued for, never a relaxation to `N deferrals
+    /// permitted`."* An eighth deferral fails this test and must be argued for in the same change.
+    ///
+    /// Every entry shares ONE property, and naming it is what stops the list becoming a parking
+    /// lot: **the receiving aggregate has no fold rule answering "is this re-delivered fact already
+    /// reflected?"**, so there is no idempotency anchor and recording it would let a redelivery
+    /// append a second copy. The fold rule is what each tracking issue adds; the route move follows
+    /// it, never precedes it.
+    #[test]
+    fn the_corpus_declares_exactly_the_argued_deferrals() {
+        const ARGUED: &[(&str, &str)] = &[
+            // Cart has no recorder at all (#784).
+            ("Cart", "CartCheckedOut"),
+            // Catalog has no recorder, and which of availability/stock/orderability an external
+            // stock report moves is undeclared (#785).
+            ("Catalog", "OfferStockUpdated"),
+            // Customer has no recorder. The erasure clock is a LEGAL deadline with no second copy
+            // anywhere, which is why its delivery parks and never terminally fails (#786).
+            ("Customer", "CustomerErasureDue"),
+            ("Customer", "CustomerIdentityUnlinked"),
+            // DeliveryJob: a declared transition but no "already reflected" rule (#787).
+            ("DeliveryJob", "DeliveryDispatchFailed"),
+            // No transition at all, and status cannot be the dedupe key (#787).
+            ("DeliveryJob", "DeliveryOfferTimedOut"),
+            // The BIRTH: fold-based idempotency has no fold to consult (#787).
+            ("DeliveryJob", "DeliveryRequested"),
+        ];
+        let expected: std::collections::BTreeSet<(String, String)> =
+            ARGUED.iter().map(|(a, m)| (a.to_string(), m.to_string())).collect();
+        assert_eq!(
+            declared_deferrals(&real_model()),
+            expected,
+            "the deferral set moved. A deferral is a promise the product has not kept, so a new one \
+             must carry a reason a reviewer can evaluate, a tracking issue that will close it, and \
+             THIS allow-list must move in the same change. It is an allow-list and never a count: \
+             `N deferrals permitted` is how `UNWIRED_MUTATIONS` became a parking lot"
+        );
+    }
+
+    /// Every declared deferral names a tracking issue that is a REAL link and a reason that is a
+    /// modelling statement rather than a schedule. The grammar rule
+    /// (`receives-deferred-shape`) enforces the shape; this asserts the CONTENT convention the
+    /// corpus adopted, which is the half a schema cannot see.
+    #[test]
+    fn a_deferral_reason_is_a_modelling_statement_not_a_schedule() {
+        let model = real_model();
+        for actor in inbox_actors(&model) {
+            for m in &actor.messages {
+                let Some((reason, issue)) = &m.deferred else { continue };
+                let at = format!("{}/{}", actor.name, m.name);
+                assert!(
+                    issue.starts_with("https://github.com/"),
+                    "{at}: the tracking issue must be a full link"
+                );
+                assert!(
+                    reason.starts_with("MODELLING"),
+                    "{at}: a deferral reason states what the MODEL is missing. \"the route moves \
+                     later\" is a backlog fact, not a modelling statement (evans, #780): {reason}"
+                );
+                for schedule_word in ["lands in C3", "later chunk", "not yet implemented", "TODO"] {
+                    assert!(
+                        !reason.contains(schedule_word),
+                        "{at}: '{schedule_word}' is a SCHEDULE, not a modelling statement: {reason}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 // ─── #771: the `deferred:` grammar, the DSL successor of UNWIRED_MUTATIONS ───────────────────────
 
 #[cfg(test)]
@@ -16817,22 +17014,22 @@ mod receives_deferred_grammar {
         assert_eq!(rules_of_issues(&not_a_mapping), vec!["receives-deferred-shape"]);
     }
 
-    /// The real corpus carries NO deferral. #771's one candidate (`DeliveryJob`/
-    /// `UpdateDeliveryStatus`) turned out to have its `via: status` handler already written,
-    /// green and re-exported — it was missing only a router row, like the other nine — so it is
-    /// WIRED, and the grammar ships with zero users by decision (ADR-20260830-183000: kept for
-    /// C3's remaining `deliver:` routes, which are each an opportunity to declare a real one).
+    /// **THE RETIRED RATCHET'S SUCCESSOR (#780).** The corpus-declares-no-deferral assertion was
+    /// the right ratchet while the grammar had zero users, and seven deferrals landed with
+    /// #780. Its successor is an explicit ALLOW-LIST of the seven that were argued for —
+    /// `fact_route_gate::the_corpus_declares_exactly_the_argued_deferrals` — which keeps the
+    /// property that mattered (an eighth entry fails a test and must be argued for in the same
+    /// change) without ever becoming `N deferrals permitted`, which is how `UNWIRED_MUTATIONS`
+    /// became a parking lot in the first place.
     ///
-    /// This is the RATCHET, not a formality: `UNWIRED_MUTATIONS` degenerated into a parking lot
-    /// precisely because entries could accumulate without anyone deciding. The first deferral to
-    /// arrive must fail this test and be argued for in the same change — including whether
-    /// [#781](https://github.com/TheCaptainCompany/captain-food/issues/781) (nothing binds a
-    /// `Deferred` ARM to its declaration, in either direction) should close first.
+    /// The two halves of each deferral are additionally held EQUAL in both directions by
+    /// `fact_route_gate::every_unrecorded_arm_is_a_declared_deferral`, so a declaration cannot
+    /// outlive its arm or vice versa (#781, for the fact half).
     #[test]
-    fn the_corpus_declares_no_deferral() {
+    fn every_deferral_is_reachable_from_the_generated_table() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        let deferred: Vec<(String, String)> = inbox_actors(&model)
+        let declared: Vec<(String, String)> = inbox_actors(&model)
             .into_iter()
             .flat_map(|a| {
                 let actor = a.name.clone();
@@ -16842,14 +17039,18 @@ mod receives_deferred_grammar {
                     .map(move |m| (actor.clone(), m.name))
             })
             .collect();
-        assert_eq!(
-            deferred,
-            Vec::<(String, String)>::new(),
-            "a deferral appeared. The grammar is real and this is not a veto -- but a deferral is \
-             a promise the product has not kept, so the entry must carry a reason a reviewer can \
-             evaluate and an issue that will close it, and THIS assertion must move in the same \
-             change that adds it. #771's own candidate turned out to have a handler already \
-             written: check that first"
-        );
+        let emitted = emit_app_inboxes(&model);
+        for (actor, message) in &declared {
+            assert!(
+                emitted.contains(&format!("(\"{actor}\", \"{message}\", ")),
+                "{actor}/{message} is declared `deferred:` but does not reach `DEFERRED_MESSAGES` \
+                 -- the deferral would be invisible to every runtime reader"
+            );
+            assert!(
+                emitted.contains("HANDLER DEFERRED"),
+                "a deferral must be rendered onto the variant it qualifies"
+            );
+        }
+        assert!(!declared.is_empty(), "the check must not be vacuous");
     }
 }

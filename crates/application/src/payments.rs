@@ -10,6 +10,7 @@
 //! PlaceOrderProcess ORCHESTRATOR's `PaymentEventOrphaned` guard that flags the orphan for ops, not
 //! this recording path.
 
+use crate::generated::inboxes::PaymentFactInbox;
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::PaymentIntentId;
 use domain::shared::errors::DomainError;
@@ -61,6 +62,55 @@ pub async fn record_inbound_payment_event(
             "record_inbound_payment_event routed a non-payment event: {event:?}"
         )));
     };
+    record_on_payment_stream(store, intent, event, actor).await
+}
+
+/// The intent a Payment-lane fact belongs to — **TOTAL over the lane's declared fact set** (#780).
+///
+/// [`payment_intent_of`] reads an untyped `DomainEvent` and so must end in `_ => None`; five of the
+/// ten facts the `Payment` actor declares it receives fell into it, and routing one of them through
+/// the generic recorder would have produced a `Repository` error rather than a record. This one
+/// cannot: a new `receives:` FACT on the Payment lane is an E0004 HERE, at the place that knows how
+/// to find its stream, instead of a runtime surprise on the money path.
+pub fn intent_of_fact(fact: &PaymentFactInbox) -> PaymentIntentId {
+    match fact {
+        PaymentFactInbox::PaymentAuthorized(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::PaymentCaptureFailed(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::PaymentCaptured(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::PaymentFailed(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::PaymentIntentCreated(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::PaymentRefunded(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::PaymentReleased(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::RefundApproved(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::RefundDenied(e) => e.payment_intent_id.clone(),
+        PaymentFactInbox::RefundOpened(e) => e.payment_intent_id.clone(),
+    }
+}
+
+/// Record one TYPED Payment-lane fact on its `Payment-<intentId>` stream.
+///
+/// The typed door of [`record_inbound_payment_event`] and NOT a second recorder: both resolve to
+/// [`record_on_payment_stream`], so there is exactly ONE idempotency rule on the money path
+/// (`domain::payment::already_records`, folded from the aggregate's own stream — never a `View_*`
+/// read, which would make a projection rebuild change what the write side records,
+/// ADR-20260815-030206). What this entry point adds is that the STREAM lookup is total.
+pub async fn record_inbound_payment_fact(
+    store: &dyn EventStore,
+    fact: PaymentFactInbox,
+    actor: &Actor,
+) -> Result<RecordOutcome, DomainError> {
+    let intent = intent_of_fact(&fact);
+    record_on_payment_stream(store, intent, fact.into_domain_event(), actor).await
+}
+
+/// The ONE append: fold the aggregate's own stream, consult its own dedupe, append the fact it
+/// received and nothing else.
+async fn record_on_payment_stream(
+    store: &dyn EventStore,
+    intent: PaymentIntentId,
+    event: DomainEvent,
+    actor: &Actor,
+) -> Result<RecordOutcome, DomainError> {
     let stream = domain::payment::stream(&intent);
     let (events, version) = store.load(&stream).await?;
     if let Some(payment) = domain::payment::fold(&events) {
