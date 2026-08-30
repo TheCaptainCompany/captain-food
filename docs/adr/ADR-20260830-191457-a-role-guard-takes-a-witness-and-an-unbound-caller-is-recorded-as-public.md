@@ -81,6 +81,19 @@ public constructor that runs the SAME match `authorize` runs: it can produce an 
 role assertion in the server test suite now names the identity holding the role rather than a bare
 enum somebody typed, which is the property under test.
 
+**That migration is where this change nearly shipped a defect, and the repair is a gate.** The sweep
+matched the LITERAL spelling `.data(RequestRole::X)`, converted 45 of them, and missed three
+variable-bound `.data(role)` sites inside `for role in …` loops — twice in `mailbox_lanes.rs`, once
+in `graphql_subscriptions.rs`. All three suites stayed GREEN, because a role that never arrives
+reads as absent and fails closed to PUBLIC, and PUBLIC is refused too: three role-refusal loops
+asserting nothing, one of which `mailbox_lanes.rs` itself records as having been caught at 4-of-6
+coverage on #536 and was now at 0-of-6. Found by the independent reviewer pass, fixed here, and the
+recurrence class is now held by `crates/server/tests/role_injection_gate.rs` — a source scan, which
+is the "check as fallback" level and is legitimate precisely because the compiler cannot reach it:
+`async_graphql::Data::insert` is `TypeId`-keyed over `Any`, so injecting the wrong type is neither
+an error nor a warning. Seen RED against the exact mutant before it was trusted, and it asserts it
+scanned a non-empty set, because a gate that scans nothing passes forever.
+
 ## Decision 2 — `Principal::role()` becomes `recorded_role()`, and Unbound records as PUBLIC
 
 Two questions were being answered by one method. They are now two, named so the difference is
@@ -108,10 +121,31 @@ exists and means "a credential proved no usable role". That reading is recorded 
 `specs/common/scalars.yaml#/UserType`, because a fold inferring "anonymous" from PUBLIC would
 silently reclassify.
 
-One derived signal moved with it: the `auth.read_scope` span's `bridge_resolved` was computed as
-`scope != Public || role == Public || role == External`, which went silently "always true" the
-moment Unbound stopped reporting its declared role. It is now `Principal::bridge_resolved()`, an
-exhaustive predicate on the identity, and an Unbound caller is the exact `false`.
+One consumer of `user_type` is not telemetry and was missing from that enumeration: the mailbox's
+`resolve_actor` branches on `message.user_type == "CUSTOMER"` to resolve a domain id through
+`by_auth_ref`. A claimless CUSTOMER on `/customer` used to enqueue as CUSTOMER and pick up a domain
+id there; it now enqueues as PUBLIC with none. Unreachable rather than fixed, and deliberately so:
+every CUSTOMER-only operation denies such a caller at the guard, and the only PUBLIC-inclusive
+customer mutations are `requestPhoneVerification` and `verifyPhone`, which MINT identity rather than
+consume it. Recorded because "unreachable" is a claim about today's API surface, and the next
+PUBLIC-inclusive customer mutation is what would falsify it.
+
+One derived signal moved with it, and it took two attempts. The `auth.read_scope` span's
+`bridge_resolved` was computed inline as `scope != Public || role == Public || role == External`,
+which went silently "always true" the moment Unbound stopped reporting its declared role. Restating
+it as a predicate on the IDENTITY alone fixed that end and broke the other, which the independent
+reviewer caught: a CUSTOMER under `CustomerIdentitySource::Postgres` whose lookup returns
+`NoMapping` or `LookupFailed` **is** a bound identity and degrades to `Public` anyway (#641), so an
+identity-only predicate reports the seam's own outage as resolved — and `LookupFailed` is the
+PAGE-classed one. `Principal::bridge_resolved(&scope)` asks both questions, which is the only form
+right at both ends: an Unbound caller is `false` because nothing could resolve, and a bound caller is
+`false` when nothing did.
+
+The span's `business.role` attribute now carries `recorded_role()`, so an Unbound caller's
+`auth.read_scope` span reads PUBLIC. The declared role survives on
+`read_authorization_bridge_unresolved_total{role}` and nowhere else — thinner attribution than
+before, accepted rather than overlooked: a fourth role accessor existing purely for a span attribute
+would cost more clarity at the seam than it buys in telemetry.
 
 ## Decision 3 — the rider read model is a TABLE, and its constraints are the interesting part
 
@@ -129,7 +163,11 @@ Three column decisions are load-bearing and each was a checkpoint stop:
   repository lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row,
   plan-dependent and without error, and `ScopeMembership` keys grants on `member_id = rider_id`; a
   duplicate would hand one rider another rider's order scope. The constraint converts a silent
-  breach into a visible denial. It does **not** create the invariant — nothing on the write side
+  breach into a **denial** — though "visible" overstates it, and part C's author must not read it
+  as a promise that an operator is told: under the production default `DbFaultPolicy::Skip` the fold
+  fails inside its savepoint, is logged at ERROR and SKIPPED with the checkpoint advancing, so the
+  second rider is simply absent until a reprojection, with a log line and no metric. Strictly better
+  than an ambiguous resolve; not an alert. It does **not** create the invariant — nothing on the write side
   prevents two `RiderRegistered` with the same `authRef`, and the reservation that would (the
   `slug_reservations` shape) is designed and unbuilt, owed by the sign-in door. `index: true`
   beside `unique:` is deliberately absent: they are separate emitter passes and would emit two
@@ -170,6 +208,15 @@ Reversibility class **HOLD: human** (identity on A, money path on B). Briefed be
 lens named what it would catch, and every item below was verified against the tree by the lens that
 raised it.
 
+- **reviewer** (independent, full-diff, post-implementation — the third look) — returned **FAIL**
+  on one blocking finding and it was a real one: the test migration had missed three variable-bound
+  `.data(role)` sites, leaving three role-refusal loops green while asserting nothing, and two
+  sentences in this record and in `STATUS.md` asserted otherwise. Fixed here, with a gate. Also
+  found the `bridge_resolved` narrowing at the #641 end, the `DbFaultPolicy::Skip` overstatement in
+  the `auth_ref` rationale, and the unrecorded `resolve_actor` interaction — all three corrected
+  above. Verified independently that no non-PUBLIC `ActingRole` is obtainable for an unbound caller
+  by any path, that the migration is byte-identical to the generated schema, that the store's column
+  list matches the DDL, and that no fenced path was touched.
 - **beck** — owns the evidence bar this change was held to: four planted violations, each with its
   message recorded (the Unbound guard arm and the envelope arm go RED; dropping the witness from
   either transport is a COMPILE error). Found that the existing assertion

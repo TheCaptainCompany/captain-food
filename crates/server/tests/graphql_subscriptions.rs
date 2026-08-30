@@ -1127,7 +1127,7 @@ async fn unauthorized_role_is_forbidden() {
     );
 
     for role in [RequestRole::Rider, RequestRole::Public, RequestRole::External] {
-        let mut stream = schema.execute_stream(Request::new(query.clone()).data(role));
+        let mut stream = schema.execute_stream(Request::new(query.clone()).data(acting(role)));
         let resp = tokio::time::timeout(Duration::from_secs(5), stream.next())
             .await
             .expect("guard answers immediately")

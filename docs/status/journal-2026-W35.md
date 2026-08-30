@@ -48,6 +48,39 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > English over an empty order queue. Part C is not claimed — it is AMBER and owes a proposal plus a
 > founder decision.
 
+> **2026-08-30 (later) — the independent review returned FAIL, and the finding is the one worth
+> keeping from this whole chunk.** The #639 A+B test migration converted 45 literal
+> `.data(RequestRole::X)` call sites with a regex and **missed three variable-bound `.data(role)`
+> sites** inside `for role in …` loops. Every one of those suites stayed GREEN — because a role that
+> never arrives reads as absent, the guard fails closed to PUBLIC, and PUBLIC is refused too. Three
+> role-refusal loops asserting nothing, and `mailbox_lanes.rs` carries a comment recording the SAME
+> loop being caught at 4-of-6 role coverage on #536; the miss had taken it to 0-of-6. Two sentences
+> in the ADR and in `STATUS.md` asserted the opposite, which is worse than the code defect: the next
+> session would have cited them.
+>
+> **The generalisable lesson, and it is not "grep harder".** A fail-closed default is correct for
+> production and actively hostile to a test: the test's subject silently becomes the default, and
+> the assertion still passes. Any change that moves a context-injected value to a new type has this
+> shape — `async_graphql::Data` is `TypeId`-keyed over `Any`, so the compiler sees nothing. The
+> repair is `crates/server/tests/role_injection_gate.rs`: a source scan naming the two wrong
+> spellings, which is the sanctioned "check as fallback" level because the compiler genuinely cannot
+> reach the call sites. It asserts it scanned a non-empty set — a gate that scans nothing passes
+> forever — and it was seen RED against the exact mutant before being trusted.
+>
+> Three more review findings, all corrected in the same commit: `bridge_resolved` restated on the
+> identity alone had fixed the Unbound end and **broken the #641 end** (a bound CUSTOMER whose
+> Postgres lookup fails degrades to Public and was reporting resolved — including `LookupFailed`,
+> the PAGE-classed one), so it now takes both the identity and the resolved scope; the `auth_ref`
+> UNIQUE rationale said "a visible denial" when `DbFaultPolicy::Skip` makes it a log line and no
+> metric; and the mailbox `resolve_actor`'s dependence on `user_type == "CUSTOMER"` was a real
+> consumer missing from the ADR's enumeration (unreachable today, recorded because "unreachable" is
+> a claim about the current API surface).
+>
+> Non-blocking and filed rather than fixed: `Principal::role_binding` is an unconditionally `pub`
+> constructor that can mint an ADMIN principal from nothing — production is unaffected
+> (`routes.rs` is the only injector) but it is the test-only escape hatch this change refused for
+> `ActingRole`, re-created one level up in the public API.
+
 > **2026-08-30 — the flip changed a field and left the sentence: a config default is now emitted,
 > never restated.** `ROUTE_ORDER_BIRTH_THROUGH_LANE` went `default: false → true` on 2026-08-30
 > ([ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md));

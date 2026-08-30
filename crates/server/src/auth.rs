@@ -357,18 +357,30 @@ impl Principal {
     /// Whether this caller's login-to-domain bridge RESOLVED — the `auth.read_scope` span's
     /// `bridge_resolved` attribute (#451).
     ///
-    /// Stated on the identity rather than derived from a resolved `ReadScope` plus [`role`](Self::role):
-    /// the derived form read `scope != Public || role == Public || role == External`, which
-    /// silently became "always true" the moment an Unbound caller stopped reporting its declared
-    /// role — turning the one population the attribute exists to surface into a healthy reading.
-    pub fn bridge_resolved(&self) -> bool {
+    /// **It takes BOTH the identity and the scope that was actually resolved**, because neither
+    /// alone answers the question. The form this replaced was
+    /// `scope != Public || role == Public || role == External`, evaluated at the call site: correct
+    /// while `role()` reported an Unbound caller's declared role, and silently **always true** the
+    /// moment it stopped (#639 part B) — turning the one population the attribute exists to surface
+    /// into a healthy reading. Restating it purely on the identity fixed that and broke the other
+    /// end: a CUSTOMER under `CustomerIdentitySource::Postgres` whose lookup returns `NoMapping` or
+    /// `LookupFailed` **is** a bound identity, and degrades to `Public` anyway (#641) — so an
+    /// identity-only predicate reports the seam's own outage as resolved, and `LookupFailed` is the
+    /// PAGE-classed one. Asking both questions is the only form that is right at both ends.
+    pub fn bridge_resolved(&self, scope: &application::queries::ReadScope) -> bool {
         match &self.identity {
             // Nothing to resolve: their scope IS their role (ADMIN), or they have none by design.
             Identity::Anonymous | Identity::External { .. } | Identity::Admin { .. } => true,
+            // A binding was presented — did it actually resolve to a scope? Under the default
+            // claim path this is a foregone `true`; under Postgres resolution it is the real
+            // question, and `Public` here means the seam said no or could not answer.
             Identity::Customer { .. }
             | Identity::Restaurant { .. }
             | Identity::RestaurantAccount { .. }
-            | Identity::Rider { .. } => true,
+            | Identity::Rider { .. } => {
+                !matches!(scope, application::queries::ReadScope::Public)
+            }
+            // No binding was presented at all: nothing could have resolved.
             Identity::Unbound { .. } => false,
         }
     }
@@ -2325,12 +2337,13 @@ pub async fn resolve_read_scope(
     let scope = resolve_customer_scope(principal, correlation_id, customer_identity)
         .instrument(span.clone())
         .await;
-    // Asked of the IDENTITY (`Principal::bridge_resolved`), not derived from the resolved scope.
-    // The derived form was `scope != Public || role == Public || role == External`, and it went
-    // silently "always true" the moment an Unbound caller stopped reporting its declared role
-    // (#639 part B) — turning the one population this attribute exists to surface into a healthy
-    // reading. It is also no longer a proxy: an Unbound caller is now the exact `false`.
-    telemetry::spans::record_bridge_resolved(&span, principal.bridge_resolved());
+    // Asked of the identity AND the scope it actually resolved to (`Principal::bridge_resolved`),
+    // because the inline form this replaced read the role — and went silently "always true" the
+    // moment an Unbound caller stopped reporting its declared role (#639 part B), turning the one
+    // population this attribute exists to surface into a healthy reading. Two populations are
+    // `false` now and both are meant to be: an Unbound caller, and a bound one whose Postgres
+    // lookup said no or could not answer (#641).
+    telemetry::spans::record_bridge_resolved(&span, principal.bridge_resolved(&scope));
     scope
 }
 
@@ -2399,7 +2412,23 @@ mod read_scope_tests {
             "an unbound caller records as PUBLIC — stamping CUSTOMER into domain_events.user_type \
              would be a false author in an immutable log"
         );
-        assert!(!unbound.bridge_resolved(), "and it is the population `bridge_resolved: false` names");
+        assert!(
+            !unbound.bridge_resolved(&read_scope(&unbound)),
+            "and it is the population `bridge_resolved: false` names"
+        );
+        // The other end, which an identity-only predicate got wrong (#641): a BOUND caller whose
+        // Postgres lookup said no, or could not answer, also degrades to Public and must also read
+        // as unresolved — otherwise the seam's own outage reports healthy.
+        let bound = principal(RequestRole::Customer, &sub, Some(uuid::Uuid::from_u128(2)));
+        assert!(
+            bound.bridge_resolved(&read_scope(&bound)),
+            "a bound caller that resolved is resolved"
+        );
+        assert!(
+            !bound.bridge_resolved(&ReadScope::Public),
+            "a bound caller that resolved to Public did NOT resolve — the #641 NoMapping / \
+             LookupFailed population"
+        );
         assert_eq!(
             read_scope(&principal(RequestRole::Rider, &sub, None)),
             ReadScope::Public,

@@ -299,7 +299,7 @@ async fn mailbox_lanes_join_counts_and_admin_guard() {
     // 3) The guard: every non-ADMIN role is refused — the supervision surface never leaks.
     for role in every_non_admin_role() {
         let resp = schema
-            .execute(async_graphql::Request::new(query).data(role))
+            .execute(async_graphql::Request::new(query).data(acting(role)))
             .await;
         assert_eq!(resp.errors.len(), 1, "{role:?} should be refused: {:?}", resp.errors);
     }
@@ -341,7 +341,7 @@ async fn poisoned_mailbox_messages_detail_and_admin_guard() {
 
     for role in every_non_admin_role() {
         let resp = schema
-            .execute(async_graphql::Request::new(query).data(role))
+            .execute(async_graphql::Request::new(query).data(acting(role)))
             .await;
         assert_eq!(resp.errors.len(), 1, "{role:?} should be refused: {:?}", resp.errors);
     }
