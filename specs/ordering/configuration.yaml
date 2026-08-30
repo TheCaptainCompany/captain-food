@@ -52,6 +52,34 @@ keys:
       Order/OrderPlaced pair alone — the other twelve deliver: steps keep the legacy append until
       each is moved by its own record.
 
+  ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    gates: >
+      The REPLACEMENT-order birth routing (#595, ADR-20260829-230418 chunk C2). ON,
+      ReclamationProcess's REPLACEMENT arm stops CALLING the PlaceReplacementOrder handler
+      in-process and instead stages a COMMAND lane enqueue that the polling runner's fenced leg
+      transaction turns into an inbound_messages row; the Order's own lane worker then runs the
+      command and appends the birth, and it is THAT delivery which (re)declares the
+      OrderAcceptanceTimedOut reminder the spec already promises for `Order`/`PlaceReplacementOrder`.
+      OFF -- the DEFAULT -- is today's behaviour byte for byte: the saga writes Order-{id} itself,
+      with no transaction and no lane, and the replacement order's acceptance clock never arms.
+      This is a SEPARATE key from ROUTE_ORDER_BIRTH_THROUGH_LANE on purpose (farley,
+      ADR-20260829-230418 C3): one fused flag would flip unrelated routes together, which is exactly
+      the un-flippable blast radius a per-route gate exists to avoid. What flipping it CHANGES: (a)
+      the replacement birth gains one lane hop of latency after the resolution is recorded; (b) the
+      birth's ENVELOPE changes -- user_id/user_type and cause_id come from the mailbox row rather
+      than the saga's system actor, and stored rows are NEVER backfilled; (c) the door becomes a
+      COMMAND row, so an OrderNotFound rejection lands a REJECTED verdict on a supervisable row
+      instead of a `tracing::warn!` nobody routes; (d) the version-conflict retry path disappears --
+      the lane serialises the Order's writer, so there is no concurrent saga append to lose a race
+      to. ROLLBACK IS A FLIP, NOT A REDEPLOY: set it OFF and the next resolution takes the legacy
+      in-process call; already-routed births stay as they are. Flipping the default is a SEPARATE
+      recorded decision, and the legacy arm is deleted in a SEPARATE change again, with golden
+      payload equality as its precondition (beck).
+
   ORDER_ACCEPTANCE_TIMEOUT_SECONDS:
     type: int
     unit: seconds     # typed duration unit (#167) — the emitters branch on THIS, never on the name
@@ -107,10 +135,11 @@ keys:
       waits on production time-to-accept distributions (precondition (4)), which no walk can
       produce: the TTL is chosen from how long real restaurants take per daypart, and that number
       only exists once real orders flow. (5a) is FIRST in dependency order even though it is
-      listed last. Second, unfixed producer gap: the
-      reclamation PM calls place_replacement_order in-process from the polling runner, which owns
-      no delivery transaction and therefore cannot use this seam — a replacement order's clock
-      stays unarmed until issue #595 moves that route onto the mailbox. The flip is PROSPECTIVE only: occurrences
+      listed last. Second producer, its own gate: the REPLACEMENT-order birth
+      is no longer unlaneable — #595 gave the polling runner a fenced leg transaction and put the
+      replacement birth behind ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE above, whose OFF default keeps
+      the legacy in-process call and therefore keeps a replacement order's clock unarmed. That
+      key's own flip is what arms it, and it is a separate recorded decision from this one. The flip is PROSPECTIVE only: occurrences
       fired-and-absorbed while OFF are spent, nobody synthesizes timeouts for orders already past
       the TTL.
 

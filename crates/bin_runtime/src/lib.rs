@@ -160,6 +160,10 @@ pub struct PmRuntime {
     /// The payment port (PlaceOrder/Refund/Reclamation declare it).
     pub payments: Option<Arc<dyn PaymentService>>,
     pub waiter: Option<infrastructure::EventWaiter>,
+    /// #595 (`configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`), resolved from the bin's
+    /// generated `Config`. It MUST match the monolith's value: a split fleet lanes some replacement
+    /// births and appends others, which is invisible in every series except `runtime_flag_state`.
+    pub replacement_birth_lane: bool,
 }
 
 /// Spawn the restricted saga runner. Returns the `/saga`-shaped status handle (the bin's health
@@ -176,6 +180,7 @@ pub async fn spawn_pm_runtime(
     if let Some(payments) = rt.payments {
         runner = runner.with_payments(payments);
     }
+    runner = runner.with_replacement_birth_lane(rt.replacement_birth_lane);
     let status = runner.status();
     // The startup backfill (monolith parity): only the money PMs (the mailbox-laned ones) need
     // it. Idempotent — the standalone fleet runs its own pass too; the point of THIS one is

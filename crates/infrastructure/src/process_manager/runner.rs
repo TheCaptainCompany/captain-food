@@ -155,6 +155,12 @@ pub struct ProcessManagerRunner {
     /// their own. Per-PM checkpoints (`pm:<Name>`) make the split free: a filtered runner
     /// advances exactly the rows a full runner would for that PM.
     only: Option<&'static str>,
+    /// #595 (`configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`): route
+    /// ReclamationProcess's REPLACEMENT arm through the Order's own mailbox lane instead of calling
+    /// `PlaceReplacementOrder` in-process and writing `Order-{id}` from the saga. Resolved ONCE at
+    /// the composition root and handed in (the `enforce_service_hours_guard` style) — the runner
+    /// never reads config or env itself. OFF is the default and leaves every leg byte-identical.
+    route_replacement_birth_through_lane: bool,
     status: Arc<Mutex<ProcessManagerStatus>>,
     /// Idle gate: `MAX(position)` as observed at the end of the last pass that drained EVERY PM.
     /// `-1` means nothing observed yet, so the first tick after start always drains.
@@ -175,6 +181,7 @@ impl ProcessManagerRunner {
             partner: Arc::new(NoopDeliveryService),
             payments: Arc::new(crate::integrations::payments::FailClosedPaymentGateway),
             only: None,
+            route_replacement_birth_through_lane: false,
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
             last_head: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
@@ -196,6 +203,14 @@ impl ProcessManagerRunner {
         REGISTRY
             .iter()
             .filter(move |g| only.is_none_or(|name| g.checkpoint.strip_prefix("pm:") == Some(name)))
+    }
+
+    /// Route the REPLACEMENT-order birth through the Order's lane (#595,
+    /// `configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`). Off unless the composition root
+    /// says otherwise, so a runner built anywhere else — a test, a tool — cannot silently enqueue.
+    pub fn with_replacement_birth_lane(mut self, on: bool) -> Self {
+        self.route_replacement_birth_through_lane = on;
+        self
     }
 
     /// Replace the delivery-partner port (the composition root injects the real ACL when it lands).
@@ -345,8 +360,12 @@ impl ProcessManagerRunner {
 
         for record in pending {
             let position: i64 = record.try_get("position").map_err(db_err)?;
-            match self.apply_record(group, &record).await {
-                Ok(Outcome::Completed) => {}
+            // The leg's STAGING buffer (#595). One per record, never shared: the buffer IS this
+            // leg's uncommitted truth, exactly as in the mailbox delivery.
+            let lane_sink = Arc::new(application::lanes::StagingLaneSink::new());
+            let mut staged = Vec::new();
+            match self.apply_record(group, &record, &lane_sink).await {
+                Ok(Outcome::Completed) => staged = lane_sink.take_staged(),
                 Ok(Outcome::Skipped(reason)) => {
                     // Benign expected alternative (idempotent re-delivery, COLLECTION no-op, failed
                     // state.expect) — logged, never an error.
@@ -373,7 +392,13 @@ impl ProcessManagerRunner {
                     surfaced.push(msg);
                 }
             }
-            self.commit_checkpoint(group.checkpoint, position).await?;
+            // The FENCED leg commit (#595, ADR-20260829-230418 C2): the staged lane enqueues and
+            // the checkpoint advance go in ONE transaction, so the two can never disagree. Either
+            // the door row exists AND this position is consumed, or neither is true and the leg
+            // re-runs next tick over fresh state — where the door's frozen identity makes the
+            // re-run a no-op collision. A staged buffer that never reached `Completed` is dropped
+            // unflushed, which is the same rule the mailbox route follows.
+            self.commit_leg(group.checkpoint, position, &record, &staged).await?;
         }
         Ok(())
     }
@@ -384,6 +409,7 @@ impl ProcessManagerRunner {
         &self,
         group: &PmGroup,
         record: &sqlx::postgres::PgRow,
+        lane_sink: &Arc<application::lanes::StagingLaneSink>,
     ) -> Result<Outcome, DomainError> {
         let position: i64 = record.try_get("position").map_err(db_err)?;
         let event_id: uuid::Uuid = record.try_get("id").map_err(db_err)?;
@@ -397,14 +423,27 @@ impl ProcessManagerRunner {
         }))
         .map_err(|e| db_err(format!("position {position} ({event_type}): {e}")))?;
 
-        let trigger = Trigger {
-            event_type,
-            event,
-            // NO lane sink (#588): the polling runner owns no delivery transaction to stage an
-            // enqueue into, so routed `deliver:` steps take the legacy append here. The
-            // reclamation replacement birth this route reaches is issue #595.
-            envelope: TriggerEnvelope::unlaned(event_id, correlation_id, occurred_at),
+        // #595 corrected the comment that used to stand here: the polling runner owned no
+        // delivery transaction, so routed steps had nowhere to stage and the reclamation
+        // replacement birth wrote `Order-{id}` from the saga with no transaction and no lane. It
+        // owns one NOW — `commit_leg` below opens it and flushes this sink into it alongside the
+        // checkpoint advance — so naming `laned` here is a claim this runner can honour, which is
+        // the whole contract `TriggerEnvelope::laned` asks its callers to make.
+        //
+        // The gate is per ROUTE, not per runner (farley, ADR-20260829-230418 C3): with
+        // `ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` OFF the sink is withheld and every leg on this
+        // runner behaves byte for byte as before.
+        let envelope = if self.route_replacement_birth_through_lane {
+            TriggerEnvelope::laned(
+                event_id,
+                correlation_id,
+                occurred_at,
+                lane_sink.clone() as Arc<dyn application::lanes::LaneSink>,
+            )
+        } else {
+            TriggerEnvelope::unlaned(event_id, correlation_id, occurred_at)
         };
+        let trigger = Trigger { event_type, event, envelope };
         self.dispatch(group.pm, &trigger).await
     }
 
@@ -573,16 +612,49 @@ impl ProcessManagerRunner {
         }
     }
 
-    async fn commit_checkpoint(&self, projector: &str, position: i64) -> Result<(), DomainError> {
+    /// Commit one drained position: the leg's staged lane enqueues AND the checkpoint advance, in
+    /// ONE transaction (#595).
+    ///
+    /// The atomicity is the point. The enqueue has no other partner to be atomic with on this
+    /// route — there is no delivery row to record a verdict on — so it is paired with the fact that
+    /// consumes the trigger. Split them and both orders fail: checkpoint-then-enqueue can lose the
+    /// birth entirely on a crash (the position is spent, nobody enqueued), enqueue-then-checkpoint
+    /// is merely safe-by-idempotence and only because the door identity is frozen. One transaction
+    /// needs neither argument.
+    ///
+    /// With nothing staged this is exactly the previous single-statement upsert, one transaction
+    /// deep — the cost a leg that routes nothing pays is a BEGIN/COMMIT around one row.
+    async fn commit_leg(
+        &self,
+        projector: &str,
+        position: i64,
+        record: &sqlx::postgres::PgRow,
+        staged: &[application::lanes::LaneEnqueue],
+    ) -> Result<(), DomainError> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        if !staged.is_empty() {
+            // The envelope of a runner-staged enqueue: the acting principal is the SAGA's system
+            // user (there is no request principal on this route) and the cause is the
+            // `domain_events` row being reacted to — real causality for this route, rather than a
+            // fabricated mailbox row (see `LaneCause`).
+            let cause = crate::mailbox::LaneCause {
+                user_id: Some(application::process_managers::saga_system_user_id()),
+                user_type: application::process_managers::EXTERNAL_USER_TYPE.to_string(),
+                correlation_id: record.try_get("correlation_id").map_err(db_err)?,
+                cause_id: record.try_get("id").map_err(db_err)?,
+            };
+            crate::mailbox::flush_lane_enqueues_in_tx(&mut tx, &cause, staged).await?;
+        }
         sqlx::query(
             "INSERT INTO projection_checkpoint (projector, position, updated_at) VALUES ($1, $2, now()) \
              ON CONFLICT (projector) DO UPDATE SET position = EXCLUDED.position, updated_at = now()",
         )
         .bind(projector)
         .bind(position)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
         Ok(())
     }
 }

@@ -52,6 +52,35 @@ use domain::shared::errors::DomainError;
 use sqlx::{Postgres, Transaction};
 use tracing::Instrument as _;
 
+/// The ENVELOPE bits a lane enqueue inherits from whatever caused it (#595).
+///
+/// One shape, two producers, and the point is that they are DIFFERENT: a mailbox delivery's cause
+/// is the `inbound_messages` row it is handling; the polling runner's cause is the `domain_events`
+/// row it is reacting to. Both are real causality; neither is the other's.
+pub struct LaneCause {
+    /// The acting principal carried onto the enqueued row (`ADR-0041` envelope metadata). `None`
+    /// where the causing row carried none — an unauthenticated door — never a fabricated one.
+    pub user_id: Option<uuid::Uuid>,
+    pub user_type: String,
+    /// The correlation the whole reaction belongs to.
+    pub correlation_id: uuid::Uuid,
+    /// What CAUSED this enqueue — the triggering mailbox row, or the trigger event's id.
+    pub cause_id: uuid::Uuid,
+}
+
+impl LaneCause {
+    /// The envelope of an enqueue staged inside a MAILBOX delivery: the row being delivered is the
+    /// cause.
+    pub fn of_message(message: &actor_runtime::InboundMessage) -> Self {
+        Self {
+            user_id: message.user_id,
+            user_type: message.user_type.clone(),
+            correlation_id: message.correlation_id,
+            cause_id: message.message_id,
+        }
+    }
+}
+
 /// Flush staged lane ENQUEUES into the completion transaction — the second half of
 /// ADR-20260816-040239's seam, and the reason a routed `deliver:` is not a dual write: the door
 /// row and the saga's own effects (the run row, the remaining appends, the verdict) commit or roll
@@ -72,14 +101,18 @@ use tracing::Instrument as _;
 ///   rolled-back one. A deduplicated insert notifies nobody, which is correct: the first insert
 ///   already did.
 ///
-/// The ENVELOPE is stamped from the triggering mailbox row: `cause_id` is that row (the causality
-/// chain the saga hop belongs to) and the principal carries over, so the birth records who actually
-/// caused it. Post-flip `OrderPlaced` rows therefore carry a different envelope from the
-/// saga-appended ones — legal, permanent and never backfilled (ADR-20260816-040239 "What
-/// legitimately changes").
+/// The ENVELOPE is stamped by the CALLER through [`LaneCause`]: `cause_id` is what caused the hop
+/// (the triggering mailbox row on a mailbox route, the `domain_events` row on the polling runner's
+/// route, #595) and the principal carries over, so the birth records who actually caused it.
+/// Post-flip `OrderPlaced` rows therefore carry a different envelope from the saga-appended ones —
+/// legal, permanent and never backfilled (ADR-20260816-040239 "What legitimately changes").
+///
+/// It is a parameter rather than an `InboundMessage` because the two routes that own a transaction
+/// do not both HAVE a mailbox row: taking the row would have forced the runner to fabricate a fake
+/// one, and a fabricated envelope is exactly the kind of lie that later reads as real causality.
 pub async fn flush_lane_enqueues_in_tx(
     tx: &mut Transaction<'_, Postgres>,
-    message: &actor_runtime::InboundMessage,
+    cause: &LaneCause,
     enqueues: &[application::lanes::LaneEnqueue],
 ) -> Result<(), DomainError> {
     for enqueue in enqueues {
@@ -98,7 +131,7 @@ pub async fn flush_lane_enqueues_in_tx(
             // target declares a mailbox); a wiring bug, never a business outcome.
             return Err(DomainError::Repository(format!(
                 "routed deliver of '{}' but '{}' declares no mailbox — wiring bug",
-                enqueue.event_type, enqueue.actor_type
+                enqueue.message_type, enqueue.actor_type
             )));
         };
         let message_id = actor_client::inbound_message_id(&enqueue.source, &enqueue.external_id);
@@ -108,7 +141,7 @@ pub async fn flush_lane_enqueues_in_tx(
                  (message_id, kind, actor_type, actor_id, partition, message_type, payload, \
                   payload_hash, channel, user_id, user_type, correlation_id, cause_id, source, \
                   external_id) \
-               VALUES ($1, 'EVENT', $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11, $12, $13) \
+               VALUES ($1, $14, $2, $3, $4, $5, $6, $7, 'WORKER', $8, $9, $10, $11, $12, $13) \
                ON CONFLICT (message_id) DO NOTHING \
                RETURNING actor_type \
              ) \
@@ -118,15 +151,19 @@ pub async fn flush_lane_enqueues_in_tx(
         .bind(enqueue.actor_type)
         .bind(enqueue.actor_id)
         .bind(partition)
-        .bind(enqueue.event_type)
+        .bind(enqueue.message_type)
         .bind(&enqueue.payload)
         .bind(application::journal::payload_hash(&enqueue.payload))
-        .bind(message.user_id)
-        .bind(&message.user_type)
-        .bind(message.correlation_id)
-        .bind(message.message_id)
+        .bind(cause.user_id)
+        .bind(&cause.user_type)
+        .bind(cause.correlation_id)
+        .bind(cause.cause_id)
         .bind(&enqueue.source)
         .bind(&enqueue.external_id)
+        // The DOOR: 'EVENT' for a `deliver:` fact, 'COMMAND' for a `sends:` request (#595). The
+        // column drives which delivery route the target's lane worker runs, and therefore whether
+        // the target may REJECT — so it is bound from the typed `kind`, never assumed.
+        .bind(enqueue.kind.as_str())
         // `order.lane.enqueue` (#598): the HANDOVER's act, instrumented HERE at the
         // infrastructure seam — `c4-l3.yaml` keeps the saga and the aggregates SDK-free, and this
         // glue is the framework boundary that owns the write. It is the second branch of
@@ -134,7 +171,10 @@ pub async fn flush_lane_enqueues_in_tx(
         // the saga's trace, so without this span a checkout that lost the birth entirely and one
         // that handed it over correctly are the same trace shape.
         .execute(&mut **tx)
-        .instrument(telemetry::spans::order_lane_enqueue(enqueue.event_type, &enqueue.external_id))
+        .instrument(telemetry::spans::order_lane_enqueue(
+            enqueue.message_type,
+            &enqueue.external_id,
+        ))
         .await
         .map_err(|e| DomainError::Repository(e.to_string()))?;
     }

@@ -700,6 +700,13 @@ pub async fn dispatch_command(
             };
             Some(validated(async { application::process_managers::refund::deny_refund(store.as_ref(), refund_state.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
+        "PlaceReplacementOrder" => {
+            let cmd: domain::generated::commands::PlaceReplacementOrder = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("PlaceReplacementOrder payload: {e}")))),
+            };
+            Some(validated(async { application::commands::place_replacement_order(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
+        }
         _ => None,
     }
 }

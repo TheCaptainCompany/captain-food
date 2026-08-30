@@ -209,7 +209,14 @@ ReclamationProcess:
     still isolates only the GOODWILL_CREDIT credit grant; the REPLACEMENT dispatch (a cross-aggregate read
     + one send, idempotent per reclamationId via a deterministic new orderId) is carried in this saga's
     hand-written wrapper seam (crate::process_managers::reclamation), the same seam that owns the branch
-    decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL.
+    decision — a 3-way credit/replacement/no-op split is not expressible in the current step DSL, so the
+    command is declared on this leg's `sends:` instead of as a step. The DOOR that command goes through is
+    gated (#595, ADR-20260829-230418 C2): with configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE ON
+    the seam stages a COMMAND lane enqueue and the Order's OWN lane worker runs PlaceReplacementOrder — so
+    the birth is appended by the aggregate that owns the fact, and the delivery arms the
+    OrderAcceptanceTimedOut reminder this actor already declares for Order/PlaceReplacementOrder. OFF (the
+    default) keeps the legacy in-process call, which writes Order-{id} from the saga with no transaction,
+    no lane and no acceptance clock.
   ports:
     # The refund arm (#207) drives the Stripe refund itself (approve_refund runs INSIDE this
     # saga's reaction — RefundProcess's leg, but executed here), so the payment service is a real
@@ -230,6 +237,15 @@ ReclamationProcess:
         # the hand-written wrapper seam, declared here so behaviour-test coverage sees them.
         - { $ref: 'events.yaml#/RefundOpened' }
         - { $ref: 'events.yaml#/RefundApproved' }
+      sends:
+        # Wrapper-seam REPLACEMENT arm (#159, ADR-20260726-171736; ROUTED by #595): a REPLACEMENT
+        # resolution sends this COMMAND to the Order, which mints the no-charge replacement and
+        # records its own OrderPlaced. It is NOT step-derived -- the leg is a 3-way
+        # credit/replacement/refund split the step DSL cannot express, and the command's `orderId`
+        # is DERIVED from reclamationId (a deterministic id, not a `with:` mapping) -- so it is
+        # declared here for the same reason `emits` above is: a $ref the refs walker can see, and
+        # a rule can hold, instead of a hand-written call no validator knows exists.
+        - { $ref: 'commands.yaml#/PlaceReplacementOrder' }
       throws:
         # Amount safety (rules.yaml#/RefundResolutionCappedAtCaptured): a PARTIAL over the captured total.
         - { $ref: 'errors.yaml#/RefundExceedsCaptured' }
