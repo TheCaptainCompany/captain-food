@@ -14,13 +14,14 @@ pub enum HookOutcome<T> {
     Skip(String),
 }
 
-/// One ROUTED `deliver:` target — the lane a process manager hands a fact to instead of
-/// appending to that aggregate's stream itself (ADR-20260816-040239).
+/// One ROUTED target — the lane a process manager hands a message to instead of acting on
+/// that aggregate's stream itself (ADR-20260816-040239; `sends:` routes added by #595).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RoutedLane {
     /// `actors.yaml` key of the TARGET — its mailbox lane receives the message.
     pub actor_type: &'static str,
-    /// `events.yaml` key of the fact handed over.
+    /// The message handed over: an `events.yaml` key for a routed `deliver:` (a FACT), a
+    /// `commands.yaml` key for a routed `sends:` (a REQUEST the target may refuse).
     pub event_type: &'static str,
     /// FROZEN door identity, first half: `pm:{ProcessManager}:{Event}`.
     pub source: &'static str,
