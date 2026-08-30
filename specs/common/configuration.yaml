@@ -390,7 +390,7 @@ keys:
       Standalone adapter workers (#272 D3, deferred from the PR #270 review): ON in a webhook
       adapter's own deployment, the binary runs MailboxWorkers for exactly the lanes its
       ingestor feeds — so facts keep being DELIVERED (not just accepted) while the monolith is
-      down. OFF (the default), the adapter only mirrors + enqueues and the monolith's fleet
+      down. OFF, the adapter only mirrors + enqueues and the monolith's fleet
       delivers. The trade-off the flip accepts: the status/event buses are in-process, so a
       fact delivered by the adapter process never reaches the monolith's push subscribers
       (polls unaffected) — which is why this is a deployment posture, not a default. The MONEY
@@ -412,7 +412,7 @@ keys:
       delivered actor's own stream through a shared held-state cache — filled on first load,
       extended with the committed appends strictly AFTER the fenced transaction commits
       (apply-after-commit), dropped on a lost version race, on lane loss, on idle expiry and
-      under the memory bound. OFF (the default — gate-then-stabilize; the flip is its own
+      under the memory bound. OFF (gate-then-stabilize; the flip is its own
       one-line ADR after staging smoke), every delivery folds from the log, byte-identically
       to the pre-D3 runtime. Correctness never depends on the cache, on BOTH verdict shapes:
       an APPEND from a stale hold loses the UNIQUE(stream_name, version) race, and a NON-APPEND
@@ -574,7 +574,7 @@ keys:
       The generic deletion engine (ADR-20260731-214500 §4): runs the declared deletion journeys
       (tombstone -> stream deletion -> ledger receipt) for every actors.yaml `deletion:` block.
       OFF, recorded expiry facts accumulate and no stream is ever erased — GDPR deletion pauses,
-      data is never lost. DEFAULT OFF (gate-then-stabilize): this worker DELETES event streams;
+      data is never lost. Gate-then-stabilize: this worker DELETES event streams;
       the default flips by its own one-line ADR after the gated form is smoked in staging.
       Readiness at GET /deletion.
 

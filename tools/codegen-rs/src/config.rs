@@ -145,6 +145,49 @@ pub(crate) fn validate_configuration(model: &Model, issues: &mut Vec<Issue>) {
                     .into(),
             ));
         }
+        // A bool key's default is EMITTED into the generated doc comment from `default:` (see
+        // `emit_config`), so restating the polarity in `gates:` prose creates a second source —
+        // and only the prose one can be wrong. ROUTE_ORDER_BIRTH_THROUGH_LANE flipped to
+        // `default: true` on 2026-08-30 (ADR-20260830-012200) and its prose went on asserting
+        // "OFF — the DEFAULT — is today's behaviour byte for byte" in fourteen generated configs,
+        // seven lines below the field that contradicted it. A grep for the KEY does not find a
+        // claim written in prose; this rule does. Deliberately scoped to POLARITY claims: prose
+        // that merely says the default flips by its own ADR states no value and stays legal.
+        if k.ty == "bool" {
+            let normalized = k
+                .gates
+                .to_lowercase()
+                .replace(['\u{2014}', '\u{2013}'], "-")
+                .replace("--", "-");
+            const DEFAULT_POLARITY_CLAIMS: &[&str] = &[
+                "the default -",
+                "- the default",
+                "(the default)",
+                "default on",
+                "default off",
+                "default is on",
+                "default is off",
+                "default true",
+                "default false",
+                "defaults to on",
+                "defaults to off",
+                "on default",
+                "off default",
+            ];
+            if let Some(claim) = DEFAULT_POLARITY_CLAIMS.iter().find(|c| normalized.contains(**c)) {
+                issues.push(err(
+                    "config-gates-restates-default",
+                    at.clone(),
+                    format!(
+                        "`gates:` restates the default polarity ({claim:?}): the generated doc comment already \
+                         leads with `DEFAULT \\`{}\\`` emitted from `default:`, so prose that repeats it is a \
+                         second source that goes stale the day the default flips. State what each POSITION does \
+                         (\"OFF is SHADOW MODE\"), never which one is the default.",
+                        k.default.as_deref().unwrap_or("<none>")
+                    ),
+                ));
+            }
+        }
         match k.ty.as_str() {
             "bool" | "string" | "int" => {}
             "enum" => {
@@ -493,7 +536,18 @@ pub(crate) fn emit_config_module(model: &Model, keys: &[ConfigKey], is_server: b
             _ if k.required.is_empty() && k.default.is_none() => "Option<String>".to_string(),
             _ => "String".to_string(),
         };
-        out.push_str(&format!("    /// {}\n    pub {}: {},\n", k.gates.replace('\n', " ").trim(), field(&k.name), ty));
+        // The DECLARED default LEADS the doc comment, emitted from `default:` itself — the single
+        // source. It is never restated in `gates:` prose (rule `config-gates-restates-default`),
+        // because a field and a sentence are two sources and only the sentence can be wrong:
+        // ROUTE_ORDER_BIRTH_THROUGH_LANE flipped to `default: true` on 2026-08-30 and left a
+        // `gates:` sentence reading "OFF — the DEFAULT" in fourteen generated configs, next to a
+        // `describe()` line printing the live `true`. An operator's map disagreeing with the
+        // operator's dump, under incident pressure, is the failure this prepend removes.
+        let doc = match &k.default {
+            Some(d) => format!("DEFAULT `{d}`. {}", k.gates.replace('\n', " ").trim()),
+            None => k.gates.replace('\n', " ").trim().to_string(),
+        };
+        out.push_str(&format!("    /// {doc}\n    pub {}: {},\n", field(&k.name), ty));
     }
     out.push_str("}\n\n");
 

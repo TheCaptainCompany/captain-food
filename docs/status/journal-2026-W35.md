@@ -3,6 +3,26 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-30 — the flip changed a field and left the sentence: a config default is now emitted,
+> never restated.** `ROUTE_ORDER_BIRTH_THROUGH_LANE` went `default: false → true` on 2026-08-30
+> ([ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md));
+> its `gates:` prose, seven lines below the field, went on reading *"OFF — the DEFAULT — is today's
+> behaviour byte for byte"*. `gates:` is the doc-comment source for every generated config, so the
+> false sentence stood in **14** files (`crates/server/src/generated/config.rs` + 13 bins), and
+> `Config::describe()` printed the live `true` right beside it — the operator's map contradicting
+> the operator's dump, and the rollback sentence telling that operator OFF is a no-op when OFF is
+> now a REVERT to the legacy unrouted birth. **Fixed structurally, not by correcting the sentence**
+> (compiler-first, ADR-20260803-234035): the emitter now prepends `DEFAULT \`<value>\`` to the
+> generated doc comment straight from `default:`, and the new validator rule
+> `config-gates-restates-default` refuses any bool `gates:` block that names which position is the
+> default — so the field is the only source and prose has nothing left to contradict. Eight further
+> bool keys were restating their default TRUELY and lost the restatement anyway; the rule is scoped
+> to POLARITY claims, so "the default flips by its own one-line ADR" stays legal. Same change:
+> `ENFORCE_ACCEPTANCE_TIMEOUT`'s precondition (5a) stopped describing the routing flip as work the
+> C1a chunk will produce. Third instance of the class after PR #763 (four sites) and PR #776 (three)
+> — **a commit that changes behaviour must re-sweep every statement it falsifies, and a grep for the
+> config KEY never finds a claim written in prose.**
+
 > 🔒 **2026-08-30 — the actor inbox is a generated enum now, and it found ten live dead ends on the
 > way in** (PR [#776](https://github.com/TheCaptainCompany/captain-food/pull/776) for
 > [#771](https://github.com/TheCaptainCompany/captain-food/issues/771),

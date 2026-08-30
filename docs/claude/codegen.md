@@ -46,6 +46,19 @@ lines from anything that looks related. Any emitter interpolating spec prose int
 The blast radius is caught today only because a different codegen test happens to parse the generated
 AST with `syn`; do not rely on that catching yours.
 
+### A field's value is EMITTED into the doc comment, never restated in the spec's prose
+
+`configuration.yaml`'s `gates:` is the doc-comment source for every generated `config.rs` (the
+server's plus one per bin, 58 files), and `Config::describe()` prints the LIVE value next to it —
+so a `gates:` sentence naming which position is the default is a second source that only prose can
+get wrong. `ROUTE_ORDER_BIRTH_THROUGH_LANE` flipped to `default: true` on 2026-08-30 and left
+*"OFF - the DEFAULT - is today's behaviour byte for byte"* standing in 14 files. `emit_config`
+therefore prepends `DEFAULT \`<value>\`` from `default:` itself, and the validator rule
+`config-gates-restates-default` refuses a bool `gates:` block that restates the polarity. The
+general form: **if the emitter can derive a fact from a declared field, derive it — prose next to
+the field is a copy with no gate on it.** The rule is scoped to polarity claims on purpose; prose
+that says the default *flips by its own ADR* states no value and stays legal.
+
 ## Layout
 
 Single crate, one binary (`src/main.rs`), organized in sections that mirror the old TypeScript modules:

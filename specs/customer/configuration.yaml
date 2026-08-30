@@ -124,7 +124,7 @@ keys:
       pattern): ON, `resolve_read_scope`'s CUSTOMER arm resolves the caller's domain id from
       Postgres via the existing `CustomerReadRepository::by_auth_ref` bridge, keyed on the
       verified auth subject (`authRef`) -- the JWT's `captain_food.customer_id` claim is UNREAD
-      for this decision. OFF -- the DEFAULT -- is today's behaviour byte for byte: the claim,
+      for this decision. OFF is today's behaviour byte for byte: the claim,
       already bound into the verified Principal at `authorize()` time, is trusted, no lookup, no
       I/O. The two paths are selected ONCE at startup/config-load, never a per-request fallback
       (a runtime try-Postgres-else-claim is the dual-path the ADR forbids): the gated-ON path

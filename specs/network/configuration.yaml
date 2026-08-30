@@ -27,7 +27,7 @@ keys:
     default: false
     gates: >
       SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and
-      releases their payloads. DEFAULT OFF since 2026-07-28 (paused with the CI sweep, issue #220). OFF,
+      releases their payloads. PAUSED since 2026-07-28 with the CI sweep (issue #220). OFF,
       staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen.
       Readiness at GET /sirene.
     deploy:

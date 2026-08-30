@@ -893,6 +893,80 @@ keys:
         }
     }
 
+    /// A bool key's default reaches the operator through the GENERATED doc comment, prepended
+    /// from `default:` by `emit_config`. Prose that ALSO names which position is the default is a
+    /// second source, and only the prose one can go stale: ROUTE_ORDER_BIRTH_THROUGH_LANE flipped
+    /// to `default: true` on 2026-08-30 and shipped "OFF — the DEFAULT — is today's behaviour byte
+    /// for byte" into fourteen generated `config.rs` files, seven lines under the field that
+    /// contradicted it — with `describe()` printing the live `true` right beside it. A grep for
+    /// the config KEY finds nothing, because the false claim is a sentence.
+    #[test]
+    fn a_bool_gates_block_may_not_restate_which_position_is_the_default() {
+        for prose in [
+            "OFF -- the DEFAULT -- is today's behaviour byte for byte.",
+            "OFF \u{2014} the DEFAULT \u{2014} is SHADOW MODE.",
+            "DEFAULT OFF (gate-then-stabilize): it deletes streams.",
+            "ON (the default), the adapter delivers.",
+            "The default is ON until the ADR lands.",
+            "It defaults to off while the shadow form is smoked.",
+            "Its OFF default keeps the legacy call.",
+        ] {
+            let spec = format!(
+                "keys:\n  FLAG:\n    type: bool\n    default: true\n    gates: {:?}\n",
+                prose
+            );
+            let model = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(&spec).expect("parses"),
+                )]),
+                ..Default::default()
+            };
+            let mut issues = Vec::new();
+            validate_configuration(&model, &mut issues);
+            assert!(
+                issues.iter().any(|i| i.rule == "config-gates-restates-default"),
+                "{prose:?} restates the default polarity and must be rejected; got {:?}",
+                issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// The complement, and the reason the rule is scoped to POLARITY claims rather than the word
+    /// "default": prose that says the default FLIPS by its own ADR, or that a key declares no
+    /// default at all, states no value and can never contradict `default:`. A rule that also
+    /// rejected those would push authors to stop explaining the flip discipline, which is the
+    /// part of `gates:` an operator most needs. Non-bool keys are out of scope entirely — there
+    /// is no ON/OFF to get backwards.
+    #[test]
+    fn gates_prose_that_states_no_default_value_is_accepted() {
+        for (ty, dflt, prose) in [
+            ("bool", "false", "OFF is SHADOW MODE. The default flips by its own one-line ADR after the gated form is smoked."),
+            ("bool", "true", "ON routes the birth; OFF is the legacy unrouted path. Flipping the default is a SEPARATE recorded decision."),
+            ("int", "200", "THE DEFAULT IS A DELIBERATELY CONSERVATIVE GUESS, NOT A COSTED NUMBER."),
+            ("string", "eu", "Empty (the default) resolves the in-cluster endpoint."),
+        ] {
+            let spec = format!(
+                "keys:\n  FLAG:\n    type: {ty}\n    default: {dflt}\n    gates: {:?}\n",
+                prose
+            );
+            let model = Model {
+                defs: BTreeMap::from([(
+                    "configuration.yaml".to_string(),
+                    serde_yaml::from_str::<Value>(&spec).expect("parses"),
+                )]),
+                ..Default::default()
+            };
+            let mut issues = Vec::new();
+            validate_configuration(&model, &mut issues);
+            assert!(
+                !issues.iter().any(|i| i.rule == "config-gates-restates-default"),
+                "{prose:?} states no default value and is legal; got {:?}",
+                issues.iter().map(|i| i.rule).collect::<Vec<_>>()
+            );
+        }
+    }
+
     /// `when.at` (RSO-1): the accepted grammar is a Z-NORMALIZED RFC3339 instant and nothing
     /// else — offsets, bare dates, spaces and out-of-range components are all refused, because
     /// the field exists precisely to remove clock ambiguity from clock-consuming tests.
