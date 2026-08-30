@@ -160,11 +160,31 @@ Customer:
       payload: { $ref: 'events.yaml#/CustomerErasureDue' }
       after: { $ref: 'configuration.yaml#/keys/CUSTOMER_ERASURE_GRACE_WINDOW_DAYS' }
       reschedule: keep
-  deletion:
-    triggers:
-      - on: [{ $ref: 'events.yaml#/CustomerErasureDue' }]
-        cancelled_on: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
-        match:
-          event: { $ref: 'events.yaml#/CustomerErasureDue/properties/customerId' }
-          state: { $ref: '#/Customer/state/customerId' }
-    receipt: { $ref: 'events.yaml#/CustomerErased' }
+  # THE `deletion:` BLOCK IS DEFERRED TO THE RUNTIME CHUNK, and the deletion ENGINE is what proved
+  # it must be. Declaring it here does not describe a promise — it CHANGES THE RUNNING SYSTEM, in
+  # two ways this chunk cannot honour:
+  #   1. `DeletionEngine::new` validates EVERY declared policy at construction. A Customer block
+  #      with no receipt builder makes the engine fail to construct AT ALL — so declaring it here
+  #      would have broken ORDER erasure in production, an existing, working, legally-required
+  #      journey. That is a regression, not an incomplete feature.
+  #   2. The block needs `cancelled_on:` (re-login-cancels is the designed behaviour and the
+  #      subject's own act), and the engine refuses it outright: the UNDO PASS IS NOT BUILT
+  #      (deletion.rs). Declaring the block WITHOUT `cancelled_on` would be far worse than not
+  #      declaring it — a cancelled erasure would still destroy the account, silently, which is the
+  #      one outcome no part of this design tolerates.
+  # So the block lands in the runtime chunk together with its receipt builder and the undo pass,
+  # where the three test each other. Everything the block would have referenced already exists here
+  # and is validated: the commands, the confirmed/cancelled/due facts, `CustomerErased`, the
+  # reminder that schedules the grace window, and the rules that pin the ladder. What is missing is
+  # exactly the machinery, and it is missing HONESTLY rather than declared and inert.
+  # Shape it must take (unchanged from PROP-20260829-150752 §3.2, recorded so it is not re-derived):
+  #   deletion:
+  #     triggers:
+  #       - on:           [CustomerErasureDue]
+  #         cancelled_on: [CustomerErasureCancelled]
+  #         match: { event: CustomerErasureDue.customerId, state: Customer.customerId }
+  #     receipt: CustomerErased
+  # The receipt builder must read `erasureRequestId` off the CONFIRMED fact (scanning in reverse:
+  # request → cancel → request again is legal on one stream, and only the last confirmation
+  # authorised the run), never off a merely-requested one, and never from the Customer fold —
+  # every field on a receipt that outlives the erasure must be one we are allowed to keep.

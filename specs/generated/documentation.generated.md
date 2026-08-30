@@ -8139,13 +8139,6 @@ Reminders (self-scheduled facts — ADR-20260731-214500):
 | --- | --- | --- | --- |
 | ⏰ `CustomerErasureDue` | [⚡ `CustomerErasureDue`](#event-customererasuredue) | ⚙️ `CUSTOMER_ERASURE_GRACE_WINDOW_DAYS` | keep |
 
-Deletion (declarative, generic engine — ADR-20260731-214500):
-
-| On | Window | Cancelled on | Match |
-| --- | --- | --- | --- |
-| [⚡ `CustomerErasureDue`](#event-customererasuredue) | _immediate (propagation)_ | [⚡ `CustomerErasureCancelled`](#event-customererasurecancelled) | [⚡ `CustomerErasureDue`.`customerId`](#event-customererasuredue--customerid) ↔ `state.customerId` |
-- **Receipt**: [⚡ `CustomerErased`](#event-customererased)
-
 <a id="actor-cartbindingprocess"></a>
 #### 🎭 Actor: `CartBindingProcess`
 

@@ -811,6 +811,14 @@ is itself the argument: **a list that grows has no business stating its own leng
   statement in the artifact the gate exists to keep true. Cost: three deferrals and their
   diagnosis, each found only after a full `make rust` cycle. **Plan the chunk boundary along the
   runtime seam, not along `specs/**` vs `crates/**`** — the DSL surface a gate will accept is
-  exactly the surface something can already execute. Corollary worth the same breath: this is the
+  exactly the surface something can already execute. **The fourth instance is the one that would
+  have shipped a REGRESSION, and it was invisible until the DB-gated suites ran**: a `deletion:`
+  block is a runtime declaration, not a vocabulary one. `DeletionEngine::new` validates EVERY
+  declared policy at construction, so declaring a block whose receipt builder does not exist makes
+  the engine fail to construct — taking down the OTHER actor's erasure, which already worked and is
+  legally required. `cancelled_on:` is refused outright until the undo pass exists. Neither shows up
+  in `make rust`; both need `DATABASE_URL` set (`make test-crates` FAILS rather than skips since
+  #474, but a bare `cargo test -p <crate>` without the env var reports its DB-gated suites in a way
+  that is easy to read as a pass — check the suite COUNT, not just the absence of red). Corollary worth the same breath: this is the
   gates working. Every refusal above prevented a declaration with no behaviour behind it, which is
   the defect class the specs exist to make unspellable.

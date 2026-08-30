@@ -6239,11 +6239,17 @@ Catalog:
         let deletions = parse_deletions(&model);
         assert_eq!(
             deletions.iter().map(|d| d.actor.as_str()).collect::<Vec<_>>(),
-            // Customer joins Order as a declared deletion block (#708). The list stays EXACT on
-            // purpose: a third actor gaining the power to delete its own streams is a decision, and
-            // it should have to be made here, in a diff someone reads.
-            vec!["Customer", "Order"],
-            "the declared deletion blocks: the Order retention pilot and the Customer erasure journey"
+            // STILL ONLY Order (#708). Customer's erasure vocabulary landed in that chunk but its
+            // `deletion:` block DELIBERATELY DID NOT, and the reason is worth keeping next to the
+            // assertion: the deletion ENGINE validates every declared policy at construction, so a
+            // Customer block without its receipt builder makes `DeletionEngine::new` fail outright
+            // and takes ORDER erasure -- a working, legally-required journey -- down with it. It
+            // also needs `cancelled_on:`, whose undo pass does not exist (deletion.rs). Declaring
+            // the block without that would let a CANCELLED erasure destroy the account anyway.
+            // The list stays EXACT on purpose: an actor gaining the power to delete its own streams
+            // is a decision, and it should have to be made here, in a diff someone reads.
+            vec!["Order"],
+            "the declared deletion blocks: the Order retention pilot alone -- Customer's block lands with its engine support"
         );
         let table = emit_infra_deletion_policy(&model).expect("Order declares deletion → table emitted");
         assert!(table.contains("receipt: \"OrderDeleted\""), "{}", table);

@@ -3,6 +3,40 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔎 **2026-08-30 — the #708 checkpoint found a false statement in the spec, which is the class the
+> chunk existed to kill** (PR [#763](https://github.com/TheCaptainCompany/captain-food/pull/763),
+> 3 declared lenses). Four spec sites said the erasure mutations "ship DARK behind
+> `RUN_DELETION_ENGINE`". They do not — the handlers refuse unconditionally and never read that key,
+> which gates the deletion engine POD. All four now say what is true; the reported line was one of
+> them. `erasureStatus` moved from a generic `not implemented` to the same typed refusal as the
+> mutations, changed in the EMITTER; `Ok(None)` is recorded there as the tempting wrong answer,
+> because null means "no request exists" and would one day tell a subject with a pending erasure
+> that they never asked. The role-visibility test that blocks merge **caught two bugs in itself
+> before passing** — both the trap its own doc comment names, where a malformed or under-specified
+> query fails on GraphQL VALIDATION before the guard runs and "passes" while proving nothing. It now
+> pins execution, introspection and type reachability separately, ADMIN included on purpose.
+> `from_envelope: occurred_at` was REVERTED: no corpus user once the PM deferred, no test — the same
+> declaration-with-no-runtime defect being fixed elsewhere in the round — and the grammar doc that
+> promised three envelope values while the generator supports one was corrected instead.
+> `PaymentCaptured`/`PaymentRefunded` gained retention markers while no deletion block on Payment
+> exists, which is the only moment that fix is free. Two issues filed rather than fixed:
+> [#764](https://github.com/TheCaptainCompany/captain-food/issues/764) (a spendable `CustomerCredit`
+> balance survives its erased subject — **blocking before the engine chunk**, three counsel
+> questions) and [#765](https://github.com/TheCaptainCompany/captain-food/issues/765) (the BAM
+> denominator concern is **inverted**: order-based folds do NOT shrink, because `OrderPlaced` is
+> retained 3650 days — the real tension is a `customerId` living ten years in a fold).
+> `cargo test -p server` is now GREEN (147) — the gate the first round could not link.
+>
+> **Scope correction found in the same round, and it is the chunk's headline:** the Customer
+> `deletion:` block was REMOVED. Running the DB-gated infrastructure suite (which the first round
+> never reached) showed `DeletionEngine::new` validates EVERY declared policy at construction — so
+> a Customer block with no receipt builder makes the engine fail to construct and takes the working,
+> legally-required ORDER erasure down with it. The block also needs `cancelled_on:`, whose undo pass
+> does not exist; declaring it without that would let a CANCELLED erasure destroy the account
+> anyway. Third instance in one chunk of the same law, now banked in `sessions/gates.md`: **a
+> `deletion:` block is a RUNTIME declaration, not a vocabulary one.** The full erasure vocabulary
+> still landed; `Order` remains the only declared deletion block, pinned exactly.
+
 > 🔒 **2026-08-30 — erasure chunk 1: the DSL says what Art. 17 promises, and the code refuses rather
 > than pretends** ([#708](https://github.com/TheCaptainCompany/captain-food/issues/708) part 1,
 > PR [#763](https://github.com/TheCaptainCompany/captain-food/pull/763), `HOLD: human`).
