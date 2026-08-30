@@ -5672,42 +5672,59 @@ Catalog:
     }
 
     #[test]
-    fn every_api_mutation_has_a_handler() {
-        // The silent half of the "declared but does nothing" family. `wired_mutation_dispatch`
-        // returns None for any mutation missing from its table, and the emitter then writes an
-        // `Err("not implemented")` body with no command_router arm -- while api.yaml declares the
-        // mutation, a story step covers it and a role guard protects it. Nothing in the SPEC gates
-        // can see that, because the table lives in the emitter.
+    fn every_enqueueable_row_can_be_parsed_by_its_actor_inbox() {
+        // SUCCESSOR to `every_api_mutation_has_a_handler` (#771). That test asked "does this
+        // mutation have a row in `wired_mutation_dispatch`?" -- and the table it consulted no
+        // longer exists, because "does an addressed message reach a handler?" is the COMPILER's
+        // question now: a message an actor declares it receives with no arm in the human-owned
+        // `infrastructure::inbox` is an E0004 build failure over ALL received commands, not only
+        // the ones a mutation happens to reach. (The ten in that gap on `main` were precisely the
+        // ones the old assert could not see.)
         //
-        // recordDeliverySatisfaction and escalateDelivery sat in exactly that state with their
-        // handlers already written in application::commands, missing only a table row.
+        // What the compiler CANNOT see is whether the ENQUEUE side and the CONSUME side agree on
+        // the same (actor, message) pairs: they are two independent scans of actors.yaml in two
+        // crates, and a row the enqueue door accepts but no inbox declares would abort delivery
+        // forever and poison the lane. That is a cross-artifact question, so it is a gate.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
-        let api = parse_api(&model);
 
-        let declared: std::collections::BTreeSet<&str> =
-            crate::emit::server_graphql::UNWIRED_MUTATIONS.iter().copied().collect();
-        let unwired: Vec<&str> = api
+        let inboxes: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+            inbox_actors(&model)
+                .into_iter()
+                .map(|a| (a.name, a.messages.into_iter().map(|m| m.name).collect()))
+                .collect();
+
+        // Every COMMAND the enqueue side can address (`mailbox_address`, from `command_addressing`)
+        // must be a variant of the addressed actor's inbox.
+        for (command, addr) in command_addressing(&model) {
+            let declared = inboxes.get(&addr.actor_type).unwrap_or_else(|| {
+                panic!("command `{command}` is addressed to `{}`, which has no inbox", addr.actor_type)
+            });
+            assert!(
+                declared.contains(&command),
+                "the enqueue door addresses `{command}` to `{}`, but that actor's inbox has no \
+                 such variant -- an enqueued row would abort delivery forever and poison the lane",
+                addr.actor_type
+            );
+        }
+
+        // Every api.yaml mutation's command must be addressable: a mutation only ENQUEUES, so
+        // addressing is what makes its resolver generatable at all (the emitter panics otherwise;
+        // this says so with the spec's vocabulary instead of a codegen backtrace).
+        let api = parse_api(&model);
+        let addressing = command_addressing(&model);
+        let unaddressed: Vec<&str> = api
             .mutations
             .iter()
+            .filter(|m| !addressing.contains_key(&m.command))
             .map(|m| m.name.as_str())
-            .filter(|n| crate::emit::server_graphql::wired_mutation_dispatch(n).is_none())
-            .filter(|n| !declared.contains(n))
             .collect();
         assert!(
-            unwired.is_empty(),
-            "every api.yaml mutation needs a handler in `wired_mutation_dispatch`, or an explicit \
-             UNWIRED_MUTATIONS entry saying it is deliberately not wired yet. Undeclared: {:?}",
-            unwired
+            unaddressed.is_empty(),
+            "every api.yaml mutation's command must be received by an actor with `identity` + \
+             `mailbox.partitions` -- otherwise the resolver has no lane to enqueue on. \
+             Unaddressed: {unaddressed:?}"
         );
-
-        // The allowlist is a pressure valve, not a parking lot: an entry that is actually wired is
-        // stale and must be removed, or it silently permits a future regression on that name.
-        let stale: Vec<&&str> = declared
-            .iter()
-            .filter(|n| crate::emit::server_graphql::wired_mutation_dispatch(n).is_some())
-            .collect();
-        assert!(stale.is_empty(), "these UNWIRED_MUTATIONS entries are wired -- remove them: {:?}", stale);
     }
 
     #[test]
@@ -16072,5 +16089,396 @@ Order:
 
     fn rules_of_issues(issues: &[Issue]) -> Vec<&str> {
         issues.iter().map(|i| i.rule).collect()
+    }
+}
+
+// ─── #771 TYPED-ACTOR-INBOX: the E0004 proof ────────────────────────────────────────────────────
+
+/// The guard this whole chunk exists to install, PROVEN RED against real `rustc`.
+///
+/// A guard never seen red is an unverified claim (beck, decisive). The claim under test is:
+/// *"if `actors.yaml` gains a `receives:` entry and nobody adds an arm, the build FAILS."* Before
+/// #771 that same omission shipped green and surfaced as a `FAILED "unroutable command type"` row
+/// in production — #595, a replacement order silently never born.
+///
+/// WHY THIS SHAPE AND NOT `cargo check` ON THE REAL TREE. The property being proven is purely
+/// *variant set vs arm set*, so it needs no dependency of the real crates and no mutation of the
+/// working tree (which would be hostile under concurrent sessions). Both halves come from the SAME
+/// emitter, so nothing is scraped out of a source file and nothing here can rot into a tautology.
+/// The other half of the proof is the ordinary build: `make rust` compiling the real
+/// `infrastructure::inbox` against the real `inboxes.rs` is what proves the in-tree match is currently
+/// exhaustive. Together they are complete — this test proves a WIDENED enum breaks the match, and
+/// the build proves the match is not broken today.
+#[cfg(test)]
+mod typed_actor_inbox_e0004 {
+    use super::*;
+
+    /// Compile a standalone source file with `rustc` and return its stderr.
+    ///
+    /// `--emit=metadata` on purpose: type checking is the whole question, and skipping codegen
+    /// keeps the test in the tens of milliseconds.
+    fn rustc_stderr(dir: &std::path::Path, source: &str) -> (bool, String) {
+        let src = dir.join("proof.rs");
+        std::fs::write(&src, source).expect("write proof source");
+        let out = std::process::Command::new(env!("CARGO"))
+            .arg("--version")
+            .output()
+            .ok()
+            .map(|_| ())
+            .and(Some(()))
+            .and_then(|_| {
+                std::process::Command::new("rustc")
+                    .arg("--edition=2021")
+                    .arg("--crate-type=lib")
+                    .arg("--emit=metadata")
+                    .arg("--out-dir")
+                    .arg(dir)
+                    .arg(&src)
+                    .output()
+                    .ok()
+            })
+            .expect("rustc must be available to prove the inbox guard red");
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+
+    /// The standalone proof program: payload-type shims (so no crate dependency is needed — the
+    /// question is exhaustiveness, and a unit struct is a payload as far as E0004 is concerned),
+    /// the emitted enum declaration for `actor`, and a `match` whose arms are exactly `arm_source`.
+    fn proof_program(actor: &InboxActor, arms_from: &InboxActor) -> String {
+        let mut commands: Vec<&str> = Vec::new();
+        let mut events: Vec<&str> = Vec::new();
+        for m in &actor.messages {
+            let leaf = m.payload_type.rsplit("::").next().expect("qualified payload type");
+            if m.payload_type.contains("::commands::") {
+                commands.push(leaf);
+            } else {
+                events.push(leaf);
+            }
+        }
+        commands.sort_unstable();
+        commands.dedup();
+        events.sort_unstable();
+        events.dedup();
+        let decls = |names: &[&str]| {
+            names.iter().map(|n| format!("        #[derive(Debug, Clone, PartialEq)]\n        pub struct {n};\n")).collect::<String>()
+        };
+        let arms = arms_from
+            .messages
+            .iter()
+            .map(|m| format!("        {}::{}(_) => {{}}\n", actor.enum_name(), m.name))
+            .collect::<String>();
+        format!(
+            "#![allow(dead_code, unused_variables)]\n\
+             mod domain {{ pub mod generated {{\n    pub mod commands {{\n{cmds}    }}\n    pub mod events {{\n{evts}    }}\n}} }}\n\n\
+             {decl}\n\
+             /// The HUMAN-OWNED routing match, in miniature.\n\
+             fn route(message: {enum_name}) {{\n    match message {{\n{arms}    }}\n}}\n",
+            cmds = decls(&commands),
+            evts = decls(&events),
+            decl = inbox_enum_decl(actor),
+            enum_name = actor.enum_name(),
+            arms = arms,
+        )
+    }
+
+    /// Add one `receives:` entry to `actor` in a CLONE of the model — the spec change a future
+    /// chunk makes without touching the router (C3's twelve remaining `deliver:` routes are each
+    /// exactly this shape).
+    fn with_extra_receives(model: &Model, actor: &str, message_ref: &str) -> Model {
+        let mut mutated = model.clone();
+        let actors = mutated.defs.get_mut("actors.yaml").expect("actors.yaml in the model");
+        let def = actors.get_mut(actor).expect("the actor exists");
+        let receives = def
+            .get_mut("receives")
+            .and_then(|r| r.as_sequence_mut())
+            .expect("the actor declares receives");
+        let entry: Value = serde_yaml::from_str(&format!(
+            "message: {{ $ref: '{message_ref}' }}\nemits: []\n"
+        ))
+        .expect("synthetic receives entry parses");
+        receives.push(entry);
+        mutated
+    }
+
+    #[test]
+    fn a_widened_receives_set_is_a_compile_error() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let cart = inbox_actors(&model)
+            .into_iter()
+            .find(|a| a.name == "Cart")
+            .expect("Cart is a mailbox actor");
+
+        let dir = std::env::temp_dir().join(format!(
+            "cf-inbox-e0004-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+
+        // CONTROL — the scaffold itself must be sound: the real variant set, matched arm for arm,
+        // compiles clean. Without this half a broken scaffold would "prove" E0004 for the wrong
+        // reason and the guard would be unverified again, one level up.
+        let (ok, stderr) = rustc_stderr(&dir, &proof_program(&cart, &cart));
+        assert!(ok, "the unmutated inbox + its exact arms must compile clean:\n{stderr}");
+
+        // THE PROOF — one more declared message, the same arms: E0004.
+        let mutated = with_extra_receives(&model, "Cart", "commands.yaml#/ScuttleCart");
+        let widened = inbox_actors(&mutated)
+            .into_iter()
+            .find(|a| a.name == "Cart")
+            .expect("Cart survives the mutation");
+        assert_eq!(
+            widened.messages.len(),
+            cart.messages.len() + 1,
+            "the mutation must actually widen the inbox"
+        );
+        let (ok, stderr) = rustc_stderr(&dir, &proof_program(&widened, &cart));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!ok, "a widened inbox with unchanged arms MUST NOT compile:\n{stderr}");
+        assert!(
+            stderr.contains("error[E0004]"),
+            "the widened inbox must fail with E0004 (non-exhaustive patterns), not something else:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("ScuttleCart"),
+            "E0004 must NAME the unconsumed message, so the diagnostic reads as the decision it \
+             demands:\n{stderr}"
+        );
+    }
+
+    /// The catch-all escape hatch, closed — asserted as a PROPERTY of the parsed file, not as a
+    /// spelling.
+    ///
+    /// Typed payloads stop `CartInbox::AddCartLine => {}` from compiling, but a total catch-all arm
+    /// still absorbs every future variant, and a match that compiles and does nothing is exactly
+    /// the failure #771 exists to remove. The type system cannot reach this one (there is no way to
+    /// declare "no wildcard may match me"; `#[non_exhaustive]` does the OPPOSITE, forcing one), so
+    /// per ADR-20260803-234035 a check is the legitimate fallback. It is scoped to the one
+    /// human-owned routing file.
+    ///
+    /// **Round-1 review of PR #776 found the first version of this test gated the SPELLING and not
+    /// the property**: it line-scanned for `_ =>` / `_ if `, so planting `_ => …` failed it (it had
+    /// been seen red) but `_other => …` — a NAMED binding, equally total — passed the test and
+    /// compiled clean. Every future variant silently absorbed, E0004 never firing again, every gate
+    /// green: the #595 failure this chunk exists to make unspellable, one character away. The test
+    /// now parses the file with `syn` and asserts two things:
+    ///
+    /// 1. **No arm ANYWHERE in this file is a total catch-all** — neither `Pat::Wild` (`_`) nor a
+    ///    bare `Pat::Ident` (`other`, `m`, `_other`: an irrefutable binding pattern, which is a
+    ///    wildcard that happens to have a name).
+    /// 2. **Every arm of a LANE match names an `<Actor>Inbox::` variant** — the positive form, which
+    ///    is the stronger statement, and which also covers a hypothetical lane match written with no
+    ///    inbox arm at all (classification falls back to the scrutinee, `message`).
+    ///
+    /// The scan asserts its own reach (`>= 18` lane matches, `>= 100` arms) because a scanner that
+    /// silently matches nothing passes vacuously — the same defect class one level up.
+    #[test]
+    fn every_arm_of_the_human_owned_router_names_an_inbox_variant() {
+        /// The head identifier of a path-shaped pattern (`CartInbox::AddCartLine(cmd)` → `CartInbox`).
+        fn head_ident(pat: &syn::Pat) -> Option<String> {
+            let path = match pat {
+                syn::Pat::TupleStruct(t) => &t.path,
+                syn::Pat::Path(p) => &p.path,
+                syn::Pat::Struct(s) => &s.path,
+                _ => return None,
+            };
+            path.segments.first().map(|s| s.ident.to_string())
+        }
+
+        /// The POSITIVE form: this pattern names a variant of some `<Actor>Inbox` enum.
+        fn names_inbox_variant(pat: &syn::Pat) -> bool {
+            match pat {
+                syn::Pat::Or(o) => o.cases.iter().all(names_inbox_variant),
+                syn::Pat::Paren(p) => names_inbox_variant(&p.pat),
+                other => head_ident(other).is_some_and(|i| i.ends_with("Inbox")),
+            }
+        }
+
+        /// A TOTAL catch-all: matches every remaining value whatever the variant set becomes.
+        /// `_` and a bare binding `other` are the same pattern with different ergonomics.
+        fn is_catch_all(pat: &syn::Pat) -> bool {
+            match pat {
+                syn::Pat::Wild(_) => true,
+                syn::Pat::Ident(i) => i.subpat.is_none(),
+                syn::Pat::Paren(p) => is_catch_all(&p.pat),
+                _ => false,
+            }
+        }
+
+        #[derive(Default)]
+        struct Scan {
+            offenders: Vec<String>,
+            lane_matches: usize,
+            lane_arms: usize,
+            current_fn: String,
+        }
+
+        impl<'ast> syn::visit::Visit<'ast> for Scan {
+            fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+                let outer = std::mem::replace(&mut self.current_fn, f.sig.ident.to_string());
+                syn::visit::visit_item_fn(self, f);
+                self.current_fn = outer;
+            }
+
+            fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {
+                // A LANE match is one over an inbox enum: either its scrutinee is the routed
+                // `message`, or at least one arm names an inbox variant. The first half is what
+                // catches a lane match rewritten to a single catch-all arm, where the second would
+                // classify it as "not a lane match" and wave it through.
+                let scrutinee_is_message =
+                    matches!(&*m.expr, syn::Expr::Path(p) if p.path.is_ident("message"));
+                let is_lane = scrutinee_is_message || m.arms.iter().any(|a| names_inbox_variant(&a.pat));
+                if is_lane {
+                    self.lane_matches += 1;
+                }
+                for arm in &m.arms {
+                    let pat = &arm.pat;
+                    let shown = quote::quote!(#pat).to_string();
+                    if is_catch_all(&arm.pat) {
+                        self.offenders.push(format!(
+                            "fn `{}`: `{shown} =>` is a TOTAL CATCH-ALL (a named binding is a \
+                             wildcard with a name)",
+                            self.current_fn
+                        ));
+                    } else if is_lane && !names_inbox_variant(&arm.pat) {
+                        self.offenders.push(format!(
+                            "fn `{}`: `{shown} =>` sits in a lane match but does not name an \
+                             `<Actor>Inbox::` variant",
+                            self.current_fn
+                        ));
+                    }
+                    if is_lane {
+                        self.lane_arms += 1;
+                    }
+                }
+                syn::visit::visit_expr_match(self, m);
+            }
+        }
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = std::fs::read_to_string(root.join("crates/infrastructure/src/inbox.rs"))
+            .expect("the human-owned inbox router must exist");
+        let file = syn::parse_file(&src).expect("the human-owned inbox router must parse");
+
+        let mut scan = Scan::default();
+        syn::visit::Visit::visit_file(&mut scan, &file);
+
+        assert!(
+            scan.offenders.is_empty(),
+            "crates/infrastructure/src/inbox.rs must never absorb inbox variants with a catch-all \
+             arm -- a catch-all makes the match exhaustive by construction and the E0004 guard \
+             (#771) stops catching anything. Every arm of a lane match must name an \
+             `<Actor>Inbox::` variant. Offenders:\n  {}",
+            scan.offenders.join("\n  ")
+        );
+        // A scanner that matches nothing passes vacuously -- the defect this test exists to
+        // prevent, one level up. Pin its reach to the real corpus (17 lanes + the `ActorInbox`
+        // dispatch; 100 received commands plus the facts and reminders).
+        assert!(
+            scan.lane_matches >= 18 && scan.lane_arms >= 100,
+            "the no-catch-all scan reached only {} lane matches / {} arms -- it is no longer \
+             reading the router it claims to check",
+            scan.lane_matches,
+            scan.lane_arms
+        );
+    }
+}
+
+// ─── #771: the `deferred:` grammar, the DSL successor of UNWIRED_MUTATIONS ───────────────────────
+
+#[cfg(test)]
+mod receives_deferred_grammar {
+    use super::*;
+
+    fn rules_of_issues(issues: &[Issue]) -> Vec<&str> {
+        issues.iter().map(|i| i.rule).collect()
+    }
+
+    fn issues_for(deferred_block: &str) -> Vec<Issue> {
+        let actors = format!(
+            "DeliveryJob:\n  type: aggregate\n  identity: {{ $ref: '#/DeliveryJob/state/deliveryJobId' }}\n  mailbox:\n    partitions: 5\n  receives:\n    - message: {{ $ref: 'commands.yaml#/UpdateDeliveryStatus' }}\n      emits: []\n{deferred_block}"
+        );
+        let model = inline_model(&[("actors.yaml", &actors)]);
+        let mut issues = Vec::new();
+        validate_receives_deferrals(&model, &mut issues);
+        issues
+    }
+
+    /// The rule, seen RED for each way a deferral can be unanswerable. `UNWIRED_MUTATIONS` was a
+    /// bare list of names with no reason and no owner, and its whole defect was that nobody could
+    /// evaluate an entry; a `deferred:` block missing either field reproduces exactly that one file
+    /// over, so the grammar is only worth having if these fail.
+    #[test]
+    fn a_deferral_without_a_reason_or_an_owner_is_an_error() {
+        let ok = issues_for(
+            "      deferred:\n        reason: \"no handler for the rider/admin correction path\"\n        issue: \"https://github.com/TheCaptainCompany/captain-food/issues/777\"\n",
+        );
+        assert!(ok.is_empty(), "a well-formed deferral must pass: {:?}", rules_of_issues(&ok));
+
+        let no_reason = issues_for(
+            "      deferred:\n        issue: \"https://github.com/TheCaptainCompany/captain-food/issues/777\"\n",
+        );
+        assert_eq!(rules_of_issues(&no_reason), vec!["receives-deferred-shape"]);
+        assert!(no_reason[0].message.contains("reason"), "{}", no_reason[0].message);
+
+        let no_issue = issues_for("      deferred:\n        reason: \"because\"\n");
+        assert_eq!(rules_of_issues(&no_issue), vec!["receives-deferred-shape"]);
+
+        // A bare `#NN` is not a link: GitHub does not auto-link it outside issues/PRs/commits
+        // (CLAUDE.md). The string is rendered into the GENERATED Rust doc comment on the inbox
+        // variant and into `DEFERRED_MESSAGES` -- NOT into `documentation.generated.md`, which has
+        // no `deferred:` reader (round-1 review of PR #776 corrected the earlier claim).
+        let bare_number =
+            issues_for("      deferred:\n        reason: \"because\"\n        issue: \"#777\"\n");
+        assert_eq!(rules_of_issues(&bare_number), vec!["receives-deferred-shape"]);
+
+        let unknown_key = issues_for(
+            "      deferred:\n        reason: \"because\"\n        issue: \"https://github.com/TheCaptainCompany/captain-food/issues/777\"\n        owner: \"someone\"\n",
+        );
+        assert_eq!(rules_of_issues(&unknown_key), vec!["receives-deferred-shape"]);
+        assert!(unknown_key[0].message.contains("CLOSED"), "{}", unknown_key[0].message);
+
+        let not_a_mapping = issues_for("      deferred: true\n");
+        assert_eq!(rules_of_issues(&not_a_mapping), vec!["receives-deferred-shape"]);
+    }
+
+    /// The real corpus carries NO deferral. #771's one candidate (`DeliveryJob`/
+    /// `UpdateDeliveryStatus`) turned out to have its `via: status` handler already written,
+    /// green and re-exported — it was missing only a router row, like the other nine — so it is
+    /// WIRED, and the grammar ships with zero users by decision (ADR-20260830-183000: kept for
+    /// C3's remaining `deliver:` routes, which are each an opportunity to declare a real one).
+    ///
+    /// This is the RATCHET, not a formality: `UNWIRED_MUTATIONS` degenerated into a parking lot
+    /// precisely because entries could accumulate without anyone deciding. The first deferral to
+    /// arrive must fail this test and be argued for in the same change — including whether
+    /// [#781](https://github.com/TheCaptainCompany/captain-food/issues/781) (nothing binds a
+    /// `Deferred` ARM to its declaration, in either direction) should close first.
+    #[test]
+    fn the_corpus_declares_no_deferral() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let deferred: Vec<(String, String)> = inbox_actors(&model)
+            .into_iter()
+            .flat_map(|a| {
+                let actor = a.name.clone();
+                a.messages
+                    .into_iter()
+                    .filter(|m| m.deferred.is_some())
+                    .map(move |m| (actor.clone(), m.name))
+            })
+            .collect();
+        assert_eq!(
+            deferred,
+            Vec::<(String, String)>::new(),
+            "a deferral appeared. The grammar is real and this is not a veto -- but a deferral is \
+             a promise the product has not kept, so the entry must carry a reason a reviewer can \
+             evaluate and an issue that will close it, and THIS assertion must move in the same \
+             change that adds it. #771's own candidate turned out to have a handler already \
+             written: check that first"
+        );
     }
 }

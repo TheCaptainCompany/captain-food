@@ -179,6 +179,79 @@ pub(crate) fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>
     }
 }
 
+/// `receives[].deferred: { reason, issue }` — the DSL successor of the retired `UNWIRED_MUTATIONS`
+/// const (#771). It says: this actor DOES receive this message, and the handler is deliberately not
+/// built yet.
+///
+/// It is validated rather than trusted because a deferral is the one shape whose whole value is
+/// being reviewable. `UNWIRED_MUTATIONS` was a bare list of names in an emitter — no reason, no
+/// tracking issue, and nobody read it. A `deferred:` with no reason or no issue would reproduce
+/// exactly that, one file over: the CLOSED key set and both required fields are what make the
+/// deferral answerable ("why, and who is going to finish it?").
+pub(crate) fn validate_receives_deferrals(model: &Model, issues: &mut Vec<Issue>) {
+    let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return };
+    for (k, node) in actors {
+        let Some(name) = k.as_str().filter(|s| *s != "principals") else { continue };
+        for (i, entry) in
+            node.get("receives").and_then(|r| r.as_sequence()).into_iter().flatten().enumerate()
+        {
+            let Some(deferred) = entry.get("deferred") else { continue };
+            let loc = format!("actors.yaml/{}/receives[{}]/deferred", name, i);
+            let Some(map) = deferred.as_mapping() else {
+                issues.push(err(
+                    "receives-deferred-shape",
+                    loc,
+                    "`deferred:` must be a mapping `{ reason, issue }` — it replaces the \
+                     UNWIRED_MUTATIONS const, whose whole defect was being an unexplained list."
+                        .to_string(),
+                ));
+                continue;
+            };
+            for key in map.keys().filter_map(|k| k.as_str()) {
+                if !matches!(key, "reason" | "issue") {
+                    issues.push(err(
+                        "receives-deferred-shape",
+                        loc.clone(),
+                        format!(
+                            "unknown key '{key}' on `deferred:` — the key set is CLOSED (reason | issue)."
+                        ),
+                    ));
+                }
+            }
+            let reason = map.get("reason").and_then(|v| v.as_str()).unwrap_or_default();
+            if reason.trim().is_empty() {
+                issues.push(err(
+                    "receives-deferred-shape",
+                    loc.clone(),
+                    "`deferred:` needs a `reason:` — a deferral nobody can evaluate is the \
+                     UNWIRED_MUTATIONS failure with new syntax."
+                        .to_string(),
+                ));
+            }
+            let issue = map.get("issue").and_then(|v| v.as_str()).unwrap_or_default();
+            // A FULL CLICKABLE LINK, per CLAUDE.md: GitHub does not auto-link a bare `#NN` outside
+            // issues/PRs/commits -- which is the whole ground for the rule. It is NOT that the
+            // string reaches `documentation.generated.md`: no docs emitter reads `deferred:`. It
+            // reaches the GENERATED Rust doc comment on the inbox variant and
+            // `inboxes::DEFERRED_MESSAGES`, and it is copied into PR/issue bodies by whoever
+            // triages the deferral -- which is exactly where a bare `#NN` dies.
+            // (Round-1 review of PR #776 falsified the earlier claim; the rule stands on the
+            // CLAUDE.md ground alone.)
+            if !issue.starts_with("https://github.com/TheCaptainCompany/captain-food/issues/") {
+                issues.push(err(
+                    "receives-deferred-shape",
+                    loc,
+                    format!(
+                        "`deferred:` needs an `issue:` naming the tracking issue as a FULL URL \
+                         (https://github.com/TheCaptainCompany/captain-food/issues/NN) — got \
+                         '{issue}'. A deferral with no owner is a permanent one."
+                    ),
+                ));
+            }
+        }
+    }
+}
+
 /// The optional `mailbox.activations` sub-block (PROP-20260728-152752 §3.5, #272 D3): `false`
 /// opts the actor out of the ACTOR_ACTIVATIONS-gated held-state cache; a mapping tunes it
 /// (`enabled`, `idle_seconds` — the per-actor passivation override). Anything else is a shape

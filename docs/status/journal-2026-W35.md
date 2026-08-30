@@ -3,6 +3,51 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔒 **2026-08-30 — the actor inbox is a generated enum now, and it found ten live dead ends on the
+> way in** (PR [#776](https://github.com/TheCaptainCompany/captain-food/pull/776) for
+> [#771](https://github.com/TheCaptainCompany/captain-food/issues/771),
+> [ADR-20260830-183000](../adr/ADR-20260830-183000-the-actor-inbox-is-a-generated-enum-and-the-match-is-human-owned.md),
+> **`HOLD: human`** — the mailbox runtime). Founder directive, verbatim: *"Go for the generated
+> per-actor enum."* `specs/*/actors.yaml` already declared each actor's `receives:` set and the
+> runtime threw it away at the door: a flat `match` over a `&str` across ALL actors ending in
+> `_ => None`. **Ten commands were declared received with no dispatch arm on `main`** — the #595
+> class, live, ×10, green at every gate. **All ten had their handler already written** in
+> `application::commands` and were missing only a table row, so **all ten are wired**; **two are
+> already declared process-manager `sends:`** — `CartBindingProcess` → `BindCartToCustomer`, and
+> `ReclamationProcess` GOODWILL_CREDIT → `GrantCustomerCredit`, i.e. a resolved reclamation's
+> goodwill credit never granted. (Round 1 of this PR reported *nine* wired and declared the tenth,
+> `UpdateDeliveryStatus`, under the new `deferred:` DSL grammar; the independent reviewer pass
+> falsified that — its `via: status` handler exists at `handlers.rs:181`, is re-exported beside
+> `change_rider_status`, and passes `TestDeliveryStatusUpdatedByCommand`. It is wired, its deferral
+> is withdrawn, and the six records that carried the wrong count move in the same change.
+> [#777](https://github.com/TheCaptainCompany/captain-food/issues/777) narrows to the open question
+> it always was: which door — a mutation with a role guard, or worker-channel only — should reach
+> it.) The `deferred: { reason, issue }` grammar therefore ships with **zero users**, kept on
+> purpose for C3's remaining `deliver:` routes and recorded as a decision in the ADR rather than
+> left as a leftover. The router also took
+> `message_type` and never `actor_type`, so a row on lane A could drive a handler writing aggregate
+> B under A's fence — ADR-20260829-230418 violated by the transport itself; `ActorInbox::parse` now
+> takes the lane, so that is a value that cannot be constructed. **The enum is generated and the
+> `match` is human-owned**: one walk producing both would make it exhaustive by construction and the
+> compiler would catch nothing. Proven RED against real `rustc` from a mutated model, with a control
+> half that caught a scaffold defect on its first run. Four gates DELETED as compiler-subsumed
+> (`UNWIRED_MUTATIONS` + its assert, `wired_saga_command_dispatch`, `wired_mutation_dispatch` — 90
+> handler calls held as Rust source in *string literals* no compiler checked — and
+> `every_api_mutation_has_a_handler`), two ADDED where types cannot reach. **No new status and no
+> migration**: the card asked for a `PARKED` state, `InboundMessageStatus` has none and is a stored
+> promised column, and the existing poison path already gives park semantics when the delivery
+> aborts instead of failing — *park* here being **terminal `FAILED` on the poison queue** at the
+> attempt cap (~5 min at cap 5, 10c), visible in `poisonedMailboxMessages`, recovered by an operator
+> `RequeueMailboxMessage`, with the lane head-of-line blocked for that window: survivable, not free,
+> and never self-healing. Generated `command_router.rs`: 761 lines → 42. **The guarantee is over
+> COMMANDS and the routing decision, not over fact DELIVERY** — E0004 proves every declared message
+> reaches a decision, and a `RecordFact` decision then hands off to a fact route that is still a
+> string match ending in a catch-all, with 12 declared inbound facts unrouted there
+> ([#780](https://github.com/TheCaptainCompany/captain-food/issues/780), pre-existing). Round 2 also
+> replaced the no-wildcard gate: it checked the *spelling* `_ =>`, and the reviewer bypassed it with
+> `_other =>` — a named binding is a wildcard with a name. It now parses the file with `syn` and
+> asserts the positive property, that every arm of a lane match names an `<Actor>Inbox::` variant.
+
 > 🔎 **2026-08-30 — the #708 checkpoint found a false statement in the spec, which is the class the
 > chunk existed to kill** (PR [#763](https://github.com/TheCaptainCompany/captain-food/pull/763),
 > 3 declared lenses). Four spec sites said the erasure mutations "ship DARK behind

@@ -131,6 +131,15 @@ DeliveryJob:
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
         - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # must be a valid status transition
+      # The rider/admin status-correction path. One of the TEN commands #771 found declared here
+      # with no dispatch arm at all: before #771 an enqueued row landed FAILED "unroutable command
+      # type" with every spec gate green. Its `via: status` handler was already written
+      # (`application::commands::update_delivery_status`, generated from this declaration per
+      # ADR-20260721-093027, covered by `tests.yaml#/TestDeliveryStatusUpdatedByCommand`); it was
+      # missing only its router row, so #771 wired it like the other nine. Nothing enqueues it yet
+      # -- no mutation and no process-manager `sends:` -- which is exactly why the gap was
+      # invisible; #777 carries the remaining question of which door (mutation + role guard, or
+      # worker-channel only) should reach it.
 
     - message: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryUnassignedFromPartner' }]

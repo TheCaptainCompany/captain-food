@@ -81,7 +81,7 @@ pub(crate) const NON_SCOPE_DIRS: &[&str] =
 /// The loaded model: each source file parsed into its YAML `Value` (the full top-level mapping).
 /// Per-scope fragments (`specs/{scope}/{kind}.yaml`) are merged into the LOGICAL catalog keys, with
 /// `origins` recording each merged item's scope (items from a flat root catalog have no entry).
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Model {
     pub(crate) defs: BTreeMap<String, Value>,
     /// `(logical file, item key)` → origin scope folder. For section kinds the item key is

@@ -412,6 +412,8 @@ pub(crate) fn validate(model: &Model) -> Report {
     // --- 2c. Aggregate lifecycle state machines (actors.yaml `lifecycle`, ADR-20260720-004419) ---
     validate_lifecycles(model, &mut issues);
     validate_mailbox_addressing(model, &mut issues);
+    // #771: `receives[].deferred: { reason, issue }` — the DSL successor of UNWIRED_MUTATIONS.
+    validate_receives_deferrals(model, &mut issues);
     validate_actor_state(model, &mut issues);
     // --- 2g. Actor `answers:` blocks (PROP-20260815-142349, #582 actors half) -------------------
     validate_actor_answers(model, &mut issues);

@@ -23,6 +23,29 @@ as `rustup`, failing with `invalid value 'build' for '[+toolchain]'`. The same s
 conversion of the paths handed to the native cargo) is in `.claude/hooks/{stop-gate,validate-generated}.sh`.
 Override with `make validate CARGO=/path/to/cargo` if your setup needs something else.
 
+### `make rust` runs `cargo test` BEFORE it regenerates — regenerate first, and commit first
+
+Two costs the ordering imposes, both paid as a full failed gate cycle (#771, 2026-08-30):
+
+- **`rust-test` runs against the artifacts that are on disk**, not the ones your emitter change would
+  now produce. Codegen tests that read a generated file therefore fail against the STALE version, and
+  the failure surfaces in whichever unrelated test happens to read it — for #771 that was
+  `every_mailbox_port_method_demands_the_access_witness` reporting *"`inboxes.rs` does not parse
+  (expected `,`) — this guard reads the AST"*, which names neither the emitter nor the change. **Run
+  `make generate` before `make rust` after any emitter edit.**
+- **`check-drift` diffs the WORKING TREE**, so it fails on any uncommitted file and prints
+  *"generated artifacts drifted"* while listing your hand-written sources. It is not reporting drift;
+  it is reporting that you have not committed. **Commit, then run `make rust`.**
+
+### A spec free-text field rendered into a `///` doc comment must be whitespace-flattened
+
+A YAML folded scalar (`reason: >`) keeps its newlines. Emitted into a `///` line, the first newline
+ends the comment and the remaining prose becomes Rust tokens — the file stops parsing, several hundred
+lines from anything that looks related. Any emitter interpolating spec prose into a doc comment does
+`text.split_whitespace().collect::<Vec<_>>().join(" ")` first (`emit/actor_inbox.rs` is the reference).
+The blast radius is caught today only because a different codegen test happens to parse the generated
+AST with `syn`; do not rely on that catching yours.
+
 ## Layout
 
 Single crate, one binary (`src/main.rs`), organized in sections that mirror the old TypeScript modules:
