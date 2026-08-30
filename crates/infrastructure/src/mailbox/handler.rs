@@ -176,6 +176,22 @@ impl MessageHandler for MailboxCommandHandler {
                 }
                 match flush_staged_in_tx(tx, &staged).await {
                     Ok(()) => {
+                        // A routed birth can arrive on the COMMAND door too (#595: the replacement
+                        // order is born by `PlaceReplacementOrder`, not by a delivered fact), and
+                        // it is the SAME handover `order_birth_lag_ms` was declared to measure —
+                        // enqueue to `Recorded`. `routed` is read from the DECLARED route table
+                        // rather than from a config flag: the flag says what the NEXT enqueue will
+                        // do, while the table says whether THIS (actor, message) pair is one a
+                        // lane route produces — the honest answer for a row that was enqueued
+                        // before a rollback and delivered after it.
+                        super::record_order_birth_lag(
+                            message,
+                            &staged,
+                            application::generated::process_managers::ROUTED_LANES.iter().any(|l| {
+                                l.actor_type == message.actor_type
+                                    && l.event_type == message.message_type
+                            }),
+                        );
                         // The handler's third observable effect (ADR-20260731-214500 §2): a
                         // successful delivery (re)declares its `schedules:` reminders in the
                         // SAME transaction — commit and clock start together or not at all.
@@ -793,7 +809,11 @@ impl MailboxCommandHandler {
                         // The ROUTED `deliver:` steps' door rows (#588): same transaction as the
                         // staged appends above and the run row below — both or neither. A
                         // duplicate collides on the primary key and is a SUCCESS, never an error.
-                        super::flush_lane_enqueues_in_tx(tx, message, &lane_sink.take_staged())
+                        super::flush_lane_enqueues_in_tx(
+                            tx,
+                            &super::LaneCause::of_message(message),
+                            &lane_sink.take_staged(),
+                        )
                             .await
                             .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
                         pm_delivery::flush_pm_rows_in_tx(

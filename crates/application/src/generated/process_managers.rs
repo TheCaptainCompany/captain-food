@@ -14,13 +14,14 @@ pub enum HookOutcome<T> {
     Skip(String),
 }
 
-/// One ROUTED `deliver:` target — the lane a process manager hands a fact to instead of
-/// appending to that aggregate's stream itself (ADR-20260816-040239).
+/// One ROUTED target — the lane a process manager hands a message to instead of acting on
+/// that aggregate's stream itself (ADR-20260816-040239; `sends:` routes added by #595).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RoutedLane {
     /// `actors.yaml` key of the TARGET — its mailbox lane receives the message.
     pub actor_type: &'static str,
-    /// `events.yaml` key of the fact handed over.
+    /// The message handed over: an `events.yaml` key for a routed `deliver:` (a FACT), a
+    /// `commands.yaml` key for a routed `sends:` (a REQUEST the target may refuse).
     pub event_type: &'static str,
     /// FROZEN door identity, first half: `pm:{ProcessManager}:{Event}`.
     pub source: &'static str,
@@ -32,6 +33,7 @@ pub struct RoutedLane {
 /// when something was routed is a lane whose silence is ambiguous.
 pub const ROUTED_LANES: &[RoutedLane] = &[
     RoutedLane { actor_type: "Order", event_type: "OrderPlaced", source: "pm:PlaceOrderProcess:OrderPlaced" },
+    RoutedLane { actor_type: "Order", event_type: "PlaceReplacementOrder", source: "pm:ReclamationProcess:PlaceReplacementOrder" },
 ];
 
 /// Generated step pipelines for `processmanager.yaml#/DeliveryDispatchProcess`.
@@ -680,9 +682,10 @@ pub mod place_order_process {
         };
         if let Some(lanes) = env.lane_sink() {
             lanes.stage(crate::lanes::LaneEnqueue {
+                kind: crate::lanes::LaneMessageKind::Event,
                 actor_type: "Order",
                 actor_id: order_placed.order_id.0,
-                event_type: "OrderPlaced",
+                message_type: "OrderPlaced",
                 payload: serde_json::to_value(domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())).map_err(|e| domain::shared::errors::DomainError::Repository(format!("OrderPlaced lane enqueue payload: {e}")))?,
                 source: "pm:PlaceOrderProcess:OrderPlaced".to_string(),
                 external_id: order_placed.order_id.0.to_string(),

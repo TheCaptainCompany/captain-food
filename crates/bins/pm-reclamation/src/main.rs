@@ -81,6 +81,8 @@ async fn main() {
             partner: None,
             payments: Some(payments.clone()),
             waiter,
+            // #595: one value across the fleet -- the bin reads the SAME generated key as the monolith.
+            replacement_birth_lane: config.route_replacement_birth_through_lane,
         })
         .await;
         tracing::info!(pm = PM, "saga runner spawned (restricted to this PM)");

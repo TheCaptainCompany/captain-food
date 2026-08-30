@@ -56,6 +56,33 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > facts carry no `customerId` — so a PARKED erasure's resume leg is unspellable until one of the two
 > moves (the second is a stored-event-shape change). The dead-man's switch is what keeps that
 > survivable, which is exactly why it is in the contract and not in the backlog.
+> 🧭 **2026-08-30 — C2: the reclamation REPLACEMENT birth moves onto the Order lane, gated**
+> ([#595](https://github.com/TheCaptainCompany/captain-food/issues/595), PR
+> [#762](https://github.com/TheCaptainCompany/captain-food/pull/762);
+> [ADR-20260830-101500](../adr/ADR-20260830-101500-the-polling-runner-owns-a-fenced-leg-transaction.md)).
+> The second unlaned birth site is closed behind `ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`
+> (**default OFF** — the polling-runner path is deployed behaviour; the flip is a separate recorded
+> decision and deleting the legacy arm a separate change again). Three things this chunk had to
+> establish rather than reuse: (1) **the polling runner now owns a fenced LEG transaction** —
+> `commit_leg` writes the staged lane enqueues and the checkpoint advance together, which is what
+> licenses the SECOND `TriggerEnvelope::laned` call site; that guard became an ALLOWLIST naming
+> which transaction each caller flushes into, failing both on an unaudited caller and on a stale
+> entry. (2) **The door is a COMMAND door** — `PlaceReplacementOrder` is a request the Order may
+> refuse, so a rejection lands a REJECTED verdict on a supervisable row, and the delivery declares
+> the `schedules:` the spec already promised for `(Order, PlaceReplacementOrder)`. **That is how the
+> acceptance clock arms, and it needed NO new spec** — the reminder row was already generated and
+> nothing had ever delivered the message that arms it. (3) **The seam stopped being
+> grammar-invisible**: a PM leg may now declare `sends:`, held by `pm-sends-kind` /
+> `pm-sends-no-inbox`, because the command's `orderId` is a derived id and the leg is a 3-way branch
+> — no `send:` step can express it, and before this the call was one no `$ref` pointed at.
+> **Seen red first**, twice on the committed tree and reverted: with the routed branch unreachable
+> 3 of 4 DB tests fail (`ReclamationProcess must NOT append OrderPlaced…`); with the door mutated
+> COMMAND→EVENT the clock test fails on `left: "EVENT" right: "COMMAND"`. Golden payload equality
+> (the deletion precondition) is asserted on two clean databases. Observability: the replacement
+> birth IS an `OrderPlaced`, so `order_birth_lag_ms` was EXTENDED to the COMMAND route rather than a
+> new metric invented — **`replacement order_birth_lag_ms{routed="true"} recorded 14 ms`**, and
+> disconnecting that call site reds the assertion. Posture `HOLD: human` (mailbox runtime): stopped
+> at ready-for-review.
 
 > 🚀 **2026-08-30 — the flip is EXECUTED: `ROUTE_ORDER_BIRTH_THROUGH_LANE` defaults ON**
 > (`specs/ordering/configuration.yaml` `default: false → true`, one line, the key's text untouched;

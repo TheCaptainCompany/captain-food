@@ -1063,7 +1063,7 @@ async fn redelivered_authorization_dedups_the_birth_at_the_door() {
 /// never runs, in either flag state. That constraint is carried elsewhere, in two pieces: the
 /// COMPILER refuses an anonymous `lanes: Some(..)` field write (`TriggerEnvelope` is private-field
 /// and alone in its own module), and the GUARD
-/// `trigger_envelope_laned_has_exactly_one_call_site` holds the remaining hole — `prepare` calling
+/// `trigger_envelope_laned_call_sites_are_audited` holds the remaining hole — `prepare` calling
 /// `TriggerEnvelope::laned(..)` compiles, because `application` cannot name a transaction to demand
 /// as proof (ADR-20260803-234035: compiler first, a check where types cannot reach). Neither piece
 /// is a thing a delivery test could have provided.

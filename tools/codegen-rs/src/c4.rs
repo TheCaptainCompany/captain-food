@@ -15,6 +15,13 @@ pub(crate) struct Receive {
     pub(crate) throws: Vec<String>,
     /// Reminders this handler (re)schedules — raw same-actor `$ref`s (ADR-20260731-214500 §2).
     pub(crate) schedules: Vec<String>,
+    /// Commands a PROCESS MANAGER leg sends that no `send:` STEP can express (#595): raw
+    /// `commands.yaml#/…` `$ref`s declared on the leg's `sends:`. The step DSL covers a send whose
+    /// payload is fully derivable from the trigger with `with:` mappings; a wrapper-seam arm whose
+    /// payload is COMPUTED (a deterministic id minted from the trigger, a 3-way branch) has no step
+    /// form, and before this key existed it was a hand-written call NO `$ref` pointed at — invisible
+    /// to the refs walker and therefore to every rule (evans). Empty on aggregates.
+    pub(crate) sends: Vec<String>,
     pub(crate) effect: Option<String>,
 }
 pub(crate) struct Ctx {
@@ -177,7 +184,7 @@ pub(crate) fn parse_actors(model: &Model) -> Vec<Actor> {
                     let throws = ref_strings(e.get("throws"));
                     let schedules = ref_strings(e.get("schedules"));
                     let effect = e.get("effect").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    receives.push(Receive { message_ref, emits, throws, schedules, effect });
+                    receives.push(Receive { message_ref, emits, throws, schedules, sends: Vec::new(), effect });
                 }
             }
             out.push(Actor {
@@ -197,6 +204,20 @@ pub(crate) fn parse_actors(model: &Model) -> Vec<Actor> {
         .flat_map(|a| {
             a.receives.iter().filter_map(move |r| {
                 ref_name(&r.message_ref).map(|m| ((a.name.clone(), m), r.emits.clone()))
+            })
+        })
+        .collect();
+    // command name -> the events its HANDLING aggregate emits. `agg_emits` is keyed by (actor,
+    // message) because a `send:` STEP names both; a `sends:` declaration names only the command, so
+    // the target is resolved the way the runtime resolves it — through the inbox that declares it.
+    let cmd_inboxes: HashMap<String, Vec<String>> = out
+        .iter()
+        .flat_map(|a| {
+            a.receives.iter().filter_map(|r| {
+                r.message_ref
+                    .starts_with("commands.yaml#/")
+                    .then(|| ref_name(&r.message_ref).map(|m| (m, r.emits.clone())))
+                    .flatten()
             })
         })
         .collect();
@@ -264,8 +285,22 @@ pub(crate) fn parse_actors(model: &Model) -> Vec<Actor> {
                             throws.push(er);
                         }
                     }
+                    // A DECLARED wrapper-seam send (#595, `sends:`) derives emits exactly as a
+                    // step-derived `send:` does — through the TARGET aggregate's own inbox, so
+                    // actors.yaml stays the single wiring truth either way. The two forms differ in
+                    // how the payload is built, never in what the send MEANS.
+                    let sends: Vec<String> = ref_strings(e.get("sends"));
+                    for c in &sends {
+                        let Some(cmd) = ref_name(c) else { continue };
+                        let Some(evs) = cmd_inboxes.get(&cmd) else { continue };
+                        for ev in evs {
+                            if !emits.contains(ev) {
+                                emits.push(ev.clone());
+                            }
+                        }
+                    }
                     let effect = e.get("description").and_then(|x| x.as_str()).map(|s| s.to_string());
-                    receives.push(Receive { message_ref, emits, throws, schedules: Vec::new(), effect });
+                    receives.push(Receive { message_ref, emits, throws, schedules: Vec::new(), sends, effect });
                 }
             }
             out.push(Actor {

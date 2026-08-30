@@ -37,6 +37,7 @@ mod mailbox_wake;
 mod order_projection;
 mod pending_refund_read_model;
 mod pm_prepare_delivery;
+mod pm_replacement_birth_lane;
 mod projection_batching;
 mod projection_checkpoint_halt;
 mod prospection_projection;

@@ -813,7 +813,9 @@ pub async fn router() -> Router {
                     .expect("payment service binding (services.yaml)");
                     let runner = ProcessManagerRunner::new(pool.clone())
                         .with_partner(partner)
-                        .with_payments(saga_payments);
+                        .with_payments(saga_payments)
+                        // #595: resolved ONCE here, handed in — the runner never reads config.
+                        .with_replacement_birth_lane(config.route_replacement_birth_through_lane);
                     saga_status = Some(runner.status());
                     // The backfill runs INSIDE the runner's task, before its first tick — the
                     // ordering the re-verification demanded (see the pm_backfill comment above).
@@ -936,6 +938,13 @@ pub async fn router() -> Router {
                     telemetry::meters::runtime::declare_flag(
                         "ROUTE_ORDER_BIRTH_THROUGH_LANE",
                         config.route_order_birth_through_lane,
+                    );
+                    // #595: the same split-fleet argument as the key above — the replacement route
+                    // must read ONE value across every process that runs a saga runner, or some
+                    // replacement births lane and others do not, invisibly.
+                    telemetry::meters::runtime::declare_flag(
+                        "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
+                        config.route_replacement_birth_through_lane,
                     );
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a

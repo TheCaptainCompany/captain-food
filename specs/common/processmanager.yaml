@@ -20,11 +20,21 @@ description: >
                          (services.yaml, ADR-20260719-214500): `payment: { $ref: 'services.yaml#/payment' }`.
                          The port name is the service name; `call`/`from_port` reference
                          `<service>.<operation>` against the catalog's declared operations.
-    - <PM>.receives    : the inbox. Each entry { message, description?, steps }:
+    - <PM>.receives    : the inbox. Each entry { message, description?, steps, sends? }:
         * message : $ref to the command (commands.yaml) or event (events.yaml) received.
                     COMMAND legs reject with the thrown error. EVENT legs never reject the FACT —
                     but an error condition still `throws` (run aborts, error surfaced); only benign
                     alternatives `skip`.
+        * sends   : OPTIONAL list of $refs to commands.yaml the leg's HAND-WRITTEN wrapper sends
+                    but no `send` step can express — the escape hatch twin of `emits` (#595).
+                    Use only where the step form genuinely cannot say it (a derived payload, or a
+                    branch the step DSL has no form for); a command a `send` step CAN express must
+                    use the step, which declares itself. Declaring it here is not decoration: it
+                    makes the seam a $ref the refs walker can see, and it is what routes the
+                    command's lane into ROUTED_LANES (so the target lane inherits its dead-man's
+                    switch on its own declaration). Validator: `pm-sends-kind` (must reference a
+                    command) and `pm-sends-no-inbox` (some actor must actually RECEIVE it —
+                    otherwise the enqueued row lands FAILED 'unroutable command type').
         * steps   : ordered list; each step is one of:
             - read    : { model, as, where?, note? } — read a read model. `model` is a $ref to a
                         projection table (database/tables/projection_tables.yaml) or view
