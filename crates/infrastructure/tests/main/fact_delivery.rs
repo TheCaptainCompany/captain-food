@@ -371,3 +371,272 @@ async fn a_declared_fact_with_no_record_route_parks_and_stays_deliverable() {
         "and nothing was appended"
     );
 }
+
+// ─── THE FIVE NEWLY-WIRED PAYMENT FACTS (PR #783 review B1) ──────────────────────────────────────
+//
+// `PaymentCaptureFailed`, `PaymentIntentCreated`, `RefundApproved`, `RefundDenied` and
+// `RefundOpened` are the five the `Payment` actor declares it receives that the pre-review route
+// could NOT record: it widened the lane's typed fact to a `DomainEvent` and handed it to
+// `record_inbound_payment_event`, whose stream lookup ended in `_ => None` over exactly these five.
+// The result was not a rejection — a fact cannot be refused — but a `Repository` error that becomes
+// `sqlx::Error::Protocol`, aborts the transaction, and re-enters the lane HEAD-OF-LINE until the
+// attempts cap. The reviewer's probe measured it: `status=RECEIVED attempts=1
+// appended_on_payment_stream=0`.
+//
+// The suite was green throughout, because it exercised only `PaymentCaptured`/`PaymentAuthorized`
+// — both already routed before that branch (beck: a suite that does not predict production for the
+// facts the change delivers). These two tests are that probe made permanent.
+
+fn eur(cents: i64) -> domain::generated::entities::Money {
+    use domain::generated::scalars::{CurrencyCode, MoneyCents};
+    domain::generated::entities::Money {
+        amount_cents: MoneyCents(cents),
+        currency: CurrencyCode("EUR".into()),
+    }
+}
+
+/// The wire shape of a fact, built from the TYPED event rather than hand-written JSON.
+///
+/// Hand-written JSON is how a fixture drifts from the payload it claims to be: it keeps parsing
+/// after a field is added and the test goes on asserting about a shape production no longer has.
+/// Serializing the real struct means the row carries exactly what the Stripe ACL stages.
+fn staged(event: domain::generated::events::DomainEvent) -> serde_json::Value {
+    serde_json::to_value(&event).expect("a DomainEvent serializes to its adjacently-tagged wire shape")
+}
+
+fn refund_opened(intent: &str, order: uuid::Uuid, restaurant: uuid::Uuid) -> domain::generated::events::DomainEvent {
+    use domain::generated::scalars::{OrderId, PaymentIntentId, RestaurantId};
+    domain::generated::events::DomainEvent::RefundOpened(domain::generated::events::RefundOpened {
+        payment_intent_id: PaymentIntentId(intent.into()),
+        order_id: OrderId(order),
+        restaurant_id: RestaurantId(restaurant),
+        amount: eur(1960),
+        reason: Some("customer cancelled after capture".into()),
+    })
+}
+
+/// **THE MONEY FACT THE REFUND QUEUE IS FOLDED FROM RECORDS.**
+///
+/// `RefundOpened` is the sole feeder of `View_PendingRefunds`
+/// (`specs/database/projection_views.yaml`), so losing it is not a missing row in a report: the
+/// restaurant is never asked to decide, and money captured from a customer stays captured. It is
+/// therefore the one of the five worth asserting end to end — through the real worker, against a
+/// real Postgres, on the real lane.
+#[tokio::test]
+async fn an_inbound_refund_opened_records_on_the_payment_stream() {
+    let Some(db) = crate::common::TestDb::acquire("fact_delivery_refund_opened").await else {
+        return;
+    };
+    let pool = db.pool();
+    let intent = "pi_780_refund_opened";
+    let order = uuid::Uuid::from_u128(0x7E61);
+    let restaurant = uuid::Uuid::from_u128(0x7E51);
+    let lane_actor = uuid::Uuid::from_u128(0x7E62);
+
+    let message_id = enqueue_fact(
+        &pool,
+        0x7831,
+        "Payment",
+        lane_actor,
+        0,
+        "RefundOpened",
+        staged(refund_opened(intent, order, restaurant)),
+    )
+    .await;
+
+    let bus = EventBus::default();
+    let mut rx = bus.subscribe();
+    let worker = MailboxWorker::new(
+        pool.clone(),
+        "w-refund",
+        "Payment",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(deps_over(&pool)).with_event_bus(bus.clone())),
+    );
+    worker.seed(5).await.expect("seed");
+    worker.claim().await.expect("claim");
+    assert_eq!(worker.drain().await.expect("drain"), 1, "the fact delivered in one pass");
+
+    // THE APPEND. This is the assertion the pre-review branch failed: zero rows here, with the
+    // message left RECEIVED and the lane wedged behind it.
+    let events = sqlx::query(
+        "SELECT event_type, cause_id, user_type FROM domain_events WHERE stream_name = $1 \
+         ORDER BY version",
+    )
+    .bind(format!("Payment-{intent}"))
+    .fetch_all(&pool)
+    .await
+    .expect("events");
+    assert_eq!(
+        events.len(),
+        1,
+        "RefundOpened must APPEND on the Payment stream -- View_PendingRefunds folds from this \
+         fact and from nothing else, so a fact that does not record is a refund nobody is asked \
+         to decide"
+    );
+    assert_eq!(events[0].get::<String, _>("event_type"), "RefundOpened");
+    assert_eq!(events[0].get::<Option<uuid::Uuid>, _>("cause_id"), Some(message_id));
+    assert_eq!(events[0].get::<String, _>("user_type"), "EXTERNAL");
+
+    let row = sqlx::query("SELECT status, attempts, error FROM inbound_messages WHERE message_id = $1")
+        .bind(message_id)
+        .fetch_one(&pool)
+        .await
+        .expect("row");
+    assert_eq!(
+        row.get::<String, _>("status"),
+        "SUCCEEDED",
+        "not RECEIVED-and-retrying: an aborted delivery re-enters the lane head-of-line and wedges \
+         the money path until the attempts cap"
+    );
+    assert!(
+        row.get::<Option<serde_json::Value>, _>("error").is_none(),
+        "and nothing is written to the 90-day durable error column"
+    );
+
+    let published = rx.try_recv().expect("the post-commit fan-out must publish the recorded fact");
+    assert_eq!(published.event_type, "RefundOpened");
+    assert_eq!(published.stream_name, format!("Payment-{intent}"));
+}
+
+/// **ALL FIVE, THROUGH THE LANE.** One test per fact would assert the same one thing five times;
+/// what matters is that no member of the set is left behind, so the set itself is the assertion —
+/// and it is spelled out fact by fact, because a loop over a list nobody maintains is how the
+/// missing five went unnoticed in the first place.
+///
+/// The birth goes first so the fold EXISTS and `already_records` answers from state rather than
+/// from the birthless structural-equality fallback: that is the harder path, and it is the one
+/// production takes.
+#[tokio::test]
+async fn every_newly_wired_payment_fact_records_through_the_lane() {
+    use domain::generated::entities::{CheckoutSnapshot, CustomerContact, PaymentBreakdown};
+    use domain::generated::events::{
+        DomainEvent, PaymentCaptureFailed, PaymentIntentCreated, RefundApproved, RefundDenied,
+    };
+    use domain::generated::scalars::*;
+
+    let Some(db) = crate::common::TestDb::acquire("fact_delivery_five_facts").await else { return };
+    let pool = db.pool();
+    let intent = "pi_780_five_facts";
+    let order = uuid::Uuid::from_u128(0x7E71);
+    let cart = uuid::Uuid::from_u128(0x7E72);
+    let restaurant = uuid::Uuid::from_u128(0x7E51);
+    let lane_actor = uuid::Uuid::from_u128(0x7E73);
+    let z = eur(0);
+
+    let birth = DomainEvent::PaymentIntentCreated(PaymentIntentCreated {
+        payment_intent_id: PaymentIntentId(intent.into()),
+        restaurant_id: RestaurantId(restaurant),
+        customer_id: CustomerId(uuid::Uuid::nil()),
+        amount: eur(1960),
+        checkout: CheckoutSnapshot {
+            order_id: OrderId(order),
+            cart_id: CartId(cart),
+            restaurant_id: RestaurantId(restaurant),
+            customer_id: CustomerId(uuid::Uuid::nil()),
+            mode: None,
+            r#ref: None,
+            customer_contact: CustomerContact {
+                display_name: CustomerDisplayName("Johnny".into()),
+                email: None,
+                phone: PhoneNumber("+33612345678".into()),
+            },
+            service_type: ServiceType::DELIVERY,
+            delivery_address: None,
+            items: Vec::new(),
+            total_amount: eur(1960),
+            breakdown: PaymentBreakdown {
+                articles: eur(1960),
+                delivery: z.clone(),
+                service_fee: z.clone(),
+                total: eur(1960),
+                restaurant_contribution: z.clone(),
+                restaurant_payout: eur(1960),
+                rider_payout: z.clone(),
+                captain_net: z,
+            },
+            note: None,
+            verdict: None,
+            window_from: None,
+            window_to: None,
+            timezone: None,
+            evaluated_at: None,
+        },
+    });
+    let capture_failed = DomainEvent::PaymentCaptureFailed(PaymentCaptureFailed {
+        payment_intent_id: PaymentIntentId(intent.into()),
+        order_id: OrderId(order),
+        restaurant_id: RestaurantId(restaurant),
+        reason: CaptureFailureReason::CARD_DECLINED,
+        detail: None,
+    });
+    let approved = DomainEvent::RefundApproved(RefundApproved {
+        payment_intent_id: PaymentIntentId(intent.into()),
+        order_id: OrderId(order),
+        amount: eur(1960),
+        reason: None,
+    });
+    let denied = DomainEvent::RefundDenied(RefundDenied {
+        payment_intent_id: PaymentIntentId(intent.into()),
+        order_id: OrderId(order),
+        reason: "outside the claim window".into(),
+    });
+
+    let facts = [
+        ("PaymentIntentCreated", birth),
+        ("PaymentCaptureFailed", capture_failed),
+        ("RefundOpened", refund_opened(intent, order, restaurant)),
+        ("RefundApproved", approved),
+        ("RefundDenied", denied),
+    ];
+    for (n, (message_type, event)) in facts.iter().enumerate() {
+        enqueue_fact(
+            &pool,
+            0x7841 + n as u128,
+            "Payment",
+            lane_actor,
+            0,
+            message_type,
+            staged(event.clone()),
+        )
+        .await;
+    }
+
+    let worker = MailboxWorker::new(
+        pool.clone(),
+        "w-five",
+        "Payment",
+        WorkerConfig { lease_seconds: 300, ..WorkerConfig::default() },
+        Arc::new(MailboxCommandHandler::new(deps_over(&pool))),
+    );
+    worker.seed(10).await.expect("seed");
+    worker.claim().await.expect("claim");
+    assert_eq!(worker.drain().await.expect("drain"), 5, "all five delivered in one pass");
+
+    let appended: Vec<String> = sqlx::query_scalar(
+        "SELECT event_type FROM domain_events WHERE stream_name = $1 ORDER BY version",
+    )
+    .bind(format!("Payment-{intent}"))
+    .fetch_all(&pool)
+    .await
+    .expect("events");
+    assert_eq!(
+        appended,
+        vec![
+            "PaymentIntentCreated",
+            "PaymentCaptureFailed",
+            "RefundOpened",
+            "RefundApproved",
+            "RefundDenied"
+        ],
+        "every one of the five must record, in delivery order -- each was refused by the untyped \
+         stream lookup before PR #783's review"
+    );
+
+    let statuses: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM inbound_messages ORDER BY position")
+            .fetch_all(&pool)
+            .await
+            .expect("verdicts");
+    assert_eq!(statuses, vec!["SUCCEEDED"; 5], "and none of them aborted for retry");
+}

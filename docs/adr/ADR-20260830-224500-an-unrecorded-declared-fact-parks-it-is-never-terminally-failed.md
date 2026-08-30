@@ -122,6 +122,45 @@ model this fact.* **The fold rule is what a route move must add FIRST**, and the
 - `fact_route_gate::a_deferral_reason_is_a_modelling_statement_not_a_schedule` — every reason states
   what the model is missing, and schedule words are refused.
 
+## The record leg carries the recorder's own payload — added in review, and the reason it matters
+
+The first cut of this change modelled the record decision as
+`FactLeg::Record { recorder: FactRecorder, event: DomainEvent }`: a NAME beside a widened payload.
+The independent reviewer proved, by enqueueing a real `RefundOpened` through the real worker
+(`status=RECEIVED attempts=1 appended_on_payment_stream=0`), that the money lane's five newly-wired
+facts **did not record**. The route widened the lane's typed fact back to a `DomainEvent` and handed
+it to the untyped `record_inbound_payment_event`, whose stream lookup ended in `_ => None` over
+exactly those five; the typed door written for them — `record_inbound_payment_fact` /
+`intent_of_fact` — had **zero production callers**. The claim that a new Payment `receives:` FACT is
+a compile error at the place that knows how to find its stream was, for that reason, unenforced.
+
+Three things make this worth an ADR entry rather than a commit message.
+
+1. **It holed the gate built for it.** `fact_route_gate::a_routed_deliver_target_is_never_a_parked_fact`
+   reads the `FactLeg::Unrecorded` arms. A fact that is not parked but nonetheless cannot record is
+   invisible to it — so adding `("Payment", "RefundOpened")` to `PM_LANE_ROUTED_DELIVERS`, which
+   `specs/payments/processmanager.yaml` already declares as a `deliver:`, would have passed the gate
+   GREEN while wedging the money lane head-of-line at every refund open until the attempts cap. That
+   is the exact failure the gate's own docstring describes, reached by the one path it does not read.
+2. **A struct cannot express the constraint; a sum type can.** Two independent fields make
+   "recorder X with a payload X cannot resolve" a spellable value, and nothing was checking it.
+   `RecordLeg` — one variant per recorder, each carrying the payload THAT recorder takes — makes the
+   pairing unspellable instead of merely absent (ADR-20260803-234035, compiler first). The money lane
+   carries its generated `PaymentFactInbox`; the remaining recorders still take a `DomainEvent`, and
+   typing each is a change to one variant plus one signature.
+3. **A green suite that does not predict production is the defect, not the evidence.** The fact
+   suite exercised `PaymentCaptured` and `PaymentAuthorized` — both routed before this change — so
+   not one of the five arms it delivered was covered. `fact_delivery.rs` now drives all five through
+   the real lane against a real Postgres, and both tests were seen RED against the pre-review money
+   path (0 delivered, matching the reviewer's probe) before being seen green.
+
+The untyped `record_inbound_payment_event` survives as a **thin adapter**: it narrows onto
+`PaymentFactInbox` and delegates, so both doors share one stream lookup and one idempotency rule,
+and all ten declared facts are accepted rather than five. Its refusal message now names the event
+TYPE only — it rides `DomainError::Repository` into `inbound_messages.error`, a 90-day durable
+column, and a `{event:?}` there wrote a full money payload into it (the #623 leak class this same
+change tightens on the sirene path).
+
 ## Consequences
 
 - **Deployed behaviour delta: zero.** All seven parking facts are unreachable today — no `deliver:`
@@ -132,3 +171,8 @@ model this fact.* **The fold rule is what a route move must add FIRST**, and the
   `reason: deferred` must be permanently zero in production, and it is kept in its own series
   because a must-be-zero counter mixed with a routine one is a counter everyone learns to ignore.
 - **Rollback is `git revert`**: code-only, no config, no migration, no stored event shape.
+- **The five newly-wired Payment facts are the one non-zero behaviour delta**, and only for a
+  `deliver:` that does not exist yet: `PM_LANE_ROUTED_DELIVERS` routes `("Order", "OrderPlaced")`
+  alone, and the Stripe ACL emits only already-routed facts. Their value is that the NEXT step —
+  routing `specs/payments/processmanager.yaml`'s declared `RefundOpened` deliver — now lands on a
+  path that records instead of one that wedges.

@@ -502,6 +502,12 @@ impl MailboxCommandHandler {
             other => other,
         };
         let result = self.deliver_fact_leg(tx, message, leg).instrument(span.clone()).await;
+        // KNOWN GAP, tracked in
+        // [#791](https://github.com/TheCaptainCompany/captain-food/issues/791): the `Err` arm
+        // records NEITHER a verdict NOR a span error, so an aborted delivery exports with
+        // `business.verdict` unset and satisfies this contract's `verdict != 'parked'` success
+        // condition vacuously. Not fixed here because the fix is the contract's, not this call
+        // site's: a success condition written as "!= one member" is satisfied by ABSENCE.
         if let Ok(delivery) = &result {
             telemetry::spans::record_message_deliver_verdict(
                 &span,
@@ -578,7 +584,7 @@ impl MailboxCommandHandler {
         // THE LANE IS READ FROM THE ROW, NEVER DERIVED FROM THE PAYLOAD (vernon): `ActorInbox::parse`
         // keyed off `message.actor_type` and refuses a lane/message pair the spec does not declare,
         // so a Payment fact on a `PlaceOrderProcess` row is a value that could not be constructed.
-        let (recorder, event) = match leg {
+        let record = match leg {
             // A chained PM-addressed copy (B2): the lane IS the saga — run its event leg, not the
             // record route (the fact is already on the Payment stream; this hop reacts to it).
             crate::inbox::FactLeg::ProcessManager(leg) => {
@@ -586,8 +592,14 @@ impl MailboxCommandHandler {
             }
             // Handled by the caller before the transaction does anything.
             crate::inbox::FactLeg::Unrecorded(u) => return self.park_unrecorded_fact(message, u),
-            crate::inbox::FactLeg::Record { recorder, event } => (recorder, event),
+            crate::inbox::FactLeg::Record(record) => record,
         };
+        // The fact widened to a `DomainEvent`, for the effects that are EVENT-shaped rather than
+        // lane-shaped: the chained PM-addressed copy routes on the event, not on the recording
+        // lane. NOT the recording path — the recorders below take the leg's own payload, which for
+        // the money lane is its typed `PaymentFactInbox` (PR #783 review B1: widening on the way IN
+        // is what left five declared Payment facts unrecordable).
+        let event = record.to_domain_event();
         let actor = Actor {
             // The external system principal (deterministic per source — mirrors the enqueue side).
             user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
@@ -611,24 +623,26 @@ impl MailboxCommandHandler {
         //
         // ONE ARM, ONE STREAM, ONE TRANSACTION (vernon): every recorder below appends to exactly
         // one aggregate's own stream, and none of them may reach a second.
-        use crate::inbox::FactRecorder;
-        let outcome = match recorder {
-            FactRecorder::Payment => {
-                application::payments::record_inbound_payment_event(
-                    store.as_ref(),
-                    event.clone(),
-                    &actor,
-                )
-                .await
-            }
-            FactRecorder::Delivery => {
-                application::deliveries::record_inbound_delivery_event(store.as_ref(), event.clone(), &actor)
+        use crate::inbox::RecordLeg;
+        let outcome = match record {
+            // THE MONEY PATH. The leg carries the lane's TYPED fact, so the stream lookup is
+            // `payments::intent_of_fact` — total over `PaymentFactInbox`. This call is what makes
+            // the E0004 guarantee load-bearing: before PR #783's review it went to the untyped
+            // `record_inbound_payment_event`, whose lookup covered five of the ten declared facts,
+            // and `RefundOpened` (the sole feeder of `View_PendingRefunds`) aborted instead of
+            // recording.
+            RecordLeg::Payment(fact) => {
+                application::payments::record_inbound_payment_fact(store.as_ref(), fact, &actor)
                     .await
             }
-            FactRecorder::RestaurantRegistration => {
+            RecordLeg::Delivery(e) => {
+                application::deliveries::record_inbound_delivery_event(store.as_ref(), e, &actor)
+                    .await
+            }
+            RecordLeg::RestaurantRegistration(e) => {
                 application::commands::record_inbound_restaurant_registration(
                     store.as_ref(),
-                    event.clone(),
+                    e,
                     &actor,
                 )
                 .await
@@ -636,28 +650,26 @@ impl MailboxCommandHandler {
             // The reminders pilot (ADR-20260731-153000): the promoted OrderExpired MESSAGE
             // records the expiry on its order's stream — Recorded / AlreadyRecorded / NoChange,
             // never a rejection (a retention deadline's passage cannot be refused).
-            FactRecorder::Order => {
-                application::commands::record_inbound_order_event(store.as_ref(), event.clone(), &actor)
-                    .await
+            RecordLeg::Order(e) => {
+                application::commands::record_inbound_order_event(store.as_ref(), e, &actor).await
             }
             // #167: the Order BIRTH as a mailbox delivery — the spec's "Birth: PlaceOrderProcess
             // delivers OrderPlaced" receive. Recorded idempotently; its `schedules:` start the
             // acceptance clock, and a redelivered (AlreadyRecorded) birth RE-APPLIES them —
             // safe by design: `reschedule: keep` means the first deadline wins.
-            FactRecorder::OrderPlaced => {
-                application::commands::record_inbound_order_placed(store.as_ref(), event.clone(), &actor)
-                    .await
+            RecordLeg::OrderPlaced(e) => {
+                application::commands::record_inbound_order_placed(store.as_ref(), e, &actor).await
             }
             // #167: the promoted acceptance deadline — its own route because its outcome is
             // richer than RecordOutcome (the shadow WouldCancel arm is the flip ADR's evidence)
             // and because of the young+vernon fence below: schedules apply on the
             // Recorded/Cancelled arm ONLY.
-            FactRecorder::OrderAcceptanceTimeout => {
+            RecordLeg::OrderAcceptanceTimeout(e) => {
                 return self
                     .handle_acceptance_timeout(
                         tx,
                         message,
-                        event.clone(),
+                        e,
                         staging.clone(),
                         activation,
                         &actor,

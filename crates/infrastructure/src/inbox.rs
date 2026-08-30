@@ -517,9 +517,10 @@ async fn rider(
 /// that arm. A fact reaching it was not appended late — it was LOST, with a terminal verdict, and
 /// with `make validate` and `cargo test` both green.
 pub enum FactLeg {
-    /// Record the carried fact on the addressed aggregate's OWN stream, through `recorder`.
+    /// Record the carried fact on the addressed aggregate's OWN stream, through the recorder the
+    /// leg NAMES BY CARRYING ITS PAYLOAD ([`RecordLeg`]).
     /// One arm, one stream, one transaction — no leg here may reach a second aggregate.
-    Record { recorder: FactRecorder, event: domain::generated::events::DomainEvent },
+    Record(RecordLeg),
     /// The lane IS a process manager: run its typed event leg, not the record route. The fact is
     /// already on the aggregate's stream; this hop REACTS to it (B2's chained PM-addressed copy).
     ProcessManager(PmFactLeg),
@@ -529,10 +530,76 @@ pub enum FactLeg {
     Unrecorded(UnrecordedFact),
 }
 
+/// **WHICH RECORDER OWNS THE APPEND, CARRYING THE PAYLOAD THAT RECORDER TAKES.**
+///
+/// The shape PR #783's review earned (B1). The first cut of this route was
+/// `Record { recorder: FactRecorder, event: DomainEvent }` — a NAME beside an untyped payload — and
+/// the pairing was checked by nobody: the Payment arm named
+/// `application::payments::record_inbound_payment_fact` in its doc comment while the handler fed the
+/// `DomainEvent` to the untyped `record_inbound_payment_event`, whose stream lookup covered only
+/// five of the lane's ten declared facts. `RefundOpened` — the sole feeder of `View_PendingRefunds`
+/// — did not record; it aborted, retried, and wedged the money lane until the attempts cap. The
+/// typed door existed and was dead code, and the whole point of #780 is that a fact with nowhere to
+/// go must be a COMPILE error rather than a runtime surprise.
+///
+/// A struct with two independent fields cannot express "this recorder takes THIS payload"; a sum
+/// type can, so the mismatch is now UNSPELLABLE rather than merely absent (CLAUDE.md
+/// "compiler first"). The Payment lane carries its generated lane enum; the remaining recorders
+/// still take an untyped [`domain::generated::events::DomainEvent`], and typing each of them is a
+/// change to ONE variant here plus its recorder's signature — the same move, lane by lane.
+pub enum RecordLeg {
+    /// **THE MONEY PATH, TYPED.** `application::payments::record_inbound_payment_fact` —
+    /// `Payment-{intentId}`, with the stream resolved by `payments::intent_of_fact`, which is total
+    /// over `PaymentFactInbox`. An eleventh declared Payment fact is an E0004 there, at the place
+    /// that knows how to find its stream.
+    Payment(PaymentFactInbox),
+    /// `application::deliveries::record_inbound_delivery_event` — `DeliveryJob-{id}`.
+    Delivery(domain::generated::events::DomainEvent),
+    /// `application::commands::record_inbound_restaurant_registration` — `Restaurant-{id}`.
+    RestaurantRegistration(domain::generated::events::DomainEvent),
+    /// `application::commands::record_inbound_order_event` — `Order-{id}`.
+    Order(domain::generated::events::DomainEvent),
+    /// `application::commands::record_inbound_order_placed` — the Order BIRTH (#167).
+    OrderPlaced(domain::generated::events::DomainEvent),
+    /// `application::commands::record_order_acceptance_timeout` — its own route because its
+    /// outcome is richer than `RecordOutcome` and its `schedules:` apply on one arm only (#167).
+    OrderAcceptanceTimeout(domain::generated::events::DomainEvent),
+}
+
+impl RecordLeg {
+    /// The payload-free NAME of the recorder — for the verdict table, which asserts the return
+    /// SHAPE and must not be handed a money payload to compare.
+    pub fn recorder(&self) -> FactRecorder {
+        match self {
+            Self::Payment(_) => FactRecorder::Payment,
+            Self::Delivery(_) => FactRecorder::Delivery,
+            Self::RestaurantRegistration(_) => FactRecorder::RestaurantRegistration,
+            Self::Order(_) => FactRecorder::Order,
+            Self::OrderPlaced(_) => FactRecorder::OrderPlaced,
+            Self::OrderAcceptanceTimeout(_) => FactRecorder::OrderAcceptanceTimeout,
+        }
+    }
+
+    /// The carried fact as an untyped `DomainEvent`, for the effects that are EVENT-shaped rather
+    /// than lane-shaped — the post-commit PM-addressed copy (`chain_pm_copy_in_tx`), which routes
+    /// on the event, not on the recording lane. A projection, never the recording path: the
+    /// recorders themselves take the typed value where their lane has one.
+    pub fn to_domain_event(&self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::Payment(fact) => fact.clone().into_domain_event(),
+            Self::Delivery(e)
+            | Self::RestaurantRegistration(e)
+            | Self::Order(e)
+            | Self::OrderPlaced(e)
+            | Self::OrderAcceptanceTimeout(e) => e.clone(),
+        }
+    }
+}
+
 /// Which recorder owns the append. A closed, human-owned set: the handler performs, this names.
 ///
-/// It carries no payload, so the exhaustiveness that matters is over the FACT enums above, never
-/// over this.
+/// It carries no payload — it is [`RecordLeg::recorder`]'s codomain, the class key the verdict
+/// table compares. The exhaustiveness that matters is over the FACT enums above, never over this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactRecorder {
     /// `application::payments::record_inbound_payment_fact` — `Payment-{intentId}`.
@@ -586,7 +653,7 @@ impl FactLeg {
     /// asserts the return SHAPE rather than any message text.
     pub fn class(&self) -> FactLegClass {
         match self {
-            Self::Record { recorder, .. } => FactLegClass::Record(*recorder),
+            Self::Record(r) => FactLegClass::Record(r.recorder()),
             Self::ProcessManager(_) => FactLegClass::ProcessManager,
             Self::Unrecorded(u) => FactLegClass::Unrecorded(*u),
         }
@@ -676,20 +743,21 @@ fn customer_fact(message: CustomerFactInbox) -> FactLeg {
 fn delivery_job_fact(message: DeliveryJobFactInbox) -> FactLeg {
     use domain::generated::events::DomainEvent as E;
     match message {
-        DeliveryJobFactInbox::DeliveryAcceptedByPartner(e) => FactLeg::Record {
-            recorder: FactRecorder::Delivery,
-            event: E::DeliveryAcceptedByPartner(e),
-        },
-        DeliveryJobFactInbox::DeliveryRejectedByPartner(e) => FactLeg::Record {
-            recorder: FactRecorder::Delivery,
-            event: E::DeliveryRejectedByPartner(e),
-        },
-        DeliveryJobFactInbox::DeliveryStatusUpdated(e) => {
-            FactLeg::Record { recorder: FactRecorder::Delivery, event: E::DeliveryStatusUpdated(e) }
+        DeliveryJobFactInbox::DeliveryAcceptedByPartner(e) => {
+            FactLeg::Record(RecordLeg::Delivery(E::DeliveryAcceptedByPartner(e)))
         }
-        // `DeliveryDispatchFailed` is not in the lifecycle transition table, so
-        // `record_inbound_delivery_event` would refuse it as an illegal transition rather than
-        // record it — the aggregate does not model a dispatch that never produced a job.
+        DeliveryJobFactInbox::DeliveryRejectedByPartner(e) => {
+            FactLeg::Record(RecordLeg::Delivery(E::DeliveryRejectedByPartner(e)))
+        }
+        DeliveryJobFactInbox::DeliveryStatusUpdated(e) => {
+            FactLeg::Record(RecordLeg::Delivery(E::DeliveryStatusUpdated(e)))
+        }
+        // The `PENDING -> FAILED` transition IS declared (specs/delivery/actors.yaml), but no
+        // "already reflected" rule is: on redelivery the job is already FAILED, the transition
+        // lookup is `None`, and `record_inbound_delivery_event` turns that into a retry loop
+        // instead of a DUPLICATE. Same statement as the DSL `deferred:` reason, which is the side
+        // the gate reads — this comment is the side nothing checks, so it is kept literally equal
+        // (PR #783 review N1: it used to claim the transition was missing, which is false).
         DeliveryJobFactInbox::DeliveryDispatchFailed(_) => {
             unrecorded(DeliveryJobFactInbox::ACTOR_TYPE, "DeliveryDispatchFailed")
         }
@@ -714,18 +782,15 @@ fn order_fact(message: OrderFactInbox) -> FactLeg {
         // The promoted acceptance deadline (#167): its own recorder because its outcome is richer
         // than `RecordOutcome` (the shadow WouldCancel arm is the flip ADR's evidence) and because
         // its `schedules:` apply on the Recorded/Cancelled arm ONLY.
-        OrderFactInbox::OrderAcceptanceTimedOut(e) => FactLeg::Record {
-            recorder: FactRecorder::OrderAcceptanceTimeout,
-            event: E::OrderAcceptanceTimedOut(e),
-        },
-        // The promoted GDPR retention deadline (ADR-20260731-153000).
-        OrderFactInbox::OrderExpired(e) => {
-            FactLeg::Record { recorder: FactRecorder::Order, event: E::OrderExpired(e) }
+        OrderFactInbox::OrderAcceptanceTimedOut(e) => {
+            FactLeg::Record(RecordLeg::OrderAcceptanceTimeout(E::OrderAcceptanceTimedOut(e)))
         }
+        // The promoted GDPR retention deadline (ADR-20260731-153000).
+        OrderFactInbox::OrderExpired(e) => FactLeg::Record(RecordLeg::Order(E::OrderExpired(e))),
         // The Order BIRTH as a mailbox delivery (#167/#588) — the one routed `deliver:` in the
         // corpus, and the reason `ROUTED_LANES` and this route are gated against each other.
         OrderFactInbox::OrderPlaced(e) => {
-            FactLeg::Record { recorder: FactRecorder::OrderPlaced, event: E::OrderPlaced(e) }
+            FactLeg::Record(RecordLeg::OrderPlaced(E::OrderPlaced(e)))
         }
     }
 }
@@ -733,62 +798,62 @@ fn order_fact(message: OrderFactInbox) -> FactLeg {
 /// The `Payment` lane's facts — the money path. Every one records, and every one dedupes through
 /// `domain::payment::already_records`, which already carries a rule for all ten: a redelivered
 /// capture failure lands DUPLICATE instead of appending a second money event (young).
+///
+/// **THE LANE VALUE TRAVELS TYPED** (PR #783 review B1). Each arm hands the recorder its
+/// `PaymentFactInbox`, not a widened `DomainEvent`, so the stream is resolved by
+/// `payments::intent_of_fact` — total over this enum — rather than by a `DomainEvent` match ending
+/// in `_ => None`. The first cut widened here and the widening was the whole defect: five of these
+/// ten (`PaymentCaptureFailed`, `PaymentIntentCreated`, `RefundApproved`, `RefundDenied`,
+/// `RefundOpened`) fell into that wildcard, so they did not record — they aborted and retried until
+/// the attempts cap, wedging the money lane head-of-line, while the typed door that would have
+/// recorded them sat unreferenced.
 fn payment_fact(message: PaymentFactInbox) -> FactLeg {
-    use domain::generated::events::DomainEvent as E;
-    // TEN ARMS, NOT `into_domain_event()`. A blanket `FactLeg::Record` over the whole lane would be
-    // a lane-level catch-all wearing a different hat: a new declared Payment fact would be routed
-    // to the money-path recorder with no human deciding it should be, which is #780 exactly.
+    // TEN ARMS, NOT `FactLeg::Record(RecordLeg::Payment(message))`. A blanket leg over the whole
+    // lane would be a lane-level catch-all wearing a different hat: a new declared Payment fact
+    // would be routed to the money-path recorder with no human deciding it should be, which is #780
+    // exactly. So each arm re-states its variant, and an eleventh fact is an E0004 here as well as
+    // in `intent_of_fact`.
     match message {
-        PaymentFactInbox::PaymentAuthorized(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentAuthorized(e),
-        },
+        PaymentFactInbox::PaymentAuthorized(e) => {
+            record_payment(PaymentFactInbox::PaymentAuthorized(e))
+        }
         // Two authors on `Payment-{intentId}`: `PaymentSettlementProcess` records it in-process
         // today, and this lane records it when the route moves. Both go through
         // `already_records` (`state.capture_failed`), so the second copy is absorbed as DUPLICATE
         // rather than double-counted by every downstream fold (young).
-        PaymentFactInbox::PaymentCaptureFailed(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentCaptureFailed(e),
-        },
-        PaymentFactInbox::PaymentCaptured(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentCaptured(e),
-        },
-        PaymentFactInbox::PaymentFailed(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentFailed(e),
-        },
+        PaymentFactInbox::PaymentCaptureFailed(e) => {
+            record_payment(PaymentFactInbox::PaymentCaptureFailed(e))
+        }
+        PaymentFactInbox::PaymentCaptured(e) => {
+            record_payment(PaymentFactInbox::PaymentCaptured(e))
+        }
+        PaymentFactInbox::PaymentFailed(e) => record_payment(PaymentFactInbox::PaymentFailed(e)),
         // The stream's BIRTH. `already_records` answers `true` whenever a fold exists, and a
         // birthless stream falls back to structural equality — so a redelivered birth is DUPLICATE.
-        PaymentFactInbox::PaymentIntentCreated(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentIntentCreated(e),
-        },
-        PaymentFactInbox::PaymentRefunded(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentRefunded(e),
-        },
-        PaymentFactInbox::PaymentReleased(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::PaymentReleased(e),
-        },
-        PaymentFactInbox::RefundApproved(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::RefundApproved(e),
-        },
-        PaymentFactInbox::RefundDenied(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::RefundDenied(e),
-        },
+        PaymentFactInbox::PaymentIntentCreated(e) => {
+            record_payment(PaymentFactInbox::PaymentIntentCreated(e))
+        }
+        PaymentFactInbox::PaymentRefunded(e) => {
+            record_payment(PaymentFactInbox::PaymentRefunded(e))
+        }
+        PaymentFactInbox::PaymentReleased(e) => {
+            record_payment(PaymentFactInbox::PaymentReleased(e))
+        }
+        PaymentFactInbox::RefundApproved(e) => {
+            record_payment(PaymentFactInbox::RefundApproved(e))
+        }
+        PaymentFactInbox::RefundDenied(e) => record_payment(PaymentFactInbox::RefundDenied(e)),
         // `View_PendingRefunds` is folded from THIS fact and from nothing else
         // (`specs/database/projection_views.yaml`): losing it means the restaurant is never asked
-        // to decide and captured money stays captured.
-        PaymentFactInbox::RefundOpened(e) => FactLeg::Record {
-            recorder: FactRecorder::Payment,
-            event: E::RefundOpened(e),
-        },
+        // to decide and captured money stays captured. It was one of the five that did not record.
+        PaymentFactInbox::RefundOpened(e) => record_payment(PaymentFactInbox::RefundOpened(e)),
     }
+}
+
+/// The money lane's record leg — named once so the ten arms above read as ten DECISIONS rather than
+/// ten spellings of the same constructor.
+fn record_payment(fact: PaymentFactInbox) -> FactLeg {
+    FactLeg::Record(RecordLeg::Payment(fact))
 }
 
 /// The `PlaceOrderProcess` lane's facts — the saga's own event legs, never the record route.
@@ -816,9 +881,8 @@ fn refund_process_fact(message: RefundProcessFactInbox) -> FactLeg {
 fn restaurant_fact(message: RestaurantFactInbox) -> FactLeg {
     use domain::generated::events::DomainEvent as E;
     match message {
-        RestaurantFactInbox::RestaurantRegistered(e) => FactLeg::Record {
-            recorder: FactRecorder::RestaurantRegistration,
-            event: E::RestaurantRegistered(e),
-        },
+        RestaurantFactInbox::RestaurantRegistered(e) => {
+            FactLeg::Record(RecordLeg::RestaurantRegistration(E::RestaurantRegistered(e)))
+        }
     }
 }
