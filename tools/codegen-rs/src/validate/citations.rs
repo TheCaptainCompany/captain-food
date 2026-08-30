@@ -78,6 +78,102 @@ pub(crate) fn parse_citation_exemptions(content: &str) -> (Vec<CitationExemption
     (out, issues)
 }
 
+/// §23d — the exemption-set RATCHET, and WHY IT LIVES IN THIS FILE RATHER THAN IN A UNIT TEST
+/// (#802). `docs/decisions/_exempt.yaml` is the one bypass in §23, so its growth has always been
+/// ratcheted. Until #802 the ratchet was `assert_eq!(exemptions.len(), 4)` in
+/// `tools/codegen-rs/src/tests.rs` — and that put a gate over a `docs/**` file inside the ONE CI
+/// job the docs-only path filter switches off. Two consecutive pushes reached `main` green while
+/// carrying the failing assertion; it surfaced only when a `crates/**` diff was merged alongside
+/// them. As a validator rule it runs inside `make validate`, which `docs-validate` executes
+/// verbatim on exactly the docs-only complement, so the lane that edits this file is the lane that
+/// now checks it.
+///
+/// IT IS ID-SHAPED, NOT COUNT-SHAPED, and that is the substance rather than the relocation. The
+/// exemption file is a SELF-PRUNING QUEUE: entries arrive when a record is held and leave when it
+/// is deposited (`citation-exemption-unused` is what forces the removal). A count assertion is red
+/// on both halves of that cycle — the #802 red was an arrival, and the very next merge of PR #799
+/// deposits `ADR-20260830-191457` and would have gone red again on the departure. So the ratchet
+/// checks membership and only ONE direction:
+///
+///   * SHRINKING is silent-green — retirement is the file working as designed, and making it red
+///     would reproduce the defect in the opposite direction;
+///   * GROWING is an error that NAMES the id and what the declaration would have to say about it,
+///     because "5 != 4" tells a reader nothing about whether the new entry is legitimate.
+///
+/// And the list is deliberately kept in RUST SOURCE rather than in a data file: adding an exemption
+/// TOGETHER WITH ITS DECLARATION cannot be a docs-only diff, because it must touch `tools/**` —
+/// which flips the path filter and un-skips the whole matrix.
+///
+/// WHAT THIS IS NOT: it is not "unspellable", and the word is reserved
+/// (ADR-20260803-234035 — compiler-first, a check is the fallback). Adding an exemption WITHOUT the
+/// declaration is still perfectly spellable, is still a docs-only push, and still lands on `main`,
+/// because that lane is a push with no PR. What changed is where it becomes visible: it is now
+/// LOUDLY RED ON THE LANE THAT EDITS THE FILE — `docs-validate` runs `make validate`'s command
+/// verbatim on exactly the docs-only complement — instead of skipping the only job that could see
+/// it. A check placed on the right lane, which is the level the type system cannot reach here: the
+/// authors of `_exempt.yaml` entries are YAML rows, not Rust call sites, so there is no value to
+/// witness and nothing to seal.
+///
+/// A declared id no longer present in the file is NOT an error (that is the shrink direction);
+/// prune it opportunistically when its record deposits.
+///
+/// THAT PRUNING LINE IS PROSE, AND IT IS THIS DESIGN'S ACCEPTED RESIDUAL rather than an oversight:
+/// a declaration left behind after its record deposits keeps that id permanently pre-authorised, so
+/// it could re-enter `_exempt.yaml` later on a docs-only push with nothing to say. It is recorded
+/// rather than closed because every gate that would close it is worse than the hole. A rule that
+/// reds on shrinkage REPRODUCES #802 IN THE OPPOSITE DIRECTION — the file is a self-pruning queue,
+/// so retirement is the ordinary case and the red would fire on correct behaviour, at a moment
+/// decided by some other PR's merge. A warning is no escape either: the warning baseline is a
+/// ratchet, so an unbaselined warning is red and a baselined one is invisible. Open, with the
+/// narrower question of whether RE-ENTRY can be distinguished from RETIREMENT, as issue #805.
+pub(crate) const DECLARED_EXEMPTIONS: &[(&str, &str)] = &[
+    (
+        "ADR-20260817-232744",
+        "one of the HELD externally-authored trio — not deposited until corrected (ADR-20260818-004647:179; DECISIONS.md 2026-08-18 reconciliation)",
+    ),
+    (
+        "ADR-20260817-232745",
+        "one of the HELD externally-authored trio — not deposited until corrected (ADR-20260818-004647:179)",
+    ),
+    (
+        "ADR-20260817-232746",
+        "one of the HELD externally-authored trio — not deposited until corrected (ADR-20260818-004647:179)",
+    ),
+    (
+        "ADR-20260724-172808",
+        "the one genuinely dangling id the register audit found (PROP-20260819-110442 §1.2) — its remaining citations QUOTE it as a specimen of that defect, never as a record",
+    ),
+    // `ADR-20260830-191457` sat here for exactly one session. It was the #802 red — the fifth entry
+    // whose arrival a count assertion could not survive — and PR #799 deposited the record while
+    // this branch was being written, so the entry self-pruned out of `_exempt.yaml` and the
+    // declaration went with it. That whole cycle, arrival to retirement, is why the rule is
+    // membership-shaped: the count it replaced would have gone red on the arrival AND again on the
+    // departure, hours apart, and only the second one would have looked like a mystery.
+];
+
+/// §23d: every id in `_exempt.yaml` is one the ratchet declares. Growth is red and names the id;
+/// shrinkage is green (see the const's note for why the asymmetry is the whole point).
+pub(crate) fn validate_exemption_ratchet(
+    exemptions: &[CitationExemption],
+    declared: &[(&str, &str)],
+) -> Vec<Issue> {
+    let known: BTreeSet<&str> = declared.iter().map(|(id, _)| *id).collect();
+    exemptions
+        .iter()
+        .filter(|e| !known.contains(e.id.as_str()))
+        .map(|e| {
+            err(
+                "citation-exemption-undeclared",
+                "docs/decisions/_exempt.yaml".to_string(),
+                format!(
+                    "exemption `{}` is not declared in the ratchet (reason on file: {}). The exemption file is the one sanctioned bypass in the citation ratchet, so it may SHRINK freely but never grow unannounced. If the entry is right, add `{}` to DECLARED_EXEMPTIONS in tools/codegen-rs/src/validate/citations.rs, saying in one line WHAT THE RECORD IS and what deposits it — a reviewer must be able to judge the entry, which a bare count never allowed. First ask the cheaper question: can the record simply be deposited under docs/adr/ or docs/proposals/ instead? An exemption is citable as EXISTING, never as CONTROLLING.",
+                    e.id, e.reason, e.id
+                ),
+            )
+        })
+        .collect()
+}
+
 /// The governed documentation surfaces: every .md/.yaml/.html under docs/** (recursive), plus
 /// CLAUDE.md. `_exempt.yaml` itself is excluded — it names dangling ids on purpose. Sorted for
 /// deterministic issue output.

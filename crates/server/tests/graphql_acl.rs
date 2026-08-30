@@ -1,6 +1,6 @@
 //! Per-role GraphQL ACL enforcement (ADR-0006 "role = path"), spec-derived from api.yaml `roles`.
-//! Executes against the schema directly with a `RequestRole` in the request context (what
-//! `/{role}/graphql` injects from the URL path) — no DB needed (`build_schema(None, None, None)`):
+//! Executes against the schema directly with an `ActingRole` in the request context (what
+//! `/{role}/graphql` injects) — no DB needed (`build_schema(None, None, None)`):
 //! - EXECUTION: a role calling an operation outside its api.yaml `roles` gets a FORBIDDEN error
 //!   (extension `code`) and the resolver never runs; an authorized role reaches the resolver.
 //! - INTROSPECTION: a role only sees its authorized fields, and (via async-graphql's
@@ -18,9 +18,26 @@ fn schema() -> CaptainSchema {
     build_schema(None, None, None)
 }
 
-/// Execute `query` under `role` (mirrors routes.rs' `request.data(role)`).
+/// A verified principal BOUND to `role`, the way `AuthContext::authorize` builds one from a token
+/// carrying both a role and its domain claim. Roles that carry no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn bound(role: RequestRole) -> server::Principal {
+    server::Principal::role_binding(
+        role,
+        "acl-test-subject".to_string(),
+        Some(uuid::Uuid::from_u128(0x639)),
+    )
+}
+
+/// Execute `query` as a caller BOUND to `role` (mirrors what `routes.rs` injects).
+///
+/// The context carries an `ActingRole`, and there is no way to fabricate one (#639 part B) — this
+/// helper has to go through a `Principal`, which is the point: every case in this file now asserts
+/// something about a caller who actually holds the binding for the role they are exercising, rather
+/// than about a bare enum somebody typed. `unbound_denied_on_the_money_path` below is the same
+/// helper with the binding taken away.
 async fn execute_as(schema: &CaptainSchema, role: RequestRole, query: &str) -> async_graphql::Response {
-    schema.execute(Request::new(query).data(role)).await
+    schema.execute(Request::new(query).data(bound(role).acting_role(role))).await
 }
 
 /// True when the error is the RoleGuard rejection (extension `code: FORBIDDEN`).
@@ -333,4 +350,170 @@ async fn erasure_operations_are_customer_only_on_every_axis() {
             "the CustomerErasure type leaked to {role:?}"
         );
     }
+}
+
+/// **`unbound ⇒ denied`, on the money path** — the companion test
+/// [ADR-20260818-101500](../../../docs/adr/ADR-20260818-101500-the-restaurant-signs-in-by-email-link-and-638-freezes-at-chunk-1.md)
+/// banked at the briefing, and the one it says *"matters more than the obvious one"*: without it,
+/// `domain_id: None` gets coded as "unknown ⇒ allow", the cross-tenant test still passes, and the
+/// hole is untouched.
+///
+/// The defect (#639 §4, ADR-20260818-004646 Correction 3): a token asserting
+/// `captain_food.role = "RESTAURANT"` with NO `restaurant_id` produced an `Identity::Unbound` whose
+/// `role()` returned RESTAURANT, so it satisfied `approveRefund`'s `ALLOW_RESTAURANT_ADMIN` guard —
+/// and `approveRefund` resolves its actor from the payload's `orderId`, never from the caller, so
+/// that caller could approve ANY pending refund.
+///
+/// Asserted as a PAIR, never as a lone denial: an `acting_role` that returned PUBLIC for
+/// *everything* would pass a one-sided "unbound is refused" test while breaking every real
+/// restaurateur. The bound leg proves the guard still admits, by asserting the request gets past
+/// FORBIDDEN — it then fails inside the resolver on the absent mailbox, which is exactly the
+/// evidence wanted: the guard let it through.
+///
+/// Both doors are asserted because both read `role_allows`: EXECUTION (the guard) and
+/// INTROSPECTION (`visible_restaurant_admin`). A field hidden but callable, or visible but guarded,
+/// are both wrong.
+#[tokio::test]
+async fn an_unbound_restaurant_principal_is_denied_on_the_money_path() {
+    let schema = schema();
+    // A COMPLETE, valid input: async-graphql validates arguments before it runs the field guard,
+    // so a malformed one would fail validation and never reach the ACL — a green test proving
+    // nothing about authorization.
+    const APPROVE: &str = r#"mutation { approveRefund(input: {
+        orderId: "00000000-0000-0000-0000-000000000002",
+        amount: { amountCents: 1250, currency: EUR }
+    }) { messageId } }"#;
+
+    // BOUND: admitted by the guard. Not "no errors" — the resolver has no mailbox in this schema —
+    // but specifically NOT the FORBIDDEN refusal.
+    let bound_resp = schema
+        .execute(
+            Request::new(APPROVE)
+                .data(bound(RequestRole::Restaurant).acting_role(RequestRole::Restaurant)),
+        )
+        .await;
+    assert!(
+        !bound_resp.errors.iter().any(is_forbidden),
+        "a RESTAURANT bound to a restaurant must pass the guard — refund approval stays with the \
+         restaurant (ADR-20260818-094500 ruling B): {:?}",
+        bound_resp.errors
+    );
+
+    // UNBOUND: the same role, the same path, no domain binding. `role_binding(.., None)` is the one
+    // honest way to spell it, and it is the identity a hand-stamped `{"role":"RESTAURANT"}` token
+    // produces today.
+    let unbound = server::Principal::role_binding(
+        RequestRole::Restaurant,
+        "acl-test-subject".to_string(),
+        None,
+    );
+    assert_eq!(
+        unbound.acting_role(RequestRole::Restaurant).get(),
+        RequestRole::Public,
+        "an unbound caller cannot ACT as RESTAURANT — the witness is the mechanism, not this test"
+    );
+    let unbound_resp = schema
+        .execute(Request::new(APPROVE).data(unbound.acting_role(RequestRole::Restaurant)))
+        .await;
+    assert!(
+        unbound_resp.errors.iter().any(is_forbidden),
+        "an authenticated caller with NO restaurant binding must be FORBIDDEN from approveRefund: \
+         {:?}",
+        unbound_resp.errors
+    );
+
+    // INTROSPECTION, the second door onto the same `role_allows`.
+    let (_, bound_mutations) = introspected_fields(&schema, RequestRole::Restaurant).await;
+    assert!(
+        bound_mutations.contains(&"approveRefund".to_string()),
+        "approveRefund must stay visible to a bound RESTAURANT: {bound_mutations:?}"
+    );
+    let hidden = schema
+        .execute(
+            Request::new("{ __schema { mutationType { fields { name } } } }")
+                .data(unbound.acting_role(RequestRole::Restaurant)),
+        )
+        .await;
+    let names = hidden.data.into_json().expect("introspection json")["__schema"]["mutationType"]
+        ["fields"]
+        .as_array()
+        .expect("fields array")
+        .iter()
+        .map(|f| f["name"].as_str().expect("field name").to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        !names.contains(&"approveRefund".to_string()),
+        "approveRefund must not be introspectable by an unbound caller either: {names:?}"
+    );
+}
+
+/// Every role, one table, because the unbound arm must not have been bought by breaking the others.
+///
+/// ADMIN and EXTERNAL are the ones that would fail silently and expensively: neither carries a
+/// domain claim BY DESIGN (`Identity::Admin` — "its scope IS the role"), so an `acting_role` that
+/// keyed on *claim presence* rather than on the identity VARIANT would black them out. `/external`
+/// is the Stripe and HubRise webhook path: dark at peak, that is a paid order nobody is told about.
+#[test]
+fn every_role_acts_as_itself_when_bound_and_as_public_when_not() {
+    for role in [
+        RequestRole::Public,
+        RequestRole::Customer,
+        RequestRole::RestaurantAccount,
+        RequestRole::Restaurant,
+        RequestRole::Rider,
+        RequestRole::Admin,
+        RequestRole::External,
+    ] {
+        assert_eq!(
+            bound(role).acting_role(role).get(),
+            role,
+            "{role:?}: a bound caller acts as its own role"
+        );
+    }
+
+    // Only the four roles with a domain binding CAN be unbound — `role_binding` with `None` for
+    // ADMIN / EXTERNAL / PUBLIC yields their own claim-free identities, not `Unbound`, which is
+    // why they keep acting as themselves above.
+    for role in [
+        RequestRole::Customer,
+        RequestRole::RestaurantAccount,
+        RequestRole::Restaurant,
+        RequestRole::Rider,
+    ] {
+        let unbound = server::Principal::role_binding(role, "s".to_string(), None);
+        assert_eq!(
+            unbound.acting_role(role).get(),
+            RequestRole::Public,
+            "{role:?}: no binding, no action"
+        );
+        assert_eq!(
+            unbound.recorded_role(),
+            RequestRole::Public,
+            "{role:?}: and no false author in domain_events.user_type either"
+        );
+    }
+}
+
+/// The `/public` rule the ACL depends on: an identified customer on the OPEN path (#469 — the
+/// storefront IS the open path) is evaluated as PUBLIC, so no `roles: [CUSTOMER]` operation becomes
+/// reachable, or introspectable, from the one path anyone can reach. This is why `acting_role`
+/// takes the PATH role instead of deriving one from the identity.
+#[test]
+fn an_identified_customer_on_the_public_path_still_acts_as_public() {
+    let customer = server::Principal::role_binding(
+        RequestRole::Customer,
+        "s".to_string(),
+        Some(uuid::Uuid::from_u128(0x469)),
+    );
+    assert_eq!(
+        customer.acting_role(RequestRole::Public).get(),
+        RequestRole::Public,
+        "the ACL runs against the PATH, so the storefront's own path widens nothing"
+    );
+    assert_eq!(
+        customer.recorded_role(),
+        RequestRole::Customer,
+        "but the ENVELOPE records who they are — a storefront order is authored by the customer, \
+         not by an anonymous visitor"
+    );
 }

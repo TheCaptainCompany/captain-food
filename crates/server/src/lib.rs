@@ -101,6 +101,11 @@ pub use auth::AuthContext;
 // The verified request principal — exposed for the subscription-ownership integration tests
 // (the generated resolvers reach it as crate::auth::Principal).
 pub use auth::Principal;
+/// The role-guard witness (#639 part B). Re-exported because integration tests must inject the
+/// SAME value `routes.rs` does, and there is deliberately no other way to obtain one: it comes from
+/// [`Principal::acting_role`] or it does not exist. A test that wants to exercise a role therefore
+/// has to name the identity holding it — which is the property under test.
+pub use auth::ActingRole;
 /// IDENT-1 Phase A (#641): the CUSTOMER identity-resolution seam, re-exported so integration tests
 /// can drive `graphql_routes` under either mode and plant a fake `ResolveCustomerIdentity`, and
 /// exercise `resolve_read_scope` directly over a REAL verified `Principal` (its own constructors
@@ -176,7 +181,7 @@ pub fn wire() -> HealthDto {
 /// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
 /// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
 /// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260813021500;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260830210000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

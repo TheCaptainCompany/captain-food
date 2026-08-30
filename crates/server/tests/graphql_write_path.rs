@@ -29,6 +29,15 @@ use infrastructure::{
     PgUberEstimationPolicyRepository, PgUberSplitPolicyRepository, UnverifiedGbpOrderLinkProbe,
 };
 use server::graphql_acl::RequestRole;
+
+/// The role-guard witness the transports inject (#639 part B). There is no way to fabricate an
+/// `ActingRole`: it comes from a `Principal` or it does not exist, so a test that exercises a role
+/// has to name a caller actually BOUND to it. Roles carrying no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn acting(role: RequestRole) -> server::ActingRole {
+    server::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+        .acting_role(role)
+}
 use sqlx::PgPool;
 
 /// Fresh copies of the tables this slice touches (mirrors restaurant_write_path.rs — the read repos
@@ -294,7 +303,7 @@ async fn poll_operation(
         let query = format!(
             r#"query {{ operationStatus(input: {{ messageId: "{message_id}" }}) {{ messageId correlationId status errorCode message }} }}"#
         );
-        let mut req = async_graphql::Request::new(query).data(role);
+        let mut req = async_graphql::Request::new(query).data(acting(role));
         req = req.data(server::graphql_session::SessionHeader(session));
         let resp = schema.execute(req).await;
         assert!(resp.errors.is_empty(), "operationStatus errored: {:?}", resp.errors);
@@ -339,7 +348,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
     // registerRestaurant is [ADMIN, RESTAURANT_ACCOUNT] — execute under the ADMIN role path (the ACL
     // guard fails closed to PUBLIC when no role is in the request context, ADR-0006).
     let resp = schema
-        .execute(async_graphql::Request::new(mutation.clone()).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(mutation.clone()).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "mutation errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
@@ -393,7 +402,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
         }}"#
     );
     let resp = schema
-        .execute(async_graphql::Request::new(replayed).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(replayed).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "replay errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json data");
@@ -412,7 +421,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
         }}"#
     );
     let resp = schema
-        .execute(async_graphql::Request::new(conflicting).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(conflicting).data(acting(RequestRole::Admin)))
         .await;
     assert_eq!(resp.errors.len(), 1, "expected the Conflict: {:?}", resp.errors);
     let ext = resp.errors[0].extensions.as_ref().expect("extensions");
@@ -431,7 +440,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
             async_graphql::Request::new(format!(
                 r#"mutation {{ activateRestaurant(input: {{ restaurantId: "{missing}" }}) {{ messageId operationStatus }} }}"#
             ))
-            .data(RequestRole::Admin),
+            .data(acting(RequestRole::Admin)),
         )
         .await;
     assert!(resp.errors.is_empty(), "acceptance must not error: {:?}", resp.errors);
@@ -461,7 +470,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
     let resp = schema
         .execute(
             async_graphql::Request::new(anon)
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(server::graphql_session::SessionHeader(Some(session_a))),
         )
         .await;
@@ -479,7 +488,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
             async_graphql::Request::new(format!(
                 r#"query {{ operationStatus(input: {{ messageId: "{anon_message}" }}) {{ status }} }}"#
             ))
-            .data(RequestRole::Public)
+            .data(acting(RequestRole::Public))
             .data(server::graphql_session::SessionHeader(Some(session_b))),
         )
         .await;
@@ -493,7 +502,7 @@ async fn acceptance_first_write_path_enqueues_delivers_and_serves_status() {
             async_graphql::Request::new(format!(
                 r#"query {{ operationStatus(input: {{ messageId: "{anon_message}" }}) {{ status }} }}"#
             ))
-            .data(RequestRole::Admin),
+            .data(acting(RequestRole::Admin)),
         )
         .await;
     assert!(admin.errors.is_empty());
@@ -567,7 +576,7 @@ async fn pm_command_replay_is_a_duplicate_never_a_reexecution() {
         }}"#
     );
     let resp = schema
-        .execute(async_graphql::Request::new(replay).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(replay).data(acting(RequestRole::Admin)))
         .await;
     assert!(resp.errors.is_empty(), "replay errored: {:?}", resp.errors);
     let data = resp.data.into_json().expect("json");
@@ -588,7 +597,7 @@ async fn pm_command_replay_is_a_duplicate_never_a_reexecution() {
         }}"#
     );
     let resp = schema
-        .execute(async_graphql::Request::new(conflicting).data(RequestRole::Admin))
+        .execute(async_graphql::Request::new(conflicting).data(acting(RequestRole::Admin)))
         .await;
     assert_eq!(resp.errors.len(), 1, "expected Conflict: {:?}", resp.errors);
     let ext = resp.errors[0].extensions.as_ref().expect("extensions");

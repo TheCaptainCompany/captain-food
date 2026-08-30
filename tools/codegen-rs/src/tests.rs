@@ -12122,14 +12122,33 @@ mod decision_ask_and_citations {
             .map(|l| l.split_once("//").map_or(l, |(before, _)| before))
             .collect::<Vec<_>>()
             .join("\n");
-        for needle in [
-            "claude_citation_corpus(&root)",
-            "validate_no_superseded_row_is_cited_as_authority(",
+        // THE CONSEQUENCE CLAUSE IS PER-NEEDLE, not shared. It read "would stop running the
+        // superseded-citation rule" for all three, so two thirds of this guard named the wrong rule
+        // in the message a reader gets at the exact moment they have no other information -- §19
+        // #10's class, in the assertion whose whole job is to explain what just stopped being
+        // checked. (Round 2 of PR #803.)
+        for (needle, what_stops) in [
+            (
+                "claude_citation_corpus(&root)",
+                "the §23 citation ratchet would stop being fed the instruction surface, so every rule over it silently checks nothing",
+            ),
+            (
+                "validate_no_superseded_row_is_cited_as_authority(",
+                "`make validate` would stop running the superseded-citation rule",
+            ),
+            // §23d (#802): the exemption ratchet is only worth anything where `docs-validate` can
+            // reach it. Unwiring it here would return the gate to a test job the docs-only filter
+            // skips -- the exact state in which `main` reported green while red, twice.
+            (
+                "validate_exemption_ratchet(&exemptions, DECLARED_EXEMPTIONS)",
+                "the §23d exemption ratchet would return to a gate the docs-only filter skips -- the exact state in which `main` reported green while red, twice",
+            ),
         ] {
             assert!(
                 code.contains(needle),
-                "main.rs no longer contains the EXECUTABLE `{}` (a copy inside a comment does not count) -- `make validate` would stop running the superseded-citation rule with every test still green",
-                needle
+                "main.rs no longer contains the EXECUTABLE `{}` (a copy inside a comment does not count) -- {}, with every test still green",
+                needle,
+                what_stops
             );
         }
     }
@@ -12281,12 +12300,64 @@ mod decision_ask_and_citations {
     }
 
     #[test]
+    fn the_exemption_ratchet_reds_on_growth_and_stays_green_on_retirement() {
+        // The ratchet's whole asymmetry, planted both ways. Fixture declarations only — the
+        // committed list is asserted separately, by the corpus test below.
+        let declared: &[(&str, &str)] = &[
+            ("ADR-20990101-000000", "held, deposits with the PR that authored it"),
+            ("ADR-20990101-000001", "the known-dangling specimen"),
+        ];
+        let entry = |id: &str| {
+            format!("  - id: \"{}\"\n    reason: \"held\"\n    retires_when: \"deposit\"\n", id)
+        };
+        let file = |ids: &[&str]| {
+            let mut y = String::from("exempt:\n");
+            for id in ids {
+                y.push_str(&entry(id));
+            }
+            parse_citation_exemptions(&y).0
+        };
+        let rule = |ids: &[&str]| validate_exemption_ratchet(&file(ids), declared);
+
+        // Exactly the declared set: GREEN.
+        assert!(rule(&["ADR-20990101-000000", "ADR-20990101-000001"]).is_empty());
+
+        // GROWTH — an id nobody declared: RED, and the message NAMES the id, which is the point
+        // the superseded `5 != 4` count could never make.
+        let grown = rule(&["ADR-20990101-000000", "ADR-20990101-000001", "ADR-20990101-000002"]);
+        assert_eq!(
+            grown.iter().map(|i| i.rule).collect::<Vec<_>>(),
+            vec!["citation-exemption-undeclared"]
+        );
+        assert_eq!(grown[0].location, "docs/decisions/_exempt.yaml");
+        assert!(grown[0].message.contains("ADR-20990101-000002"), "the id must be named: {}", grown[0].message);
+        assert!(matches!(grown[0].level, Level::Error));
+
+        // RETIREMENT — a declared id deposits and leaves the file: GREEN, deliberately. This is
+        // the #799 case: a count assertion would go red here, which is how the same landmine
+        // rearms itself pointing the other way. `citation-exemption-unused` is what forces the
+        // removal, so the ratchet must not also punish it.
+        assert!(rule(&["ADR-20990101-000000"]).is_empty());
+        assert!(rule(&[]).is_empty());
+
+        // An EMPTY declaration list is not a free pass: everything on file is then undeclared.
+        assert_eq!(validate_exemption_ratchet(&file(&["ADR-20990101-000000"]), &[]).len(), 1);
+    }
+
+    #[test]
     fn the_committed_corpus_passes_the_ratchet_with_exactly_the_declared_exemptions() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let c = load_record_corpus(&root);
         let (exemptions, shape_issues) = load_citation_exemptions(&root);
         assert!(shape_issues.is_empty(), "exemption file must be well-shaped");
-        assert_eq!(exemptions.len(), 4, "the adoption-time exemption set is exactly the held trio + the one known-dangling id");
+        // §23d — the ratchet is now a VALIDATOR RULE, not a count in this test (#802). The count
+        // lived here, `_exempt.yaml` is a docs/** file, and the docs-only path filter switches this
+        // job off: two pushes reached `main` green while this assertion was failing. Asserting the
+        // rule from here keeps the corpus covered without holding the knowledge in a test binary.
+        assert!(
+            validate_exemption_ratchet(&exemptions, DECLARED_EXEMPTIONS).is_empty(),
+            "every committed exemption must be one the ratchet declares"
+        );
         let files = load_governed_doc_files(&root);
         assert!(files.len() > 100, "the governed corpus should span docs/** + CLAUDE.md");
         let issues = validate_citations(&files, &c, &exemptions);

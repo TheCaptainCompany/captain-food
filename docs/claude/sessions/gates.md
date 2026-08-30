@@ -6,7 +6,7 @@ Part of [`../sessions.md`](../sessions.md).
 
 | Change touches | Gate | Cost |
 |---|---|---|
-| `docs/**` only (no regeneration) | nothing, or `make validate` | seconds |
+| `docs/**` only (no regeneration) | `make validate` — never *nothing*, see below | seconds |
 | `specs/**` | `make validate`, then `make rust` before pushing | seconds, then minutes |
 | `crates/**`, `tools/**`, CI, deploy | `make rust` | minutes — **much** worse from a cold cache |
 
@@ -28,6 +28,42 @@ decision 6). Corollary for CI itself: path filters are keyed on one question —
 generated output?* (`docs/**`/ADRs/`STATUS.md` skip the matrix, **`specs/**` is never filtered**), and
 a filtered job must still report its **required-check name** from a skip job or branch protection
 deadlocks.
+
+**…and that question is INCOMPLETE, which is how `main` went green while red (2026-08-30, #802).**
+A filter keyed only on *can this change generated output?* is blind to the other way a `docs/**`
+edit breaks the build: **a `docs/**` file that is an INPUT to a Rust test**.
+`docs/decisions/_exempt.yaml` was ratcheted by `assert_eq!(exemptions.len(), 4)` in
+`tools/codegen-rs/src/tests.rs`, so the gate over a docs file lived in `build-test` — the job
+`docs_only` switches off. Adding the fifth exemption reded that assertion and `ci` reported
+**success** on two consecutive pushes to `main`; it surfaced only when an unrelated `crates/**` diff
+was merged alongside it. `docs-validate` could not see it either, because `make validate` genuinely
+passed: the validator rules are content-shaped and the ratchet was count-shaped. **The filter's real
+question is therefore *can this change break a gate?*, and the docs-only lane answers it only for
+gates that live inside `make validate`.**
+
+The executable half is landed — that ratchet is now the validator rule
+`citation-exemption-undeclared`, and its declaration list sits in Rust source **on purpose**: adding
+an exemption must touch `tools/**`, which flips the filter and un-skips the matrix. So the rule this
+leaves is short: **before putting a real `docs/**` path in a Rust test, put the check in `make
+validate` instead** — and prefer membership to a count, because a governed file that legitimately
+arrives and retires reds a count assertion on both halves of its cycle (#802's fifth exemption
+arrived and deposited within one session, so a bumped count would have gone red again hours later,
+looking like a fresh bug).
+
+What is still open at that boundary is a **property, not a list**: *no real `docs/**` path may be
+read from disk in `tools/codegen-rs/src/tests.rs` outside a loader `main.rs` also calls, and no test
+may require a NAMED `docs/**` file to be present in a corpus it loads.* `tests.rs` breaks it in at
+least four places today, and the figure is the least reliable part of that sentence — **the first
+inventory of them was compiled by READING `main.rs` for loader call sites, said there were only
+`_exempt.yaml`'s two neighbours, and shipped as complete.** A single planted docs-only mutation
+found others within minutes: rewriting `.github/workflows` to a nonexistent pathspec inside an ADR
+leaves `docs-validate`'s literal command at exit 0 while `cargo test` FAILS. **That is the general
+lesson, one level up from the path filter — an inventory of what a gate covers is worth what it was
+EXECUTED against; a coverage claim derived by reading runs in the permissive direction.** Any
+instance reds `main` from a docs-only push while `ci` stays green. Tracked, with the guard that
+would make the property executable rather than prose, as
+[#804 "`docs/**` files gated only by a Rust test: the docs-only filter can hide their red (#802's
+class, remaining instances)"](https://github.com/TheCaptainCompany/captain-food/issues/804).
 
 **CLAUDE.md's architecture summary can be STALE — check it against `docs/STATUS.md` whenever
 hosting, storage or deployment topology matters.** Nothing regenerates that paragraph and no gate

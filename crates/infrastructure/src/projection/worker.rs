@@ -23,7 +23,7 @@ use std::time::Duration;
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
     project_order_conversation, project_order_tracking, project_prospection_pipeline,
-    project_restaurant, project_slug_alias, Envelope,
+    project_restaurant, project_rider, project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
@@ -33,10 +33,11 @@ use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
+use application::projectors::rider::RiderProjector;
 use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
-use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId};
+use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId, RiderId};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 use tracing::Instrument as _;
@@ -47,7 +48,7 @@ use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
-    scope_membership_store, slug_alias_store,
+    rider_store, scope_membership_store, slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -138,6 +139,10 @@ enum ReadModelProjector {
     OrderTracking,
     OrderConversation,
     CustomerCreditBalance,
+    /// The rider identity read model (#639 part A): the `auth_ref -> rider_id` bridge
+    /// ADR-20260818-004646 puts in our Postgres rather than in the provider's claims. A plain
+    /// single-stream fold with no computed column — `RiderCompute` is empty.
+    Rider,
     /// Keyed by the SUPERSEDED slug from the event payload, not by an aggregate id — one row per
     /// rename, so a restaurant renamed N times leaves N rows on the same stream.
     SlugAlias,
@@ -205,6 +210,13 @@ impl ReadModelProjector {
                 let state = customer_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_customer(&CustomerProjector, state, env) {
                     customer_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                }
+            }
+            Self::Rider => {
+                let id = RiderId(aggregate_uuid_of(env, "Rider-", "riderId")?);
+                let state = rider_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                if let Some(next) = project_rider(&RiderProjector, state, env) {
+                    rider_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::Catalog => {
@@ -417,6 +429,23 @@ const REGISTRY: &[ProjectorGroup] = &[
         stream_prefixes: &["Customer-"],
         projectors: &[ReadModelProjector::Customer],
         scope: "customer",
+    },
+    // The rider identity read model (#639 part A, ADR-20260818-004646). Its OWN checkpoint and its
+    // OWN group, never a prefix bolted onto an existing one: a prefix joined below an already
+    // advanced checkpoint is never folded (the #424 lesson, stated again on the ScopeMembership
+    // group below). Backfill is free for the same reason it is there — a group with no
+    // `projection_checkpoint` row starts at position 0 — and here that costs nothing, because no
+    // `RiderRegistered` has ever been appended.
+    //
+    // `DeliveryAcceptedByRider` lands on `DeliveryJob-%` and is therefore INVISIBLE to this group.
+    // Correct today: this table holds identity and availability, not job assignment. The day a
+    // "current job" column is wanted, adding that prefix requires DELETING the Rider checkpoint row
+    // in the same migration.
+    ProjectorGroup {
+        checkpoint: "Rider",
+        stream_prefixes: &["Rider-"],
+        projectors: &[ReadModelProjector::Rider],
+        scope: "delivery",
     },
     ProjectorGroup {
         checkpoint: "Catalog",

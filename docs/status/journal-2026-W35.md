@@ -1,7 +1,112 @@
 # Status journal — 2026-W35
 
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
+
+> **2026-08-30 (second sitting) — the founder answered three residues, and answering them found a
+> decision that was approved 22 days ago and never built.**
+> ([ADR-20260830-234532](../adr/ADR-20260830-234532-the-second-sitting-publish-france-wide-revocation-is-immediate-and-the-objection-chain-was-decided-22-days-ago.md),
+> five lenses.) Publish scope: **crawl AND publish France-wide**, over the crawl-wide/publish-Tours
+> recommendation `business-specialist` and `legal-specialist` reached independently and which was
+> put to him as the recommendation. Rider revocation: **immediately, on the next request**. Support
+> contact: a functional role address on a domain we control — **shape settled, string still owed**.
+>
+> **The finding that outranks all three** is true today, at Touraine scale, with the crawl paused:
+> `PROP-20260808-142532` D3/D4 were **Approved on 2026-08-08** and are unbuilt.
+> `projectors.rs:59` is `RestaurantListingOptedOut(_) => state` — the opt-out folds to a literal
+> no-op; the D4 `delisted` boolean exists nowhere; `ProspectionPipeline.fedBy` does not consume the
+> opt-out, so an opted-out restaurant stays a prospect; `restaurant.rs:83` filters `listing_status`
+> only when `orderable_only == Some(true)`, so non-partner rows are listed on an unguarded public
+> query; and the only door to the objection requires a Google proof behind a **fail-closed**
+> verifier. The register's usual pathology is a decision nobody is making — **this is its mirror.**
+>
+> **The number in the question was wrong, and the `UNVERIFIED input` marking earned its keep.**
+> ADR-20260817-105845 requires a coordinator-authored figure to be marked; this one was, and `dba`
+> found "~200k rows" is *neither* population — the publish surface is ~250–300k registered listings
+> and the mirror is ~1.0M rows, re-derived from ADR-20260728-143000's measured 339,077 rows over 37
+> of 101 departments. The 200k came from a partial-coverage re-translation batch and had been
+> carried into the residue as the publish population. The 3.5× gap is its own defect:
+> `restauration_query` wraps its predicates in INSEE's `periode(...)`, which matches **any** period,
+> so without `dateFin:null` the sweep returns every établissement ever active under a restauration
+> NAF and the mirror has no row retention.
+>
+> **Two facts the founder did not have when he answered**, recorded because they change what the
+> decision means and not whether it was right: `sirene.rs:111-113` composes a sole trader's
+> `displayName` as `"{prénom} {nom}"` against an `adresseEtablissement` that for micro-entrepreneurs
+> is frequently the **domicile**, so national publish publishes natural persons' home addresses; and
+> `grep -rni 'diffusion|statutDiffusion|nonDiffusible'` returns **zero hits repo-wide**, so people
+> who asked the State not to be published are ingested. Also: **it is not executable as stated** —
+> ADR-20260728-011344 nulled slugs on `NON_PARTNER` rows and the `restaurant` query resolves by
+> slug, so there is no per-listing page for the Art. 14 notice, the objection route or the claim
+> door to live on.
+>
+> Seven register rows written and `STAFF-AUTH` migrated off `_legacy.yaml` — it had been **amended
+> twice the same day while still legacy**, which `_legacy.yaml`'s own burn-down trigger (b) makes a
+> same-change migration, and `make validate` did not notice. `PUBLISH-SCOPE` and
+> `RIDER-REVOCATION-TTL` created *and closed* in the same change, because under `reconsiders` an
+> undeclared decision cannot be reversed — and publishing a national directory is precisely the
+> decision someone will want to challenge. The four mechanical obligations got **no** decision rows:
+> they were decided on 2026-08-08 and filing them again would re-ask an answered question.
+>
+> Sequencing: the objection chain goes **first** — GREEN, already approved, dispatchable — and part
+> C's proposal runs beside it on disjoint files. The crawl stays paused; the founder answered *how
+> wide*, not *whether we are ready*.
+
 Current state: [`../STATUS.md`](../STATUS.md).
+
+> **2026-08-30 — `main` reported green while a Rust unit test was failing, because the gate over a
+> `docs/**` file lived in the one job the docs-only path filter switches off.**
+> `docs/decisions/_exempt.yaml` is the single sanctioned bypass in the §23 citation ratchet, so its
+> growth has always been ratcheted — by `assert_eq!(exemptions.len(), 4)` in
+> `tools/codegen-rs/src/tests.rs`. Commit `2fa8a30b` added a fifth, legitimate exemption; the
+> `changes` job classified that push and the next as **docs-only**, `build-test` was skipped, and
+> `codegen` aggregated to success. Two consecutive pushes reached `main` carrying a failing
+> assertion. `docs-validate` — the job
+> [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)
+> added precisely to cover that lane — could not see it either, because `make validate` genuinely
+> passed: the validator rules are content-shaped and the ratchet was count-shaped.
+>
+> **The fix is not the bump the incident asks for.** The exemption file is a *self-pruning queue* —
+> entries arrive when a record is held and leave when it deposits, `citation-exemption-unused` being
+> what forces the removal — so a count assertion is red on **both** halves of that cycle. This was
+> not a theoretical objection: PR [#799](https://github.com/TheCaptainCompany/captain-food/pull/799)
+> merged while the fix was being written, deposited
+> [ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md),
+> and the fifth entry self-pruned away within the hour. A bumped `== 5` would have been red on
+> `main` right then, hours after landing, looking like a fresh bug. So the ratchet became
+> **membership-shaped**: growth is `citation-exemption-undeclared`, an error naming the id and what
+> a declaration must say about it; shrinkage is silent-green, because retirement is the file working
+> as designed.
+>
+> **And it moved into `make validate`**, where `docs-validate` runs it verbatim on exactly the
+> docs-only complement — executing
+> [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)'s
+> intent rather than deciding anything new, so no ADR. The compiler-first half is where the
+> declaration list lives: **Rust source, on purpose.** Adding an exemption *with its declaration*
+> can no longer be a docs-only diff, because it must touch `tools/**`, which flips the path filter
+> and un-skips the whole matrix. **It is a check, not an impossibility, and the word "unspellable"
+> is reserved** (ADR-20260803-234035): a docs-only push that adds an exemption and *skips* the
+> declaration is still perfectly spellable and still lands on `main`, because that lane is a push
+> with no PR — what changed is that it now goes **loudly red on `docs-validate`, the lane that
+> edits the file**, instead of silently skipping the only job that could see it.
+>
+> **The finding that outlives this chunk**: `_exempt.yaml` was not the only `docs/**` file read by a
+> Rust test — and the first inventory of the rest, compiled by *reading* `main.rs` for loader call
+> sites rather than by executing anything, was itself short and shipped as complete. The residue is
+> therefore recorded as a **property**: no real `docs/**` path is read from disk in `tests.rs`
+> outside a loader `main.rs` also calls, and no test requires a NAMED `docs/**` file to be present
+> in a corpus it loads. `tests.rs` breaks it in at least four places —
+> `gates_md_does_not_state_the_length_of_a_list_it_introduces` reads
+> `docs/claude/sessions/gates.md`; `the_ride_along_count_matches_the_clauses_named` reads
+> `docs/decisions/RETRIEVAL-QMD-CI.yaml` and asserts a **derived count**, the exact shape just
+> removed; and the review found `the_records_state_the_same_citation_corpus_as_the_code` and
+> `the_status_parser_tolerates_the_real_corpus_format_variance` by PLANTING a docs-only mutation
+> instead of reading — rewriting `.github/workflows` to a nonexistent pathspec inside
+> `ADR-20260824-205911`, after which `docs-validate`'s literal command exits **0** and `cargo test`
+> **FAILS**, reproduced on this branch. Any of them reds `main` from a docs-only push while `ci`
+> stays green. Reported, not fixed:
+> [#804](https://github.com/TheCaptainCompany/captain-food/issues/804). Work on
+> [#802](https://github.com/TheCaptainCompany/captain-food/issues/802) /
+> PR [#803](https://github.com/TheCaptainCompany/captain-food/pull/803).
 
 > **2026-08-30 — the four STAFF-AUTH answers, and the one that is a composite rather than an
 > option.** The founder answered the decision queue put to him after #639 parts A and B landed
@@ -161,6 +266,83 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > Deployed behaviour delta: **zero** — all twelve are unreachable today. The value is that the build
 > now refuses the omission. #780, PR #783.
 
+> **2026-08-30 — a role guard now takes a value only an identity can mint, and the RIDER role has
+> an identity to mint one from.** #639 parts A and B, on `claude/staff-auth-signin-zpapwy`
+> ([ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md)).
+> The defect ADR-20260818-004646 recorded as Correction 3 is closed at the edge: `RoleGuard` tested
+> membership of a `RequestRole` that `routes.rs` had parsed out of the URL path, and never consulted
+> the verified `Principal` — so a token asserting `role: RESTAURANT` with no `restaurant_id` passed
+> `approveRefund`, which resolves its actor from the payload's `orderId` and not from the caller.
+> The guard's input is now an `ActingRole`, a private-field newtype in a child module of `auth`
+> whose only producer matches on `Identity` and whose `Unbound` arm yields PUBLIC. The privileged
+> value does not exist for that caller.
+>
+> **Three things the mob caught that the card had wrong, banked as a card defect.** (1) The card
+> named two transports; there are **three** — `web_ssr.rs` renders SSR pages straight against the
+> schema (**graphql-architect**). (2) `Rider.display_name` mirrored `Customer`'s nullability, and
+> the projector emitter branches on the COLUMN's nullability, so a nullable column blind-overwrites:
+> `RiderInfoUpdated` is a partial update, so a phone-only change would have erased the rider's name,
+> live and on every replay (**young**). (3) `auth_ref` was specified `index: true`, and a
+> non-unique index makes `fetch_optional` return an arbitrary row on multiplicity — with
+> `ScopeMembership` keying grants on `member_id = rider_id`, that is one rider silently holding
+> another's order scope (**dba**). All three were fixed before the diff was presented. Attribution:
+> **card defect** in all three cases, not roster width — the invited lenses caught them at briefing,
+> which is what the briefing is for.
+>
+> **Two findings worth keeping past this chunk.** The nullable-column defect turns out to be caught
+> by `rustc`, not only by a test: the generated row field becomes `Option<PhoneNumber>` and the
+> hand-written store stops typechecking — so the spec's NOT NULL is enforced by the compiler one
+> layer down, and that is worth knowing before anyone "simplifies" a projection column to nullable.
+> And the injection half of a context-bag guarantee **can** be made structural even though presence
+> in the bag cannot: returning the witness as a tuple element of the one function both transports go
+> through makes forgetting it a compile error.
+>
+> **Evidence.** 1488 tests passed / 0 failed across 199 binaries with a real Postgres (Postgres 16
+> started locally per `docs/claude/sessions/gates.md`; the DB-gated suites RAN — 91 in
+> `infrastructure`, not skipped). `make validate` 0 errors. The warning surface NARROWED
+> (`event-not-projected` 9 → 6) and the baseline was tightened in the same commit. Four planted
+> violations were seen red, each with its message: the Unbound guard arm and the envelope arm as
+> failing assertions, the witness dropped from either transport as `rustc` E0308.
+>
+> **What is NOT closed, so a green branch is not misread**: the money path is still unbound
+> (`other-restaurant ⇒ denied` is false everywhere — `approveRefund` has no ownership comparison,
+> and its source is still open); no rider can sign in, because part A ships a fold with no consumer;
+> and an incompletely-provisioned restaurateur still gets *"role PUBLIC is not authorized"* in
+> English over an empty order queue. Part C is not claimed — it is AMBER and owes a proposal plus a
+> founder decision.
+
+> **2026-08-30 (later) — the independent review returned FAIL, and the finding is the one worth
+> keeping from this whole chunk.** The #639 A+B test migration converted 45 literal
+> `.data(RequestRole::X)` call sites with a regex and **missed three variable-bound `.data(role)`
+> sites** inside `for role in …` loops. Every one of those suites stayed GREEN — because a role that
+> never arrives reads as absent, the guard fails closed to PUBLIC, and PUBLIC is refused too. Three
+> role-refusal loops asserting nothing, and `mailbox_lanes.rs` carries a comment recording the SAME
+> loop being caught at 4-of-6 role coverage on #536; the miss had taken it to 0-of-6. Two sentences
+> in the ADR and in `STATUS.md` asserted the opposite, which is worse than the code defect: the next
+> session would have cited them.
+>
+> **The generalisable lesson, and it is not "grep harder".** A fail-closed default is correct for
+> production and actively hostile to a test: the test's subject silently becomes the default, and
+> the assertion still passes. Any change that moves a context-injected value to a new type has this
+> shape — `async_graphql::Data` is `TypeId`-keyed over `Any`, so the compiler sees nothing. The
+> repair is `crates/server/tests/role_injection_gate.rs`: a source scan naming the two wrong
+> spellings, which is the sanctioned "check as fallback" level because the compiler genuinely cannot
+> reach the call sites. It asserts it scanned a non-empty set — a gate that scans nothing passes
+> forever — and it was seen RED against the exact mutant before being trusted.
+>
+> Three more review findings, all corrected in the same commit: `bridge_resolved` restated on the
+> identity alone had fixed the Unbound end and **broken the #641 end** (a bound CUSTOMER whose
+> Postgres lookup fails degrades to Public and was reporting resolved — including `LookupFailed`,
+> the PAGE-classed one), so it now takes both the identity and the resolved scope; the `auth_ref`
+> UNIQUE rationale said "a visible denial" when `DbFaultPolicy::Skip` makes it a log line and no
+> metric; and the mailbox `resolve_actor`'s dependence on `user_type == "CUSTOMER"` was a real
+> consumer missing from the ADR's enumeration (unreachable today, recorded because "unreachable" is
+> a claim about the current API surface).
+>
+> Non-blocking and filed rather than fixed: `Principal::role_binding` is an unconditionally `pub`
+> constructor that can mint an ADMIN principal from nothing — production is unaffected
+> (`routes.rs` is the only injector) but it is the test-only escape hatch this change refused for
+> `ActingRole`, re-created one level up in the public API.
 
 > **2026-08-30 — the flip changed a field and left the sentence: a config default is now emitted,
 > never restated.** `ROUTE_ORDER_BIRTH_THROUGH_LANE` went `default: false → true` on 2026-08-30
