@@ -98,6 +98,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 >
 > Deployed behaviour delta: **zero** — all twelve are unreachable today. The value is that the build
 > now refuses the omission. #780, PR #783.
+
 > **2026-08-30 — a role guard now takes a value only an identity can mint, and the RIDER role has
 > an identity to mint one from.** #639 parts A and B, on `claude/staff-auth-signin-zpapwy`
 > ([ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md)).
