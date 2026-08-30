@@ -28,18 +28,42 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > that `$ref` IS what makes it routed — the codegen's hand-kept `PM_LANE_ROUTED_DELIVERS` and
 > `SENDS_LANE_ROUTED` consts are gone and the routed set is read from the model. The emitter writes a
 > `Route` enum and a `RouteGates` struct; `TriggerEnvelope::lane_sink()` is **deleted** and the only
-> accessor is `lane_sink_for(Route)`. Four mistakes, three of them now unspellable: a key that does
-> not exist is `ref-site-undeclared` at `make validate`; staging without naming your route is E0061;
-> forgetting a construction site is E0063 (`RouteGates` derives no `Default` on purpose). Only the
-> fourth — feeding route A's field from route B's key — needs a check, because the compiler cannot
-> see which config field MEANS which key: `route_gates_are_not_fused`, a `syn` scan asserting the
-> property, planted-red against the real tree.
+> accessor is `lane_sink_for(Route)`. Five mistakes, three of them now unspellable: a key that does
+> not exist is `ref-dangling` at `make validate`; staging without naming your route is E0599
+> (`lane_sink()` is deleted, not re-arity'd); forgetting a construction site is E0063 (`RouteGates`
+> derives no `Default` on purpose). Two need a check, because the compiler cannot see which config
+> field MEANS which key nor that a `sends:` is half-declared: `route_gates_are_not_fused`, a `syn`
+> scan asserting the property in BOTH spellings a key is written in (`config.<key>` and
+> `env_flag("KEY", ..)`), and `pm-route-gate`, which refuses `to:` without `route_gate:` — the
+> emitter reads the both-present pair, so that shape would silently drop the route from
+> `ROUTED_LANES` and generate no `Route` variant. Both planted-red against the real tree.
 >
 > **Both routes keep their exact position**: `ROUTE_ORDER_BIRTH_THROUGH_LANE` ON,
 > `ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` OFF. The runner now hands the sink UNCONDITIONALLY — owning
 > the fenced transaction is a property of the runner, true on every leg — and with every gate off the
 > envelope is laned and no route stages, which is byte for byte what withholding the sink used to
 > give. `runner.rs`'s comment is now true rather than annotated.
+>
+> **Round 2 — the guard against the false claim shipped two more false claims, and the guard itself
+> was green on the defect.** The independent reviewer returned FAIL with three blocking findings, all
+> of the same class this branch exists to remove. (1) `route_gates_are_not_fused` compared
+> case-SENSITIVELY, so at `standalone_deps` — the standalone adapter and per-actor bin fleet
+> composition root, the one with no generated `Config`, which this PR itself introduced — every field
+> named no key and was skipped in silence. Crossing the two env keys there, on the money-path
+> Order-birth route, left the suite at `3 passed; 0 failed`. Matching is now case-insensitive on
+> whole identifier runs, with a second planted red in the `env_flag("KEY", ..)` spelling: **a claim
+> that a guard asserts "the PROPERTY, not a spelling" is a claim about the spellings in the tree, and
+> only a verified red per spelling discharges it.** (2) `pm-route-gate` was named in two emitter doc
+> comments and did not exist; removing `route_gate:` while keeping `to:` gave 0 errors and emitted
+> `ROUTED_LANES` without its row, dropping the lane from #783's dead-man's-switch population and the
+> `Route` variant with it. The rule is written rather than the comments deleted, because that failure
+> mode is a lane vanishing from a dead-man's switch. (3) Two doc comments were spliced in half by
+> items inserted INSIDE them, so each documented the wrong thing while compiling and passing every
+> suite green — no gate reads a doc block. Also: the guard's non-vacuity was `literals > 0` tree-wide, which the six GENERATED bins
+> satisfy alone — deleting both hand-written roots left it green; it is per-file now, the same remedy
+> the `laned` allowlist argues for one file over. **The recurring shape across all four is one rule:
+> a claim written next to the code is consumed as checked, and the only thing that makes it checked
+> is a red you have actually seen.**
 
 > **2026-08-30 — the typed-inbox guarantee reached the fact door, and the thing it was hiding was a
 > catch-all that DESTROYED facts.** #771 made every declared COMMAND reach a decision in a

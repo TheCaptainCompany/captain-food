@@ -334,6 +334,65 @@ pub(crate) fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) 
             let is_command = ref_target_file(msg_ref, CTX).as_deref() == Some("commands.yaml");
             let msg_props = resolve_ref(model, msg_ref, CTX).map(|d| props_info(model, d, CTX)).unwrap_or_default();
 
+            // `pm-route-gate` (#797). A wrapper-seam `sends:` entry is ROUTED — `to:` names the
+            // actor whose lane receives the command and `route_gate:` names the configuration key
+            // that route is rolled back with — or it is a plain declaration for wiring/coverage
+            // and carries NEITHER. One without the other is a half-declared route, and the
+            // emitter (`emit::pm_orchestrators::route_decls`) reads exactly the both-present pair,
+            // so each half fails a different way and NEITHER of them is loud:
+            //   * `to:` with no `route_gate:` — the route drops out of the DECLARED route
+            //     population. `ROUTED_LANES` is emitted WITHOUT its row, so the lane leaves the
+            //     dead-man's-switch's declared population (#783: a lane nothing watches), and the
+            //     `Route` variant it would be enqueued through is never generated. `make validate`
+            //     stays at 0 errors and `make generate` writes the smaller table in silence; the
+            //     only thing that says anything today is a hand-written seam naming the missing
+            //     variant, i.e. a compile error in a file the DSL does not own.
+            //   * `route_gate:` with no `to:` — a rollback lever wired to nothing. The key looks
+            //     operable (it is a resolvable `$ref`, it appears in the boot report) while no
+            //     route consults it.
+            // Presence is tested on the KEY, not on a readable `$ref` inside it: a malformed
+            // `route_gate:` is reported by §1's `ref-dangling`/`ref-site-undeclared`, and treating
+            // it as absent here would answer a shape error with the wrong sentence.
+            for (j, s) in e.get("sends").and_then(|x| x.as_sequence()).into_iter().flatten().enumerate() {
+                let sw = format!("{}.sends[{}]", leg, j);
+                let has_to = s.get("to").is_some();
+                let has_gate = s.get("route_gate").is_some();
+                let cmd = s
+                    .get("command")
+                    .and_then(|x| x.get("$ref"))
+                    .and_then(|x| x.as_str())
+                    .and_then(ref_name)
+                    .unwrap_or_else(|| "?".to_string());
+                if has_to && !has_gate {
+                    issues.push(err(
+                        "pm-route-gate",
+                        format!("{}.route_gate", sw),
+                        format!(
+                            "sends '{}' declares `to:` with no `route_gate:` — a target with no gate is an \
+                             UNGATEABLE route, and it is not even a route: the emitter reads the both-present \
+                             pair, so this send is silently left out of ROUTED_LANES (its lane leaves the \
+                             dead-man's-switch population) and no `Route` variant is generated for it. Declare \
+                             the configuration key this route is rolled back with, or drop `to:` and leave the \
+                             send as a plain declaration.",
+                            cmd
+                        ),
+                    ));
+                }
+                if has_gate && !has_to {
+                    issues.push(err(
+                        "pm-route-gate",
+                        format!("{}.to", sw),
+                        format!(
+                            "sends '{}' declares `route_gate:` with no `to:` — a gate on nothing. The key reads \
+                             as an operable rollback lever (it resolves, it is in the boot report) while no \
+                             route consults it. Name the target actor whose lane receives the command, or drop \
+                             the gate.",
+                            cmd
+                        ),
+                    ));
+                }
+            }
+
             let steps = match e.get("steps").and_then(|x| x.as_sequence()) {
                 Some(s) if !s.is_empty() => s,
                 _ => {

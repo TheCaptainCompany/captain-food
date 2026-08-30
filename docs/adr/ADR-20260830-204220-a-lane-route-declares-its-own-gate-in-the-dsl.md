@@ -26,9 +26,11 @@ Accepted
 
 n/a — no behavioral guarantee. This ADR changes no route's position and no observable behaviour; it
 records the FORM the per-route gate takes. The mechanical guarantees it does carry are executable,
-not prose: `ref-site-undeclared` on `route_gate:` (`make validate`), `RouteGates`'s absent `Default`
-(E0063 at every construction site), the absence of any route-blind accessor on `TriggerEnvelope`
-(E0061), and `route_gates_are_not_fused` in `tools/codegen-rs/src/tests.rs`.
+not prose: `ref-dangling` on a `route_gate:` naming a key that does not exist (`make validate`),
+`pm-route-gate` on a half-declared routed `sends:`, `RouteGates`'s absent `Default` (E0063 at every
+construction site), the absence of any route-blind accessor on `TriggerEnvelope` (E0599 — the
+route-blind `lane_sink()` is deleted, not re-arity'd), and `route_gates_are_not_fused` in
+`tools/codegen-rs/src/tests.rs`.
 
 ## Context
 
@@ -89,17 +91,21 @@ The forces on the FORM of the fix:
 behaviours, which is precisely what "per-route gate" means; a route that exists without its own lever
 is the thing this ADR removes.
 
-Four levels of enforcement, in the order PROP-20260802-130500 §1 ranks them:
+The levels of enforcement, in the order PROP-20260802-130500 §1 ranks them (the table is the
+count — a number in this sentence goes stale the first time a row is added, and one was):
 
 | Mistake | What refuses it |
 |---|---|
-| Route names a key that does not exist | `ref-site-undeclared` at `make validate` — the gate is a `$ref` the refs walker resolves, not a string looked up at runtime |
-| Staging without naming your route | E0061 — there is no route-blind accessor to call |
+| Route names a key that does not exist | `ref-dangling` at `make validate` — the gate is a `$ref` the refs walker resolves, not a string looked up at runtime (the SITE is contracted in `REF_CONTRACT`, so `ref-site-undeclared` is what would fire if the contract row itself were removed) |
+| A routed `sends:` declares `to:` without `route_gate:`, or the reverse | `pm-route-gate` at `make validate` — the emitter reads the both-present pair, so a target with no gate would silently leave `ROUTED_LANES` and generate no `Route` variant, at 0 errors |
+| Staging without naming your route | E0599 — `lane_sink()` is deleted, so there is no route-blind accessor to call (not E0061: the method does not exist, it did not change arity) |
 | Declaring a route and forgetting a construction site | E0063 — `RouteGates` derives no `Default`, so every literal must name every field |
-| Feeding route A's field from route B's key (copy-paste fusion) | `route_gates_are_not_fused` — a `syn` scan of every `RouteGates { .. }` literal in `crates/**`, asserting the PROPERTY (a field naming any declared route's key must name its own) and refusing `..rest` |
+| Feeding route A's field from route B's key (copy-paste fusion) | `route_gates_are_not_fused` — a `syn` scan of every `RouteGates { .. }` literal in `crates/**`, asserting the PROPERTY (a field naming any declared route's key must name its own) and refusing `..rest`. Matched case-insensitively on whole identifier runs, because a key is written BOTH as the generated `Config` field and as its canonical UPPERCASE name in `env_flag("KEY", ..)`; each spelling carries its own planted red, and the composition roots the scan reads are pinned per file rather than by a tree-wide `> 0` |
 
-Only the fourth is a check, and only because the compiler cannot see which config field *means* which
-key. Compiler first; a check is the fallback (ADR-20260803-234035).
+The compiler carries every row it can reach. The two that stay checks are the two it cannot see:
+which config field *means* which key, and that a `sends:` entry declared HALF a route is not a route
+at all (both halves of that pair live in YAML, so no Rust type is even involved). Compiler first; a
+check is the fallback (ADR-20260803-234035).
 
 `runner.rs`'s comment stays, because the code now delivers what it claims: the sink is handed over
 UNCONDITIONALLY (owning the fenced transaction is a property of the runner, true on every leg) and
@@ -123,9 +129,11 @@ route stages — byte for byte what the withheld sink used to give.
   policy, a different axis entirely — a route is a `(process manager, message, target)` triple, and
   two routes to the same lane must be separately flippable.
 - **A validator rule instead of a type** ("every routed step must name a gate"). Rejected as the
-  primary mechanism under ADR-20260803-234035: the `$ref` + the missing `Default` already make three
-  of the four mistakes unspellable, and a rule that restates what the compiler enforces is a rule
-  that will drift.
+  PRIMARY mechanism under ADR-20260803-234035: the `$ref` + the missing `Default` already make the
+  compiler-reachable mistakes unspellable, and a rule that restates what the compiler enforces is a
+  rule that will drift. `pm-route-gate` is the fallback for the one shape no type can reach — a
+  `sends:` entry with `to:` and no `route_gate:` is well-typed YAML that the emitter reads as
+  unrouted, so nothing downstream is ever constructed to fail.
 - **Leaving `PM_LANE_ROUTED_DELIVERS` in the codegen and adding only the key binding.** Rejected: two
   places would then say which steps are routed, and the whole defect is two places disagreeing about
   which switch drives which route.

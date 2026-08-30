@@ -143,15 +143,15 @@ pub fn spawn_actor_fleet(
     );
 }
 
-/// Everything a `pm-{name}` bin hosts besides its (optional) mailbox lane: the saga runner
-/// restricted to its OWN process manager, sequenced after the startup Stripe-fact backfill
-/// exactly like the monolith (#272 review MAJOR-2: the backfill must complete before the runner's
 /// The generated per-route lane gates, re-exported so a spine bin can name them without linking
 /// `application` directly (#797) — the same courtesy this crate already extends for the probe
 /// families. Declaring a route adds a field here, and every `PmRuntime` literal below stops
 /// compiling until a human says which configuration key feeds it.
 pub use application::generated::process_managers::{Route, RouteGates};
 
+/// Everything a `pm-{name}` bin hosts besides its (optional) mailbox lane: the saga runner
+/// restricted to its OWN process manager, sequenced after the startup Stripe-fact backfill
+/// exactly like the monolith (#272 review MAJOR-2: the backfill must complete before the runner's
 /// first tick, or a fact past a frozen checkpoint is missed forever).
 pub struct PmRuntime {
     pub pool: PgPool,

@@ -76,13 +76,6 @@ mod tests {
     }
 }
 
-/// Fully Pg-backed [`CommandDeps`] for a process hosting mailbox workers OUTSIDE the monolith
-/// composition root — a standalone adapter, or a per-actor bin (#385). External services resolve
-/// exactly like the monolith's: ENV-GATED with the fail-closed stand-in as the default —
-/// identity is the real Supabase ACL when `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` are set
-/// (else auth-dependent deliveries decline), sessions are the encrypted Pg store when
-/// `AUTH_SESSION_KEY` is set (else the no-op). `payments` stays injected because only the caller
-/// knows whether its deployment carries Stripe credentials AND only bins whose spec declares the
 /// Read one boolean gate from the environment, with the spec key's own default when unset.
 ///
 /// The standalone fleet has no generated `Config` (that lives in `crates/server`), so each gate is
@@ -95,6 +88,13 @@ fn env_flag(key: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+/// Fully Pg-backed [`CommandDeps`] for a process hosting mailbox workers OUTSIDE the monolith
+/// composition root — a standalone adapter, or a per-actor bin (#385). External services resolve
+/// exactly like the monolith's: ENV-GATED with the fail-closed stand-in as the default —
+/// identity is the real Supabase ACL when `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` are set
+/// (else auth-dependent deliveries decline), sessions are the encrypted Pg store when
+/// `AUTH_SESSION_KEY` is set (else the no-op). `payments` stays injected because only the caller
+/// knows whether its deployment carries Stripe credentials AND only bins whose spec declares the
 /// `payment` port link the Stripe adapter (the adapter crate sits above this one).
 pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
     let auth: Arc<dyn IdentityService> = match crate::SupabaseIdentityService::from_env() {

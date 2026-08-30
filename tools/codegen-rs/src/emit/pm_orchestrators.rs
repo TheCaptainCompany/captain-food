@@ -97,8 +97,12 @@ pub(crate) struct PmLegDef {
 /// `to` + `route_gate` are what a ROUTED send needs and a plain declaration does not: the target
 /// actor whose lane receives the command, and the `configuration.yaml` key that route is gated on.
 /// Both present ⇒ routed; both absent ⇒ the command is declared for wiring/coverage only. One
-/// without the other is refused by `pm-route-gate` — a target with no gate is an ungateable route,
-/// a gate with no target is a gate on nothing.
+/// without the other is refused by `pm-route-gate` (`validate::process_managers`) — a gate with no
+/// target is a gate on nothing, and a target with no gate is worse than an ungateable route:
+/// `route_decls` below reads the both-present PAIR, so the send would silently leave `ROUTED_LANES`
+/// (its lane dropping out of #783's dead-man's-switch population) with no `Route` variant emitted
+/// for it, at 0 validate errors. That rule was named here before it existed, and the shape it
+/// claims to refuse was reachable — round 2 of #797's review.
 pub(crate) struct PmSendDecl {
     /// The full `commands.yaml#/Name` ref string — what `pm-sends-kind`/`pm-sends-no-inbox` read.
     pub(crate) command_ref: String,
@@ -190,8 +194,11 @@ pub(crate) fn route_decls(model: &Model) -> Vec<RouteDecl> {
                         config_key: key.clone(),
                         is_fact: false,
                     }),
-                    // `pm-route-gate` reports the half-declared forms; the emitter treats them as
-                    // unrouted so a validate error is a validate error, never a codegen panic.
+                    // `pm-route-gate` (validate::process_managers) reports the half-declared forms;
+                    // the emitter treats them as unrouted so a validate error is a validate error,
+                    // never a codegen panic. Falling through here is precisely why the rule has to
+                    // exist: without it this arm drops the route from ROUTED_LANES and the `Route`
+                    // enum in silence, at 0 errors.
                     _ => {}
                 }
             }
