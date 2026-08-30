@@ -9516,7 +9516,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(2)_
+### 🗄️ Views (read models) _(3)_
 
 <a id="view-view_deliveryjob"></a>
 #### 🗄️ View: `View_DeliveryJob`
@@ -9563,6 +9563,24 @@ sequenceDiagram
 | `status` | [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus) | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested), [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | — | Derived from the latest lifecycle event type. |
 | `requested_at` | `timestamptz` | [⚡ `DeliveryPartnerAvailabilityRequested`](#event-deliverypartneravailabilityrequested) | — | occurrence: max(occurred_at) of the birth fact. |
 | `decided_at` | `timestamptz` | [⚡ `DeliveryPartnerAvailabilityApproved`](#event-deliverypartneravailabilityapproved), [⚡ `DeliveryPartnerAvailabilityRevoked`](#event-deliverypartneravailabilityrevoked) | nullable | occurrence: max(occurred_at) of the latest decision (approve/revoke); null while PENDING. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-rider"></a>
+#### 🗄️ View: `Rider`
+
+- **Source**: [🎭 `Rider`](#actor-rider) · 🛶 V0 · 🔒 internal
+- **Note**: The rider identity read model: the auth subject -> riderId mapping the authenticated request path resolves against (ADR-20260818-004646 -- no business identifier lives in the identity provider, so the mapping resolves in OUR Postgres), plus the rider's profile and availability. `RiderRegistered` has always carried `authRef` as required; until #639 nothing projected it, so `auth_ref` occurred exactly once in the whole projection set, on Customer, and the RIDER role had no sign-in-capable identity at all. A TABLE and not a `View_*` for the reason SlugAlias states three declarations up: this is read on EVERY authenticated request and must never fold on read -- peak is Friday/Saturday 19:00-21:30. Recovery is REPLAY, so there is no backup of it and there must not be one. 
+- **Rules**: This table answers WHO this connection is. It must never become the anchor for WHAT that connection may see -- the distinction the mapping exists to preserve. Concretely: the resolver reads `auth_ref -> rider_id` and NOTHING else. `status` sits in the same row and will tempt a `SUSPENDED => deny` check onto the auth path; that check belongs in the handler folding the `Rider-{id}` stream, which owns the transition table (delivery/actors.yaml) and reads it anyway. A read model is not an authorization oracle, and revocation is separately recorded as unrepresentable today -- there is no unbinding fact for anyone in the model (ADR-20260818-094500 finding 5). `auth_ref` is UNIQUE, not merely indexed, and the difference is a security property rather than a performance one: the repository lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- plan-dependent, no error -- and `ScopeMembership` keys its grants on `member_id = rider_id`, so a duplicate would hand one rider another rider's order scope. The constraint converts a silent breach into a visible denial. It does NOT create the invariant: nothing on the write side prevents two `RiderRegistered` with the same `authRef` and different `riderId`s (`register_rider` guards `riderId` existence only), and the write-side reservation that would is designed but unbuilt -- see the Rider sign-in door, tracked on #639 part C. Uniqueness over a POPULATION is not an aggregate's to enforce. `phone` carries NO unique constraint and NO index, deliberately, and this is where copying Customer would inject a defect: Customer.phone is UNIQUE because it is that aggregate's identity key, whereas a rider is keyed by `authRef` precisely so the phone never becomes a domain key. French mobile numbers are recycled, so a unique phone here is a scheduled future projector fault on a number's second owner. Rebuild by RESETTING THE CHECKPOINT, never by TRUNCATE. The fold is an upsert keyed on `rider_id` and `RiderRegistered` is the only creating arm, so a from-zero replay rewrites every row in place and no rider is ever denied mid-rebuild. TRUNCATE + replay does the opposite: every rider fails closed to Public for the length of the drain, and the fleet cannot sign in. ERASURE, named here so the sweep cannot miss an app-projected table the generated dispatch skips (the ScopeMembership precedent): `display_name` and `phone` are a natural person's data held OUTSIDE the stream, and the deletion engine deletes streams, not projection rows. Delivery declares no `deletion:` block for Rider today, so there is nothing to build yet -- but a rider tombstone fold is OWED the moment one is declared.
+- **Fed by**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderInfoUpdated`](#event-riderinfoupdated), [⚡ `RiderStatusChanged`](#event-riderstatuschanged)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `rider_id` | [🔤 `RiderId`](#scalar-riderid) _(derived)_ | [⚡ `RiderRegistered`.`riderId`](#event-riderregistered--riderid) | PK |  |
+| `auth_ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `RiderRegistered`.`authRef`](#event-riderregistered--authref) | unique | Auth provider user id (Supabase Auth) -> Rider. The lookup key of the identity bridge; see the `auth_ref` rule above for why the constraint is UNIQUE and what it does and does not guarantee. |
+| `display_name` | `text` _(derived)_ | [⚡ `RiderRegistered`.`displayName`](#event-riderregistered--displayname), [⚡ `RiderInfoUpdated`.`displayName`](#event-riderinfoupdated--displayname) | — | Rider's display name; RiderInfoUpdated overwrites it only when it carries one. |
+| `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RiderRegistered`.`phone`](#event-riderregistered--phone), [⚡ `RiderInfoUpdated`.`phone`](#event-riderinfoupdated--phone) | — | Contact number, a profile attribute and never a lookup key -- see the `phone` rule above. NOT NULL for the same partial-update reason as display_name. |
+| `status` | [🔤 `RiderStatus`](#scalar-riderstatus) _(derived)_ | [⚡ `RiderRegistered`.`status`](#event-riderregistered--status), [⚡ `RiderStatusChanged`.`status`](#event-riderstatuschanged--status) | — | Availability/lifecycle status, straight off the payload of whichever event wrote last. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -10088,7 +10106,7 @@ An independent Captain rider registered (linked to the auth provider user).
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10105,7 +10123,7 @@ One or more editable rider profile fields changed.
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10120,7 +10138,7 @@ A rider's availability/lifecycle status changed.
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

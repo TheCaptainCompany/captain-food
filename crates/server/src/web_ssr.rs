@@ -82,7 +82,13 @@ impl Transport for SchemaTransport {
     async fn execute(&self, document: &str, variables: Value) -> Result<Value, TransportError> {
         let request = async_graphql::Request::new(document)
             .variables(async_graphql::Variables::from_json(variables))
-            .data(RequestRole::Public)
+            // The THIRD transport (#639 part B — the two GraphQL doors in `routes.rs` are the
+            // other two). It injects the ACTING role like they do, and it derives it from the
+            // anonymous principal rather than naming PUBLIC directly, so this page renderer can
+            // never be the one place a role is asserted instead of proved. A document GET carries
+            // no credentials, so the answer is PUBLIC by construction — that is the module
+            // contract above, now spelled by the type.
+            .data(Principal::anonymous().acting_role(RequestRole::Public))
             .data(Principal::anonymous())
             .data(SessionHeader(None))
             .data(TraceContext(None))

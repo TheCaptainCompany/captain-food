@@ -78,6 +78,18 @@ pub struct CustomerRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The rider identity read model: the auth subject -> riderId mapping the authenticated request path resolves against (ADR-20260818-004646 -- no business identifier lives in the identity provider, so the mapping resolves in OUR Postgres), plus the rider's profile and availability. `RiderRegistered` has always carried `authRef` as required; until #639 nothing projected it, so `auth_ref` occurred exactly once in the whole projection set, on Customer, and the RIDER role had no sign-in-capable identity at all. A TABLE and not a `View_*` for the reason SlugAlias states three declarations up: this is read on EVERY authenticated request and must never fold on read -- peak is Friday/Saturday 19:00-21:30. Recovery is REPLAY, so there is no backup of it and there must not be one. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiderRow {
+    pub rider_id: RiderId,
+    pub auth_ref: ExternalReference,
+    pub display_name: String,
+    pub phone: PhoneNumber,
+    pub status: RiderStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatalogRow {
     pub catalog_id: CatalogId,

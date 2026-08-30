@@ -238,11 +238,24 @@ mutations:
 
   claimRestaurantListing:
     command: { $ref: 'commands.yaml#/ClaimRestaurantListing' }
+    # PUBLIC is KEPT, with the justification ADR-20260818-101500 requires rather than left to be
+    # discovered later: THE OWNERSHIP PROOF IS THE AUTHENTICATION. `ClaimRestaurantListing` requires
+    # `googleOwnershipProof`, verified server-side, and the claimant is by construction someone who
+    # does not yet have a Captain.Food account — that is the whole pre-registration listing flow
+    # (ADR-0019/0021), and stories.yaml's ClaimListing puts FindMyListing -> ClaimIt before any
+    # account exists. Removing PUBLIC deletes the entry point to the journey, and removing a role
+    # from a `roles:` list is a NON-ADDITIVE schema change besides.
+    # Unchanged by #639 part B: an unbound RESTAURANT_ACCOUNT caller acts as PUBLIC, which this list
+    # already admits, so the operation's behaviour is identical before and after. What DID change is
+    # its envelope — such a caller now records PUBLIC in `domain_events.user_type` instead of the
+    # role it merely asserted.
     roles: [PUBLIC, RESTAURANT_ACCOUNT]   # an owner proves ownership via Google Business Profile
     slice: V0
 
   optOutRestaurantListing:
     command: { $ref: 'commands.yaml#/OptOutRestaurantListing' }
+    # PUBLIC kept for a stronger reason than the claim above: an owner who wants OFF our listing
+    # must not have to create an account with us first.
     roles: [PUBLIC, RESTAURANT_ACCOUNT]
     slice: V0
 

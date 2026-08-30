@@ -43,6 +43,15 @@ use application::queries::{
 };
 use application::projections::OrderTrackingRow;
 use server::graphql_acl::RequestRole;
+
+/// The role-guard witness the transports inject (#639 part B). There is no way to fabricate an
+/// `ActingRole`: it comes from a `Principal` or it does not exist, so a test that exercises a role
+/// has to name a caller actually BOUND to it. Roles carrying no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn acting(role: RequestRole) -> server::ActingRole {
+    server::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+        .acting_role(role)
+}
 use server::graphql_schema::{build_schema, CaptainSchema, ReadDeps};
 use server::graphql_session::SessionHeader;
 
@@ -500,7 +509,7 @@ async fn leg1_the_customers_bound_cart_prices_live_to_3400() {
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(tenant_of(restaurant)),
         )
@@ -527,7 +536,7 @@ async fn leg2_an_anonymous_session_resolves_its_own_cart_and_only_its_own() {
     let own = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(SessionHeader(Some(uid(10))))
                 .data(tenant_of(restaurant)),
         )
@@ -539,7 +548,7 @@ async fn leg2_an_anonymous_session_resolves_its_own_cart_and_only_its_own() {
     let other = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(SessionHeader(Some(uid(11))))
                 .data(tenant_of(restaurant)),
         )
@@ -548,7 +557,7 @@ async fn leg2_an_anonymous_session_resolves_its_own_cart_and_only_its_own() {
     assert_eq!(other.data.into_json().unwrap()["current"], json!(null), "session B sees nothing");
 
     let headerless = schema
-        .execute(Request::new(CURRENT_Q).data(RequestRole::Public).data(tenant_of(restaurant)))
+        .execute(Request::new(CURRENT_Q).data(acting(RequestRole::Public)).data(tenant_of(restaurant)))
         .await;
     assert!(headerless.errors.is_empty());
     assert_eq!(headerless.data.into_json().unwrap()["current"], json!(null));
@@ -564,7 +573,7 @@ async fn leg2_a_bound_cart_is_invisible_to_an_anonymous_session_replay() {
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Public)
+                .data(acting(RequestRole::Public))
                 .data(SessionHeader(Some(uid(10))))
                 .data(tenant_of(restaurant)),
         )
@@ -590,7 +599,7 @@ async fn leg2_a_bound_cart_is_invisible_to_a_different_customers_claim_on_that_s
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(6))))
                 .data(SessionHeader(Some(uid(10))))
                 .data(tenant_of(restaurant)),
@@ -608,7 +617,7 @@ async fn leg2_a_bound_cart_is_invisible_to_a_different_customers_claim_on_that_s
     let owner = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(SessionHeader(Some(uid(10))))
                 .data(tenant_of(restaurant)),
@@ -631,7 +640,7 @@ async fn an_empty_open_cart_answers_zero_with_no_breakdown() {
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(tenant_of(restaurant)),
         )
@@ -664,7 +673,7 @@ async fn by_id_cart_admits_the_owner_and_admin_only() {
         .execute(
             Request::new(CART_Q)
                 .variables(cart_vars(1))
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(tenant_of(restaurant)),
         )
@@ -680,7 +689,7 @@ async fn by_id_cart_admits_the_owner_and_admin_only() {
         .execute(
             Request::new(CART_Q)
                 .variables(cart_vars(1))
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(6)))),
         )
         .await;
@@ -695,7 +704,7 @@ async fn by_id_cart_admits_the_owner_and_admin_only() {
         .execute(
             Request::new(CART_Q)
                 .variables(cart_vars(2))
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(tenant_of(restaurant)),
         )
@@ -708,7 +717,7 @@ async fn by_id_cart_admits_the_owner_and_admin_only() {
     );
 
     let admin = schema
-        .execute(Request::new(CART_Q).variables(cart_vars(1)).data(RequestRole::Admin).data(ReadScope::Admin))
+        .execute(Request::new(CART_Q).variables(cart_vars(1)).data(acting(RequestRole::Admin)).data(ReadScope::Admin))
         .await;
     assert!(admin.errors.is_empty(), "{:?}", admin.errors);
     assert_eq!(
@@ -734,7 +743,7 @@ async fn an_unresolvable_line_errors_the_read_instead_of_lying() {
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(tenant_of(restaurant)),
         )
@@ -771,7 +780,7 @@ async fn a_malformed_lines_row_errors_the_read_instead_of_rendering_a_partial_ca
     let resp = schema
         .execute(
             Request::new(CURRENT_Q)
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(ReadScope::Customer(ds::CustomerId(uid(5))))
                 .data(tenant_of(restaurant)),
         )

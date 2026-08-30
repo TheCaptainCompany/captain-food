@@ -3,6 +3,51 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-30 — a role guard now takes a value only an identity can mint, and the RIDER role has
+> an identity to mint one from.** #639 parts A and B, on `claude/staff-auth-signin-zpapwy`
+> ([ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md)).
+> The defect ADR-20260818-004646 recorded as Correction 3 is closed at the edge: `RoleGuard` tested
+> membership of a `RequestRole` that `routes.rs` had parsed out of the URL path, and never consulted
+> the verified `Principal` — so a token asserting `role: RESTAURANT` with no `restaurant_id` passed
+> `approveRefund`, which resolves its actor from the payload's `orderId` and not from the caller.
+> The guard's input is now an `ActingRole`, a private-field newtype in a child module of `auth`
+> whose only producer matches on `Identity` and whose `Unbound` arm yields PUBLIC. The privileged
+> value does not exist for that caller.
+>
+> **Three things the mob caught that the card had wrong, banked as a card defect.** (1) The card
+> named two transports; there are **three** — `web_ssr.rs` renders SSR pages straight against the
+> schema (**graphql-architect**). (2) `Rider.display_name` mirrored `Customer`'s nullability, and
+> the projector emitter branches on the COLUMN's nullability, so a nullable column blind-overwrites:
+> `RiderInfoUpdated` is a partial update, so a phone-only change would have erased the rider's name,
+> live and on every replay (**young**). (3) `auth_ref` was specified `index: true`, and a
+> non-unique index makes `fetch_optional` return an arbitrary row on multiplicity — with
+> `ScopeMembership` keying grants on `member_id = rider_id`, that is one rider silently holding
+> another's order scope (**dba**). All three were fixed before the diff was presented. Attribution:
+> **card defect** in all three cases, not roster width — the invited lenses caught them at briefing,
+> which is what the briefing is for.
+>
+> **Two findings worth keeping past this chunk.** The nullable-column defect turns out to be caught
+> by `rustc`, not only by a test: the generated row field becomes `Option<PhoneNumber>` and the
+> hand-written store stops typechecking — so the spec's NOT NULL is enforced by the compiler one
+> layer down, and that is worth knowing before anyone "simplifies" a projection column to nullable.
+> And the injection half of a context-bag guarantee **can** be made structural even though presence
+> in the bag cannot: returning the witness as a tuple element of the one function both transports go
+> through makes forgetting it a compile error.
+>
+> **Evidence.** 1488 tests passed / 0 failed across 199 binaries with a real Postgres (Postgres 16
+> started locally per `docs/claude/sessions/gates.md`; the DB-gated suites RAN — 91 in
+> `infrastructure`, not skipped). `make validate` 0 errors. The warning surface NARROWED
+> (`event-not-projected` 9 → 6) and the baseline was tightened in the same commit. Four planted
+> violations were seen red, each with its message: the Unbound guard arm and the envelope arm as
+> failing assertions, the witness dropped from either transport as `rustc` E0308.
+>
+> **What is NOT closed, so a green branch is not misread**: the money path is still unbound
+> (`other-restaurant ⇒ denied` is false everywhere — `approveRefund` has no ownership comparison,
+> and its source is still open); no rider can sign in, because part A ships a fold with no consumer;
+> and an incompletely-provisioned restaurateur still gets *"role PUBLIC is not authorized"* in
+> English over an empty order queue. Part C is not claimed — it is AMBER and owes a proposal plus a
+> founder decision.
+
 > **2026-08-30 — the flip changed a field and left the sentence: a config default is now emitted,
 > never restated.** `ROUTE_ORDER_BIRTH_THROUGH_LANE` went `default: false → true` on 2026-08-30
 > ([ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md));

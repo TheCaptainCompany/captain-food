@@ -142,6 +142,78 @@ enum Identity {
     Unbound { sub: String, role: RequestRole },
 }
 
+/// The [`ActingRole`] witness and its ONE producer, in a child module for the same reason
+/// [`fetch_intent`] is: **privacy is MODULE-scoped, not type-scoped**. A private field declared
+/// beside `Principal` would still leave `ActingRole(RequestRole::Restaurant)` spellable everywhere
+/// in `auth`, including in the very function whose mistake this type exists to make impossible.
+/// Down here the tuple field is out of scope at every call site in the file, and
+/// [`ActingRole::of`] — which owns the [`Identity`] match itself — is the only door.
+mod acting_role {
+    use super::{Identity, RequestRole};
+
+    /// **The only value a role guard accepts**: the role a verified caller may ACT as, as opposed
+    /// to the role their token merely asserts or their URL path merely names.
+    ///
+    /// **What it buys, concretely** (#639 part B, ADR-20260818-004646 Correction 3): the guard on
+    /// `approveRefund` was a membership test on the PATH role, which is attacker-chosen text that
+    /// any code can re-derive — so a token asserting `captain_food.role = "RESTAURANT"` and
+    /// carrying no `restaurant_id` reached the money path and could approve ANY pending refund.
+    /// An `ActingRole` cannot be spelled at all without an [`Identity`] in front of it, and
+    /// [`ActingRole::of`]'s [`Identity::Unbound`] arm yields PUBLIC. The privileged value does not
+    /// exist for that caller: the refusal is a property of the type, not of a check.
+    ///
+    /// Deliberately NOT `Default`, NOT `From<RequestRole>`, and with no public constructor and no
+    /// test-only one — each would be exactly the escape hatch this type exists to close. A test
+    /// that needs one builds the [`super::Principal`] it belongs to
+    /// ([`super::Principal::role_binding`]) and asks it, which is also the only honest way to
+    /// assert the unbound case.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ActingRole(RequestRole);
+
+    impl ActingRole {
+        /// Mint the acting role of an identity on a given path. `pub(super)` so the whole `auth`
+        /// module can reach it, which costs nothing: every caller must already hold an `Identity`,
+        /// and the arm that decides is right here.
+        ///
+        /// `path_role` decides for every bound identity rather than the identity's own role, and
+        /// that is deliberate: the ACL is PATH authorization (ADR-0006), and on `/public` an
+        /// identified customer ([`super::Principal::public_customer`]) must still evaluate as
+        /// PUBLIC — otherwise every operation with `roles: [CUSTOMER]` becomes reachable, and
+        /// introspectable, from the one path anyone can reach. For every other path
+        /// [`super::AuthContext::authorize`] has already checked the granted role equals the path
+        /// role, so the two agree by the time we get here.
+        ///
+        /// The match is exhaustive on purpose: a new [`Identity`] variant is `rustc` E0004 here, so
+        /// nobody can add an identity that silently inherits the "may act" answer.
+        pub(super) fn of(identity: &Identity, path_role: RequestRole) -> Self {
+            match identity {
+                // The ONE arm that cannot act. Verified on a role path, no domain binding — so
+                // there is no restaurant, rider or account it could be acting FOR, and every
+                // scoped operation would resolve its target from the request payload instead of
+                // from the caller. It degrades to PUBLIC rather than erroring so the answer
+                // matches `super::read_scope`, which already resolves this population to
+                // `ReadScope::Public`: one caller, one posture, on the read half and the write
+                // half alike.
+                Identity::Unbound { .. } => ActingRole(RequestRole::Public),
+                Identity::Anonymous
+                | Identity::External { .. }
+                | Identity::Admin { .. }
+                | Identity::Customer { .. }
+                | Identity::Restaurant { .. }
+                | Identity::RestaurantAccount { .. }
+                | Identity::Rider { .. } => ActingRole(path_role),
+            }
+        }
+
+        /// The role this caller may act as. Read-only: handing the inner role out lets callers
+        /// COMPARE it, never mint one.
+        pub fn get(self) -> RequestRole {
+            self.0
+        }
+    }
+}
+pub use acting_role::ActingRole;
+
 impl Principal {
     /// The unauthenticated PUBLIC identity — also what the SSR page renderer executes reads as
     /// (#92: a document GET carries no credentials, so server-side data resolution is by
@@ -236,10 +308,32 @@ impl Principal {
         }
     }
 
-    /// The verified role this caller acts as — DERIVED from the identity, so it can never disagree
-    /// with the claim beside it. An [`Identity::Unbound`] caller keeps its role (that is precisely
-    /// what makes its denial attributable, and what stamps `user_type` on its commands).
-    pub fn role(&self) -> RequestRole {
+    /// The verified role this caller IS — DERIVED from the identity, so it can never disagree with
+    /// the claim beside it. This is the role the mutation envelope stamps into
+    /// `domain_events.user_type` (ADR-0041: the acting user is envelope metadata).
+    ///
+    /// **Not the same question as [`acting_role`](Self::acting_role), and the two must not be
+    /// merged.** This one answers *"whose act was this?"* and follows the IDENTITY, which is why
+    /// it takes no path: an identified customer on `/public` — the storefront's own path (#469) —
+    /// records CUSTOMER, while the ACL evaluates them as PUBLIC. `acting_role` answers *"what may
+    /// they do?"* and follows the PATH. Using either for the other's job is a regression in one
+    /// direction and a hole in the other.
+    ///
+    /// **Why Unbound records as PUBLIC** (#639 part B): a token asserting RESTAURANT with no
+    /// `restaurant_id` is an authenticated stranger. Stamping *"RESTAURANT did this"* on its
+    /// commands writes a **false author into an immutable log** — worse than the authorization hole
+    /// it accompanies, because the log is what we would later reason from and events are never
+    /// rewritten. The declared role survives where it is a DIAGNOSIS rather than an attribution:
+    /// [`read_scope`] destructures `Identity::Unbound { role, .. }` itself to label
+    /// `read_authorization_bridge_unresolved_total{role}`, so the provisioning gap stays
+    /// attributable without anything downstream believing the role.
+    ///
+    /// Note for anyone reading `domain_events`: PUBLIC in `user_type` no longer implies a NULL
+    /// `user_id`. An Unbound caller keeps its auth subject (that is honest — it did authenticate)
+    /// and records PUBLIC, so the pair `(user_type = PUBLIC, user_id = <sub>)` now means *"a
+    /// credential proved no usable role"*. `specs/common/scalars.yaml#/UserType` carries the same
+    /// correction.
+    pub fn recorded_role(&self) -> RequestRole {
         match &self.identity {
             Identity::Anonymous => RequestRole::Public,
             Identity::External { .. } => RequestRole::External,
@@ -248,8 +342,64 @@ impl Principal {
             Identity::Restaurant { .. } => RequestRole::Restaurant,
             Identity::RestaurantAccount { .. } => RequestRole::RestaurantAccount,
             Identity::Rider { .. } => RequestRole::Rider,
-            Identity::Unbound { role, .. } => *role,
+            Identity::Unbound { .. } => RequestRole::Public,
         }
+    }
+
+    /// **The [`ActingRole`] the role guards run against.** The whole decision lives in
+    /// [`ActingRole::of`], in the child module that owns the type; this is the door onto it, and
+    /// the only reason it is `pub` is that `routes.rs` and the tests hold a `Principal`, not an
+    /// `Identity`.
+    pub fn acting_role(&self, path_role: RequestRole) -> ActingRole {
+        ActingRole::of(&self.identity, path_role)
+    }
+
+    /// Whether this caller's login-to-domain bridge RESOLVED — the `auth.read_scope` span's
+    /// `bridge_resolved` attribute (#451).
+    ///
+    /// Stated on the identity rather than derived from a resolved `ReadScope` plus [`role`](Self::role):
+    /// the derived form read `scope != Public || role == Public || role == External`, which
+    /// silently became "always true" the moment an Unbound caller stopped reporting its declared
+    /// role — turning the one population the attribute exists to surface into a healthy reading.
+    pub fn bridge_resolved(&self) -> bool {
+        match &self.identity {
+            // Nothing to resolve: their scope IS their role (ADMIN), or they have none by design.
+            Identity::Anonymous | Identity::External { .. } | Identity::Admin { .. } => true,
+            Identity::Customer { .. }
+            | Identity::Restaurant { .. }
+            | Identity::RestaurantAccount { .. }
+            | Identity::Rider { .. } => true,
+            Identity::Unbound { .. } => false,
+        }
+    }
+
+    /// Build a verified principal from a role and its domain binding — the same match
+    /// [`AuthContext::authorize`] runs, exposed for tests and for any future non-HTTP driver that
+    /// must present a caller to the schema.
+    ///
+    /// `binding: None` yields [`Identity::Unbound`], which is the point: the unbound case is the
+    /// one a guard must refuse, so it has to be spellable in a test. What is NOT spellable through
+    /// here — or anywhere — is a *lying* principal: a bound identity carrying no binding, or a
+    /// binding that disagrees with the role. The identity stays one private value and this
+    /// constructor cannot assemble a pair the real path would reject.
+    pub fn role_binding(role: RequestRole, sub: String, binding: Option<uuid::Uuid>) -> Self {
+        let binding = binding.map(|id| id.to_string());
+        let claims = match role {
+            RequestRole::Customer => ProductClaims { customer_id: binding, ..Default::default() },
+            RequestRole::Rider => ProductClaims { rider_id: binding, ..Default::default() },
+            RequestRole::Restaurant => {
+                ProductClaims { restaurant_id: binding, ..Default::default() }
+            }
+            RequestRole::RestaurantAccount => {
+                ProductClaims { restaurant_account_id: binding, ..Default::default() }
+            }
+            // ADMIN, EXTERNAL and PUBLIC carry no domain binding — their arms in `role_path` ignore
+            // the claim object entirely, so an argument here would be dropped, not honoured.
+            RequestRole::Admin | RequestRole::External | RequestRole::Public => {
+                ProductClaims::default()
+            }
+        };
+        Self::role_path(role, sub, &claims)
     }
 }
 
@@ -1439,7 +1589,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
                 Identity::Anonymous,
                 "{role}: not elevated, no identity and no tenant claim survives on the open path"
             );
-            assert_eq!(principal.role(), RequestRole::Public, "{role}: not elevated");
+            assert_eq!(principal.recorded_role(), RequestRole::Public, "{role}: not elevated");
             assert_eq!(
                 read_scope(&principal),
                 application::queries::ReadScope::Public,
@@ -1481,7 +1631,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
                 Identity::Anonymous,
                 "{case}: an unusable claim is a DEGRADE, not an Unbound CUSTOMER principal"
             );
-            assert_eq!(principal.role(), RequestRole::Public, "{case}");
+            assert_eq!(principal.recorded_role(), RequestRole::Public, "{case}");
             assert_eq!(
                 read_scope(&principal),
                 application::queries::ReadScope::Public,
@@ -2170,17 +2320,17 @@ pub async fn resolve_read_scope(
     correlation_id: crate::graphql::session::RequestCorrelationId,
     customer_identity: &CustomerIdentitySource,
 ) -> application::queries::ReadScope {
-    let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.role()));
+    let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.recorded_role()));
     span.record("business.correlation_id", correlation_id.0.to_string().as_str());
     let scope = resolve_customer_scope(principal, correlation_id, customer_identity)
         .instrument(span.clone())
         .await;
-    telemetry::spans::record_bridge_resolved(
-        &span,
-        !matches!(scope, application::queries::ReadScope::Public)
-            || principal.role() == RequestRole::Public
-            || principal.role() == RequestRole::External,
-    );
+    // Asked of the IDENTITY (`Principal::bridge_resolved`), not derived from the resolved scope.
+    // The derived form was `scope != Public || role == Public || role == External`, and it went
+    // silently "always true" the moment an Unbound caller stopped reporting its declared role
+    // (#639 part B) — turning the one population this attribute exists to surface into a healthy
+    // reading. It is also no longer a proxy: an Unbound caller is now the exact `false`.
+    telemetry::spans::record_bridge_resolved(&span, principal.bridge_resolved());
     scope
 }
 
@@ -2235,11 +2385,21 @@ mod read_scope_tests {
         assert_eq!(read_scope(&p), ReadScope::RestaurantAccount(RestaurantAccountId(rid)));
 
         // Claim ABSENT -> Public, even with a perfectly parseable sub: sub is never an identity.
-        // The role SURVIVES the absence (`Identity::Unbound`) — that is what makes the denial
-        // attributable to a role in `read_authorization_bridge_unresolved_total{role}`.
+        // The declared role survives INSIDE the identity, which is what keeps the denial
+        // attributable in `read_authorization_bridge_unresolved_total{role}` — `read_scope`
+        // destructures `Identity::Unbound { role, .. }` to label the counter. What it must NOT
+        // survive is anything downstream believing it: this assertion used to read
+        // `unbound.role() == Customer, "the unbound caller keeps its role"` and was GREEN, which
+        // is the #639 part B defect stated as a passing test.
         let unbound = principal(RequestRole::Customer, &sub, None);
         assert_eq!(read_scope(&unbound), ReadScope::Public, "sub is never an identity (customer)");
-        assert_eq!(unbound.role(), RequestRole::Customer, "the unbound caller keeps its role");
+        assert_eq!(
+            unbound.recorded_role(),
+            RequestRole::Public,
+            "an unbound caller records as PUBLIC — stamping CUSTOMER into domain_events.user_type \
+             would be a false author in an immutable log"
+        );
+        assert!(!unbound.bridge_resolved(), "and it is the population `bridge_resolved: false` names");
         assert_eq!(
             read_scope(&principal(RequestRole::Rider, &sub, None)),
             ReadScope::Public,

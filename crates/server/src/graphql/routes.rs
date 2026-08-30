@@ -157,7 +157,7 @@ async fn graphql_handler(
     // Authn/authz + per-instance authorization at the path boundary (ADR-0047, #144/#433/#641),
     // shared by this handler and the WS `connection_init` closure below — see
     // [`authorize_and_resolve_scope`] for what each step does and why it is one function.
-    let (principal, correlation, scope) =
+    let (principal, acting, correlation, scope) =
         match authorize_and_resolve_scope(&auth, role, &headers, &identity).await {
             Ok(t) => t,
             Err(e) => return e.into_response(),
@@ -181,7 +181,11 @@ async fn graphql_handler(
     let resp: GraphQLResponse = schema
         .execute(
             req.into_inner()
-                .data(role)
+                // The ONE role value in the context (#639 part B): the ACTING role, minted from
+                // the verified identity, never the path segment. The bare `RequestRole` is
+                // deliberately NOT injected any more — two role values in one context is exactly
+                // the shape the next reader gets wrong, and the wrong one was the privileged one.
+                .data(acting)
                 .data(principal)
                 .data(session)
                 .data(trace)
@@ -214,17 +218,28 @@ async fn authorize_and_resolve_scope(
     headers: &HeaderMap,
     customer_identity: &crate::auth::CustomerIdentitySource,
 ) -> Result<
-    (crate::auth::Principal, crate::graphql::session::RequestCorrelationId, application::queries::ReadScope),
+    (
+        crate::auth::Principal,
+        crate::auth::ActingRole,
+        crate::graphql::session::RequestCorrelationId,
+        application::queries::ReadScope,
+    ),
     crate::auth::AuthError,
 > {
     let principal = auth.authorize(path_role, headers).await?;
+    // Minted HERE, in the one function both transports go through, and returned as a tuple element
+    // they both destructure — so a transport that fails to inject it does not compile (#639 part
+    // B). The type stops a bad acting role being minted; returning it stops a good one being
+    // forgotten, which would otherwise be a silent permanent 403 on one transport only. That
+    // discharges ADR-20260818-101500's every-transport clause structurally rather than by review.
+    let acting = principal.acting_role(path_role);
     // The ONE `request.correlation_id` of this request/connection (#451): minted here, at the
     // transport boundary, and shared by every read-path span it opens (`auth.read_scope`,
     // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
     // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
     let correlation = crate::graphql::session::RequestCorrelationId::mint();
     let scope = crate::auth::resolve_read_scope(&principal, correlation, customer_identity).await;
-    Ok((principal, correlation, scope))
+    Ok((principal, acting, correlation, scope))
 }
 
 /// The effective auth headers for a WS connection, PURE (#437 makes this composition load-bearing:
@@ -305,7 +320,7 @@ async fn graphql_get(
                 // `authorize_and_resolve_scope` the POST path uses — a subscription must not
                 // widen what a query would refuse (#144/#433), and Postgres-mode resolution (#641)
                 // applies identically on both transports (the shared function IS the proof).
-                let (principal, correlation, scope) =
+                let (principal, acting, correlation, scope) =
                     authorize_and_resolve_scope(&auth, role, &headers, &identity)
                         .await
                         .map_err(|e| {
@@ -320,7 +335,11 @@ async fn graphql_get(
                             })
                         })?;
                 let mut data = async_graphql::Data::default();
-                data.insert(role);
+                // The ACTING role, exactly as the POST path injects it — the socket must not be
+                // the transport where an unbound caller keeps its role (#639 part B). The
+                // compiler is what holds the two paths together: `acting` is a destructured
+                // element of the shared `authorize_and_resolve_scope` result.
+                data.insert(acting);
                 data.insert(correlation);
                 // Deliberately NO `RequestNow` here (RSO-1): a socket lives for hours, so a
                 // connection-scoped clock would serve every later operation a stale "now". On
@@ -732,10 +751,17 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         let identity = crate::auth::CustomerIdentitySource::Postgres(Arc::new(WsScriptedResolver(
             crate::auth::CustomerIdentityResolution::Resolved(CustomerId(right_id)),
         )));
-        let (_, _, scope) =
+        let (_, acting, _, scope) =
             authorize_and_resolve_scope(&auth, RequestRole::Customer, &headers, &identity)
                 .await
                 .expect("a well-formed CUSTOMER token authorizes");
+        // The WS leg mints the same acting role the POST leg does — asserted HERE, in the shared
+        // function's own test, because that is the seam both transports go through (#639 part B).
+        assert_eq!(
+            acting.get(),
+            RequestRole::Customer,
+            "a BOUND customer acts as CUSTOMER on the socket, exactly as on POST"
+        );
         assert_eq!(
             scope,
             application::queries::ReadScope::Customer(CustomerId(right_id)),

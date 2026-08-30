@@ -6589,7 +6589,7 @@ fn request_envelope(ctx: &async_graphql::Context<'_>, metadata: &Option<Metadata
     let user_id = principal
         .and_then(|p| p.user_id())
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
-    let user_type = principal.map(|p| role_text(&p.role())).unwrap_or("PUBLIC").to_string();
+    let user_type = principal.map(|p| role_text(&p.recorded_role())).unwrap_or("PUBLIC").to_string();
     let session_id = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
     let trace_id = ctx.data_opt::<crate::graphql::session::TraceContext>().and_then(|t| t.0.clone());
     // Client-suppliable ids validate structurally at scalar parse time; anything missing is
@@ -6666,8 +6666,8 @@ pub(crate) fn mailbox_operation_owned(
     row: &actor_client::mailbox::MailboxStatusRow,
 ) -> bool {
     let admin = matches!(
-        ctx.data_opt::<crate::graphql::acl::RequestRole>(),
-        Some(crate::graphql::acl::RequestRole::Admin)
+        crate::graphql::acl::request_role(ctx),
+        crate::graphql::acl::RequestRole::Admin
     );
     let principal_uuid = ctx
         .data_opt::<crate::auth::Principal>()
