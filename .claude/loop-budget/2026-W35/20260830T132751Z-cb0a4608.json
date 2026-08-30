@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 3969,
+  "recordedAt": "2026-08-30T13:27:51.417Z",
+  "branch": "708-erasure-dsl-surface",
+  "note": "#708 part 1: erasure DSL surface + legalRetention gate"
+}

@@ -3,6 +3,26 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔒 **2026-08-30 — erasure chunk 1: the DSL says what Art. 17 promises, and the code refuses rather
+> than pretends** ([#708](https://github.com/TheCaptainCompany/captain-food/issues/708) part 1,
+> PR [#763](https://github.com/TheCaptainCompany/captain-food/pull/763), `HOLD: human`).
+> `legalRetention:` + its two validator rules landed WITH the deletion grammar they guard — the
+> `BRIEF-20260811 §3` BLOCKER-on-arrival is closed by a gate instead of by prose. The Order pilot
+> passes AT the boundary (3650 >= 3650), asserted, so shortening `ORDER_RETENTION_WINDOW_DAYS` now
+> goes red. The Customer surface (commands, facts, `deletion:` block, `View_CustomerErasure`,
+> `erasureStatus` with no args, observability contract) landed with handlers that REFUSE: accepting
+> a request the unbuilt journey cannot execute would start the statutory month on nothing.
+> **The finding that matters for planning**: there is no such thing as a "spec-only" chunk here. The
+> fail-closed gates weld DSL to runtime — a process manager cannot be declared without its whole
+> seam (the emitter enforces it), a service operation cannot be declared without its ACL impls
+> (exhaustive traits), and translation keys cannot be declared without a screen
+> (`translation-key-unused`). Three deferrals followed, each recorded rather than faked; the
+> orchestrator, the unlink ACL and the copy ride the runtime chunk. Two further gaps found by the
+> emitter, not by reading: `state.by` admits only trigger-message properties, and the order terminal
+> facts carry no `customerId` — so a PARKED erasure's resume leg is unspellable until one of the two
+> moves (the second is a stored-event-shape change). The dead-man's switch is what keeps that
+> survivable, which is exactly why it is in the contract and not in the backlog.
+
 > 🚀 **2026-08-30 — the flip is EXECUTED: `ROUTE_ORDER_BIRTH_THROUGH_LANE` defaults ON**
 > (`specs/ordering/configuration.yaml` `default: false → true`, one line, the key's text untouched;
 > [ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md)).

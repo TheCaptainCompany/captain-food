@@ -20,6 +20,23 @@ const DAY: u64 = 86_400;
 fn reminder_schedule_table_is_exactly_the_declared_set() {
     // (actor, on_message, reminder, payload_event, identity_prop, after_key, window, policy)
     let expected: &[(&str, &str, &str, &str, &str, &str, std::time::Duration, ReschedulePolicy)] = &[
+        // #708 GDPR erasure grace window: the CONFIRMATION schedules it, `keep` (the subject was
+        // told a date, and a redelivered confirmation is not a new decision, so the FIRST
+        // scheduled_at wins), CUSTOMER_ERASURE_GRACE_WINDOW_DAYS = 30 DAYS.
+        // The unit is the whole point of this pin, in this row more than any other: 30 SECONDS
+        // here would destroy a customer's account half a minute after they confirmed, inside the
+        // window we promised them on screen — the mirror image of the "3650 seconds" trap in the
+        // header, and unrecoverable rather than merely early.
+        (
+            "Customer",
+            "ConfirmCustomerErasure",
+            "CustomerErasureDue",
+            "CustomerErasureDue",
+            "customerId",
+            "CUSTOMER_ERASURE_GRACE_WINDOW_DAYS",
+            std::time::Duration::from_secs(30 * DAY),
+            ReschedulePolicy::Keep,
+        ),
         // #167 acceptance deadline: BOTH birth receives schedule it (apply_schedules_in_tx keys
         // on the delivered message type, so each birth needs its own row — deleting one makes
         // the generated test DISAPPEAR, not fail; THIS pin is the red), `keep` (the first
