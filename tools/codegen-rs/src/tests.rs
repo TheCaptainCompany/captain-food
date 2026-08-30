@@ -4307,8 +4307,9 @@ keys:
         );
     }
 
-    /// **`TriggerEnvelope::laned` has EXACTLY ONE call site** (#597 review B2, the level-3 fallback
-    /// ADR-20260803-234035 sanctions where types demonstrably cannot reach).
+    /// **Every `TriggerEnvelope::laned` call site is AUDITED, and there are exactly as many of them
+    /// as the allowlist says** (#597 review B2, the level-3 fallback ADR-20260803-234035 sanctions
+    /// where types demonstrably cannot reach; per-file COUNTS since #595 review round 1).
     ///
     /// ADR-20260816-040239's constraint 1 is *the enqueue is never in `prepare`* —
     /// `actor_runtime::completion` re-runs `prepare` with NO transaction open, so an enqueue staged
@@ -4387,18 +4388,39 @@ keys:
             }
         }
 
-        // The ALLOWLIST, not a count (#595). Two routes now own a transaction to flush into, and a
-        // bare `assert_eq!(len, 2)` would let a THIRD, wrong caller land simply by deleting one of
-        // these two — the count would still read 2. Each entry is a file that has been audited
-        // against the claim `laned` makes, and the audit is recorded next to it.
-        const AUDITED: &[(&str, &str)] = &[
+        // The ALLOWLIST **with per-file counts** (#595, tightened in review round 1).
+        //
+        // Two shapes were rejected on the way here, and both failures are worth keeping written
+        // down because each looks adequate:
+        //
+        //   * `assert_eq!(call_sites.len(), 2)` — a bare total lets a THIRD, wrong caller land by
+        //     deleting one of the two right ones; the count still reads 2.
+        //   * a set of audited FILES — this is the one that actually shipped in the first pass and
+        //     the reviewer caught it. It is strictly WEAKER than what it replaced: a third call
+        //     added *inside* an already-listed file passes silently. That is not theoretical.
+        //     `handler.rs` contains both the audited call and `async fn prepare(`, and
+        //     ADR-20260816-040239's constraint 1 is precisely *the enqueue is never in `prepare`*
+        //     (completion re-runs `prepare` with NO transaction open). A file-granular guard is
+        //     blind to the exact edit the guard exists to stop.
+        //
+        // So: file, EXPECTED COUNT, and the sentence naming WHICH transaction that file's callers
+        // flush into. Adding a call inside a listed file fails on the count; adding one in a new
+        // file fails as unaudited; removing the last one fails as stale. Exact in all three
+        // directions — a guard that can only be satisfied by editing this list on purpose.
+        const AUDITED: &[(&str, usize, &str)] = &[
             (
                 "crates/infrastructure/src/mailbox/handler.rs",
-                "handle_pm_fact — owns the fenced DELIVERY transaction; flushes via                  flush_lane_enqueues_in_tx before the verdict commits (ADR-20260816-040239).",
+                1,
+                "handle_pm_fact -- owns the fenced DELIVERY transaction; flushes via \
+                 flush_lane_enqueues_in_tx before the verdict commits (ADR-20260816-040239). \
+                 NOT `prepare`, which this file also contains and which holds no transaction.",
             ),
             (
                 "crates/infrastructure/src/process_manager/runner.rs",
-                "apply_record — the polling runner's LEG transaction (#595 `commit_leg`): the                  staged enqueues and the checkpoint advance commit together, so a door row can                  never outlive a position that was not consumed.",
+                1,
+                "apply_record -- the polling runner's LEG transaction (#595 `commit_leg`): the \
+                 staged enqueues and the checkpoint advance commit together, so a door row can \
+                 never outlive a position that was not consumed.",
             ),
         ];
         let found: Vec<String> = call_sites
@@ -4406,26 +4428,39 @@ keys:
             .map(|s| s.trim_start().split(':').next().unwrap_or("").to_string())
             .collect();
         let unaudited: Vec<&String> =
-            found.iter().filter(|f| !AUDITED.iter().any(|(p, _)| *p == f.as_str())).collect();
-        let missing: Vec<&str> =
-            AUDITED.iter().map(|(p, _)| *p).filter(|p| !found.iter().any(|f| f == p)).collect();
+            found.iter().filter(|f| !AUDITED.iter().any(|(p, _, _)| *p == f.as_str())).collect();
+        // The COUNT check subsumes the old "listed site that no longer calls it" check: an entry
+        // whose file has dropped to zero call sites reports `expected 1, found 0` here.
+        let miscounted: Vec<String> = AUDITED
+            .iter()
+            .filter_map(|(path, expected, _)| {
+                let actual = found.iter().filter(|f| f.as_str() == *path).count();
+                (actual != *expected)
+                    .then(|| format!("  {path}: expected {expected}, found {actual}"))
+            })
+            .collect();
         assert!(
-            unaudited.is_empty() && missing.is_empty(),
-            "`TriggerEnvelope::laned` may only be called from an AUDITED site.\n\
-             unaudited callers: {:?}\nlisted sites that no longer call it: {:?}\n\
+            unaudited.is_empty() && miscounted.is_empty(),
+            "`TriggerEnvelope::laned` may only be called from an AUDITED site, and only as many \
+             times as the allowlist says.\n\
+             unaudited callers (file not on the list): {:?}\n\
+             wrong number of calls in a listed file:\n{}\n\
              all call sites found:\n{}\n\n\
              A NEW CALL SITE IS A DESIGN EVENT, NOT A LINT. `laned` means: *I hold a fenced \
              transaction, and whatever this sink buffers I will flush into it before I commit.* \
              The type system cannot check that claim (ADR-20260816-040239 constraint 1; \
              `application` cannot name a Postgres transaction), so the claim is audited by there \
-             being a listed place to audit. If the new caller genuinely owns a transaction and \
-             flushes the sink into it, add it to AUDITED with the sentence that says WHICH \
-             transaction, IN THE SAME COMMIT — and if it does not, you have just written the bug \
-             this guard exists to catch: an enqueue that survives a verdict which never \
-             committed, i.e. a birth message for an order that does not exist. A site that \
-             DISAPPEARS is also a failure: a stale allowlist entry is a guard protecting nothing.",
+             being a listed place to audit. THE COUNT IS PART OF THE AUDIT: a second call inside \
+             an already-listed file is exactly the edit that puts an enqueue in `prepare`, which \
+             re-runs on completion with no transaction open. If the new caller genuinely owns a \
+             transaction and flushes the sink into it, bump that file's count and extend its \
+             sentence to say WHICH transaction, IN THE SAME COMMIT — and if it does not, you have \
+             just written the bug this guard exists to catch: an enqueue that survives a verdict \
+             which never committed, i.e. a birth message for an order that does not exist. A site \
+             that DISAPPEARS fails too (`expected 1, found 0`): a stale allowlist entry is a \
+             guard protecting nothing.",
             unaudited,
-            missing,
+            miscounted.join("\n"),
             call_sites.join("\n")
         );
     }

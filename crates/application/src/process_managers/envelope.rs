@@ -10,8 +10,12 @@
 //! Declared HERE, with nothing else in the module, the guarantee is unconditional: no code anywhere
 //! — this crate included — can attach a lane sink except through [`TriggerEnvelope::laned`], and
 //! `laned` has only AUDITED call sites — the `trigger_envelope_laned_call_sites_are_audited` guard
-//! holds it to a named allowlist, each entry carrying the sentence that says WHICH transaction that
-//! caller flushes into (#595 added the second).
+//! holds it to an allowlist of (file, EXPECTED COUNT, the sentence saying WHICH transaction that
+//! file's caller flushes into). The count is not bookkeeping: a SECOND call inside an
+//! already-listed file is exactly the edit that puts an enqueue in `prepare` — which
+//! `actor_runtime::completion` re-runs with no transaction open — so a name-only allowlist would
+//! wave through the one mistake ADR-20260816-040239 constraint 1 names. (#595 added the second
+//! file; its review round 1 added the counts, after the first cut shipped file-granular.)
 
 /// The trigger's ENVELOPE bits an event leg may reference (`from_envelope`, ADR-0041): the
 /// `domain_events` row's id (dedup keys, `cause_id`), its correlation and its occurrence time.

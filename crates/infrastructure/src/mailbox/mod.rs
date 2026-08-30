@@ -52,11 +52,6 @@ use domain::shared::errors::DomainError;
 use sqlx::{Postgres, Transaction};
 use tracing::Instrument as _;
 
-/// Flush staged lane ENQUEUES into the completion transaction — the second half of
-/// ADR-20260816-040239's seam, and the reason a routed `deliver:` is not a dual write: the door
-/// row and the saga's own effects (the run row, the remaining appends, the verdict) commit or roll
-/// back together. A degenerate outbox — same database, same transaction, no relay.
-///
 /// The ENVELOPE bits a lane enqueue inherits from whatever caused it (#595).
 ///
 /// One shape, two producers, and the point is that they are DIFFERENT: a mailbox delivery's cause
@@ -86,6 +81,11 @@ impl LaneCause {
     }
 }
 
+/// Flush staged lane ENQUEUES into the completion transaction — the second half of
+/// ADR-20260816-040239's seam, and the reason a routed `deliver:` is not a dual write: the door
+/// row and the saga's own effects (the run row, the remaining appends, the verdict) commit or roll
+/// back together. A degenerate outbox — same database, same transaction, no relay.
+///
 /// Three properties, each load-bearing:
 ///
 /// - **`&mut Transaction`, never `self.deps`' pool.** Get this wrong and the atomicity is a

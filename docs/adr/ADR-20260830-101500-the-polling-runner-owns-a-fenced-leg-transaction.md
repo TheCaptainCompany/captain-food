@@ -56,9 +56,19 @@ wrote.
 
 This is what licenses the runner to name `TriggerEnvelope::laned` — the **second** call site of a
 constructor whose whole guard was "there is one place to audit". The guard is not relaxed to a count
-of two: it becomes an **allowlist**, each entry carrying the sentence that names WHICH transaction
-that caller flushes into, failing on an unaudited caller *and* on a listed caller that no longer
-calls it (a stale allowlist is a guard protecting nothing).
+of two: it becomes an **allowlist of `(file, expected count, audit sentence)`**, the sentence naming
+WHICH transaction that file's caller flushes into. It fails in three directions: a call in an
+unlisted file, the WRONG NUMBER of calls in a listed file, and a listed file that no longer calls it
+at all (`expected 1, found 0` — a stale allowlist is a guard protecting nothing).
+
+The count is the part that carries the constraint, and the first cut of this change **shipped
+without it** — a file-granular allowlist, caught in review round 1. That version was strictly weaker
+than the `assert_eq!(len, 1)` it replaced: `handler.rs` holds both the audited call and `async fn
+prepare(`, so a third call added inside that file would have passed silently, and "the enqueue is
+never in `prepare`" is the whole of ADR-20260816-040239 constraint 1. Recorded because the failure
+is instructive: *widening* a guard's unit (call site → file) to accommodate a legitimate new caller
+reads like a faithful generalisation and is a weakening. When an exact gate must admit one more
+case, raise the expected COUNT; never coarsen what is counted.
 
 ### 2. The door is a COMMAND door, not an EVENT door
 
