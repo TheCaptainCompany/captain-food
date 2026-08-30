@@ -161,6 +161,12 @@ fn main() {
         // retirement event, unused exemptions are errors, and record stamps stay unique per kind.
         let (exemptions, mut ex_issues) = load_citation_exemptions(&root);
         dec_issues.append(&mut ex_issues);
+        // §23d — the exemption-set ratchet (#802). It lives HERE, not in a unit test, because
+        // `_exempt.yaml` is a docs/** file and the docs-only path filter switches the test job off:
+        // `main` went green twice while the old `assert_eq!(len, 4)` was failing. `docs-validate`
+        // runs this validator verbatim on exactly that lane. See the rule's own comment for why it
+        // is id-shaped rather than count-shaped.
+        dec_issues.extend(validate_exemption_ratchet(&exemptions, DECLARED_EXEMPTIONS));
         dec_issues.extend(validate_citations(&load_governed_doc_files(&root), &corpus, &exemptions));
         dec_issues.extend(validate_record_stamps(&corpus));
         issues.extend(dec_issues);
@@ -272,8 +278,9 @@ fn main() {
         load_legacy_keys(&repo_root(&specs)).len()
     );
     eprintln!(
-        "    - citations: full-form ADR/PROP citations across docs/** + CLAUDE.md resolve to record files; {} declared exemption(s); record stamps unique (§23)",
-        load_citation_exemptions(&repo_root(&specs)).0.len()
+        "    - citations: full-form ADR/PROP citations across docs/** + CLAUDE.md resolve to record files; {} exemption(s) on file, each one the ratchet names among its {} declared (§23, §23d); record stamps unique",
+        load_citation_exemptions(&repo_root(&specs)).0.len(),
+        DECLARED_EXEMPTIONS.len()
     );
     eprintln!(
         "    - status journal: {} docs/status/journal-*.md — no entry-opener left in STATUS.md, every entry in its own-date's ISO-week file, every declared count derived not trusted (§24)",
