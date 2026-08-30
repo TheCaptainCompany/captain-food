@@ -3,6 +3,12 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-30 — CLAIM: [#797 "C3-gate: the routed step consults its own per-route flag, not bare
+> sink presence"](https://github.com/TheCaptainCompany/captain-food/issues/797).** The routed-lane
+> gate is spelled per-route in a comment and fused in the code: the polling runner hands ONE sink
+> gated on ONE boolean, and every routed step reads bare `env.lane_sink()` presence, so the
+> route-selection predicate is `sink.is_some()`. Branch `797-c3-gate`, draft PR, `HOLD: human`.
+
 > **2026-08-30 — the typed-inbox guarantee reached the fact door, and the thing it was hiding was a
 > catch-all that DESTROYED facts.** #771 made every declared COMMAND reach a decision in a
 > human-owned match, with `rustc` E0004 as the enforcement. It stopped at the fact-record route,
