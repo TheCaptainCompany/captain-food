@@ -82,25 +82,10 @@ ErasureStatus:
     The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing
     else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR
     execution (an in-flight paid order of the subject's own defers the destructive legs), it is
-    `ErasureProcessStatus` on the process row, and it is never an event. Leaking it here would make
+    row state on the erasure process (landing with the orchestrator), and it is never an event.
+    Leaking it here would make
     the subject read an operational excuse as a decision about their rights, and would put a member
     in a stored, promised enum for a concept the ledger has no fact for.
-
-
-ErasureProcessStatus:
-  type: string
-  enum:
-    - AWAITING_CONFIRMATION  # requested; the token has not come back yet
-    - SCHEDULED              # confirmed; the grace window is running (cancellable by the subject)
-    - PARKED                 # due, but a destructive leg would harm an in-flight order — deferred, ALERTING, still on the Art. 12(3) clock
-    - RUNNING                # the re-check passed; the legs are executing
-    - COMPLETED              # the receipt is recorded — terminal (success)
-    - CANCELLED              # the subject changed their mind inside the window — terminal
-  description: >
-    State of ONE CustomerErasureProcess run (the `customer_erasure_process_manager` row). This is
-    ROW state, not event-sourced bookkeeping (young): the request/confirm/cancel FACTS live on the
-    Customer stream, the phase ladder does not. PARKED is a state, never a fact — a parked run
-    alerts with its reason and its dead-man clock keeps running; it never silently waits.
 
 
 ErasureParkReason:

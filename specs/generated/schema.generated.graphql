@@ -327,15 +327,6 @@ enum ErasureStatus {
   ERASED
 }
 
-enum ErasureProcessStatus {
-  AWAITING_CONFIRMATION
-  SCHEDULED
-  PARKED
-  RUNNING
-  COMPLETED
-  CANCELLED
-}
-
 enum ErasureParkReason {
   OPEN_ORDER
   FUNDS_IN_FLIGHT

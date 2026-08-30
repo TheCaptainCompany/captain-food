@@ -2115,7 +2115,7 @@ impl From<ErasureConfirmationToken> for ds::ErasureConfirmationToken {
     }
 }
 
-/// The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is `ErasureProcessStatus` on the process row, and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.
+/// The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is row state on the erasure process (landing with the orchestrator), and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum ErasureStatus {
     #[graphql(name = "REQUESTED")]
@@ -2144,47 +2144,6 @@ impl From<ErasureStatus> for ds::ErasureStatus {
             ErasureStatus::CONFIRMED => Self::CONFIRMED,
             ErasureStatus::EXECUTING => Self::EXECUTING,
             ErasureStatus::ERASED => Self::ERASED,
-        }
-    }
-}
-
-/// State of ONE CustomerErasureProcess run (the `customer_erasure_process_manager` row). This is ROW state, not event-sourced bookkeeping (young): the request/confirm/cancel FACTS live on the Customer stream, the phase ladder does not. PARKED is a state, never a fact — a parked run alerts with its reason and its dead-man clock keeps running; it never silently waits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
-pub enum ErasureProcessStatus {
-    #[graphql(name = "AWAITING_CONFIRMATION")]
-    AWAITING_CONFIRMATION,
-    #[graphql(name = "SCHEDULED")]
-    SCHEDULED,
-    #[graphql(name = "PARKED")]
-    PARKED,
-    #[graphql(name = "RUNNING")]
-    RUNNING,
-    #[graphql(name = "COMPLETED")]
-    COMPLETED,
-    #[graphql(name = "CANCELLED")]
-    CANCELLED,
-}
-impl From<ds::ErasureProcessStatus> for ErasureProcessStatus {
-    fn from(v: ds::ErasureProcessStatus) -> Self {
-        match v {
-            ds::ErasureProcessStatus::AWAITING_CONFIRMATION => Self::AWAITING_CONFIRMATION,
-            ds::ErasureProcessStatus::SCHEDULED => Self::SCHEDULED,
-            ds::ErasureProcessStatus::PARKED => Self::PARKED,
-            ds::ErasureProcessStatus::RUNNING => Self::RUNNING,
-            ds::ErasureProcessStatus::COMPLETED => Self::COMPLETED,
-            ds::ErasureProcessStatus::CANCELLED => Self::CANCELLED,
-        }
-    }
-}
-impl From<ErasureProcessStatus> for ds::ErasureProcessStatus {
-    fn from(v: ErasureProcessStatus) -> Self {
-        match v {
-            ErasureProcessStatus::AWAITING_CONFIRMATION => Self::AWAITING_CONFIRMATION,
-            ErasureProcessStatus::SCHEDULED => Self::SCHEDULED,
-            ErasureProcessStatus::PARKED => Self::PARKED,
-            ErasureProcessStatus::RUNNING => Self::RUNNING,
-            ErasureProcessStatus::COMPLETED => Self::COMPLETED,
-            ErasureProcessStatus::CANCELLED => Self::CANCELLED,
         }
     }
 }

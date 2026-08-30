@@ -36,7 +36,7 @@ pub struct ErasureRequestId(pub uuid::Uuid);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ErasureConfirmationToken(pub String);
 
-/// The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is `ErasureProcessStatus` on the process row, and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.
+/// The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is row state on the erasure process (landing with the orchestrator), and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum ErasureStatus {
@@ -44,18 +44,6 @@ pub enum ErasureStatus {
     CONFIRMED,
     EXECUTING,
     ERASED,
-}
-
-/// State of ONE CustomerErasureProcess run (the `customer_erasure_process_manager` row). This is ROW state, not event-sourced bookkeeping (young): the request/confirm/cancel FACTS live on the Customer stream, the phase ladder does not. PARKED is a state, never a fact — a parked run alerts with its reason and its dead-man clock keeps running; it never silently waits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
-pub enum ErasureProcessStatus {
-    AWAITING_CONFIRMATION,
-    SCHEDULED,
-    PARKED,
-    RUNNING,
-    COMPLETED,
-    CANCELLED,
 }
 
 /// Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.

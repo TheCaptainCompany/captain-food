@@ -230,7 +230,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 ### `View_CustomerErasure` · 🔭 V1 · source aggregate `Customer`
 
 - **Fed by**: `CustomerErasureRequested`, `CustomerErasureConfirmed`, `CustomerErasureCancelled`, `CustomerErasureDue`, `CustomerIdentityUnlinked`, `CustomerErased`
-- **Rules**: `status` is derived from the latest recorded fact: REQUESTED -> CONFIRMED -> EXECUTING (the first destructive leg reported) -> ERASED. A CustomerErasureCancelled stamps cancelled_at and ends the row's life as a request; nothing further folds onto it. PARKED is ABSENT on purpose: parking is process-row state (ErasureProcessStatus), not a fact, and the subject is owed the state of their RIGHT, not of our scheduler. Every column is pseudonymous. The row must survive the deletion of the Customer stream, which is exactly why it may never carry personal data.
+- **Rules**: `status` is derived from the latest recorded fact: REQUESTED -> CONFIRMED -> EXECUTING (the first destructive leg reported) -> ERASED. A CustomerErasureCancelled stamps cancelled_at and ends the row's life as a request; nothing further folds onto it. PARKED is ABSENT on purpose: parking is process-row state — an internal scheduling fact about OUR execution, never a recorded event — and the subject is owed the state of their RIGHT, not of our scheduler. The row-state enum that carries it lands with the orchestrator. Every column is pseudonymous. The row must survive the deletion of the Customer stream, which is exactly why it may never carry personal data.
 - **Indexes**: `(customer_id, status)`
 
 | Column | Type | SQL | Constraints | Notes |
