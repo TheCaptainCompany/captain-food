@@ -16089,7 +16089,7 @@ Order:
 /// working tree (which would be hostile under concurrent sessions). Both halves come from the SAME
 /// emitter, so nothing is scraped out of a source file and nothing here can rot into a tautology.
 /// The other half of the proof is the ordinary build: `make rust` compiling the real
-/// `application::inbox` against the real `inboxes.rs` is what proves the in-tree match is currently
+/// `infrastructure::inbox` against the real `inboxes.rs` is what proves the in-tree match is currently
 /// exhaustive. Together they are complete — this test proves a WIDENED enum breaks the match, and
 /// the build proves the match is not broken today.
 #[cfg(test)]
@@ -16243,7 +16243,7 @@ mod typed_actor_inbox_e0004 {
     #[test]
     fn the_human_owned_router_carries_no_wildcard_arm() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-        let src = std::fs::read_to_string(root.join("crates/application/src/inbox.rs"))
+        let src = std::fs::read_to_string(root.join("crates/infrastructure/src/inbox.rs"))
             .expect("the human-owned inbox router must exist");
         let offenders: Vec<(usize, &str)> = src
             .lines()
@@ -16256,7 +16256,7 @@ mod typed_actor_inbox_e0004 {
             .collect();
         assert!(
             offenders.is_empty(),
-            "crates/application/src/inbox.rs must never absorb inbox variants with a wildcard arm \
+            "crates/infrastructure/src/inbox.rs must never absorb inbox variants with a wildcard arm \
              -- a wildcard makes the match exhaustive by construction and the E0004 guard \
              (#771) stops catching anything. Offending lines: {offenders:?}"
         );

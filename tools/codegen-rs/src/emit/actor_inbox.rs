@@ -18,7 +18,7 @@
 //! It must NEVER write the routing `match`.** If one walk over the model generated both the variants
 //! and the arms, the match would be exhaustive BY CONSTRUCTION and the compiler would catch exactly
 //! nothing — the guard would be a decoration. The arms live in the HUMAN-OWNED
-//! `crates/application/src/inbox.rs`, and `rustc` E0004 is what makes a new `receives:` entry
+//! `crates/infrastructure/src/inbox.rs`, and `rustc` E0004 is what makes a new `receives:` entry
 //! impossible to ignore. `tests.rs::a_widened_receives_set_is_a_compile_error` proves that guard RED
 //! against real `rustc` output; a guard never seen red is an unverified claim.
 //!
@@ -118,8 +118,17 @@ fn resolve_message(model: &Model, actor: &str, r: &str) -> Option<(String, Inbox
         .and_then(|r| r.as_str())
         .and_then(|r| r.strip_prefix("events.yaml#/"))?;
     debug_assert_eq!(owner, actor, "a reminder ref names its own declaring actor");
+    let _ = reminder;
+    // THE VARIANT IS THE PAYLOAD EVENT, NOT THE REMINDER NAME. A promoted reminder row carries
+    // `message_type = spec.payload_event` (`actor_client::reminders::scheduled_entry`), so naming
+    // the variant after the reminder would produce an enum `parse` could never match. They happen
+    // to coincide for all three reminders declared today; that is a coincidence, not the contract.
+    //
+    // A reminder whose payload event the actor ALSO receives as a fact is therefore the same wire
+    // triple and de-duplicates to one variant — correct, because the router cannot tell them apart
+    // either, and the kind of the first declaration wins.
     Some((
-        reminder.to_string(),
+        payload.to_string(),
         InboxKind::Reminder,
         format!("domain::generated::events::{payload}"),
     ))
@@ -182,7 +191,7 @@ pub(crate) fn inbox_actors(model: &Model) -> Vec<InboxActor> {
 pub(crate) fn inbox_enum_decl(actor: &InboxActor) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "/// GENERATED from `actors.yaml#/{name}/receives` — the CLOSED set of messages the `{name}`\n/// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),\n/// each variant carrying its typed payload.\n///\n/// Adding a `receives:` entry adds a variant here, and the human-owned `match` in\n/// `application::inbox` then fails to compile with E0004 until someone decides what the new\n/// message DOES. That compile error is the whole point: before #771 the same omission shipped\n/// green and surfaced as a `FAILED \"unroutable command type\"` row in production.\n#[derive(Debug, Clone, PartialEq)]\npub enum {enum_name} {{\n",
+        "/// GENERATED from `actors.yaml#/{name}/receives` — the CLOSED set of messages the `{name}`\n/// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),\n/// each variant carrying its typed payload.\n///\n/// Adding a `receives:` entry adds a variant here, and the human-owned `match` in\n/// `infrastructure::inbox` then fails to compile with E0004 until someone decides what the new\n/// message DOES. That compile error is the whole point: before #771 the same omission shipped\n/// green and surfaced as a `FAILED \"unroutable command type\"` row in production.\n#[derive(Debug, Clone, PartialEq)]\npub enum {enum_name} {{\n",
         name = actor.name,
         enum_name = actor.enum_name()
     ));
@@ -219,7 +228,7 @@ pub(crate) fn inbox_enum_decl(actor: &InboxActor) -> String {
 /// The `match`es in here are generated ON PURPOSE and are not the routing match: they are total
 /// projections FROM the variant set (name, kind), so they carry no decision a human could get
 /// wrong. The one match that encodes a decision — what a message DOES — is hand-written in
-/// `application::inbox`, and this emitter must never grow it.
+/// `infrastructure::inbox`, and this emitter must never grow it.
 pub(crate) fn inbox_enum_impl(actor: &InboxActor) -> String {
     let enum_name = actor.enum_name();
     let mut out = String::new();
@@ -235,11 +244,26 @@ pub(crate) fn inbox_enum_impl(actor: &InboxActor) -> String {
     // parse — the single fallible edge.
     out.push_str("    /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY\n    /// fallible edge of the typed dispatch path: past it the router matches a closed enum.\n    ///\n    /// An UNDECLARED message type is NOT an error about this payload — during a rolling deploy an\n    /// old consumer legitimately meets a message type a newer producer already emits. The caller\n    /// must treat it as TRANSIENT (retry, then park loudly), never as a terminal failure:\n    /// terminal-failing it buries a paid order.\n    pub fn parse(\n        message_type: &str,\n        payload: &serde_json::Value,\n    ) -> Result<Self, InboxParseError> {\n        match message_type {\n");
     for m in &actor.messages {
-        out.push_str(&format!(
-            "            \"{name}\" => serde_json::from_value::<{ty}>(payload.clone())\n                .map(Self::{name})\n                .map_err(|e| InboxParseError::Payload {{\n                    actor_type: Self::ACTOR_TYPE,\n                    message_type: \"{name}\",\n                    detail: e.to_string(),\n                }}),\n",
-            name = m.name,
-            ty = m.payload_type
-        ));
+        match m.kind {
+            // A COMMAND row's `payload` column is the BARE command struct (the GraphQL door
+            // serializes the domain command's own serde form straight into it).
+            InboxKind::Command => out.push_str(&format!(
+                "            \"{name}\" => serde_json::from_value::<{ty}>(payload.clone())\n                .map(Self::{name})\n                .map_err(|e| InboxParseError::Payload {{\n                    actor_type: Self::ACTOR_TYPE,\n                    message_type: \"{name}\",\n                    detail: e.to_string(),\n                }}),\n",
+                name = m.name,
+                ty = m.payload_type
+            )),
+            // A FACT or promoted REMINDER row's `payload` column is the ADJACENTLY-TAGGED
+            // `DomainEvent` (`{ eventType, payload }`) — a different wire shape from a command's,
+            // which is why this parse cannot be one uniform `from_value`.
+            //
+            // And it cross-checks the tag against the row's `message_type`. Nothing did before:
+            // a row could carry `message_type: "OrderPlaced"` with an `eventType: "OrderRejected"`
+            // body and the generic record route would have appended the body under the wrong name.
+            InboxKind::Fact | InboxKind::Reminder => out.push_str(&format!(
+                "            \"{name}\" => match serde_json::from_value::<domain::generated::events::DomainEvent>(payload.clone()) {{\n                Ok(domain::generated::events::DomainEvent::{name}(e)) => Ok(Self::{name}(e)),\n                Ok(other) => Err(InboxParseError::Payload {{\n                    actor_type: Self::ACTOR_TYPE,\n                    message_type: \"{name}\",\n                    detail: format!(\n                        \"row message_type is '{name}' but the staged DomainEvent is {{other:?}}\"\n                    ),\n                }}),\n                Err(e) => Err(InboxParseError::Payload {{\n                    actor_type: Self::ACTOR_TYPE,\n                    message_type: \"{name}\",\n                    detail: e.to_string(),\n                }}),\n            }},\n",
+                name = m.name
+            )),
+        }
     }
     out.push_str("            other => Err(InboxParseError::UndeclaredMessage {\n                actor_type: Self::ACTOR_TYPE,\n                message_type: other.to_string(),\n            }),\n        }\n    }\n\n");
     // message_type projection
@@ -268,7 +292,7 @@ pub(crate) fn inbox_enum_impl(actor: &InboxActor) -> String {
 pub(crate) fn emit_app_inboxes(model: &Model) -> String {
     let actors = inbox_actors(model);
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/*/actors.yaml `receives:` — do not edit\n// by hand (#771, founder directive 2026-08-30: \"Go for the generated per-actor enum\").\n//\n// ONE `<Actor>Inbox` enum per mailbox actor: the CLOSED set of messages that actor's single queue\n// can carry, spanning COMMAND / inbound FACT / REMINDER, each variant carrying its typed payload.\n//\n// THIS FILE IS THE ENUM ONLY. The routing `match` — what a message DOES — is HUMAN-OWNED, in\n// `crates/application/src/inbox.rs`. Generating both halves from one walk would make the match\n// exhaustive by construction and the compiler would catch nothing; keeping them apart is what makes\n// a new `receives:` entry an E0004 compile error instead of a `FAILED` row in production (#595).\n//\n// The wire stays a string: `ActorInbox::parse(actor_type, message_type, payload)` is the single\n// fallible edge, and it consumes the ACTOR TYPE as well as the message type — so a row enqueued on\n// lane A carrying lane B's message cannot parse at all (ADR-20260829-230418, \"Aggregates own the\n// facts\": the transport must not be able to violate the isolation the aggregates declare).\n\n/// What kind of message an inbox variant carries. The inbox is ONE queue, so one type spans all\n/// three; the kind is a property of the variant, never a second enum to keep in sync.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum InboxKind {\n    /// A `commands.yaml#/…` entry: write-side input, may be REJECTED.\n    Command,\n    /// An `events.yaml#/…` entry: a fact that already happened, recorded — never rejected.\n    Fact,\n    /// A `#/<Actor>/reminders/<Name>` entry: a reminder this actor scheduled for itself, promoted\n    /// to the queue when due (its payload is the declared fact, ADR-20260731-153000 §1a).\n    Reminder,\n}\n\n/// Why a wire triple could not become a typed inbox value.\n///\n/// The three arms are DELIBERATELY distinct, because the runtime owes them different postures:\n/// `UnknownActor` and `UndeclaredMessage` are TRANSIENT (a rolling deploy legitimately produces\n/// them — retry, then park loudly), while `Payload` is a genuine shape failure of a message this\n/// build does understand.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum InboxParseError {\n    /// No mailbox actor by this `actor_type` exists in THIS build.\n    UnknownActor { actor_type: String },\n    /// The actor exists and does not declare this message in its `receives:` set — in THIS build.\n    UndeclaredMessage { actor_type: &'static str, message_type: String },\n    /// A DECLARED message whose payload does not deserialize into its typed shape.\n    Payload { actor_type: &'static str, message_type: &'static str, detail: String },\n}\n\nimpl InboxParseError {\n    /// TRANSIENT means: this build cannot route the row, but a build on the other side of a rolling\n    /// deploy can — so the row must be RETRIED and then PARKED (the poison path), never terminally\n    /// FAILED. Terminal-failing an unknown type during a deploy buries a paid order.\n    pub fn is_transient(&self) -> bool {\n        matches!(self, Self::UnknownActor { .. } | Self::UndeclaredMessage { .. })\n    }\n}\n\nimpl std::fmt::Display for InboxParseError {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        match self {\n            Self::UnknownActor { actor_type } => {\n                write!(f, \"no mailbox actor '{actor_type}' in this build\")\n            }\n            Self::UndeclaredMessage { actor_type, message_type } => write!(\n                f,\n                \"actor '{actor_type}' does not declare message '{message_type}' in this build\"\n            ),\n            Self::Payload { actor_type, message_type, detail } => {\n                write!(f, \"{actor_type}/{message_type} payload: {detail}\")\n            }\n        }\n    }\n}\n\nimpl std::error::Error for InboxParseError {}\n",
+        "// GENERATED by the Captain.Food codegen from specs/*/actors.yaml `receives:` — do not edit\n// by hand (#771, founder directive 2026-08-30: \"Go for the generated per-actor enum\").\n//\n// ONE `<Actor>Inbox` enum per mailbox actor: the CLOSED set of messages that actor's single queue\n// can carry, spanning COMMAND / inbound FACT / REMINDER, each variant carrying its typed payload.\n//\n// THIS FILE IS THE ENUM ONLY. The routing `match` — what a message DOES — is HUMAN-OWNED, in\n// `crates/infrastructure/src/inbox.rs`. Generating both halves from one walk would make the match\n// exhaustive by construction and the compiler would catch nothing; keeping them apart is what makes\n// a new `receives:` entry an E0004 compile error instead of a `FAILED` row in production (#595).\n//\n// The wire stays a string: `ActorInbox::parse(actor_type, message_type, payload)` is the single\n// fallible edge, and it consumes the ACTOR TYPE as well as the message type — so a row enqueued on\n// lane A carrying lane B's message cannot parse at all (ADR-20260829-230418, \"Aggregates own the\n// facts\": the transport must not be able to violate the isolation the aggregates declare).\n\n/// What kind of message an inbox variant carries. The inbox is ONE queue, so one type spans all\n/// three; the kind is a property of the variant, never a second enum to keep in sync.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum InboxKind {\n    /// A `commands.yaml#/…` entry: write-side input, may be REJECTED.\n    Command,\n    /// An `events.yaml#/…` entry: a fact that already happened, recorded — never rejected.\n    Fact,\n    /// A `#/<Actor>/reminders/<Name>` entry: a reminder this actor scheduled for itself, promoted\n    /// to the queue when due (its payload is the declared fact, ADR-20260731-153000 §1a).\n    Reminder,\n}\n\n/// Why a wire triple could not become a typed inbox value.\n///\n/// The three arms are DELIBERATELY distinct, because the runtime owes them different postures:\n/// `UnknownActor` and `UndeclaredMessage` are TRANSIENT (a rolling deploy legitimately produces\n/// them — retry, then park loudly), while `Payload` is a genuine shape failure of a message this\n/// build does understand.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum InboxParseError {\n    /// No mailbox actor by this `actor_type` exists in THIS build.\n    UnknownActor { actor_type: String },\n    /// The actor exists and does not declare this message in its `receives:` set — in THIS build.\n    UndeclaredMessage { actor_type: &'static str, message_type: String },\n    /// A DECLARED message whose payload does not deserialize into its typed shape.\n    Payload { actor_type: &'static str, message_type: &'static str, detail: String },\n}\n\nimpl InboxParseError {\n    /// TRANSIENT means: this build cannot route the row, but a build on the other side of a rolling\n    /// deploy can — so the row must be RETRIED and then PARKED (the poison path), never terminally\n    /// FAILED. Terminal-failing an unknown type during a deploy buries a paid order.\n    pub fn is_transient(&self) -> bool {\n        matches!(self, Self::UnknownActor { .. } | Self::UndeclaredMessage { .. })\n    }\n}\n\nimpl std::fmt::Display for InboxParseError {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        match self {\n            Self::UnknownActor { actor_type } => {\n                write!(f, \"no mailbox actor '{actor_type}' in this build\")\n            }\n            Self::UndeclaredMessage { actor_type, message_type } => write!(\n                f,\n                \"actor '{actor_type}' does not declare message '{message_type}' in this build\"\n            ),\n            Self::Payload { actor_type, message_type, detail } => {\n                write!(f, \"{actor_type}/{message_type} payload: {detail}\")\n            }\n        }\n    }\n}\n\nimpl std::error::Error for InboxParseError {}\n",
     );
     for actor in &actors {
         out.push('\n');

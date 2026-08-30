@@ -734,8 +734,9 @@ fn main() {
         ("process_managers.rs", emit_pm_orchestrators(&model)),
         ("handlers.rs", emit_application_handlers(&model)),
         ("reminders.rs", emit_app_reminders(&model)),
+        ("inboxes.rs", emit_app_inboxes(&model)),
         ("behaviour_tests.rs", emit_behaviour_tests(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\npub mod reminders;\n#[cfg(test)]\npub mod behaviour_tests;\n".to_string()),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod rows;\npub mod projectors;\npub mod pm_state;\npub mod process_managers;\npub mod services;\npub mod handlers;\npub mod reminders;\npub mod inboxes;\n#[cfg(test)]\npub mod behaviour_tests;\n".to_string()),
     ] {
         let path = app_gen.join(name);
         if let Err(e) = fs::write(&path, content) {
