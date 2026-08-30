@@ -3,6 +3,63 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-30 — the typed-inbox guarantee reached the fact door, and the thing it was hiding was a
+> catch-all that DESTROYED facts.** #771 made every declared COMMAND reach a decision in a
+> human-owned match, with `rustc` E0004 as the enforcement. It stopped at the fact-record route,
+> which was still a `match` over `DomainEvent` ending in `_ => Failed("no delivery route")`.
+> **Twelve of the 27 declared facts fell into that arm.** A fact reaching it was not appended late —
+> it was LOST, with a terminal verdict, `make validate` green and `cargo test` green. On
+> `RefundOpened`, the SOLE source of `View_PendingRefunds`, that is a restaurant never asked to
+> decide and captured money staying captured. Worse than the loss: the verdict wrote
+> `code: "Internal"`, and the poison read, the lane counter and the requeue write all filter on
+> `DeliveryInfrastructureError` — so the row was invisible in `poisonedMailboxMessages`, refused by
+> `RequeueMailboxMessage`, and swept at 90 days.
+>
+> **Fixed by a TYPE, not a gate** (compiler-first, ADR-20260803-234035). The obvious implementation
+> — a match over the composite `ActorInbox` with lane arms — **defeats #776's own scan**:
+> `ActorInbox::Payment(_) => Failed(..)` has `catch_all=false` and `names_inbox_variant=true`, so
+> both shipped predicates pass it while it absorbs every message the Payment lane can ever carry.
+> That is PR #776's spelling-vs-property defect one nesting level down, and this chunk was the first
+> work to reach for the shape. So the fact route runs over a GENERATED per-actor `<Actor>FactInbox`
+> — the `receives:` entries of kind Fact/Reminder only — where a COMMAND variant is unspellable, no
+> arm ever needs to say "not a fact", and no lane wildcard is ever wanted. The gate is fixed too
+> (`absorbs_a_lane` recurses under the composite; the test asserts the two old predicates' MISS so
+> the rule cannot be narrowed back to them) and the fact half gets its OWN reach pin, because the
+> global floor was met by the command half alone: **deleting the entire fact route left the scan
+> green.**
+>
+> **PARK, never terminal** ([ADR-20260830-224500](../adr/ADR-20260830-224500-an-unrecorded-declared-fact-parks-it-is-never-terminally-failed.md)).
+> A command may be refused — that is what makes it a command — but a fact already happened somewhere
+> else. The cheap fix (have the handler write `DeliveryInfrastructureError` so the row lands in the
+> poison queue) was rejected: that code is DEFINED by `rules.yaml`, `api.yaml` and `commands.yaml`
+> as *the delivery-attempts cap*, and minting it from a handler makes a routing gap
+> indistinguishable from a transport casualty. Aborting instead reaches the same place through the
+> recorded path — the runtime poisons it at the cap, for the reason the code names. It also turned
+> the per-fact "can the source re-emit?" question into a uniform answer: a provider redelivery is
+> absorbed by the enqueue-side pk dedupe, so re-emittability changes the COST of a terminal verdict,
+> never its correctness.
+>
+> **`deferred:` got its first seven users, and a name.** #771 shipped the grammar with zero
+> instances and a ratchet. Seven landed here, and they are a closed set rather than a backlog: in
+> every case **the receiving aggregate has no fold rule answering "is this re-delivered fact already
+> reflected?"** — so recording it would let a redelivery append a second copy. That makes the
+> deferral a MODELLING statement (evans's condition) and it tells C3 the ordering: **the fold rule
+> first, the route move after.** The ratchet is replaced by an explicit allow-list, never a count;
+> the arms and the declarations are held equal in BOTH directions, closing #781 for the fact half;
+> and a test refuses any reason containing a schedule word.
+>
+> Three catch-alls died on the way: `handle_pm_fact`'s `(actor, _) => Failed("no PM event leg")` (on
+> the money path, in a file the router scan does not read), the unparsable-staged-`DomainEvent`
+> terminal arm (dead once the door's already-parsed value is used — `ActorInbox::parse` does the
+> deserialize AND the `eventType`-vs-`message_type` cross-check), and the fact route's own. The door
+> also stopped writing free text into `inbound_messages.error`, and the delivery seam got its first
+> span: `handle_recorded_fact` had none, and `StatusBusObserver::committed` returns early for any
+> non-COMMAND row, so a lost fact was a **zero-signal** event.
+>
+> Deployed behaviour delta: **zero** — all twelve are unreachable today. The value is that the build
+> now refuses the omission. #780, PR #783.
+
+
 > **2026-08-30 — the flip changed a field and left the sentence: a config default is now emitted,
 > never restated.** `ROUTE_ORDER_BIRTH_THROUGH_LANE` went `default: false → true` on 2026-08-30
 > ([ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md));

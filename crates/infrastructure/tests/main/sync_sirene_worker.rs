@@ -507,6 +507,13 @@ async fn worker_adopts_the_legacy_aggregate_id_the_projection_names_for_a_known_
 /// eprintln nobody reads, (b) reconcile onto the mirror as FAILED with the payload KEPT (it is the
 /// only original if re-translation is needed), and (c) not be retried every pass — the production
 /// 605-row SlugAlreadyTaken log storm was exactly the retry-forever shape this guards against.
+///
+/// **What "durable trace" means changed with #780** and the assertion below moved with it: the
+/// door's undecodable-payload verdict used to record `context.detail: <free text>`, one of the
+/// legacy sites the #623 leak canary names, and now records the bounded
+/// `CommandFailureAttribution` pair. The row still says WHY — more precisely, in a vocabulary
+/// support can act on — and the diagnostic prose lives in the log, where nothing keeps it for
+/// ninety days.
 /// Recovery needs no operator action: a changed record from INSEE re-pends the row.
 #[tokio::test]
 async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
@@ -538,9 +545,25 @@ async fn a_failed_delivery_leaves_a_durable_trace_and_is_not_retried_forever() {
             .expect("inbound verdict");
     assert_eq!(inbound_status, "FAILED");
     let error = error.expect("the failure reason is recorded on the row");
+    // The trace says WHY, in the BOUNDED vocabulary #623 installed and #780 extended to this door.
+    // It used to be `context.detail: <free text>`; `inbound_messages.error` is a 90-day durable
+    // column, so the reason is now a closed pair and the diagnostic prose goes to the log. This is
+    // a STRONGER assertion than the one it replaces: a closed set can be asserted exactly, and the
+    // absence of free text is asserted too, which makes this a second leak canary on the one path
+    // where a provider-shaped string could reach the column.
+    assert_eq!(
+        error["context"]["seam"].as_str(),
+        Some("COMMAND_PAYLOAD"),
+        "the seam names WHERE it broke: {error}"
+    );
+    assert_eq!(
+        error["context"]["reason"].as_str(),
+        Some("PAYLOAD_UNDECODABLE"),
+        "the reason names WHY, in a vocabulary support can act on: {error}"
+    );
     assert!(
-        error["context"]["detail"].as_str().is_some_and(|d| !d.is_empty()),
-        "the trace says WHY, not just that it failed"
+        error["context"]["detail"].is_null(),
+        "no free text may reach the 90-day error column (#623): {error}"
     );
 
     // (b) Reconciled onto the mirror as FAILED: nothing claims a sync, and the payload survives.

@@ -1662,6 +1662,31 @@ pub(crate) fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (Stri
 /// grammar allows it.
 pub(crate) const SENDS_LANE_ROUTED: &[(&str, &str)] = &[("PlaceReplacementOrder", "Order")];
 
+/// Every ROUTED `deliver:` target as `(target actor, event)` — the FACT half of `ROUTED_LANES`,
+/// recomputed from the MODEL.
+///
+/// It exists so the #780 route gate has an ORACLE that is not the artifact under test: asking
+/// `ROUTED_LANES` which pairs are routed, in order to check `ROUTED_LANES`, measures nothing. A
+/// routed `sends:` is deliberately excluded — a command may be refused, so it does not belong to a
+/// gate about facts that must be recorded.
+pub(crate) fn routed_fact_targets(model: &Model) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for pm in parse_pm_orchestrators(model) {
+        for leg in &pm.legs {
+            for step in &leg.steps {
+                if let PmStepDef::Deliver { event, to, .. } = step {
+                    if deliver_is_lane_routed(to, event) {
+                        out.push((to.clone(), event.clone()));
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Emit `ROUTED_LANES` — the mailbox lanes a ROUTED `deliver:` or `sends:` addresses, DECLARED at
 /// runtime
 /// (#598).

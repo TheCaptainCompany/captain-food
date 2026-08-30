@@ -132,12 +132,20 @@ Customer:
     # rather than a return value nobody can replay.
     - message: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
       emits: [{ $ref: 'events.yaml#/CustomerIdentityUnlinked' }]
+      deferred:
+        reason: >
+          MODELLING: identity is Supabase-side and deliberately not business data (the auth wrapper is identity-only), so whether the Customer aggregate records an unlink AT ALL is the open question. No recorder, no fold rule.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/786"
       effect: "Record the auth provider's confirmation that the subject's identity was deleted at its end (Art. 28 processor instruction completed). Idempotent under re-delivery."
     # The grace window elapsing is a RECORDED fact, not an engine-internal timer — record semantics,
     # never rejected (ADR-20260731-153000 §1a). It is what projections fold to move the subject's
     # status, and what the deletion trigger fires on.
     - message: { $ref: '#/Customer/reminders/CustomerErasureDue' }
       emits: [{ $ref: 'events.yaml#/CustomerErasureDue' }]
+      deferred:
+        reason: >
+          MODELLING: the Customer fold has no erasure-due rule, so nothing answers "already reflected?" and a redelivery would append a second due-date. This is a LEGAL clock with no second copy anywhere, so the delivery PARKS (never terminal) until the rule exists.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/786"
       effect: "The grace window elapsed: record it. CustomerErasureProcess then re-checks the open-order precondition and, only if it passes, begins the destructive legs."
 
   # The `deletion:` block — the recorded grammar of ADR-20260731-214500, reused, not reinvented.

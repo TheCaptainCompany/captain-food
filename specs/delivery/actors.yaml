@@ -75,6 +75,10 @@ DeliveryJob:
     - message: { $ref: 'events.yaml#/DeliveryRequested' }
       emits: [{ $ref: 'events.yaml#/DeliveryRequested' }]
       effect: "Birth: DeliveryDispatchProcess delivers DeliveryRequested; the DeliveryJob records it (idempotent)."
+      deferred:
+        reason: >
+          MODELLING: the job's BIRTH, and record_inbound_delivery_event's idempotency is fold-based -- a birth has no fold to consult and there is no birthless structural-equality fallback, so a redelivery would append a second birth and apply `initial` twice.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/787"
     - message: { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
       emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByPartner' }]
       effect: "Inbound partner acceptance (via the avelo37 ACL use case): the DeliveryJob records the assigned courier (idempotent by partnerRef)."
@@ -84,12 +88,20 @@ DeliveryJob:
     - message: { $ref: 'events.yaml#/DeliveryOfferTimedOut' }
       emits: [{ $ref: 'events.yaml#/DeliveryOfferTimedOut' }]
       effect: "The DeliveryOfferTimeoutWorker's fact that an outstanding offer expired (#60): the DeliveryJob records it (mirrors the inbound rejection); DeliveryDispatchProcess advances the ranked channel walk."
+      deferred:
+        reason: >
+          MODELLING: not in the lifecycle transition table, so the recorder refuses it as an illegal transition; and job status cannot answer "already reflected?" because one job may legitimately time out on several ranked channels -- the dedupe key is the offer, not the status.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/787"
     - message: { $ref: 'events.yaml#/DeliveryStatusUpdated' }
       emits: [{ $ref: 'events.yaml#/DeliveryStatusUpdated' }]
       effect: "Inbound partner progress report (via the avelo37 ACL, two-layer inbox — the same event the UpdateDeliveryStatus command emits on the rider/admin path): the DeliveryJob records the reported transition (idempotent; lifecycle-guarded at append), and DeliveryDispatchProcess closes the order on DELIVERED."
     - message: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
       emits: [{ $ref: 'events.yaml#/DeliveryDispatchFailed' }]
       effect: "DeliveryDispatchProcess delivers the terminal dispatch failure (the ranked channel walk is exhausted — fail closed, #60): the DeliveryJob records it (status → FAILED) so the restaurant board surfaces it for manual handling (idempotent)."
+      deferred:
+        reason: >
+          MODELLING: the PENDING->FAILED transition is declared, but no "already reflected" rule is -- on redelivery the job is already FAILED, the transition lookup is None, and the recorder turns that into a retry loop instead of a DUPLICATE.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/787"
     - message: { $ref: 'commands.yaml#/AcceptDelivery' }
       emits: [{ $ref: 'events.yaml#/DeliveryAcceptedByRider' }]
       throws:

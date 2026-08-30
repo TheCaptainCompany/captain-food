@@ -56,6 +56,10 @@ Cart:
         - { $ref: 'errors.yaml#/CartNotFound' }
     - message: { $ref: 'events.yaml#/CartCheckedOut' }
       emits: [{ $ref: 'events.yaml#/CartCheckedOut' }]
+      deferred:
+        reason: >
+          MODELLING, not schedule: the Cart has no recorder and no fold rule answering "is this checkout already reflected?", so recording it would let a redelivery append a second CartCheckedOut. The fold rule comes first, then the route.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/784"
       effect: "PlaceOrderProcess delivers the checkout fact on payment authorization (ADR-20260808-195315 §1.2); the Cart records it and closes (idempotent)."
 
 

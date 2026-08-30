@@ -85,7 +85,7 @@ pub enum CartInbox {
     AddCartLine(domain::generated::commands::AddCartLine),
     /// COMMAND `BindCartToCustomer`.
     BindCartToCustomer(domain::generated::commands::BindCartToCustomer),
-    /// inbound FACT `CartCheckedOut`.
+    /// inbound FACT `CartCheckedOut` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING, not schedule: the Cart has no recorder and no fold rule answering "is this checkout already reflected?", so recording it would let a redelivery append a second CartCheckedOut. The fold rule comes first, then the route. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/784.
     CartCheckedOut(domain::generated::events::CartCheckedOut),
     /// COMMAND `ChangeCartLineQuantity`.
     ChangeCartLineQuantity(domain::generated::commands::ChangeCartLineQuantity),
@@ -187,6 +187,57 @@ impl CartInbox {
     }
 }
 
+/// GENERATED — the FACT half of `Cart`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CartFactInbox {
+    /// inbound FACT `CartCheckedOut` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING, not schedule: the Cart has no recorder and no fold rule answering "is this checkout already reflected?", so recording it would let a redelivery append a second CartCheckedOut. The fold rule comes first, then the route. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/784.
+    CartCheckedOut(domain::generated::events::CartCheckedOut),
+}
+
+impl CartFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "Cart";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::CartCheckedOut(_) => "CartCheckedOut",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::CartCheckedOut(e) => domain::generated::events::DomainEvent::CartCheckedOut(e),
+        }
+    }
+}
+
+impl CartInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<CartFactInbox> {
+        match self {
+            Self::AddCartLine(_) => None,
+            Self::BindCartToCustomer(_) => None,
+            Self::CartCheckedOut(e) => Some(CartFactInbox::CartCheckedOut(e)),
+            Self::ChangeCartLineQuantity(_) => None,
+            Self::RemoveCartLine(_) => None,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Catalog/receives` — the CLOSED set of messages the `Catalog`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -209,7 +260,7 @@ pub enum CatalogInbox {
     CreateCatalog(domain::generated::commands::CreateCatalog),
     /// COMMAND `ImportCatalog`.
     ImportCatalog(domain::generated::commands::ImportCatalog),
-    /// inbound FACT `OfferStockUpdated`.
+    /// inbound FACT `OfferStockUpdated` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: stock is a DERIVED status over the catalog fold, and availability, stock and orderability are three different things -- which one an externally reported level moves, and when a re-report is inert, is undeclared. No recorder and no dedupe rule. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/785.
     OfferStockUpdated(domain::generated::events::OfferStockUpdated),
     /// COMMAND `RemoveCatalogCategory`.
     RemoveCatalogCategory(domain::generated::commands::RemoveCatalogCategory),
@@ -402,6 +453,66 @@ impl CatalogInbox {
     }
 }
 
+/// GENERATED — the FACT half of `Catalog`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CatalogFactInbox {
+    /// inbound FACT `OfferStockUpdated` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: stock is a DERIVED status over the catalog fold, and availability, stock and orderability are three different things -- which one an externally reported level moves, and when a re-report is inert, is undeclared. No recorder and no dedupe rule. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/785.
+    OfferStockUpdated(domain::generated::events::OfferStockUpdated),
+}
+
+impl CatalogFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "Catalog";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::OfferStockUpdated(_) => "OfferStockUpdated",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::OfferStockUpdated(e) => domain::generated::events::DomainEvent::OfferStockUpdated(e),
+        }
+    }
+}
+
+impl CatalogInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<CatalogFactInbox> {
+        match self {
+            Self::AddCatalogCategory(_) => None,
+            Self::AddOptionList(_) => None,
+            Self::AddProduct(_) => None,
+            Self::ConfigureCatalogSlug(_) => None,
+            Self::CreateCatalog(_) => None,
+            Self::ImportCatalog(_) => None,
+            Self::OfferStockUpdated(e) => Some(CatalogFactInbox::OfferStockUpdated(e)),
+            Self::RemoveCatalogCategory(_) => None,
+            Self::RemoveOptionList(_) => None,
+            Self::RemoveProduct(_) => None,
+            Self::UpdateCatalogCategory(_) => None,
+            Self::UpdateOfferStock(_) => None,
+            Self::UpdateOptionList(_) => None,
+            Self::UpdateProduct(_) => None,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Conversation/receives` — the CLOSED set of messages the `Conversation`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -541,9 +652,9 @@ pub enum CustomerInbox {
     ConfirmEmailVerification(domain::generated::commands::ConfirmEmailVerification),
     /// COMMAND `ConfirmPhoneChange`.
     ConfirmPhoneChange(domain::generated::commands::ConfirmPhoneChange),
-    /// REMINDER `CustomerErasureDue`.
+    /// REMINDER `CustomerErasureDue` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: the Customer fold has no erasure-due rule, so nothing answers "already reflected?" and a redelivery would append a second due-date. This is a LEGAL clock with no second copy anywhere, so the delivery PARKS (never terminal) until the rule exists. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/786.
     CustomerErasureDue(domain::generated::events::CustomerErasureDue),
-    /// inbound FACT `CustomerIdentityUnlinked`.
+    /// inbound FACT `CustomerIdentityUnlinked` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: identity is Supabase-side and deliberately not business data (the auth wrapper is identity-only), so whether the Customer aggregate records an unlink AT ALL is the open question. No recorder, no fold rule. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/786.
     CustomerIdentityUnlinked(domain::generated::events::CustomerIdentityUnlinked),
     /// COMMAND `MarkRestaurantAsFavorite`.
     MarkRestaurantAsFavorite(domain::generated::commands::MarkRestaurantAsFavorite),
@@ -799,6 +910,75 @@ impl CustomerInbox {
     }
 }
 
+/// GENERATED — the FACT half of `Customer`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CustomerFactInbox {
+    /// REMINDER `CustomerErasureDue` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: the Customer fold has no erasure-due rule, so nothing answers "already reflected?" and a redelivery would append a second due-date. This is a LEGAL clock with no second copy anywhere, so the delivery PARKS (never terminal) until the rule exists. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/786.
+    CustomerErasureDue(domain::generated::events::CustomerErasureDue),
+    /// inbound FACT `CustomerIdentityUnlinked` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: identity is Supabase-side and deliberately not business data (the auth wrapper is identity-only), so whether the Customer aggregate records an unlink AT ALL is the open question. No recorder, no fold rule. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/786.
+    CustomerIdentityUnlinked(domain::generated::events::CustomerIdentityUnlinked),
+}
+
+impl CustomerFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "Customer";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::CustomerErasureDue(_) => "CustomerErasureDue",
+            Self::CustomerIdentityUnlinked(_) => "CustomerIdentityUnlinked",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::CustomerErasureDue(e) => domain::generated::events::DomainEvent::CustomerErasureDue(e),
+            Self::CustomerIdentityUnlinked(e) => domain::generated::events::DomainEvent::CustomerIdentityUnlinked(e),
+        }
+    }
+}
+
+impl CustomerInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<CustomerFactInbox> {
+        match self {
+            Self::CancelCustomerErasure(_) => None,
+            Self::ChangeLanguage(_) => None,
+            Self::ConfirmCustomerErasure(_) => None,
+            Self::ConfirmEmailVerification(_) => None,
+            Self::ConfirmPhoneChange(_) => None,
+            Self::CustomerErasureDue(e) => Some(CustomerFactInbox::CustomerErasureDue(e)),
+            Self::CustomerIdentityUnlinked(e) => Some(CustomerFactInbox::CustomerIdentityUnlinked(e)),
+            Self::MarkRestaurantAsFavorite(_) => None,
+            Self::RemoveCustomerAddress(_) => None,
+            Self::RequestCustomerErasure(_) => None,
+            Self::RequestEmailVerification(_) => None,
+            Self::RequestPhoneChange(_) => None,
+            Self::RequestPhoneVerification(_) => None,
+            Self::SetCustomerAddress(_) => None,
+            Self::SetCustomerPaymentMethod(_) => None,
+            Self::SetCustomerPreferences(_) => None,
+            Self::UnmarkRestaurantAsFavorite(_) => None,
+            Self::UpdateCustomerInfo(_) => None,
+            Self::VerifyPhone(_) => None,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/CustomerCredit/receives` — the CLOSED set of messages the `CustomerCredit`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -896,13 +1076,13 @@ pub enum DeliveryJobInbox {
     DeclineDelivery(domain::generated::commands::DeclineDelivery),
     /// inbound FACT `DeliveryAcceptedByPartner`.
     DeliveryAcceptedByPartner(domain::generated::events::DeliveryAcceptedByPartner),
-    /// inbound FACT `DeliveryDispatchFailed`.
+    /// inbound FACT `DeliveryDispatchFailed` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: the PENDING->FAILED transition is declared, but no "already reflected" rule is -- on redelivery the job is already FAILED, the transition lookup is None, and the recorder turns that into a retry loop instead of a DUPLICATE. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/787.
     DeliveryDispatchFailed(domain::generated::events::DeliveryDispatchFailed),
-    /// inbound FACT `DeliveryOfferTimedOut`.
+    /// inbound FACT `DeliveryOfferTimedOut` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: not in the lifecycle transition table, so the recorder refuses it as an illegal transition; and job status cannot answer "already reflected?" because one job may legitimately time out on several ranked channels -- the dedupe key is the offer, not the status. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/787.
     DeliveryOfferTimedOut(domain::generated::events::DeliveryOfferTimedOut),
     /// inbound FACT `DeliveryRejectedByPartner`.
     DeliveryRejectedByPartner(domain::generated::events::DeliveryRejectedByPartner),
-    /// inbound FACT `DeliveryRequested`.
+    /// inbound FACT `DeliveryRequested` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: the job's BIRTH, and record_inbound_delivery_event's idempotency is fold-based -- a birth has no fold to consult and there is no birthless structural-equality fallback, so a redelivery would append a second birth and apply `initial` twice. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/787.
     DeliveryRequested(domain::generated::events::DeliveryRequested),
     /// inbound FACT `DeliveryStatusUpdated`.
     DeliveryStatusUpdated(domain::generated::events::DeliveryStatusUpdated),
@@ -1147,6 +1327,88 @@ impl DeliveryJobInbox {
             Self::ResolveDeliveryIssue(_) => InboxKind::Command,
             Self::UnassignDeliveryFromPartner(_) => InboxKind::Command,
             Self::UpdateDeliveryStatus(_) => InboxKind::Command,
+        }
+    }
+}
+
+/// GENERATED — the FACT half of `DeliveryJob`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeliveryJobFactInbox {
+    /// inbound FACT `DeliveryAcceptedByPartner`.
+    DeliveryAcceptedByPartner(domain::generated::events::DeliveryAcceptedByPartner),
+    /// inbound FACT `DeliveryDispatchFailed` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: the PENDING->FAILED transition is declared, but no "already reflected" rule is -- on redelivery the job is already FAILED, the transition lookup is None, and the recorder turns that into a retry loop instead of a DUPLICATE. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/787.
+    DeliveryDispatchFailed(domain::generated::events::DeliveryDispatchFailed),
+    /// inbound FACT `DeliveryOfferTimedOut` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: not in the lifecycle transition table, so the recorder refuses it as an illegal transition; and job status cannot answer "already reflected?" because one job may legitimately time out on several ranked channels -- the dedupe key is the offer, not the status. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/787.
+    DeliveryOfferTimedOut(domain::generated::events::DeliveryOfferTimedOut),
+    /// inbound FACT `DeliveryRejectedByPartner`.
+    DeliveryRejectedByPartner(domain::generated::events::DeliveryRejectedByPartner),
+    /// inbound FACT `DeliveryRequested` — HANDLER DEFERRED (actors.yaml `deferred:`): MODELLING: the job's BIRTH, and record_inbound_delivery_event's idempotency is fold-based -- a birth has no fold to consult and there is no birthless structural-equality fallback, so a redelivery would append a second birth and apply `initial` twice. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/787.
+    DeliveryRequested(domain::generated::events::DeliveryRequested),
+    /// inbound FACT `DeliveryStatusUpdated`.
+    DeliveryStatusUpdated(domain::generated::events::DeliveryStatusUpdated),
+}
+
+impl DeliveryJobFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "DeliveryJob";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::DeliveryAcceptedByPartner(_) => "DeliveryAcceptedByPartner",
+            Self::DeliveryDispatchFailed(_) => "DeliveryDispatchFailed",
+            Self::DeliveryOfferTimedOut(_) => "DeliveryOfferTimedOut",
+            Self::DeliveryRejectedByPartner(_) => "DeliveryRejectedByPartner",
+            Self::DeliveryRequested(_) => "DeliveryRequested",
+            Self::DeliveryStatusUpdated(_) => "DeliveryStatusUpdated",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::DeliveryAcceptedByPartner(e) => domain::generated::events::DomainEvent::DeliveryAcceptedByPartner(e),
+            Self::DeliveryDispatchFailed(e) => domain::generated::events::DomainEvent::DeliveryDispatchFailed(e),
+            Self::DeliveryOfferTimedOut(e) => domain::generated::events::DomainEvent::DeliveryOfferTimedOut(e),
+            Self::DeliveryRejectedByPartner(e) => domain::generated::events::DomainEvent::DeliveryRejectedByPartner(e),
+            Self::DeliveryRequested(e) => domain::generated::events::DomainEvent::DeliveryRequested(e),
+            Self::DeliveryStatusUpdated(e) => domain::generated::events::DomainEvent::DeliveryStatusUpdated(e),
+        }
+    }
+}
+
+impl DeliveryJobInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<DeliveryJobFactInbox> {
+        match self {
+            Self::AcceptDelivery(_) => None,
+            Self::CancelDelivery(_) => None,
+            Self::CompleteDelivery(_) => None,
+            Self::ConfirmPickup(_) => None,
+            Self::DeclineDelivery(_) => None,
+            Self::DeliveryAcceptedByPartner(e) => Some(DeliveryJobFactInbox::DeliveryAcceptedByPartner(e)),
+            Self::DeliveryDispatchFailed(e) => Some(DeliveryJobFactInbox::DeliveryDispatchFailed(e)),
+            Self::DeliveryOfferTimedOut(e) => Some(DeliveryJobFactInbox::DeliveryOfferTimedOut(e)),
+            Self::DeliveryRejectedByPartner(e) => Some(DeliveryJobFactInbox::DeliveryRejectedByPartner(e)),
+            Self::DeliveryRequested(e) => Some(DeliveryJobFactInbox::DeliveryRequested(e)),
+            Self::DeliveryStatusUpdated(e) => Some(DeliveryJobFactInbox::DeliveryStatusUpdated(e)),
+            Self::EscalateDelivery(_) => None,
+            Self::ReportDeliveryIssue(_) => None,
+            Self::ResolveDeliveryIssue(_) => None,
+            Self::UnassignDeliveryFromPartner(_) => None,
+            Self::UpdateDeliveryStatus(_) => None,
         }
     }
 }
@@ -1554,6 +1816,76 @@ impl OrderInbox {
     }
 }
 
+/// GENERATED — the FACT half of `Order`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderFactInbox {
+    /// REMINDER `OrderAcceptanceTimedOut`.
+    OrderAcceptanceTimedOut(domain::generated::events::OrderAcceptanceTimedOut),
+    /// REMINDER `OrderExpired`.
+    OrderExpired(domain::generated::events::OrderExpired),
+    /// inbound FACT `OrderPlaced`.
+    OrderPlaced(domain::generated::events::OrderPlaced),
+}
+
+impl OrderFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "Order";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::OrderAcceptanceTimedOut(_) => "OrderAcceptanceTimedOut",
+            Self::OrderExpired(_) => "OrderExpired",
+            Self::OrderPlaced(_) => "OrderPlaced",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::OrderAcceptanceTimedOut(e) => domain::generated::events::DomainEvent::OrderAcceptanceTimedOut(e),
+            Self::OrderExpired(e) => domain::generated::events::DomainEvent::OrderExpired(e),
+            Self::OrderPlaced(e) => domain::generated::events::DomainEvent::OrderPlaced(e),
+        }
+    }
+}
+
+impl OrderInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<OrderFactInbox> {
+        match self {
+            Self::AcceptOrder(_) => None,
+            Self::CancelOrderByCustomer(_) => None,
+            Self::CancelOrderByRestaurant(_) => None,
+            Self::MarkOrderDelivered(_) => None,
+            Self::MarkOrderReady(_) => None,
+            Self::OrderAcceptanceTimedOut(e) => Some(OrderFactInbox::OrderAcceptanceTimedOut(e)),
+            Self::OrderExpired(e) => Some(OrderFactInbox::OrderExpired(e)),
+            Self::OrderPlaced(e) => Some(OrderFactInbox::OrderPlaced(e)),
+            Self::PlaceReplacementOrder(_) => None,
+            Self::RateOrder(_) => None,
+            Self::RateRestaurant(_) => None,
+            Self::RecordDeliverySatisfaction(_) => None,
+            Self::RejectOrder(_) => None,
+            Self::RequestRefund(_) => None,
+            Self::StartPreparation(_) => None,
+            Self::TipOrder(_) => None,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Payment/receives` — the CLOSED set of messages the `Payment`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -1797,6 +2129,98 @@ impl PaymentInbox {
     }
 }
 
+/// GENERATED — the FACT half of `Payment`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaymentFactInbox {
+    /// inbound FACT `PaymentAuthorized`.
+    PaymentAuthorized(domain::generated::events::PaymentAuthorized),
+    /// inbound FACT `PaymentCaptureFailed`.
+    PaymentCaptureFailed(domain::generated::events::PaymentCaptureFailed),
+    /// inbound FACT `PaymentCaptured`.
+    PaymentCaptured(domain::generated::events::PaymentCaptured),
+    /// inbound FACT `PaymentFailed`.
+    PaymentFailed(domain::generated::events::PaymentFailed),
+    /// inbound FACT `PaymentIntentCreated`.
+    PaymentIntentCreated(domain::generated::events::PaymentIntentCreated),
+    /// inbound FACT `PaymentRefunded`.
+    PaymentRefunded(domain::generated::events::PaymentRefunded),
+    /// inbound FACT `PaymentReleased`.
+    PaymentReleased(domain::generated::events::PaymentReleased),
+    /// inbound FACT `RefundApproved`.
+    RefundApproved(domain::generated::events::RefundApproved),
+    /// inbound FACT `RefundDenied`.
+    RefundDenied(domain::generated::events::RefundDenied),
+    /// inbound FACT `RefundOpened`.
+    RefundOpened(domain::generated::events::RefundOpened),
+}
+
+impl PaymentFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "Payment";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::PaymentAuthorized(_) => "PaymentAuthorized",
+            Self::PaymentCaptureFailed(_) => "PaymentCaptureFailed",
+            Self::PaymentCaptured(_) => "PaymentCaptured",
+            Self::PaymentFailed(_) => "PaymentFailed",
+            Self::PaymentIntentCreated(_) => "PaymentIntentCreated",
+            Self::PaymentRefunded(_) => "PaymentRefunded",
+            Self::PaymentReleased(_) => "PaymentReleased",
+            Self::RefundApproved(_) => "RefundApproved",
+            Self::RefundDenied(_) => "RefundDenied",
+            Self::RefundOpened(_) => "RefundOpened",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::PaymentAuthorized(e) => domain::generated::events::DomainEvent::PaymentAuthorized(e),
+            Self::PaymentCaptureFailed(e) => domain::generated::events::DomainEvent::PaymentCaptureFailed(e),
+            Self::PaymentCaptured(e) => domain::generated::events::DomainEvent::PaymentCaptured(e),
+            Self::PaymentFailed(e) => domain::generated::events::DomainEvent::PaymentFailed(e),
+            Self::PaymentIntentCreated(e) => domain::generated::events::DomainEvent::PaymentIntentCreated(e),
+            Self::PaymentRefunded(e) => domain::generated::events::DomainEvent::PaymentRefunded(e),
+            Self::PaymentReleased(e) => domain::generated::events::DomainEvent::PaymentReleased(e),
+            Self::RefundApproved(e) => domain::generated::events::DomainEvent::RefundApproved(e),
+            Self::RefundDenied(e) => domain::generated::events::DomainEvent::RefundDenied(e),
+            Self::RefundOpened(e) => domain::generated::events::DomainEvent::RefundOpened(e),
+        }
+    }
+}
+
+impl PaymentInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<PaymentFactInbox> {
+        match self {
+            Self::PaymentAuthorized(e) => Some(PaymentFactInbox::PaymentAuthorized(e)),
+            Self::PaymentCaptureFailed(e) => Some(PaymentFactInbox::PaymentCaptureFailed(e)),
+            Self::PaymentCaptured(e) => Some(PaymentFactInbox::PaymentCaptured(e)),
+            Self::PaymentFailed(e) => Some(PaymentFactInbox::PaymentFailed(e)),
+            Self::PaymentIntentCreated(e) => Some(PaymentFactInbox::PaymentIntentCreated(e)),
+            Self::PaymentRefunded(e) => Some(PaymentFactInbox::PaymentRefunded(e)),
+            Self::PaymentReleased(e) => Some(PaymentFactInbox::PaymentReleased(e)),
+            Self::RefundApproved(e) => Some(PaymentFactInbox::RefundApproved(e)),
+            Self::RefundDenied(e) => Some(PaymentFactInbox::RefundDenied(e)),
+            Self::RefundOpened(e) => Some(PaymentFactInbox::RefundOpened(e)),
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/PlaceOrderProcess/receives` — the CLOSED set of messages the `PlaceOrderProcess`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -1895,6 +2319,59 @@ impl PlaceOrderProcessInbox {
             Self::PaymentAuthorized(_) => InboxKind::Fact,
             Self::PaymentFailed(_) => InboxKind::Fact,
             Self::PlaceOrder(_) => InboxKind::Command,
+        }
+    }
+}
+
+/// GENERATED — the FACT half of `PlaceOrderProcess`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlaceOrderProcessFactInbox {
+    /// inbound FACT `PaymentAuthorized`.
+    PaymentAuthorized(domain::generated::events::PaymentAuthorized),
+    /// inbound FACT `PaymentFailed`.
+    PaymentFailed(domain::generated::events::PaymentFailed),
+}
+
+impl PlaceOrderProcessFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "PlaceOrderProcess";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::PaymentAuthorized(_) => "PaymentAuthorized",
+            Self::PaymentFailed(_) => "PaymentFailed",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::PaymentAuthorized(e) => domain::generated::events::DomainEvent::PaymentAuthorized(e),
+            Self::PaymentFailed(e) => domain::generated::events::DomainEvent::PaymentFailed(e),
+        }
+    }
+}
+
+impl PlaceOrderProcessInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<PlaceOrderProcessFactInbox> {
+        match self {
+            Self::PaymentAuthorized(e) => Some(PlaceOrderProcessFactInbox::PaymentAuthorized(e)),
+            Self::PaymentFailed(e) => Some(PlaceOrderProcessFactInbox::PaymentFailed(e)),
+            Self::PlaceOrder(_) => None,
         }
     }
 }
@@ -2187,6 +2664,55 @@ impl RefundProcessInbox {
     }
 }
 
+/// GENERATED — the FACT half of `RefundProcess`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RefundProcessFactInbox {
+    /// inbound FACT `PaymentRefunded`.
+    PaymentRefunded(domain::generated::events::PaymentRefunded),
+}
+
+impl RefundProcessFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "RefundProcess";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::PaymentRefunded(_) => "PaymentRefunded",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::PaymentRefunded(e) => domain::generated::events::DomainEvent::PaymentRefunded(e),
+        }
+    }
+}
+
+impl RefundProcessInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<RefundProcessFactInbox> {
+        match self {
+            Self::ApproveRefund(_) => None,
+            Self::DenyRefund(_) => None,
+            Self::PaymentRefunded(e) => Some(RefundProcessFactInbox::PaymentRefunded(e)),
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Restaurant/receives` — the CLOSED set of messages the `Restaurant`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -2409,6 +2935,67 @@ impl RestaurantInbox {
             Self::UpdateRestaurant(_) => InboxKind::Command,
             Self::UpdateRestaurantGoogleBusinessProfile(_) => InboxKind::Command,
             Self::VerifyGoogleBusinessProfileOrderLink(_) => InboxKind::Command,
+        }
+    }
+}
+
+/// GENERATED — the FACT half of `Restaurant`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RestaurantFactInbox {
+    /// inbound FACT `RestaurantRegistered`.
+    RestaurantRegistered(domain::generated::events::RestaurantRegistered),
+}
+
+impl RestaurantFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "Restaurant";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::RestaurantRegistered(_) => "RestaurantRegistered",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::RestaurantRegistered(e) => domain::generated::events::DomainEvent::RestaurantRegistered(e),
+        }
+    }
+}
+
+impl RestaurantInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<RestaurantFactInbox> {
+        match self {
+            Self::ActivateRestaurant(_) => None,
+            Self::ChangeOrderAcceptanceMode(_) => None,
+            Self::ChangeRestaurantListingStatus(_) => None,
+            Self::ClaimRestaurantListing(_) => None,
+            Self::ConfigureGoogleBusinessProfileOrderLink(_) => None,
+            Self::ConfigureRestaurantSlug(_) => None,
+            Self::DeactivateRestaurant(_) => None,
+            Self::MarkRestaurantClosed(_) => None,
+            Self::OptOutRestaurantListing(_) => None,
+            Self::RegisterRestaurant(_) => None,
+            Self::RemoveRestaurant(_) => None,
+            Self::RestaurantRegistered(e) => Some(RestaurantFactInbox::RestaurantRegistered(e)),
+            Self::UpdateRestaurant(_) => None,
+            Self::UpdateRestaurantGoogleBusinessProfile(_) => None,
+            Self::VerifyGoogleBusinessProfileOrderLink(_) => None,
         }
     }
 }
@@ -2727,6 +3314,160 @@ impl ActorInbox {
     }
 }
 
+/// One parsed mailbox row that carries a FACT, attributed to its lane — the composite the
+/// human-owned `fact_route` dispatches on (#780).
+///
+/// It exists so that a COMMAND variant is UNSPELLABLE in the fact match. Matching the fact route
+/// over `ActorInbox` instead would need a lane arm per command-only lane and, worse, would make
+/// `ActorInbox::Payment(_) => Failed("no route")` both compilable and gate-clean while absorbing
+/// every message the Payment lane can ever carry. Removing the temptation beats gating it
+/// (compiler-first, ADR-20260803-234035).
+///
+/// A lane whose `receives:` set is commands only has no variant here at all.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActorFactInbox {
+    /// A FACT row on a `Cart` lane.
+    Cart(CartFactInbox),
+    /// A FACT row on a `Catalog` lane.
+    Catalog(CatalogFactInbox),
+    /// A FACT row on a `Customer` lane.
+    Customer(CustomerFactInbox),
+    /// A FACT row on a `DeliveryJob` lane.
+    DeliveryJob(DeliveryJobFactInbox),
+    /// A FACT row on a `Order` lane.
+    Order(OrderFactInbox),
+    /// A FACT row on a `Payment` lane.
+    Payment(PaymentFactInbox),
+    /// A FACT row on a `PlaceOrderProcess` lane.
+    PlaceOrderProcess(PlaceOrderProcessFactInbox),
+    /// A FACT row on a `RefundProcess` lane.
+    RefundProcess(RefundProcessFactInbox),
+    /// A FACT row on a `Restaurant` lane.
+    Restaurant(RestaurantFactInbox),
+}
+
+impl ActorFactInbox {
+    /// The lane this fact was delivered ON — read from the ROW's `actor_type` through
+    /// `ActorInbox::parse`, never derived from the payload. A fact parsed into the wrong lane is
+    /// the foreign-stream append wearing a typed hat, and the enum cannot catch it because the
+    /// enum would be right and the lane wrong (vernon, #780).
+    pub fn actor_type(&self) -> &'static str {
+        match self {
+            Self::Cart(_) => CartFactInbox::ACTOR_TYPE,
+            Self::Catalog(_) => CatalogFactInbox::ACTOR_TYPE,
+            Self::Customer(_) => CustomerFactInbox::ACTOR_TYPE,
+            Self::DeliveryJob(_) => DeliveryJobFactInbox::ACTOR_TYPE,
+            Self::Order(_) => OrderFactInbox::ACTOR_TYPE,
+            Self::Payment(_) => PaymentFactInbox::ACTOR_TYPE,
+            Self::PlaceOrderProcess(_) => PlaceOrderProcessFactInbox::ACTOR_TYPE,
+            Self::RefundProcess(_) => RefundProcessFactInbox::ACTOR_TYPE,
+            Self::Restaurant(_) => RestaurantFactInbox::ACTOR_TYPE,
+        }
+    }
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::Cart(m) => m.message_type(),
+            Self::Catalog(m) => m.message_type(),
+            Self::Customer(m) => m.message_type(),
+            Self::DeliveryJob(m) => m.message_type(),
+            Self::Order(m) => m.message_type(),
+            Self::Payment(m) => m.message_type(),
+            Self::PlaceOrderProcess(m) => m.message_type(),
+            Self::RefundProcess(m) => m.message_type(),
+            Self::Restaurant(m) => m.message_type(),
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::Cart(m) => m.into_domain_event(),
+            Self::Catalog(m) => m.into_domain_event(),
+            Self::Customer(m) => m.into_domain_event(),
+            Self::DeliveryJob(m) => m.into_domain_event(),
+            Self::Order(m) => m.into_domain_event(),
+            Self::Payment(m) => m.into_domain_event(),
+            Self::PlaceOrderProcess(m) => m.into_domain_event(),
+            Self::RefundProcess(m) => m.into_domain_event(),
+            Self::Restaurant(m) => m.into_domain_event(),
+        }
+    }
+}
+
+impl ActorInbox {
+    /// The FACT half of this row, or `None` for a COMMAND — the TOTAL generated projection the
+    /// fact route runs on (#780). Generated because it carries no decision: whether a `receives:`
+    /// entry is a fact is answered by its `$ref` path and by nothing else, exactly like
+    /// `message_type()`. The DECISION — what each fact DOES — stays human-owned, and E0004 over
+    /// `ActorFactInbox` is what makes a new declared fact impossible to ignore.
+    pub fn into_fact(self) -> Option<ActorFactInbox> {
+        match self {
+            Self::Cart(m) => m.into_fact().map(ActorFactInbox::Cart),
+            Self::Catalog(m) => m.into_fact().map(ActorFactInbox::Catalog),
+            // The `Conversation` lane declares no fact.
+            Self::Conversation(_) => None,
+            Self::Customer(m) => m.into_fact().map(ActorFactInbox::Customer),
+            // The `CustomerCredit` lane declares no fact.
+            Self::CustomerCredit(_) => None,
+            Self::DeliveryJob(m) => m.into_fact().map(ActorFactInbox::DeliveryJob),
+            // The `DeliveryPartnerRegistration` lane declares no fact.
+            Self::DeliveryPartnerRegistration(_) => None,
+            // The `MailboxSupervision` lane declares no fact.
+            Self::MailboxSupervision(_) => None,
+            Self::Order(m) => m.into_fact().map(ActorFactInbox::Order),
+            Self::Payment(m) => m.into_fact().map(ActorFactInbox::Payment),
+            Self::PlaceOrderProcess(m) => m.into_fact().map(ActorFactInbox::PlaceOrderProcess),
+            // The `Prospect` lane declares no fact.
+            Self::Prospect(_) => None,
+            // The `Reclamation` lane declares no fact.
+            Self::Reclamation(_) => None,
+            Self::RefundProcess(m) => m.into_fact().map(ActorFactInbox::RefundProcess),
+            Self::Restaurant(m) => m.into_fact().map(ActorFactInbox::Restaurant),
+            // The `RestaurantAccount` lane declares no fact.
+            Self::RestaurantAccount(_) => None,
+            // The `Rider` lane declares no fact.
+            Self::Rider(_) => None,
+        }
+    }
+}
+
+/// Every FACT an actor DECLARES it receives — `(actor_type, message_type)`, sorted.
+///
+/// The DECLARED population a route gate measures itself against: a routed `deliver:` target must
+/// be in here AND must have a real record arm, and a gate that derives its own population from the
+/// artifact under test is measuring nothing (#780).
+pub const DECLARED_FACTS: &[(&str, &str)] = &[
+    ("Cart", "CartCheckedOut"),
+    ("Catalog", "OfferStockUpdated"),
+    ("Customer", "CustomerErasureDue"),
+    ("Customer", "CustomerIdentityUnlinked"),
+    ("DeliveryJob", "DeliveryAcceptedByPartner"),
+    ("DeliveryJob", "DeliveryDispatchFailed"),
+    ("DeliveryJob", "DeliveryOfferTimedOut"),
+    ("DeliveryJob", "DeliveryRejectedByPartner"),
+    ("DeliveryJob", "DeliveryRequested"),
+    ("DeliveryJob", "DeliveryStatusUpdated"),
+    ("Order", "OrderAcceptanceTimedOut"),
+    ("Order", "OrderExpired"),
+    ("Order", "OrderPlaced"),
+    ("Payment", "PaymentAuthorized"),
+    ("Payment", "PaymentCaptureFailed"),
+    ("Payment", "PaymentCaptured"),
+    ("Payment", "PaymentFailed"),
+    ("Payment", "PaymentIntentCreated"),
+    ("Payment", "PaymentRefunded"),
+    ("Payment", "PaymentReleased"),
+    ("Payment", "RefundApproved"),
+    ("Payment", "RefundDenied"),
+    ("Payment", "RefundOpened"),
+    ("PlaceOrderProcess", "PaymentAuthorized"),
+    ("PlaceOrderProcess", "PaymentFailed"),
+    ("RefundProcess", "PaymentRefunded"),
+    ("Restaurant", "RestaurantRegistered"),
+];
+
 /// Messages an actor DECLARES it receives whose handler is deliberately not built yet
 /// (`actors.yaml` `receives[].deferred: { reason, issue }`) — `(actor_type, message_type, reason,
 /// issue)`.
@@ -2739,4 +3480,11 @@ impl ActorInbox {
 /// variant and its router arm still exist: what is deferred is what the arm DOES, and the compiler
 /// still refuses to let the message go unconsumed.
 pub const DEFERRED_MESSAGES: &[(&str, &str, &str, &str)] = &[
+    ("Cart", "CartCheckedOut", "MODELLING, not schedule: the Cart has no recorder and no fold rule answering \"is this checkout already reflected?\", so recording it would let a redelivery append a second CartCheckedOut. The fold rule comes first, then the route.", "https://github.com/TheCaptainCompany/captain-food/issues/784"),
+    ("Catalog", "OfferStockUpdated", "MODELLING: stock is a DERIVED status over the catalog fold, and availability, stock and orderability are three different things -- which one an externally reported level moves, and when a re-report is inert, is undeclared. No recorder and no dedupe rule.", "https://github.com/TheCaptainCompany/captain-food/issues/785"),
+    ("Customer", "CustomerErasureDue", "MODELLING: the Customer fold has no erasure-due rule, so nothing answers \"already reflected?\" and a redelivery would append a second due-date. This is a LEGAL clock with no second copy anywhere, so the delivery PARKS (never terminal) until the rule exists.", "https://github.com/TheCaptainCompany/captain-food/issues/786"),
+    ("Customer", "CustomerIdentityUnlinked", "MODELLING: identity is Supabase-side and deliberately not business data (the auth wrapper is identity-only), so whether the Customer aggregate records an unlink AT ALL is the open question. No recorder, no fold rule.", "https://github.com/TheCaptainCompany/captain-food/issues/786"),
+    ("DeliveryJob", "DeliveryDispatchFailed", "MODELLING: the PENDING->FAILED transition is declared, but no \"already reflected\" rule is -- on redelivery the job is already FAILED, the transition lookup is None, and the recorder turns that into a retry loop instead of a DUPLICATE.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
+    ("DeliveryJob", "DeliveryOfferTimedOut", "MODELLING: not in the lifecycle transition table, so the recorder refuses it as an illegal transition; and job status cannot answer \"already reflected?\" because one job may legitimately time out on several ranked channels -- the dedupe key is the offer, not the status.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
+    ("DeliveryJob", "DeliveryRequested", "MODELLING: the job's BIRTH, and record_inbound_delivery_event's idempotency is fold-based -- a birth has no fold to consult and there is no birthless structural-equality fallback, so a redelivery would append a second birth and apply `initial` twice.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
 ];

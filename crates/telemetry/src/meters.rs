@@ -99,6 +99,39 @@ pub mod mailbox {
         poison_counter().add(1, &[KeyValue::new("actor_type", actor_type.to_string())]);
     }
 
+    fn fact_unrecorded_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MAILBOX_FACT_UNRECORDED_TOTAL).build())
+    }
+
+    /// The CLOSED `reason` set of `mailbox_fact_unrecorded_total`, spelled once
+    /// (`specs/observability.yaml#/mailbox-delivery`). Constants rather than call-site literals so
+    /// a typo cannot silently open a third series that no dashboard is watching.
+    ///
+    /// The fact is DECLARED and the receiving aggregate has no fold rule for it, so the delivery
+    /// PARKED. Permanently zero in production.
+    pub const FACT_UNRECORDED_DEFERRED: &str = "deferred";
+    /// A DECLARED fact whose payload does not deserialize, or whose staged `eventType` disagrees
+    /// with the row's `message_type`. Deterministic, so the row is terminally failed.
+    pub const FACT_UNRECORDED_UNPARSABLE: &str = "unparsable_payload";
+
+    /// A declared inbound fact did NOT reach its aggregate
+    /// (`mailbox_fact_unrecorded_total{actor_type, message_type, reason}`).
+    ///
+    /// `message_type` is a label ON PURPOSE: it answers *which fact*, which is the entire question,
+    /// and its population is bounded by that lane's declared `receives:` set. The row's
+    /// `message_id`/`correlation_id` are NOT labels -- they ride the `message.deliver` span.
+    pub fn fact_unrecorded(actor_type: &str, message_type: &str, reason: &'static str) {
+        fact_unrecorded_counter().add(
+            1,
+            &[
+                KeyValue::new("actor_type", actor_type.to_string()),
+                KeyValue::new("message_type", message_type.to_string()),
+                KeyValue::new("reason", reason),
+            ],
+        );
+    }
+
     /// The push listener went DOWN (`mailbox_push_down_total{reason}`): connection lost, or the
     /// liveness canary timed out (the transaction-pooler silently-deaf-LISTEN mode). Workers are
     /// on the pre-push cadence until recovery.
