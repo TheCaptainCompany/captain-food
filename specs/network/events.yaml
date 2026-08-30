@@ -343,6 +343,18 @@ RestaurantListingClaimed:
 
 RestaurantListingOptedOut:
   description: "An owner asked to edit/remove their public listing (opt-out), proven via GBP ownership."
+  # THIS EVENT **IS** THE ART. 21 OBJECTION REGISTER — not stale data (BRIEF-20260808 Q1/Q4,
+  # BRIEF-20260811 §3, recorded there as BLOCKER-on-arrival). The CNIL *liste repoussoir* doctrine
+  # makes retaining the minimal suppression identifier the LAWFUL act and deleting it the violation:
+  # without it the ProspectionPipeline finds nothing recording the refusal and re-contacts the person
+  # who objected, and under Art. 5(2) we could not evidence that the objection was ever honoured.
+  #
+  # `Restaurant` declares no `deletion:` block today, so nothing is broken — the danger is the day
+  # the retention sweep gives it an Order-shaped one. Until now the only guard was prose, "the weaker
+  # form CLAUDE.md warns about"; this marker is the LEFT-HAND SIDE the brief said was missing, and it
+  # makes `deletion-undercuts-retention` refuse such a block OUTRIGHT rather than by review.
+  legalRetention:
+    window: { $ref: 'configuration.yaml#/retention_windows/GDPR_ART21_OBJECTION_REGISTER' }
   type: object
   properties:
     restaurantId:

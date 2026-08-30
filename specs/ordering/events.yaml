@@ -113,6 +113,15 @@ CartCheckedOut:
 
 OrderPlaced:
   description: "A customer has placed an order and payment was successfully authorized/captured."
+  # Legal retention (PROP-20260829-150752 §3.4): the financial record of a sale, which French law
+  # compels us to keep for ten years. The marker is ON THE EVENT, never in prose, so the enforcement
+  # gate (`deletion-undercuts-retention`) and the customer-facing "what was retained and why" copy
+  # read the SAME declaration and cannot drift apart. The per-FIELD split — which fields are invoice
+  # data (plaintext) versus personal data (crypto-shredded) — is counsel's, and OPEN (§9 Q1): until
+  # it lands the WHOLE event is marked, which is the conservative direction.
+  legalRetention:
+    window: { $ref: 'configuration.yaml#/retention_windows/FRENCH_COMMERCIAL_BOOKS_10Y' }    # The sale itself: totals, VAT, payment reference — the core piece justificative.
+
   type: object
   properties:
     mode: { $ref: 'scalars.yaml#/Mode' }   # test mode (ADR-0038); optional, absent = LIVE
@@ -373,6 +382,15 @@ OrderTipped:
   description: >
     A tipper (customer or restaurant) added one or more tips (rider / restaurant / Captain) on an order
     (ADR-012). Separate from the price; Captain keeps 0%. Additive — multiple OrderTipped accumulate.
+  # Legal retention (PROP-20260829-150752 §3.4): the financial record of a sale, which French law
+  # compels us to keep for ten years. The marker is ON THE EVENT, never in prose, so the enforcement
+  # gate (`deletion-undercuts-retention`) and the customer-facing "what was retained and why" copy
+  # read the SAME declaration and cannot drift apart. The per-FIELD split — which fields are invoice
+  # data (plaintext) versus personal data (crypto-shredded) — is counsel's, and OPEN (§9 Q1): until
+  # it lands the WHOLE event is marked, which is the conservative direction.
+  legalRetention:
+    window: { $ref: 'configuration.yaml#/retention_windows/FRENCH_COMMERCIAL_BOOKS_10Y' }    # Money added to the transaction after the sale; it rides the same receipt.
+
   type: object
   properties:
     orderId:
@@ -398,6 +416,15 @@ OrderTipped:
 
 RefundRequested:
   description: "The customer requested a refund for an order; the RefundProcess will drive Stripe."
+  # Legal retention (PROP-20260829-150752 §3.4): the financial record of a sale, which French law
+  # compels us to keep for ten years. The marker is ON THE EVENT, never in prose, so the enforcement
+  # gate (`deletion-undercuts-retention`) and the customer-facing "what was retained and why" copy
+  # read the SAME declaration and cannot drift apart. The per-FIELD split — which fields are invoice
+  # data (plaintext) versus personal data (crypto-shredded) — is counsel's, and OPEN (§9 Q1): until
+  # it lands the WHOLE event is marked, which is the conservative direction.
+  legalRetention:
+    window: { $ref: 'configuration.yaml#/retention_windows/FRENCH_COMMERCIAL_BOOKS_10Y' }    # A refund claim against a settled sale — part of the same accounting trail.
+
   type: object
   properties:
     orderId:

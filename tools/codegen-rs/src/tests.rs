@@ -15707,3 +15707,293 @@ if_true:
         );
     }
 }
+
+/// §2f-bis — `legalRetention:` and the deletion/retention gate (PROP-20260829-150752 §3.4).
+///
+/// Every case here is PLANTED and asserted RED first: a rule exercised only against the real,
+/// passing corpus tests nothing. The green half matters just as much — case (C) proves the LIVE
+/// Order pilot passes AT the boundary (3650 >= 3650), not merely somewhere far from it, because a
+/// rule that only ever runs on comfortable numbers has never had its comparison checked.
+mod legal_retention_gate {
+    use super::*;
+
+    const LR_SCALARS: &str = "OrderId: { type: string }\nRestaurantId: { type: string }\n";
+
+    const LR_EVENTS_PLAIN: &str = r#"
+OrderPlaced:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+OrderExpired:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+OrderDeleted:
+  type: object
+  properties:
+    orderId: { $ref: 'scalars.yaml#/OrderId' }
+"#;
+
+    /// The catalog: one dated horizon, one indefinite register.
+    const LR_CONFIG: &str = r#"
+keys:
+  ORDER_RETENTION_WINDOW_DAYS:
+    type: int
+    unit: days
+    default: 3650
+    gates: "Retention window for terminal orders."
+  SHORT_WINDOW_DAYS:
+    type: int
+    unit: days
+    default: 30
+    gates: "A deliberately short window."
+  NO_DEFAULT_WINDOW_DAYS:
+    type: int
+    unit: days
+    gates: "A window whose value only exists at runtime."
+retention_windows:
+  FRENCH_COMMERCIAL_BOOKS_10Y:
+    instrument: "Code de commerce L123-22"
+    days: 3650
+  GDPR_ART21_OBJECTION_REGISTER:
+    instrument: "GDPR Art. 21 objection register"
+    indefinite: true
+"#;
+
+    /// Mark an event with a retention window (the `legalRetention:` sibling key).
+    fn with_retention(events: &str, event: &str, window: &str) -> String {
+        let marker = format!(
+            "\n{event}:\n  type: object\n  legalRetention:\n    window: {{ $ref: 'configuration.yaml#/retention_windows/{window}' }}\n  properties:\n    orderId: {{ $ref: 'scalars.yaml#/OrderId' }}\n"
+        );
+        // Replace the plain declaration with the marked one.
+        let plain = format!("\n{event}:\n  type: object\n  properties:\n    orderId: {{ $ref: 'scalars.yaml#/OrderId' }}\n");
+        assert!(events.contains(&plain), "fixture must contain the plain {event}");
+        events.replace(&plain, &marker)
+    }
+
+    fn lr_issues(events: &str, actors: &str) -> Vec<Issue> {
+        let model = inline_model(&[
+            ("scalars.yaml", LR_SCALARS),
+            ("events.yaml", events),
+            ("commands.yaml", "PlaceOrder:\n  type: object\n"),
+            ("configuration.yaml", LR_CONFIG),
+            ("actors.yaml", actors),
+        ]);
+        let mut issues = Vec::new();
+        validate_legal_retention(&model, &mut issues);
+        issues
+    }
+
+    /// The pilot's real shape: the window lives on the REMINDER, and the trigger carries no `after:`.
+    fn pilot_actor(window_key: &str) -> String {
+        format!(
+            r#"
+Order:
+  type: aggregate
+  identity: {{ $ref: '#/Order/state/orderId' }}
+  reminders:
+    OrderExpired:
+      payload: {{ $ref: 'events.yaml#/OrderExpired' }}
+      after: {{ $ref: 'configuration.yaml#/keys/{window_key}' }}
+  receives:
+    - message: {{ $ref: 'commands.yaml#/PlaceOrder' }}
+      emits: [{{ $ref: 'events.yaml#/OrderPlaced' }}]
+      schedules: [{{ $ref: '#/Order/reminders/OrderExpired' }}]
+    - message: {{ $ref: '#/Order/reminders/OrderExpired' }}
+      emits: []
+  deletion:
+    triggers:
+      - on: [{{ $ref: 'events.yaml#/OrderExpired' }}]
+        match:
+          event: {{ $ref: 'events.yaml#/OrderExpired/properties/orderId' }}
+          state: {{ $ref: '#/Order/state/orderId' }}
+    receipt: {{ $ref: 'events.yaml#/OrderDeleted' }}
+"#
+        )
+    }
+
+    // ── (C) the traced window — the arm that makes the pilot checkable at all ───────────────────
+
+    #[test]
+    fn c_green_the_pilot_passes_exactly_at_the_boundary() {
+        // 3650 retained, 3650 window — EQUAL, not comfortably apart. This is the real corpus's
+        // posture, so the `>=` is load-bearing and is asserted, never assumed.
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "FRENCH_COMMERCIAL_BOOKS_10Y");
+        let issues = lr_issues(&events, &pilot_actor("ORDER_RETENTION_WINDOW_DAYS"));
+        assert!(
+            issues.is_empty(),
+            "3650 >= 3650 must pass at the boundary: {:?}",
+            issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn c_red_shrinking_the_traced_reminder_window_below_retention_is_refused() {
+        // Same shape, window shrunk to 30 days on the REMINDER — the trigger itself is unchanged,
+        // which is exactly why an actor-scoped or `after:`-only rule would have missed it.
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "FRENCH_COMMERCIAL_BOOKS_10Y");
+        let issues = lr_issues(&events, &pilot_actor("SHORT_WINDOW_DAYS"));
+        assert_eq!(issues.len(), 1, "{:?}", rules_of_issues(&issues));
+        assert_eq!(issues[0].rule, "deletion-undercuts-retention");
+        assert!(
+            issues[0].message.contains("after 30 days")
+                && issues[0].message.contains("3650 days")
+                && issues[0].message.contains("Code de commerce L123-22"),
+            "the message must name BOTH numbers so the reader can see the undercut: {}",
+            issues[0].message
+        );
+    }
+
+    // ── (B) an indefinite horizon bars deletion outright ────────────────────────────────────────
+
+    #[test]
+    fn b_red_an_indefinite_horizon_bars_any_deletion_trigger() {
+        // The BRIEF-20260811 §3 trap itself: an Order-shaped block on an actor that authors the
+        // Art. 21 register. No window can satisfy it, so a LONG one must not rescue it.
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "GDPR_ART21_OBJECTION_REGISTER");
+        let issues = lr_issues(&events, &pilot_actor("ORDER_RETENTION_WINDOW_DAYS"));
+        assert_eq!(issues.len(), 1, "{:?}", rules_of_issues(&issues));
+        assert_eq!(issues[0].rule, "deletion-undercuts-retention");
+        assert!(
+            issues[0].message.contains("INDEFINITE"),
+            "the refusal must say WHY no window helps: {}",
+            issues[0].message
+        );
+    }
+
+    // ── (D) an unknowable window is refused, never waved through ────────────────────────────────
+
+    #[test]
+    fn d_red_a_trigger_with_no_after_and_no_traceable_schedule_errors() {
+        // The arm most likely to be skipped, because the spec LOOKS complete: a `deletion:` block
+        // with a typed `match`, no `after:`, and no reminder scheduling its trigger event. Reading
+        // the missing window as "no delay" would pass it silently while measuring nothing.
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "FRENCH_COMMERCIAL_BOOKS_10Y");
+        let actors = r#"
+Order:
+  type: aggregate
+  identity: { $ref: '#/Order/state/orderId' }
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
+"#;
+        let issues = lr_issues(&events, actors);
+        assert_eq!(issues.len(), 1, "{:?}", rules_of_issues(&issues));
+        assert_eq!(issues[0].rule, "deletion-undercuts-retention");
+        assert!(
+            issues[0].message.contains("UNKNOWABLE"),
+            "an undeterminable window must be refused as such: {}",
+            issues[0].message
+        );
+    }
+
+    #[test]
+    fn d_red_a_window_key_with_no_default_is_unknowable_too() {
+        // "Present at runtime" is not "checkable at spec time" — and runtime is exactly when it is
+        // too late to discover the window undercuts a legal obligation.
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "FRENCH_COMMERCIAL_BOOKS_10Y");
+        let issues = lr_issues(&events, &pilot_actor("NO_DEFAULT_WINDOW_DAYS"));
+        assert_eq!(issues.len(), 1, "{:?}", rules_of_issues(&issues));
+        assert_eq!(issues[0].rule, "deletion-undercuts-retention");
+        assert!(issues[0].message.contains("no checkable window"), "{}", issues[0].message);
+    }
+
+    #[test]
+    fn a_green_a_propagation_trigger_with_nothing_retained_stays_legal() {
+        // The guard on the guard: child-dies-with-parent triggers legitimately have no window, and
+        // scoping rule 1 to "retention actually reachable" is what keeps them spellable.
+        let actors = r#"
+Order:
+  type: aggregate
+  identity: { $ref: '#/Order/state/orderId' }
+  receives:
+    - message: { $ref: 'commands.yaml#/PlaceOrder' }
+      emits: [{ $ref: 'events.yaml#/OrderPlaced' }]
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/OrderExpired' }]
+        match:
+          event: { $ref: 'events.yaml#/OrderExpired/properties/orderId' }
+          state: { $ref: '#/Order/state/orderId' }
+    receipt: { $ref: 'events.yaml#/OrderDeleted' }
+"#;
+        assert!(lr_issues(LR_EVENTS_PLAIN, actors).is_empty());
+    }
+
+    // ── rule 2: the window must come from the approved catalog ──────────────────────────────────
+
+    #[test]
+    fn red_a_retention_naming_an_uncatalogued_window_is_refused() {
+        let events = LR_EVENTS_PLAIN.replace(
+            "\nOrderPlaced:\n  type: object\n",
+            "\nOrderPlaced:\n  type: object\n  legalRetention:\n    window: { $ref: 'configuration.yaml#/retention_windows/SOME_WINDOW_NOBODY_APPROVED' }\n",
+        );
+        let issues = lr_issues(&events, &pilot_actor("ORDER_RETENTION_WINDOW_DAYS"));
+        assert_eq!(rules_of_issues(&issues), vec!["legal-retention-window-uncatalogued"], "{:?}", rules_of_issues(&issues));
+    }
+
+    #[test]
+    fn red_a_retention_with_a_bare_token_window_is_refused() {
+        // ADR-20260811-014129 clause 2: a plain string is invisible to the refs walker, so no rule
+        // could ever see it. The catalog exists precisely so this is unspellable.
+        let events = LR_EVENTS_PLAIN.replace(
+            "\nOrderPlaced:\n  type: object\n",
+            "\nOrderPlaced:\n  type: object\n  legalRetention:\n    window: { $ref: 'P3650D' }\n",
+        );
+        let issues = lr_issues(&events, &pilot_actor("ORDER_RETENTION_WINDOW_DAYS"));
+        assert_eq!(rules_of_issues(&issues), vec!["legal-retention-window-uncatalogued"], "{:?}", rules_of_issues(&issues));
+    }
+
+    #[test]
+    fn red_a_catalog_entry_declaring_both_days_and_indefinite_is_not_well_formed() {
+        // A window that is both dated and endless is a contradiction someone will read as whichever
+        // half suits them; it is refused as uncatalogued rather than silently picking one.
+        let config = LR_CONFIG.replace(
+            "  FRENCH_COMMERCIAL_BOOKS_10Y:\n    instrument: \"Code de commerce L123-22\"\n    days: 3650\n",
+            "  FRENCH_COMMERCIAL_BOOKS_10Y:\n    instrument: \"Code de commerce L123-22\"\n    days: 3650\n    indefinite: true\n",
+        );
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "FRENCH_COMMERCIAL_BOOKS_10Y");
+        let model = inline_model(&[
+            ("scalars.yaml", LR_SCALARS),
+            ("events.yaml", &events),
+            ("commands.yaml", "PlaceOrder:\n  type: object\n"),
+            ("configuration.yaml", &config),
+            ("actors.yaml", &pilot_actor("ORDER_RETENTION_WINDOW_DAYS")),
+        ]);
+        let mut issues = Vec::new();
+        validate_legal_retention(&model, &mut issues);
+        assert_eq!(rules_of_issues(&issues), vec!["legal-retention-window-uncatalogued"], "{:?}", rules_of_issues(&issues));
+    }
+
+    #[test]
+    fn the_legal_retention_ref_site_is_declared_in_the_ref_contract() {
+        // REF_CONTRACT is fail-closed: this asserts the new site is CLASSIFIED, not merely tolerated
+        // — without the entry the ref would fail as `ref-site-undeclared` instead of being checked.
+        let events = with_retention(LR_EVENTS_PLAIN, "OrderPlaced", "FRENCH_COMMERCIAL_BOOKS_10Y");
+        let model = inline_model(&[
+            ("scalars.yaml", LR_SCALARS),
+            ("events.yaml", &events),
+            ("commands.yaml", "PlaceOrder:\n  type: object\n"),
+            ("configuration.yaml", LR_CONFIG),
+            ("actors.yaml", &pilot_actor("ORDER_RETENTION_WINDOW_DAYS")),
+        ]);
+        let mut kinds = Vec::new();
+        validate_ref_kinds(&model, &mut kinds);
+        assert!(
+            kinds.is_empty(),
+            "{:?}",
+            kinds.iter().map(|i| (i.rule, &i.message)).collect::<Vec<_>>()
+        );
+    }
+
+    fn rules_of_issues(issues: &[Issue]) -> Vec<&str> {
+        issues.iter().map(|i| i.rule).collect()
+    }
+}
