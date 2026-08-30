@@ -193,3 +193,115 @@ CustomerPaymentMethodSet:
     paymentMethodId:
       $ref: 'scalars.yaml#/PaymentMethodId'
   required: [customerId, paymentMethodId]
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# GDPR erasure — the recorded FACTS (PROP-20260829-150752; #708)
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# Facts vs state (young): request / confirm / cancel are COMMAND-PRODUCED facts on the Customer
+# stream; the process manager's phase ladder is ROW state and is deliberately NOT event-sourced —
+# event-sourcing bookkeeping would put an operational vocabulary (PARKED, RUNNING) into an immutable,
+# promised log to no business end.
+#
+# Payloads are BUSINESS-ONLY (ADR-0041): who requested is envelope metadata on
+# `domain_events.user_id`, never a payload field.
+
+CustomerErasureRequested:
+  description: >
+    The customer asked to be erased (Art. 17). Recorded on acceptance, which is what starts the
+    Art. 12(3) month — the clock is anchored HERE, at receipt of the request, and the confirmation
+    step never re-anchors it: the confirmation is our safeguard, so it may not eat the subject's time.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+  required: [customerId, erasureRequestId]
+
+
+CustomerErasureConfirmed:
+  description: >
+    The subject confirmed the erasure with their token. THIS is the fact the machinery reacts to: the
+    `deletion:` trigger arms on it and the grace window runs from it. A request alone never destroys
+    anything.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+  required: [customerId, erasureRequestId]
+
+
+CustomerErasureCancelled:
+  description: >
+    The subject withdrew the erasure inside the grace window (re-login-cancels — the user's act,
+    never an admin resurrection). Listed in the deletion block's `cancelled_on:`, so a pending
+    deletion goes SCHEDULED → CANCELLED.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+  required: [customerId, erasureRequestId]
+
+
+CustomerIdentityUnlinked:
+  description: >
+    INBOUND INTEGRATION FACT, recorded through the identity ACL with NO command (ADR-0004): the auth
+    provider confirmed the subject's identity was deleted at its end. An external fact that already
+    happened is never a command — there is nothing left to reject.
+    THE NAME CARRIES THE DISTINCTION AND MUST NOT BE "ERASED" (evans): erasure is data destroyed on
+    our side; UNLINKING is the identity mapping severed at the provider. Erasing our stream without
+    provider-side revocation would leave the foreign model holding exactly what we deleted, so this
+    is a mandatory leg of the journey and not a nicety. The instruction that provokes it is an
+    Art. 28 processor instruction — a Tell, never an Ask.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+  required: [customerId, erasureRequestId]
+
+
+CustomerErased:
+  description: >
+    THE RECEIPT — the terminal fact, recorded on the DELETION LEDGER stream (never on the Customer
+    stream, which no longer exists by then), mirroring `OrderDeleted` (ADR-20260731-160000 §6).
+    This is what makes "is this customer really gone?" a durable, queryable answer that OUTLIVES the
+    streams, and it is the record the post-erasure status response is served from — so every field a
+    rebuilt read side needs must be here, PSEUDONYMOUSLY. Domain references only: never the erased
+    payloads, which are gone.
+    It is also the worklist a restore re-executes: after any PITR to a point before a deletion, the
+    receipts are what say which subjects must be swept again (§3.5).
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      description: "The accountability reference, not personal data — the same posture as OrderDeleted.customerId."
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+    policy:
+      type: string
+      maxLength: 100
+      description: "The configuration key naming the grace window under which erasure ran (CUSTOMER_ERASURE_GRACE_WINDOW_DAYS)."
+    retainedUnder:
+      type: array
+      description: >
+        The approved retention windows under which data about this subject SURVIVES, by catalog name
+        (`configuration.yaml#/retention_windows`). This is the disclosure limb of the receipt: it is
+        what lets the post-erasure answer say WHAT was kept and under WHICH instrument once the
+        streams are gone, generated from the same declarations that enforce it — so the copy cannot
+        drift from the behaviour.
+      items:
+        type: string
+        maxLength: 100
+    tombstoneEventId:
+      type: string
+      maxLength: 36
+      nullable: true
+      description: "The technical tombstone event that instructed the stream deletion — the receipt's 'deleted, thanks to tombstone <id>' stamp."
+  required: [customerId, erasureRequestId, policy]

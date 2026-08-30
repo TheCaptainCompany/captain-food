@@ -51,6 +51,19 @@ fixtures:
   customerInfoUpdated:
     type: { $ref: 'events.yaml#/CustomerInfoUpdated' }
     data: { customerId: "cust-1", displayName: "Johnny B." }
+  # --- GDPR erasure (PROP-20260829-150752; #708) ---
+  customerErasureRequested:
+    type: { $ref: 'events.yaml#/CustomerErasureRequested' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+  customerErasureConfirmed:
+    type: { $ref: 'events.yaml#/CustomerErasureConfirmed' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+  customerErasureCancelled:
+    type: { $ref: 'events.yaml#/CustomerErasureCancelled' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+  customerIdentityUnlinked:
+    type: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
   customerEmailVerified:
     type: { $ref: 'events.yaml#/CustomerEmailVerified' }
     data: { customerId: "cust-1", email: "johnny@example.com" }
@@ -4152,3 +4165,101 @@ tests:
       data: { targetMessageId: "missing-1" }
     thrown:
       - { $ref: 'errors.yaml#/MailboxMessageNotFound' }
+
+  # ----------------------------- Customer GDPR erasure (PROP-20260829-150752; #708) --------------
+  # The behaviour contract of a right, not of a feature. Note what is asserted on the REFUSAL cases:
+  # `assert_appended(..., &[])` — that NOTHING was recorded. For erasure that is the whole point: a
+  # refusal that quietly records the request anyway would start the Art. 12(3) clock behind the
+  # customer's back, which is precisely the failure the typed rejection exists to prevent.
+  TestCustomerRequestErasure:
+    name: "Requesting erasure records the request (acceptance-first) and starts the Art. 12(3) clock"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsRequestedConfirmedThenExecuted' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/RequestCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+    then:
+      - { $ref: '#/fixtures/customerErasureRequested' }
+
+  TestCustomerRequestErasureIsRefusedWithAnOpenOrderOrAGatedEngine:
+    name: "Refuses an erasure request with an order in flight, or while the deletion engine is gated off -- and records NOTHING"
+    rules:
+      - { $ref: 'rules.yaml#/ErasureIsRequestedConfirmedThenExecuted' }
+      - { $ref: 'rules.yaml#/ErasureIsRefusedWhileTheEngineIsGatedOff' }
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/RequestCustomerErasure' }
+      data: { customerId: "cust-blocked", erasureRequestId: "erasure-blocked" }
+    thrown:
+      - { $ref: 'errors.yaml#/ErasureBlockedByOpenOrder' }
+      - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+
+  TestCustomerConfirmErasure:
+    name: "Confirming with a valid token records the confirmation -- the fact the deletion trigger arms on"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsRequestedConfirmedThenExecuted' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1", token: "erasure-token-valid" }
+    then:
+      - { $ref: '#/fixtures/customerErasureConfirmed' }
+
+  TestCustomerConfirmErasureIsRejectedOnABadToken:
+    name: "Rejects an invalid/expired erasure token -- with its OWN error, never the email magic link's"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsRequestedConfirmedThenExecuted' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1", token: "erasure-token-invalid" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidErasureConfirmationToken' }
+      - { $ref: 'errors.yaml#/ErasureNotRequested' }
+      - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+
+  TestCustomerCancelErasure:
+    name: "The subject withdraws the erasure inside the window (re-login-cancels -- never an admin resurrection)"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsCancellableByTheSubjectWithinTheWindow' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/CancelCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+    then:
+      - { $ref: '#/fixtures/customerErasureCancelled' }
+
+  TestCustomerCancelErasureWithNothingPendingIsRejected:
+    name: "Refuses a cancel with no erasure outstanding -- a silent no-op would let a customer believe they kept an account still scheduled for deletion"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsCancellableByTheSubjectWithinTheWindow' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/CancelCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-none" }
+    thrown:
+      - { $ref: 'errors.yaml#/ErasureNotRequested' }
+
+  TestCustomerIdentityUnlinkedIsRecorded:
+    name: "Records the auth provider's confirmation that the identity was deleted at its end (inbound fact, no command)"
+    rules: [{ $ref: 'rules.yaml#/ErasureUnlinkingIsRecordedAsAnInboundFact' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureConfirmed' }
+    when:
+      type: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+    then:
+      - { $ref: '#/fixtures/customerIdentityUnlinked' }

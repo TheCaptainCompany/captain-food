@@ -95,3 +95,54 @@ Customer:
     - message: { $ref: 'commands.yaml#/SetCustomerPaymentMethod' }
       emits: [{ $ref: 'events.yaml#/CustomerPaymentMethodSet' }]
       throws: []
+    # --- GDPR erasure (PROP-20260829-150752 §3.1/§3.2; #708) -----------------------------------
+    # Erasure is a rejectable COMMAND pair, not an event: an open order or funds in flight is a
+    # set-based precondition the write side checks, and an event cannot be refused (young, vernon).
+    # Every leg also throws `ErasureEngineUnavailable` — THE MUTATIONS SHIP DARK behind the single
+    # `RUN_DELETION_ENGINE` gate, and dark means a TYPED REFUSAL, never a silent accept (farley):
+    # accepting a request the engine cannot run would start the Art. 12(3) clock on a journey nothing
+    # will ever execute and show the subject "scheduled" forever.
+    - message: { $ref: 'commands.yaml#/RequestCustomerErasure' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/ErasureBlockedByOpenOrder' }
+        - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+      effect: "Record the Art. 17 request (acceptance-first, returns the erasureRequestId) and send the confirmation token. Idempotent while one is pending — the same id comes back and nothing new is recorded."
+    - message: { $ref: 'commands.yaml#/ConfirmCustomerErasure' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureConfirmed' }]
+      throws:
+        - { $ref: 'errors.yaml#/InvalidErasureConfirmationToken' }
+        - { $ref: 'errors.yaml#/ErasureNotRequested' }
+        - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+      effect: "Verify the token server-side, then record the confirmation — the fact the deletion trigger arms on. The grace window runs from here."
+    - message: { $ref: 'commands.yaml#/CancelCustomerErasure' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
+      throws:
+        - { $ref: 'errors.yaml#/ErasureNotRequested' }
+      effect: "The subject keeps their account (re-login-cancels — the user's act, never an admin resurrection). Deliberately does NOT throw ErasureEngineUnavailable: a customer must always be able to stop a deletion, whatever state the engine is in."
+    # INBOUND INTEGRATION FACT, no command (ADR-0004): the provider confirmed the identity is gone.
+    # Recorded here so the erasure journey's unlink leg has a foldable completion fact in the log
+    # rather than a return value nobody can replay.
+    - message: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+      emits: [{ $ref: 'events.yaml#/CustomerIdentityUnlinked' }]
+      effect: "Record the auth provider's confirmation that the subject's identity was deleted at its end (Art. 28 processor instruction completed). Idempotent under re-delivery."
+
+  # The `deletion:` block — the recorded grammar of ADR-20260731-214500, reused, not reinvented.
+  # The engine's journey is unchanged (tombstone through projections, including View_Customer.auth_ref
+  # — the access-control artifact #708 names — then technical tombstone, stream deletion, ledger
+  # receipt). What Customer adds beyond the Order pilot is BESPOKE LEGS, which is the recorded escape
+  # hatch of §4: "an aggregate needing bespoke steps falls back to a hand-written PM — `deletion:` is
+  # sugar over the same machinery." Those legs are CustomerErasureProcess.
+  #
+  # `after:` is on the TRIGGER here, not on a reminder as in the Order pilot, because the customer is
+  # TOLD the window ("you have N days to change your mind"): the delay is part of the promise made to
+  # the subject, not an internal expiry schedule.
+  deletion:
+    triggers:
+      - on: [{ $ref: 'events.yaml#/CustomerErasureConfirmed' }]
+        after: { $ref: 'configuration.yaml#/keys/CUSTOMER_ERASURE_GRACE_WINDOW_DAYS' }
+        cancelled_on: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
+        match:
+          event: { $ref: 'events.yaml#/CustomerErasureConfirmed/properties/customerId' }
+          state: { $ref: '#/Customer/state/customerId' }
+    receipt: { $ref: 'events.yaml#/CustomerErased' }

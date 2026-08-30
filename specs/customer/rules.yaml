@@ -46,3 +46,35 @@ AddressBookManagement:
 
 PaymentMethodStorage:
   description: "A customer's payment method can be stored."
+
+# --- GDPR erasure (PROP-20260829-150752; #708) ---
+ErasureIsRequestedConfirmedThenExecuted:
+  description: >
+    Erasure takes TWO round-trips before anything is destroyed: a request that can be REFUSED (an
+    open order or funds in flight), then a confirmation proved by a one-shot token. Only the
+    confirmation arms the deletion; a request alone never destroys anything, and a token that does
+    not verify is rejected with its own typed error — never the email magic link's, which means a
+    different secret entirely.
+
+ErasureIsCancellableByTheSubjectWithinTheWindow:
+  description: >
+    Inside the grace window the subject, and ONLY the subject, can withdraw the erasure
+    (re-login-cancels). There is no admin resurrection: an erasure an operator can undo is not an
+    erasure. Cancelling stays available whatever state the deletion engine is in — a customer must
+    always be able to stop a deletion in progress, which is why the cancel path alone does not
+    refuse when the engine is gated off.
+
+ErasureIsRefusedWhileTheEngineIsGatedOff:
+  description: >
+    While the deletion engine is gated OFF, the erasure mutations REFUSE with a typed error instead
+    of accepting. Accepting a request nothing can execute would start the Art. 12(3) thirty-day
+    clock on a journey that will never run and show the subject "scheduled" forever — the erasure
+    analogue of a paid order nobody is told about, and worse, because the subject stops chasing a
+    right they believe is being honoured.
+
+ErasureUnlinkingIsRecordedAsAnInboundFact:
+  description: >
+    The auth provider's confirmation that the identity was deleted at its end is recorded as an
+    INBOUND fact with no command: an external event that already happened cannot be rejected.
+    Unlinking is a distinct act from erasure and a mandatory leg — erasing our stream without
+    provider-side revocation leaves the foreign model holding exactly what we deleted.

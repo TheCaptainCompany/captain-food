@@ -440,3 +440,71 @@ View_PendingRefunds:
         - { $ref: 'events.yaml#/RefundDenied' }
       nullable: true
       note: "The decision's occurrence time (approval or denial); null while REQUESTED."
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# View_CustomerErasure — the data subject's answer to "what is happening to my request?"
+# (PROP-20260829-150752 §3.1/§3.6; #708)
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# A generated fold over `domain_events`, which is what makes the answer REPLAYABLE — and replay is the
+# property the whole design turns on: a deleted stream is simply never seen again, so a rebuild
+# reproduces erasure by construction rather than by remembering to re-run something.
+#
+# It deliberately holds NO personal data. Not an oversight and not caution: this view must keep
+# answering AFTER the customer's stream is gone, and a row that carried a name or an address would
+# either have to be deleted with the stream (leaving the subject with no way to check the erasure
+# they asked for) or survive it (making the erasure a lie). Pseudonymous references only, so the row
+# can honestly outlive its subject.
+View_CustomerErasure:
+  aggregate: Customer
+  slice: V1
+  fedBy:
+    - { $ref: 'events.yaml#/CustomerErasureRequested' }
+    - { $ref: 'events.yaml#/CustomerErasureConfirmed' }
+    - { $ref: 'events.yaml#/CustomerErasureCancelled' }
+    - { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+    - { $ref: 'events.yaml#/CustomerErased' }
+  rules:
+    - "`status` is derived from the latest recorded fact: REQUESTED -> CONFIRMED -> EXECUTING (the first destructive leg reported) -> ERASED. A CustomerErasureCancelled stamps cancelled_at and ends the row's life as a request; nothing further folds onto it."
+    - "PARKED is ABSENT on purpose: parking is process-row state (ErasureProcessStatus), not a fact, and the subject is owed the state of their RIGHT, not of our scheduler."
+    - "Every column is pseudonymous. The row must survive the deletion of the Customer stream, which is exactly why it may never carry personal data."
+  indexes:
+    - [customer_id, status]   # the caller's own request, resolved from auth context (no client-supplied subject)
+  columns:
+    erasure_request_id:
+      from: [{ $ref: 'events.yaml#/CustomerErasureRequested/properties/erasureRequestId' }]
+      pk: true
+    customer_id:
+      from: [{ $ref: 'events.yaml#/CustomerErasureRequested/properties/customerId' }]
+      index: true
+      note: "The accountability reference the query scopes on — resolved from the authenticated principal, never from a client argument."
+    status:
+      type: { $ref: 'scalars.yaml#/ErasureStatus' }
+      derive:
+        CustomerErasureRequested: REQUESTED
+        CustomerErasureConfirmed: CONFIRMED
+        CustomerIdentityUnlinked: EXECUTING
+        CustomerErased: ERASED
+      from:
+        - { $ref: 'events.yaml#/CustomerErasureRequested' }
+        - { $ref: 'events.yaml#/CustomerErasureConfirmed' }
+        - { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+        - { $ref: 'events.yaml#/CustomerErased' }
+      note: "Derived from the latest fact. The unlink leg is the first externally observable destructive step, so it is what turns the answer to EXECUTING."
+    cancelled_at:
+      type: timestamptz
+      from: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
+      nullable: true
+      note: >
+        occurrence: when the subject withdrew the request inside the window. A separate TIMESTAMP
+        rather than a member of ErasureStatus: a cancelled request is not a phase of an erasure, it
+        is the absence of one — and the moment they changed their mind is the fact worth keeping,
+        not merely that they did.
+    policy:
+      from: [{ $ref: 'events.yaml#/CustomerErased/properties/policy' }]
+      nullable: true
+      note: "The window the erasure ran under; null until the receipt exists."
+    retained_under:
+      from: [{ $ref: 'events.yaml#/CustomerErased/properties/retainedUnder' }]
+      nullable: true
+      note: "The approved retention windows under which data about this subject survives, by catalog name — the disclosure limb of §3.6, generated from the same declarations that enforce it, so the screen cannot drift from the behaviour."

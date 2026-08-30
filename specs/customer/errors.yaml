@@ -97,3 +97,63 @@ PhoneAlreadyInUse:
   messages:
     en: "The phone number '{phone}' is already in use by another account."
     fr: "Le numéro '{phone}' est déjà utilisé par un autre compte."
+
+
+# --- GDPR erasure (PROP-20260829-150752; #708) ---------------------------------------------------
+
+ErasureBlockedByOpenOrder:
+  description: >
+    The customer asked to be erased while an order of theirs is still in flight (or money is still
+    settling). A set-based precondition the write side checks, which is exactly why erasure begins as
+    a rejectable COMMAND and not an event: an event cannot be refused, a command can.
+    NOT a refusal of the right — a refusal of the TIMING, and the message must say so, because a
+    person exercising Art. 17 who reads "no" will not ask twice. The same precondition re-runs at
+    promotion, where failing it PARKS the journey rather than rejecting it (the request already
+    stands by then; only execution waits).
+  context:
+    openOrders: { $ref: 'scalars.yaml#/HasOpenOrders' }
+  messages:
+    en: "You have an order in progress. You can request deletion once it is complete — your request has not been recorded."
+    fr: "Vous avez une commande en cours. Vous pourrez demander la suppression une fois celle-ci terminée — votre demande n'a pas été enregistrée."
+
+
+InvalidErasureConfirmationToken:
+  description: >
+    The erasure confirmation token does not verify, or its window has expired.
+    DELIBERATELY NOT `InvalidVerificationToken`, which already means the email magic link: one name,
+    one meaning. Overloading it would render "this email verification link is invalid" to a customer
+    who is trying to delete their account — a lie at the highest-stakes tap in the product, and one
+    that would send them to the wrong recovery path.
+  context: {}
+  messages:
+    en: "This deletion confirmation link is invalid or has expired. Please request deletion again."
+    fr: "Ce lien de confirmation de suppression est invalide ou a expiré. Veuillez redemander la suppression."
+
+
+ErasureNotRequested:
+  description: >
+    A confirm or cancel arrived with no erasure request outstanding for this customer — the request
+    was already confirmed, already cancelled, or never made. Typed rather than silent because both
+    commands are irreversible-adjacent: a cancel that quietly does nothing would let a customer
+    believe they had kept an account that is still scheduled for deletion.
+  context: {}
+  messages:
+    en: "There is no deletion request to act on for this account."
+    fr: "Aucune demande de suppression n'est en cours pour ce compte."
+
+
+ErasureEngineUnavailable:
+  description: >
+    Erasure is declared but its engine is not running in this deployment
+    (`configuration.yaml#/RUN_DELETION_ENGINE` is OFF — the single gate, gate-then-stabilize).
+    THE MUTATIONS SHIP DARK BEHIND THAT SAME FLAG, AND DARK MEANS A TYPED REFUSAL, NEVER A SILENT
+    ACCEPT (farley). Accepting a request the engine cannot execute would start the Art. 12(3)
+    thirty-day clock on a journey nothing will ever run, and produce a status screen that says
+    "scheduled" forever: the erasure analogue of a paid order nobody is told about — and worse here,
+    because the subject stops chasing a right they believe is being honoured. Refusing loudly keeps
+    the failure OURS instead of moving it onto the customer.
+    A second flag was rejected on purpose: one blast radius, one decision surface.
+  context: {}
+  messages:
+    en: "Account deletion is temporarily unavailable. Please contact us and we will handle your request."
+    fr: "La suppression de compte est temporairement indisponible. Contactez-nous et nous traiterons votre demande."
