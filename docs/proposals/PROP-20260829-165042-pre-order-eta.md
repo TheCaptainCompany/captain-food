@@ -1,6 +1,12 @@
 # PROP-20260829-165042 — Pre-order delivery ETA: computed estimate vs declared range
 
-- **Status**: Proposed
+- **Status**: **Approved** — founder, 2026-08-29, verbatim: *"ETA-PROPOSAL (PROP-20260829-165042): Hybrid — final shape now, declared inputs at V0"*.
+  That is the §6 recommendation: Option B's final `ComputedDeliveryEstimate` shape now, evaluated
+  from declared inputs (`basis: DECLARED`) at V0, the measured upgrade as a follow-on slice.
+  Realizing work enters the prioritised backlog (the architect ranks it) and queues **behind the
+  isolation lane** per
+  [ADR-20260829-230418](../adr/ADR-20260829-230418-aggregates-own-the-facts-isolation-first.md)'s
+  sequencing — the approval is not a dispatch.
 - **Date**: 2026-08-29
 - **Tracking issue**: [#733 "Storefront pre-order delivery ETA: the slot is now honestly empty — and the ETA is the product"](https://github.com/TheCaptainCompany/captain-food/issues/733)
 - **Realized by**: (filled at completion)

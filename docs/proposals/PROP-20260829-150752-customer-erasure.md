@@ -1,6 +1,15 @@
 # PROP-20260829-150752 — Customer GDPR erasure: request, unlink, shred, delete, prove
 
-- **Status**: Proposed
+- **Status**: **Approved** — founder, 2026-08-29, verbatim: *"ERASURE-PROPOSAL (PROP-20260829-150752): A — Approve Option 1"*.
+  Scope choices: **Option 1 (final vision)** as recommended, all seven legs; the three §9 counsel
+  questions run in **parallel** and **refine, not block** (they sharpen the invoice-field split,
+  the value of W and the response wording — they never reopen the architecture). Sequencing: per
+  [ADR-20260829-230418](../adr/ADR-20260829-230418-aggregates-own-the-facts-isolation-first.md),
+  the build starts now that slice C1 has proved the pattern (default flipped by
+  [ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md));
+  the realizing dispatch carries the two banked round-2 non-blockings (the residual EXECUTING
+  checkout race; rule-1 window tracing) and the reviewer's `holds_place_order` freshness edges
+  noted on [#760](https://github.com/TheCaptainCompany/captain-food/issues/760).
 - **Date**: 2026-08-29
 - **Tracking issue**: [#708 "No GDPR erasure flow exists for Customer — deletion blocks exist only on Order"](https://github.com/TheCaptainCompany/captain-food/issues/708)
 - **Realized by**: (filled at completion)

@@ -3,6 +3,26 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🗳️ **2026-08-29 — the founder's round-4 answers land as records: the lane flip is approved, erasure Option 1 is approved, the ETA hybrid is approved.**
+> Verbatim: *"LANE-FLIP (ROUTE_ORDER_BIRTH_THROUGH_LANE): A — Flip it ON"* — recorded as
+> [ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md),
+> satisfying dispatch card 598 §7's founder-gated flip obligation with the §9 evidence carried
+> (PR [#761](https://github.com/TheCaptainCompany/captain-food/pull/761) merged `2408fc73`: routed
+> birth observed, histogram 18/21 ms, tracking guard, reviewer PASS incl. the never-born
+> terminal-state sentence); rollback = config flip back, no redeploy; the ACCEPTANCE-TIMEOUT flip
+> explicitly NOT taken (precondition 5b, production data still owed). *"ERASURE-PROPOSAL
+> (PROP-20260829-150752): A — Approve Option 1"* — header updated on
+> [PROP-20260829-150752](../proposals/PROP-20260829-150752-customer-erasure.md); counsel questions
+> run in parallel and refine-not-block; the BUILD starts now that C1 proves the pattern
+> (ADR-20260829-230418 sequencing satisfied), the realizing dispatch to carry the two banked
+> round-2 non-blockings (EXECUTING checkout race; rule-1 window tracing) plus the reviewer's
+> freshness edges on [#760](https://github.com/TheCaptainCompany/captain-food/issues/760).
+> *"ETA-PROPOSAL (PROP-20260829-165042): Hybrid — final shape now, declared inputs at V0"* —
+> header updated on [PROP-20260829-165042](../proposals/PROP-20260829-165042-pre-order-eta.md);
+> realizing work enters the backlog behind the isolation lane. Consults banked, no new fan-out:
+> these are approvals of team-recommended options (ADR-20260829-230418's 13-lens block; the
+> PROP mob reviews; the #761 reviewer pass).
+
 > ✅ **2026-08-29 — C1a delivered: the pre-flip evidence for `ROUTE_ORDER_BIRTH_THROUGH_LANE` is merged**
 > ([#758 "C1a: pre-flip evidence for ROUTE_ORDER_BIRTH_THROUGH_LANE — birth-lag seen recorded, the paid-then-null tracking guard, split flip preconditions"](https://github.com/TheCaptainCompany/captain-food/issues/758),
 > PR [#761](https://github.com/TheCaptainCompany/captain-food/pull/761), squash-merged as `2408fc73`
