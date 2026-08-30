@@ -16255,6 +16255,38 @@ mod typed_actor_inbox_e0004 {
         )
     }
 
+    /// The FACT half's proof program. TODAY'S SHAPE, deliberately: the enum declaration, the
+    /// command match, and the fact route AS IT IS IN THE TREE -- a match over the adjacently-tagged
+    /// `DomainEvent` ending in the `_ =>` catch-all of
+    /// `crates/infrastructure/src/mailbox/handler.rs`. It is written this way so the assertion
+    /// about WHICH TYPE rustc names goes red for the real reason (#780) rather than never being
+    /// written at all.
+    fn fact_proof_program(actor: &InboxActor, arms_from: &InboxActor) -> String {
+        let facts: Vec<&InboxMessage> =
+            actor.messages.iter().filter(|m| m.kind != InboxKind::Command).collect();
+        let fact_variants = facts
+            .iter()
+            .map(|m| format!("    {}(domain::generated::events::{}),\n", m.name, m.name))
+            .collect::<String>();
+        // The arms come from the UNMUTATED actor, and they dispatch on `DomainEvent` with a
+        // catch-all -- exactly the route under test.
+        let fact_arms = arms_from
+            .messages
+            .iter()
+            .filter(|m| m.kind != InboxKind::Command)
+            .map(|m| format!("        DomainEvent::{}(_) => {{}}\n", m.name))
+            .collect::<String>();
+        format!(
+            "{decl_program}\n\
+             pub enum DomainEvent {{\n{fact_variants}}}\n\n\
+             /// The fact-record route, as it is in the tree.\n\
+             fn record(event: DomainEvent) {{\n    match event {{\n{fact_arms}        _ => {{}}\n    }}\n}}\n",
+            decl_program = proof_program(actor, arms_from),
+            fact_variants = fact_variants,
+            fact_arms = fact_arms,
+        )
+    }
+
     /// Add one `receives:` entry to `actor` in a CLONE of the model — the spec change a future
     /// chunk makes without touching the router (C3's twelve remaining `deliver:` routes are each
     /// exactly this shape).
@@ -16324,6 +16356,66 @@ mod typed_actor_inbox_e0004 {
         );
     }
 
+    /// **T1 (#780) — the E0004 proof for the FACT match.**
+    ///
+    /// The command half above proves nothing about the fact half, and that is not a technicality:
+    /// the fact-record route dispatches on `DomainEvent` behind a `_ =>` catch-all, so a widened
+    /// `receives:` set of kind FACT reaches a decision in NO file. Re-running the command proof
+    /// with a fact-shaped mutation would be a vacuously green "proof": the COMMAND match breaks,
+    /// `error[E0004]` appears, and the fact route is never mentioned. So the assertion that carries
+    /// the claim is the one about WHICH TYPE rustc named.
+    #[test]
+    fn a_widened_receives_set_of_a_fact_is_a_compile_error_in_the_fact_match() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let order = inbox_actors(&model)
+            .into_iter()
+            .find(|a| a.name == "Order")
+            .expect("Order is a mailbox actor");
+
+        let dir = std::env::temp_dir().join(format!(
+            "cf-inbox-fact-e0004-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+
+        // CONTROL: both matches, unmutated, compile clean.
+        let (ok, stderr) = rustc_stderr(&dir, &fact_proof_program(&order, &order));
+        assert!(ok, "the unmutated inbox + its exact command and fact arms must compile:\n{stderr}");
+
+        // THE PROOF: one more declared FACT (an `events.yaml` ref, NOT a command), same arms.
+        let mutated = with_extra_receives(&model, "Order", "events.yaml#/OrderRejectedByRestaurant");
+        let widened = inbox_actors(&mutated)
+            .into_iter()
+            .find(|a| a.name == "Order")
+            .expect("Order survives the mutation");
+        assert_eq!(
+            widened.messages.len(),
+            order.messages.len() + 1,
+            "the mutation must actually widen the inbox"
+        );
+        let (ok, stderr) = rustc_stderr(&dir, &fact_proof_program(&widened, &order));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!ok, "a widened FACT set with unchanged arms MUST NOT compile:\n{stderr}");
+        assert!(stderr.contains("error[E0004]"), "expected E0004:\n{stderr}");
+        assert!(
+            stderr.contains("OrderRejectedByRestaurant"),
+            "E0004 must NAME the unconsumed fact:\n{stderr}"
+        );
+        // THE LOAD-BEARING ASSERTION. Without it this test passes on a tree where the fact route
+        // is a `DomainEvent` string match with a catch-all: the COMMAND match breaks, E0004 fires,
+        // and nothing anywhere has been proven about fact delivery.
+        assert!(
+            stderr.contains("OrderFactInbox"),
+            "E0004 must name the FACT enum -- an unconsumed declared FACT has to break the FACT \
+             match, not merely the command match it also happens to appear in:\n{stderr}"
+        );
+    }
+
     /// The catch-all escape hatch, closed — asserted as a PROPERTY of the parsed file, not as a
     /// spelling.
     ///
@@ -16350,103 +16442,238 @@ mod typed_actor_inbox_e0004 {
     ///
     /// The scan asserts its own reach (`>= 18` lane matches, `>= 100` arms) because a scanner that
     /// silently matches nothing passes vacuously — the same defect class one level up.
-    #[test]
-    fn every_arm_of_the_human_owned_router_names_an_inbox_variant() {
-        /// The head identifier of a path-shaped pattern (`CartInbox::AddCartLine(cmd)` → `CartInbox`).
-        fn head_ident(pat: &syn::Pat) -> Option<String> {
-            let path = match pat {
-                syn::Pat::TupleStruct(t) => &t.path,
-                syn::Pat::Path(p) => &p.path,
-                syn::Pat::Struct(s) => &s.path,
-                _ => return None,
-            };
-            path.segments.first().map(|s| s.ident.to_string())
-        }
+    /// The COMPOSITE inbox enums — the ones whose variants carry ANOTHER inbox enum rather than a
+    /// payload. Pinned by [`the_composite_inbox_names_are_the_generated_ones`] against the real
+    /// emitter, so a rename breaks the test loudly instead of silently disarming it.
+    ///
+    /// **Why they need their own rule (#780).** [`is_catch_all`] inspects only a pattern's TOP
+    /// level and [`names_inbox_variant`] only its HEAD segment, so
+    /// `ActorInbox::Payment(_) => Failed("no route")` satisfies BOTH — `catch_all=false`,
+    /// `names_inbox_variant=true` — while being a total catch-all over every message the Payment
+    /// lane can ever carry. That is PR #776's spelling-vs-property defect one nesting level down.
+    const COMPOSITE_INBOXES: &[&str] = &["ActorInbox", "ActorFactInbox"];
 
-        /// The POSITIVE form: this pattern names a variant of some `<Actor>Inbox` enum.
-        fn names_inbox_variant(pat: &syn::Pat) -> bool {
-            match pat {
-                syn::Pat::Or(o) => o.cases.iter().all(names_inbox_variant),
-                syn::Pat::Paren(p) => names_inbox_variant(&p.pat),
-                other => head_ident(other).is_some_and(|i| i.ends_with("Inbox")),
-            }
-        }
+    /// The head identifier of a path-shaped pattern (`CartInbox::AddCartLine(cmd)` → `CartInbox`).
+    fn head_ident(pat: &syn::Pat) -> Option<String> {
+        let path = match pat {
+            syn::Pat::TupleStruct(t) => &t.path,
+            syn::Pat::Path(p) => &p.path,
+            syn::Pat::Struct(s) => &s.path,
+            _ => return None,
+        };
+        path.segments.first().map(|s| s.ident.to_string())
+    }
 
-        /// A TOTAL catch-all: matches every remaining value whatever the variant set becomes.
-        /// `_` and a bare binding `other` are the same pattern with different ergonomics.
-        fn is_catch_all(pat: &syn::Pat) -> bool {
-            match pat {
-                syn::Pat::Wild(_) => true,
-                syn::Pat::Ident(i) => i.subpat.is_none(),
-                syn::Pat::Paren(p) => is_catch_all(&p.pat),
-                _ => false,
-            }
+    /// The POSITIVE form: this pattern names a variant of some `<Actor>Inbox` enum.
+    fn names_inbox_variant(pat: &syn::Pat) -> bool {
+        match pat {
+            syn::Pat::Or(o) => o.cases.iter().all(names_inbox_variant),
+            syn::Pat::Paren(p) => names_inbox_variant(&p.pat),
+            other => head_ident(other).is_some_and(|i| i.ends_with("Inbox")),
         }
+    }
 
+    /// This pattern names a variant of some `<Actor>FactInbox` enum — the FACT half of the router,
+    /// which needs its own reach pin because the global one is satisfied by the command half alone.
+    fn names_fact_inbox_variant(pat: &syn::Pat) -> bool {
+        match pat {
+            syn::Pat::Or(o) => o.cases.iter().all(names_fact_inbox_variant),
+            syn::Pat::Paren(p) => names_fact_inbox_variant(&p.pat),
+            other => head_ident(other).is_some_and(|i| i.ends_with("FactInbox")),
+        }
+    }
+
+    /// A TOTAL catch-all: matches every remaining value whatever the variant set becomes.
+    /// `_` and a bare binding `other` are the same pattern with different ergonomics.
+    fn is_catch_all(pat: &syn::Pat) -> bool {
+        match pat {
+            syn::Pat::Wild(_) => true,
+            syn::Pat::Ident(i) => i.subpat.is_none(),
+            syn::Pat::Paren(p) => is_catch_all(&p.pat),
+            _ => false,
+        }
+    }
+
+    /// Every ident used as a plain path expression anywhere in `body`.
+    fn idents_read(body: &syn::Expr) -> std::collections::BTreeSet<String> {
         #[derive(Default)]
-        struct Scan {
-            offenders: Vec<String>,
-            lane_matches: usize,
-            lane_arms: usize,
-            current_fn: String,
+        struct V(std::collections::BTreeSet<String>);
+        impl<'ast> syn::visit::Visit<'ast> for V {
+            fn visit_expr_path(&mut self, p: &'ast syn::ExprPath) {
+                if let Some(i) = p.path.get_ident() {
+                    self.0.insert(i.to_string());
+                }
+                syn::visit::visit_expr_path(self, p);
+            }
+        }
+        let mut v = V::default();
+        syn::visit::Visit::visit_expr(&mut v, body);
+        v.0
+    }
+
+    /// **#780 — A LANE ABSORBED ONE LEVEL DOWN.** The nesting position [`is_catch_all`] cannot see.
+    ///
+    /// Under a COMPOSITE inbox the only legal inner pattern is a NAMED binding the arm body
+    /// actually consumes (`ActorInbox::Cart(m) => cart(deps, m, ..)`): the lane value is handed on
+    /// to that lane's own total match, where E0004 still applies. A wildcard, an underscore-prefixed
+    /// binding, or a binding the body never reads all DISCARD the lane value — and discarding it is
+    /// what "absorbed" means, whatever the pattern is spelled.
+    ///
+    /// HONEST LIMIT, because a gate whose reach is overclaimed is worse than none: a body that binds
+    /// the lane and then deliberately throws it away (`(m) => { let _ = m; Failed(..) }`) reads the
+    /// ident and passes this scan. No syntactic rule reaches that, which is exactly why the PRIMARY
+    /// mechanism for #780 is a TYPE — `ActorFactInbox` makes a command variant unspellable in the
+    /// fact match, so no arm ever needs to say "not a fact" and no lane wildcard is ever tempting
+    /// (compiler-first, ADR-20260803-234035). This scan is the fallback for the residue.
+    fn absorbs_a_lane(arm: &syn::Arm) -> Option<String> {
+        fn tuple_struct(pat: &syn::Pat) -> Option<&syn::PatTupleStruct> {
+            match pat {
+                syn::Pat::TupleStruct(t) => Some(t),
+                syn::Pat::Paren(p) => tuple_struct(&p.pat),
+                _ => None,
+            }
+        }
+        let t = tuple_struct(&arm.pat)?;
+        let head = t.path.segments.first()?.ident.to_string();
+        if !COMPOSITE_INBOXES.contains(&head.as_str()) {
+            return None;
+        }
+        let read = idents_read(&arm.body);
+        for inner in &t.elems {
+            match inner {
+                syn::Pat::Wild(_) => {
+                    return Some(format!("`{head}::…(_)` DISCARDS the lane value"));
+                }
+                syn::Pat::Ident(i) if i.subpat.is_none() => {
+                    let name = i.ident.to_string();
+                    if name.starts_with('_') {
+                        return Some(format!(
+                            "`{head}::…({name})` binds the lane value to a discard name -- a \
+                             wildcard with a name is still a wildcard"
+                        ));
+                    }
+                    if !read.contains(&name) {
+                        return Some(format!(
+                            "`{head}::…({name})` binds the lane value and the arm body never reads \
+                             it -- the lane is absorbed"
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// What one pass over the human-owned router found.
+    #[derive(Default)]
+    struct Scan {
+        offenders: Vec<String>,
+        lane_matches: usize,
+        lane_arms: usize,
+        fact_matches: usize,
+        fact_arms: usize,
+        current_fn: String,
+    }
+
+    impl<'ast> syn::visit::Visit<'ast> for Scan {
+        fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+            let outer = std::mem::replace(&mut self.current_fn, f.sig.ident.to_string());
+            syn::visit::visit_item_fn(self, f);
+            self.current_fn = outer;
         }
 
-        impl<'ast> syn::visit::Visit<'ast> for Scan {
-            fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
-                let outer = std::mem::replace(&mut self.current_fn, f.sig.ident.to_string());
-                syn::visit::visit_item_fn(self, f);
-                self.current_fn = outer;
+        fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {
+            // A LANE match is one over an inbox enum: either its scrutinee is the routed
+            // `message`, or at least one arm names an inbox variant. The first half is what
+            // catches a lane match rewritten to a single catch-all arm, where the second would
+            // classify it as "not a lane match" and wave it through.
+            let scrutinee_is_message = matches!(&*m.expr,
+                syn::Expr::Path(p) if p.path.is_ident("message") || p.path.is_ident("fact"));
+            let is_lane = scrutinee_is_message || m.arms.iter().any(|a| names_inbox_variant(&a.pat));
+            // The FACT half, counted separately: today's global floor is satisfied by the command
+            // half alone, so deleting the entire fact match would leave the scan green (beck).
+            let is_fact = m.arms.iter().any(|a| names_fact_inbox_variant(&a.pat));
+            if is_lane {
+                self.lane_matches += 1;
             }
-
-            fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {
-                // A LANE match is one over an inbox enum: either its scrutinee is the routed
-                // `message`, or at least one arm names an inbox variant. The first half is what
-                // catches a lane match rewritten to a single catch-all arm, where the second would
-                // classify it as "not a lane match" and wave it through.
-                let scrutinee_is_message =
-                    matches!(&*m.expr, syn::Expr::Path(p) if p.path.is_ident("message"));
-                let is_lane = scrutinee_is_message || m.arms.iter().any(|a| names_inbox_variant(&a.pat));
+            if is_fact {
+                self.fact_matches += 1;
+            }
+            for arm in &m.arms {
+                let pat = &arm.pat;
+                let shown = quote::quote!(#pat).to_string();
+                if is_catch_all(&arm.pat) {
+                    self.offenders.push(format!(
+                        "fn `{}`: `{shown} =>` is a TOTAL CATCH-ALL (a named binding is a \
+                         wildcard with a name)",
+                        self.current_fn
+                    ));
+                } else if let Some(why) = absorbs_a_lane(arm) {
+                    self.offenders.push(format!(
+                        "fn `{}`: `{shown} =>` ABSORBS A WHOLE LANE -- {why}",
+                        self.current_fn
+                    ));
+                } else if is_lane && !names_inbox_variant(&arm.pat) {
+                    self.offenders.push(format!(
+                        "fn `{}`: `{shown} =>` sits in a lane match but does not name an \
+                         `<Actor>Inbox::` variant",
+                        self.current_fn
+                    ));
+                }
                 if is_lane {
-                    self.lane_matches += 1;
+                    self.lane_arms += 1;
                 }
-                for arm in &m.arms {
-                    let pat = &arm.pat;
-                    let shown = quote::quote!(#pat).to_string();
-                    if is_catch_all(&arm.pat) {
-                        self.offenders.push(format!(
-                            "fn `{}`: `{shown} =>` is a TOTAL CATCH-ALL (a named binding is a \
-                             wildcard with a name)",
-                            self.current_fn
-                        ));
-                    } else if is_lane && !names_inbox_variant(&arm.pat) {
-                        self.offenders.push(format!(
-                            "fn `{}`: `{shown} =>` sits in a lane match but does not name an \
-                             `<Actor>Inbox::` variant",
-                            self.current_fn
-                        ));
-                    }
-                    if is_lane {
-                        self.lane_arms += 1;
-                    }
+                if is_fact {
+                    self.fact_arms += 1;
                 }
-                syn::visit::visit_expr_match(self, m);
             }
+            syn::visit::visit_expr_match(self, m);
         }
+    }
 
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
-        let src = std::fs::read_to_string(root.join("crates/infrastructure/src/inbox.rs"))
-            .expect("the human-owned inbox router must exist");
-        let file = syn::parse_file(&src).expect("the human-owned inbox router must parse");
-
+    /// Parse a router source and scan it. Taking a `&str` rather than a path is what makes the
+    /// PLANTED-mutation tests below possible: a scan proven only against the real (passing) file is
+    /// a scan nobody has seen go red.
+    fn scan_router(src: &str) -> Scan {
+        let file = syn::parse_file(src).expect("the router source must parse");
         let mut scan = Scan::default();
         syn::visit::Visit::visit_file(&mut scan, &file);
+        scan
+    }
+
+    fn router_source() -> String {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        std::fs::read_to_string(root.join("crates/infrastructure/src/inbox.rs"))
+            .expect("the human-owned inbox router must exist")
+    }
+
+    /// The declared corpus the scan's reach is pinned to: `(lanes with >=1 fact, declared facts)`.
+    /// Derived from the MODEL, never from a literal — a hand-kept number is the artifact under test
+    /// standing in for its own oracle.
+    fn declared_fact_population() -> (usize, usize) {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let actors = inbox_actors(&model);
+        let facts: Vec<usize> = actors
+            .iter()
+            .map(|a| a.messages.iter().filter(|m| m.kind != InboxKind::Command).count())
+            .filter(|n| *n > 0)
+            .collect();
+        (facts.len(), facts.iter().sum())
+    }
+
+    #[test]
+    fn every_arm_of_the_human_owned_router_names_an_inbox_variant() {
+        let scan = scan_router(&router_source());
 
         assert!(
             scan.offenders.is_empty(),
             "crates/infrastructure/src/inbox.rs must never absorb inbox variants with a catch-all \
              arm -- a catch-all makes the match exhaustive by construction and the E0004 guard \
              (#771) stops catching anything. Every arm of a lane match must name an \
-             `<Actor>Inbox::` variant. Offenders:\n  {}",
+             `<Actor>Inbox::` variant, and no arm may absorb a whole lane one level down (#780). \
+             Offenders:\n  {}",
             scan.offenders.join("\n  ")
         );
         // A scanner that matches nothing passes vacuously -- the defect this test exists to
@@ -16459,6 +16686,76 @@ mod typed_actor_inbox_e0004 {
             scan.lane_matches,
             scan.lane_arms
         );
+        // THE FACT HALF, PINNED SEPARATELY (#780, beck): the floor above is met by the command
+        // half alone, so without this deleting the ENTIRE fact route would leave the scan green.
+        // The floor is the DECLARED population: one total match per fact-bearing lane, plus the
+        // composite dispatch, with an arm for every declared fact.
+        let (fact_lanes, declared_facts) = declared_fact_population();
+        assert!(
+            scan.fact_matches >= fact_lanes + 1 && scan.fact_arms >= declared_facts + fact_lanes,
+            "the fact half of the router reached only {} matches / {} arms, against {} \
+             fact-bearing lanes and {} declared facts in the model -- the fact-record route is \
+             not being checked (#780)",
+            scan.fact_matches,
+            scan.fact_arms,
+            fact_lanes,
+            declared_facts
+        );
+    }
+
+    /// **T2 (#780) — the no-catch-all property, RECURSIVE.** The planted mutation beck ran against
+    /// the shipped predicates: `catch_all=false`, `names_inbox_variant=true`, both PASS, and the
+    /// arm is a total catch-all over the entire Payment lane. Seen red on the parent commit.
+    #[test]
+    fn red_a_wildcard_under_the_composite_inbox_absorbs_a_whole_lane() {
+        let planted = "fn route(message: ActorInbox) -> u8 {\n    match message {\n        \
+             ActorInbox::Cart(m) => cart(m),\n        ActorInbox::Payment(_) => 0,\n    }\n}\n";
+        let scan = scan_router(planted);
+
+        // THE RED THIS REPLACES, asserted rather than claimed. Both SHIPPED predicates wave the
+        // planted arm through -- `is_catch_all` reads only the pattern's top level and
+        // `names_inbox_variant` only its head segment -- so on the parent commit this planted
+        // mutation produced ZERO offenders while absorbing every message the Payment lane can
+        // ever carry. Keeping the assertion here means the rule can never be quietly narrowed
+        // back to the two predicates that missed it.
+        let absorbing: syn::Arm = syn::parse_quote!(ActorInbox::Payment(_) => 0);
+        assert!(!is_catch_all(&absorbing.pat), "the shipped catch-all predicate passed this arm");
+        assert!(names_inbox_variant(&absorbing.pat), "the shipped positive predicate passed it too");
+        assert!(absorbs_a_lane(&absorbing).is_some(), "the #780 rule must catch what they missed");
+        assert_eq!(scan.offenders.len(), 1, "{:?}", scan.offenders);
+        assert!(scan.offenders[0].contains("ABSORBS A WHOLE LANE"), "{}", scan.offenders[0]);
+
+        // The named-binding spelling of the same absorption -- PR #776's `_other` defect, one
+        // nesting level down.
+        let named = planted.replace("ActorInbox::Payment(_)", "ActorInbox::Payment(_other)");
+        assert_eq!(scan_router(&named).offenders.len(), 1, "a `_other` inner binding is the same \
+             total pattern with a name");
+
+        // And a binding the arm never reads: the lane value is discarded just as completely.
+        let unread = planted.replace("ActorInbox::Payment(_)", "ActorInbox::Payment(m2)");
+        assert_eq!(scan_router(&unread).offenders.len(), 1, "a bound-but-unread lane value is \
+             absorbed too");
+
+        // CONTROL -- the legal delegation shape must stay clean, or the rule is unusable.
+        let ok = planted.replace("ActorInbox::Payment(_) => 0", "ActorInbox::Payment(p) => pay(p)");
+        assert!(scan_router(&ok).offenders.is_empty(), "{:?}", scan_router(&ok).offenders);
+    }
+
+    /// The composite names the rule above pins to must be the ones the EMITTER actually writes: a
+    /// rename would otherwise leave `COMPOSITE_INBOXES` naming nothing and the rule silently inert
+    /// -- a scanner that matches nothing passing vacuously, the defect class this module is about.
+    #[test]
+    fn the_composite_inbox_names_are_the_generated_ones() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let emitted = emit_app_inboxes(&model);
+        for name in COMPOSITE_INBOXES {
+            assert!(
+                emitted.contains(&format!("pub enum {name} {{")),
+                "`{name}` is pinned by the lane-absorption rule but the emitter writes no such \
+                 enum -- the rule is inert"
+            );
+        }
     }
 }
 
