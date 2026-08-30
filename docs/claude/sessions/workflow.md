@@ -655,3 +655,26 @@ session "waits" on an event that will never come. Rule, binding on the coordinat
 3. Costed at one founder interruption on 2026-08-28 (#716 waited conflicted while the session
    idled); the same serialized-queue conflict had already been resolved three times that evening
    (#700, #705, #711→#713 twice), so the pattern was established and the check was owed.
+
+## `HOLD: human` names the TEAM's reviewer pass — it is never a founder wait, and the coordinator merges (founder, 2026-08-30)
+
+Second occurrence. The founder had to ask *"Do you need me to merge? Normally you must do it
+yourself"* about PR #799, which sat at ready-for-review with a PASS reviewer verdict and eight
+green checks. The first occurrence cost #576 the same hold and produced
+[ADR-20260815-134655](../../adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md)
+— *"Never wait my review you are responsible of your work. Why are you asking me to review?"* — so
+the rule that was owed here already existed in writing and was still misread.
+
+The misread is in the word: `HOLD: human` looks like *a human being must act*. It is not. Per
+[ADR-20260815-115220](../../adr/ADR-20260815-115220-auto-merge-on-green-by-default-hold-human-for-the-named-class.md)
+as amended, it means only **do not arm auto-merge on this class** (stored event shapes, fold
+semantics, migrations, payments/funds/erasure, legal surfaces, non-additive GraphQL, the mailbox
+runtime, the merge machinery). The "human" it holds for is the **team's independent reviewer pass
+over the full branch diff**. Once that pass returns no blocking finding and the gates are green,
+**the coordinator merges** — the same session, no further approval.
+
+Test to apply before ending a turn on any open PR you own: *what am I waiting for, and who sends
+it?* If the answer names the founder and no `decision queue` row is open, there is nothing coming
+— merge. A founder decision is owed only for a genuine option space, an external/legal action or
+an admin-gated provisioning, and it is asked as a queue row with options and a recommendation,
+never as a PR left ready-for-review.

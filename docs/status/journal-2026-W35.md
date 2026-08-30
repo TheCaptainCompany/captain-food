@@ -99,6 +99,83 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > Deployed behaviour delta: **zero** — all twelve are unreachable today. The value is that the build
 > now refuses the omission. #780, PR #783.
 
+> **2026-08-30 — a role guard now takes a value only an identity can mint, and the RIDER role has
+> an identity to mint one from.** #639 parts A and B, on `claude/staff-auth-signin-zpapwy`
+> ([ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md)).
+> The defect ADR-20260818-004646 recorded as Correction 3 is closed at the edge: `RoleGuard` tested
+> membership of a `RequestRole` that `routes.rs` had parsed out of the URL path, and never consulted
+> the verified `Principal` — so a token asserting `role: RESTAURANT` with no `restaurant_id` passed
+> `approveRefund`, which resolves its actor from the payload's `orderId` and not from the caller.
+> The guard's input is now an `ActingRole`, a private-field newtype in a child module of `auth`
+> whose only producer matches on `Identity` and whose `Unbound` arm yields PUBLIC. The privileged
+> value does not exist for that caller.
+>
+> **Three things the mob caught that the card had wrong, banked as a card defect.** (1) The card
+> named two transports; there are **three** — `web_ssr.rs` renders SSR pages straight against the
+> schema (**graphql-architect**). (2) `Rider.display_name` mirrored `Customer`'s nullability, and
+> the projector emitter branches on the COLUMN's nullability, so a nullable column blind-overwrites:
+> `RiderInfoUpdated` is a partial update, so a phone-only change would have erased the rider's name,
+> live and on every replay (**young**). (3) `auth_ref` was specified `index: true`, and a
+> non-unique index makes `fetch_optional` return an arbitrary row on multiplicity — with
+> `ScopeMembership` keying grants on `member_id = rider_id`, that is one rider silently holding
+> another's order scope (**dba**). All three were fixed before the diff was presented. Attribution:
+> **card defect** in all three cases, not roster width — the invited lenses caught them at briefing,
+> which is what the briefing is for.
+>
+> **Two findings worth keeping past this chunk.** The nullable-column defect turns out to be caught
+> by `rustc`, not only by a test: the generated row field becomes `Option<PhoneNumber>` and the
+> hand-written store stops typechecking — so the spec's NOT NULL is enforced by the compiler one
+> layer down, and that is worth knowing before anyone "simplifies" a projection column to nullable.
+> And the injection half of a context-bag guarantee **can** be made structural even though presence
+> in the bag cannot: returning the witness as a tuple element of the one function both transports go
+> through makes forgetting it a compile error.
+>
+> **Evidence.** 1488 tests passed / 0 failed across 199 binaries with a real Postgres (Postgres 16
+> started locally per `docs/claude/sessions/gates.md`; the DB-gated suites RAN — 91 in
+> `infrastructure`, not skipped). `make validate` 0 errors. The warning surface NARROWED
+> (`event-not-projected` 9 → 6) and the baseline was tightened in the same commit. Four planted
+> violations were seen red, each with its message: the Unbound guard arm and the envelope arm as
+> failing assertions, the witness dropped from either transport as `rustc` E0308.
+>
+> **What is NOT closed, so a green branch is not misread**: the money path is still unbound
+> (`other-restaurant ⇒ denied` is false everywhere — `approveRefund` has no ownership comparison,
+> and its source is still open); no rider can sign in, because part A ships a fold with no consumer;
+> and an incompletely-provisioned restaurateur still gets *"role PUBLIC is not authorized"* in
+> English over an empty order queue. Part C is not claimed — it is AMBER and owes a proposal plus a
+> founder decision.
+
+> **2026-08-30 (later) — the independent review returned FAIL, and the finding is the one worth
+> keeping from this whole chunk.** The #639 A+B test migration converted 45 literal
+> `.data(RequestRole::X)` call sites with a regex and **missed three variable-bound `.data(role)`
+> sites** inside `for role in …` loops. Every one of those suites stayed GREEN — because a role that
+> never arrives reads as absent, the guard fails closed to PUBLIC, and PUBLIC is refused too. Three
+> role-refusal loops asserting nothing, and `mailbox_lanes.rs` carries a comment recording the SAME
+> loop being caught at 4-of-6 role coverage on #536; the miss had taken it to 0-of-6. Two sentences
+> in the ADR and in `STATUS.md` asserted the opposite, which is worse than the code defect: the next
+> session would have cited them.
+>
+> **The generalisable lesson, and it is not "grep harder".** A fail-closed default is correct for
+> production and actively hostile to a test: the test's subject silently becomes the default, and
+> the assertion still passes. Any change that moves a context-injected value to a new type has this
+> shape — `async_graphql::Data` is `TypeId`-keyed over `Any`, so the compiler sees nothing. The
+> repair is `crates/server/tests/role_injection_gate.rs`: a source scan naming the two wrong
+> spellings, which is the sanctioned "check as fallback" level because the compiler genuinely cannot
+> reach the call sites. It asserts it scanned a non-empty set — a gate that scans nothing passes
+> forever — and it was seen RED against the exact mutant before being trusted.
+>
+> Three more review findings, all corrected in the same commit: `bridge_resolved` restated on the
+> identity alone had fixed the Unbound end and **broken the #641 end** (a bound CUSTOMER whose
+> Postgres lookup fails degrades to Public and was reporting resolved — including `LookupFailed`,
+> the PAGE-classed one), so it now takes both the identity and the resolved scope; the `auth_ref`
+> UNIQUE rationale said "a visible denial" when `DbFaultPolicy::Skip` makes it a log line and no
+> metric; and the mailbox `resolve_actor`'s dependence on `user_type == "CUSTOMER"` was a real
+> consumer missing from the ADR's enumeration (unreachable today, recorded because "unreachable" is
+> a claim about the current API surface).
+>
+> Non-blocking and filed rather than fixed: `Principal::role_binding` is an unconditionally `pub`
+> constructor that can mint an ADMIN principal from nothing — production is unaffected
+> (`routes.rs` is the only injector) but it is the test-only escape hatch this change refused for
+> `ActingRole`, re-created one level up in the public API.
 
 > **2026-08-30 — the flip changed a field and left the sentence: a config default is now emitted,
 > never restated.** `ROUTE_ORDER_BIRTH_THROUGH_LANE` went `default: false → true` on 2026-08-30

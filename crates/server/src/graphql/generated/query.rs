@@ -581,8 +581,8 @@ impl QueryRoot {
             return Ok(None);
         };
         let admin = matches!(
-            ctx.data_opt::<crate::graphql::acl::RequestRole>(),
-            Some(crate::graphql::acl::RequestRole::Admin)
+            crate::graphql::acl::request_role(ctx),
+            crate::graphql::acl::RequestRole::Admin
         );
         let session = ctx.data_opt::<crate::graphql::session::SessionHeader>().and_then(|s| s.0);
         let session_owned = session.is_some() && session == row.session_id.as_ref().map(|s| s.0);

@@ -108,7 +108,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `projector-catalog` | catalog | scope `catalog`: 0 View_* + 1 projection table(s) | catalog | **all 8** | **fat +7** | `bin_runtime` | 12 | -- |
 | `projector-comms` | order | scope `comms`: 0 View_* + 1 projection table(s) | comms | **all 8** | **fat +7** | `bin_runtime` | 11 | -- |
 | `projector-customer` | customer | scope `customer`: 1 View_* + 1 projection table(s) | customer | **all 8** | **fat +7** | `bin_runtime` | 11 | -- |
-| `projector-delivery` | delivery | scope `delivery`: 2 View_* + 0 projection table(s) | delivery | **all 8** | **fat +7** | `bin_runtime` | 15 | -- |
+| `projector-delivery` | delivery | scope `delivery`: 2 View_* + 1 projection table(s) | delivery | **all 8** | **fat +7** | `bin_runtime` | 15 | -- |
 | `projector-network` | restaurant | scope `network`: 0 View_* + 3 projection table(s) | network | **all 8** | **fat +7** | `bin_runtime` | 11 | -- |
 | `projector-ordering` | order | scope `ordering`: 2 View_* + 3 projection table(s) | ordering | **all 8** | **fat +7** | `bin_runtime` | 11 | -- |
 | `projector-payments` | order | scope `payments`: 1 View_* + 1 projection table(s) | payments | **all 8** | **fat +7** | `bin_runtime` | 13 | -- |

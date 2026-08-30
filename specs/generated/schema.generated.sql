@@ -380,6 +380,16 @@ CREATE TABLE Customer (
 );
 CREATE INDEX ON Customer (auth_ref);
 
+CREATE TABLE Rider (
+  rider_id UUID PRIMARY KEY,
+  auth_ref TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,

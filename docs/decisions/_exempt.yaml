@@ -4,9 +4,6 @@
 # a self-pruning queue, never a permanent bypass. An exempt id is citable as EXISTING, never as
 # CONTROLLING — a held record has no authority until deposited.
 exempt:
-  - id: "ADR-20260830-191457"
-    reason: "NOT YET DEPOSITED on main: the record of #639 parts A and B, which lives on the open draft PR #799 (branch claude/staff-auth-signin-zpapwy) under HOLD: human. ADR-20260830-213135 and the STAFF-AUTH register row land on main FIRST, because they record a founder answer and a founder answer is not held behind a code review. The id is cited as EXISTING -- the design it records is on the PR, not in main's tree."
-    retires_when: "PR #799 merges and deposits the file under docs/adr/ -- the citations then resolve and this entry errors as unused (citation-exemption-unused), which is the removal prompt."
   - id: "ADR-20260817-232744"
     reason: "Externally authored, HELD and not deposited until corrected (ADR-20260818-004647:179; DECISIONS.md 2026-08-18 reconciliation)."
     retires_when: "The record is deposited under docs/adr/ (or the holding decision retires it) — its citations then resolve and this entry errors as unused."

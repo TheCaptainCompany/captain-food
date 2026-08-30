@@ -19,5 +19,6 @@ pub mod order_conversation;
 pub mod order_tracking;
 pub mod prospection_pipeline;
 pub mod restaurant;
+pub mod rider;
 pub mod scope_membership;
 pub mod slug_alias;

@@ -47,6 +47,7 @@ mod restaurant_locations_by_account;
 mod restaurant_projection;
 mod restaurant_write_path;
 mod retention_sweep;
+mod rider_projection;
 mod runtime_posture;
 mod sms_send_quota;
 mod scope_membership;

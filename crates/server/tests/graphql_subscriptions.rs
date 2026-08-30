@@ -35,6 +35,15 @@ use application::queries::{
 };
 use infrastructure::{AppendedEvent, EventBus};
 use server::graphql_acl::RequestRole;
+
+/// The role-guard witness the transports inject (#639 part B). There is no way to fabricate an
+/// `ActingRole`: it comes from a `Principal` or it does not exist, so a test that exercises a role
+/// has to name a caller actually BOUND to it. Roles carrying no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn acting(role: RequestRole) -> server::ActingRole {
+    server::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+        .acting_role(role)
+}
 use server::graphql_schema::{build_schema, CaptainSchema, ReadDeps};
 
 // ---------------------------------------------------------------------------------------------
@@ -532,7 +541,7 @@ async fn order_status_changed_streams_updates_dedupes_and_completes() {
     // ReadScope is transport-injected in production (#144); System here because these tests
     // exercise the stream machinery, not the guard (the guard has its own ownership test below).
     let mut stream = schema.execute_stream(
-        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+        Request::new(query).data(acting(RequestRole::Restaurant)).data(application::queries::ReadScope::System),
     );
 
     // Many identical OrderPlaced envelopes → exactly one PLACED push (dedupe).
@@ -602,7 +611,7 @@ async fn a_status_unchanged_fold_still_reaches_the_confirmation_page() {
     // ReadScope is transport-injected in production (#144); System here because these tests
     // exercise the stream machinery, not the guard (the guard has its own ownership test below).
     let mut stream = schema.execute_stream(
-        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+        Request::new(query).data(acting(RequestRole::Restaurant)).data(application::queries::ReadScope::System),
     );
 
     // Establish the subscriber's baseline on the order's own stream: ACCEPTED, no delivery yet.
@@ -696,7 +705,7 @@ async fn a_subscription_re_evaluates_the_service_window_per_push_not_per_subscri
         r#"subscription {{ orderStatusChanged(input: {{ orderId: "{order_id}" }}) {{ id restaurant {{ serviceWindow {{ verdict evaluatedAt }} }} }} }}"#
     );
     let mut stream = schema.execute_stream(
-        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+        Request::new(query).data(acting(RequestRole::Restaurant)).data(application::queries::ReadScope::System),
     );
 
     spawn_publisher(bus.clone(), order_envelope(order_id, correlation, "OrderPlaced", 1));
@@ -782,7 +791,7 @@ async fn a_delivery_job_envelope_alone_reaches_the_confirmation_page() {
     // ReadScope is transport-injected in production (#144); System here because these tests
     // exercise the stream machinery, not the guard (the guard has its own ownership test below).
     let mut stream = schema.execute_stream(
-        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+        Request::new(query).data(acting(RequestRole::Restaurant)).data(application::queries::ReadScope::System),
     );
 
     // The ONLY publish in this test. `spawn_publisher` (not a one-shot) because the bus receiver
@@ -839,7 +848,7 @@ async fn another_orders_delivery_job_never_reaches_this_subscriber() {
     // ReadScope is transport-injected in production (#144); System here because these tests
     // exercise the stream machinery, not the guard (the guard has its own ownership test below).
     let mut stream = schema.execute_stream(
-        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+        Request::new(query).data(acting(RequestRole::Restaurant)).data(application::queries::ReadScope::System),
     );
 
     // Someone else's rider moves, and this order's row moves too (the worst case for a filter that
@@ -886,7 +895,7 @@ async fn order_status_changed_ignores_other_orders() {
     // ReadScope is transport-injected in production (#144); System here because these tests
     // exercise the stream machinery, not the guard (the guard has its own ownership test below).
     let mut stream = schema.execute_stream(
-        Request::new(query).data(RequestRole::Restaurant).data(application::queries::ReadScope::System),
+        Request::new(query).data(acting(RequestRole::Restaurant)).data(application::queries::ReadScope::System),
     );
     spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderPlaced", 1));
 
@@ -947,7 +956,7 @@ async fn operation_status_changed_streams_the_mailbox_lifecycle() {
     // PUBLIC + the owning session (what connection_init injects from the X-SESSION-ID payload).
     let mut stream = schema.execute_stream(
         Request::new(query)
-            .data(RequestRole::Public)
+            .data(acting(RequestRole::Public))
             .data(server::graphql_session::SessionHeader(Some(session)))
             .data(mailbox.clone())
             .data(status_bus.clone()),
@@ -1017,7 +1026,7 @@ async fn operation_status_changed_hides_non_owned_operations() {
     );
     let mut stream = schema.execute_stream(
         Request::new(query)
-            .data(RequestRole::Public)
+            .data(acting(RequestRole::Public))
             .data(server::graphql_session::SessionHeader(Some(uuid::Uuid::new_v4())))
             .data(mailbox.clone())
             .data(status_bus.clone()),
@@ -1061,7 +1070,7 @@ async fn payment_status_changed_streams_the_checkout_run() {
     );
     let mut stream = schema.execute_stream(
         Request::new(query)
-            .data(RequestRole::Customer)
+            .data(acting(RequestRole::Customer))
             .data(server::graphql_session::SessionHeader(Some(session)))
             .data(pm_port.clone()),
     );
@@ -1118,7 +1127,7 @@ async fn unauthorized_role_is_forbidden() {
     );
 
     for role in [RequestRole::Rider, RequestRole::Public, RequestRole::External] {
-        let mut stream = schema.execute_stream(Request::new(query.clone()).data(role));
+        let mut stream = schema.execute_stream(Request::new(query.clone()).data(acting(role)));
         let resp = tokio::time::timeout(Duration::from_secs(5), stream.next())
             .await
             .expect("guard answers immediately")
@@ -1155,7 +1164,7 @@ async fn order_status_changed_is_owned_by_the_orders_customer() {
     // production (#144) — resolved ONCE at the edge; the resolver never re-derives identity.
     let mut stream = schema.execute_stream(
         Request::new(query.clone())
-            .data(RequestRole::Customer)
+            .data(acting(RequestRole::Customer))
             .data(application::queries::ReadScope::Customer(customer_id)),
     );
     spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderPlaced", 1));
@@ -1171,7 +1180,7 @@ async fn order_status_changed_is_owned_by_the_orders_customer() {
     // scoped read resolves None and the stream never yields (no oracle).
     let mut stream = schema.execute_stream(
         Request::new(query.clone())
-            .data(RequestRole::Customer)
+            .data(acting(RequestRole::Customer))
             .data(application::queries::ReadScope::Customer(ds::CustomerId(uuid::Uuid::new_v4()))),
     );
     spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderAccepted", 2));
@@ -1180,7 +1189,7 @@ async fn order_status_changed_is_owned_by_the_orders_customer() {
 
     // An anonymous CUSTOMER-path caller (no ReadScope in context) falls back to Public and stays
     // silent too — the fail-closed direction the transport fallback must never widen.
-    let mut stream = schema.execute_stream(Request::new(query).data(RequestRole::Customer));
+    let mut stream = schema.execute_stream(Request::new(query).data(acting(RequestRole::Customer)));
     spawn_publisher(bus.clone(), order_envelope(order_id, uuid::Uuid::new_v4(), "OrderReady", 3));
     let nothing = tokio::time::timeout(Duration::from_millis(1500), stream.next()).await;
     assert!(nothing.is_err(), "an anonymous customer-path caller must receive nothing: {nothing:?}");
@@ -1253,7 +1262,7 @@ async fn a_scopeless_request_reaches_the_order_port_as_public() {
     let schema = schema_over_spy(spy.clone());
 
     let resp = schema
-        .execute(Request::new("query { orders { id } }").data(RequestRole::Customer))
+        .execute(Request::new("query { orders { id } }").data(acting(RequestRole::Customer)))
         .await;
     assert!(resp.errors.is_empty(), "orders errored: {:?}", resp.errors);
     let resp = schema
@@ -1262,7 +1271,7 @@ async fn a_scopeless_request_reaches_the_order_port_as_public() {
                 r#"query {{ order(input: {{ id: "{}" }}) {{ id }} }}"#,
                 uuid::Uuid::new_v4()
             ))
-            .data(RequestRole::Customer),
+            .data(acting(RequestRole::Customer)),
         )
         .await;
     assert!(resp.errors.is_empty(), "order errored: {:?}", resp.errors);
@@ -1285,7 +1294,7 @@ async fn an_injected_scope_reaches_the_order_port_verbatim() {
     let resp = schema
         .execute(
             Request::new("query { orders { id } }")
-                .data(RequestRole::Customer)
+                .data(acting(RequestRole::Customer))
                 .data(application::queries::ReadScope::Customer(customer)),
         )
         .await;

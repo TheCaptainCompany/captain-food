@@ -10,6 +10,15 @@ use application::pm_state::{mem::MemPaymentProcessState, PaymentProcessRow, Paym
 use async_graphql::Request;
 use domain::generated::scalars as ds;
 use server::graphql_acl::RequestRole;
+
+/// The role-guard witness the transports inject (#639 part B). There is no way to fabricate an
+/// `ActingRole`: it comes from a `Principal` or it does not exist, so a test that exercises a role
+/// has to name a caller actually BOUND to it. Roles carrying no domain binding by design (ADMIN,
+/// EXTERNAL, PUBLIC) ignore the uuid, exactly as `Principal::role_path` does.
+fn acting(role: RequestRole) -> server::ActingRole {
+    server::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+        .acting_role(role)
+}
 use server::graphql_schema::build_schema;
 
 fn checkout_row(order_id: uuid::Uuid, session: uuid::Uuid) -> PaymentProcessRow {
@@ -40,7 +49,7 @@ async fn query_payment_status(
     let resp = schema
         .execute(
             Request::new(query)
-                .data(role)
+                .data(acting(role))
                 .data(server::graphql_session::SessionHeader(session))
                 .data(pm_port.clone()),
         )

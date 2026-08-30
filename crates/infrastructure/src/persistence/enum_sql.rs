@@ -14,7 +14,7 @@ use domain::generated::scalars::{
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
-    RestaurantStatus, ScopeType, ServiceType, ThumbRating, UserType,
+    RestaurantStatus, RiderStatus, ScopeType, ServiceType, ThumbRating, UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -72,6 +72,7 @@ enum_text!(DeliveryStatus {
     CANCELLED,
 });
 enum_text!(DeliveryProvider { PARTNER, INDEPENDENT });
+enum_text!(RiderStatus { OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED });
 enum_text!(InboundMessageStatus {
     SCHEDULED,
     CANCELLED,
