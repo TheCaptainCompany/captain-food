@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 2346,
+  "recordedAt": "2026-08-30T14:07:03.045Z",
+  "branch": "708-erasure-dsl-surface",
+  "note": "#708 part 1: checkpoint finish phase (7 fixes, 2 issues, deletion-block deferral)"
+}
