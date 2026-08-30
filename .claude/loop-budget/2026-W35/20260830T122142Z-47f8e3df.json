@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 140,
+  "recordedAt": "2026-08-30T12:21:42.689Z",
+  "branch": "708-erasure-dsl-surface",
+  "note": "stale timer from dead pid 1782; prior #708 run died on API credit limit"
+}
