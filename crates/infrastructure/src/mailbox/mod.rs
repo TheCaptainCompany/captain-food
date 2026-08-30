@@ -45,7 +45,7 @@ pub use standalone::{
 // assert on the journal row's error JSON without a live call, a hand-written error string, or a
 // database. It cannot live in this crate: the decoder is in `stripe-adapter`, which depends on
 // `infrastructure`, so the test has to sit on the other side of that edge.
-pub use handler::{verdict_of_error, MailboxCommandHandler, StatusBusObserver};
+pub use handler::{parse_posture, verdict_of_error, DoorPosture, MailboxCommandHandler, StatusBusObserver};
 pub use pm_delivery::backfill_stripe_facts_to_pm_lanes;
 
 use domain::shared::errors::DomainError;

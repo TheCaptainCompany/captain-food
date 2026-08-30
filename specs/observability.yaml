@@ -1798,3 +1798,97 @@ customer-erasure:
 
   latency_budget: { max_p95_ms: 5000, max_p99_ms: 15000 }
   error_budget: { max_error_rate_pct: 0.0 }
+
+# =====================================================================
+# mailbox-delivery — the EVENT/MESSAGE delivery door (#780)
+# an adapted inbound FACT (Stripe, a delivery partner) or a promoted REMINDER
+#   -> ActorInbox::parse (lane + type together)
+#   -> fact_route (pure, total, human-owned)
+#   -> the aggregate's own recorder, a PM event leg, or a PARK.
+#
+# WHY IT IS ITS OWN CONTRACT AND NOT PART OF `command-acceptance`. That contract binds
+# `surface: graphql`, and this door's traffic is a Stripe webhook, a partner callback or a reminder
+# the platform promoted for itself — none of which touches GraphQL. Binding them there would be a
+# false binding, so `mailbox` joins `graphql` as a declared dispatch surface.
+#
+# WHAT WAS INVISIBLE BEFORE IT. The whole route was uninstrumented: `handle_recorded_fact` opened no
+# span at all, and `StatusBusObserver::committed` returns early for any row whose kind is not
+# COMMAND — so `command_completion_ms{status="FAILED"}` was never recorded for an EVENT/MESSAGE row
+# and nothing reached the status bus. `mailbox_poison_failed_total` could not cover the gap either:
+# a terminally FAILED verdict is a SUCCESSFULLY COMMITTED delivery, so it never becomes poison. A
+# declared fact with no record route was therefore lost at ZERO signal, with `make validate` and
+# `cargo test` both green. #780 removes the loss by construction (E0004 over `ActorFactInbox`) and
+# this contract is what makes the residue observable.
+#
+# OTLP AND NOT BAM, deliberately (ADR-20260811-014129): a fact that never reached its aggregate
+# never reached `domain_events`, so a fold is structurally blind to it. The signal has to live where
+# it still works when the write path does not.
+#
+# NO PER-FACT-TYPE LIVENESS GAUGE. For most declared facts zero is a legitimate reading — silence
+# here is not ambiguous the way an overdue erasure is — so a dead-man's switch would be a series
+# that must be permanently zero, which is the alarm everyone learns to ignore.
+# =====================================================================
+mailbox-delivery:
+  feature: mailbox-delivery
+  criticality: high
+  workflow:
+    surface: mailbox   # dispatch-surface binding: the EVENT/MESSAGE door, not one command or saga
+
+  run_identity:
+    - { name: correlation_id, source: "message.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: message_id, source: "message.message_id", required: true }   # inbound_messages pk
+
+  spans:
+    - name: "message.deliver"
+      kind: CONSUMER
+      required: true
+      attributes:
+        # WHICH LANE and WHICH FACT — the entire question when a fact does not arrive. Both are read
+        # from the parsed typed value, which is keyed off the ROW's actor_type, so the pair can never
+        # be the payload's opinion of where it belongs.
+        - { key: "business.actor_type", type: string, required: true }
+        - { key: "business.message_type", type: string, required: true }
+        - { key: "business.message_kind", type: string, required: true }   # EVENT | MESSAGE
+        - { key: "business.message_id", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
+        # The delivery's outcome, late-bound: recorded | duplicate | ignored | pm_leg | parked.
+        - { key: "business.verdict", type: string, required: true }
+
+  metrics:
+    # A DECLARED fact that did not reach its aggregate. `reason` is a CLOSED set and the two members
+    # are kept in SEPARATE series ON PURPOSE (observability, #780 briefing): collapsing them makes a
+    # counter that must be permanently zero non-zero, and it gets ignored within a week.
+    #
+    #   deferred           — the fact is declared and the receiving aggregate has no fold rule for
+    #                        it, so it PARKS: the row stays RECEIVED, retries, and at the cap the
+    #                        runtime flips it into the existing poison queue where an operator can
+    #                        requeue it. Must be zero in production; every increment is a routed
+    #                        `deliver:` that landed before its fold rule did.
+    #   unparsable_payload — a DECLARED fact whose payload does not deserialize, or whose staged
+    #                        `eventType` disagrees with the row's `message_type`. Deterministic, so
+    #                        terminal; the row is the evidence.
+    #
+    # `no_route` is deliberately ABSENT: over `ActorFactInbox` an unrouted declared fact is an
+    # E0004, so the member would name a state the build cannot reach.
+    - name: "mailbox_fact_unrecorded_total"
+      type: counter
+      attributes: ["actor_type", "message_type", "reason"]
+      # The bounded population of the `reason` key, DECLARED (ADR-20260811-014129). `actor_type` and
+      # `message_type` are bounded by `actors.yaml` itself — the declared lane set and that lane's
+      # declared `receives:` set — which is why `message_type` is kept: it answers WHICH fact, the
+      # entire question. `message_id`/`correlation_id` stay on the SPAN, never on a metric label.
+      attribute_values:
+        reason: [deferred, unparsable_payload]
+
+  status_rules:
+    success:
+      required_spans: ["message.deliver"]
+      conditions: ["message.deliver.business.verdict != 'parked'"]
+    technical_error:
+      any_span_errors: true
+
+  # The delivery itself: parse, fold the addressed stream, append, commit. Not the end-to-end
+  # webhook latency — that spans the provider hop and belongs to the workflow contracts.
+  latency_budget: { max_p95_ms: 250, max_p99_ms: 1000 }
+  error_budget: { max_error_rate_pct: 1.0 }

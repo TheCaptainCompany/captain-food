@@ -44,12 +44,36 @@ evidence: >
   is false is worse than no grammar) and #777 narrows to the open question it always was: which door
   -- a mutation with a role guard, or worker-channel only -- should reach that command.
 
-  WHAT THE GUARANTEE DOES NOT COVER: it is over COMMANDS and the routing DECISION, not fact
-  DELIVERY. E0004 proves every declared message reaches a decision in infrastructure::inbox; a
-  RecordFact decision then hands off to mailbox::handler's fact route, still a match over the wire
-  string ending in a catch-all, where TWELVE declared inbound facts have no arm (incl.
-  PaymentCaptureFailed, PaymentIntentCreated and three refund facts). Pre-existing and unchanged
-  here; extending the proof is #780. The guarantee must not be quoted unconditionally.
+  THE GAP THIS ROW OPENED IS CLOSED (#780, 2026-08-30, ADR-20260830-224500). It read: 'the guarantee
+  is over COMMANDS and the routing DECISION, not fact DELIVERY... TWELVE declared inbound facts have
+  no arm... The guarantee must not be quoted unconditionally.' It may now be quoted for facts too,
+  and the mechanism is a TYPE rather than a wider gate: a GENERATED per-actor <Actor>FactInbox (the
+  receives: entries of kind Fact/Reminder only) plus a TOTAL generated projection
+  ActorInbox -> Option<ActorFactInbox>, with the human-owned pure fact_route matching on that. A
+  COMMAND variant is UNSPELLABLE there, so no arm ever needs to say 'not a fact' and no lane wildcard
+  is ever wanted. THE OBVIOUS ALTERNATIVE WAS A TRAP AND IT DEFEATED THIS ROW'S OWN GATE: a match
+  over the composite with lane arms makes ActorInbox::Payment(_) => Failed(..) compile clean AND pass
+  BOTH predicates below (is_catch_all reads only the pattern's top level, names_inbox_variant only
+  its head segment) while absorbing every message the Payment lane can ever carry -- the
+  spelling-vs-property defect recorded below, one nesting level down, reached by the first work that
+  needed the shape. The gate is repaired (absorbs_a_lane recurses under the composite, and the test
+  ASSERTS the two shipped predicates' miss so it cannot be narrowed back to them) and the fact half
+  gained its OWN reach pin, because the global floor was satisfied by the command half alone:
+  deleting the entire fact route left the scan green. The count was also wrong here: 27 declared
+  facts, not 24 -- the three PM-lane facts are declared receives: of kind FACT exactly like the rest.
+  Of the 27: 12 already routed, 5 more Payment facts wired, 3 PM legs typed, 7 declared deferred:.
+
+  AN UNRECORDED DECLARED FACT PARKS; IT IS NEVER TERMINALLY FAILED (ADR-20260830-224500). The
+  transient-then-park posture recorded below for an UNKNOWN message type is extended to a DECLARED
+  fact with no record route, and for a stronger reason: a command may be REJECTED (ADR-0004), a fact
+  already happened somewhere else and cannot be. The cheaper remedy -- have the handler write
+  code: DeliveryInfrastructureError so the row lands in the poison queue -- was REJECTED because that
+  code is DEFINED by rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable, api.yaml and commands.yaml
+  as 'the row the DELIVERY-ATTEMPTS CAP flipped', and minting it from a handler makes a routing gap
+  indistinguishable from a transport casualty and silently widens the rule. Aborting reaches the same
+  destination through the recorded path. It also collapsed the per-fact question ('can the source
+  re-emit?') into a uniform answer: a provider redelivery is absorbed by the enqueue-side pk dedupe,
+  so re-emittability changes the COST of a terminal verdict, never its correctness.
 
   GATES DELETED AS SUBSUMED: UNWIRED_MUTATIONS + its assert_eq! (it asked whether a mutation had a
   table row; the question it protected is now E0004 over a STRICTLY LARGER set -- all 100 received
@@ -84,7 +108,18 @@ evidence: >
   emitter nobody read; a deferral is now reviewable spec content sitting next to the declaration it
   qualifies.
 
-  THE GRAMMAR SHIPS WITH ZERO USERS, BY DECISION. Its intended first instance turned out to be
+  THE GRAMMAR SHIPPED WITH ZERO USERS AND GAINED ITS FIRST SEVEN IN #780, and they are a closed set
+  rather than a parking lot: in every case THE RECEIVING AGGREGATE HAS NO FOLD RULE answering 'is this
+  re-delivered fact already reflected?', so recording it would let a redelivery append a second copy.
+  That makes each reason a MODELLING statement (evans's condition: 'lands in C3' is a backlog fact,
+  not a modelling one) and it fixes C3's ordering -- the fold rule first, the route move after. The
+  ratchet the_corpus_declares_no_deferral is REPLACED by an explicit ALLOW-LIST of the seven, never a
+  count; every_unrecorded_arm_is_a_declared_deferral holds the Rust arms and the DSL declarations
+  equal in BOTH directions, which closes the open loop #781 for the fact half; and
+  a_deferral_reason_is_a_modelling_statement_not_a_schedule refuses schedule words. The 'unused
+  grammar rots, deleting it is correct' counter-argument recorded below is now moot.
+
+  THE ORIGINAL ZERO-USERS DECISION, kept for the reasoning that earned it: Its intended first instance turned out to be
   wired, and restating a false reason would have been worse than having no grammar. It is KEPT
   because C3's remaining deliver: routes are each an opportunity to declare a route whose handler is
   not written, and because a reviewable form invented under the pressure of needing one is how

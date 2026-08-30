@@ -93,6 +93,37 @@ impl MailboxCommandHandler {
     }
 }
 
+/// What the door does with a row it could not turn into a typed value.
+///
+/// Pure and separate from the handler so the verdict table can assert the POSTURE — the property
+/// that decides whether a row survives — without a database and without reading any message text
+/// (`mailbox::handler::tests::the_door_verdict_table`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoorPosture {
+    /// ABORT the delivery: the row stays RECEIVED, the attempt counter advances, the runtime
+    /// retries under backoff and — if nothing improves — flips it into the POISON queue at the
+    /// cap, where `poisonedMailboxMessages` shows it and `RequeueMailboxMessage` recovers it.
+    Park,
+    /// COMMIT a terminal FAILED verdict: the bytes in the row are wrong and no retry, and no
+    /// deploy on the other side, can change them.
+    Terminal,
+}
+
+/// The door's posture for a parse failure.
+///
+/// `UnknownActor` / `UndeclaredMessage` are PARK because a build on the other side of a rolling
+/// deploy can route them — terminal-failing an unknown type during a deploy buries a paid order.
+/// `Payload` is TERMINAL because it is a deterministic shape failure of a message this build DOES
+/// understand, including the case where the row's `message_type` disagrees with the staged
+/// `eventType` tag.
+pub fn parse_posture(err: &application::generated::inboxes::InboxParseError) -> DoorPosture {
+    if err.is_transient() {
+        DoorPosture::Park
+    } else {
+        DoorPosture::Terminal
+    }
+}
+
 #[async_trait::async_trait]
 impl MessageHandler for MailboxCommandHandler {
     /// The PREPARE phase (ADR-20260801-023000): the three PM commands run their WHOLE legacy
@@ -137,7 +168,7 @@ impl MessageHandler for MailboxCommandHandler {
             // `mailbox_poison_failed_total{actor_type}`, the ADMIN `poisonedMailboxMessages` read
             // and `RequeueMailboxMessage` as the operator's way back. No new status and no
             // migration: park is the existing poison path, reached by aborting instead of failing.
-            Err(e) if e.is_transient() => {
+            Err(e) if parse_posture(&e) == DoorPosture::Park => {
                 return Err(sqlx::Error::Protocol(format!(
                     "mailbox: {e} -- TRANSIENT (rolling deploy?); retrying, then parking on the \
                      poison queue rather than burying the row"
@@ -145,10 +176,40 @@ impl MessageHandler for MailboxCommandHandler {
             }
             // A DECLARED message whose payload does not deserialize is a deterministic shape
             // failure of a message this build DOES understand: retrying cannot fix it.
+            //
+            // THE CONTEXT GOES THROUGH `attribution` (#623, #780). `inbound_messages.error` is a
+            // 90-day durable jsonb column, and `e.to_string()` here was one of the legacy
+            // `detail: <free text>` sites the leak canary's header names. The bounded
+            // `CommandFailureAttribution` says the same thing in a closed vocabulary — seam
+            // COMMAND_PAYLOAD, reason PAYLOAD_UNDECODABLE — and the diagnostic text goes to the LOG,
+            // which is where an operator with a correlation id looks and where nothing retains it.
             Err(e) => {
+                // The detail rides the DomainError for the log's benefit only: `context_of` emits
+                // seam + reason and nothing else, so the free text cannot reach the column.
+                let undecodable =
+                    attribution::command_payload_undecodable(&message.message_type, &e.to_string());
+                tracing::error!(
+                    actor_type = %message.actor_type,
+                    message_type = %message.message_type,
+                    message_id = %message.message_id,
+                    kind = %message.kind,
+                    detail = %e,
+                    "mailbox: DECLARED message payload did not decode -- terminal (retrying cannot \
+                     change the bytes in the row)"
+                );
+                // A FACT that cannot be decoded never reaches its aggregate either, so it belongs
+                // to the same `mailbox-delivery` counter as a parked one, under its own reason.
+                // A COMMAND's undecodable payload is already the `command-acceptance` contract's.
+                if message.kind == "EVENT" || message.kind == "MESSAGE" {
+                    telemetry::meters::mailbox::fact_unrecorded(
+                        &message.actor_type,
+                        &message.message_type,
+                        telemetry::meters::mailbox::FACT_UNRECORDED_UNPARSABLE,
+                    );
+                }
                 return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
                     "code": "Internal",
-                    "context": { "detail": e.to_string() }
+                    "context": attribution::context_of(&attribution::attribute(&undecodable))
                 }))));
             }
         };
@@ -167,7 +228,22 @@ impl MessageHandler for MailboxCommandHandler {
             // Both kinds RECORD facts: EVENT carries an adapted inbound business fact, MESSAGE a
             // promoted reminder's payload fact (ADR-20260731-153000 §1a) — same record semantics,
             // same route.
-            return self.handle_recorded_fact(tx, message).await;
+            //
+            // THE TYPED FACT DOOR (#780). The already-parsed value is projected onto its lane's
+            // FACT half; a COMMAND row on an EVENT/MESSAGE kind yields `None` and is a wiring bug,
+            // aborted for retry rather than terminally failed. Nothing re-parses the payload here
+            // any more: `ActorInbox::parse` did the `DomainEvent` deserialize AND the
+            // `eventType`-vs-`message_type` cross-check, so the old "unparsable staged DomainEvent"
+            // terminal arm — a third silent loss, invisible to the poison queue — is gone by
+            // construction rather than instrumented.
+            let Some(fact) = inbox.into_fact() else {
+                return Err(sqlx::Error::Protocol(format!(
+                    "mailbox: '{}' on the '{}' lane arrived with kind '{}' but is a COMMAND (wiring \
+                     bug); aborting for retry rather than recording a verdict for our own mistake",
+                    message.message_type, message.actor_type, message.kind
+                )));
+            };
+            return self.handle_recorded_fact(tx, message, fact).await;
         }
         if message.kind != "COMMAND" {
             return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
@@ -400,22 +476,130 @@ impl MailboxCommandHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
+        fact: application::generated::inboxes::ActorFactInbox,
     ) -> Result<Delivery, sqlx::Error> {
-        let event: domain::generated::events::DomainEvent =
-            match serde_json::from_value(message.payload.clone()) {
-                Ok(e) => e,
-                Err(e) => {
-                    return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
-                        "code": "Internal",
-                        "context": { "detail": format!("unparsable staged DomainEvent: {e}") }
-                    }))))
-                }
-            };
-        // A chained PM-addressed copy (B2): the lane IS the saga — run its event leg, not the
-        // record route (the fact is already on the Payment stream; this hop reacts to it).
-        if message.actor_type == "PlaceOrderProcess" || message.actor_type == "RefundProcess" {
-            return self.handle_pm_fact(tx, message, event).await;
+        use tracing::Instrument as _;
+        // `message.deliver` (specs/observability.yaml#/mailbox-delivery, #780). The whole route was
+        // uninstrumented: no span here, and `StatusBusObserver::committed` returns early for any
+        // row whose kind is not COMMAND, so a lost fact was a ZERO-SIGNAL event.
+        let span = telemetry::spans::message_deliver(
+            fact.actor_type(),
+            fact.message_type(),
+            &message.kind,
+            &message.message_id.to_string(),
+            &message.correlation_id.to_string(),
+        );
+        let leg = crate::inbox::fact_route(fact);
+        let leg = match leg {
+            // PARKED: recorded on the span BEFORE the return, because an aborted delivery has no
+            // committed verdict for anything downstream to read.
+            crate::inbox::FactLeg::Unrecorded(u) => {
+                telemetry::spans::record_message_deliver_verdict(&span, "parked");
+                telemetry::spans::record_message_deliver_error(&span);
+                let _enter = span.enter();
+                return self.park_unrecorded_fact(message, u);
+            }
+            other => other,
+        };
+        let result = self.deliver_fact_leg(tx, message, leg).instrument(span.clone()).await;
+        // KNOWN GAP, tracked in
+        // [#791](https://github.com/TheCaptainCompany/captain-food/issues/791): the `Err` arm
+        // records NEITHER a verdict NOR a span error, so an aborted delivery exports with
+        // `business.verdict` unset and satisfies this contract's `verdict != 'parked'` success
+        // condition vacuously. Not fixed here because the fix is the contract's, not this call
+        // site's: a success condition written as "!= one member" is satisfied by ABSENCE.
+        if let Ok(delivery) = &result {
+            telemetry::spans::record_message_deliver_verdict(
+                &span,
+                match delivery.verdict {
+                    HandlerVerdict::Failed(_) => {
+                        telemetry::spans::record_message_deliver_error(&span);
+                        "failed"
+                    }
+                    HandlerVerdict::Succeeded => "recorded",
+                    HandlerVerdict::Duplicate => "duplicate",
+                    HandlerVerdict::Ignored => "ignored",
+                    HandlerVerdict::Rejected(_) => "rejected",
+                },
+            );
         }
+        result
+    }
+
+    /// A DECLARED fact the receiving aggregate has no fold rule for: PARK it.
+    ///
+    /// **NEVER TERMINAL** (ADR-20260830-224500). A COMMAND may be refused — that is what makes it a
+    /// command (ADR-0004) — but a FACT already happened somewhere else and cannot be. A terminal
+    /// verdict here would also be unrecoverable in practice: `error->>'code' = 'Internal'` is
+    /// invisible to `poisonedMailboxMessages` and refused by `RequeueMailboxMessage`
+    /// (`rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable`), and the redelivery that supposedly
+    /// "costs only a re-send" is absorbed by the enqueue-side pk dedupe.
+    ///
+    /// Aborting instead leaves the row RECEIVED: it retries under backoff and, at the cap, the
+    /// RUNTIME flips it with `DeliveryInfrastructureError` — poison-visible, requeueable, through
+    /// the operator recovery that already exists, with that code still meaning exactly what
+    /// `specs/common/rules.yaml` says it means. It is the SAME posture the door already takes for an
+    /// `UndeclaredMessage`: *retry, then park loudly, rather than bury the row.*
+    ///
+    /// Nothing free-text reaches `inbound_messages.error` from here, because nothing is written to
+    /// it at all: the diagnosis goes to the LOG (where an operator with a correlation id finds it
+    /// and nothing retains it for ninety days) and to the counter.
+    fn park_unrecorded_fact(
+        &self,
+        message: &InboundMessage,
+        unrecorded: crate::inbox::UnrecordedFact,
+    ) -> Result<Delivery, sqlx::Error> {
+        telemetry::meters::mailbox::fact_unrecorded(
+            unrecorded.actor_type,
+            unrecorded.message_type,
+            telemetry::meters::mailbox::FACT_UNRECORDED_DEFERRED,
+        );
+        tracing::error!(
+            actor_type = %unrecorded.actor_type,
+            message_type = %unrecorded.message_type,
+            message_id = %message.message_id,
+            correlation_id = ?message.correlation_id,
+            "mailbox: a DECLARED fact has no record route (actors.yaml `deferred:`) -- PARKING on \
+             the poison path rather than losing the fact"
+        );
+        Err(sqlx::Error::Protocol(format!(
+            "mailbox: '{}' is DECLARED on the '{}' inbox with no record route (actors.yaml \
+             `deferred:`) -- PARKED, not failed: a fact cannot be refused",
+            unrecorded.message_type, unrecorded.actor_type
+        )))
+    }
+
+    /// The recorded/PM legs of one fact delivery — everything that needs the fenced transaction.
+    async fn deliver_fact_leg(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        message: &InboundMessage,
+        leg: crate::inbox::FactLeg,
+    ) -> Result<Delivery, sqlx::Error> {
+        // THE ROUTING DECISION was taken by `crate::inbox::fact_route` in the caller: pure, total
+        // and transaction-free. It is human-owned and matches on `ActorFactInbox`, where a COMMAND
+        // variant is unspellable — so a declared fact nobody consumes is an E0004 at build time,
+        // never a terminal `FAILED "no delivery route"` row a customer paid for.
+        //
+        // THE LANE IS READ FROM THE ROW, NEVER DERIVED FROM THE PAYLOAD (vernon): `ActorInbox::parse`
+        // keyed off `message.actor_type` and refuses a lane/message pair the spec does not declare,
+        // so a Payment fact on a `PlaceOrderProcess` row is a value that could not be constructed.
+        let record = match leg {
+            // A chained PM-addressed copy (B2): the lane IS the saga — run its event leg, not the
+            // record route (the fact is already on the Payment stream; this hop reacts to it).
+            crate::inbox::FactLeg::ProcessManager(leg) => {
+                return self.handle_pm_fact(tx, message, leg).await
+            }
+            // Handled by the caller before the transaction does anything.
+            crate::inbox::FactLeg::Unrecorded(u) => return self.park_unrecorded_fact(message, u),
+            crate::inbox::FactLeg::Record(record) => record,
+        };
+        // The fact widened to a `DomainEvent`, for the effects that are EVENT-shaped rather than
+        // lane-shaped: the chained PM-addressed copy routes on the event, not on the recording
+        // lane. NOT the recording path — the recorders below take the leg's own payload, which for
+        // the money lane is its typed `PaymentFactInbox` (PR #783 review B1: widening on the way IN
+        // is what left five declared Payment facts unrecordable).
+        let event = record.to_domain_event();
         let actor = Actor {
             // The external system principal (deterministic per source — mirrors the enqueue side).
             user_id: message.user_id.unwrap_or_else(uuid::Uuid::nil),
@@ -433,30 +617,32 @@ impl MailboxCommandHandler {
         let staging = Arc::new(StagingEventStore::new(base_store));
         let store: Arc<dyn EventStore> = staging.clone();
 
-        use domain::generated::events::DomainEvent as E;
-        let outcome = match &event {
-            E::PaymentAuthorized(_)
-            | E::PaymentCaptured(_)
-            | E::PaymentReleased(_)
-            | E::PaymentFailed(_)
-            | E::PaymentRefunded(_) => {
-                application::payments::record_inbound_payment_event(
-                    store.as_ref(),
-                    event.clone(),
-                    &actor,
-                )
-                .await
-            }
-            E::DeliveryAcceptedByPartner(_)
-            | E::DeliveryRejectedByPartner(_)
-            | E::DeliveryStatusUpdated(_) => {
-                application::deliveries::record_inbound_delivery_event(store.as_ref(), event.clone(), &actor)
+        // THE EFFECT. `fact_route` already decided WHICH recorder owns the append; this match is
+        // over that closed, payload-free set, so it can carry no routing decision of its own and
+        // there is nothing here for a future declared fact to fall through.
+        //
+        // ONE ARM, ONE STREAM, ONE TRANSACTION (vernon): every recorder below appends to exactly
+        // one aggregate's own stream, and none of them may reach a second.
+        use crate::inbox::RecordLeg;
+        let outcome = match record {
+            // THE MONEY PATH. The leg carries the lane's TYPED fact, so the stream lookup is
+            // `payments::intent_of_fact` — total over `PaymentFactInbox`. This call is what makes
+            // the E0004 guarantee load-bearing: before PR #783's review it went to the untyped
+            // `record_inbound_payment_event`, whose lookup covered five of the ten declared facts,
+            // and `RefundOpened` (the sole feeder of `View_PendingRefunds`) aborted instead of
+            // recording.
+            RecordLeg::Payment(fact) => {
+                application::payments::record_inbound_payment_fact(store.as_ref(), fact, &actor)
                     .await
             }
-            E::RestaurantRegistered(_) => {
+            RecordLeg::Delivery(e) => {
+                application::deliveries::record_inbound_delivery_event(store.as_ref(), e, &actor)
+                    .await
+            }
+            RecordLeg::RestaurantRegistration(e) => {
                 application::commands::record_inbound_restaurant_registration(
                     store.as_ref(),
-                    event.clone(),
+                    e,
                     &actor,
                 )
                 .await
@@ -464,39 +650,31 @@ impl MailboxCommandHandler {
             // The reminders pilot (ADR-20260731-153000): the promoted OrderExpired MESSAGE
             // records the expiry on its order's stream — Recorded / AlreadyRecorded / NoChange,
             // never a rejection (a retention deadline's passage cannot be refused).
-            E::OrderExpired(_) => {
-                application::commands::record_inbound_order_event(store.as_ref(), event.clone(), &actor)
-                    .await
+            RecordLeg::Order(e) => {
+                application::commands::record_inbound_order_event(store.as_ref(), e, &actor).await
             }
             // #167: the Order BIRTH as a mailbox delivery — the spec's "Birth: PlaceOrderProcess
             // delivers OrderPlaced" receive. Recorded idempotently; its `schedules:` start the
             // acceptance clock, and a redelivered (AlreadyRecorded) birth RE-APPLIES them —
             // safe by design: `reschedule: keep` means the first deadline wins.
-            E::OrderPlaced(_) => {
-                application::commands::record_inbound_order_placed(store.as_ref(), event.clone(), &actor)
-                    .await
+            RecordLeg::OrderPlaced(e) => {
+                application::commands::record_inbound_order_placed(store.as_ref(), e, &actor).await
             }
             // #167: the promoted acceptance deadline — its own route because its outcome is
             // richer than RecordOutcome (the shadow WouldCancel arm is the flip ADR's evidence)
             // and because of the young+vernon fence below: schedules apply on the
             // Recorded/Cancelled arm ONLY.
-            E::OrderAcceptanceTimedOut(_) => {
+            RecordLeg::OrderAcceptanceTimeout(e) => {
                 return self
                     .handle_acceptance_timeout(
                         tx,
                         message,
-                        event.clone(),
+                        e,
                         staging.clone(),
                         activation,
                         &actor,
                     )
                     .await;
-            }
-            _ => {
-                return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
-                    "code": "Internal",
-                    "context": { "detail": format!("no delivery route for inbound fact type '{}'", message.message_type) }
-                }))))
             }
         };
         let delivery = match outcome {
@@ -796,10 +974,10 @@ impl MailboxCommandHandler {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         message: &InboundMessage,
-        event: domain::generated::events::DomainEvent,
+        leg: crate::inbox::PmFactLeg,
     ) -> Result<Delivery, sqlx::Error> {
         use application::process_managers::{place_order, refund, Outcome, TriggerEnvelope};
-        use domain::generated::events::DomainEvent as E;
+        use crate::inbox::PmFactLeg;
 
         let staging = Arc::new(StagingEventStore::new(self.deps.store.clone()));
         let payment_staging =
@@ -834,29 +1012,26 @@ impl MailboxCommandHandler {
                 message.received_at,
             )
         };
-        let outcome = match (message.actor_type.as_str(), &event) {
-            ("PlaceOrderProcess", E::PaymentAuthorized(e)) => {
+        // TYPED, AND THEREFORE TOTAL (#780). This was a match over `(actor_type, &DomainEvent)`
+        // ending in `(actor, _) => Failed("no PM event leg")` — a catch-all on the money path, in a
+        // file the router's no-catch-all scan does not read. `PmFactLeg` has exactly the three legs
+        // the saga declares, so there is nothing left to fall through and a fourth is an E0004 in
+        // the human-owned `fact_route`, where the decision belongs.
+        let outcome = match leg {
+            PmFactLeg::PlaceOrderOnPaymentAuthorized(e) => {
                 place_order::on_payment_authorized(
                     staging.as_ref() as &dyn EventStore,
                     &payment_staging,
-                    e,
+                    &e,
                     &env,
                 )
                 .await
             }
-            ("PlaceOrderProcess", E::PaymentFailed(e)) => {
-                place_order::on_payment_failed(&payment_staging, e, &env).await
+            PmFactLeg::PlaceOrderOnPaymentFailed(e) => {
+                place_order::on_payment_failed(&payment_staging, &e, &env).await
             }
-            ("RefundProcess", E::PaymentRefunded(e)) => {
-                refund::on_payment_refunded(&refund_staging, e).await
-            }
-            (actor, _) => {
-                return Ok(Delivery::of(HandlerVerdict::Failed(serde_json::json!({
-                    "code": "Internal",
-                    "context": { "detail": format!(
-                        "no PM event leg for '{}' on the {actor} lane", message.message_type
-                    ) }
-                }))))
+            PmFactLeg::RefundOnPaymentRefunded(e) => {
+                refund::on_payment_refunded(&refund_staging, &e).await
             }
         };
         match outcome {
@@ -1062,5 +1237,125 @@ impl DeliveryObserver for StatusBusObserver {
             error_code: Some("DeliveryInfrastructureError".to_owned()),
             message: None,
         });
+    }
+}
+
+/// **T4 (#780) — THE DOOR'S VERDICT TABLE.** Five rows, on the RETURN SHAPE, never on message text.
+///
+/// It is a fast pure table and not five database tests because the property under test is a
+/// decision, and the decision was made transaction-free precisely so it could be tested this way
+/// ("make the change easy first", beck). What still needs a database is the EFFECT, and that lives
+/// in `crates/infrastructure/tests/main/fact_delivery.rs`.
+///
+/// **Row (a) is the risk pin.** An undeclared `message_type` on a KNOWN lane must PARK, never go
+/// terminal: during a rolling deploy an old consumer legitimately meets a type a newer producer
+/// already emits, and terminal-failing it buries a paid order. It is one `is_transient` arm away
+/// from silently becoming row (c), and nothing else in the suite would notice.
+#[cfg(test)]
+mod verdict_table {
+    use super::*;
+    use application::generated::inboxes::ActorInbox;
+
+    /// A well-formed staged `DomainEvent` envelope for a Payment fact.
+    fn staged_payment_captured() -> serde_json::Value {
+        serde_json::json!({
+            "eventType": "PaymentCaptured",
+            "payload": {
+                "paymentIntentId": "pi_verdict_table",
+                "orderId": null,
+                "restaurantId": "00000000-0000-0000-0000-0000000000a1",
+                "amount": { "amountCents": 1960, "currency": "EUR" }
+            }
+        })
+    }
+
+    fn posture_of(actor_type: &str, message_type: &str, payload: &serde_json::Value) -> DoorPosture {
+        match ActorInbox::parse(actor_type, message_type, payload) {
+            Ok(_) => panic!("this row must NOT parse: {actor_type}/{message_type}"),
+            Err(e) => parse_posture(&e),
+        }
+    }
+
+    /// (a) A DECLARED lane, an UNDECLARED message type. The rolling-deploy case.
+    #[test]
+    fn an_undeclared_message_type_on_a_known_lane_parks() {
+        assert_eq!(
+            posture_of("Payment", "PaymentTeleported", &staged_payment_captured()),
+            DoorPosture::Park,
+            "an undeclared type must be RETRIED and then parked on the poison queue -- a build on \
+             the other side of a rolling deploy can route it, and terminal-failing it buries a \
+             paid order"
+        );
+    }
+
+    /// (b) An unknown `actor_type`. Same posture, same reason.
+    #[test]
+    fn an_unknown_actor_type_parks() {
+        assert_eq!(
+            posture_of("Teleporter", "PaymentCaptured", &staged_payment_captured()),
+            DoorPosture::Park
+        );
+    }
+
+    /// (c) A DECLARED message whose payload does not deserialize. Deterministic, so terminal.
+    #[test]
+    fn a_declared_message_with_a_malformed_payload_is_terminal() {
+        let malformed = serde_json::json!({ "eventType": "PaymentCaptured", "payload": 7 });
+        assert_eq!(posture_of("Payment", "PaymentCaptured", &malformed), DoorPosture::Terminal);
+    }
+
+    /// (d) The row's `message_type` disagrees with the staged `eventType` tag. Nothing checked this
+    /// before #771: a row could carry `message_type: "OrderPlaced"` with an `OrderRejected` body
+    /// and the generic record route would have appended the body under the wrong name.
+    #[test]
+    fn a_message_type_disagreeing_with_the_payload_tag_is_terminal() {
+        let mismatched = serde_json::json!({
+            "eventType": "PaymentReleased",
+            "payload": { "paymentIntentId": "pi_verdict_table" }
+        });
+        assert_eq!(posture_of("Payment", "PaymentCaptured", &mismatched), DoorPosture::Terminal);
+    }
+
+    /// (e) A DECLARED fact with no record route: PARK, and the class says which fact.
+    ///
+    /// Asserted through `fact_route` rather than through the parse edge, because this row is not a
+    /// parse failure at all -- it is a fact that parses perfectly and has nowhere to go, which is
+    /// the whole subject of #780.
+    #[test]
+    fn a_declared_fact_with_no_record_route_parks() {
+        use crate::inbox::{fact_route, FactLegClass, UnrecordedFact};
+        let staged = serde_json::json!({
+            "eventType": "DeliveryRequested",
+            "payload": {
+                "deliveryJobId": "00000000-0000-0000-0000-0000000000d1",
+                "orderId": "00000000-0000-0000-0000-0000000000d2",
+                "restaurantId": "00000000-0000-0000-0000-0000000000d3",
+                "pickup": { "line1": "1 rue de la Paix", "city": "Tours", "postalCode": "37000", "country": "FR" },
+                "dropoff": { "line1": "2 rue Nationale", "city": "Tours", "postalCode": "37000", "country": "FR" }
+            }
+        });
+        let inbox = ActorInbox::parse("DeliveryJob", "DeliveryRequested", &staged)
+            .expect("a DECLARED fact must parse -- it is declared, it just has no route");
+        let fact = inbox.into_fact().expect("a fact row projects onto the fact half");
+        assert_eq!(
+            fact_route(fact).class(),
+            FactLegClass::Unrecorded(UnrecordedFact {
+                actor_type: "DeliveryJob",
+                message_type: "DeliveryRequested",
+            }),
+            "a declared fact with no fold rule must PARK, naming itself -- never a terminal verdict, \
+             because a fact already happened and cannot be refused"
+        );
+    }
+
+    /// The control that stops the table passing for the wrong reason: a fact that DOES have a route
+    /// must not be classified as parked, or every row above would hold vacuously.
+    #[test]
+    fn a_routed_fact_is_not_parked() {
+        use crate::inbox::{fact_route, FactLegClass, FactRecorder};
+        let inbox = ActorInbox::parse("Payment", "PaymentCaptured", &staged_payment_captured())
+            .expect("PaymentCaptured is declared on the Payment lane");
+        let fact = inbox.into_fact().expect("a fact row projects onto the fact half");
+        assert_eq!(fact_route(fact).class(), FactLegClass::Record(FactRecorder::Payment));
     }
 }

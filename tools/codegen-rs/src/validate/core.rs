@@ -1417,7 +1417,11 @@ pub(crate) fn validate(model: &Model) -> Report {
         let span_kinds: BTreeSet<&str> = ["SERVER", "CLIENT", "INTERNAL", "PRODUCER", "CONSUMER"].into_iter().collect();
         // Dispatch surfaces a contract may bind INSTEAD of a single command/saga/aggregate
         // (ADR-20260721-031127: pipeline contracts, e.g. command-acceptance over the GraphQL dispatch).
-        const SURFACE_KINDS: [&str; 1] = ["graphql"];
+        //
+        // `mailbox` joined it with #780: the EVENT/MESSAGE delivery door carries facts from Stripe,
+        // delivery partners and promoted reminders, so binding its contract to `graphql` would be a
+        // false binding — a webhook-sourced fact never touches the GraphQL surface.
+        const SURFACE_KINDS: [&str; 2] = ["graphql", "mailbox"];
         if let Some(obs) = model.defs.get("observability.yaml").and_then(|x| x.as_mapping()) {
             for (fk, c) in obs {
                 let feature = match fk.as_str() {

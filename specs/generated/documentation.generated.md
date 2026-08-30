@@ -11212,7 +11212,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(11)_
+### 📡 Observability _(12)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -11531,6 +11531,32 @@ _criticality: **high**_
 - **Metrics**: `erasure_duration_ms` _(histogram)_, `erasure_store_failed_total` _(counter)_, `erasure_request_parked_total` _(counter)_, `erasure_overdue_age_seconds` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans [`erasure.store.purge`, `event.store.append`]
 - **SLOs**: p95 ≤ 5000ms · p99 ≤ 15000ms · error rate ≤ 0%
+
+<a id="obs-mailbox-delivery"></a>
+#### 📡 Contract: `mailbox-delivery`
+
+_criticality: **high**_
+
+- **Workflow**: surface `mailbox` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `message.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `message_id` | `message.message_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `message.deliver` | `CONSUMER` | ✅ | — | `business.actor_type`*, `business.message_type`*, `business.message_kind`*, `business.message_id`*, `business.correlation_id`*, `business.verdict`* |
+
+- **Metrics**: `mailbox_fact_unrecorded_total` _(counter)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans [`message.deliver`]
+- **SLOs**: p95 ≤ 250ms · p99 ≤ 1000ms · error rate ≤ 1%
 
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)

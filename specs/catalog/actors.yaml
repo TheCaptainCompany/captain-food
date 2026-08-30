@@ -86,4 +86,8 @@ Catalog:
         - { $ref: 'errors.yaml#/MissingRef' }
     - message: { $ref: 'events.yaml#/OfferStockUpdated' }
       emits: [{ $ref: 'events.yaml#/OfferStockUpdated' }]
+      deferred:
+        reason: >
+          MODELLING: stock is a DERIVED status over the catalog fold, and availability, stock and orderability are three different things -- which one an externally reported level moves, and when a re-report is inert, is undeclared. No recorder and no dedupe rule.
+        issue: "https://github.com/TheCaptainCompany/captain-food/issues/785"
       effect: "Inbound HubRise inventory sync recorded via the ACL (no command, no rejection)."
