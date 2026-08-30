@@ -1,6 +1,56 @@
 # Status journal — 2026-W35
 
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
+
+> **2026-08-30 (second sitting) — the founder answered three residues, and answering them found a
+> decision that was approved 22 days ago and never built.**
+> ([ADR-20260830-234532](../adr/ADR-20260830-234532-the-second-sitting-publish-france-wide-revocation-is-immediate-and-the-objection-chain-was-decided-22-days-ago.md),
+> five lenses.) Publish scope: **crawl AND publish France-wide**, over the crawl-wide/publish-Tours
+> recommendation `business-specialist` and `legal-specialist` reached independently and which was
+> put to him as the recommendation. Rider revocation: **immediately, on the next request**. Support
+> contact: a functional role address on a domain we control — **shape settled, string still owed**.
+>
+> **The finding that outranks all three** is true today, at Touraine scale, with the crawl paused:
+> `PROP-20260808-142532` D3/D4 were **Approved on 2026-08-08** and are unbuilt.
+> `projectors.rs:59` is `RestaurantListingOptedOut(_) => state` — the opt-out folds to a literal
+> no-op; the D4 `delisted` boolean exists nowhere; `ProspectionPipeline.fedBy` does not consume the
+> opt-out, so an opted-out restaurant stays a prospect; `restaurant.rs:83` filters `listing_status`
+> only when `orderable_only == Some(true)`, so non-partner rows are listed on an unguarded public
+> query; and the only door to the objection requires a Google proof behind a **fail-closed**
+> verifier. The register's usual pathology is a decision nobody is making — **this is its mirror.**
+>
+> **The number in the question was wrong, and the `UNVERIFIED input` marking earned its keep.**
+> ADR-20260817-105845 requires a coordinator-authored figure to be marked; this one was, and `dba`
+> found "~200k rows" is *neither* population — the publish surface is ~250–300k registered listings
+> and the mirror is ~1.0M rows, re-derived from ADR-20260728-143000's measured 339,077 rows over 37
+> of 101 departments. The 200k came from a partial-coverage re-translation batch and had been
+> carried into the residue as the publish population. The 3.5× gap is its own defect:
+> `restauration_query` wraps its predicates in INSEE's `periode(...)`, which matches **any** period,
+> so without `dateFin:null` the sweep returns every établissement ever active under a restauration
+> NAF and the mirror has no row retention.
+>
+> **Two facts the founder did not have when he answered**, recorded because they change what the
+> decision means and not whether it was right: `sirene.rs:111-113` composes a sole trader's
+> `displayName` as `"{prénom} {nom}"` against an `adresseEtablissement` that for micro-entrepreneurs
+> is frequently the **domicile**, so national publish publishes natural persons' home addresses; and
+> `grep -rni 'diffusion|statutDiffusion|nonDiffusible'` returns **zero hits repo-wide**, so people
+> who asked the State not to be published are ingested. Also: **it is not executable as stated** —
+> ADR-20260728-011344 nulled slugs on `NON_PARTNER` rows and the `restaurant` query resolves by
+> slug, so there is no per-listing page for the Art. 14 notice, the objection route or the claim
+> door to live on.
+>
+> Seven register rows written and `STAFF-AUTH` migrated off `_legacy.yaml` — it had been **amended
+> twice the same day while still legacy**, which `_legacy.yaml`'s own burn-down trigger (b) makes a
+> same-change migration, and `make validate` did not notice. `PUBLISH-SCOPE` and
+> `RIDER-REVOCATION-TTL` created *and closed* in the same change, because under `reconsiders` an
+> undeclared decision cannot be reversed — and publishing a national directory is precisely the
+> decision someone will want to challenge. The four mechanical obligations got **no** decision rows:
+> they were decided on 2026-08-08 and filing them again would re-ask an answered question.
+>
+> Sequencing: the objection chain goes **first** — GREEN, already approved, dispatchable — and part
+> C's proposal runs beside it on disjoint files. The crawl stays paused; the founder answered *how
+> wide*, not *whether we are ready*.
+
 Current state: [`../STATUS.md`](../STATUS.md).
 
 > **2026-08-30 — the four STAFF-AUTH answers, and the one that is a composite rather than an

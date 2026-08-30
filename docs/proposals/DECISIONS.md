@@ -21,6 +21,10 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `DELIV-THRESHOLD` | open | 2026-08-19 | The free-delivery threshold: which field, computed where, and the ninth money term — design team-owned, commercial parameters founder-owned (suggest, never cap). | team |
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
+| `PRINCIPALS-MEMBER` | open | 2026-08-30 | Part C needs a restaurant MEMBER principal that does not exist. What is the change to actors.yaml principals, ScopeType and UserType, and what is the versioning story for it? | team |
+| `PUBLISH-PRECONDITIONS` | open | 2026-08-30 | What must exist before the first crawled listing is shown publicly, now that PUBLISH-SCOPE is national? Specifically: does Art. 6(1)(f) carry national publication of SIRENE-derived listings including sole traders' name and often-domicile address, is an Art. 35 DPIA mandatory and does it trigger Art. 36 prior consultation, and is Art. 14 satisfied individually or under the 14(5)(b) derogation? | counsel |
+| `REVOKED-COLLEAGUE-NOTICE` | open | 2026-08-30 | When a restaurant owner revokes a colleague's access, must the colleague be notified, by whom, and with what content? | counsel |
+| `SUPPORT-CONTACT` | open | 2026-08-30 | SUPPORT_CONTACT is a required configuration key with no default, so the #792 refusal screen cannot boot without a value. What string is published, who reads it, and does it carry a voice leg at peak? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `AGGREGATES-OWN-THE-FACTS` | decided | 2026-08-29 | Does the foreign-stream-append isolation subject (twelve deliver: steps still appended by process managers, plus the #595 unlaned reclamation birth) get resolved FIRST, before any new development builds on the pre-isolation shape? -> ADR-20260829-230418 | founder |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
@@ -59,6 +63,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260811-000946--D5` | decided | 2026-08-11 | Where do behaviour-event records go? -> ADR-20260811-120828 | founder |
 | `PROP-20260811-000946--D6` | decided | 2026-08-11 | What does the behaviour-event validator enforce? -> PROP-20260811-000946 | team |
 | `PROP-20260811-000946--D7` | decided | 2026-08-11 | What is the first slice of behaviour-event tracking? -> PROP-20260811-000946 | team |
+| `PUBLISH-SCOPE` | decided | 2026-08-30 | The INSEE crawl is scoped to Touraine and the founder asked for all of France. Crawling wide is nearly free; publishing wide is not. Do we crawl France-wide and publish France-wide, or crawl wide and publish Tours only? -> ADR-20260830-234532 | founder |
 | `REFUND-BEARER` | decided | 2026-08-19 | Who bears a refund? -> ADR-20260819-103112 | founder |
 | `REG-1` | decided | 2026-08-21 | Does enforcement against re-asked questions go on the ask, or on the archive? -> ADR-20260821-010543 | founder |
 | `REG-2` | decided | 2026-08-21 | What shape does the register source take? -> ADR-20260821-095957 | founder |
@@ -69,6 +74,8 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REV-1` | decided | 2026-08-17 | Does the `claude-review` bot check stay a REQUIRED status check on `main`? -> ADR-20260807-235930 | founder |
 | `REVIEW-GATE-BYPASS` | decided | 2026-08-24 | Does the #677 hardening of `claude-review` land BEFORE REV-1 is executed — merged by a one-time admin bypass, leaving the check required and newly able to fail — or does REV-1 execute first so the hardened check reds on a non-required gate? -> ADR-20260825-005323 | founder |
 | `REVIEW-GATES-CRATES-MERGE` | decided | 2026-08-28 | Should the independent review pass gate auto-merge on PRs touching crates/**, or keep merging on green CI with review findings landing as follow-up PRs? -> ADR-20260828-023258 | founder |
+| `RIDER-REVOCATION-TTL` | decided | 2026-08-30 | A JWT claim is a cached fold we cannot invalidate, so an outstanding token keeps working after a suspension fact is appended. How long may a suspended rider's app keep working? -> ADR-20260830-234532 | founder |
+| `STAFF-AUTH` | decided | 2026-08-30 | How does a restaurant operator, an account manager or a rider come to exist as a sign-in-capable person? Nothing in the repository writes a RESTAURANT, RESTAURANT_ACCOUNT or RIDER claim: the sole claim writer hardcodes role CUSTOMER, so three of the four principal roles cannot authenticate at all. -> ADR-20260830-213135 | founder |
 | `TYPED-ACTOR-INBOX` | decided | 2026-08-30 | Does the mailbox runtime keep a flat string router over all actors -- where a message an actor DECLARES it receives can have no dispatch arm and ship green, and a row on lane A can drive a handler that writes aggregate B -- or does each actor's declared `receives:` set become a GENERATED enum whose routing match the compiler proves exhaustive? -> ADR-20260830-183000 | founder |
 | `V0-PROMO-AND-MINIMUM` | decided | 2026-08-29 | Does V0 ship promo codes and/or a minimum order amount, and at what rules/values? -> ADR-20260829-145848 | founder |
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
@@ -77,9 +84,9 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 63 — 8 open · 50 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 70 — 12 open · 53 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
-**Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
+**Legacy rows remaining: 101** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
 For every key above, `docs/decisions/<KEY>.yaml` is **authoritative for CURRENT status**; the prose sections below are its history and their glyphs are not current status.
 
