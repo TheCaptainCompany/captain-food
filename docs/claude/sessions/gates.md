@@ -29,6 +29,30 @@ generated output?* (`docs/**`/ADRs/`STATUS.md` skip the matrix, **`specs/**` is 
 a filtered job must still report its **required-check name** from a skip job or branch protection
 deadlocks.
 
+**…and that question is INCOMPLETE, which is how `main` went green while red (2026-08-30, #802).**
+A filter keyed only on *can this change generated output?* is blind to the other way a `docs/**`
+edit breaks the build: **a `docs/**` file that is an INPUT to a Rust test**.
+`docs/decisions/_exempt.yaml` was ratcheted by `assert_eq!(exemptions.len(), 4)` in
+`tools/codegen-rs/src/tests.rs`, so the gate over a docs file lived in `build-test` — the job
+`docs_only` switches off. Adding the fifth exemption reded that assertion and `ci` reported
+**success** on two consecutive pushes to `main`; it surfaced only when an unrelated `crates/**` diff
+was merged alongside it. `docs-validate` could not see it either, because `make validate` genuinely
+passed: the validator rules are content-shaped and the ratchet was count-shaped. **The filter's real
+question is therefore *can this change break a gate?*, and the docs-only lane answers it only for
+gates that live inside `make validate`.**
+
+The executable half is landed — that ratchet is now the validator rule
+`citation-exemption-undeclared`, and its declaration list sits in Rust source **on purpose**: adding
+an exemption must touch `tools/**`, which flips the filter and un-skips the matrix. So the rule this
+leaves is short: **before putting a real `docs/**` path in a Rust test, put the check in `make
+validate` instead** — and prefer membership to a count, because a governed file that legitimately
+arrives and retires reds a count assertion on both halves of its cycle (#802's fifth exemption
+arrived and deposited within one session, so a bumped count would have gone red again hours later,
+looking like a fresh bug). Still open at that boundary:
+`gates_md_does_not_state_the_length_of_a_list_it_introduces` reads this very file, and
+`the_ride_along_count_matches_the_clauses_named` reads `docs/decisions/RETRIEVAL-QMD-CI.yaml` and
+asserts a derived count — either can red `main` from a docs-only push while `ci` stays green.
+
 **CLAUDE.md's architecture summary can be STALE — check it against `docs/STATUS.md` whenever
 hosting, storage or deployment topology matters.** Nothing regenerates that paragraph and no gate
 covers it, so it drifts silently in the one file every session reads first. Measured cost: on

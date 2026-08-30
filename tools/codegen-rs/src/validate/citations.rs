@@ -123,10 +123,12 @@ pub(crate) const DECLARED_EXEMPTIONS: &[(&str, &str)] = &[
         "ADR-20260724-172808",
         "the one genuinely dangling id the register audit found (PROP-20260819-110442 §1.2) — its remaining citations QUOTE it as a specimen of that defect, never as a record",
     ),
-    (
-        "ADR-20260830-191457",
-        "NOT YET DEPOSITED on main — the record of #639 parts A and B, which lives on the open draft PR #799 (branch claude/staff-auth-signin-zpapwy) under HOLD: human, while the founder answer that cites it landed on main first. Retires when #799 merges",
-    ),
+    // `ADR-20260830-191457` sat here for exactly one session. It was the #802 red — the fifth entry
+    // whose arrival a count assertion could not survive — and PR #799 deposited the record while
+    // this branch was being written, so the entry self-pruned out of `_exempt.yaml` and the
+    // declaration went with it. That whole cycle, arrival to retirement, is why the rule is
+    // membership-shaped: the count it replaced would have gone red on the arrival AND again on the
+    // departure, hours apart, and only the second one would have looked like a mystery.
 ];
 
 /// §23d: every id in `_exempt.yaml` is one the ratchet declares. Growth is red and names the id;
