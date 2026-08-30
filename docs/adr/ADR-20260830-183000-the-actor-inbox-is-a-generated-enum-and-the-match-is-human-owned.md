@@ -45,10 +45,10 @@ same class of omission, two postures. #595 hit it by hand: `PlaceReplacementOrde
 replacement order was silently never born.
 
 **The cutover measured the real size of it: TEN commands were declared in some actor's `receives:`
-with no dispatch arm at all on `main`.** Nine had their handler already written in
-`application::commands` and were missing only a table row — the exact history the `UNWIRED_MUTATIONS`
-doc comment recounts for `recordDeliverySatisfaction` and `escalateDelivery`, repeating. Two are
-already declared process-manager `sends:`:
+with no dispatch arm at all on `main` — and all TEN are now wired.** Every one of them had its
+handler already written in `application::commands` and was missing only a table row — the exact
+history the `UNWIRED_MUTATIONS` doc comment recounts for `recordDeliverySatisfaction` and
+`escalateDelivery`, repeating, ×10. Two are already declared process-manager `sends:`:
 
 - `CartBindingProcess` → `BindCartToCustomer` — a returning visitor's guest cart never binds.
 - `ReclamationProcess` GOODWILL_CREDIT arm → `GrantCustomerCredit` — **a resolved reclamation's
@@ -92,12 +92,35 @@ order. The delivery aborts, the row stays RECEIVED and is retried with backoff, 
 have turned a compile-time change into a stored-shape migration. Park is the poison path, reached by
 aborting instead of failing.
 
-**A deferral is DSL content, not a Rust const.** `UNWIRED_MUTATIONS` was a bare list of names in an
-emitter — no reason, no owner, nobody read it. Its successor is `receives[].deferred: { reason,
-issue }`, validator-enforced (`receives-deferred-shape`: closed key set, both fields required, the
-issue a FULL URL because a bare `#NN` does not auto-link and this text renders into generated
-documentation). Its first and only user is `DeliveryJob`/`UpdateDeliveryStatus`, the one of the ten
-with no handler written — so the grammar lands with a real instance rather than as dead spec surface.
+**A deferral is DSL content, not a Rust const — and it ships with ZERO users, deliberately.**
+`UNWIRED_MUTATIONS` was a bare list of names in an emitter — no reason, no owner, nobody read it.
+Its successor is `receives[].deferred: { reason, issue }`, validator-enforced
+(`receives-deferred-shape`: closed key set, both fields required, the issue a FULL URL). *The URL
+rule stands on the CLAUDE.md ground that a bare `#NN` does not auto-link outside issues/PRs/commits
+— **not** on the claim, made in the first version of this record and falsified by the round-1
+reviewer pass on PR #776, that the text renders into `specs/generated/documentation.generated.md`.
+It does not: no docs emitter reads `deferred:`. It renders into the GENERATED Rust doc comment on
+the inbox variant and into `inboxes::DEFERRED_MESSAGES`, and it is copied by hand into PR and issue
+bodies — which is exactly where a bare `#NN` dies.*
+
+Its intended first user was `DeliveryJob`/`UpdateDeliveryStatus`, believed to be the one of the ten
+with no handler written. **That was wrong**: `update_delivery_status` is the generated `via: status`
+handler, is re-exported beside `change_rider_status`, and passes
+`tests.yaml#/TestDeliveryStatusUpdatedByCommand`. It is wired like the other nine, and the deferral
+is withdrawn rather than restated — a deferral whose `reason:` is false is worse than no grammar,
+because it is a reviewable artifact nobody can review correctly.
+
+**So the grammar has zero instances, and we keep it.** Stated as a decision, not a side effect: a
+new DSL key, a validator rule and two tests with no user is real carrying cost, and the honest
+alternative was to delete it and re-derive it when the first genuine deferral arrives. We keep it
+because (a) C3's remaining `deliver:` routes are each an opportunity to declare a route whose handler
+is not yet written, which is precisely the shape the grammar exists for, and (b) the moment a
+deferral is *needed* is the moment nobody has time to design its reviewable form, so a grammar
+invented under that pressure is the one that degenerates into `UNWIRED_MUTATIONS` again. The ratchet
+that makes this safe is the codegen test `the_corpus_declares_no_deferral`: the corpus declares none,
+and the FIRST deferral must fail that test and be argued for in the same change. The counter-argument
+is recorded too — unused grammar rots, and if C3 lands without ever using it, deleting it is the
+correct outcome, not a defeat.
 
 ## The gates that die, subsumed by the compiler
 
@@ -125,22 +148,50 @@ delegated this judgement explicitly; the reasoning is recorded rather than assum
 - **The mutation resolver's wiring gate becomes ADDRESSING**, which is the right question: a resolver
   only ENQUEUES, so whether a handler exists says nothing about whether the resolver can be written.
 
-**Two gates are ADDED, both where types cannot reach.** A wildcard `_ =>` arm still absorbs every
-future variant, and no type can forbid one (`#[non_exhaustive]` does the opposite), so
-`the_human_owned_router_carries_no_wildcard_arm` reads the one human-owned file. And
+**Two gates are ADDED, both where types cannot reach.** A catch-all arm still absorbs every future
+variant, and no type can forbid one (`#[non_exhaustive]` does the opposite), so
+`every_arm_of_the_human_owned_router_names_an_inbox_variant` reads the one human-owned file. **It
+asserts the PROPERTY, not a spelling**: its first version line-scanned for `_ =>`, and the round-1
+reviewer pass on PR #776 bypassed it with `_other =>` — a named binding is a wildcard wearing a
+name, equally total, and it compiled clean with every gate green. The test now parses the file with
+`syn` and asserts the positive form — every arm of a lane match names an `<Actor>Inbox::` variant,
+and no arm anywhere is `Pat::Wild` or a bare `Pat::Ident` — plus its own reach, because a scanner
+that silently matches nothing passes vacuously. The general lesson is worth more than the fix: *a
+gate that names the spelling of a defect gates the spelling; the property has to be asserted against
+the parsed artifact.* And
 `a_widened_receives_set_is_a_compile_error` proves the whole guard RED against real `rustc` — it
 emits Cart's inbox from a clone of the real model and from a model with one extra `receives:` entry,
 compiles both against the same arm set, and asserts the control compiles CLEAN and the widened one
 fails with `error[E0004]` naming the unconsumed message. A guard never seen red is an unverified
 claim.
 
+## What the guarantee does NOT cover
+
+**It is over COMMANDS and over the routing DECISION — not over fact DELIVERY.** E0004 proves that
+every message an actor declares it receives reaches a decision in `infrastructure::inbox`. A
+decision of `InboxOutcome::RecordFact` then hands the message to the fact route in
+`mailbox::handler`, which is still a `match` over the wire `message_type` **string** ending in
+`_ => Failed("no delivery route for inbound fact type")` — and **twelve declared inbound facts have
+an inbox variant and a `RecordFact` arm but no arm there** (`CartCheckedOut`, `OfferStockUpdated`,
+`CustomerErasureDue`, `CustomerIdentityUnlinked`, `DeliveryDispatchFailed`, `DeliveryOfferTimedOut`,
+`DeliveryRequested`, `PaymentCaptureFailed`, `PaymentIntentCreated`, `RefundApproved`,
+`RefundDenied`, `RefundOpened`). That is pre-existing and unchanged by this decision, but the
+guarantee must never be quoted unconditionally: the #595 shape survives one function downstream, on
+the payments and refunds lanes among others. Extending the same proof to the fact route is
+[#780](https://github.com/TheCaptainCompany/captain-food/issues/780). Raised by the independent
+reviewer pass on PR #776.
+
 ## Consequence for [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
 
 **Consumer-first deploy ordering is now a precondition of the runtime split**: consumers that
 understand a message type must deploy before producers emit it. The transient-then-park posture makes
-the wrong order *survivable* rather than *fatal* — it costs latency and an operator requeue, not a
-buried order — but it is not a licence to ignore the ordering. Recorded in the register row so the
-#358 cutover work reads it.
+the wrong order *survivable* rather than *fatal* — it costs latency, a head-of-line-blocked lane and
+an operator requeue, not a buried order — but it is not a licence to ignore the ordering, and *park*
+means **terminal `FAILED` on the poison queue** (`DeliveryInfrastructureError`, ~5 min at cap 5 per
+`STATUS.md` 10c), never a row that recovers itself. Recorded in the register row and in
+`PROP-20260811-090000` §5 — where the #358 cutover work reads its preconditions — so a rollout
+planner cannot read "parked" as "self-healing" (the round-1 reviewer pass on PR #776 found exactly
+that misreading in the proposal's wording).
 
 ## Consulted
 
@@ -178,6 +229,6 @@ BEFORE the directive, and the checkpoint set was those who declared a concern.
   unspellable rather than merely gated.
 - The generated `command_router.rs` shrinks from 761 lines to 42 — the addressing surface, nothing
   else.
-- Nine previously-dead handlers become reachable. None is enqueued by anything live today except
+- Ten previously-dead handlers become reachable. None is enqueued by anything live today except
   through the two declared PM `sends:` above, so no behaviour a customer sees changes on merge; what
   changes is that those two declared routes now work when C3 reaches them.

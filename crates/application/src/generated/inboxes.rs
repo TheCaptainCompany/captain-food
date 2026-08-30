@@ -914,7 +914,7 @@ pub enum DeliveryJobInbox {
     ResolveDeliveryIssue(domain::generated::commands::ResolveDeliveryIssue),
     /// COMMAND `UnassignDeliveryFromPartner`.
     UnassignDeliveryFromPartner(domain::generated::commands::UnassignDeliveryFromPartner),
-    /// COMMAND `UpdateDeliveryStatus` — HANDLER DEFERRED (actors.yaml `deferred:`): No handler exists for the rider/admin status-correction path. Writing it needs the lifecycle guard (`via: status`, ADR-20260721-093027) and its own behaviour test, and nothing enqueues the command today -- no mutation and no process-manager `sends:` -- so no live path is broken by the gap. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/777.
+    /// COMMAND `UpdateDeliveryStatus`.
     UpdateDeliveryStatus(domain::generated::commands::UpdateDeliveryStatus),
 }
 
@@ -2733,9 +2733,10 @@ impl ActorInbox {
 ///
 /// This replaces the retired `UNWIRED_MUTATIONS` const in the codegen crate. A deferral is now
 /// REVIEWABLE SPEC CONTENT — it sits next to the declaration it qualifies, carries a reason and a
-/// tracking issue, and shows up in the generated documentation — instead of a Rust const in an
-/// emitter that nobody reads. The variant and its router arm still exist: what is deferred is what
-/// the arm DOES, and the compiler still refuses to let the message go unconsumed.
+/// tracking issue, and is rendered onto the variant it qualifies — instead of a Rust const in an
+/// emitter that nobody reads. (It reaches the GENERATED Rust doc comment and this table; it does
+/// NOT reach `specs/generated/documentation.generated.md`, which has no `deferred:` reader.) The
+/// variant and its router arm still exist: what is deferred is what the arm DOES, and the compiler
+/// still refuses to let the message go unconsumed.
 pub const DEFERRED_MESSAGES: &[(&str, &str, &str, &str)] = &[
-    ("DeliveryJob", "UpdateDeliveryStatus", "No handler exists for the rider/admin status-correction path. Writing it needs the lifecycle guard (`via: status`, ADR-20260721-093027) and its own behaviour test, and nothing enqueues the command today -- no mutation and no process-manager `sends:` -- so no live path is broken by the gap.", "https://github.com/TheCaptainCompany/captain-food/issues/777"),
 ];

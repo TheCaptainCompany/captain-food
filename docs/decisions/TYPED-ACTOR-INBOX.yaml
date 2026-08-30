@@ -33,12 +33,23 @@ evidence: >
   wrong reason.
 
   WHAT IT FOUND. Ten commands were declared in some actor's receives: with NO dispatch arm on main --
-  the #595 class, live, x10, green at every gate. Nine had their handler ALREADY WRITTEN and were
-  missing only a table row. Two are already declared process-manager sends: CartBindingProcess ->
-  BindCartToCustomer (a returning visitor's guest cart never binds) and ReclamationProcess
-  GOODWILL_CREDIT -> GrantCustomerCredit (a resolved reclamation's goodwill credit never granted --
-  the money path). The tenth, UpdateDeliveryStatus, has no handler and becomes the first user of the
-  new DSL deferral grammar, tracked by #777.
+  the #595 class, live, x10, green at every gate. ALL TEN had their handler ALREADY WRITTEN and were
+  missing only a table row; all ten are WIRED. Two are already declared process-manager sends:
+  CartBindingProcess -> BindCartToCustomer (a returning visitor's guest cart never binds) and
+  ReclamationProcess GOODWILL_CREDIT -> GrantCustomerCredit (a resolved reclamation's goodwill credit
+  never granted -- the money path). Round 1 of PR #776 reported NINE wired and declared the tenth,
+  UpdateDeliveryStatus, deferred; the independent reviewer pass falsified that -- its via: status
+  handler is generated at handlers.rs:181, re-exported beside change_rider_status, and green under
+  tests.yaml#/TestDeliveryStatusUpdatedByCommand. The deferral is withdrawn (a deferral whose reason
+  is false is worse than no grammar) and #777 narrows to the open question it always was: which door
+  -- a mutation with a role guard, or worker-channel only -- should reach that command.
+
+  WHAT THE GUARANTEE DOES NOT COVER: it is over COMMANDS and the routing DECISION, not fact
+  DELIVERY. E0004 proves every declared message reaches a decision in infrastructure::inbox; a
+  RecordFact decision then hands off to mailbox::handler's fact route, still a match over the wire
+  string ending in a catch-all, where TWELVE declared inbound facts have no arm (incl.
+  PaymentCaptureFailed, PaymentIntentCreated and three refund facts). Pre-existing and unchanged
+  here; extending the proof is #780. The guarantee must not be quoted unconditionally.
 
   GATES DELETED AS SUBSUMED: UNWIRED_MUTATIONS + its assert_eq! (it asked whether a mutation had a
   table row; the question it protected is now E0004 over a STRICTLY LARGER set -- all 100 received
@@ -50,12 +61,14 @@ evidence: >
   the enqueue side (mailbox_address, ACTOR_INBOUND_FACTS) and the consume side agree on the same
   pairs, being two independent scans in two crates. The mutation resolver's wiring gate becomes
   ADDRESSING, the right question, since a resolver only ENQUEUES. GATES ADDED, both where types
-  cannot reach: no-wildcard-arm on the one human-owned file, and the E0004 proof itself.
+  cannot reach: the no-catch-all PROPERTY on the one human-owned file (see below), and the E0004
+  proof itself.
 
-  UNKNOWN MESSAGE TYPE IS TRANSIENT, NEVER TERMINAL -- the one conflict that mattered in the consult.
-  A rolling deploy legitimately shows an old consumer a new message type, and terminal-failing it
-  buries a paid order. The delivery ABORTS (row stays RECEIVED), retries with backoff, and flips at
-  max_delivery_attempts into the EXISTING poison path, already loud by construction
+  UNKNOWN MESSAGE TYPE IS TRANSIENT FIRST, TERMINAL ONLY AT THE CAP -- the one conflict that mattered
+  in the consult. A rolling deploy legitimately shows an old consumer a new message type, and
+  terminal-failing it IMMEDIATELY buries a paid order. The delivery ABORTS (row stays RECEIVED),
+  retries with backoff, and at max_delivery_attempts flips to terminal FAILED on the EXISTING poison
+  path, already loud by construction
   (mailbox_poison_failed_total{actor_type}, the ADMIN poisonedMailboxMessages read,
   RequeueMailboxMessage as the way back). NO NEW STATUS AND NO MIGRATION: InboundMessageStatus has no
   PARKED member and is a stored, promised column, so adding one would have turned a compile-time
@@ -64,14 +77,41 @@ evidence: >
 
   DEFERRALS MOVE INTO THE DSL: receives[].deferred: { reason, issue }, validator-enforced
   (receives-deferred-shape: CLOSED key set, both fields required, the issue a FULL URL because a bare
-  #NN does not auto-link and the text renders into generated documentation). UNWIRED_MUTATIONS was an
-  unexplained list of names in an emitter nobody read; a deferral is now reviewable spec content
-  sitting next to the declaration it qualifies.
+  #NN does not auto-link outside issues/PRs/commits -- CLAUDE.md, and that is the whole ground. The
+  earlier claim that the text renders into documentation.generated.md was FALSE and is corrected: no
+  docs emitter reads deferred:; it renders into the generated Rust doc comment on the inbox variant
+  and into inboxes::DEFERRED_MESSAGES). UNWIRED_MUTATIONS was an unexplained list of names in an
+  emitter nobody read; a deferral is now reviewable spec content sitting next to the declaration it
+  qualifies.
+
+  THE GRAMMAR SHIPS WITH ZERO USERS, BY DECISION. Its intended first instance turned out to be
+  wired, and restating a false reason would have been worse than having no grammar. It is KEPT
+  because C3's remaining deliver: routes are each an opportunity to declare a route whose handler is
+  not written, and because a reviewable form invented under the pressure of needing one is how
+  UNWIRED_MUTATIONS happened. The ratchet is the codegen test the_corpus_declares_no_deferral: the
+  corpus declares none, and the FIRST deferral must fail it and be argued for in the same change.
+  Counter-argument recorded: unused grammar rots, and if C3 lands without using it, DELETING it is
+  the correct outcome. Open loop #781 -- nothing binds a Deferred ARM to a deferred: declaration in
+  either direction, and DEFERRED_MESSAGES is read by nothing.
+
+  THE NO-CATCH-ALL GATE ASSERTS THE PROPERTY, NOT THE SPELLING. Its first version line-scanned for
+  '_ =>' / '_ if ' and the round-1 reviewer pass bypassed it with '_other =>' -- a named binding is
+  a wildcard wearing a name, equally total, compiling clean with every gate green, which would have
+  left the load-bearing mechanism of a HOLD: human runtime protected by nothing. It now parses
+  crates/infrastructure/src/inbox.rs with syn and asserts the positive form (every arm of a lane
+  match names an <Actor>Inbox:: variant; no arm anywhere is Pat::Wild or a bare Pat::Ident), plus
+  its own reach, since a scanner that matches nothing passes vacuously. General lesson: a gate that
+  names the SPELLING of a defect gates the spelling.
 
   CONSEQUENCE FOR #358: consumer-first deploy ordering is a PRECONDITION of the runtime split --
   consumers that understand a message type deploy before producers emit it. The transient-then-park
-  posture makes the wrong order survivable (latency plus an operator requeue) rather than fatal, but
-  it is not a licence to ignore the ordering.
+  posture makes the wrong order survivable rather than fatal, but it is not a licence to ignore the
+  ordering, and PARK MEANS TERMINAL FAILED on the poison queue (worker.rs sets status='FAILED' with
+  code DeliveryInfrastructureError at the attempt cap; api.yaml defines poisonedMailboxMessages as
+  exactly that), ~5 min at cap 5 per STATUS.md 10c, recovered only by an operator
+  RequeueMailboxMessage, with the lane head-of-line blocked meanwhile. Never a row that self-heals.
+  PROP-20260811-090000 section 5 said "never terminally FAILED"; the round-1 reviewer pass falsified
+  it and the proposal now states both halves, because that is the document a rollout planner reads.
 
   Consulted: 8 lenses, one line each in the ADR (vernon, young, beck, farley, dba, evans, holub, and
   evans/young jointly on the deferral grammar); explicitly NOT consulted: legal (no legal surface),

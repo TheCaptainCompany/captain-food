@@ -179,10 +179,6 @@ pub(crate) fn validate_mailbox_addressing(model: &Model, issues: &mut Vec<Issue>
     }
 }
 
-/// The optional `mailbox.activations` sub-block (PROP-20260728-152752 §3.5, #272 D3): `false`
-/// opts the actor out of the ACTOR_ACTIVATIONS-gated held-state cache; a mapping tunes it
-/// (`enabled`, `idle_seconds` — the per-actor passivation override). Anything else is a shape
-/// error: a knob that parses to nothing would silently run the global defaults.
 /// `receives[].deferred: { reason, issue }` — the DSL successor of the retired `UNWIRED_MUTATIONS`
 /// const (#771). It says: this actor DOES receive this message, and the handler is deliberately not
 /// built yet.
@@ -234,7 +230,13 @@ pub(crate) fn validate_receives_deferrals(model: &Model, issues: &mut Vec<Issue>
             }
             let issue = map.get("issue").and_then(|v| v.as_str()).unwrap_or_default();
             // A FULL CLICKABLE LINK, per CLAUDE.md: GitHub does not auto-link a bare `#NN` outside
-            // issues/PRs/commits, and this string is rendered into generated documentation.
+            // issues/PRs/commits -- which is the whole ground for the rule. It is NOT that the
+            // string reaches `documentation.generated.md`: no docs emitter reads `deferred:`. It
+            // reaches the GENERATED Rust doc comment on the inbox variant and
+            // `inboxes::DEFERRED_MESSAGES`, and it is copied into PR/issue bodies by whoever
+            // triages the deferral -- which is exactly where a bare `#NN` dies.
+            // (Round-1 review of PR #776 falsified the earlier claim; the rule stands on the
+            // CLAUDE.md ground alone.)
             if !issue.starts_with("https://github.com/TheCaptainCompany/captain-food/issues/") {
                 issues.push(err(
                     "receives-deferred-shape",
@@ -250,6 +252,10 @@ pub(crate) fn validate_receives_deferrals(model: &Model, issues: &mut Vec<Issue>
     }
 }
 
+/// The optional `mailbox.activations` sub-block (PROP-20260728-152752 §3.5, #272 D3): `false`
+/// opts the actor out of the ACTOR_ACTIVATIONS-gated held-state cache; a mapping tunes it
+/// (`enabled`, `idle_seconds` — the per-actor passivation override). Anything else is a shape
+/// error: a knob that parses to nothing would silently run the global defaults.
 pub(crate) fn validate_mailbox_activations(node: &Value, name: &str, issues: &mut Vec<Issue>) {
     let Some(act) = node.get("mailbox").and_then(|m| m.get("activations")) else {
         return;

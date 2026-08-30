@@ -16250,32 +16250,140 @@ mod typed_actor_inbox_e0004 {
         );
     }
 
-    /// The wildcard escape hatch, closed. Typed payloads stop `CartInbox::AddCartLine => {}` from
-    /// compiling, but a bare `_ => {}` arm still absorbs every future variant — and a match that
-    /// compiles and does nothing is exactly the failure #771 exists to remove.
+    /// The catch-all escape hatch, closed — asserted as a PROPERTY of the parsed file, not as a
+    /// spelling.
     ///
-    /// The type system cannot reach this one (there is no way to declare "no wildcard may match
-    /// me"; `#[non_exhaustive]` does the OPPOSITE, forcing one), so per ADR-20260803-234035 a check
-    /// is the legitimate fallback. It is scoped to the human-owned routing file only.
+    /// Typed payloads stop `CartInbox::AddCartLine => {}` from compiling, but a total catch-all arm
+    /// still absorbs every future variant, and a match that compiles and does nothing is exactly
+    /// the failure #771 exists to remove. The type system cannot reach this one (there is no way to
+    /// declare "no wildcard may match me"; `#[non_exhaustive]` does the OPPOSITE, forcing one), so
+    /// per ADR-20260803-234035 a check is the legitimate fallback. It is scoped to the one
+    /// human-owned routing file.
+    ///
+    /// **Round-1 review of PR #776 found the first version of this test gated the SPELLING and not
+    /// the property**: it line-scanned for `_ =>` / `_ if `, so planting `_ => …` failed it (it had
+    /// been seen red) but `_other => …` — a NAMED binding, equally total — passed the test and
+    /// compiled clean. Every future variant silently absorbed, E0004 never firing again, every gate
+    /// green: the #595 failure this chunk exists to make unspellable, one character away. The test
+    /// now parses the file with `syn` and asserts two things:
+    ///
+    /// 1. **No arm ANYWHERE in this file is a total catch-all** — neither `Pat::Wild` (`_`) nor a
+    ///    bare `Pat::Ident` (`other`, `m`, `_other`: an irrefutable binding pattern, which is a
+    ///    wildcard that happens to have a name).
+    /// 2. **Every arm of a LANE match names an `<Actor>Inbox::` variant** — the positive form, which
+    ///    is the stronger statement, and which also covers a hypothetical lane match written with no
+    ///    inbox arm at all (classification falls back to the scrutinee, `message`).
+    ///
+    /// The scan asserts its own reach (`>= 18` lane matches, `>= 100` arms) because a scanner that
+    /// silently matches nothing passes vacuously — the same defect class one level up.
     #[test]
-    fn the_human_owned_router_carries_no_wildcard_arm() {
+    fn every_arm_of_the_human_owned_router_names_an_inbox_variant() {
+        /// The head identifier of a path-shaped pattern (`CartInbox::AddCartLine(cmd)` → `CartInbox`).
+        fn head_ident(pat: &syn::Pat) -> Option<String> {
+            let path = match pat {
+                syn::Pat::TupleStruct(t) => &t.path,
+                syn::Pat::Path(p) => &p.path,
+                syn::Pat::Struct(s) => &s.path,
+                _ => return None,
+            };
+            path.segments.first().map(|s| s.ident.to_string())
+        }
+
+        /// The POSITIVE form: this pattern names a variant of some `<Actor>Inbox` enum.
+        fn names_inbox_variant(pat: &syn::Pat) -> bool {
+            match pat {
+                syn::Pat::Or(o) => o.cases.iter().all(names_inbox_variant),
+                syn::Pat::Paren(p) => names_inbox_variant(&p.pat),
+                other => head_ident(other).is_some_and(|i| i.ends_with("Inbox")),
+            }
+        }
+
+        /// A TOTAL catch-all: matches every remaining value whatever the variant set becomes.
+        /// `_` and a bare binding `other` are the same pattern with different ergonomics.
+        fn is_catch_all(pat: &syn::Pat) -> bool {
+            match pat {
+                syn::Pat::Wild(_) => true,
+                syn::Pat::Ident(i) => i.subpat.is_none(),
+                syn::Pat::Paren(p) => is_catch_all(&p.pat),
+                _ => false,
+            }
+        }
+
+        #[derive(Default)]
+        struct Scan {
+            offenders: Vec<String>,
+            lane_matches: usize,
+            lane_arms: usize,
+            current_fn: String,
+        }
+
+        impl<'ast> syn::visit::Visit<'ast> for Scan {
+            fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+                let outer = std::mem::replace(&mut self.current_fn, f.sig.ident.to_string());
+                syn::visit::visit_item_fn(self, f);
+                self.current_fn = outer;
+            }
+
+            fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {
+                // A LANE match is one over an inbox enum: either its scrutinee is the routed
+                // `message`, or at least one arm names an inbox variant. The first half is what
+                // catches a lane match rewritten to a single catch-all arm, where the second would
+                // classify it as "not a lane match" and wave it through.
+                let scrutinee_is_message =
+                    matches!(&*m.expr, syn::Expr::Path(p) if p.path.is_ident("message"));
+                let is_lane = scrutinee_is_message || m.arms.iter().any(|a| names_inbox_variant(&a.pat));
+                if is_lane {
+                    self.lane_matches += 1;
+                }
+                for arm in &m.arms {
+                    let pat = &arm.pat;
+                    let shown = quote::quote!(#pat).to_string();
+                    if is_catch_all(&arm.pat) {
+                        self.offenders.push(format!(
+                            "fn `{}`: `{shown} =>` is a TOTAL CATCH-ALL (a named binding is a \
+                             wildcard with a name)",
+                            self.current_fn
+                        ));
+                    } else if is_lane && !names_inbox_variant(&arm.pat) {
+                        self.offenders.push(format!(
+                            "fn `{}`: `{shown} =>` sits in a lane match but does not name an \
+                             `<Actor>Inbox::` variant",
+                            self.current_fn
+                        ));
+                    }
+                    if is_lane {
+                        self.lane_arms += 1;
+                    }
+                }
+                syn::visit::visit_expr_match(self, m);
+            }
+        }
+
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let src = std::fs::read_to_string(root.join("crates/infrastructure/src/inbox.rs"))
             .expect("the human-owned inbox router must exist");
-        let offenders: Vec<(usize, &str)> = src
-            .lines()
-            .enumerate()
-            .filter(|(_, l)| {
-                let t = l.trim_start();
-                !t.starts_with("//") && (t.starts_with("_ =>") || t.starts_with("_ if "))
-            })
-            .map(|(i, l)| (i + 1, l.trim()))
-            .collect();
+        let file = syn::parse_file(&src).expect("the human-owned inbox router must parse");
+
+        let mut scan = Scan::default();
+        syn::visit::Visit::visit_file(&mut scan, &file);
+
         assert!(
-            offenders.is_empty(),
-            "crates/infrastructure/src/inbox.rs must never absorb inbox variants with a wildcard arm \
-             -- a wildcard makes the match exhaustive by construction and the E0004 guard \
-             (#771) stops catching anything. Offending lines: {offenders:?}"
+            scan.offenders.is_empty(),
+            "crates/infrastructure/src/inbox.rs must never absorb inbox variants with a catch-all \
+             arm -- a catch-all makes the match exhaustive by construction and the E0004 guard \
+             (#771) stops catching anything. Every arm of a lane match must name an \
+             `<Actor>Inbox::` variant. Offenders:\n  {}",
+            scan.offenders.join("\n  ")
+        );
+        // A scanner that matches nothing passes vacuously -- the defect this test exists to
+        // prevent, one level up. Pin its reach to the real corpus (17 lanes + the `ActorInbox`
+        // dispatch; 100 received commands plus the facts and reminders).
+        assert!(
+            scan.lane_matches >= 18 && scan.lane_arms >= 100,
+            "the no-catch-all scan reached only {} lane matches / {} arms -- it is no longer \
+             reading the router it claims to check",
+            scan.lane_matches,
+            scan.lane_arms
         );
     }
 }
@@ -16321,7 +16429,9 @@ mod receives_deferred_grammar {
         assert_eq!(rules_of_issues(&no_issue), vec!["receives-deferred-shape"]);
 
         // A bare `#NN` is not a link: GitHub does not auto-link it outside issues/PRs/commits
-        // (CLAUDE.md), and this string is rendered into generated documentation.
+        // (CLAUDE.md). The string is rendered into the GENERATED Rust doc comment on the inbox
+        // variant and into `DEFERRED_MESSAGES` -- NOT into `documentation.generated.md`, which has
+        // no `deferred:` reader (round-1 review of PR #776 corrected the earlier claim).
         let bare_number =
             issues_for("      deferred:\n        reason: \"because\"\n        issue: \"#777\"\n");
         assert_eq!(rules_of_issues(&bare_number), vec!["receives-deferred-shape"]);
@@ -16336,11 +16446,19 @@ mod receives_deferred_grammar {
         assert_eq!(rules_of_issues(&not_a_mapping), vec!["receives-deferred-shape"]);
     }
 
-    /// The real corpus carries exactly one deferral, and it is the one #771 surfaced. If this ever
-    /// grows without a reason, the grammar has become a parking lot — which is what
-    /// `UNWIRED_MUTATIONS` degenerated into.
+    /// The real corpus carries NO deferral. #771's one candidate (`DeliveryJob`/
+    /// `UpdateDeliveryStatus`) turned out to have its `via: status` handler already written,
+    /// green and re-exported — it was missing only a router row, like the other nine — so it is
+    /// WIRED, and the grammar ships with zero users by decision (ADR-20260830-183000: kept for
+    /// C3's remaining `deliver:` routes, which are each an opportunity to declare a real one).
+    ///
+    /// This is the RATCHET, not a formality: `UNWIRED_MUTATIONS` degenerated into a parking lot
+    /// precisely because entries could accumulate without anyone deciding. The first deferral to
+    /// arrive must fail this test and be argued for in the same change — including whether
+    /// [#781](https://github.com/TheCaptainCompany/captain-food/issues/781) (nothing binds a
+    /// `Deferred` ARM to its declaration, in either direction) should close first.
     #[test]
-    fn the_only_declared_deferral_is_the_one_771_surfaced() {
+    fn the_corpus_declares_no_deferral() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let model = load_model(&root.join("specs")).expect("load real specs");
         let deferred: Vec<(String, String)> = inbox_actors(&model)
@@ -16355,9 +16473,12 @@ mod receives_deferred_grammar {
             .collect();
         assert_eq!(
             deferred,
-            vec![("DeliveryJob".to_string(), "UpdateDeliveryStatus".to_string())],
-            "the deferral set changed -- every entry must carry a reason a reviewer can evaluate \
-             and an issue that will close it"
+            Vec::<(String, String)>::new(),
+            "a deferral appeared. The grammar is real and this is not a veto -- but a deferral is \
+             a promise the product has not kept, so the entry must carry a reason a reviewer can \
+             evaluate and an issue that will close it, and THIS assertion must move in the same \
+             change that adds it. #771's own candidate turned out to have a handler already \
+             written: check that first"
         );
     }
 }

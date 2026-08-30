@@ -12,23 +12,37 @@
 //! message does. Before #771 the same omission shipped green: the router was a flat `match` over a
 //! `&str` across ALL actors ending in `_ => None`, and an unconsumed message surfaced only in
 //! production as a `FAILED "unroutable command type"` row. #595 was that, by hand — a replacement
-//! order silently never born. The cutover found **ten more** live instances of it, two of them
-//! already declared as process-manager `sends:` (`BindCartToCustomer` from `CartBindingProcess`,
-//! `GrantCustomerCredit` from `ReclamationProcess`'s GOODWILL_CREDIT arm — a resolved reclamation's
-//! goodwill credit, i.e. the money path).
+//! order silently never born. The cutover found **ten more** live instances of it — **all ten had
+//! their handler already written in `application::commands` and were missing only a router row, so
+//! all ten are wired here** — two of them already declared as process-manager `sends:`
+//! (`BindCartToCustomer` from `CartBindingProcess`, `GrantCustomerCredit` from
+//! `ReclamationProcess`'s GOODWILL_CREDIT arm — a resolved reclamation's goodwill credit, i.e. the
+//! money path).
+//!
+//! **The guarantee is over COMMANDS and the routing decision, not over fact DELIVERY.** E0004
+//! proves every declared message reaches a decision in this file; a decision of
+//! `InboxOutcome::RecordFact` then hands the message to `mailbox::handler`'s fact route, which is
+//! still a string match ending in a catch-all. Extending the same proof to that route is
+//! [#780](https://github.com/TheCaptainCompany/captain-food/issues/780).
 //!
 //! TWO RULES FOR ANYONE EDITING THIS FILE.
 //!
-//! 1. **Never write a `_ =>` arm.** Typed payloads stop a bare `Inbox::Foo => {}` from compiling,
-//!    but a wildcard still absorbs every future variant, and a match that compiles and does nothing
-//!    is the failure this file exists to remove. The type system cannot forbid a wildcard (there is
-//!    no "no wildcard may match me", and `#[non_exhaustive]` does the *opposite*, forcing one), so
-//!    per ADR-20260803-234035 a check is the legitimate fallback:
-//!    `codegen tests::typed_actor_inbox_e0004::the_human_owned_router_carries_no_wildcard_arm`
-//!    reads this file and fails on one.
+//! 1. **Never write a CATCH-ALL arm** — neither `_ =>` nor a named binding (`other =>`, `m =>`,
+//!    `_other =>`), which is the same total pattern wearing a name. Typed payloads stop a bare
+//!    `Inbox::Foo => {}` from compiling, but a catch-all absorbs every future variant, and a match
+//!    that compiles and does nothing is the failure this file exists to remove. The type system
+//!    cannot forbid one (there is no "no wildcard may match me", and `#[non_exhaustive]` does the
+//!    *opposite*, forcing one), so per ADR-20260803-234035 a check is the legitimate fallback:
+//!    `codegen tests::typed_actor_inbox_e0004::every_arm_of_the_human_owned_router_names_an_inbox_variant`
+//!    parses this file with `syn` and asserts the POSITIVE property — every arm of a lane match
+//!    names an `<Actor>Inbox::` variant, and no arm anywhere is total. (Its first version scanned
+//!    for the *spelling* `_ =>`; PR #776's round-1 review bypassed it with `_other =>`.)
 //! 2. **A handler you are not ready to write is `InboxOutcome::Deferred`, declared in the DSL** —
 //!    `deferred: { reason, issue }` on the `receives:` entry. That replaced the `UNWIRED_MUTATIONS`
 //!    const, which was a Rust list in an emitter that nobody read. Never invent a silent arm.
+//!    **No message declares a deferral today** (the one candidate turned out to have a handler and
+//!    is wired); the grammar is kept for C3's remaining `deliver:` routes, a decision recorded in
+//!    ADR-20260830-183000 rather than a leftover.
 
 use std::sync::Arc;
 
@@ -290,7 +304,7 @@ async fn delivery_job(
         DeliveryJobInbox::ReportDeliveryIssue(cmd) => run(async { application::commands::report_delivery_issue(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         DeliveryJobInbox::ResolveDeliveryIssue(cmd) => run(async { application::commands::resolve_delivery_issue(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         DeliveryJobInbox::UnassignDeliveryFromPartner(cmd) => run(async { application::commands::unassign_delivery_from_partner(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
-        DeliveryJobInbox::UpdateDeliveryStatus(_) => InboxOutcome::Deferred,
+        DeliveryJobInbox::UpdateDeliveryStatus(cmd) => run(async { application::commands::update_delivery_status(deps.store.as_ref(), cmd, actor).await }).await,
     }
 }
 

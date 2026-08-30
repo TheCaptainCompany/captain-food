@@ -439,11 +439,24 @@ Two checks remain, and they are about the *shape*, not about a fork:
 > **A runtime that CONSUMES a message type must be deployed before any runtime that EMITS it.** Once
 > the monolith is several pods, a rolling deploy has two builds live at once, and a producer that
 > ships first hands the old consumer a message type its `<Actor>Inbox` does not declare. The typed
-> inbox makes that survivable rather than fatal — an undeclared type is TRANSIENT, so the row is
-> retried with backoff and then parked on the poison queue with
-> `mailbox_poison_failed_total{actor_type}` and an operator `RequeueMailboxMessage`, never terminally
-> `FAILED` — but *survivable* means "costs latency and a manual requeue", not "free". During peak
-> (Fri/Sat 19:00–21:30) a mis-ordered deploy is paid in orders sitting on a lane.
+> inbox makes that survivable rather than fatal — but read both halves of what "survivable" buys,
+> because the rows do **not** self-heal:
+>
+> - An undeclared type is **TRANSIENT**: the delivery aborts, the row stays `RECEIVED` and is
+>   retried with backoff. If the consumer's deploy lands inside that window, the message is
+>   delivered normally and nothing is lost. That window is the whole benefit.
+> - At `max_delivery_attempts` the row flips to **terminal `FAILED`** on the poison queue
+>   (`crates/actor_runtime/src/worker.rs`, error code `DeliveryInfrastructureError`), counted by
+>   `mailbox_poison_failed_total{actor_type}` and listed by the ADMIN `poisonedMailboxMessages`
+>   read, which `specs/common/api.yaml` defines as exactly *"terminal FAILED with error code
+>   DeliveryInfrastructureError"*. It stays there until an **operator** runs
+>   `RequeueMailboxMessage`. At the shipped cap of 5 that is roughly **5 minutes** (`STATUS.md`
+>   10c) — and for that window the lane is **head-of-line blocked** for that partition, so
+>   messages queued behind the poisoned one wait too.
+>
+> So *survivable* means "costs latency, a blocked lane and a manual requeue", not "free", and never
+> "the rows recover themselves". During peak (Fri/Sat 19:00–21:30) a mis-ordered deploy is paid in
+> orders sitting on a lane, and then in an operator being paged to requeue them.
 >
 > The practical rule for the cutover plan: **a slice that introduces a new message type ships the
 > consumer's deploy in an earlier step than the producer's**, and the two are never in the same
