@@ -822,3 +822,36 @@ is itself the argument: **a list that grows has no business stating its own leng
   that is easy to read as a pass — check the suite COUNT, not just the absence of red). Corollary worth the same breath: this is the
   gates working. Every refusal above prevented a declaration with no behaviour behind it, which is
   the defect class the specs exist to make unspellable.
+- **`cargo test --workspace` against ONE local Postgres reports failures that are not defects, and
+  `--test-threads=1` does not prevent it.** That flag serialises tests *inside* a binary; cargo
+  still runs test BINARIES in sequence against the same database, and two suites hold incompatible
+  assumptions about who owns the schema. `infrastructure`'s `TestDb::acquire` **resets the schema
+  from the real migration chain** on every acquisition; `crates/actor_runtime`'s suites apply no
+  migrations and expect the schema to already exist. So whichever `actor_runtime` binary runs after
+  an `infrastructure` reset — or before its first — fails with `relation "inbound_messages" does not
+  exist` / `relation "mailbox_partitions" does not exist`, five tests at a time, in a crate the diff
+  never touched. **The tell is the error class**: `42P01` (undefined table) and `PoolTimedOut` are
+  environment, never logic; a real regression names an assertion. Confirm by running the suspect
+  crate alone after any DB-owning suite has run (`cargo test -p infrastructure --test main <any> &&
+  cargo test -p actor_runtime`) — green there means green. Do NOT report the workspace total as the
+  verdict without that check, in either direction: it under-reports on a shared database, and one
+  session wasted a cycle re-running the whole workspace before noticing the failures were all
+  `42P01`.
+- **A full workspace test run can exhaust the session disk allowance, and Postgres is what dies.**
+  `target/debug/incremental` reached ~11 GB on its own; when the volume hit 100% the local Postgres
+  was killed, and the next run reported `connect: PoolTimedOut` across **26** tests in six crates —
+  which reads exactly like a concurrency defect and is not one. `rm -rf target/debug/incremental`
+  reclaimed it instantly (deletes still succeed when writes fail), and `CARGO_INCREMENTAL=0` keeps
+  it from coming back for the rest of the session. **Check `psql -c 'select 1'` before believing any
+  pool-timeout cascade**, and check `df -h /` before believing anything at all.
+- **A pipeline exits with the status of its LAST command, so `make validate | tail -2 && git push`
+  pushes on a RED gate.** Landed a citation-ratchet failure on `main` exactly this way (2026-08-30):
+  `make validate` errored, `tail` exited 0, the `&&` chain proceeded, and the push succeeded. Either
+  drop the pipe when the exit status is load-bearing, or set `pipefail` — and never chain a push
+  behind a filtered gate.
+- **A record that cites an ADR still sitting on an open PR branch dangles on `main`, and the
+  citation ratchet is right to refuse it.** This is the ordinary shape whenever a founder ANSWER is
+  recorded ahead of the code it points at, which is correct — an answer is not held behind a code
+  review. The mechanism is `docs/decisions/_exempt.yaml`, whose own header describes exactly this
+  case ("held/not-yet-deposited"), with the merge as the `retires_when`; it is self-pruning, so the
+  entry errors as unused the moment the PR lands, which is the removal prompt.
