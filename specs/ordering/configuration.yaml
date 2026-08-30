@@ -28,7 +28,7 @@ keys:
     type: bool
     scalar:
       $ref: 'scalars.yaml#/ConfigBoolean'
-    default: false
+    default: true
     gates: >
       The Order-lane BIRTH routing (#588, ADR-20260816-040239 "deliver: is a lane ENQUEUE, not a
       foreign-stream append"). ON, PlaceOrderProcess's `deliver: OrderPlaced to: Order` step stops

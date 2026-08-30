@@ -136,8 +136,10 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
             .unwrap_or(false),
         // #588 (ADR-20260816-040239): route the Order birth through the Order's own lane — same
-        // ENV-GATED posture, same boolean parse, same default (OFF = the legacy foreign-stream
-        // append) as the spec.
+        // ENV-GATED posture, same boolean parse, same default (ON = the routed birth; the default
+        // was flipped by the founder, ADR-20260830-012200) as the spec. This fallback and the
+        // generated Config's are the SAME default on purpose — a divergence here is the
+        // split-clock hazard below, minted at compile time.
         //
         // A standalone worker fleet and the monolith MUST read the same value, and the hazard is
         // SPLIT-CLOCK, not double-birth (#598, vernon — the earlier wording here said "would
@@ -157,7 +159,7 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // observable while that window is open.
         route_order_birth_through_lane: std::env::var("ROUTE_ORDER_BIRTH_THROUGH_LANE")
             .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
-            .unwrap_or(false),
+            .unwrap_or(true),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone

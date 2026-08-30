@@ -411,8 +411,8 @@ impl Config {
             .unwrap_or(false);
         let route_order_birth_through_lane = raw("ROUTE_ORDER_BIRTH_THROUGH_LANE")
             .or_else(|| baked("ROUTE_ORDER_BIRTH_THROUGH_LANE", profile).map(str::to_string))
-            .map(|v| parse_bool("ROUTE_ORDER_BIRTH_THROUGH_LANE", &v, false))
-            .unwrap_or(false);
+            .map(|v| parse_bool("ROUTE_ORDER_BIRTH_THROUGH_LANE", &v, true))
+            .unwrap_or(true);
         let order_acceptance_timeout_seconds = raw("ORDER_ACCEPTANCE_TIMEOUT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(300);
         let enforce_acceptance_timeout = raw("ENFORCE_ACCEPTANCE_TIMEOUT")
             .or_else(|| baked("ENFORCE_ACCEPTANCE_TIMEOUT", profile).map(str::to_string))

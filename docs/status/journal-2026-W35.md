@@ -3,6 +3,22 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🚀 **2026-08-30 — the flip is EXECUTED: `ROUTE_ORDER_BIRTH_THROUGH_LANE` defaults ON**
+> (`specs/ordering/configuration.yaml` `default: false → true`, one line, the key's text untouched;
+> [ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md)).
+> `make generate` moved the fallback to `true` across the monolith `Config` and all thirteen bin
+> configs; the standalone composition root's hand-written env fallback
+> (`crates/infrastructure/src/mailbox/standalone.rs`) flipped in the SAME commit — its comment
+> promises "same default as the spec", and leaving it OFF would have minted the split-clock
+> divergence at compile time. `graphql_write_path`'s dep pin (recorded OFF in #761's body) now
+> exercises the DEFAULT path (`route_order_birth_through_lane: true`). Walk smoke re-run at the
+> flipped default with NO env override (`ROUTE_ORDER_BIRTH_THROUGH_LANE` unset in the run's
+> environment): **`WALK EVIDENCE: order_birth_lag_ms{routed="true"} recorded 17 ms`** — birth on
+> the lane (`inbound_messages ('Order','OrderPlaced')`), exactly one `OrderPlaced`, histogram
+> point present; the resolved value with no env var is now the generated `Config` fallback `true`. Gates: `make validate` 0 errors · `make rust` ·
+> `cargo test -p web --features ssr` · `make test-crates` with Postgres, all green before push.
+> `ENFORCE_ACCEPTANCE_TIMEOUT` stays OFF (precondition 5b — production distributions still owed).
+
 > 🗳️ **2026-08-29 — the founder's round-4 answers land as records: the lane flip is approved, erasure Option 1 is approved, the ETA hybrid is approved.**
 > Verbatim: *"LANE-FLIP (ROUTE_ORDER_BIRTH_THROUGH_LANE): A — Flip it ON"* — recorded as
 > [ADR-20260830-012200](../adr/ADR-20260830-012200-the-order-birth-routes-through-the-lane.md),
