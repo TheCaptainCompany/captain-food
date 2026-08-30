@@ -16074,3 +16074,191 @@ Order:
         issues.iter().map(|i| i.rule).collect()
     }
 }
+
+// ─── #771 TYPED-ACTOR-INBOX: the E0004 proof ────────────────────────────────────────────────────
+
+/// The guard this whole chunk exists to install, PROVEN RED against real `rustc`.
+///
+/// A guard never seen red is an unverified claim (beck, decisive). The claim under test is:
+/// *"if `actors.yaml` gains a `receives:` entry and nobody adds an arm, the build FAILS."* Before
+/// #771 that same omission shipped green and surfaced as a `FAILED "unroutable command type"` row
+/// in production — #595, a replacement order silently never born.
+///
+/// WHY THIS SHAPE AND NOT `cargo check` ON THE REAL TREE. The property being proven is purely
+/// *variant set vs arm set*, so it needs no dependency of the real crates and no mutation of the
+/// working tree (which would be hostile under concurrent sessions). Both halves come from the SAME
+/// emitter, so nothing is scraped out of a source file and nothing here can rot into a tautology.
+/// The other half of the proof is the ordinary build: `make rust` compiling the real
+/// `application::inbox` against the real `inboxes.rs` is what proves the in-tree match is currently
+/// exhaustive. Together they are complete — this test proves a WIDENED enum breaks the match, and
+/// the build proves the match is not broken today.
+#[cfg(test)]
+mod typed_actor_inbox_e0004 {
+    use super::*;
+
+    /// Compile a standalone source file with `rustc` and return its stderr.
+    ///
+    /// `--emit=metadata` on purpose: type checking is the whole question, and skipping codegen
+    /// keeps the test in the tens of milliseconds.
+    fn rustc_stderr(dir: &std::path::Path, source: &str) -> (bool, String) {
+        let src = dir.join("proof.rs");
+        std::fs::write(&src, source).expect("write proof source");
+        let out = std::process::Command::new(env!("CARGO"))
+            .arg("--version")
+            .output()
+            .ok()
+            .map(|_| ())
+            .and(Some(()))
+            .and_then(|_| {
+                std::process::Command::new("rustc")
+                    .arg("--edition=2021")
+                    .arg("--crate-type=lib")
+                    .arg("--emit=metadata")
+                    .arg("--out-dir")
+                    .arg(dir)
+                    .arg(&src)
+                    .output()
+                    .ok()
+            })
+            .expect("rustc must be available to prove the inbox guard red");
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+
+    /// The standalone proof program: payload-type shims (so no crate dependency is needed — the
+    /// question is exhaustiveness, and a unit struct is a payload as far as E0004 is concerned),
+    /// the emitted enum declaration for `actor`, and a `match` whose arms are exactly `arm_source`.
+    fn proof_program(actor: &InboxActor, arms_from: &InboxActor) -> String {
+        let mut commands: Vec<&str> = Vec::new();
+        let mut events: Vec<&str> = Vec::new();
+        for m in &actor.messages {
+            let leaf = m.payload_type.rsplit("::").next().expect("qualified payload type");
+            if m.payload_type.contains("::commands::") {
+                commands.push(leaf);
+            } else {
+                events.push(leaf);
+            }
+        }
+        commands.sort_unstable();
+        commands.dedup();
+        events.sort_unstable();
+        events.dedup();
+        let decls = |names: &[&str]| {
+            names.iter().map(|n| format!("        #[derive(Debug, Clone, PartialEq)]\n        pub struct {n};\n")).collect::<String>()
+        };
+        let arms = arms_from
+            .messages
+            .iter()
+            .map(|m| format!("        {}::{}(_) => {{}}\n", actor.enum_name(), m.name))
+            .collect::<String>();
+        format!(
+            "#![allow(dead_code, unused_variables)]\n\
+             mod domain {{ pub mod generated {{\n    pub mod commands {{\n{cmds}    }}\n    pub mod events {{\n{evts}    }}\n}} }}\n\n\
+             {decl}\n\
+             /// The HUMAN-OWNED routing match, in miniature.\n\
+             fn route(message: {enum_name}) {{\n    match message {{\n{arms}    }}\n}}\n",
+            cmds = decls(&commands),
+            evts = decls(&events),
+            decl = inbox_enum_decl(actor),
+            enum_name = actor.enum_name(),
+            arms = arms,
+        )
+    }
+
+    /// Add one `receives:` entry to `actor` in a CLONE of the model — the spec change a future
+    /// chunk makes without touching the router (C3's twelve remaining `deliver:` routes are each
+    /// exactly this shape).
+    fn with_extra_receives(model: &Model, actor: &str, message_ref: &str) -> Model {
+        let mut mutated = model.clone();
+        let actors = mutated.defs.get_mut("actors.yaml").expect("actors.yaml in the model");
+        let def = actors.get_mut(actor).expect("the actor exists");
+        let receives = def
+            .get_mut("receives")
+            .and_then(|r| r.as_sequence_mut())
+            .expect("the actor declares receives");
+        let entry: Value = serde_yaml::from_str(&format!(
+            "message: {{ $ref: '{message_ref}' }}\nemits: []\n"
+        ))
+        .expect("synthetic receives entry parses");
+        receives.push(entry);
+        mutated
+    }
+
+    #[test]
+    fn a_widened_receives_set_is_a_compile_error() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let cart = inbox_actors(&model)
+            .into_iter()
+            .find(|a| a.name == "Cart")
+            .expect("Cart is a mailbox actor");
+
+        let dir = std::env::temp_dir().join(format!(
+            "cf-inbox-e0004-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+
+        // CONTROL — the scaffold itself must be sound: the real variant set, matched arm for arm,
+        // compiles clean. Without this half a broken scaffold would "prove" E0004 for the wrong
+        // reason and the guard would be unverified again, one level up.
+        let (ok, stderr) = rustc_stderr(&dir, &proof_program(&cart, &cart));
+        assert!(ok, "the unmutated inbox + its exact arms must compile clean:\n{stderr}");
+
+        // THE PROOF — one more declared message, the same arms: E0004.
+        let mutated = with_extra_receives(&model, "Cart", "commands.yaml#/ScuttleCart");
+        let widened = inbox_actors(&mutated)
+            .into_iter()
+            .find(|a| a.name == "Cart")
+            .expect("Cart survives the mutation");
+        assert_eq!(
+            widened.messages.len(),
+            cart.messages.len() + 1,
+            "the mutation must actually widen the inbox"
+        );
+        let (ok, stderr) = rustc_stderr(&dir, &proof_program(&widened, &cart));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!ok, "a widened inbox with unchanged arms MUST NOT compile:\n{stderr}");
+        assert!(
+            stderr.contains("error[E0004]"),
+            "the widened inbox must fail with E0004 (non-exhaustive patterns), not something else:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("ScuttleCart"),
+            "E0004 must NAME the unconsumed message, so the diagnostic reads as the decision it \
+             demands:\n{stderr}"
+        );
+    }
+
+    /// The wildcard escape hatch, closed. Typed payloads stop `CartInbox::AddCartLine => {}` from
+    /// compiling, but a bare `_ => {}` arm still absorbs every future variant — and a match that
+    /// compiles and does nothing is exactly the failure #771 exists to remove.
+    ///
+    /// The type system cannot reach this one (there is no way to declare "no wildcard may match
+    /// me"; `#[non_exhaustive]` does the OPPOSITE, forcing one), so per ADR-20260803-234035 a check
+    /// is the legitimate fallback. It is scoped to the human-owned routing file only.
+    #[test]
+    fn the_human_owned_router_carries_no_wildcard_arm() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let src = std::fs::read_to_string(root.join("crates/application/src/inbox.rs"))
+            .expect("the human-owned inbox router must exist");
+        let offenders: Vec<(usize, &str)> = src
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| {
+                let t = l.trim_start();
+                !t.starts_with("//") && (t.starts_with("_ =>") || t.starts_with("_ if "))
+            })
+            .map(|(i, l)| (i + 1, l.trim()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "crates/application/src/inbox.rs must never absorb inbox variants with a wildcard arm \
+             -- a wildcard makes the match exhaustive by construction and the E0004 guard \
+             (#771) stops catching anything. Offending lines: {offenders:?}"
+        );
+    }
+}

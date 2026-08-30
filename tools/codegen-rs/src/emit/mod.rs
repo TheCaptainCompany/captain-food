@@ -1,5 +1,6 @@
 //! Generated-artifact emitters, one module per artifact family (#277 split).
 
+pub(crate) mod actor_inbox; // application inboxes.rs: per-actor <Actor>Inbox enums from `receives:` (#771)
 pub(crate) mod actor_clients; // actor_client crate: typed per-actor mailbox clients (#284) + addressing tables (#290)
 pub(crate) mod app_index; // specs/generated/apps.generated.md: the per-app index (#491, PROP-20260811-141654 slice A1)
 pub(crate) mod behaviour_tests; // application behaviour_tests.rs from tests.yaml (§7 corpus)
@@ -20,6 +21,7 @@ pub(crate) mod translations; // merged translations.generated.json
 pub(crate) mod web; // web crate: tokens CSS, SDUI registry, data layer, screens
 
 pub(crate) use actor_clients::*;
+pub(crate) use actor_inbox::*;
 pub(crate) use app_index::*;
 pub(crate) use behaviour_tests::*;
 pub(crate) use bins::*;
