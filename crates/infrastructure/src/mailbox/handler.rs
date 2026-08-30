@@ -793,7 +793,11 @@ impl MailboxCommandHandler {
                         // The ROUTED `deliver:` steps' door rows (#588): same transaction as the
                         // staged appends above and the run row below — both or neither. A
                         // duplicate collides on the primary key and is a SUCCESS, never an error.
-                        super::flush_lane_enqueues_in_tx(tx, message, &lane_sink.take_staged())
+                        super::flush_lane_enqueues_in_tx(
+                            tx,
+                            &super::LaneCause::of_message(message),
+                            &lane_sink.take_staged(),
+                        )
                             .await
                             .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
                         pm_delivery::flush_pm_rows_in_tx(

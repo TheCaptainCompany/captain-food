@@ -680,9 +680,10 @@ pub mod place_order_process {
         };
         if let Some(lanes) = env.lane_sink() {
             lanes.stage(crate::lanes::LaneEnqueue {
+                kind: crate::lanes::LaneMessageKind::Event,
                 actor_type: "Order",
                 actor_id: order_placed.order_id.0,
-                event_type: "OrderPlaced",
+                message_type: "OrderPlaced",
                 payload: serde_json::to_value(domain::generated::events::DomainEvent::OrderPlaced(order_placed.clone())).map_err(|e| domain::shared::errors::DomainError::Repository(format!("OrderPlaced lane enqueue payload: {e}")))?,
                 source: "pm:PlaceOrderProcess:OrderPlaced".to_string(),
                 external_id: order_placed.order_id.0.to_string(),

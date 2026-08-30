@@ -1097,9 +1097,12 @@ impl<'a> PmLegGen<'a> {
                 // is a config flip, not a redeploy).
                 gen.push(ind, "if let Some(lanes) = env.lane_sink() {");
                 gen.push(route_ind, "lanes.stage(crate::lanes::LaneEnqueue {");
+                // A `deliver:` is a FACT, so it always takes the EVENT door (#595 made the door a
+                // typed field because the `sends:` arm takes the COMMAND one).
+                gen.push(route_ind + 4, "kind: crate::lanes::LaneMessageKind::Event,");
                 gen.push(route_ind + 4, &format!("actor_type: \"{}\",", to));
                 gen.push(route_ind + 4, &format!("actor_id: {}.0,", key_expr));
-                gen.push(route_ind + 4, &format!("event_type: \"{}\",", event));
+                gen.push(route_ind + 4, &format!("message_type: \"{}\",", event));
                 gen.push(
                     route_ind + 4,
                     &format!(

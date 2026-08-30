@@ -921,6 +921,28 @@ pub(crate) fn emit_server_mutation(model: &Model) -> String {
 /// explicit, reviewable way to say "deliberately not yet".
 pub(crate) const UNWIRED_MUTATIONS: &[&str] = &[];
 
+/// SAGA-SENT commands: the handler call for a command that reaches the mailbox through a process
+/// manager's `sends:` rather than through a GraphQL mutation (#595).
+///
+/// [`wired_mutation_dispatch`] keys on the MUTATION, so a command with no mutation — `command-no-
+/// mutation`, the saga-driven kind — gets no router arm at all, and its lane row would land FAILED
+/// "unroutable command type". That is invisible until the route is actually used: the door is
+/// declared, the row is written, the worker refuses it, and a replacement order is simply never
+/// born. Hence a table, not a fallthrough: a command routed to a lane must be named here.
+///
+/// The `pm-sends-no-inbox` validator rule guarantees the ADDRESSING half (some actor receives it);
+/// this is the HANDLER half.
+pub(crate) fn wired_saga_command_dispatch(command: &str) -> Option<String> {
+    // ReclamationProcess's REPLACEMENT arm (#159, routed by #595). No mutation exists on purpose —
+    // nobody places a replacement order by hand; the resolved claim is the only authority.
+    if command == "PlaceReplacementOrder" {
+        return Some(
+            "application::commands::place_replacement_order(store.as_ref(), cmd, &actor).await.map(|_| ())".into(),
+        );
+    }
+    None
+}
+
 pub(crate) fn wired_mutation_dispatch(name: &str) -> Option<String> {
     // verifyPhone resolves through the wrapped auth ACL (ADR-0015): its VerifyPhoneOutcome
     // (customerId/created) is no longer returned — the client reads `me` once the operation
@@ -1241,6 +1263,20 @@ pub(crate) fn emit_infra_command_router(model: &Model) -> String {
         out.push_str(&format!(
             "        \"{command}\" => {{\n            let cmd: domain::generated::commands::{command} = match serde_json::from_value(payload.clone()) {{\n                Ok(c) => c,\n                Err(e) => return Some(Err(DomainError::Repository(format!(\"{command} payload: {{e}}\")))),\n            }};\n            Some(validated(async {{ {call} }}).await)\n        }}\n",
             command = m.command,
+            call = handler_call
+        ));
+    }
+    // The saga-sent commands (#595): every command some actor RECEIVES that no mutation reached,
+    // in the deterministic order of `command_addressing`'s BTreeMap. A command with no entry in the
+    // table stays unroutable — the same explicit "not wired yet" the mutation side has.
+    for command in command_addressing(model).keys() {
+        let Some(handler_call) = wired_saga_command_dispatch(command) else { continue };
+        if !seen.insert(command.clone()) {
+            continue;
+        }
+        out.push_str(&format!(
+            "        \"{command}\" => {{\n            let cmd: domain::generated::commands::{command} = match serde_json::from_value(payload.clone()) {{\n                Ok(c) => c,\n                Err(e) => return Some(Err(DomainError::Repository(format!(\"{command} payload: {{e}}\")))),\n            }};\n            Some(validated(async {{ {call} }}).await)\n        }}\n",
+            command = command,
             call = handler_call
         ));
     }

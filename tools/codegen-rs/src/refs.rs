@@ -496,6 +496,12 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     // step-derived set, so the behaviour-test coverage checks (test-then-not-emitted / -thrown) see them.
     ("processmanager.yaml", "*.receives[*].emits[*]",                   &[Kind::Event]),
     ("processmanager.yaml", "*.receives[*].throws[*]",                  &[Kind::Error]),
+    // …and the COMMANDS it sends from that wrapper (#595): a step-derived `send:` is already a
+    // `$ref` site below, but an arm whose payload is COMPUTED (the replacement order's id is minted
+    // from reclamationId, not mapped from a property) has no step form, so before this row the send
+    // was a hand-written call the walker could not see at all. `pm-sends-kind` / `pm-sends-no-inbox`
+    // hold the declaration to a real inbox.
+    ("processmanager.yaml", "*.receives[*].sends[*]",                   &[Kind::Command]),
     ("processmanager.yaml", "*.receives[*].steps[*].read.model",        &[Kind::ProjectionTable, Kind::ProjectionView]),
     ("processmanager.yaml", "*.receives[*].steps[*].read.where.*.from", &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].guard.throws",      &[Kind::Error]),

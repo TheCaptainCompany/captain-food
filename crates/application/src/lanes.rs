@@ -32,7 +32,37 @@
 
 use std::sync::Mutex;
 
-/// One staged lane ENQUEUE — the intent a routed `deliver:` step produces.
+/// Which DOOR a staged enqueue goes through — the runtime half of the DSL's own fact/command
+/// distinction, made a type so a route cannot pick the wrong one by passing a string (vernon).
+///
+/// The two are not interchangeable, and the difference is what happens when the target REFUSES:
+///
+/// * [`LaneMessageKind::Event`] is a `deliver:` — a FACT the authority already decided. The target
+///   records it idempotently; there is no verdict to disagree with, only a redelivery to absorb.
+/// * [`LaneMessageKind::Command`] is a `send:` — a REQUEST the target may reject on its own
+///   invariants. The lane worker runs the handler, a rejection lands a REJECTED verdict on a
+///   supervisable row, and (the reason this variant exists at all) the delivery declares the
+///   `schedules:` reminders the spec attaches to that `(actor, command)` pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaneMessageKind {
+    /// `inbound_messages.kind = 'EVENT'` — the recorded-fact route.
+    Event,
+    /// `inbound_messages.kind = 'COMMAND'` — the rejectable-request route.
+    Command,
+}
+
+impl LaneMessageKind {
+    /// The `inbound_messages.kind` token. A closed set on both sides: the column's own CHECK
+    /// constraint names the same strings.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Event => "EVENT",
+            Self::Command => "COMMAND",
+        }
+    }
+}
+
+/// One staged lane ENQUEUE — the intent a routed `deliver:` or `sends:` step produces.
 ///
 /// Business payload plus addressing only. The ENVELOPE (`cause_id`, `user_id`/`user_type`,
 /// `correlation_id`, `channel`, `partition`) is stamped by the delivery glue from the mailbox row
@@ -40,16 +70,23 @@ use std::sync::Mutex;
 /// (ADR-0041).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaneEnqueue {
+    /// Which door this intent goes through — and therefore which delivery route runs it.
+    pub kind: LaneMessageKind,
     /// The target actor type (`actors.yaml` key) — its lane receives the message.
     pub actor_type: &'static str,
     /// The target aggregate's id — the lane the message is partitioned onto.
     pub actor_id: uuid::Uuid,
-    /// `events.yaml` key; the target must declare it in `receives` (validator rule `pm-deliver`).
-    pub event_type: &'static str,
-    /// The ADJACENTLY-TAGGED `DomainEvent` form (`{"eventType", "payload"}`) — exactly what the
-    /// EVENT delivery route deserializes.
+    /// The message name: an `events.yaml` key for [`LaneMessageKind::Event`] (the target must
+    /// declare it in `receives` — validator rule `pm-deliver`), a `commands.yaml` key for
+    /// [`LaneMessageKind::Command`] (`pm-sends-no-inbox`). Lands on `inbound_messages.message_type`
+    /// either way, which is what both delivery routes and `reminder_schedules_for` match on.
+    pub message_type: &'static str,
+    /// EVENT: the ADJACENTLY-TAGGED `DomainEvent` form (`{"eventType", "payload"}`), exactly what
+    /// the EVENT delivery route deserializes. COMMAND: the BARE command payload, exactly what
+    /// `dispatch_command` deserializes into the generated command struct — the two routes read the
+    /// column differently, so the shape is chosen with [`Self::kind`], never guessed.
     pub payload: serde_json::Value,
-    /// FROZEN dedup axis, half one: the ROUTE identity (`pm:{ProcessManager}:{Event}`), so two
+    /// FROZEN dedup axis, half one: the ROUTE identity (`pm:{ProcessManager}:{Message}`), so two
     /// different routed steps addressing the same aggregate can never collide.
     pub source: String,
     /// FROZEN dedup axis, half two: the TARGET AGGREGATE's id as text. Never the trigger's
@@ -96,13 +133,25 @@ mod tests {
 
     fn intent(id: u128) -> LaneEnqueue {
         LaneEnqueue {
+            kind: LaneMessageKind::Event,
             actor_type: "Order",
             actor_id: uuid::Uuid::from_u128(id),
-            event_type: "OrderPlaced",
+            message_type: "OrderPlaced",
             payload: serde_json::json!({ "eventType": "OrderPlaced", "payload": {} }),
             source: "pm:PlaceOrderProcess:OrderPlaced".into(),
             external_id: uuid::Uuid::from_u128(id).to_string(),
         }
+    }
+
+    /// The two doors are DISTINCT staged values even for the same target — the property that stops
+    /// a fact and a request being interchangeable once they are both just rows.
+    #[test]
+    fn the_door_kind_is_part_of_the_staged_intent() {
+        let fact = intent(1);
+        let request = LaneEnqueue { kind: LaneMessageKind::Command, ..intent(1) };
+        assert_ne!(fact, request);
+        assert_eq!(fact.kind.as_str(), "EVENT");
+        assert_eq!(request.kind.as_str(), "COMMAND");
     }
 
     /// Staging is INERT and ORDERED, and draining it twice yields nothing the second time — the

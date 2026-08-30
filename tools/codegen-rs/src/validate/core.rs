@@ -316,6 +316,9 @@ pub(crate) fn validate(model: &Model) -> Report {
 
     // --- 2. Actor wiring: messages, emits and throws must target the right kind of file ---------
     let mut handled_commands: BTreeSet<String> = BTreeSet::new();
+    // (`where`, command name) per declared `sends:` — checked against `handled_commands` once every
+    // actor has been read, because the sending PM may be declared before its target aggregate.
+    let mut pm_sends: Vec<(String, String)> = Vec::new();
     let mut emitted_events: BTreeSet<String> = BTreeSet::new();
     let mut consumed_events: BTreeSet<String> = BTreeSet::new();
     for actor in &actors {
@@ -365,6 +368,41 @@ pub(crate) fn validate(model: &Model) -> Report {
                     ));
                 }
             }
+            // A DECLARED wrapper-seam send (#595 `sends:`): the escape hatch for a command a
+            // process manager really sends but no `send:` STEP can express (a computed payload, a
+            // branch the step DSL has no form for). It exists so the send is a `$ref` the walker
+            // can see — but a declaration nothing checks is decoration, so it is held to the same
+            // two facts a step-derived send satisfies by construction.
+            for (j, c) in entry.sends.iter().enumerate() {
+                let at = format!("{}.sends[{}]", where_, j);
+                if ref_target_file(c, "actors.yaml").as_deref() != Some("commands.yaml") {
+                    issues.push(err(
+                        "pm-sends-kind",
+                        at,
+                        format!("sends must reference commands.yaml, got '{}'.", c),
+                    ));
+                } else {
+                    pm_sends.push((at, ref_name(c).unwrap_or_default()));
+                }
+            }
+        }
+    }
+
+    // `sends:` must name a command some actor actually RECEIVES. Without this the declaration is
+    // worse than the undeclared call it replaces: it reads as wired while addressing a door that
+    // does not exist, and at runtime the lane row lands FAILED "unroutable command type" — a
+    // replacement order silently never born.
+    for (at, cmd) in &pm_sends {
+        if !handled_commands.contains(cmd) {
+            issues.push(err(
+                "pm-sends-no-inbox",
+                at.clone(),
+                format!(
+                    "sends '{}', which no actor declares in `receives` — a sent command with no \
+                     inbox has no handler and no mailbox door; declare it on the target aggregate.",
+                    cmd
+                ),
+            ));
         }
     }
 

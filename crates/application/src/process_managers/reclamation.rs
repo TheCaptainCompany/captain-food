@@ -101,6 +101,50 @@ pub async fn on_reclamation_resolved(
             original_order_id: event.order_id,
             reclamation_id: event.reclamation_id,
         };
+        // ROUTED (#595, ADR-20260829-230418 C2): the Order's OWN lane runs the command. This is the
+        // `sends:` declared on this leg, and it goes through the COMMAND door, not the EVENT one —
+        // `PlaceReplacementOrder` is a REQUEST the Order may refuse (`OrderNotFound` when the
+        // original is gone), never a fact already decided. Three things change with the door, and
+        // each is the reason the route exists:
+        //
+        //   1. the birth is appended by the aggregate that OWNS the fact, inside the lane worker's
+        //      fenced transaction, past the Order's serialization point — not by this saga from
+        //      outside, with no transaction at all;
+        //   2. that delivery declares the `schedules:` the spec already attaches to
+        //      `(Order, PlaceReplacementOrder)`, so a replacement order finally gets an ACCEPTANCE
+        //      CLOCK. Today it has none: nobody is ever told the restaurant went silent on a
+        //      remake, which is the same failure class as a paid order nobody is told about;
+        //   3. a rejection lands a REJECTED verdict on a supervisable row instead of the
+        //      `tracing::warn!` below, which no operator reads.
+        //
+        // `env.lane_sink()` is `Some` only on a route built with `TriggerEnvelope::laned` — one
+        // that owns a fenced transaction to flush into — AND with
+        // `configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` ON. `None` takes the legacy
+        // in-process call below, byte for byte (gate-then-stabilize: rollback is a config flip).
+        if let Some(lanes) = env.lane_sink() {
+            lanes.stage(crate::lanes::LaneEnqueue {
+                kind: crate::lanes::LaneMessageKind::Command,
+                actor_type: "Order",
+                // The lane is the REPLACEMENT order's — the aggregate being born, which is also the
+                // aggregate whose writer must be serialized against.
+                actor_id: cmd.order_id.0,
+                message_type: "PlaceReplacementOrder",
+                // The BARE command payload: `dispatch_command` deserializes this column straight
+                // into `commands::PlaceReplacementOrder`, with no `eventType` wrapper.
+                payload: serde_json::to_value(&cmd).map_err(|e| {
+                    DomainError::Repository(format!(
+                        "PlaceReplacementOrder lane enqueue payload: {e}"
+                    ))
+                })?,
+                // FROZEN door identity: the ROUTE plus the TARGET aggregate's id. The target id is
+                // already deterministic per claim ([`replacement_order_id_for`]), so a re-delivered
+                // resolution mints the SAME door row and collides on the primary key — one
+                // replacement per claim, exactly as the in-process arm's version-0 append gave.
+                source: "pm:ReclamationProcess:PlaceReplacementOrder".to_string(),
+                external_id: cmd.order_id.0.to_string(),
+            });
+            return Ok(Outcome::Completed);
+        }
         return match crate::commands::place_replacement_order(store, cmd, &actor).await {
             Ok(()) => Ok(Outcome::Completed),
             // Concurrency/infra failures must NOT be swallowed — the runner retries them.
