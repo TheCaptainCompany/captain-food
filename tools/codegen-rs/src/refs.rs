@@ -521,12 +521,22 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     // from reclamationId, not mapped from a property) has no step form, so before this row the send
     // was a hand-written call the walker could not see at all. `pm-sends-kind` / `pm-sends-no-inbox`
     // hold the declaration to a real inbox.
-    ("processmanager.yaml", "*.receives[*].sends[*]",                   &[Kind::Command]),
+    ("processmanager.yaml", "*.receives[*].sends[*].command",           &[Kind::Command]),
+    // A ROUTED `sends:` (#595, #797) also names the TARGET whose lane runs the command and the
+    // CONFIGURATION KEY that route is gated on. The gate is a `$ref` rather than a key NAME on
+    // purpose: a route whose key does not exist becomes a `make validate` error here, instead of a
+    // lookup that silently resolves to `false` in production — which is the compiler-first half of
+    // "adding a route without adding its key is a build failure".
+    ("processmanager.yaml", "*.receives[*].sends[*].to",                &[Kind::Aggregate]),
+    ("processmanager.yaml", "*.receives[*].sends[*].route_gate",        &[Kind::ConfigKey]),
     ("processmanager.yaml", "*.receives[*].steps[*].read.model",        &[Kind::ProjectionTable, Kind::ProjectionView]),
     ("processmanager.yaml", "*.receives[*].steps[*].read.where.*.from", &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].guard.throws",      &[Kind::Error]),
     ("processmanager.yaml", "*.receives[*].steps[*].deliver.event",     &[Kind::Event]),
     ("processmanager.yaml", "*.receives[*].steps[*].deliver.to",        &[Kind::Aggregate]),
+    // The per-ROUTE lane gate (#797): its presence is what makes this `deliver:` a lane ENQUEUE,
+    // and the key it names is the one the generated step consults through `Route::<this route>`.
+    ("processmanager.yaml", "*.receives[*].steps[*].deliver.route_gate", &[Kind::ConfigKey]),
     ("processmanager.yaml", "*.receives[*].steps[*].deliver.with.*.from", &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].send.command",      &[Kind::Command]),
     ("processmanager.yaml", "*.receives[*].steps[*].send.to",           &[Kind::Aggregate]),

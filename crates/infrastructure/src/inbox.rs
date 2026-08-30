@@ -79,13 +79,20 @@ pub struct CommandDeps {
     /// composition-root resolution as `enforce_service_hours_guard`. OFF (the default) is SHADOW
     /// MODE: the full still-PLACED guard runs, only the append is inert.
     pub enforce_acceptance_timeout: bool,
-    /// #588 (`configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`, ADR-20260816-040239): route
-    /// the saga's `deliver: OrderPlaced to: Order` through the Order's own mailbox lane instead of
-    /// appending to its stream from the saga. Read at DELIVERY time by the PM-fact route, which
-    /// hands the saga a lane sink only when this is ON -- OFF leaves the legacy foreign-stream
-    /// append untouched, so rollback is a config flip, never a redeploy (the default is the
-    /// spec's: ON since the ADR-20260830-012200 founder flip).
-    pub route_order_birth_through_lane: bool,
+    /// Where EVERY declared lane route's gate stands (#797) -- one field per
+    /// [`Route`](application::generated::process_managers::Route), generated from the DSL's
+    /// `route_gate:` declarations, resolved once at the composition root exactly like
+    /// `enforce_service_hours_guard`.
+    ///
+    /// Read at DELIVERY time by the PM-fact route, which hands the saga a lane sink plus these
+    /// gates; each routed step then consults ITS OWN route. This was the single
+    /// `route_order_birth_through_lane` boolean until #797, and one boolean is what made routing a
+    /// property of the DELIVERY ROUTE rather than of the route being gated -- so a second route
+    /// added here would have inherited the first route's key and could not be rolled back alone.
+    /// A gate OFF leaves that route's legacy foreign-stream append untouched, so rollback is a
+    /// config flip, never a redeploy. `ROUTE_ORDER_BIRTH_THROUGH_LANE` has been ON since the
+    /// ADR-20260830-012200 founder flip.
+    pub route_gates: application::generated::process_managers::RouteGates,
 }
 
 

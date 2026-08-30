@@ -16827,7 +16827,7 @@ mod fact_route_gate {
     /// already sends real traffic down (`ROUTE_ORDER_BIRTH_THROUGH_LANE`).
     ///
     /// The routed population is recomputed from the MODEL through the emitter's own
-    /// `deliver_is_lane_routed`, so the const under test never stands in for its own oracle.
+    /// `route_decls`, so the artifact under test never stands in for its own oracle.
     #[test]
     fn a_routed_deliver_target_is_never_a_parked_fact() {
         let model = real_model();
@@ -16857,8 +16857,8 @@ mod fact_route_gate {
             parked.contains(&("DeliveryJob".into(), "DeliveryRequested".into())),
             "the planted pair must actually be parked, or this test is vacuous"
         );
-        // The planted route: what `emit_routed_lanes` would produce if the pair were added to
-        // `PM_LANE_ROUTED_DELIVERS`.
+        // The planted route: what the emitter would produce if the pair's `deliver:` gained a
+        // `route_gate:`.
         let planted = vec![("DeliveryJob".to_string(), "DeliveryRequested".to_string())];
         let offenders: Vec<_> = planted.iter().filter(|p| parked.contains(p)).collect();
         assert_eq!(offenders.len(), 1, "routing a parked fact must be caught");
@@ -17052,5 +17052,193 @@ mod receives_deferred_grammar {
             );
         }
         assert!(!declared.is_empty(), "the check must not be vacuous");
+    }
+}
+
+// ─── #797 PER-ROUTE LANE GATES: no construction site may fuse two routes onto one key ────────────
+
+/// The one thing the type system cannot carry about [`RouteGates`].
+///
+/// The compiler already covers most of #797: `RouteGates` derives no `Default`, so declaring a
+/// route in the DSL breaks every construction site with E0063 until a human names a value for it,
+/// and `TriggerEnvelope` exposes no accessor that ignores the route, so staging without naming
+/// your own `Route::X` does not compile. What neither can see is a site that names every field and
+/// feeds ONE ROUTE'S FIELD FROM ANOTHER ROUTE'S CONFIGURATION VALUE — copy-paste fusion, which
+/// produces exactly the defect this issue was filed about while typechecking perfectly.
+///
+/// The gate asserts the PROPERTY, not a spelling: for every `RouteGates { .. }` literal anywhere in
+/// `crates/**`, a field initialised from a value that names ANY declared route's configuration key
+/// must name ITS OWN. A literal `true`/`false` (tests, `NONE`) names no key and is left alone.
+///
+/// It also refuses `..rest` in such a literal: functional-update syntax would let a newly declared
+/// route inherit a value silently, which is the E0063 the type exists to produce.
+///
+/// The population is recomputed from the MODEL through the emitter's own `route_decls`, so the
+/// generated artifact never stands in for its own oracle (beck, the #780 rule).
+#[cfg(test)]
+mod route_gate_fusion {
+    use super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn rust_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&root.join("crates"), &mut out);
+        out.sort();
+        out
+    }
+
+    /// Every `RouteGates { .. }` literal in `src`, as `(field name, initializer tokens, has_rest)`.
+    fn route_gates_literals(src: &str) -> Vec<(String, String, bool)> {
+        let Ok(file) = syn::parse_file(src) else { return Vec::new() };
+        #[derive(Default)]
+        struct V(Vec<(String, String, bool)>);
+        impl<'ast> syn::visit::Visit<'ast> for V {
+            fn visit_expr_struct(&mut self, e: &'ast syn::ExprStruct) {
+                if e.path.segments.last().map(|s| s.ident.to_string()).as_deref()
+                    == Some("RouteGates")
+                {
+                    let has_rest = e.rest.is_some();
+                    for f in &e.fields {
+                        if let syn::Member::Named(name) = &f.member {
+                            let value = &f.expr;
+                            self.0.push((
+                                name.to_string(),
+                                quote::quote!(#value).to_string(),
+                                has_rest,
+                            ));
+                        }
+                    }
+                    // A literal with a `..rest` and NO fields still has to be reported.
+                    if has_rest && e.fields.is_empty() {
+                        self.0.push((String::new(), String::new(), true));
+                    }
+                }
+                syn::visit::visit_expr_struct(self, e);
+            }
+        }
+        let mut v = V::default();
+        syn::visit::Visit::visit_file(&mut v, &file);
+        v.0
+    }
+
+    /// (field name, the snake_case identifier of its OWN configuration key), from the model.
+    fn field_to_config_ident() -> std::collections::BTreeMap<String, String> {
+        route_decls(&real_model())
+            .into_iter()
+            .map(|r| (r.field(), r.config_key.to_ascii_lowercase()))
+            .collect()
+    }
+
+    /// The offenders in one source text: a field fed from another route's key, or a `..rest`.
+    fn offenders(rel: &str, src: &str) -> Vec<String> {
+        let expected = field_to_config_ident();
+        let all_idents: Vec<&String> = expected.values().collect();
+        let mut out = Vec::new();
+        for (field, value, has_rest) in route_gates_literals(src) {
+            if has_rest {
+                out.push(format!(
+                    "{rel}: a `RouteGates {{ .. }}` literal uses functional-update syntax -- \
+                     a newly declared route would inherit a value silently instead of failing to \
+                     compile. Name every field."
+                ));
+            }
+            let Some(mine) = expected.get(&field) else { continue };
+            let named: Vec<&&String> =
+                all_idents.iter().filter(|k| value.contains(k.as_str())).collect();
+            if !named.is_empty() && !named.iter().any(|k| k.as_str() == mine) {
+                out.push(format!(
+                    "{rel}: `RouteGates.{field}` is fed from {named:?} but its OWN key is \
+                     `{mine}` -- two routes sharing one key is exactly the fused gate #797 removed: \
+                     rolling one route back would roll the other back with it."
+                ));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn route_gates_are_not_fused() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        let mut found = Vec::new();
+        let mut literals = 0usize;
+        for f in rust_files(&root) {
+            let rel = f.strip_prefix(&root).unwrap_or(&f).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(&f).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) -- a partially-scanned tree is a silent no-op")
+            });
+            if !src.contains("RouteGates") {
+                continue;
+            }
+            literals += route_gates_literals(&src).len();
+            found.extend(offenders(&rel, &src));
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+        // Non-vacuous: there must BE literals to read, or the walk is scanning nothing.
+        assert!(
+            literals > 0,
+            "no `RouteGates {{ .. }}` literal found under crates/** -- the guard is reading nothing"
+        );
+    }
+
+    /// RED for the gate above: feed one route's field from the OTHER route's key.
+    #[test]
+    fn red_a_field_fed_from_another_routes_key_is_refused() {
+        let fields: Vec<String> = field_to_config_ident().keys().cloned().collect();
+        assert!(
+            fields.len() >= 2,
+            "the planted-red needs two declared routes to cross the wires between"
+        );
+        let expected = field_to_config_ident();
+        let wrong = expected.get(&fields[1]).expect("second route's key");
+        let planted = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: config.{}, {}: false }}; }}",
+            fields[0], wrong, fields[1]
+        );
+        assert_eq!(
+            offenders("planted.rs", &planted).len(),
+            1,
+            "crossing two routes' keys must be caught: {planted}"
+        );
+        // …and the CORRECT wiring must stay green, or the gate is just rejecting everything.
+        let right = expected.get(&fields[0]).expect("first route's key");
+        let ok = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: config.{}, {}: false }}; }}",
+            fields[0], right, fields[1]
+        );
+        assert!(offenders("planted.rs", &ok).is_empty(), "the correct wiring must pass: {ok}");
+    }
+
+    /// RED for the `..rest` half.
+    #[test]
+    fn red_a_functional_update_route_gates_literal_is_refused() {
+        let fields: Vec<String> = field_to_config_ident().keys().cloned().collect();
+        let planted = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: true, ..RouteGates::NONE }}; }}",
+            fields[0]
+        );
+        assert!(
+            offenders("planted.rs", &planted).iter().any(|o| o.contains("functional-update")),
+            "`..rest` in a RouteGates literal must be caught: {planted}"
+        );
     }
 }

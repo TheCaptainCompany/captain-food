@@ -112,9 +112,10 @@ PlaceOrderProcess:
         - deliver:
             event: { $ref: 'events.yaml#/OrderPlaced' }
             to: { $ref: 'actors.yaml#/Order' }
+            route_gate: { $ref: 'configuration.yaml#/keys/ROUTE_ORDER_BIRTH_THROUGH_LANE' }
             with:
               orderId: { from_state: order_id }
-            note: "Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently."
+            note: "Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently. ROUTED (#588, ADR-20260816-040239): `route_gate:` is what makes this step a lane ENQUEUE rather than a foreign-stream append, and it names THIS route's own key -- the generated step consults Route::OrderPlacedToOrder, never bare sink presence, so it can be rolled back without touching any other route (#797)."
         - deliver:
             event: { $ref: 'events.yaml#/CartCheckedOut' }
             to: { $ref: 'actors.yaml#/Cart' }
@@ -245,7 +246,12 @@ ReclamationProcess:
         # is DERIVED from reclamationId (a deterministic id, not a `with:` mapping) -- so it is
         # declared here for the same reason `emits` above is: a $ref the refs walker can see, and
         # a rule can hold, instead of a hand-written call no validator knows exists.
-        - { $ref: 'commands.yaml#/PlaceReplacementOrder' }
+        # `to:` + `route_gate:` make it a ROUTED send: the Order's own lane runs the command, gated
+        # on THIS route's own key. The wrapper seam consults Route::PlaceReplacementOrderToOrder,
+        # so flipping it never moves the OrderPlaced route sharing the same runner (#797).
+        - command: { $ref: 'commands.yaml#/PlaceReplacementOrder' }
+          to: { $ref: 'actors.yaml#/Order' }
+          route_gate: { $ref: 'configuration.yaml#/keys/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE' }
       throws:
         # Amount safety (rules.yaml#/RefundResolutionCappedAtCaptured): a PARTIAL over the captured total.
         - { $ref: 'errors.yaml#/RefundExceedsCaptured' }

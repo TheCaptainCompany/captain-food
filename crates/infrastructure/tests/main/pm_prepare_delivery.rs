@@ -234,7 +234,10 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
         enforce_acceptance_timeout: false,
         // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
-        route_order_birth_through_lane: false,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: false,
+            place_replacement_order_to_order: false,
+        },
     }
 }
 
@@ -708,7 +711,13 @@ async fn birth_row(pool: &PgPool) -> sqlx::postgres::PgRow {
 /// [`deps_over`] — the saga appends `OrderPlaced` itself and no Order-lane message exists. So the
 /// two postures are covered by two tests, and neither is a weakened version of the other.
 fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
-    CommandDeps { route_order_birth_through_lane: true, ..deps_over(pool, payments) }
+    CommandDeps {
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: true,
+            place_replacement_order_to_order: false,
+        },
+        ..deps_over(pool, payments)
+    }
 }
 
 /// An Order-lane worker with the reminder windows wired — a missing window aborts every delivery

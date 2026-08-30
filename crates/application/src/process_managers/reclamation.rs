@@ -117,11 +117,20 @@ pub async fn on_reclamation_resolved(
         //   3. a rejection lands a REJECTED verdict on a supervisable row instead of the
         //      `tracing::warn!` below, which no operator reads.
         //
-        // `env.lane_sink()` is `Some` only on a route built with `TriggerEnvelope::laned` — one
-        // that owns a fenced transaction to flush into — AND with
-        // `configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` ON. `None` takes the legacy
-        // in-process call below, byte for byte (gate-then-stabilize: rollback is a config flip).
-        if let Some(lanes) = env.lane_sink() {
+        // `env.lane_sink_for(..)` is `Some` only on a route built with `TriggerEnvelope::laned`
+        // — one that owns a fenced transaction to flush into — AND with THIS route's own gate,
+        // `configuration.yaml#/keys/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`, ON. `None` takes the
+        // legacy in-process call below, byte for byte (gate-then-stabilize: rollback is a config
+        // flip).
+        //
+        // The ROUTE is named, never inferred from sink presence (#797). This seam and the
+        // generated `OrderPlaced` route are hosted by the SAME polling runner, so a presence check
+        // bound them to one boolean: flipping the replacement route off would have flipped the
+        // order-birth route off with it, which is a second unrelated behaviour change made under
+        // incident pressure.
+        if let Some(lanes) =
+            env.lane_sink_for(crate::generated::process_managers::Route::PlaceReplacementOrderToOrder)
+        {
             lanes.stage(crate::lanes::LaneEnqueue {
                 kind: crate::lanes::LaneMessageKind::Command,
                 actor_type: "Order",

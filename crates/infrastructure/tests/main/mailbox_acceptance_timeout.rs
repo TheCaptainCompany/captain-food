@@ -57,7 +57,10 @@ fn deps_over(pool: &PgPool, enforce_acceptance_timeout: bool) -> CommandDeps {
         mailbox_requeue: Arc::new(infrastructure::persistence::mailbox_lanes::PgMailboxRequeue::new(pool.clone())),
         enforce_service_hours_guard: false,
         // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
-        route_order_birth_through_lane: false,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: false,
+            place_replacement_order_to_order: false,
+        },
         enforce_acceptance_timeout,
     }
 }

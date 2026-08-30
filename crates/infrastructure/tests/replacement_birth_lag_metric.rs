@@ -133,7 +133,10 @@ fn order_deps(pool: &PgPool) -> CommandDeps {
         ),
         enforce_service_hours_guard: false,
         enforce_acceptance_timeout: false,
-        route_order_birth_through_lane: true,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: true,
+            place_replacement_order_to_order: false,
+        },
     }
 }
 
@@ -148,7 +151,10 @@ async fn the_replacement_birth_records_the_handover_on_the_lane_delivery() {
     // ── the ENQUEUE is not the emission ─────────────────────────────────────────────────────────
     ProcessManagerRunner::new(pool.clone())
         .with_only("ReclamationProcess")
-        .with_replacement_birth_lane(true)
+        .with_route_gates(application::generated::process_managers::RouteGates {
+            order_placed_to_order: false,
+            place_replacement_order_to_order: true,
+        })
         .run_once()
         .await
         .expect("the reclamation group drains clean");

@@ -204,7 +204,10 @@ async fn deliver_once(pool: &PgPool) -> u64 {
         // #167: the acceptance-timeout gate at its spec default (OFF = shadow).
         enforce_acceptance_timeout: false,
         // #588: the Order-lane birth routing at its spec default (OFF = the legacy append).
-        route_order_birth_through_lane: false,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: false,
+            place_replacement_order_to_order: false,
+        },
     };
     let worker = MailboxWorker::new(
         pool.clone(),

@@ -3,11 +3,43 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
-> **2026-08-30 — CLAIM: [#797 "C3-gate: the routed step consults its own per-route flag, not bare
-> sink presence"](https://github.com/TheCaptainCompany/captain-food/issues/797).** The routed-lane
-> gate is spelled per-route in a comment and fused in the code: the polling runner hands ONE sink
-> gated on ONE boolean, and every routed step reads bare `env.lane_sink()` presence, so the
-> route-selection predicate is `sink.is_some()`. Branch `797-c3-gate`, draft PR, `HOLD: human`.
+> **2026-08-30 — the per-route lane gate was spelled per route in a comment and fused in the code,
+> and the comment sat at the exact line a reader checks.**
+> [#797](https://github.com/TheCaptainCompany/captain-food/issues/797) / PR
+> [#798](https://github.com/TheCaptainCompany/captain-food/pull/798). `runner.rs` said *"The gate is
+> per ROUTE, not per runner"* while building ONE envelope and handing ONE sink gated on ONE boolean;
+> every routed step then read bare `env.lane_sink()` presence, so the route-selection predicate was
+> `sink.is_some()`. farley's sharpening is the reason this was worth a chunk rather than a comment
+> fix: the defect is **a false claim of non-fusion sitting where the obligation gets checked**, and
+> the first C3 route PR would have read it as discharged. vernon: the gate names WHICH AGGREGATE
+> BOUNDARY is closed, so one boolean flips the fence for `Payment` and `DeliveryJob` together.
+>
+> **Latent today, structural for C3 — and saying which is the honest part.** `runner.rs` filters
+> `Payment*` out of every group, so the OrderPlaced route is unreachable there: one key, one
+> reachable consumer, the read was accidentally correct. But every C3 event-leg route except
+> `CartCheckedOut` is runner-hosted, so adding one would have bound it to
+> `ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` silently. Rolling the new route back would then have rolled
+> the reclamation birth back with it. **A rollback that changes something you did not intend to
+> change is not a rollback.**
+>
+> **The fix is a DSL declaration, not a second boolean**
+> ([ADR-20260830-204220](../adr/ADR-20260830-204220-a-lane-route-declares-its-own-gate-in-the-dsl.md)).
+> A routed `deliver:`/`sends:` carries `route_gate: { $ref: 'configuration.yaml#/keys/<KEY>' }`, and
+> that `$ref` IS what makes it routed — the codegen's hand-kept `PM_LANE_ROUTED_DELIVERS` and
+> `SENDS_LANE_ROUTED` consts are gone and the routed set is read from the model. The emitter writes a
+> `Route` enum and a `RouteGates` struct; `TriggerEnvelope::lane_sink()` is **deleted** and the only
+> accessor is `lane_sink_for(Route)`. Four mistakes, three of them now unspellable: a key that does
+> not exist is `ref-site-undeclared` at `make validate`; staging without naming your route is E0061;
+> forgetting a construction site is E0063 (`RouteGates` derives no `Default` on purpose). Only the
+> fourth — feeding route A's field from route B's key — needs a check, because the compiler cannot
+> see which config field MEANS which key: `route_gates_are_not_fused`, a `syn` scan asserting the
+> property, planted-red against the real tree.
+>
+> **Both routes keep their exact position**: `ROUTE_ORDER_BIRTH_THROUGH_LANE` ON,
+> `ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` OFF. The runner now hands the sink UNCONDITIONALLY — owning
+> the fenced transaction is a property of the runner, true on every leg — and with every gate off the
+> envelope is laned and no route stages, which is byte for byte what withholding the sink used to
+> give. `runner.rs`'s comment is now true rather than annotated.
 
 > **2026-08-30 — the typed-inbox guarantee reached the fact door, and the thing it was hiding was a
 > catch-all that DESTROYED facts.** #771 made every declared COMMAND reach a decision in a

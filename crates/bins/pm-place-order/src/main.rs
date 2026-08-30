@@ -83,8 +83,13 @@ async fn main() {
             partner: None,
             payments: Some(payments.clone()),
             waiter,
-            // #595: one value across the fleet -- the bin reads the SAME generated key as the monolith.
-            replacement_birth_lane: config.route_replacement_birth_through_lane,
+            // #595/#797: one value across the fleet -- the bin reads the SAME generated keys as
+            // the monolith, one per DECLARED route. A route missing from this bin's scoped Config
+            // is a compile error naming exactly the decision nobody made.
+            route_gates: bin_runtime::RouteGates {
+                order_placed_to_order: config.route_order_birth_through_lane,
+                place_replacement_order_to_order: config.route_replacement_birth_through_lane,
+            },
         })
         .await;
         tracing::info!(pm = PM, "saga runner spawned (restricted to this PM)");

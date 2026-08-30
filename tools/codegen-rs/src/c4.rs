@@ -289,7 +289,11 @@ pub(crate) fn parse_actors(model: &Model) -> Vec<Actor> {
                     // step-derived `send:` does — through the TARGET aggregate's own inbox, so
                     // actors.yaml stays the single wiring truth either way. The two forms differ in
                     // how the payload is built, never in what the send MEANS.
-                    let sends: Vec<String> = ref_strings(e.get("sends"));
+                    let sends: Vec<String> =
+                        crate::emit::pm_orchestrators::parse_pm_sends(e.get("sends"), &format!("processmanager.yaml#/{}", name))
+                            .into_iter()
+                            .map(|d| d.command_ref)
+                            .collect();
                     for c in &sends {
                         let Some(cmd) = ref_name(c) else { continue };
                         let Some(evs) = cmd_inboxes.get(&cmd) else { continue };

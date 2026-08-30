@@ -155,12 +155,18 @@ pub struct ProcessManagerRunner {
     /// their own. Per-PM checkpoints (`pm:<Name>`) make the split free: a filtered runner
     /// advances exactly the rows a full runner would for that PM.
     only: Option<&'static str>,
-    /// #595 (`configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`): route
-    /// ReclamationProcess's REPLACEMENT arm through the Order's own mailbox lane instead of calling
-    /// `PlaceReplacementOrder` in-process and writing `Order-{id}` from the saga. Resolved ONCE at
-    /// the composition root and handed in (the `enforce_service_hours_guard` style) — the runner
-    /// never reads config or env itself. OFF is the default and leaves every leg byte-identical.
-    route_replacement_birth_through_lane: bool,
+    /// Where EVERY declared lane route's gate stands — one field per
+    /// [`Route`](application::generated::process_managers::Route), generated from the DSL (#797).
+    ///
+    /// Resolved ONCE at the composition root and handed in (the `enforce_service_hours_guard`
+    /// style) — the runner never reads config or env itself. `RouteGates::NONE` is the default, so
+    /// a runner built anywhere else — a test, a tool — cannot silently enqueue on any route.
+    ///
+    /// This used to be the single boolean `route_replacement_birth_through_lane`, and that is the
+    /// whole of #797: with one boolean the runner decided routing for every route it hosts at once,
+    /// so adding a second route bound it to the first route's key and rolling one back rolled the
+    /// other back with it.
+    route_gates: application::generated::process_managers::RouteGates,
     status: Arc<Mutex<ProcessManagerStatus>>,
     /// Idle gate: `MAX(position)` as observed at the end of the last pass that drained EVERY PM.
     /// `-1` means nothing observed yet, so the first tick after start always drains.
@@ -181,7 +187,7 @@ impl ProcessManagerRunner {
             partner: Arc::new(NoopDeliveryService),
             payments: Arc::new(crate::integrations::payments::FailClosedPaymentGateway),
             only: None,
-            route_replacement_birth_through_lane: false,
+            route_gates: application::generated::process_managers::RouteGates::NONE,
             pool,
             status: Arc::new(Mutex::new(ProcessManagerStatus::default())),
             last_head: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
@@ -205,11 +211,19 @@ impl ProcessManagerRunner {
             .filter(move |g| only.is_none_or(|name| g.checkpoint.strip_prefix("pm:") == Some(name)))
     }
 
-    /// Route the REPLACEMENT-order birth through the Order's lane (#595,
-    /// `configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`). Off unless the composition root
-    /// says otherwise, so a runner built anywhere else — a test, a tool — cannot silently enqueue.
-    pub fn with_replacement_birth_lane(mut self, on: bool) -> Self {
-        self.route_replacement_birth_through_lane = on;
+    /// Set where every declared route's gate stands (#797). Off for every route unless the
+    /// composition root says otherwise, so a runner built anywhere else — a test, a tool — cannot
+    /// silently enqueue.
+    ///
+    /// It takes the WHOLE [`RouteGates`](application::generated::process_managers::RouteGates)
+    /// rather than one route's boolean on purpose: the value is a generated struct with no
+    /// `Default`, so declaring a new route makes this call site a compile error until somebody
+    /// says which configuration key feeds it.
+    pub fn with_route_gates(
+        mut self,
+        gates: application::generated::process_managers::RouteGates,
+    ) -> Self {
+        self.route_gates = gates;
         self
     }
 
@@ -430,19 +444,22 @@ impl ProcessManagerRunner {
         // checkpoint advance — so naming `laned` here is a claim this runner can honour, which is
         // the whole contract `TriggerEnvelope::laned` asks its callers to make.
         //
-        // The gate is per ROUTE, not per runner (farley, ADR-20260829-230418 C3): with
-        // `ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` OFF the sink is withheld and every leg on this
-        // runner behaves byte for byte as before.
-        let envelope = if self.route_replacement_birth_through_lane {
-            TriggerEnvelope::laned(
-                event_id,
-                correlation_id,
-                occurred_at,
-                lane_sink.clone() as Arc<dyn application::lanes::LaneSink>,
-            )
-        } else {
-            TriggerEnvelope::unlaned(event_id, correlation_id, occurred_at)
-        };
+        // **The gate is per ROUTE, not per runner** (farley, ADR-20260829-230418 C3) — and since
+        // #797 the code delivers what that sentence claims. The sink is handed over
+        // UNCONDITIONALLY, because owning the transaction is a property of this runner and is true
+        // on every leg; which routes may actually use it is `self.route_gates`, one field per
+        // declared route, and each routed step consults ITS OWN by naming `Route::X`. Withholding
+        // the sink on one route's flag — what this function used to do — made every route this
+        // runner hosts share that flag, so turning off a misbehaving route would have turned off
+        // an unrelated one at the same time. With every gate OFF the envelope is laned but no
+        // route stages, which is byte for byte the legacy behaviour the withheld sink used to give.
+        let envelope = TriggerEnvelope::laned(
+            event_id,
+            correlation_id,
+            occurred_at,
+            lane_sink.clone() as Arc<dyn application::lanes::LaneSink>,
+            self.route_gates,
+        );
         let trigger = Trigger { event_type, event, envelope };
         self.dispatch(group.pm, &trigger).await
     }
