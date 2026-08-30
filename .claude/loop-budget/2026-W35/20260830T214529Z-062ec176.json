@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 2400,
+  "recordedAt": "2026-08-30T21:45:29.982Z",
+  "branch": "797-c3-gate",
+  "note": "#797 review round 2: fusion guard case-blindness (B1), pm-route-gate rule (B2), doc-block splices (B3), N1 rule-name corrections, N2 per-file non-vacuity"
+}
