@@ -3,6 +3,46 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-30 — the four STAFF-AUTH answers, and the one that is a composite rather than an
+> option.** The founder answered the decision queue put to him after #639 parts A and B landed
+> ([ADR-20260830-213135](../adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md),
+> five lenses consulted before the record was composed). **Reading Q1 as the bare option would have
+> built the wrong thing**: the option said *"Captain provisions the roster by hand"*, and the notes
+> added three more doors — claim a crawled listing, DECLARE one we never crawled, and *"colleagues
+> invitations and manage them"*. `ux-designer` and `vernon` independently reconstructed the same
+> reconciliation: Captain hand-binds the FIRST person, the owner invites the rest. `business-specialist`
+> then found the reason it is more right than a sequencing reading — an estimated 15–30% of French
+> independents cannot reach a verified Google Business Profile, so the hand-bound route is a
+> **permanent** fallback, not a shim.
+>
+> **The operational lesson worth keeping: a chosen option and its notes can disagree, and the notes
+> win.** A single-select answer is lossy by construction. The form asked for one option and got one
+> option plus four sentences that changed its meaning — and had the record been composed from the
+> radio button alone, it would have said the founder chose manual provisioning *instead of*
+> invitations, which is the opposite of what he wrote. Read the notes as the answer and the option as
+> its headline.
+>
+> **Three findings that outlive this chunk**, each from a different lens and each verified against
+> the tree: `claimRestaurantListing`'s `accountId` is caller-supplied, nullable, never resolved by
+> the handler, and PUBLIC-callable — and the projector turns it into a RESTAURANT-scope GRANT, so a
+> caller names the beneficiary of an authorization grant for an aggregate nobody loaded (`vernon`).
+> The Google ownership verifier is fail-closed and returns "not verified" for every proof, so **the
+> claim journey the story map promises cannot be completed by anyone alive today** (`ux-designer`) —
+> Q1 is what makes that survivable, because the binding evidence becomes Captain's human check.
+> And the highest-value single decision in the rider slice is a **vocabulary**: the revocation reason
+> must be a closed declared scalar, never free text, because a suspension keyed on decline or
+> acceptance rate is the strongest requalification evidence obtainable and `DeliveryDeclinedByRider`
+> already exists as a stored event — a free-text field lets an ops person type that sentence into a
+> log we cannot rewrite (`legal-specialist`).
+>
+> **Also found while checking the premise of the answer**, and fixed on `main` separately: the SIRENE
+> crawl the whole claim path depends on has been switched off for over a month behind a blocker that
+> closed the same day it was recorded ([#800](https://github.com/TheCaptainCompany/captain-food/issues/800)).
+>
+> Q4 was executed: PR [#799](https://github.com/TheCaptainCompany/captain-food/pull/799) is open as a
+> draft, `HOLD: human`, with the mob evidence in the body. Q3's support contact was left **blank** and
+> is the first thing owed back — printing that string is a statutory commitment, not a copy decision.
+
 > **2026-08-30 — the typed-inbox guarantee reached the fact door, and the thing it was hiding was a
 > catch-all that DESTROYED facts.** #771 made every declared COMMAND reach a decision in a
 > human-owned match, with `rustc` E0004 as the enforcement. It stopped at the fact-record route,
