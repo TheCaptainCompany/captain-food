@@ -53,6 +53,61 @@ Journal entries for ISO week 2026-W35, newest first, in the order they were writ
 
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-30 — `main` reported green while a Rust unit test was failing, because the gate over a
+> `docs/**` file lived in the one job the docs-only path filter switches off.**
+> `docs/decisions/_exempt.yaml` is the single sanctioned bypass in the §23 citation ratchet, so its
+> growth has always been ratcheted — by `assert_eq!(exemptions.len(), 4)` in
+> `tools/codegen-rs/src/tests.rs`. Commit `2fa8a30b` added a fifth, legitimate exemption; the
+> `changes` job classified that push and the next as **docs-only**, `build-test` was skipped, and
+> `codegen` aggregated to success. Two consecutive pushes reached `main` carrying a failing
+> assertion. `docs-validate` — the job
+> [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)
+> added precisely to cover that lane — could not see it either, because `make validate` genuinely
+> passed: the validator rules are content-shaped and the ratchet was count-shaped.
+>
+> **The fix is not the bump the incident asks for.** The exemption file is a *self-pruning queue* —
+> entries arrive when a record is held and leave when it deposits, `citation-exemption-unused` being
+> what forces the removal — so a count assertion is red on **both** halves of that cycle. This was
+> not a theoretical objection: PR [#799](https://github.com/TheCaptainCompany/captain-food/pull/799)
+> merged while the fix was being written, deposited
+> [ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md),
+> and the fifth entry self-pruned away within the hour. A bumped `== 5` would have been red on
+> `main` right then, hours after landing, looking like a fresh bug. So the ratchet became
+> **membership-shaped**: growth is `citation-exemption-undeclared`, an error naming the id and what
+> a declaration must say about it; shrinkage is silent-green, because retirement is the file working
+> as designed.
+>
+> **And it moved into `make validate`**, where `docs-validate` runs it verbatim on exactly the
+> docs-only complement — executing
+> [ADR-20260821-103403](../adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md)'s
+> intent rather than deciding anything new, so no ADR. The compiler-first half is where the
+> declaration list lives: **Rust source, on purpose.** Adding an exemption *with its declaration*
+> can no longer be a docs-only diff, because it must touch `tools/**`, which flips the path filter
+> and un-skips the whole matrix. **It is a check, not an impossibility, and the word "unspellable"
+> is reserved** (ADR-20260803-234035): a docs-only push that adds an exemption and *skips* the
+> declaration is still perfectly spellable and still lands on `main`, because that lane is a push
+> with no PR — what changed is that it now goes **loudly red on `docs-validate`, the lane that
+> edits the file**, instead of silently skipping the only job that could see it.
+>
+> **The finding that outlives this chunk**: `_exempt.yaml` was not the only `docs/**` file read by a
+> Rust test — and the first inventory of the rest, compiled by *reading* `main.rs` for loader call
+> sites rather than by executing anything, was itself short and shipped as complete. The residue is
+> therefore recorded as a **property**: no real `docs/**` path is read from disk in `tests.rs`
+> outside a loader `main.rs` also calls, and no test requires a NAMED `docs/**` file to be present
+> in a corpus it loads. `tests.rs` breaks it in at least four places —
+> `gates_md_does_not_state_the_length_of_a_list_it_introduces` reads
+> `docs/claude/sessions/gates.md`; `the_ride_along_count_matches_the_clauses_named` reads
+> `docs/decisions/RETRIEVAL-QMD-CI.yaml` and asserts a **derived count**, the exact shape just
+> removed; and the review found `the_records_state_the_same_citation_corpus_as_the_code` and
+> `the_status_parser_tolerates_the_real_corpus_format_variance` by PLANTING a docs-only mutation
+> instead of reading — rewriting `.github/workflows` to a nonexistent pathspec inside
+> `ADR-20260824-205911`, after which `docs-validate`'s literal command exits **0** and `cargo test`
+> **FAILS**, reproduced on this branch. Any of them reds `main` from a docs-only push while `ci`
+> stays green. Reported, not fixed:
+> [#804](https://github.com/TheCaptainCompany/captain-food/issues/804). Work on
+> [#802](https://github.com/TheCaptainCompany/captain-food/issues/802) /
+> PR [#803](https://github.com/TheCaptainCompany/captain-food/pull/803).
+
 > **2026-08-30 — the four STAFF-AUTH answers, and the one that is a composite rather than an
 > option.** The founder answered the decision queue put to him after #639 parts A and B landed
 > ([ADR-20260830-213135](../adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md),

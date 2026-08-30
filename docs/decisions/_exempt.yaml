@@ -3,6 +3,12 @@
 # exemption that exempts nothing is a validator ERROR (citation-exemption-unused), so this file is
 # a self-pruning queue, never a permanent bypass. An exempt id is citable as EXISTING, never as
 # CONTROLLING — a held record has no authority until deposited.
+#
+# ADDING AN ENTRY HERE IS NOT A DOCS-ONLY CHANGE. Every id below must ALSO be declared in
+# DECLARED_EXEMPTIONS (tools/codegen-rs/src/validate/citations.rs), or `make validate` fails with
+# `citation-exemption-undeclared`, naming the id. Write the declaration in the same commit; the
+# declaration is where a reviewer reads WHAT THE RECORD IS and what deposits it. Removing an entry
+# is free and needs nothing — this file may shrink at any time, which is it working as designed.
 exempt:
   - id: "ADR-20260817-232744"
     reason: "Externally authored, HELD and not deposited until corrected (ADR-20260818-004647:179; DECISIONS.md 2026-08-18 reconciliation)."
