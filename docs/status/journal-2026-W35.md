@@ -3,6 +3,33 @@
 Journal entries for ISO week 2026-W35, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> 🔒 **2026-08-30 — the actor inbox is a generated enum now, and it found ten live dead ends on the
+> way in** (PR [#776](https://github.com/TheCaptainCompany/captain-food/pull/776) for
+> [#771](https://github.com/TheCaptainCompany/captain-food/issues/771),
+> [ADR-20260830-183000](../adr/ADR-20260830-183000-the-actor-inbox-is-a-generated-enum-and-the-match-is-human-owned.md),
+> **`HOLD: human`** — the mailbox runtime). Founder directive, verbatim: *"Go for the generated
+> per-actor enum."* `specs/*/actors.yaml` already declared each actor's `receives:` set and the
+> runtime threw it away at the door: a flat `match` over a `&str` across ALL actors ending in
+> `_ => None`. **Ten commands were declared received with no dispatch arm on `main`** — the #595
+> class, live, ×10, green at every gate. Nine had their handler already written and were missing
+> only a table row; **two are already declared process-manager `sends:`** — `CartBindingProcess` →
+> `BindCartToCustomer`, and `ReclamationProcess` GOODWILL_CREDIT → `GrantCustomerCredit`, i.e. a
+> resolved reclamation's goodwill credit never granted. The tenth has no handler and became the
+> first user of the new `deferred: { reason, issue }` DSL grammar
+> ([#777](https://github.com/TheCaptainCompany/captain-food/issues/777)). The router also took
+> `message_type` and never `actor_type`, so a row on lane A could drive a handler writing aggregate
+> B under A's fence — ADR-20260829-230418 violated by the transport itself; `ActorInbox::parse` now
+> takes the lane, so that is a value that cannot be constructed. **The enum is generated and the
+> `match` is human-owned**: one walk producing both would make it exhaustive by construction and the
+> compiler would catch nothing. Proven RED against real `rustc` from a mutated model, with a control
+> half that caught a scaffold defect on its first run. Four gates DELETED as compiler-subsumed
+> (`UNWIRED_MUTATIONS` + its assert, `wired_saga_command_dispatch`, `wired_mutation_dispatch` — 90
+> handler calls held as Rust source in *string literals* no compiler checked — and
+> `every_api_mutation_has_a_handler`), two ADDED where types cannot reach. **No new status and no
+> migration**: the card asked for a `PARKED` state, `InboundMessageStatus` has none and is a stored
+> promised column, and the existing poison path already gives park semantics when the delivery
+> aborts instead of failing. Generated `command_router.rs`: 761 lines → 42.
+
 > 🔎 **2026-08-30 — the #708 checkpoint found a false statement in the spec, which is the class the
 > chunk existed to kill** (PR [#763](https://github.com/TheCaptainCompany/captain-food/pull/763),
 > 3 declared lenses). Four spec sites said the erasure mutations "ship DARK behind

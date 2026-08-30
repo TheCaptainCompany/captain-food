@@ -429,6 +429,27 @@ Two checks remain, and they are about the *shape*, not about a fork:
 
 ## 5. Sequencing
 
+> ### Deploy ordering is CONSUMER-FIRST, and it is a precondition, not a preference
+>
+> Recorded here because this is where the [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
+> cutover work reads its preconditions
+> ([ADR-20260830-183000](../adr/ADR-20260830-183000-the-actor-inbox-is-a-generated-enum-and-the-match-is-human-owned.md),
+> [#771](https://github.com/TheCaptainCompany/captain-food/issues/771)).
+>
+> **A runtime that CONSUMES a message type must be deployed before any runtime that EMITS it.** Once
+> the monolith is several pods, a rolling deploy has two builds live at once, and a producer that
+> ships first hands the old consumer a message type its `<Actor>Inbox` does not declare. The typed
+> inbox makes that survivable rather than fatal — an undeclared type is TRANSIENT, so the row is
+> retried with backoff and then parked on the poison queue with
+> `mailbox_poison_failed_total{actor_type}` and an operator `RequeueMailboxMessage`, never terminally
+> `FAILED` — but *survivable* means "costs latency and a manual requeue", not "free". During peak
+> (Fri/Sat 19:00–21:30) a mis-ordered deploy is paid in orders sitting on a lane.
+>
+> The practical rule for the cutover plan: **a slice that introduces a new message type ships the
+> consumer's deploy in an earlier step than the producer's**, and the two are never in the same
+> rollout step.
+
+
 1. **Slice 0 — the ratchet (C).** Codegen test `bin_scope_closure_matches_declaration`: for each
    `crates/bins/*`, the transitive normal-dependency closure's `domain-*` set must equal the
    manifest's declared set, unless the bin is on an explicit `PENDING_DECOMPOSITION` list carrying

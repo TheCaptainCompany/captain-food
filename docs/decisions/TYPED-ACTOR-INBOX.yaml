@@ -1,0 +1,78 @@
+key: "TYPED-ACTOR-INBOX"
+status: "decided"
+question: "Does the mailbox runtime keep a flat string router over all actors -- where a message an actor DECLARES it receives can have no dispatch arm and ship green, and a row on lane A can drive a handler that writes aggregate B -- or does each actor's declared `receives:` set become a GENERATED enum whose routing match the compiler proves exhaustive?"
+owner: "founder"
+opened: "2026-08-30"
+decided: "2026-08-30"
+decided_by: "ADR-20260830-183000"
+register: "docs/proposals/DECISIONS.md"
+note: "SUPERSEDES the remedy proposed by #766 (a second assert_eq! mirroring the mutation twin) -- never built. Compiler-first, ADR-20260803-234035: a check is the fallback, and deleting a gate the compiler subsumes is a correct outcome. (Recorded in `note:` because the register schema is closed and carries `superseded_by` but no `supersedes` -- a row can say what replaced it, not what it replaced.)"
+evidence: >
+  Founder directive 2026-08-30, verbatim: 'Go for the generated per-actor enum.' It followed his own
+  challenge, verbatim: 'the strongly typed actors type consumer subscribe to the actor type without
+  any message type restriction... Are we on the same page?' -- which is the defect statement:
+  specs/*/actors.yaml already declares each actor's receives: set and the runtime threw that
+  declaration away at the door.
+
+  SHAPE. One <Actor>Inbox enum per mailbox actor, GENERATED from receives:, variants named verbatim
+  from the $ref, spanning COMMAND / inbound FACT / REMINDER (the inbox is one queue, so it is one
+  type), each carrying its typed payload; NOT #[non_exhaustive], which would force a wildcard arm
+  downstream and defeat the purpose. ActorInbox::parse(actor_type, message_type, payload) is the
+  single fallible edge and consumes the LANE as well as the message, so a lane-A row carrying B's
+  message is a value that cannot be constructed -- ADR-20260829-230418 closed on the transport, in
+  the type rather than in a check. The wire stays a string: inbound_messages is untouched, no stored
+  shape and no wire format change, so revert is the rollback and the whole-tree cutover needs no
+  flag (two live routers would be the exact ambiguity being removed).
+
+  THE MATCH IS HUMAN-OWNED (beck, decisive), in crates/infrastructure/src/inbox.rs. One emitter walk
+  generating both the variants and the arms would make the match exhaustive BY CONSTRUCTION and the
+  compiler would catch nothing. Generated matches that are total PROJECTIONS of the variant set
+  (parse, message_type, kind) are fine -- they encode no decision. The guard is proven RED against
+  real rustc from a mutated model (error[E0004] naming the unconsumed message), with a CONTROL half
+  asserting the unmutated pair compiles clean, because a broken scaffold would 'prove' E0004 for the
+  wrong reason.
+
+  WHAT IT FOUND. Ten commands were declared in some actor's receives: with NO dispatch arm on main --
+  the #595 class, live, x10, green at every gate. Nine had their handler ALREADY WRITTEN and were
+  missing only a table row. Two are already declared process-manager sends: CartBindingProcess ->
+  BindCartToCustomer (a returning visitor's guest cart never binds) and ReclamationProcess
+  GOODWILL_CREDIT -> GrantCustomerCredit (a resolved reclamation's goodwill credit never granted --
+  the money path). The tenth, UpdateDeliveryStatus, has no handler and becomes the first user of the
+  new DSL deferral grammar, tracked by #777.
+
+  GATES DELETED AS SUBSUMED: UNWIRED_MUTATIONS + its assert_eq! (it asked whether a mutation had a
+  table row; the question it protected is now E0004 over a STRICTLY LARGER set -- all 100 received
+  commands, not the 90 reachable from a mutation, and the ten in that gap are exactly what it could
+  not see); wired_saga_command_dispatch and the #766 twin; wired_mutation_dispatch (90 handler calls
+  held as Rust source in STRING LITERALS no compiler checked until the emitted file was built
+  downstream); every_api_mutation_has_a_handler, REPLACED by
+  every_enqueueable_row_can_be_parsed_by_its_actor_inbox, which asks what the compiler cannot -- do
+  the enqueue side (mailbox_address, ACTOR_INBOUND_FACTS) and the consume side agree on the same
+  pairs, being two independent scans in two crates. The mutation resolver's wiring gate becomes
+  ADDRESSING, the right question, since a resolver only ENQUEUES. GATES ADDED, both where types
+  cannot reach: no-wildcard-arm on the one human-owned file, and the E0004 proof itself.
+
+  UNKNOWN MESSAGE TYPE IS TRANSIENT, NEVER TERMINAL -- the one conflict that mattered in the consult.
+  A rolling deploy legitimately shows an old consumer a new message type, and terminal-failing it
+  buries a paid order. The delivery ABORTS (row stays RECEIVED), retries with backoff, and flips at
+  max_delivery_attempts into the EXISTING poison path, already loud by construction
+  (mailbox_poison_failed_total{actor_type}, the ADMIN poisonedMailboxMessages read,
+  RequeueMailboxMessage as the way back). NO NEW STATUS AND NO MIGRATION: InboundMessageStatus has no
+  PARKED member and is a stored, promised column, so adding one would have turned a compile-time
+  change into a stored-shape migration -- the dispatch card asked for PARKED literally and this is
+  the recorded correction.
+
+  DEFERRALS MOVE INTO THE DSL: receives[].deferred: { reason, issue }, validator-enforced
+  (receives-deferred-shape: CLOSED key set, both fields required, the issue a FULL URL because a bare
+  #NN does not auto-link and the text renders into generated documentation). UNWIRED_MUTATIONS was an
+  unexplained list of names in an emitter nobody read; a deferral is now reviewable spec content
+  sitting next to the declaration it qualifies.
+
+  CONSEQUENCE FOR #358: consumer-first deploy ordering is a PRECONDITION of the runtime split --
+  consumers that understand a message type deploy before producers emit it. The transient-then-park
+  posture makes the wrong order survivable (latency plus an operator requeue) rather than fatal, but
+  it is not a licence to ignore the ordering.
+
+  Consulted: 8 lenses, one line each in the ADR (vernon, young, beck, farley, dba, evans, holub, and
+  evans/young jointly on the deferral grammar); explicitly NOT consulted: legal (no legal surface),
+  design (no user-facing change).

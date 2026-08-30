@@ -69,6 +69,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `REV-1` | decided | 2026-08-17 | Does the `claude-review` bot check stay a REQUIRED status check on `main`? -> ADR-20260807-235930 | founder |
 | `REVIEW-GATE-BYPASS` | decided | 2026-08-24 | Does the #677 hardening of `claude-review` land BEFORE REV-1 is executed — merged by a one-time admin bypass, leaving the check required and newly able to fail — or does REV-1 execute first so the hardened check reds on a non-required gate? -> ADR-20260825-005323 | founder |
 | `REVIEW-GATES-CRATES-MERGE` | decided | 2026-08-28 | Should the independent review pass gate auto-merge on PRs touching crates/**, or keep merging on green CI with review findings landing as follow-up PRs? -> ADR-20260828-023258 | founder |
+| `TYPED-ACTOR-INBOX` | decided | 2026-08-30 | Does the mailbox runtime keep a flat string router over all actors -- where a message an actor DECLARES it receives can have no dispatch arm and ship green, and a row on lane A can drive a handler that writes aggregate B -- or does each actor's declared `receives:` set become a GENERATED enum whose routing match the compiler proves exhaustive? -> ADR-20260830-183000 | founder |
 | `V0-PROMO-AND-MINIMUM` | decided | 2026-08-29 | Does V0 ship promo codes and/or a minimum order amount, and at what rules/values? -> ADR-20260829-145848 | founder |
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
 | `MARGIN-WRITE` | withdrawn | 2026-08-19 | May a restaurant owner set its own margin fields? | team |
@@ -76,7 +77,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 62 — 8 open · 49 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 63 — 8 open · 50 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 102** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
