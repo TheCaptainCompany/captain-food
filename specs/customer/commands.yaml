@@ -226,3 +226,69 @@ SetCustomerPaymentMethod:
     paymentMethodId:
       $ref: 'scalars.yaml#/PaymentMethodId'
   required: [customerId, paymentMethodId]
+
+
+# =====================================================================
+# GDPR erasure — request / confirm / cancel  (persona: customer)
+# =====================================================================
+# PROP-20260829-150752 §3.1, founder-APPROVED Option 1. Erasure begins as a COMMAND, not an event,
+# because it can be REFUSED: an open order or funds in flight is a set-based precondition the write
+# side must check, and an event cannot be rejected while a command can (young, vernon).
+# Two round-trips for an irreversible act; the third command is the subject's own way back out.
+
+RequestCustomerErasure:
+  description: >
+    Ask for this account and its personal data to be erased (GDPR Art. 17). Acceptance-first: the
+    mutation returns the `erasureRequestId` and the fact is recorded by the aggregate, which is what
+    lets the status surface answer immediately.
+    IDEMPOTENT while one request is pending — a second ask returns the SAME id and records nothing
+    new, because a double-tap on a delete button is a nervous customer, not a second intention.
+    IN THIS DEPLOYMENT THE HANDLER REFUSES UNCONDITIONALLY with `ErasureEngineUnavailable` and
+    records nothing: it reads no gate, because the journey that executes an erasure is the next
+    chunk — a typed refusal, never a silent accept. `RUN_DELETION_ENGINE` gates the deletion ENGINE
+    POD, not this mutation. `ErasureBlockedByOpenOrder` is the declared refusal for an order in
+    flight; its precondition needs a read model that lands with that journey.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+      description: "The subject — resolved server-side from the authenticated principal, never taken from the client."
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+      description: "The journey id the acceptance returns; deterministic per pending request so a retry re-resolves the same one."
+  required: [customerId, erasureRequestId]
+
+
+ConfirmCustomerErasure:
+  description: >
+    Confirm the erasure with the token sent to the subject's verified channel — the SECOND
+    round-trip that turns a request into a scheduled destruction. On acceptance the grace window
+    starts and the `deletion:` trigger arms.
+    The token is verified server-side and is the ONLY thing that authorizes the confirm; it is
+    deliberately not "being logged in", because the whole point of the second step is to prove the
+    person holding the session is the person who owns the channel.
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+    token:
+      $ref: 'scalars.yaml#/ErasureConfirmationToken'
+  required: [customerId, erasureRequestId, token]
+
+
+CancelCustomerErasure:
+  description: >
+    The subject changed their mind inside the grace window and keeps their account. RE-LOGIN-CANCELS
+    is the recorded posture: cancelling is the USER's act — there is no admin resurrection, because
+    an erasure an operator can undo is not an erasure. A returning customer placing an order is the
+    strongest cancel-intent signal there is, but it does NOT auto-cancel: the recorded intent stands
+    until the subject withdraws it; an in-flight order only defers EXECUTION (the PARKED arm).
+  type: object
+  properties:
+    customerId:
+      $ref: 'scalars.yaml#/CustomerId'
+    erasureRequestId:
+      $ref: 'scalars.yaml#/ErasureRequestId'
+  required: [customerId, erasureRequestId]

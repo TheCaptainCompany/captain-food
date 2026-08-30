@@ -96,6 +96,17 @@ customer:
         SendMessage: { $ref: 'api.yaml#/mutations/postMessage' }
         TranslateMessage: { $ref: 'api.yaml#/mutations/recordMessageTranslation' }
         ReadThread: { $ref: 'api.yaml#/queries/orderConversation' }
+    EraseMyAccount:
+      description: >
+        As a customer, I ask to be forgotten, confirm it, can change my mind inside the window, and
+        can see what was erased and what the law made us keep (GDPR Art. 17; PROP-20260829-150752).
+        This activity is the LAUNCH GATE, not a feature: the founder decided ERASURE-LAUNCH-GATE "A —
+        Erasure ships first", so the first real order in Tours waits on it.
+      steps:
+        RequestErasure: { $ref: 'api.yaml#/mutations/requestErasure' }   # ask to be forgotten; refused with a typed reason while an order is in flight
+        ConfirmErasure: { $ref: 'api.yaml#/mutations/confirmErasure' }   # the second round-trip an irreversible act needs
+        KeepMyAccount: { $ref: 'api.yaml#/mutations/cancelErasure' }     # re-login-cancels -- the subject's own way back, never an admin resurrection
+        TrackErasure: { $ref: 'api.yaml#/queries/erasureStatus' }        # what is happening, and afterwards what was retained and under which instrument
     RaiseAClaim:
       description: As a customer, I raise a claim/dispute about a delivered order and can reopen a decided one (#151).
       steps:

@@ -23,6 +23,8 @@ domain = { path = "../../domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
+# Only a `reminders:` actor gets `schedule`, whose signature names a timestamp.
+chrono = { workspace = true }
 
 # D6 lint floor (PROP-20260802-130500, #302). A client crate is a BOUNDARY crate -- it exists to
 # be the door -- so it restates the workspace baseline and additionally denies `unreachable_pub`.

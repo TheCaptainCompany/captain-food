@@ -239,3 +239,98 @@ async fn guarded_nav_edges_are_hidden_from_unlisted_roles() {
         assert!(admin.contains(&f.to_string()), "{f} missing for ADMIN: {admin:?}");
     }
 }
+
+/// GDPR erasure ops are CUSTOMER-ONLY, on every axis (#708, PROP-20260829-150752 §3.1).
+///
+/// This is the highest-consequence roles list in the schema, and it is the one the rest of the
+/// suite does not reach: the other tests pin operations whose leak would expose an order or a
+/// payment, while these four expose WHETHER A NAMED PERSON IS DELETING THEMSELVES. That fact is
+/// sensitive even when the answer is "no request exists", and `erasureStatus` takes NO ARGUMENTS
+/// precisely so that the subject can only ever be the caller — a design that is only as good as the
+/// guard in front of it, because the moment another role can call it, "no args" stops meaning "only
+/// me" and starts meaning "whoever the server thinks you are".
+///
+/// Three containments, because a role-as-path leak has three independent doors and shutting one
+/// proves nothing about the others:
+///   1. EXECUTION — every non-CUSTOMER path is FORBIDDEN by the guard, and the resolver never runs.
+///   2. INTROSPECTION — no other role's schema even NAMES these operations. A hidden-but-callable
+///      field and a visible-but-guarded field are both wrong, and only introspection catches the
+///      second: the mere presence of `requestErasure` in an ADMIN-facing schema advertises a
+///      capability we do not intend to offer through that path.
+///   3. TYPE REACHABILITY — `CustomerErasure` must not be reachable for anyone else. A type that
+///      survives while its fields are hidden leaks the SHAPE of the thing (status enum members,
+///      timestamps), which is how the existence of the journey gets inferred without calling it.
+///
+/// ADMIN is asserted alongside the others ON PURPOSE and is not an oversight: an admin-side erasure
+/// console is a plausible future ask, and if it is ever built it must arrive as a DECIDED change to
+/// the roles list with its own audit trail, not by quietly widening this one. This test is the
+/// thing that makes that a deliberate act.
+#[tokio::test]
+async fn erasure_operations_are_customer_only_on_every_axis() {
+    let schema = schema();
+    const MUTATIONS: [&str; 3] = ["requestErasure", "confirmErasure", "cancelErasure"];
+    const OTHER_ROLES: [RequestRole; 5] = [
+        RequestRole::Public,
+        RequestRole::Restaurant,
+        RequestRole::RestaurantAccount,
+        RequestRole::Rider,
+        RequestRole::Admin,
+    ];
+
+    // 1. EXECUTION. The mutations carry required inputs, so a bare selection would fail on ARGUMENT
+    // VALIDATION before the guard and prove nothing; each query below is fully formed, which is why
+    // a non-FORBIDDEN error is a genuine "the guard let it through" signal.
+    let calls = [
+        (r#"mutation { requestErasure(input: { customerId: "3f6d3c9a-8f04-4f7e-9f0e-3a1b2c4d5e6f", erasureRequestId: "5c2e1a7b-9d43-4c81-bf20-6e8a0d7c1f39" }) { operationStatus } }"#, "requestErasure"),
+        (r#"mutation { confirmErasure(input: { customerId: "3f6d3c9a-8f04-4f7e-9f0e-3a1b2c4d5e6f", erasureRequestId: "5c2e1a7b-9d43-4c81-bf20-6e8a0d7c1f39", token: "tok" }) { operationStatus } }"#, "confirmErasure"),
+        (r#"mutation { cancelErasure(input: { customerId: "3f6d3c9a-8f04-4f7e-9f0e-3a1b2c4d5e6f", erasureRequestId: "5c2e1a7b-9d43-4c81-bf20-6e8a0d7c1f39" }) { operationStatus } }"#, "cancelErasure"),
+        (r#"{ erasureStatus { status } }"#, "erasureStatus"),
+    ];
+    for (query, name) in calls {
+        for role in OTHER_ROLES {
+            let resp = execute_as(&schema, role, query).await;
+            assert!(!resp.errors.is_empty(), "{name} must not succeed for {role:?}");
+            assert!(
+                is_forbidden(&resp.errors[0]),
+                "{name} must be FORBIDDEN for {role:?}, got: {:?}",
+                resp.errors[0]
+            );
+        }
+        // CUSTOMER passes the guard. It still errors — the handlers refuse with the typed
+        // ErasureEngineUnavailable while the journey is unbuilt — and that the error is NOT
+        // FORBIDDEN is exactly the proof that the guard admitted the call and the resolver ran.
+        let resp = execute_as(&schema, RequestRole::Customer, query).await;
+        assert!(!resp.errors.is_empty(), "{name}: expected the typed refusal for CUSTOMER");
+        assert!(
+            !is_forbidden(&resp.errors[0]),
+            "{name} must pass the guard for CUSTOMER: {:?}",
+            resp.errors[0]
+        );
+    }
+
+    // 2. INTROSPECTION.
+    let (cust_q, cust_m) = introspected_fields(&schema, RequestRole::Customer).await;
+    assert!(cust_q.contains(&"erasureStatus".into()), "erasureStatus missing for CUSTOMER: {cust_q:?}");
+    for m in MUTATIONS {
+        assert!(cust_m.contains(&m.to_string()), "{m} missing for CUSTOMER: {cust_m:?}");
+    }
+    for role in OTHER_ROLES {
+        let (q, m) = introspected_fields(&schema, role).await;
+        assert!(!q.contains(&"erasureStatus".into()), "erasureStatus leaked to {role:?}");
+        for name in MUTATIONS {
+            assert!(!m.contains(&name.to_string()), "{name} leaked to {role:?}");
+        }
+    }
+
+    // 3. TYPE REACHABILITY.
+    assert!(
+        type_visible(&schema, RequestRole::Customer, "CustomerErasure").await,
+        "CustomerErasure must be visible to CUSTOMER"
+    );
+    for role in OTHER_ROLES {
+        assert!(
+            !type_visible(&schema, role, "CustomerErasure").await,
+            "the CustomerErasure type leaked to {role:?}"
+        );
+    }
+}

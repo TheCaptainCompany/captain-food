@@ -1705,3 +1705,96 @@ acceptance-timeout:
   # is watched via business.fire_delay_ms, not this budget.
   latency_budget: { max_p95_ms: 500, max_p99_ms: 2000 }
   error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
+# customer-erasure — the GDPR Art. 17 journey (PROP-20260829-150752 §3.8; #708)
+#
+# IDENTITY IS PSEUDONYMOUS THROUGHOUT, and that is a hard constraint rather than a preference: this
+# workflow instruments the destruction of a person's data, so a span attribute carrying their email,
+# phone or name would survive in the telemetry backend exactly the data the journey just erased —
+# and telemetry retention is not our erasure ledger's to control. `aggregate_id` survives as the
+# tombstone reference; nothing else identifying does.
+#
+# THE DEAD-MAN'S SWITCH IS THE POINT OF THIS CONTRACT. Every other signal here fires when something
+# HAPPENS; the failure that actually costs a person their rights is an erasure that goes QUIET. A
+# PARKED request emits no spans at all — by construction, since parking means no leg ran — so a
+# monitor that can only fire on signal arrival goes silent exactly when it should scream (the
+# defect class ADR-20260810-231300 names). `erasure_overdue_age_seconds` is therefore the age of the
+# OLDEST request without a receipt, computed by a timer-driven sweep over the process rows: it rises
+# on silence. It is ANCHORED AT REQUEST RECEIPT and parking never re-anchors or pauses it — our own
+# scheduling may not extend the subject's statutory month.
+#
+# Operational telemetry stays on OTLP/Honeycomb, not in the BAM fold: it has to work when Postgres
+# is down, which is one of the ways an erasure goes overdue.
+# =====================================================================
+customer-erasure:
+  feature: customer-erasure
+  criticality: high
+  workflow:
+    # Bound to the AGGREGATE that authors the erasure facts, not to a saga: the orchestrator is the
+    # next chunk's (its declaration is inseparable from its runtime seam — see the PR body). The
+    # contract lands FIRST on purpose, so the instrumentation it demands is a requirement on that
+    # chunk rather than something remembered afterwards.
+    aggregate: { $ref: 'actors.yaml#/Customer' }
+    inbound:
+      - { $ref: 'events.yaml#/CustomerErasureRequested' }
+      - { $ref: 'events.yaml#/CustomerErasureConfirmed' }
+      - { $ref: 'events.yaml#/CustomerErasureCancelled' }
+      - { $ref: 'events.yaml#/CustomerErasureDue' }
+      - { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+
+  run_identity:
+    - { name: correlation_id, source: "event.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    # The stream key, which for a Customer stream IS the customerId — and it is what survives as the
+    # TOMBSTONE reference, so it stays meaningful after the subject's data is gone. Pseudonymous by
+    # construction and treated exactly like `OrderDeleted.customerId`: an accountability reference,
+    # never personal data. No email, phone or name is admitted as a span attribute anywhere in this
+    # workflow — telemetry retention is not our erasure ledger's to control.
+    - { name: customer_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/CustomerId' }, required: true }
+
+  spans:
+    - name: "command.receive"
+      kind: SERVER
+      required: true
+      attributes:
+        - { key: "business.command_type", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
+    - name: "erasure.store.purge"
+      kind: CLIENT
+      required: true
+      attributes:
+        # One span per LEG, distinguished by this attribute (views / identity provider / key table /
+        # stream). A partial purge — one store done, another failed — must be visible AS partial,
+        # never as a generic failure, because the remedy differs per store.
+        - { key: "business.store", type: string, required: true }
+        - { key: "business.result", type: string, required: true }
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+
+  metrics:
+    - { name: "erasure_duration_ms", type: histogram, attributes: ["result"] }
+    - { name: "erasure_store_failed_total", type: counter, attributes: ["store"] }
+    # The bounded population is `scalars.yaml#/ErasureParkReason` (OPEN_ORDER | FUNDS_IN_FLIGHT) —
+    # a grouping key needs a declared closed set, and this one is declared as a domain scalar.
+    - { name: "erasure_request_parked_total", type: counter, attributes: ["reason"] }
+    # The dead-man's switch. PAGES above a threshold set well under thirty days.
+    - { name: "erasure_overdue_age_seconds", type: gauge, attributes: [] }
+
+  status_rules:
+    success:
+      required_spans: ["erasure.store.purge", "event.store.append"]
+      conditions: ["erasure.store.purge.business.result == 'purged'"]
+    technical_error:
+      any_span_errors: true
+      # PARKED IS NOT AN ERROR AND NOT A SUCCESS — it is non-terminal, and classifying it either way
+      # loses the only thing worth knowing about it. As an error it would page for the ordinary case
+      # of a customer with an order in flight, and the page would be ignored within a week; as a
+      # success it would close a run that has destroyed nothing. It stays open, on the clock, and
+      # visible through erasure_request_parked_total and the overdue gauge.
+
+  latency_budget: { max_p95_ms: 5000, max_p99_ms: 15000 }
+  error_budget: { max_error_rate_pct: 0.0 }

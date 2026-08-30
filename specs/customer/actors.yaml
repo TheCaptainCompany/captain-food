@@ -95,3 +95,96 @@ Customer:
     - message: { $ref: 'commands.yaml#/SetCustomerPaymentMethod' }
       emits: [{ $ref: 'events.yaml#/CustomerPaymentMethodSet' }]
       throws: []
+    # --- GDPR erasure (PROP-20260829-150752 §3.1/§3.2; #708) -----------------------------------
+    # Erasure is a rejectable COMMAND pair, not an event: an open order or funds in flight is a
+    # set-based precondition the write side checks, and an event cannot be refused (young, vernon).
+    # Every leg also throws `ErasureEngineUnavailable`, and in THIS chunk it throws it
+    # UNCONDITIONALLY: the handlers refuse every erasure command and record nothing, because the
+    # journey that would execute one is the next chunk. That is a typed refusal, never a silent
+    # accept (farley) — accepting a request nothing can run would start the Art. 12(3) clock on a
+    # journey that will never execute and show the subject "scheduled" forever.
+    # NOT YET GATED, and the distinction is load-bearing: `RUN_DELETION_ENGINE` gates the deletion
+    # ENGINE POD (c4-l2.yaml), not these mutations. Wiring the refusal to read that key is part of
+    # the runtime chunk, where there is finally an ON branch for it to select. Until then the
+    # refusal is unconditional, which is strictly safer than a gate whose ON side does nothing.
+    - message: { $ref: 'commands.yaml#/RequestCustomerErasure' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureRequested' }]
+      throws:
+        - { $ref: 'errors.yaml#/ErasureBlockedByOpenOrder' }
+        - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+      effect: "Record the Art. 17 request (acceptance-first, returns the erasureRequestId) and send the confirmation token. Idempotent while one is pending — the same id comes back and nothing new is recorded."
+    - message: { $ref: 'commands.yaml#/ConfirmCustomerErasure' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureConfirmed' }]
+      throws:
+        - { $ref: 'errors.yaml#/InvalidErasureConfirmationToken' }
+        - { $ref: 'errors.yaml#/ErasureNotRequested' }
+        - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+      effect: "Verify the token server-side, then record the confirmation. The grace window is scheduled from here as a REMINDER, so the moment it elapses becomes a recorded fact rather than an engine-internal timer."
+      schedules:
+        - { $ref: '#/Customer/reminders/CustomerErasureDue' }
+    - message: { $ref: 'commands.yaml#/CancelCustomerErasure' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureCancelled' }]
+      throws:
+        - { $ref: 'errors.yaml#/ErasureNotRequested' }
+      effect: "The subject keeps their account (re-login-cancels — the user's act, never an admin resurrection). Deliberately does NOT throw ErasureEngineUnavailable: a customer must always be able to stop a deletion, whatever state the engine is in."
+    # INBOUND INTEGRATION FACT, no command (ADR-0004): the provider confirmed the identity is gone.
+    # Recorded here so the erasure journey's unlink leg has a foldable completion fact in the log
+    # rather than a return value nobody can replay.
+    - message: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+      emits: [{ $ref: 'events.yaml#/CustomerIdentityUnlinked' }]
+      effect: "Record the auth provider's confirmation that the subject's identity was deleted at its end (Art. 28 processor instruction completed). Idempotent under re-delivery."
+    # The grace window elapsing is a RECORDED fact, not an engine-internal timer — record semantics,
+    # never rejected (ADR-20260731-153000 §1a). It is what projections fold to move the subject's
+    # status, and what the deletion trigger fires on.
+    - message: { $ref: '#/Customer/reminders/CustomerErasureDue' }
+      emits: [{ $ref: 'events.yaml#/CustomerErasureDue' }]
+      effect: "The grace window elapsed: record it. CustomerErasureProcess then re-checks the open-order precondition and, only if it passes, begins the destructive legs."
+
+  # The `deletion:` block — the recorded grammar of ADR-20260731-214500, reused, not reinvented.
+  # The engine's journey is unchanged (tombstone through projections, including View_Customer.auth_ref
+  # — the access-control artifact #708 names — then technical tombstone, stream deletion, ledger
+  # receipt). What Customer adds beyond the Order pilot is BESPOKE LEGS, which is the recorded escape
+  # hatch of §4: "an aggregate needing bespoke steps falls back to a hand-written PM — `deletion:` is
+  # sugar over the same machinery." Those legs are CustomerErasureProcess.
+  #
+  # The grace window lives on the REMINDER, exactly as the Order pilot's does — NOT on the trigger.
+  # The reason is ADR-20260731-160000 §2's, and it applies with more force here: the expiry must be a
+  # recorded business fact projections can fold, because it is the moment the subject's own status
+  # screen changes from "you can still cancel" to "this is running". An engine-internal timer would
+  # move that screen with no foldable cause in the log.
+  # `reschedule: keep` on purpose (#167's shape, not the pilot's `in-place`): a redelivered,
+  # duplicate-absorbed confirmation must NOT push the deletion date out again — the FIRST
+  # scheduled_at wins, because the subject was told a date and re-delivery is not a new decision.
+  reminders:
+    CustomerErasureDue:
+      payload: { $ref: 'events.yaml#/CustomerErasureDue' }
+      after: { $ref: 'configuration.yaml#/keys/CUSTOMER_ERASURE_GRACE_WINDOW_DAYS' }
+      reschedule: keep
+  # THE `deletion:` BLOCK IS DEFERRED TO THE RUNTIME CHUNK, and the deletion ENGINE is what proved
+  # it must be. Declaring it here does not describe a promise — it CHANGES THE RUNNING SYSTEM, in
+  # two ways this chunk cannot honour:
+  #   1. `DeletionEngine::new` validates EVERY declared policy at construction. A Customer block
+  #      with no receipt builder makes the engine fail to construct AT ALL — so declaring it here
+  #      would have broken ORDER erasure in production, an existing, working, legally-required
+  #      journey. That is a regression, not an incomplete feature.
+  #   2. The block needs `cancelled_on:` (re-login-cancels is the designed behaviour and the
+  #      subject's own act), and the engine refuses it outright: the UNDO PASS IS NOT BUILT
+  #      (deletion.rs). Declaring the block WITHOUT `cancelled_on` would be far worse than not
+  #      declaring it — a cancelled erasure would still destroy the account, silently, which is the
+  #      one outcome no part of this design tolerates.
+  # So the block lands in the runtime chunk together with its receipt builder and the undo pass,
+  # where the three test each other. Everything the block would have referenced already exists here
+  # and is validated: the commands, the confirmed/cancelled/due facts, `CustomerErased`, the
+  # reminder that schedules the grace window, and the rules that pin the ladder. What is missing is
+  # exactly the machinery, and it is missing HONESTLY rather than declared and inert.
+  # Shape it must take (unchanged from PROP-20260829-150752 §3.2, recorded so it is not re-derived):
+  #   deletion:
+  #     triggers:
+  #       - on:           [CustomerErasureDue]
+  #         cancelled_on: [CustomerErasureCancelled]
+  #         match: { event: CustomerErasureDue.customerId, state: Customer.customerId }
+  #     receipt: CustomerErased
+  # The receipt builder must read `erasureRequestId` off the CONFIRMED fact (scanning in reverse:
+  # request → cancel → request again is legal on one stream, and only the last confirmation
+  # authorised the run), never off a merely-requested one, and never from the Customer fold —
+  # every field on a receipt that outlives the erasure must be one we are allowed to keep.

@@ -138,6 +138,11 @@ impl QueryRoot {
             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(CustomerProfile::from))
     }
+    /// The authenticated customer's own erasure request, or null when none exists. NO ARGS BY DESIGN: the subject is derived from AUTH CONTEXT server-side, never supplied by the client. A required `customerId!` here would be exactly the #745 unfulfillable class — an identity fact the account route has no source for, so the read would fail structurally on every paint — AND it would let any authenticated caller ask about somebody else's deletion, which is a disclosure of the most sensitive thing this product knows about a person. Answers before AND after the erasure completes: pre-receipt from the folded request row, post-receipt from the same row now carrying the receipt's policy and retained-under limbs. CONFIRM-WHILE-LOGGED-OUT is deliberately NOT served here (see the mutation roles): this query is CUSTOMER-only, so a subject who has signed out follows their emailed link, confirms, and then sees the status by signing in — the status surface never becomes an unauthenticated lookup of "what is happening to this account".
+    #[graphql(name = "erasureStatus", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    async fn erasure_status(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerErasure>> {
+        Err(crate::graphql::typed_error(&domain::generated::errors::ERASURE_ENGINE_UNAVAILABLE))
+    }
     /// The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side.
     #[graphql(name = "delivery", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn delivery(&self, ctx: &async_graphql::Context<'_>, input: DeliveryQueryInput) -> async_graphql::Result<Option<DeliveryJob>> {

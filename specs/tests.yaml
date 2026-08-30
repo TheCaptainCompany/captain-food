@@ -51,6 +51,22 @@ fixtures:
   customerInfoUpdated:
     type: { $ref: 'events.yaml#/CustomerInfoUpdated' }
     data: { customerId: "cust-1", displayName: "Johnny B." }
+  # --- GDPR erasure (PROP-20260829-150752; #708) ---
+  customerErasureRequested:
+    type: { $ref: 'events.yaml#/CustomerErasureRequested' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+  customerErasureConfirmed:
+    type: { $ref: 'events.yaml#/CustomerErasureConfirmed' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+  customerErasureCancelled:
+    type: { $ref: 'events.yaml#/CustomerErasureCancelled' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+  customerErasureDue:
+    type: { $ref: 'events.yaml#/CustomerErasureDue' }
+    data: { customerId: "cust-1" }
+  customerIdentityUnlinked:
+    type: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+    data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
   customerEmailVerified:
     type: { $ref: 'events.yaml#/CustomerEmailVerified' }
     data: { customerId: "cust-1", email: "johnny@example.com" }
@@ -4152,3 +4168,88 @@ tests:
       data: { targetMessageId: "missing-1" }
     thrown:
       - { $ref: 'errors.yaml#/MailboxMessageNotFound' }
+
+  # ----------------------------- Customer GDPR erasure (PROP-20260829-150752; #708) --------------
+  # THESE TESTS ASSERT A REFUSAL, AND THE REFUSAL IS THE SHIPPED BEHAVIOUR OF THIS CHUNK.
+  # The DSL surface for erasure landed ahead of the journey that executes one, so every write path
+  # refuses with a typed, translated error. What each case really asserts is the `thrown` line
+  # TOGETHER WITH an empty append: NOTHING is recorded. That pairing is the safety property — a
+  # refusal that quietly recorded the request anyway would start the Art. 12(3) thirty-day clock
+  # behind the customer's back and leave them watching a "scheduled" screen forever, which is the
+  # failure the typed rejection exists to prevent.
+  # When the journey lands these same cases gain their acceptance arms; the refusals stay, gated.
+  TestCustomerRequestErasureIsRefusedWhileTheJourneyIsUnbuilt:
+    name: "Refuses an erasure request while no journey can execute it -- typed, renderable, and records NOTHING"
+    rules:
+      - { $ref: 'rules.yaml#/ErasureIsRequestedConfirmedThenExecuted' }
+      - { $ref: 'rules.yaml#/ErasureIsRefusedWhileTheEngineIsGatedOff' }
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/RequestCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+    thrown:
+      # Both refusals are declared for contract completeness, the way
+      # TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards declares four: one call cannot
+      # raise both. `ErasureBlockedByOpenOrder` is the precondition arm that lands with the read
+      # model it needs; today the engine arm answers first, for every caller.
+      - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+      - { $ref: 'errors.yaml#/ErasureBlockedByOpenOrder' }
+
+  TestCustomerConfirmErasureIsRefusedWhileTheJourneyIsUnbuilt:
+    name: "Refuses a confirmation while no request can exist to confirm -- with erasure's OWN token error, never the email magic link's"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsRequestedConfirmedThenExecuted' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1", token: "erasure-token-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/ErasureEngineUnavailable' }
+      - { $ref: 'errors.yaml#/InvalidErasureConfirmationToken' }
+      - { $ref: 'errors.yaml#/ErasureNotRequested' }
+
+  TestCustomerCancelErasureAnswersAboutTheAccountNotTheEngine:
+    name: "A cancel is answered about the ACCOUNT, never about our engine -- a customer must always be able to stop a deletion"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsCancellableByTheSubjectWithinTheWindow' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureConfirmed' }
+      - { $ref: '#/fixtures/customerErasureCancelled' }
+    when:
+      type: { $ref: 'commands.yaml#/CancelCustomerErasure' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+    thrown:
+      # Deliberately NOT ErasureEngineUnavailable: the truthful answer to "stop my deletion" is about
+      # their account, not about our machinery.
+      - { $ref: 'errors.yaml#/ErasureNotRequested' }
+
+  TestCustomerErasureWindowElapses:
+    name: "The grace window elapsing is RECORDED as a fact, not left to an internal timer"
+    rules: [{ $ref: 'rules.yaml#/ErasureIsCancellableByTheSubjectWithinTheWindow' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureConfirmed' }
+    when:
+      type: { $ref: 'events.yaml#/CustomerErasureDue' }
+      data: { customerId: "cust-1" }
+    then:
+      - { $ref: '#/fixtures/customerErasureDue' }
+
+  TestCustomerIdentityUnlinkedIsRecorded:
+    name: "Records the auth provider's confirmation that the identity was deleted at its end (inbound fact, no command)"
+    rules: [{ $ref: 'rules.yaml#/ErasureUnlinkingIsRecordedWithoutACommand' }]
+    actor: { $ref: 'actors.yaml#/Customer' }
+    given:
+      - { $ref: '#/fixtures/customerRegistered' }
+      - { $ref: '#/fixtures/customerErasureConfirmed' }
+    when:
+      type: { $ref: 'events.yaml#/CustomerIdentityUnlinked' }
+      data: { customerId: "cust-1", erasureRequestId: "erasure-1" }
+    then:
+      - { $ref: '#/fixtures/customerIdentityUnlinked' }

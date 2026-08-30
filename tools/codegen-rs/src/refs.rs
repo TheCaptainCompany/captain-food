@@ -38,6 +38,11 @@ pub(crate) enum Kind {
     AnswerProperty,
     /// A `configuration.yaml#/keys/<KEY>` runtime-configuration key (PROP-20260729-004500).
     ConfigKey,
+    /// A `configuration.yaml#/retention_windows/<NAME>` APPROVED LEGAL RETENTION WINDOW (MET-W,
+    /// CLOSED 2026-08-11). Distinct from `ConfigKey` on purpose: a config key is an environment
+    /// variable an operator sets, a retention window is a legal instrument nobody may set at
+    /// runtime — so the two must never be substitutable at a `$ref` site.
+    RetentionWindow,
     /// A `processmanager.yaml` state-table orchestrator.
     ProcessManager,
     Service,
@@ -115,6 +120,7 @@ impl Kind {
             Kind::Answer => "actor answer operation",
             Kind::AnswerProperty => "actor answer reply property",
             Kind::ConfigKey => "configuration key",
+            Kind::RetentionWindow => "approved retention window",
             Kind::ProcessManager => "process manager",
             Kind::Service => "service",
             Kind::ServiceOperation => "service operation",
@@ -227,6 +233,7 @@ pub(crate) fn read_target_kind(k: Kind) -> Option<bool> {
         | Kind::Answer
         | Kind::AnswerProperty
         | Kind::ConfigKey
+        | Kind::RetentionWindow
         | Kind::ProcessManager
         | Kind::Service
         | Kind::ServiceOperation
@@ -315,7 +322,14 @@ pub(crate) fn classify(file: &str, path: &[String], node: &Value, handled: &BTre
         },
         // Runtime configuration (PROP-20260729-004500): `keys/<KEY>` is what a `deletion.after` /
         // `reminders.*.after` window binds to (ADR-20260731-214500 — a $ref, never a bare string).
-        "configuration.yaml" => (path.len() == 2 && seg(0) == Some("keys")).then_some(Kind::ConfigKey),
+        // `retention_windows/<NAME>` is the MET-W approved catalog an event's `legalRetention:`
+        // binds to. A $ref, never a bare token: a plain string is invisible to the refs walker, so
+        // no rule could see it (ADR-20260811-014129 clause 2).
+        "configuration.yaml" => match (path.len(), seg(0)) {
+            (2, Some("keys")) => Some(Kind::ConfigKey),
+            (2, Some("retention_windows")) => Some(Kind::RetentionWindow),
+            _ => None,
+        },
         "processmanager.yaml" => top.then_some(Kind::ProcessManager),
         "services.yaml" => {
             if top {
@@ -438,6 +452,12 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     // Configuration keys are TYPED (PROP-20260729-004500): each binds the scalar whose `pattern` the
     // generated reader enforces at startup, so "present" is checked against "usable".
     ("configuration.yaml", "keys.*.scalar", &[Kind::Scalar, Kind::EnumScalar]),
+
+    // An event DECLARES its own legal retention obligation (PROP-20260829-150752 §3.4; the shape
+    // BRIEF-20260811 §3 specified). The window is a $ref into the MET-W approved catalog — never a
+    // bare token, never a free duration string — which is what lets `deletion-undercuts-retention`
+    // and `legal-retention-window-uncatalogued` be spec-keyed gates instead of reviewed-by-eye prose.
+    ("events.yaml", "*.legalRetention.window", &[Kind::RetentionWindow]),
 
     // Actors (aggregates): the inbox and the lifecycle state machine. A `message` may also be the
     // actor's own reminder (`#/<Actor>/reminders/<Name>` — ADR-20260731-214500; §2f proves same-actor).

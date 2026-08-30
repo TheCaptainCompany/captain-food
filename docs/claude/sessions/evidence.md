@@ -376,6 +376,21 @@ Looking for where `SessionHeader` reaches the GraphQL context, a grep for `Sessi
 that the anonymous cart path was unwired in production, which would have produced a "fix" for a
 non-problem in a dispatch that had explicitly authorized wiring it.
 
+**Same class, one level up: a grep for the config KEY does not find a claim written in PROSE**
+(2026-08-30, #708 PR [#763], review round 2). A commit that removed a behaviour swept the four sites
+naming `RUN_DELETION_ENGINE` and declared *"fixed the sites, not the one line reported — a false
+statement is a class"*. The reviewer then found a FIFTH: a command `description:` saying *"when the
+deletion engine is gated OFF in this deployment"* — the key's meaning, never its spelling — and it
+was the worst of the five, because `async_graphql::InputObject` turns a command description into the
+**GraphQL introspection description every client of that role reads**. Two more sites in the same
+sweep were Rust comments a grep over `specs/**` structurally cannot reach. **After a commit that
+changes behaviour or deletes a declaration, re-sweep the CLAIM, not the identifier**: grep the
+behaviour's words (`gated`, `arms on`, `points the subject at`), across `crates/**` and `tools/**` as
+well as `specs/**`, and read the diff of the commit that falsified them. Cost here: a full review
+round for three stale sentences. **No cheap gate exists for it** — a checker would have to know which
+sentences are true — so this stays prose deliberately; what IS cheap is doing the sweep in the same
+commit as the behaviour change, while the list of falsified statements is still in your head.
+
 **Search the injection SHAPE at the transport boundary, not the type**: `grep -n '\.data(' ` in the
 route handlers and any `Data::default()` assembly (here: HTTP POST, the WS `connection_init`, and
 the in-process SSR transport). Then read those handlers top to bottom — the binding that carries

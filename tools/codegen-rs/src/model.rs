@@ -66,7 +66,12 @@ pub(crate) const SCOPED_FLAT_KINDS: &[&str] = &[
 /// fragments merge per section entry. Origin keys are `"{section}/{name}"`.
 pub(crate) const SCOPED_SECTION_KINDS: &[(&str, &[&str])] = &[
     ("api.yaml", &["types", "inputs", "queries", "mutations", "subscriptions"]),
-    ("configuration.yaml", &["keys"]),
+    // `retention_windows` is the MET-W approved catalog of LEGAL retention horizons (the shape
+    // BRIEF-20260811 §3 specified). It shares configuration.yaml with `keys` so the deletion
+    // grammar's `after:` and an event's `legalRetention:` read out of ONE catalog file, but the two
+    // sections are not interchangeable: a key is an environment variable an operator sets, a
+    // retention window is a legal instrument nobody may set at runtime.
+    ("configuration.yaml", &["keys", "retention_windows"]),
 ];
 
 /// `specs/` subdirectories that are NOT scope folders (structural homes with their own loaders).

@@ -569,3 +569,299 @@ pub(crate) fn validate_reminders_and_deletion(model: &Model, issues: &mut Vec<Is
     }
 }
 
+
+// ─── §2f-bis — legal retention vs. declarative deletion (PROP-20260829-150752 §3.4) ─────────────
+//
+// These two rules SHIP WITH the deletion grammar, never after it. A `deletion:` block spellable
+// without its `legalRetention:` gate is the register-destroying trap BRIEF-20260811 §3 recorded as
+// BLOCKER-on-arrival: the one built erasure mechanism is Order-shaped (delete the whole stream), and
+// giving `Restaurant-*` the same block would delete the Art. 21 objection register WITH the stream.
+// The consequence is not data loss, it is RE-LISTABILITY — the pipeline would find nothing recording
+// the refusal and re-contact the person who objected.
+//
+// The brief's own words: what was missing is "the LEFT-HAND SIDE" — the spec had no way to say
+// "this event is a legal register", and the only alternative was hard-coding the event name in the
+// validator, "a comment written in Rust, not a spec-derived gate". `legalRetention:` is that
+// left-hand side, and these rules are the gate it makes possible.
+
+/// One event's declared `legalRetention:` — the obligation that COMPELS keeping it.
+pub(crate) struct LegalRetentionDef {
+    pub(crate) event: String,
+    /// `window.$ref` — MUST be a `configuration.yaml#/retention_windows/<NAME>` catalog entry.
+    pub(crate) window_ref: Option<String>,
+}
+
+/// A resolved catalog window: a horizon in days, or no horizon at all.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetentionHorizon {
+    Days(i64),
+    Indefinite,
+}
+
+/// Parse every `legalRetention:` clause in the merged events catalog, in catalog order.
+pub(crate) fn parse_legal_retentions(model: &Model) -> Vec<LegalRetentionDef> {
+    let mut out = Vec::new();
+    let Some(Value::Mapping(events)) = model.defs.get("events.yaml") else { return out };
+    for (k, node) in events {
+        let Some(event) = k.as_str() else { continue };
+        let Some(lr) = node.get("legalRetention") else { continue };
+        out.push(LegalRetentionDef {
+            event: event.to_string(),
+            window_ref: lr
+                .get("window")
+                .and_then(|w| w.get("$ref"))
+                .and_then(|r| r.as_str())
+                .map(str::to_string),
+        });
+    }
+    out
+}
+
+/// The catalog name a retention-window `$ref` denotes, or None when the ref has any other shape.
+pub(crate) fn retention_window_ref_name(r: &str) -> Option<String> {
+    let pr = parse_ref(r)?;
+    (pr.file == "configuration.yaml" && pr.path.len() == 2 && pr.path[0] == "retention_windows")
+        .then(|| pr.path[1].clone())
+}
+
+/// Resolve a catalog entry to its horizon. `None` = absent or malformed (neither `days` nor
+/// `indefinite`, or both) — the caller reports it as uncatalogued, because a window that declares no
+/// usable horizon is not a window anyone approved.
+fn horizon_of(model: &Model, name: &str) -> Option<RetentionHorizon> {
+    let node = model
+        .defs
+        .get("configuration.yaml")
+        .and_then(|c| c.get("retention_windows"))
+        .and_then(|w| w.get(name))?;
+    let indefinite = node.get("indefinite").and_then(|i| i.as_bool()).unwrap_or(false);
+    let days = node.get("days").and_then(|d| d.as_i64());
+    match (indefinite, days) {
+        (true, None) => Some(RetentionHorizon::Indefinite),
+        (false, Some(d)) if d >= 0 => Some(RetentionHorizon::Days(d)),
+        _ => None,
+    }
+}
+
+/// A configuration key's window in DAYS, from its DECLARED default. `None` when the key is absent,
+/// declares no default, or its unit is not a duration — each of which makes the window unknowable
+/// at spec time, which is the case the rule must refuse rather than wave through.
+fn config_window_days(model: &Model, key: &str) -> Option<i64> {
+    let node = model.defs.get("configuration.yaml").and_then(|c| c.get("keys")).and_then(|k| k.get(key))?;
+    let default = node.get("default").and_then(|d| d.as_i64())?;
+    match node.get("unit").and_then(|u| u.as_str()) {
+        Some("days") => Some(default),
+        // Integer days, floored: a window expressed in seconds is compared as whole days, and
+        // flooring is the SAFE direction — it can only make a window look SHORTER than it is, so a
+        // rounding artefact can never turn a real undercut into a pass.
+        Some("seconds") => Some(default / 86_400),
+        _ => None,
+    }
+}
+
+/// §2f-bis. Two rules, both spec-keyed, both errors:
+///   - `legal-retention-window-uncatalogued` (error): a `legalRetention:` that does not name a
+///     resolving, well-formed `configuration.yaml#/retention_windows/<NAME>` entry. A free duration
+///     string was refused on purpose (DECISIONS MET-W): "a pattern catches `P90DD` but not a
+///     well-formed window nobody approved";
+///   - `deletion-undercuts-retention` (error): a `deletion:` TRIGGER whose effective window is
+///     shorter than the longest `legalRetention` horizon reachable from the actor's `emits`, or
+///     which reaches an `indefinite` horizon at all, or whose window cannot be determined while a
+///     retention obligation IS reachable.
+///
+/// SCOPED PER TRIGGER, not per actor — that is what reconciles the rule with the LIVE Order pilot:
+/// `ORDER_RETENTION_WINDOW_DAYS` defaults to 3650, the same horizon its financial events declare, so
+/// the pilot passes EXACTLY AT the boundary (3650 >= 3650) rather than comfortably inside it. Any
+/// shortening of that key is meant to go red.
+///
+/// THE WINDOW IS TRACED, NOT ASSUMED. The pilot's trigger carries NO `after:` — the window lives on
+/// the REMINDER (`specs/ordering/actors.yaml` `reminders.OrderExpired.after`), because the expiry
+/// must be a recorded business fact projections can fold (ADR-20260731-160000 §2). So a trigger
+/// without `after:` is resolved by tracing each `on` event back to a same-actor reminder that
+/// SCHEDULES it, and the MINIMUM across the `on` events wins (the trigger fires on whichever arrives
+/// first). Reading a missing `after:` as "no delay" would have silently passed the pilot while
+/// measuring nothing.
+///
+/// An untraceable window is an ERROR, never a pass — but ONLY where a retention obligation is
+/// actually reachable. Pure PROPAGATION triggers (no `after`, a typed `match`, nothing retained)
+/// are the normal shape of a child dying with its parent and must stay legal.
+pub(crate) fn validate_legal_retention(model: &Model, issues: &mut Vec<Issue>) {
+    // ---- rule 2: every legalRetention names a catalogued window ----
+    let retentions = parse_legal_retentions(model);
+    let mut horizon_by_event: BTreeMap<String, RetentionHorizon> = BTreeMap::new();
+    // The INSTRUMENT that compels each horizon — carried into the refusal so the reader is told
+    // WHICH law they are about to break, not merely that a number is too small.
+    let mut instrument_by_event: BTreeMap<String, String> = BTreeMap::new();
+    for lr in &retentions {
+        let at = format!("events.yaml/{}/legalRetention", lr.event);
+        let Some(r) = &lr.window_ref else {
+            issues.push(err(
+                "legal-retention-window-uncatalogued",
+                at,
+                "legalRetention declares no `window` — name one from the approved catalog (`configuration.yaml#/retention_windows/<NAME>`, MET-W). A retention obligation with no horizon is unenforceable.".into(),
+            ));
+            continue;
+        };
+        let Some(name) = retention_window_ref_name(r) else {
+            issues.push(err(
+                "legal-retention-window-uncatalogued",
+                at,
+                format!("`window` must be a `configuration.yaml#/retention_windows/<NAME>` ref, got '{}' — never a bare token and never a free duration string (DECISIONS MET-W: a pattern catches 'P90DD' but not a well-formed window nobody approved).", r),
+            ));
+            continue;
+        };
+        match horizon_of(model, &name) {
+            Some(h) => {
+                horizon_by_event.insert(lr.event.clone(), h);
+                if let Some(instr) = model
+                    .defs
+                    .get("configuration.yaml")
+                    .and_then(|c| c.get("retention_windows"))
+                    .and_then(|w| w.get(name.as_str()))
+                    .and_then(|n| n.get("instrument"))
+                    .and_then(|i| i.as_str())
+                {
+                    instrument_by_event.insert(lr.event.clone(), instr.to_string());
+                }
+            }
+            None => issues.push(err(
+                "legal-retention-window-uncatalogued",
+                at,
+                format!("'{}' is not a well-formed entry of the approved retention catalog — it must exist under `configuration.yaml#/retention_windows` and declare EXACTLY ONE of `days: <n>` or `indefinite: true`.", name),
+            )),
+        }
+    }
+
+    // ---- rule 1: a deletion trigger may not undercut retention ----
+    if horizon_by_event.is_empty() {
+        return;
+    }
+    let deletions = parse_deletions(model);
+    let reminders = parse_reminders(model);
+    let Some(Value::Mapping(actors)) = model.defs.get("actors.yaml") else { return };
+
+    for d in &deletions {
+        // What this actor AUTHORS — the retention obligations its stream deletion would destroy.
+        let mut indefinite: Vec<&str> = Vec::new();
+        let mut longest: Option<(i64, &str)> = None;
+        let emitted: BTreeSet<String> = actors
+            .get(d.actor.as_str())
+            .and_then(|n| n.get("receives"))
+            .and_then(|r| r.as_sequence())
+            .into_iter()
+            .flatten()
+            .flat_map(|e| ref_strings(e.get("emits")))
+            .filter_map(|r| ref_name(&r))
+            .collect();
+        for ev in &emitted {
+            match horizon_by_event.get(ev) {
+                Some(RetentionHorizon::Indefinite) => indefinite.push(ev),
+                Some(RetentionHorizon::Days(days)) => {
+                    if longest.map(|(d0, _)| *days > d0).unwrap_or(true) {
+                        longest = Some((*days, ev));
+                    }
+                }
+                None => {}
+            }
+        }
+        if indefinite.is_empty() && longest.is_none() {
+            continue; // nothing retained on this stream — the ordinary case
+        }
+
+        for (i, t) in d.triggers.iter().enumerate() {
+            let tat = format!("actors.yaml/{}/deletion.triggers[{}]", d.actor, i);
+
+            // (B) An indefinite horizon bars stream deletion OUTRIGHT — there is no window long
+            // enough. Reported first and unconditionally: it is the BRIEF-20260811 §3 trap itself.
+            if let Some(ev) = indefinite.first() {
+                issues.push(err(
+                    "deletion-undercuts-retention",
+                    tat.clone(),
+                    format!(
+                        "'{}' emits '{}', whose legalRetention horizon is INDEFINITE — a stream-deleting trigger is refused outright, because no `after:` window can ever satisfy it. Retaining that record IS the lawful act and deleting it is the violation (BRIEF-20260811 §3; Art. 21 register read with Art. 5(2) accountability). Erase the personal fields by crypto-shred and keep the stream, or move the retained fact off this stream.",
+                        d.actor, ev
+                    ),
+                ));
+                continue;
+            }
+            let Some((need_days, need_ev)) = longest else { continue };
+
+            // The trigger's effective window: its own `after:`, else traced through the same-actor
+            // reminders that schedule its `on` events (the pilot's shape).
+            let mut traced: Option<i64> = None;
+            let mut unknowable: Option<String> = None;
+            match &t.after_ref {
+                Some(a) => match config_key_ref_name(a).and_then(|k| config_window_days(model, &k)) {
+                    Some(days) => traced = Some(days),
+                    None => {
+                        unknowable = Some(format!(
+                            "its `after:` ref '{}' resolves to no checkable window — the key must exist, declare a duration `unit:` (days|seconds) AND a `default:`, or the horizon is only knowable at runtime, which is exactly when it is too late",
+                            a
+                        ))
+                    }
+                },
+                None => {
+                    for on in &t.on {
+                        let Some(on_ev) = ref_name(on) else { continue };
+                        let sched = reminders.iter().find(|r| {
+                            r.actor == d.actor
+                                && ref_name(&r.payload_ref).as_deref() == Some(on_ev.as_str())
+                        });
+                        match sched.and_then(|r| r.after_ref.as_ref()) {
+                            Some(a) => {
+                                match config_key_ref_name(a).and_then(|k| config_window_days(model, &k)) {
+                                    Some(days) => {
+                                        traced = Some(traced.map_or(days, |t0: i64| t0.min(days)))
+                                    }
+                                    None => {
+                                        unknowable = Some(format!(
+                                            "the reminder scheduling '{}' names window key '{}', which resolves to no checkable window (needs a duration `unit:` and a `default:`)",
+                                            on_ev, a
+                                        ))
+                                    }
+                                }
+                            }
+                            None => {
+                                unknowable = Some(format!(
+                                    "it declares no `after:` and its trigger event '{}' is scheduled by no reminder on '{}' that carries one, so the delay before deletion is UNKNOWABLE from the spec",
+                                    on_ev, d.actor
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // (D) Unknowable beats unknown: a window nobody can compute is never assumed to be long
+            // enough. This is the arm a reviewer skips, because the spec LOOKS complete.
+            if let Some(why) = unknowable {
+                issues.push(err(
+                    "deletion-undercuts-retention",
+                    tat.clone(),
+                    format!(
+                        "'{}' emits '{}', retained for {} days, but this trigger's effective window cannot be determined: {}. An undeterminable window is refused, never assumed sufficient.",
+                        d.actor, need_ev, need_days, why
+                    ),
+                ));
+                continue;
+            }
+            // (A) The comparison itself. `>=` on purpose: equality is the pilot's real posture.
+            if let Some(have) = traced {
+                if have < need_days {
+                    issues.push(err(
+                        "deletion-undercuts-retention",
+                        tat,
+                        format!(
+                            "this trigger deletes the '{}' stream after {} days, but '{}' declares a legalRetention horizon of {} days ({}) — deletion would destroy a record the law compels us to keep. Lengthen the window to at least {} days, or keep the stream and crypto-shred its personal fields instead.",
+                            d.actor,
+                            have,
+                            need_ev,
+                            need_days,
+                            instrument_by_event.get(need_ev).map(String::as_str).unwrap_or("instrument undeclared"),
+                            need_days
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+}

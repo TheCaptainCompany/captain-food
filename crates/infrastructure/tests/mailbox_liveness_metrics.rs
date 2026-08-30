@@ -73,7 +73,16 @@ use telemetry::contract::metric;
 /// `REMINDER_SCHEDULES`: an expectation computed from the same table the watcher reads would agree
 /// with the watcher by construction. [`declared_lanes_are_still_the_ones_asserted`] keeps the
 /// literal honest and tells a future lane-adder exactly what to update.
-const LANES: &[(&str, &str)] = &[("Order", "OrderAcceptanceTimedOut"), ("Order", "OrderExpired")];
+/// NOTE for the next lane-adder: the list is SORTED, because the assertion compares against a
+/// sorted+deduped view of `REMINDER_SCHEDULES`. `Customer/CustomerErasureDue` (#708) is the lane
+/// whose silence is least tolerable of the three: the other two fire on orders that someone is
+/// actively waiting for and will chase, while an erasure whose due-reminder never lands is a
+/// statutory deadline passing with nobody on either side aware of it.
+const LANES: &[(&str, &str)] = &[
+    ("Customer", "CustomerErasureDue"),
+    ("Order", "OrderAcceptanceTimedOut"),
+    ("Order", "OrderExpired"),
+];
 
 /// The ROUTED-BIRTH lanes the Order-lane watch must report on (#598) — same literal-not-derived
 /// discipline as [`LANES`], pinned by [`routed_lanes_are_still_the_ones_asserted`].
@@ -82,6 +91,19 @@ const ROUTED: &[&str] = &["Order"];
 /// One expected attribute set.
 fn attrs<const N: usize>(kvs: [(&str, &str); N]) -> BTreeMap<String, String> {
     kvs.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+}
+
+/// The dead-man's-switch point set: ONE point per declared ACTOR TYPE (the lag is keyed by actor
+/// type alone, not by lane), each at `value`. Derived from [`LANES`] rather than spelled out, for
+/// the reason the depth helper is: a new reminder on a NEW actor silently widens this series, and
+/// a hard-coded literal would then fail three assertions at once with a point-set diff that names
+/// no cause. `declared_lanes_are_still_the_ones_asserted` remains the one place a lane change is
+/// explained.
+fn expected_lag<T: Copy>(value: T) -> Vec<(BTreeMap<String, String>, T)> {
+    let mut actors: Vec<&str> = LANES.iter().map(|(actor, _)| *actor).collect();
+    actors.sort();
+    actors.dedup();
+    actors.into_iter().map(|a| (attrs([("actor_type", a)]), value)).collect()
 }
 
 /// The depth point set the watcher owes for a backlog where only `due` lanes carry rows: every
@@ -279,13 +301,13 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     );
     assert_eq!(
         empty.points(metric::REMINDER_PROMOTION_DUE_LAG_MS),
-        vec![(attrs([("actor_type", "Order")]), 0.0)],
+        expected_lag(0.0),
         "the dead-man's switch records 0 when nothing is due -- an absent point is what a DEAD \
          watcher looks like, and the two must never be confusable"
     );
     assert_eq!(
         empty.records(metric::REMINDER_PROMOTION_DUE_LAG_MS),
-        vec![(attrs([("actor_type", "Order")]), 1)],
+        expected_lag(1),
         "exactly ONE record per lane per tick: the alert is on the increment, so a tick that \
          records twice (or not at all) breaks the heartbeat's arithmetic"
     );
@@ -307,7 +329,7 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     );
     assert_eq!(
         empty_again.points(metric::REMINDER_PROMOTION_DUE_LAG_MS),
-        vec![(attrs([("actor_type", "Order")]), 0.0)],
+        expected_lag(0.0),
         "the dead-man's switch must RE-ASSERT on every tick: a signal emitted once proves only \
          that the process started"
     );
@@ -328,17 +350,30 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     let lag = due.points(metric::REMINDER_PROMOTION_DUE_LAG_MS);
     assert_eq!(
         lag.len(),
-        1,
-        "one lag point per actor type, whatever the number of due rows: {lag:?}"
+        expected_lag(0.0).len(),
+        "one lag point per DECLARED actor type, whatever the number of due rows -- and the actors \
+         with nothing due still report, which is the whole dead-man's-switch claim: {lag:?}"
     );
-    assert_eq!(lag[0].0, attrs([("actor_type", "Order")]), "the lag is keyed by actor type alone");
+    let order_lag = lag
+        .iter()
+        .find(|(a, _)| a == &attrs([("actor_type", "Order")]))
+        .expect("the lag is keyed by actor type alone, and Order has the overdue row");
     assert!(
-        lag[0].1 >= 60_000.0,
+        order_lag.1 >= 60_000.0,
         "a reminder 90s overdue must show as ~90000ms of lag, not {}ms -- the value IS the alarm: \
          a watcher that always reports 0 is indistinguishable from a promotion pass that is \
          keeping up, which is exactly the failure it is meant to catch",
-        lag[0].1
+        order_lag.1
     );
+    // The actors with NOTHING due must still read zero in the same drain. Without this, a watcher
+    // that reported only the actor it found work for would satisfy every assertion above -- and
+    // that is precisely the defect class ADR-20260810-231300 names, where a threshold alert goes
+    // quiet exactly when it should scream.
+    for (attr, value) in &lag {
+        if attr != &attrs([("actor_type", "Order")]) {
+            assert_eq!(*value, 0.0, "an actor with nothing due must report 0, not be absent: {attr:?}");
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────
     // #598 — the ROUTED-BIRTH lane dead-man's switch, in the same binary because the process's

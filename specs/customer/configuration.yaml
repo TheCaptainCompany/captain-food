@@ -135,3 +135,38 @@ keys:
       DECISIONS §46), so there is no subject to key a mapping on for them; this key does not touch
       their claim reads. Flipping the default is a SEPARATE recorded decision after the gated form
       is smoked.
+
+
+  # ===================================================================
+  # GDPR ERASURE WINDOWS (PROP-20260829-150752; #708)
+  #
+  # These are OPERATIONAL windows an operator may tune — deliberately in `keys:`, unlike the LEGAL
+  # horizons, which live in `configuration.yaml#/retention_windows` precisely because nobody may set
+  # those at runtime. Shortening a key below a legal horizon is refused by
+  # `deletion-undercuts-retention`, so the two catalogs are checked against each other, not merely
+  # documented next to each other.
+  # ===================================================================
+
+  CUSTOMER_ERASURE_GRACE_WINDOW_DAYS:
+    type: int
+    unit: days        # typed duration unit (#167) — the emitters branch on THIS, never on the name
+    default: 30
+    gates: >
+      The grace window between a CONFIRMED erasure and the destructive legs running: the customer's
+      way back (re-login-cancels) and our only chance to stop a mistake, since nothing after it is
+      reversible. 30 days is the defensible ceiling (BRIEF-20260808 §3) and is set AT it rather than
+      under it, because the value doubles as the customer's stated "you have N days to change your
+      mind" — a shorter window is a smaller promise, not a safer one. It does NOT extend the
+      Art. 12(3) month: that clock is anchored at the REQUEST receipt and runs regardless. Set it to
+      0 only with counsel's answer on immediate-execution-on-demand (PROP §9 Q5) recorded.
+
+  CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS:
+    type: int
+    unit: seconds     # typed duration unit (#167)
+    default: 259200   # 72 hours
+    gates: >
+      How long an erasure confirmation token stays valid. It EXISTS so that an unconfirmed request
+      LAPSES VISIBLY on the status view instead of sitting open and silently consuming the subject's
+      thirty days — the confirmation is our safeguard, so it may not eat their clock. Too long and a
+      forgotten link stays live on a mail server; too short and a customer who checks mail daily
+      cannot exercise a right. 72h is the proposed value pending counsel's response-wording answer.

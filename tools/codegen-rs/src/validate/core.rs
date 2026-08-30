@@ -417,6 +417,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     validate_actor_answers(model, &mut issues);
     // --- 2f. Reminders + declarative deletion (ADR-20260731-214500) ------------------------------
     validate_reminders_and_deletion(model, &mut issues);
+    // §2f-bis — the retention gate ships WITH the deletion grammar it guards (PROP-20260829-150752
+    // §3.4): a `deletion:` block spellable without its `legalRetention:` check is the
+    // register-destroying trap BRIEF-20260811 §3 recorded as BLOCKER-on-arrival.
+    validate_legal_retention(model, &mut issues);
     {
         let lcs = parse_lifecycles(model);
         cov.lifecycles = lcs.len();

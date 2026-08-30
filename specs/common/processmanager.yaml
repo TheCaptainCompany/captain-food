@@ -69,8 +69,15 @@ description: >
             - { from_state: <column> }                        — the PM's own state row
             - { from_read: <alias>.<column> }                 — a prior read step's result
             - { from_port: <port>.<operation> }               — a prior call step's result
-            - { from_envelope: event_id | correlation_id | occurred_at } — the trigger's envelope
+            - { from_envelope: event_id }                    — the trigger's envelope
                                                                   (ADR-0041; infrastructure metadata)
+              NOTE: `correlation_id` and `occurred_at` are DESIGNED but NOT EMITTED — the generator
+              panics on them today (pm_orchestrators.rs), so this grammar previously promised two
+              values no PM could actually use. `occurred_at` is the one that will be needed first
+              and it is not cosmetic: wherever a stamped time is a DEADLINE ANCHOR (the #708 Art.
+              12(3) erasure clock), `Utc::now()` restarts the clock whenever a worker happens to
+              drain the lane, so a slow queue buys us time that is not ours. It lands with the first
+              PM that needs it, which is also its first corpus user and its test.
 
   RUNTIME ENVELOPE (declared once, never repeated as steps — like the event envelope, ADR-0041):
   single-flight per state row via optimistic concurrency (the old lock/unlock steps), trigger

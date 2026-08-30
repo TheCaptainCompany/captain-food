@@ -136,3 +136,24 @@ SELECT
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('RefundOpened', 'RefundApproved', 'RefundDenied', 'PaymentRefunded')) AS updated_at
 FROM domain_events c
 WHERE c.event_type = 'RefundOpened';
+
+CREATE OR REPLACE VIEW View_CustomerErasure AS
+SELECT
+  (c.payload->>'customerId')::uuid AS customer_id,
+  (c.payload->>'erasureRequestId')::uuid AS erasure_request_id,
+  (SELECT CASE e.event_type WHEN 'CustomerErasureRequested' THEN 'REQUESTED' WHEN 'CustomerErasureConfirmed' THEN 'CONFIRMED' WHEN 'CustomerErasureDue' THEN 'EXECUTING' WHEN 'CustomerIdentityUnlinked' THEN 'EXECUTING' WHEN 'CustomerErased' THEN 'ERASED' END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('CustomerErasureRequested', 'CustomerErasureConfirmed', 'CustomerErasureDue', 'CustomerIdentityUnlinked', 'CustomerErased')
+     ORDER BY e.position DESC LIMIT 1) AS status,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('CustomerErasureCancelled')) AS cancelled_at,
+  (SELECT e.payload->>'policy' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('CustomerErased') AND e.payload ? 'policy'
+     ORDER BY e.position DESC LIMIT 1) AS policy,
+  (SELECT e.payload->'retainedUnder' FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('CustomerErased') AND e.payload ? 'retainedUnder'
+     ORDER BY e.position DESC LIMIT 1) AS retained_under,
+  c.occurred_at AS created_at,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('CustomerErasureRequested', 'CustomerErasureConfirmed', 'CustomerErasureCancelled', 'CustomerErasureDue', 'CustomerIdentityUnlinked', 'CustomerErased')) AS updated_at
+FROM domain_events c
+WHERE c.event_type = 'CustomerErasureRequested';

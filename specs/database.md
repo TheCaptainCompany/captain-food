@@ -227,6 +227,24 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `View_CustomerErasure` · 🔭 V1 · source aggregate `Customer`
+
+- **Fed by**: `CustomerErasureRequested`, `CustomerErasureConfirmed`, `CustomerErasureCancelled`, `CustomerErasureDue`, `CustomerIdentityUnlinked`, `CustomerErased`
+- **Rules**: `status` is derived from the latest recorded fact: REQUESTED -> CONFIRMED -> EXECUTING (the first destructive leg reported) -> ERASED. A CustomerErasureCancelled stamps cancelled_at and ends the row's life as a request; nothing further folds onto it. PARKED is ABSENT on purpose: parking is process-row state — an internal scheduling fact about OUR execution, never a recorded event — and the subject is owed the state of their RIGHT, not of our scheduler. The row-state enum that carries it lands with the orchestrator. Every column is pseudonymous. The row must survive the deletion of the Customer stream, which is exactly why it may never carry personal data.
+- **Indexes**: `(customer_id, status)`
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `customer_id` | `CustomerId` | `UUID` | PK | The accountability reference the query scopes on — resolved from the authenticated principal, never from a client argument. |
+| `erasure_request_id` | `ErasureRequestId` | `UUID` | — | The subject's pseudonymous reference for the right they exercised; quotable back to us after everything else is gone. |
+| `status` | `ErasureStatus` | `TEXT` | — | Derived from the latest fact. The grace window elapsing is what turns the answer to EXECUTING — the subject can no longer cancel from that moment, so telling them otherwise would be false. The unlink leg keeps it there. |
+| `cancelled_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | occurrence: when the subject withdrew the request inside the window. A separate TIMESTAMP rather than a member of ErasureStatus: a cancelled request is not a phase of an erasure, it is the absence of one — and the moment they changed their mind is the fact worth keeping, not merely that they did.
+ |
+| `policy` | `text` | `TEXT` | nullable | The window the erasure ran under; null until the receipt exists. |
+| `retained_under` | `jsonb` | `JSONB` | nullable | The approved retention windows under which data about this subject survives, by catalog name — the disclosure limb of §3.6, generated from the same declarations that enforce it, so the screen cannot drift from the behaviour. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `Restaurant` · 🛶 V0 · source aggregate `Restaurant`
 
 - **Fed by**: `RestaurantRegistered`, `RestaurantUpdated`, `RestaurantActivated`, `RestaurantDeactivated`, `RestaurantAcceptanceModeChanged`, `RestaurantRemoved`, `RestaurantGoogleBusinessProfileUpdated`, `RestaurantListingClaimed`, `RestaurantListingOptedOut`, `RestaurantMarkedClosed`, `RestaurantListingStatusChanged`, `RestaurantGoogleBusinessProfileOrderLinkConfigured`, `RestaurantGoogleBusinessProfileOrderLinkVerified`, `RestaurantSlugConfigured`, `RestaurantSlugReconfigured`, `RestaurantAccountRegistered`

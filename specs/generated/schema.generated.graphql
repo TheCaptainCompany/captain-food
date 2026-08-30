@@ -83,6 +83,8 @@ scalar DialingCode
 scalar NationalPhoneNumber
 scalar OtpCode
 scalar EmailVerificationToken
+scalar ErasureRequestId
+scalar ErasureConfirmationToken
 scalar DeliveryJobId
 scalar CityId
 scalar DeliveryChannelKey
@@ -316,6 +318,23 @@ enum ClaimTimelineEventKind {
   REJECTED
   REOPENED
   EVIDENCE_ATTACHED
+}
+
+enum ErasureStatus {
+  REQUESTED
+  CONFIRMED
+  EXECUTING
+  ERASED
+}
+
+enum ErasureParkReason {
+  OPEN_ORDER
+  FUNDS_IN_FLIGHT
+}
+
+enum HasOpenOrders {
+  NONE
+  PRESENT
 }
 
 enum RiderStatus {
@@ -782,6 +801,14 @@ type CustomerProfile {
   timezone: TimeZone
 }
 
+type CustomerErasure {
+  erasureRequestId: ErasureRequestId!
+  status: ErasureStatus!
+  cancelledAt: DateTime
+  policy: String
+  retainedUnder: String!
+}
+
 type DeliveryJob {
   id: DeliveryJobId!
   orderId: OrderId!
@@ -1201,6 +1228,22 @@ input RemoveCustomerAddressInput {
 input SetCustomerPaymentMethodInput {
   customerId: CustomerId!
   paymentMethodId: PaymentMethodId!
+}
+
+input RequestCustomerErasureInput {
+  customerId: CustomerId!
+  erasureRequestId: ErasureRequestId!
+}
+
+input ConfirmCustomerErasureInput {
+  customerId: CustomerId!
+  erasureRequestId: ErasureRequestId!
+  token: ErasureConfirmationToken!
+}
+
+input CancelCustomerErasureInput {
+  customerId: CustomerId!
+  erasureRequestId: ErasureRequestId!
 }
 
 input ChangeRiderStatusInput {
@@ -1812,6 +1855,7 @@ type Query {
   orderConversation(input: OrderConversationQueryInput!): OrderConversation @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
   orderConversationInternalNotes(input: OrderConversationInternalNotesQueryInput!): ConversationInternalNotes @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
+  erasureStatus: CustomerErasure @auth(requires: [CUSTOMER]) @reads(views: ["View_CustomerErasure"])
   delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
@@ -1876,6 +1920,9 @@ type Mutation {
   setCustomerAddress(input: SetCustomerAddressInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerAddress")
   removeCustomerAddress(input: RemoveCustomerAddressInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RemoveCustomerAddress")
   setCustomerPaymentMethod(input: SetCustomerPaymentMethodInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "SetCustomerPaymentMethod")
+  requestErasure(input: RequestCustomerErasureInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestCustomerErasure")
+  confirmErasure(input: ConfirmCustomerErasureInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmCustomerErasure")
+  cancelErasure(input: CancelCustomerErasureInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "CancelCustomerErasure")
   changeRiderStatus(input: ChangeRiderStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ChangeRiderStatus")
   acceptDelivery(input: AcceptDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "AcceptDelivery")
   confirmPickup(input: ConfirmPickupInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")

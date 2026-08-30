@@ -27,3 +27,37 @@ pub struct OtpCode(pub String);
 /// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EmailVerificationToken(pub String);
+
+/// Identifies ONE erasure journey, from the request through to the receipt. It is the customer's reference for a right they exercised, so it must outlive the customer: after stream deletion this id is the only handle joining the surviving tombstone, the `CustomerErased` receipt and the subject's own "is it done?" question. Pseudonymous by construction — it identifies a REQUEST, never a person. A second request while one is pending returns the SAME id (acceptance-first absorbs the duplicate; a typed rejection would punish a double-tap for no gain); a fresh request after a cancel gets a fresh one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ErasureRequestId(pub uuid::Uuid);
+
+/// The one-shot token proving the SECOND round-trip of an irreversible act — deliberately its own scalar and NOT `EmailVerificationToken`, because these are different secrets with different lifetimes and blast radii, and one name means one thing. It expires (the confirm window) so an unconfirmed request LAPSES VISIBLY on the status view instead of silently eating the subject's Art. 12(3) month: the confirmation step is OUR safeguard, so it may not consume their clock.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ErasureConfirmationToken(pub String);
+
+/// The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is row state on the erasure process (landing with the orchestrator), and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ErasureStatus {
+    REQUESTED,
+    CONFIRMED,
+    EXECUTING,
+    ERASED,
+}
+
+/// Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum ErasureParkReason {
+    OPEN_ORDER,
+    FUNDS_IN_FLIGHT,
+}
+
+/// The open-order verdict for one customer, as an ENUM rather than a boolean or a count — because a process-manager `guard.that` admits only `{ const: <ENUM_MEMBER> }` (specs/common/processmanager.yaml). Expressing the re-check as a declared enum column keeps the erasure re-check inside the LIVE lane grammar instead of forcing a grammar extension for one saga (vernon). The read side derives it; nothing stores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum HasOpenOrders {
+    NONE,
+    PRESENT,
+}

@@ -63,3 +63,32 @@ pub const PHONE_ALREADY_IN_USE: ErrorDef = ErrorDef {
     message_en: "The phone number '{phone}' is already in use by another account.",
     message_fr: "Le numéro '{phone}' est déjà utilisé par un autre compte.",
 };
+
+/// The customer asked to be erased while an order of theirs is still in flight (or money is still settling). A set-based precondition the write side checks, which is exactly why erasure begins as a rejectable COMMAND and not an event: an event cannot be refused, a command can. NOT a refusal of the right — a refusal of the TIMING, and the message must say so, because a person exercising Art. 17 who reads "no" will not ask twice. The same precondition re-runs at promotion, where failing it PARKS the journey rather than rejecting it (the request already stands by then; only execution waits).
+/// Context: `openOrders`.
+pub const ERASURE_BLOCKED_BY_OPEN_ORDER: ErrorDef = ErrorDef {
+    code: "ErasureBlockedByOpenOrder",
+    message_en: "You have an order in progress. You can request deletion once it is complete — your request has not been recorded.",
+    message_fr: "Vous avez une commande en cours. Vous pourrez demander la suppression une fois celle-ci terminée — votre demande n'a pas été enregistrée.",
+};
+
+/// The erasure confirmation token does not verify, or its window has expired. DELIBERATELY NOT `InvalidVerificationToken`, which already means the email magic link: one name, one meaning. Overloading it would render "this email verification link is invalid" to a customer who is trying to delete their account — a lie at the highest-stakes tap in the product, and one that would send them to the wrong recovery path.
+pub const INVALID_ERASURE_CONFIRMATION_TOKEN: ErrorDef = ErrorDef {
+    code: "InvalidErasureConfirmationToken",
+    message_en: "This deletion confirmation link is invalid or has expired. Please request deletion again.",
+    message_fr: "Ce lien de confirmation de suppression est invalide ou a expiré. Veuillez redemander la suppression.",
+};
+
+/// A confirm or cancel arrived with no erasure request outstanding for this customer — the request was already confirmed, already cancelled, or never made. Typed rather than silent because both commands are irreversible-adjacent: a cancel that quietly does nothing would let a customer believe they had kept an account that is still scheduled for deletion.
+pub const ERASURE_NOT_REQUESTED: ErrorDef = ErrorDef {
+    code: "ErasureNotRequested",
+    message_en: "There is no deletion request to act on for this account.",
+    message_fr: "Aucune demande de suppression n'est en cours pour ce compte.",
+};
+
+/// Erasure is declared but its engine cannot execute a request in this deployment. IN THE CURRENT CHUNK THIS IS UNCONDITIONAL: the erasure journey is not built, so every leg refuses and records nothing. It is a TYPED REFUSAL, NEVER A SILENT ACCEPT (farley). The eventual condition is `configuration.yaml#/RUN_DELETION_ENGINE` — the single gate (gate-then-stabilize) that runs the deletion ENGINE POD — and the handlers begin reading it in the runtime chunk, when an ON branch exists to select. Accepting a request the engine cannot execute would start the Art. 12(3) thirty-day clock on a journey nothing will ever run, and produce a status screen that says "scheduled" forever: the erasure analogue of a paid order nobody is told about — and worse here, because the subject stops chasing a right they believe is being honoured. Refusing loudly keeps the failure OURS instead of moving it onto the customer. A second flag was rejected on purpose: one blast radius, one decision surface.
+pub const ERASURE_ENGINE_UNAVAILABLE: ErrorDef = ErrorDef {
+    code: "ErasureEngineUnavailable",
+    message_en: "Account deletion is temporarily unavailable, so your request has not been recorded. This does not affect your right to have your data erased.",
+    message_fr: "La suppression de compte est temporairement indisponible : votre demande n'a donc pas été enregistrée. Cela n'affecte pas votre droit à l'effacement de vos données.",
+};

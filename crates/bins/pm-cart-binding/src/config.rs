@@ -276,6 +276,10 @@ pub struct Config {
     pub sms_max_sends_per_day_global: i64,
     /// IDENT-1 Phase A (ADR-20260818-004646, gate-then-stabilize; the ENFORCE_SERVICE_HOURS_GUARD pattern): ON, `resolve_read_scope`'s CUSTOMER arm resolves the caller's domain id from Postgres via the existing `CustomerReadRepository::by_auth_ref` bridge, keyed on the verified auth subject (`authRef`) -- the JWT's `captain_food.customer_id` claim is UNREAD for this decision. OFF -- the DEFAULT -- is today's behaviour byte for byte: the claim, already bound into the verified Principal at `authorize()` time, is trusted, no lookup, no I/O. The two paths are selected ONCE at startup/config-load, never a per-request fallback (a runtime try-Postgres-else-claim is the dual-path the ADR forbids): the gated-ON path contains no claim read at all for CUSTOMER read-scope resolution. A NoMapping row and a failed lookup BOTH fail closed to Public identically at the API boundary, distinguishably in telemetry (specs/observability.yaml#/customer-identity). Scope: CUSTOMER only -- RESTAURANT, RESTAURANT_ACCOUNT and RIDER have no sign-in operation in the DSL at all (STAFF-AUTH, DECISIONS §46), so there is no subject to key a mapping on for them; this key does not touch their claim reads. Flipping the default is a SEPARATE recorded decision after the gated form is smoked.
     pub resolve_customer_identity_from_postgres: bool,
+    /// The grace window between a CONFIRMED erasure and the destructive legs running: the customer's way back (re-login-cancels) and our only chance to stop a mistake, since nothing after it is reversible. 30 days is the defensible ceiling (BRIEF-20260808 §3) and is set AT it rather than under it, because the value doubles as the customer's stated "you have N days to change your mind" — a shorter window is a smaller promise, not a safer one. It does NOT extend the Art. 12(3) month: that clock is anchored at the REQUEST receipt and runs regardless. Set it to 0 only with counsel's answer on immediate-execution-on-demand (PROP §9 Q5) recorded.
+    pub customer_erasure_grace_window_days: i64,
+    /// How long an erasure confirmation token stays valid. It EXISTS so that an unconfirmed request LAPSES VISIBLY on the status view instead of sitting open and silently consuming the subject's thirty days — the confirmation is our safeguard, so it may not eat their clock. Too long and a forgotten link stays live on a mail server; too short and a customer who checks mail daily cannot exercise a right. 72h is the proposed value pending counsel's response-wording answer.
+    pub customer_erasure_confirm_token_ttl_seconds: i64,
     /// The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF — the DEFAULT (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) — is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
     pub enforce_service_hours_guard: bool,
     /// The Order-lane BIRTH routing (#588, ADR-20260816-040239 "deliver: is a lane ENQUEUE, not a foreign-stream append"). ON, PlaceOrderProcess's `deliver: OrderPlaced to: Order` step stops calling Repository::save on the Order's stream and instead stages a lane ENQUEUE that the delivery glue turns into an inbound_messages row INSIDE the same fenced transaction; the Order's own lane worker then appends the birth, and it is THAT delivery's Recorded verdict the acceptance deadline is keyed on. OFF — the DEFAULT — is today's behaviour byte for byte: the saga appends OrderPlaced (and CartCheckedOut) itself and no Order-lane message exists. What flipping it CHANGES, stated plainly: (a) the birth gains one lane hop of latency after the payment authorization commits — the order is still accepted acceptance-first, but the OrderPlaced row appears a beat later; (b) the birth's ENVELOPE changes — user_id/user_type and cause_id come from the mailbox row rather than the saga's system actor (no fold, view or projector reads either, verified in the ADR §2, and stored rows are NEVER backfilled); (c) one aggregate per transaction on the checkout saga's most expensive leg, where today Order-{id} and Cart-{id} are written in one; (d) the acceptance clock can arm at all, which is precondition (5) of ENFORCE_ACCEPTANCE_TIMEOUT below. ROLLBACK IS A FLIP, NOT A REDEPLOY: set it OFF and the next delivery appends the legacy way; already-routed births stay as they are (reversible in code, not in state — those rows exist). Both the monolith and any standalone worker fleet MUST read the same value; a split fleet would route some births and append others. Flipping the default is a SEPARATE recorded decision, and it is scoped to the Order/OrderPlaced pair alone — the other twelve deliver: steps keep the legacy append until each is moved by its own record.
@@ -430,6 +434,8 @@ impl Config {
             .or_else(|| baked("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", profile).map(str::to_string))
             .map(|v| parse_bool("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", &v, false))
             .unwrap_or(false);
+        let customer_erasure_grace_window_days = raw("CUSTOMER_ERASURE_GRACE_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
+        let customer_erasure_confirm_token_ttl_seconds = raw("CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(259200);
         let enforce_service_hours_guard = raw("ENFORCE_SERVICE_HOURS_GUARD")
             .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
             .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
@@ -538,6 +544,8 @@ impl Config {
                 sms_send_backoff_seconds,
                 sms_max_sends_per_day_global,
                 resolve_customer_identity_from_postgres,
+                customer_erasure_grace_window_days,
+                customer_erasure_confirm_token_ttl_seconds,
                 enforce_service_hours_guard,
                 route_order_birth_through_lane,
                 route_replacement_birth_through_lane,
@@ -555,6 +563,7 @@ impl Config {
     /// constant (ADR-20260731-214500).
     pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {
         [
+            ("CUSTOMER_ERASURE_GRACE_WINDOW_DAYS", std::time::Duration::from_secs(u64::try_from(self.customer_erasure_grace_window_days).expect("CUSTOMER_ERASURE_GRACE_WINDOW_DAYS must be non-negative") * 86_400)),
             ("ORDER_ACCEPTANCE_TIMEOUT_SECONDS", std::time::Duration::from_secs(u64::try_from(self.order_acceptance_timeout_seconds).expect("ORDER_ACCEPTANCE_TIMEOUT_SECONDS must be non-negative"))),
             ("ORDER_RETENTION_WINDOW_DAYS", std::time::Duration::from_secs(u64::try_from(self.order_retention_window_days).expect("ORDER_RETENTION_WINDOW_DAYS must be non-negative") * 86_400)),
         ]
@@ -614,6 +623,8 @@ impl Config {
         out.push_str(&format!("  SMS_SEND_BACKOFF_SECONDS   = {}\n", self.sms_send_backoff_seconds));
         out.push_str(&format!("  SMS_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.sms_max_sends_per_day_global));
         out.push_str(&format!("  RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES = {}\n", self.resolve_customer_identity_from_postgres));
+        out.push_str(&format!("  CUSTOMER_ERASURE_GRACE_WINDOW_DAYS = {}\n", self.customer_erasure_grace_window_days));
+        out.push_str(&format!("  CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS = {}\n", self.customer_erasure_confirm_token_ttl_seconds));
         out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
         out.push_str(&format!("  ROUTE_ORDER_BIRTH_THROUGH_LANE = {}\n", self.route_order_birth_through_lane));
         out.push_str(&format!("  ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE = {}\n", self.route_replacement_birth_through_lane));
@@ -625,7 +636,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 53;
+pub const KEY_COUNT: usize = 55;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -677,6 +688,8 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SMS_SEND_BACKOFF_SECONDS",
     "SMS_MAX_SENDS_PER_DAY_GLOBAL",
     "RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES",
+    "CUSTOMER_ERASURE_GRACE_WINDOW_DAYS",
+    "CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS",
     "ENFORCE_SERVICE_HOURS_GUARD",
     "ROUTE_ORDER_BIRTH_THROUGH_LANE",
     "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",

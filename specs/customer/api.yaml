@@ -22,12 +22,50 @@ types:
       locale: { $ref: 'scalars.yaml#/Locale', nullable: true }
       timezone: { $ref: 'scalars.yaml#/TimeZone', nullable: true }
 
+  # --- GDPR erasure (PROP-20260829-150752 §3.1/§3.6; #708) ---
+  CustomerErasure:
+    description: >
+      The state of ONE erasure request, as the data subject is entitled to see it (Art. 12/15), plus
+      the disclosure limb of §3.6 once the receipt exists: what was retained and under which
+      instrument. Every field is PSEUDONYMOUS — this type must keep answering after the customer's
+      stream is gone, so a name or an address here would either have to die with the stream (leaving
+      the subject unable to check the erasure they asked for) or survive it (making the erasure a
+      lie).
+    reads: [{ $ref: 'database/projection_views.yaml#/View_CustomerErasure' }]
+    properties:
+      erasureRequestId: { $ref: 'scalars.yaml#/ErasureRequestId' }
+      status: { $ref: 'scalars.yaml#/ErasureStatus' }
+      cancelledAt: { type: string, format: date-time, nullable: true }
+      policy: { type: string, nullable: true }
+      retainedUnder:
+        type: array
+        items: { type: string }
+        description: "Approved retention-window catalog names — the source the 'what was retained and why' copy interpolates its instrument and horizon from, so the screen and the enforcement cannot drift apart."
+
 queries:
 
 
   me:
     description: "The signed-in customer's own profile (resolves the session authRef → Customer via Customer)."
     returns: { $ref: '#/types/CustomerProfile', nullable: true }
+    roles: [CUSTOMER]
+    slice: V1
+
+  erasureStatus:
+    description: >
+      The authenticated customer's own erasure request, or null when none exists. NO ARGS BY DESIGN:
+      the subject is derived from AUTH CONTEXT server-side, never supplied by the client. A required
+      `customerId!` here would be exactly the #745 unfulfillable class — an identity fact the account
+      route has no source for, so the read would fail structurally on every paint — AND it would let
+      any authenticated caller ask about somebody else's deletion, which is a disclosure of the most
+      sensitive thing this product knows about a person.
+      Answers before AND after the erasure completes: pre-receipt from the folded request row,
+      post-receipt from the same row now carrying the receipt's policy and retained-under limbs.
+      CONFIRM-WHILE-LOGGED-OUT is deliberately NOT served here (see the mutation roles): this query
+      is CUSTOMER-only, so a subject who has signed out follows their emailed link, confirms, and
+      then sees the status by signing in — the status surface never becomes an unauthenticated
+      lookup of "what is happening to this account".
+    returns: { $ref: '#/types/CustomerErasure', nullable: true }
     roles: [CUSTOMER]
     slice: V1
 
@@ -106,3 +144,34 @@ mutations:
     command: { $ref: 'commands.yaml#/SetCustomerPaymentMethod' }
     roles: [CUSTOMER]
     slice: V1
+
+  # --- GDPR erasure (PROP-20260829-150752 §3.1; #708). Role = path: these live only on the
+  # /customer/graphql schema. All three currently refuse UNCONDITIONALLY with
+  # `ErasureEngineUnavailable` and record nothing — a typed rejection, never a silent accept —
+  # because the journey that executes an erasure is the next chunk. They are not yet bound to
+  # `RUN_DELETION_ENGINE`: that key gates the engine POD, and the handlers start reading it when
+  # there is an ON branch worth selecting.
+  requestErasure:
+    command: { $ref: 'commands.yaml#/RequestCustomerErasure' }
+    roles: [CUSTOMER]
+    slice: V1
+    # Acceptance-first (ADR-20260720-015500): the mutation returns the operation handle and the
+    # client reads `erasureStatus` once it SUCCEEDs. Idempotent while one request is pending.
+
+  confirmErasure:
+    command: { $ref: 'commands.yaml#/ConfirmCustomerErasure' }
+    roles: [CUSTOMER]
+    slice: V1
+    # CONFIRM-WHILE-LOGGED-OUT, stated explicitly because it is a real product decision and not an
+    # oversight: this is CUSTOMER-only, so the token alone does NOT authorize the confirm from an
+    # anonymous session. A subject who followed the link after signing out signs in first. The
+    # alternative — PUBLIC plus a bearer token — turns a link forwarded, logged by a mail provider or
+    # sitting in a shared inbox into a complete account-destruction capability held by whoever has
+    # the URL. Requiring both the session and the token keeps an irreversible act behind two facts.
+
+  cancelErasure:
+    command: { $ref: 'commands.yaml#/CancelCustomerErasure' }
+    roles: [CUSTOMER]
+    slice: V1
+    # Re-login-cancels is the user's act. Deliberately does NOT refuse when the engine is gated off:
+    # a customer must always be able to stop a deletion, whatever state our machinery is in.

@@ -747,3 +747,61 @@ keys:
       declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec
       default of plain `dev` would state a value the runtime never produces — a false declaration is
       worse than an absent one.
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# RETENTION WINDOWS — the approved catalog (MET-W, CLOSED 2026-08-11 "APPROVED AS RECOMMENDED")
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# A NAMED CATALOG of approved retention windows, `$ref`'d — deliberately NOT a `Duration` scalar with
+# a pattern, because "a pattern catches `P90DD` but not a well-formed window nobody approved"
+# (DECISIONS MET-W). An event declares the obligation ON ITSELF via `legalRetention:`, naming a
+# window from here; the validator then enforces two things no reviewer can be trusted to catch by
+# eye (`legal-retention-window-uncatalogued`, `deletion-undercuts-retention`).
+#
+# WHY THIS IS A SECTION OF configuration.yaml AND NOT A NEW KIND: the deletion grammar's `after:`
+# already names `configuration.yaml#/keys/<KEY>`, so the enforcement and the obligation now read out
+# of ONE catalog file, and the kind list in CLAUDE.md is unchanged. The two sections are NOT
+# interchangeable: a `keys` entry is an environment variable an operator sets, a `retention_windows`
+# entry is a legal instrument nobody may set at runtime — which is exactly why it has no `type`,
+# no `default` and no `deploy`.
+#
+# BRIEF-20260811 §3 is the reason this exists: without it the only way to say "this event is a legal
+# register" was to hard-code `RestaurantListingOptedOut` in the validator — "a comment written in
+# Rust, not a spec-derived gate".
+#
+# Fields:
+#   - instrument  : the legal instrument that COMPELS the retention, in the words of the instrument.
+#                   Not a comment: it is interpolated into the customer-facing "what was retained
+#                   and why" copy (PROP-20260829-150752 §3.6), so the screen and the enforcement are
+#                   generated from the SAME declaration and cannot drift apart.
+#   - days        : the horizon, in days. Mutually exclusive with `indefinite`.
+#   - indefinite  : true = there is NO horizon; the obligation never expires, and any deletion
+#                   trigger reaching this event is refused OUTRIGHT (an Art. 21 register is retained
+#                   BECAUSE retaining it is the lawful act — deleting it is the violation).
+retention_windows:
+
+  FRENCH_COMMERCIAL_BOOKS_10Y:
+    instrument: "Code de commerce L123-22 (livres et documents comptables) + CGI 242 nonies A (pièces justificatives)"
+    days: 3650
+    description: >
+      The accounting/invoice horizon French law compels for the financial record of a sale: ten
+      years from the close of the exercise. Deliberately set at the CONSERVATIVE whole-order
+      horizon because the per-FIELD split — which order fields are invoice data (retained,
+      plaintext) versus personal data (encrypted, crypto-shredded) — is counsel's to name and is
+      OPEN (PROP-20260829-150752 §9 Q1, sharpening BRIEF-20260811 G3). Narrowing this window, or
+      splitting it per field, is a counsel-driven change to this ONE declaration; nothing else moves.
+      This is the window `ORDER_RETENTION_WINDOW_DAYS` (default 3650) is set against — the pilot
+      passes `deletion-undercuts-retention` exactly AT the boundary, not comfortably inside it, and
+      that is deliberate: any shortening of the config key is meant to go red.
+
+  GDPR_ART21_OBJECTION_REGISTER:
+    instrument: "GDPR Art. 21 objection register (liste repoussoir, CNIL doctrine) — read with Art. 5(2) accountability"
+    indefinite: true
+    description: >
+      The suppression register: the minimal record that a person OBJECTED. It has no horizon and
+      may never be deleted, because retaining it IS the lawful act and deleting it is the violation
+      — re-import would re-contact the person who objected, and under Art. 5(2) the controller
+      would then be unable to evidence that the objection was ever honoured
+      (BRIEF-20260808 Q1/Q4, BRIEF-20260811 §3, recorded there as BLOCKER-on-arrival).
+      `RestaurantListingOptedOut` carries this window. An `indefinite` window bars a stream-deleting
+      `deletion:` trigger OUTRIGHT — there is no window long enough to satisfy it.

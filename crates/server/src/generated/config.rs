@@ -281,6 +281,10 @@ pub struct Config {
     pub sms_max_sends_per_day_global: i64,
     /// IDENT-1 Phase A (ADR-20260818-004646, gate-then-stabilize; the ENFORCE_SERVICE_HOURS_GUARD pattern): ON, `resolve_read_scope`'s CUSTOMER arm resolves the caller's domain id from Postgres via the existing `CustomerReadRepository::by_auth_ref` bridge, keyed on the verified auth subject (`authRef`) -- the JWT's `captain_food.customer_id` claim is UNREAD for this decision. OFF -- the DEFAULT -- is today's behaviour byte for byte: the claim, already bound into the verified Principal at `authorize()` time, is trusted, no lookup, no I/O. The two paths are selected ONCE at startup/config-load, never a per-request fallback (a runtime try-Postgres-else-claim is the dual-path the ADR forbids): the gated-ON path contains no claim read at all for CUSTOMER read-scope resolution. A NoMapping row and a failed lookup BOTH fail closed to Public identically at the API boundary, distinguishably in telemetry (specs/observability.yaml#/customer-identity). Scope: CUSTOMER only -- RESTAURANT, RESTAURANT_ACCOUNT and RIDER have no sign-in operation in the DSL at all (STAFF-AUTH, DECISIONS §46), so there is no subject to key a mapping on for them; this key does not touch their claim reads. Flipping the default is a SEPARATE recorded decision after the gated form is smoked.
     pub resolve_customer_identity_from_postgres: bool,
+    /// The grace window between a CONFIRMED erasure and the destructive legs running: the customer's way back (re-login-cancels) and our only chance to stop a mistake, since nothing after it is reversible. 30 days is the defensible ceiling (BRIEF-20260808 §3) and is set AT it rather than under it, because the value doubles as the customer's stated "you have N days to change your mind" — a shorter window is a smaller promise, not a safer one. It does NOT extend the Art. 12(3) month: that clock is anchored at the REQUEST receipt and runs regardless. Set it to 0 only with counsel's answer on immediate-execution-on-demand (PROP §9 Q5) recorded.
+    pub customer_erasure_grace_window_days: i64,
+    /// How long an erasure confirmation token stays valid. It EXISTS so that an unconfirmed request LAPSES VISIBLY on the status view instead of sitting open and silently consuming the subject's thirty days — the confirmation is our safeguard, so it may not eat their clock. Too long and a forgotten link stays live on a mail server; too short and a customer who checks mail daily cannot exercise a right. 72h is the proposed value pending counsel's response-wording answer.
+    pub customer_erasure_confirm_token_ttl_seconds: i64,
     /// Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not open this repo and learn what ceiling production applies, which is the whole failure this file exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per profile by adding a `deploy:` block, or in seconds during an incident by setting the env var. Everything a repo secret would have given, minus the opacity.
     pub delivery_offer_max_ttl_seconds: i64,
     /// Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on a rider who is not coming.
@@ -476,6 +480,8 @@ impl Config {
             .or_else(|| baked("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", profile).map(str::to_string))
             .map(|v| parse_bool("RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES", &v, false))
             .unwrap_or(false);
+        let customer_erasure_grace_window_days = raw("CUSTOMER_ERASURE_GRACE_WINDOW_DAYS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
+        let customer_erasure_confirm_token_ttl_seconds = raw("CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(259200);
         let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let run_delivery_offer_timeout = raw("RUN_DELIVERY_OFFER_TIMEOUT")
             .or_else(|| baked("RUN_DELIVERY_OFFER_TIMEOUT", profile).map(str::to_string))
@@ -661,6 +667,8 @@ impl Config {
                 sms_send_backoff_seconds,
                 sms_max_sends_per_day_global,
                 resolve_customer_identity_from_postgres,
+                customer_erasure_grace_window_days,
+                customer_erasure_confirm_token_ttl_seconds,
                 delivery_offer_max_ttl_seconds,
                 run_delivery_offer_timeout,
                 avelo37_api_key,
@@ -696,6 +704,7 @@ impl Config {
     /// constant (ADR-20260731-214500).
     pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {
         [
+            ("CUSTOMER_ERASURE_GRACE_WINDOW_DAYS", std::time::Duration::from_secs(u64::try_from(self.customer_erasure_grace_window_days).expect("CUSTOMER_ERASURE_GRACE_WINDOW_DAYS must be non-negative") * 86_400)),
             ("ORDER_ACCEPTANCE_TIMEOUT_SECONDS", std::time::Duration::from_secs(u64::try_from(self.order_acceptance_timeout_seconds).expect("ORDER_ACCEPTANCE_TIMEOUT_SECONDS must be non-negative"))),
             ("ORDER_RETENTION_WINDOW_DAYS", std::time::Duration::from_secs(u64::try_from(self.order_retention_window_days).expect("ORDER_RETENTION_WINDOW_DAYS must be non-negative") * 86_400)),
         ]
@@ -760,6 +769,8 @@ impl Config {
         out.push_str(&format!("  SMS_SEND_BACKOFF_SECONDS   = {}\n", self.sms_send_backoff_seconds));
         out.push_str(&format!("  SMS_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.sms_max_sends_per_day_global));
         out.push_str(&format!("  RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES = {}\n", self.resolve_customer_identity_from_postgres));
+        out.push_str(&format!("  CUSTOMER_ERASURE_GRACE_WINDOW_DAYS = {}\n", self.customer_erasure_grace_window_days));
+        out.push_str(&format!("  CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS = {}\n", self.customer_erasure_confirm_token_ttl_seconds));
         out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
         out.push_str(&format!("  AVELO37_API_KEY            = {}\n", if self.avelo37_api_key.is_some() { "set" } else { "unset" }));
@@ -789,7 +800,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 76;
+pub const KEY_COUNT: usize = 78;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -846,6 +857,8 @@ pub const DECLARED_KEYS: &[&str] = &[
     "SMS_SEND_BACKOFF_SECONDS",
     "SMS_MAX_SENDS_PER_DAY_GLOBAL",
     "RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES",
+    "CUSTOMER_ERASURE_GRACE_WINDOW_DAYS",
+    "CUSTOMER_ERASURE_CONFIRM_TOKEN_TTL_SECONDS",
     "DELIVERY_OFFER_MAX_TTL_SECONDS",
     "RUN_DELIVERY_OFFER_TIMEOUT",
     "AVELO37_API_KEY",

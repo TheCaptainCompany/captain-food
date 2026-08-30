@@ -336,6 +336,27 @@ pub async fn dispatch_command(
             };
             Some(validated(async { application::commands::set_customer_payment_method(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
         }
+        "RequestCustomerErasure" => {
+            let cmd: domain::generated::commands::RequestCustomerErasure = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("RequestCustomerErasure payload: {e}")))),
+            };
+            Some(validated(async { application::commands::request_customer_erasure(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
+        }
+        "ConfirmCustomerErasure" => {
+            let cmd: domain::generated::commands::ConfirmCustomerErasure = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("ConfirmCustomerErasure payload: {e}")))),
+            };
+            Some(validated(async { application::commands::confirm_customer_erasure(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
+        }
+        "CancelCustomerErasure" => {
+            let cmd: domain::generated::commands::CancelCustomerErasure = match serde_json::from_value(payload.clone()) {
+                Ok(c) => c,
+                Err(e) => return Some(Err(DomainError::Repository(format!("CancelCustomerErasure payload: {e}")))),
+            };
+            Some(validated(async { application::commands::cancel_customer_erasure(store.as_ref(), cmd, &actor).await.map(|_| ()) }).await)
+        }
         "ChangeRiderStatus" => {
             let cmd: domain::generated::commands::ChangeRiderStatus = match serde_json::from_value(payload.clone()) {
                 Ok(c) => c,
