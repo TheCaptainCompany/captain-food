@@ -146,8 +146,11 @@ mutations:
     slice: V1
 
   # --- GDPR erasure (PROP-20260829-150752 §3.1; #708). Role = path: these live only on the
-  # /customer/graphql schema. All three SHIP DARK behind `RUN_DELETION_ENGINE` and refuse with
-  # `ErasureEngineUnavailable` while it is off — a typed rejection, never a silent accept.
+  # /customer/graphql schema. All three currently refuse UNCONDITIONALLY with
+  # `ErasureEngineUnavailable` and record nothing — a typed rejection, never a silent accept —
+  # because the journey that executes an erasure is the next chunk. They are not yet bound to
+  # `RUN_DELETION_ENGINE`: that key gates the engine POD, and the handlers start reading it when
+  # there is an ON branch worth selecting.
   requestErasure:
     command: { $ref: 'commands.yaml#/RequestCustomerErasure' }
     roles: [CUSTOMER]

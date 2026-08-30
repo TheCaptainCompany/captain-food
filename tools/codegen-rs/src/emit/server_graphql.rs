@@ -646,6 +646,28 @@ pub(crate) fn emit_server_query(model: &Model) -> String {
 /// the fn body (8-space indent); `None` → the `not implemented` stub. Extend as read repos land.
 pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
     match name {
+        // GDPR erasure status (#708). WIRED DELIBERATELY TO A TYPED REFUSAL, not left as the
+        // generic `not implemented` stub and not answered `Ok(None)`. Three reasons, in order of
+        // how badly the alternatives fail:
+        //   1. `Ok(None)` is the dangerous one. The field's contract is "null when no request
+        //      exists", so null does not mean "we cannot tell you" — it means "nothing is
+        //      happening to your account". The moment the write side starts accepting requests,
+        //      a resolver still hard-coded to null would tell a subject with a pending erasure
+        //      that they never asked. That is the mutations' "scheduled forever" failure with the
+        //      sign flipped, and it is worse, because a subject who is told nothing is scheduled
+        //      stops chasing the right entirely.
+        //   2. `not implemented` is untyped: a client cannot distinguish it from a server bug,
+        //      and it carries no code a screen can branch on.
+        //   3. The mutations for this journey refuse with `ErasureEngineUnavailable`. A read that
+        //      failed differently from the writes would make the surface incoherent exactly where
+        //      the subject is most anxious.
+        // The refusal is UNCONDITIONAL here for the same reason it is in the command handlers:
+        // `View_CustomerErasure` has no repository yet. It becomes a real read in the runtime
+        // chunk, and this arm is deleted when `wired_query_body` gains the repo delegation.
+        // No disclosure risk either way -- the guard is CUSTOMER-only and this arm reads nothing.
+        "erasureStatus" => Some(
+            "        Err(crate::graphql::typed_error(&domain::generated::errors::ERASURE_ENGINE_UNAVAILABLE))",
+        ),
         // The actor-mailbox supervision lanes (#242 Runtime B): ADMIN-only via the field guard;
         // no args, rows map 1:1 — write-path infrastructure, no View_*. Read through the
         // actor_client supervision DOOR (#510): the port method demands the mailbox witness,

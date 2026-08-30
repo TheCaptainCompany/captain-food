@@ -799,7 +799,7 @@ screens:
       # because a dead Delete button is a promise to a data subject that we do not keep. The delete
       # entry point must land at EQUAL PROMINENCE with the other account actions when it does (the
       # dark-pattern condition, BRIEF-20260808 §2) — not buried under Support.
-      - "GDPR account deletion is specified but not yet rendered here (#708): the three screens (request `/account/delete`, confirm `/account/delete/confirm`, status `/account/delete/status`) and the four ops (`requestErasure`, `confirmErasure`, `cancelErasure`, `erasureStatus`) exist in the DSL, and the mutations ship DARK behind `RUN_DELETION_ENGINE`. No control is bound until the engine chunk lands — a Delete button that cannot delete is a promise to a data subject we would not be keeping."
+      - "GDPR account deletion is specified but not yet rendered here (#708): the three screens (request `/account/delete`, confirm `/account/delete/confirm`, status `/account/delete/status`) and the four ops (`requestErasure`, `confirmErasure`, `cancelErasure`, `erasureStatus`) exist in the DSL, and the mutations currently refuse every request with a typed `ErasureEngineUnavailable` and record nothing — the engine gate (`RUN_DELETION_ENGINE`) is NOT yet read by them, and wiring it is part of the runtime chunk. No control is bound until that chunk lands — a Delete button that cannot delete is a promise to a data subject we would not be keeping."
       # THE COPY IS NOT DRAFTED HERE, ON PURPOSE. `translation-key-unused` refuses a key no screen
       # references, and it is right to: a string nothing renders is a promise with no runtime, the
       # same defect class BRIEF-20260811 §4 names when a document asserts a control the system does

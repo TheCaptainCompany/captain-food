@@ -37,6 +37,10 @@ PaymentCaptured:
     (ADR-20260808-195315 §1.2) this is the settlement fact alone (capture on delivered / picked up,
     driven by PaymentSettlementProcess), no longer the authorized-and-captured composite of the
     automatic-capture era. Inbound Stripe fact (`payment_intent.succeeded`).
+
+  legalRetention:
+    window: { $ref: 'configuration.yaml#/retention_windows/FRENCH_COMMERCIAL_BOOKS_10Y' }    # The settlement itself: this is the moment the money moved, and it is the piece justificative for the sale it settles.
+
   type: object
   properties:
     paymentIntentId:
@@ -133,6 +137,10 @@ PaymentFailed:
 
 PaymentRefunded:
   description: "A captured payment was refunded (e.g. after rejection or cancellation)."
+
+  legalRetention:
+    window: { $ref: 'configuration.yaml#/retention_windows/FRENCH_COMMERCIAL_BOOKS_10Y' }    # Money moving back out against a settled sale — the same accounting trail, and unreadable without it.
+
   type: object
   properties:
     refundId:

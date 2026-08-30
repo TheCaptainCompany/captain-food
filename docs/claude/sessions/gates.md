@@ -798,3 +798,19 @@ is itself the argument: **a list that grows has no business stating its own leng
   individually by name, and read the DELETION side of `git diff` before committing. The executable
   half is `every_test_name_cited_in_a_doc_comment_still_exists` — this repo's tests carry their
   reasoning by citing each other, so a dangling citation is the one trace a silent deletion leaves.
+- **There is no "spec-only" chunk in this repo for anything with an execution surface — the
+  fail-closed gates weld the DSL to its runtime.** Planned as a DSL-only slice of the erasure
+  journey (#708), and the tooling refused three separate ways, none of which is visible from the
+  YAML: **(1) a process manager cannot be declared without its whole runtime seam** — the
+  behaviour-test emitter panics with `no dispatch entry for process-manager <PM> ← event <E>` and
+  ADR-0032 then demands a test per leg; **(2) a service operation cannot be declared without its
+  ACL implementations** — adding one to `services.yaml` broke every impl of an exhaustive trait,
+  including two whose real behaviour the chunk had no way to verify; **(3) a translation key
+  cannot be declared without a screen that renders it** — `translation-key-unused` refuses it, and
+  registering the key in `translations.code_refs.yaml` to get past the gate would be a false
+  statement in the artifact the gate exists to keep true. Cost: three deferrals and their
+  diagnosis, each found only after a full `make rust` cycle. **Plan the chunk boundary along the
+  runtime seam, not along `specs/**` vs `crates/**`** — the DSL surface a gate will accept is
+  exactly the surface something can already execute. Corollary worth the same breath: this is the
+  gates working. Every refusal above prevented a declaration with no behaviour behind it, which is
+  the defect class the specs exist to make unspellable.

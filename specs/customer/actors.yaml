@@ -98,10 +98,15 @@ Customer:
     # --- GDPR erasure (PROP-20260829-150752 §3.1/§3.2; #708) -----------------------------------
     # Erasure is a rejectable COMMAND pair, not an event: an open order or funds in flight is a
     # set-based precondition the write side checks, and an event cannot be refused (young, vernon).
-    # Every leg also throws `ErasureEngineUnavailable` — THE MUTATIONS SHIP DARK behind the single
-    # `RUN_DELETION_ENGINE` gate, and dark means a TYPED REFUSAL, never a silent accept (farley):
-    # accepting a request the engine cannot run would start the Art. 12(3) clock on a journey nothing
-    # will ever execute and show the subject "scheduled" forever.
+    # Every leg also throws `ErasureEngineUnavailable`, and in THIS chunk it throws it
+    # UNCONDITIONALLY: the handlers refuse every erasure command and record nothing, because the
+    # journey that would execute one is the next chunk. That is a typed refusal, never a silent
+    # accept (farley) — accepting a request nothing can run would start the Art. 12(3) clock on a
+    # journey that will never execute and show the subject "scheduled" forever.
+    # NOT YET GATED, and the distinction is load-bearing: `RUN_DELETION_ENGINE` gates the deletion
+    # ENGINE POD (c4-l2.yaml), not these mutations. Wiring the refusal to read that key is part of
+    # the runtime chunk, where there is finally an ON branch for it to select. Until then the
+    # refusal is unconditional, which is strictly safer than a gate whose ON side does nothing.
     - message: { $ref: 'commands.yaml#/RequestCustomerErasure' }
       emits: [{ $ref: 'events.yaml#/CustomerErasureRequested' }]
       throws:
