@@ -93,6 +93,37 @@ impl MailboxCommandHandler {
     }
 }
 
+/// What the door does with a row it could not turn into a typed value.
+///
+/// Pure and separate from the handler so the verdict table can assert the POSTURE — the property
+/// that decides whether a row survives — without a database and without reading any message text
+/// (`mailbox::handler::tests::the_door_verdict_table`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoorPosture {
+    /// ABORT the delivery: the row stays RECEIVED, the attempt counter advances, the runtime
+    /// retries under backoff and — if nothing improves — flips it into the POISON queue at the
+    /// cap, where `poisonedMailboxMessages` shows it and `RequeueMailboxMessage` recovers it.
+    Park,
+    /// COMMIT a terminal FAILED verdict: the bytes in the row are wrong and no retry, and no
+    /// deploy on the other side, can change them.
+    Terminal,
+}
+
+/// The door's posture for a parse failure.
+///
+/// `UnknownActor` / `UndeclaredMessage` are PARK because a build on the other side of a rolling
+/// deploy can route them — terminal-failing an unknown type during a deploy buries a paid order.
+/// `Payload` is TERMINAL because it is a deterministic shape failure of a message this build DOES
+/// understand, including the case where the row's `message_type` disagrees with the staged
+/// `eventType` tag.
+pub fn parse_posture(err: &application::generated::inboxes::InboxParseError) -> DoorPosture {
+    if err.is_transient() {
+        DoorPosture::Park
+    } else {
+        DoorPosture::Terminal
+    }
+}
+
 #[async_trait::async_trait]
 impl MessageHandler for MailboxCommandHandler {
     /// The PREPARE phase (ADR-20260801-023000): the three PM commands run their WHOLE legacy
@@ -137,7 +168,7 @@ impl MessageHandler for MailboxCommandHandler {
             // `mailbox_poison_failed_total{actor_type}`, the ADMIN `poisonedMailboxMessages` read
             // and `RequeueMailboxMessage` as the operator's way back. No new status and no
             // migration: park is the existing poison path, reached by aborting instead of failing.
-            Err(e) if e.is_transient() => {
+            Err(e) if parse_posture(&e) == DoorPosture::Park => {
                 return Err(sqlx::Error::Protocol(format!(
                     "mailbox: {e} -- TRANSIENT (rolling deploy?); retrying, then parking on the \
                      poison queue rather than burying the row"
@@ -1194,5 +1225,125 @@ impl DeliveryObserver for StatusBusObserver {
             error_code: Some("DeliveryInfrastructureError".to_owned()),
             message: None,
         });
+    }
+}
+
+/// **T4 (#780) — THE DOOR'S VERDICT TABLE.** Five rows, on the RETURN SHAPE, never on message text.
+///
+/// It is a fast pure table and not five database tests because the property under test is a
+/// decision, and the decision was made transaction-free precisely so it could be tested this way
+/// ("make the change easy first", beck). What still needs a database is the EFFECT, and that lives
+/// in `crates/infrastructure/tests/main/fact_delivery.rs`.
+///
+/// **Row (a) is the risk pin.** An undeclared `message_type` on a KNOWN lane must PARK, never go
+/// terminal: during a rolling deploy an old consumer legitimately meets a type a newer producer
+/// already emits, and terminal-failing it buries a paid order. It is one `is_transient` arm away
+/// from silently becoming row (c), and nothing else in the suite would notice.
+#[cfg(test)]
+mod verdict_table {
+    use super::*;
+    use application::generated::inboxes::ActorInbox;
+
+    /// A well-formed staged `DomainEvent` envelope for a Payment fact.
+    fn staged_payment_captured() -> serde_json::Value {
+        serde_json::json!({
+            "eventType": "PaymentCaptured",
+            "payload": {
+                "paymentIntentId": "pi_verdict_table",
+                "orderId": null,
+                "restaurantId": "00000000-0000-0000-0000-0000000000a1",
+                "amount": { "amountCents": 1960, "currency": "EUR" }
+            }
+        })
+    }
+
+    fn posture_of(actor_type: &str, message_type: &str, payload: &serde_json::Value) -> DoorPosture {
+        match ActorInbox::parse(actor_type, message_type, payload) {
+            Ok(_) => panic!("this row must NOT parse: {actor_type}/{message_type}"),
+            Err(e) => parse_posture(&e),
+        }
+    }
+
+    /// (a) A DECLARED lane, an UNDECLARED message type. The rolling-deploy case.
+    #[test]
+    fn an_undeclared_message_type_on_a_known_lane_parks() {
+        assert_eq!(
+            posture_of("Payment", "PaymentTeleported", &staged_payment_captured()),
+            DoorPosture::Park,
+            "an undeclared type must be RETRIED and then parked on the poison queue -- a build on \
+             the other side of a rolling deploy can route it, and terminal-failing it buries a \
+             paid order"
+        );
+    }
+
+    /// (b) An unknown `actor_type`. Same posture, same reason.
+    #[test]
+    fn an_unknown_actor_type_parks() {
+        assert_eq!(
+            posture_of("Teleporter", "PaymentCaptured", &staged_payment_captured()),
+            DoorPosture::Park
+        );
+    }
+
+    /// (c) A DECLARED message whose payload does not deserialize. Deterministic, so terminal.
+    #[test]
+    fn a_declared_message_with_a_malformed_payload_is_terminal() {
+        let malformed = serde_json::json!({ "eventType": "PaymentCaptured", "payload": 7 });
+        assert_eq!(posture_of("Payment", "PaymentCaptured", &malformed), DoorPosture::Terminal);
+    }
+
+    /// (d) The row's `message_type` disagrees with the staged `eventType` tag. Nothing checked this
+    /// before #771: a row could carry `message_type: "OrderPlaced"` with an `OrderRejected` body
+    /// and the generic record route would have appended the body under the wrong name.
+    #[test]
+    fn a_message_type_disagreeing_with_the_payload_tag_is_terminal() {
+        let mismatched = serde_json::json!({
+            "eventType": "PaymentReleased",
+            "payload": { "paymentIntentId": "pi_verdict_table" }
+        });
+        assert_eq!(posture_of("Payment", "PaymentCaptured", &mismatched), DoorPosture::Terminal);
+    }
+
+    /// (e) A DECLARED fact with no record route: PARK, and the class says which fact.
+    ///
+    /// Asserted through `fact_route` rather than through the parse edge, because this row is not a
+    /// parse failure at all -- it is a fact that parses perfectly and has nowhere to go, which is
+    /// the whole subject of #780.
+    #[test]
+    fn a_declared_fact_with_no_record_route_parks() {
+        use crate::inbox::{fact_route, FactLegClass, UnrecordedFact};
+        let staged = serde_json::json!({
+            "eventType": "DeliveryRequested",
+            "payload": {
+                "deliveryJobId": "00000000-0000-0000-0000-0000000000d1",
+                "orderId": "00000000-0000-0000-0000-0000000000d2",
+                "restaurantId": "00000000-0000-0000-0000-0000000000d3",
+                "pickup": { "line1": "1 rue de la Paix", "city": "Tours", "postalCode": "37000", "country": "FR" },
+                "dropoff": { "line1": "2 rue Nationale", "city": "Tours", "postalCode": "37000", "country": "FR" }
+            }
+        });
+        let inbox = ActorInbox::parse("DeliveryJob", "DeliveryRequested", &staged)
+            .expect("a DECLARED fact must parse -- it is declared, it just has no route");
+        let fact = inbox.into_fact().expect("a fact row projects onto the fact half");
+        assert_eq!(
+            fact_route(fact).class(),
+            FactLegClass::Unrecorded(UnrecordedFact {
+                actor_type: "DeliveryJob",
+                message_type: "DeliveryRequested",
+            }),
+            "a declared fact with no fold rule must PARK, naming itself -- never a terminal verdict, \
+             because a fact already happened and cannot be refused"
+        );
+    }
+
+    /// The control that stops the table passing for the wrong reason: a fact that DOES have a route
+    /// must not be classified as parked, or every row above would hold vacuously.
+    #[test]
+    fn a_routed_fact_is_not_parked() {
+        use crate::inbox::{fact_route, FactLegClass, FactRecorder};
+        let inbox = ActorInbox::parse("Payment", "PaymentCaptured", &staged_payment_captured())
+            .expect("PaymentCaptured is declared on the Payment lane");
+        let fact = inbox.into_fact().expect("a fact row projects onto the fact half");
+        assert_eq!(fact_route(fact).class(), FactLegClass::Record(FactRecorder::Payment));
     }
 }
