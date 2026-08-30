@@ -1,0 +1,7 @@
+{
+  "week": "2026-W35",
+  "seconds": 5100,
+  "recordedAt": "2026-08-30T13:40:01.998Z",
+  "branch": "main",
+  "note": "#595 C2: reclamation replacement birth onto the Order lane (gated OFF); fenced leg transaction in the polling runner; sends: DSL surface + 2 validator rules; 5 DB tests seen red first"
+}
