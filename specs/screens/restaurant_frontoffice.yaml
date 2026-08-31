@@ -459,7 +459,16 @@ screens:
               - { id: phone, type: phone_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone' }, value: "{{ customer.phone }}", disabled: true, helper: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.phone_helper' } }
               - { id: email, type: email_input, label: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.email' }, value: "{{ customer.email }}", required: false }
       - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions' }, visible_when: "selected_delivery_mode == 'delivery'", content: [{ type: text_area, id: delivery_instructions, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.delivery_instructions_ph' }, max_length: 200 }] }
-      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.order_summary' }, collapsible: true, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.breakdown.total | format_currency }}" }] }
+      # The pre-order total recap (#817, C. conso. L221-14 / CRD 2011/83 Art. 8(2)): the recap of
+      # the total shown immediately before ordering must be CLEAR AND LEGIBLE, so it is not
+      # collapsible — a collapsed recap the customer may never expand is a poor fit for that, and
+      # the sanction under the article is that the consumer is not bound. This section previously
+      # declared `collapsible: true`; the hand-written checkout runtime (`crates/web/src/checkout.rs`,
+      # this screen is `sdui: false`) has always rendered it expanded, so removing the flag also ends
+      # a declaration that disagreed with the runtime. Whether any given presentation SATISFIES the
+      # article is counsel's call (QT-4, docs/legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md);
+      # this is over-compliance pending that answer, not a legal conclusion (ADR-20260812-143619).
+      - { type: checkout_section, title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.order_summary' }, content: [{ type: cart_summary_mini, lines: "{{ cart.lines }}", total: "{{ cart.breakdown.total | format_currency }}" }] }
       - type: checkout_section
         title: { $ref: 'restaurant_frontoffice.translations.yaml#/checkout.payment' }
         content:

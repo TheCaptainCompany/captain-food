@@ -105,9 +105,22 @@ checkout.payment:          { messages: { en: "Payment", fr: "Paiement" } }
 # as an immediate charge would be factually wrong, so the pay step says so persistently.
 checkout.payment.hold_notice: { messages: { en: "Your card is authorized now and charged when your order is delivered.", fr: "Votre carte est autorisée maintenant, débitée à la livraison." } }
 checkout.processing:       { messages: { en: "Processing…", fr: "Traitement…" } }
+# Obligation-to-pay button (#817, C. conso. L221-14 / CRD 2011/83 Art. 8(2)): immediately before
+# a distance order the button must carry an unambiguous mention of the OBLIGATION TO PAY, the
+# statutory safe-harbour formula being "commander avec obligation de paiement" (ou une formule
+# analogue dénuée d'ambiguïté). The previous copy — "Commander — {total}" — announced an AMOUNT,
+# which is a different statement. `fr` therefore carries the safe-harbour formula verbatim and `en`
+# carries the directive's own English formulation, so both locales state the same obligation; the
+# total stays on the button because the same article wants it legible at the moment of ordering.
+# Whether any given wording SATISFIES the article is counsel's call (QT-4 on the counsel list in
+# docs/legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md) and no counsel is engaged:
+# this copy OVER-COMPLIES pending that answer, because the sanction is that the consumer is not
+# bound. This repo issues no legal clearance (ADR-20260812-143619).
 checkout.place_order:
   params: { total: "formatted order total" }
-  messages: { en: "Place order — {total}", fr: "Commander — {total}" }
+  messages:
+    en: "Order with obligation to pay — {total}"
+    fr: "Commander avec obligation de paiement — {total}"
 checkout.payment_failed.title: { messages: { en: "Payment failed", fr: "Paiement refusé" } }
 checkout.payment_failed.body:  { messages: { en: "Your card was not charged. Your cart is intact.", fr: "Votre carte n'a pas été débitée. Votre panier est intact." } }
 checkout.payment_failed.retry: { messages: { en: "Retry payment", fr: "Réessayer le paiement" } }
