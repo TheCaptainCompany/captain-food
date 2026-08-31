@@ -10693,6 +10693,132 @@ mod record_resolution {
         let rules: Vec<String> = validate_citations(&files, &corpus, &[]).iter().map(|i| i.rule.to_string()).collect();
         assert_eq!(rules, vec!["record-citation-unresolved".to_string()]);
     }
+
+    /// EVERY RECORD IN THE CORPUS MUST BE CITABLE THROUGH THE DISPATCH GATE (Lane D of
+    /// `.claude/hooks/register-check.sh`, ADR-20260831-141500).
+    ///
+    /// WHY THIS EXISTS, AND WHY FIXTURES COULD NOT HAVE CAUGHT IT. Lane D shipped with a resolver
+    /// that globbed one filename shape and refused 101 of 266 real ADRs. Round 1 fixed that and
+    /// added one FIXTURE PER FILENAME ERA — and the gate still refused all 80 `docs/decisions/`
+    /// rows, including `REG-2` (the row the ask surface's own Lane 1 reads) and `QUOTE-TOKEN`.
+    /// Both the author and the independent reviewer reasoned about the BRANCHES OF THE CODE; the
+    /// fixture population was drawn from the same model of the corpus that produced the bug, so it
+    /// could only confirm that model. **Fixtures prove the branches; only the corpus proves the
+    /// classification.**
+    ///
+    /// The refusal was worse than a plain miss: a coordinator following step 3 of
+    /// `.claude/skills/coordinator-register-check/SKILL.md` ("resolve the exact row,
+    /// `docs/decisions/<KEY>.yaml`") and citing the row was told it had produced NO citation at
+    /// all (`dispatch-trail-hollow`), leaving two exits — fabricate an id, or claim no record
+    /// exists. A gate that refuses its own corpus rewards the fabricated citation it exists to stop.
+    ///
+    /// STRUCTURE-SENSITIVE AND NOT ISOLATED, DELIBERATELY: filename shape IS the behaviour under
+    /// test, which is the case where structure-sensitivity is correct rather than a smell. It runs
+    /// the REAL hook end to end (one process per record) rather than re-implementing the resolver
+    /// in Rust — a second copy would drift, and it is the shipped script whose behaviour is at
+    /// issue. Exit 0 proves BOTH halves at once: an id that fails `DISPATCH_RECORD_ID` is never
+    /// extracted and reds as `dispatch-trail-hollow`, so a pass means the id was grammatical AND
+    /// resolved.
+    ///
+    /// KNOWN EXCLUSION, stated rather than implied: `docs/status/journal-YYYY-Www.md` is a fifth
+    /// citable kind and is not enumerated here. Pinning the `journal-` grammar alternative is
+    /// tracked in #818 with the other unpinned alternatives; this test's corpus is the four kinds
+    /// the round-1 review specified. It is therefore a completeness claim about FOUR KINDS, not
+    /// about every citable record.
+    #[test]
+    fn every_record_in_the_corpus_is_citable_through_lane_d() {
+        use std::io::Write;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let hook = root.join(".claude/hooks/register-check.sh");
+        assert!(hook.is_file(), "the dispatch gate is missing at {}", hook.display());
+
+        // The id a coordinator writes for a file: the first `n` hyphen-separated segments of its
+        // name. `PROP-20260809-003000--D1` keys are NOT derived here — they are register rows and
+        // arrive through the decisions arm below, with their full key as the id.
+        fn head_segments(name: &str, n: usize) -> String {
+            name.split('-').take(n).collect::<Vec<_>>().join("-")
+        }
+        fn read_dir_sorted(d: &std::path::Path) -> Vec<String> {
+            let mut v: Vec<String> = std::fs::read_dir(d)
+                .unwrap_or_else(|e| panic!("cannot read {}: {}", d.display(), e))
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            v.sort();
+            v
+        }
+
+        // (citation id, repo-relative path) for every record in the four enumerated kinds.
+        let mut records: Vec<(String, String)> = Vec::new();
+        let mut unclassified: Vec<String> = Vec::new();
+
+        for name in read_dir_sorted(&root.join("docs/adr")) {
+            if !name.ends_with(".md") { continue; }
+            // Not records: the index, the changelog and the blank form.
+            if matches!(name.as_str(), "README.md" | "HISTORY.md" | "_template.md") { continue; }
+            let stem: Vec<&str> = name.split('-').collect();
+            let id = if name.starts_with("ADR-") {
+                head_segments(&name, 3)                       // ADR-YYYYMMDD-HHMMSS
+            } else if stem[0].len() == 4 && stem[0].chars().all(|c| c.is_ascii_digit()) {
+                format!("ADR-{}", stem[0])                     // legacy NNNN-
+            } else if stem[0].len() == 8 && stem[0].chars().all(|c| c.is_ascii_digit()) {
+                format!("ADR-{}", head_segments(&name, 2))     // prefixless middle era
+            } else {
+                // THE TRIPWIRE: a FOURTH filename era lands and nobody remembers to add a case.
+                unclassified.push(format!("docs/adr/{}", name));
+                continue;
+            };
+            records.push((id, format!("docs/adr/{}", name)));
+        }
+        for (dir, prefix, segs) in [
+            ("docs/proposals", "PROP-", 3usize),
+            ("docs/proposals", "BRIEF-", 2),
+            ("docs/legal", "BRIEF-", 2),
+        ] {
+            for name in read_dir_sorted(&root.join(dir)) {
+                if !name.ends_with(".md") || !name.starts_with(prefix) { continue; }
+                records.push((head_segments(&name, segs), format!("{}/{}", dir, name)));
+            }
+        }
+        for name in read_dir_sorted(&root.join("docs/decisions")) {
+            let Some(key) = name.strip_suffix(".yaml") else { continue };
+            // `_legacy` is the prose-only allowlist, not a row; lowercase files are not keys.
+            if !key.starts_with(|c: char| c.is_ascii_uppercase()) { continue; }
+            records.push((key.to_string(), format!("docs/decisions/{}", name)));
+        }
+
+        assert!(unclassified.is_empty(),
+            "docs/adr/ carries {} file(s) in a filename shape this test cannot turn into a citation              id:\n  {}\nA new era means `resolve_record` in .claude/hooks/register-check.sh and this              derivation both need an arm — the gate cannot classify what nobody taught it to name.",
+            unclassified.len(), unclassified.join("\n  "));
+        // A corpus that silently became empty would make every assertion below vacuous.
+        assert!(records.len() > 300, "only {} records enumerated — the corpus walk is broken, and an              empty corpus passes this test vacuously", records.len());
+
+        let mut refused: Vec<String> = Vec::new();
+        for (id, path) in &records {
+            let payload = format!(
+                "{{\"tool_name\":\"Agent\",\"tool_input\":{{\"subagent_type\":\"executor\",\
+                 \"prompt\":\"DISPATCH. Register check: {} (2026-01-01, open) -- covers X, silent on Y\"}}}}",
+                id);
+            let mut child = std::process::Command::new("bash")
+                .arg(&hook)
+                .env("REGISTER_CHECK_LOG", "/dev/null")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("failed to run the dispatch gate");
+            child.stdin.as_mut().expect("stdin").write_all(payload.as_bytes()).expect("write payload");
+            if !child.wait().expect("wait").success() {
+                refused.push(format!("{} ({})", id, path));
+            }
+        }
+
+        assert!(refused.is_empty(),
+            "{} of {} real records are refused by the dispatch gate:\n  {}\n\
+             Each is a real record that a coordinator citing it correctly would be told is not a \
+             citation. A gate that refuses its own corpus rewards a fabricated citation.",
+            refused.len(), records.len(), refused.join("\n  "));
+    }
 }
 
 // ─── §22b/c + reconsiders + §23 — slice 3 (ADR-20260821-103403) planted-defect tests ────────────

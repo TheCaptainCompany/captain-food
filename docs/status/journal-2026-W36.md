@@ -3,6 +3,46 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the coordinator gets the register-check gate on its committing surface (#814).**
+> Every *agent* has been gated on the ask since 2026-08-21; the **coordinator had no gate on any
+> surface**, and in one session produced **nine** failures of exactly the class the gate prevents —
+> an option space presented as open that ADR-20260829-230418 had decided, a counsel posture proposed
+> without reading BRIEF-20260819 §4.2, a line-range citation (`pm_orchestrators.rs:844-852`) that
+> **reads as confirming the claim while showing the opposite**, and a dispatch about to contradict
+> PROP-20260815-142349. **Four of the nine were caught by the founder or a lens.** The ninth was
+> caught by running the check before dispatching — the proof the discipline works.
+> Now a `PreToolUse` hook on the **`Agent`** tool, as Lane D of the *same* `register-check.sh`
+> (extended, not forked — the gate-script self-verification set stays at four files, so neither
+> guard has to learn a fifth). Two design questions decided structurally rather than by a list:
+> the **discriminator** is the target agent's own `tools:` frontmatter — write-capable is gated,
+> read-only is not — so lens consults and reviewer passes pass untouched and granting an agent a
+> write tool arms the gate for it *in the same commit*, with no exemption list to go stale; and the
+> **escape hatch** is shut by requiring a cited record id to RESOLVE to a file under `docs/`, so a
+> literal `Register check: none` and a well-shaped invented id are both refused.
+> The validator returned the favour mid-write: §23 `record-citation-unresolved` refused the *fake
+> ADR id used as an illustration inside the ADR itself* — the same principle one corpus over,
+> caught by a gate rather than a reader.
+> **Recorded honestly rather than hidden**: a hook gates a TOOL CALL, so the coordinator's prose
+> answers to the founder stay ungateable. `.claude/skills/coordinator-register-check/` carries that
+> half and is *weaker* — the pre-existing `decision-lookup` skill was invoked **zero** times in the
+> session that produced the nine, which is why this one is a hook and not a paragraph, and why the
+> right move is routing more coordinator→founder questions through `AskUserQuestion`.
+> Records: [ADR-20260831-141500](../adr/ADR-20260831-141500-the-coordinator-gets-the-register-check-gate-on-its-committing-surface.md).
+> Proven by selftest cases D1-D27 / LD1-LD3 / W4-W7 and by
+> `tools/codegen-rs/src/tests.rs :: every_record_in_the_corpus_is_citable_through_lane_d`, which
+> drives the real hook over 417 records; every case was observed RED before the suite was trusted.
+> **It took three review rounds, and the shape of the misses is the lesson.** Round 1: the resolver
+> globbed one `docs/adr/` filename shape and refused 101 of 266 real ADRs. Round 2: with a fixture
+> per era in place it still mis-handled all 80 `docs/decisions/` rows (53 refused, 27 silently
+> resolving to the parent proposal), and the `tools:` parse read only the first physical line, so
+> four continuation shapes still failed open. Each round fixed the instances and re-asserted a
+> universal — *"fails closed whenever the tool set cannot be read"* — that the next round falsified.
+> Two rules came out of it, both now executable: **a gate that classifies members of a corpus is
+> tested against the CORPUS, not against fixtures** (`docs/claude/sessions/workflow.md`, bound by
+> selftest case CC), and **a universal claim backed by an enumeration is that same defect one level
+> up** — so the shipped claims are scoped to what the gate DETECTS, with the line-based parse named
+> as a residual rather than implied away.
+
 > **2026-08-31 — three operational learnings from tonight's runs, and the argued decision to gate
 > NONE of them** (records only; no `specs/**`, no code, no new hook).
 > **(1) `git rev-parse HEAD == origin/main` does not mean you are ON `main`.** An executor passed

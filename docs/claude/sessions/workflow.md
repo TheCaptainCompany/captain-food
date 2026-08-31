@@ -664,6 +664,44 @@ Ask only what is genuinely his: a real option space, an external or legal action
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
 required, and always end with a free-text question.
 
+### A gate that classifies members of a corpus is tested against the CORPUS, not against fixtures
+
+**Fixtures prove the branches; only the corpus proves the classification.**
+
+The tell is lexical: **any gate whose failure message says "fix your input" is asserting a
+completeness claim about its own accepted set** — and that claim needs an *enumerating* test, not a
+representative one.
+
+Earned twice in one PR ([#815](https://github.com/TheCaptainCompany/captain-food/pull/815),
+[ADR-20260831-141500](../../adr/ADR-20260831-141500-the-coordinator-gets-the-register-check-gate-on-its-committing-surface.md)).
+Lane D of the register-check hook shipped with a resolver that globbed one `docs/adr/` filename
+shape and **refused 101 of 266 real ADRs**. The independent review caught it; the fix added one
+fixture per filename era; and the gate still **mis-handled all 80 `docs/decisions/` rows** — 53
+refused outright, 27 silently resolving to the parent proposal instead of the cited row — including
+`REG-2`, the row the ask surface's own Lane 1 reads.
+
+**Why the fixtures could not have caught it, and why an independent pass did not either.** Both the
+author and the reviewer reasoned about the *branches of the code*; the fixture population was drawn
+from the same model of the corpus that produced the bug, so it could only ever confirm that model.
+Independence bought one round, not correctness — *the author's model of the corpus WAS the defect,
+and a second reader of the code inherits it.* The population has to come from `ls`, not from either
+mind.
+
+**Such a gate is doubly dangerous when its refusal offers only illegitimate exits.** Here a
+coordinator who did the check correctly and cited a real row was told it had produced no citation
+at all, leaving two ways forward: fabricate an id that happens to resolve, or claim no record exists.
+**A gate that refuses its own corpus rewards the fabricated citation it exists to stop** — worse
+than no gate, because it trains the defect.
+
+The executable form is
+`tools/codegen-rs/src/tests.rs :: every_record_in_the_corpus_is_citable_through_lane_d`: it walks
+the real record directories, derives the id a coordinator would write from each filename, and drives
+the **real hook** end to end. Such a test is deliberately **structure-sensitive and not isolated** —
+filename shape *is* the behaviour under test, the one case where that is correct rather than a
+smell — and it buys what fixtures cannot: **it goes red the day a fourth filename era or a fifth
+record kind lands, with nobody remembering to add a case.** State its excluded kinds explicitly, so
+it is read as a completeness claim about what it enumerates and not about everything.
+
 ### A record that pins a fact to "in flight" expires, and nothing detects it — date the claim instead
 
 `ADR-20260815-030206` carried a lens quote asserting the `source:` enumeration was ***"not on

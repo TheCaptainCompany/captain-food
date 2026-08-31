@@ -287,6 +287,125 @@ legacy:
   - OLD-ROW
 EOF
 
+# ── Lane D fixtures (the dispatch surface, ADR-20260831-141500) ─────────────────────────────────
+# A HERMETIC agent roster and docs tree, for the same reason the row fixtures exist: the live
+# roster and the live docs/ tree both change, and a case that depends on them rots. The LIVE
+# wiring is proven separately by the LD cases below, on properties that cannot legitimately move.
+mkdir -p "$FIX/agents" "$FIX/docs/adr"
+cat > "$FIX/agents/writer.md" <<'EOF'
+---
+name: writer
+tools: Read, Grep, Glob, Bash, Write, Edit
+---
+EOF
+cat > "$FIX/agents/lens.md" <<'EOF'
+---
+name: lens
+tools: Read, Grep, Glob, Bash
+---
+EOF
+cat > "$FIX/agents/notools.md" <<'EOF'
+---
+name: notools
+description: declares no `tools:` line, so it inherits the full set -- including Write
+---
+EOF
+: > "$FIX/docs/adr/ADR-20260821-095957-fixture-record.md"
+# THE OTHER TWO FILENAME ERAS. docs/adr/ holds 164 `ADR-<stamp>-*`, 47 legacy `NNNN-*` and 54
+# PREFIXLESS `<stamp>-*` files; the first resolver globbed only the first shape and so refused 101
+# of 265 real ADRs, offering a correct trail no exit but a fabricated id or a false negative
+# (review round 1, F1). One fixture per era, so a regression to the single-glob form reds here.
+: > "$FIX/docs/adr/0032-fixture-legacy-era.md"
+: > "$FIX/docs/adr/20260720-233000-fixture-prefixless-era.md"
+# Agent fixtures for the shapes that used to fail OPEN (review round 1, F2). Each one is a
+# `tools:` declaration the old `awk /^tools:/{print}` reduced to the literal `tools:` -- non-empty,
+# so the fail-closed branch never ran and a write-capable agent was declared advisory.
+cat > "$FIX/agents/listform.md" <<'EOF'
+---
+name: listform
+tools:
+  - Read
+  - Write
+---
+EOF
+cat > "$FIX/agents/continuation.md" <<'EOF'
+---
+name: continuation
+tools:
+  Read, Bash, Write
+---
+EOF
+cat > "$FIX/agents/trailcomma.md" <<'EOF'
+---
+name: trailcomma
+tools: Read, Grep,
+  Bash, Write
+---
+EOF
+cat > "$FIX/agents/wildcard.md" <<'EOF'
+---
+name: wildcard
+tools: "*"
+---
+EOF
+cat > "$FIX/agents/emptykey.md" <<'EOF'
+---
+name: emptykey
+tools:
+---
+EOF
+cat > "$FIX/agents/editonly.md" <<'EOF'
+---
+name: editonly
+tools: Read, Grep, Glob, Bash, Edit
+---
+EOF
+cat > "$FIX/agents/todowrite.md" <<'EOF'
+---
+name: todowrite
+tools: Read, Grep, Glob, Bash, TodoWrite
+---
+EOF
+# Round 2, F-A: FOUR MORE shapes that failed open, because value continuation is not decidable
+# from the first physical line. Each of these grants Write; each read `agent-advisory` until the
+# parse started reading the WHOLE value. `wrapped-readonly` is the false-positive floor beside
+# them -- it must stay advisory, and the round-2 trailing-comma heuristic had gated it.
+cat > "$FIX/agents/flowbreak-after.md" <<'EOF'
+---
+name: flowbreak-after
+tools: [Read, Grep, Glob, Bash
+  , Write]
+---
+EOF
+cat > "$FIX/agents/flowbreak-before.md" <<'EOF'
+---
+name: flowbreak-before
+tools: [Read, Grep, Glob
+  , Bash, Write]
+---
+EOF
+cat > "$FIX/agents/plainbreak.md" <<'EOF'
+---
+name: plainbreak
+tools: Read, Grep, Glob, Bash
+  , Write, Edit
+---
+EOF
+cat > "$FIX/agents/folded.md" <<'EOF'
+---
+name: folded
+tools: >
+  Read, Write
+---
+EOF
+cat > "$FIX/agents/wrapped-readonly.md" <<'EOF'
+---
+name: wrapped-readonly
+tools: Read, Grep,
+  Glob, Bash
+---
+EOF
+
 fail=0
 expect() { # expect <case> <want-exit> <decisions-dir> <payload> [want-reason]
   # want-reason (optional) is compared EXACTLY against the hook log's reason field: a case that
@@ -386,6 +505,139 @@ expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LA
 # E8 ALLOW: the documented escape -- the question asks for the external action itself.
 expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
+# ── Lane D: the dispatch card (Agent surface, ADR-20260831-141500) ──────────────────────────────
+expect_d() { # expect_d <case> <want-exit> <payload> [want-reason]
+  local case="$1" want="$2" payload="$3" want_reason="${4:-}" got reason log="$FIX/case.log"
+  : > "$log"
+  printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
+    REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+  got=$?
+  if [ "$got" -ne "$want" ]; then
+    echo "register-check selftest: case $case FAILED (want exit $want, got $got)" >&2
+    fail=1
+  fi
+  if [ -n "$want_reason" ]; then
+    reason="$(tail -1 "$log" 2>/dev/null | cut -f3)"
+    if [ "$reason" != "$want_reason" ]; then
+      echo "register-check selftest: case $case FAILED (want reason '$want_reason', got '${reason:-none}')" >&2
+      fail=1
+    fi
+  fi
+}
+DTRAIL='Register check: ADR-20260821-095957 (2026-08-21, open) -- covers the ask gate, silent on the coordinator'
+
+# D1 BLOCK: THE INCIDENT SHAPE -- a dispatch card to a write-capable agent with no trail at all.
+expect_d D1-card-no-trail 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH -- build the thing. Base main = bddba6bc."}}' dispatch-trail-missing
+# D2 ALLOW: the same card carrying a trail whose record RESOLVES -- the green half of the pair.
+expect_d D2-card-valid-trail 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\"}}" dispatch-trail-ok
+# D3 ALLOW: THE DISCRIMINATOR. A read-only agent is a lens consult / reviewer pass, not a card --
+#    it commits nothing, so it is never gated. This is the false-positive floor: if this reds, the
+#    gate fires on every mob briefing and gets worked around.
+expect_d D3-lens-advisory 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"lens","prompt":"What do you see in this event shape?"}}' agent-advisory
+# D4 BLOCK: THE ESCAPE HATCH. A literal `Register check: none` must not satisfy the gate, or the
+#    whole thing is theatre -- it names no record and is not the explicit negative.
+expect_d D4-literal-none 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: none"}}' dispatch-trail-hollow
+# D5 BLOCK: the negative without `terms:` -- "no controlling record" with nothing searched is the
+#    same free pass under a longer name.
+expect_d D5-termless-negative 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: no controlling record"}}' dispatch-trail-termless
+# D6 ALLOW: the negative WITH its terms is a PASSING trail -- a genuinely new question is the
+#    system working, and the card must not be dropped for lack of a record.
+expect_d D6-negative-with-terms 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: no controlling record -- terms: coordinator register check, PreToolUse Agent; nearest: none"}}' dispatch-trail-ok
+# D7 BLOCK: an INVENTED id. The shape is perfect and the record does not exist -- the check that
+#    makes a fabricated citation cost something. (The fixture docs tree holds exactly one ADR.)
+expect_d D7-unresolvable-id 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260101-000000 (2026-01-01, open) -- covers everything"}}' dispatch-trail-unresolved
+# D8 BLOCK: an agent with NO file -- `general-purpose` is the live case (environment.md documents
+#    pasting a charter into it), and it holds the full tool set. Fail closed.
+expect_d D8-undeclared-agent 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","prompt":"You are beck. Charter pasted."}}' dispatch-trail-missing
+# D9 BLOCK: no `subagent_type` at all -- fail closed, never fail open (ADR-20260810-231300).
+expect_d D9-no-subagent-type 2 '{"tool_name":"Agent","tool_input":{"prompt":"do a thing"}}' dispatch-trail-missing
+# D10 BLOCK: an agent file with no `tools:` line inherits the full set, so it is write-capable.
+expect_d D10-no-tools-line 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"notools","prompt":"go"}}' dispatch-trail-missing
+# D11 BLOCK: the ASK surface is untouched by Lane D's arrival -- an AskUserQuestion payload with no
+#    trail still reds on the ORIGINAL reason, not a dispatch one. (The lanes must not swap.)
+expect_d D11-ask-surface-intact 2 '{"tool_name":"AskUserQuestion","questions":[{"question":"Which funding model applies to tips?"}]}' trail-missing
+# D12 BLOCK: a card that cites a DECIDED-status record still passes the STATUS half but is refused
+#    here only because the id does not resolve -- proving Lane D never runs the ask surface's
+#    `trail-answered` rule. On a CARD, citing a decided record is the behaviour being enforced;
+#    D2's trail says `open` and D12's says `decided`, and both are judged solely on resolution.
+expect_d D12-decided-cite-ok 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260821-095957 (2026-08-21, decided) -- controlling, and cited as such"}}' dispatch-trail-ok
+
+# ── F1 regression: the resolver must cover all THREE docs/adr filename eras ─────────────────────
+# D13/D14 ALLOW: a legacy `ADR-00NN` and a PREFIXLESS middle-era stamp both resolve. Before the fix
+#    these were exit 2 -- and the refusal told a coordinator who had done the check CORRECTLY to
+#    "fix the id, or state the explicit negative", i.e. to fabricate or to lie.
+expect_d D13-legacy-era-resolves 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-0032 (2026-07-20, open) -- covers completeness, silent on X"}}' dispatch-trail-ok
+expect_d D14-prefixless-era-resolves 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260720-233000 (2026-07-20, open) -- covers the claim protocol, silent on X"}}' dispatch-trail-ok
+# D15 BLOCK: a well-formed LEGACY id that names no file still refuses -- widening the resolver to
+#    three eras must not widen it to "anything ADR-shaped". (This case first asserted the reason on
+#    `ADR-2026`, testing the trailing-hyphen guard that stops a truncated stamp borrowing a
+#    prefixless file's name. That was wrong and the red-first run caught it: `ADR-2026` matches
+#    NEITHER alternative of DISPATCH_RECORD_ID, so no id is ever extracted and the verdict is
+#    `dispatch-trail-hollow` -- the guard is real but unreachable through the grammar, kept only to
+#    mirror decisions.rs. A case that reds for a reason it does not name is the shape E5 already
+#    cost this suite once.)
+expect_d D15-legacy-id-unknown 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-0099 (2026, open) -- covers X"}}' dispatch-trail-unresolved
+
+# ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
+# A parse failure was being reported as a read declaration of read-only, so each of these was
+# exit 0 -- ungated -- on a card with no trail at all.
+expect_d D16-tools-list-form 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"listform","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+expect_d D17-tools-continuation 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"continuation","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D18: the fourth shape, found while fixing the three the review named -- an inline value that is
+#    only the FIRST FRAGMENT of a list continued on the next line.
+expect_d D18-tools-trailing-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"trailcomma","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D19: `tools: "*"` fails open by a DIFFERENT mechanism -- a non-empty value with no write token --
+#    so an emptiness check alone never reaches it.
+expect_d D19-tools-wildcard 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"wildcard","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+expect_d D20-tools-empty-key 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"emptykey","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D21 BLOCK: `Edit` alone is write capability -- the discriminator is not Write-only.
+expect_d D21-edit-only-agent 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"editonly","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D22 ALLOW: the token set is CLOSED, so `TodoWrite` -- which grants no filesystem write -- does not
+#    drag a lens into the gate the way a `Write|Edit` substring did.
+expect_d D22-todowrite-not-write 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"todowrite","prompt":"lens consult"}}' agent-advisory
+
+# ── Round 2, F-A: continuation shapes the first-line parse could not see ────────────────────────
+# All four grant Write and all four read `agent-advisory` before the whole-value parse. The first
+# two carry an UNBALANCED `[`, which `tr -d "[]"` used to discard before the token scan -- a louder
+# "this value is incomplete" signal than the trailing comma round 2 did handle.
+expect_d D23-flow-break-after-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"flowbreak-after","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D24 is the mirror of D18: the line breaks BEFORE the comma, so no trailing-comma test can see it.
+expect_d D24-flow-break-before-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"flowbreak-before","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+expect_d D25-plain-break-before-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"plainbreak","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D26: a folded scalar carries NO punctuation at all -- nothing on the first line hints at more.
+expect_d D26-folded-scalar 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"folded","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D27 ALLOW: THE FALSE-POSITIVE FLOOR. A genuinely read-only list wrapped across two lines must
+# stay advisory -- the round-2 trailing-comma heuristic gated it, and a gate that fires on ordinary
+# formatting is one that gets worked around.
+expect_d D27-wrapped-readonly-advisory 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"wrapped-readonly","prompt":"lens consult"}}' agent-advisory
+
+# LD LIVE wiring: the fixture cases above would all pass with the LIVE paths mis-wired, so two
+# anchors on the real roster -- `executor` is write-capable and `reviewer` is read-only, and
+# either changing is a roster decision that should red this case and be looked at.
+# LD1 covers ALL THREE live write-capable agents, not just `executor`: the F-A failure scenario is
+# a formatter reflowing a `tools:` list across two lines, and that reaches `architect` and
+# `generator` exactly as easily (review round 2, F-A).
+for _wa in architect executor generator; do
+  printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"$_wa\",\"prompt\":\"DISPATCH with no trail whatsoever.\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+  if [ $? -ne 2 ]; then
+    echo "register-check selftest: case LD1 FAILED -- the LIVE .claude/agents roster did not gate a trail-less dispatch to write-capable '$_wa' (a reflowed or reformatted \`tools:\` list reads advisory)" >&2
+    fail=1
+  fi
+done
+printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"reviewer","prompt":"Review the full branch diff."}}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "register-check selftest: case LD2 FAILED -- the LIVE roster gated a read-only 'reviewer' consult; Lane D must never fire on an advisory call" >&2
+  fail=1
+fi
+# LD3: the live docs tree resolves a real record id -- the anti-theatre check is only as good as
+# its resolver, and a resolver pointed at the wrong root refuses EVERY citation (fail-shut drift
+# that would read as "the coordinator keeps writing bad trails").
+printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
+  fail=1
+fi
+
 # ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────
 # L1: the live dir parses and gates -- REG-2 is decided forever (a reversal opens a NEW row).
 printf '%s' "{\"questions\":[{\"question\":\"Reopen REG-2? $TRAIL\"}]}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
@@ -411,16 +663,19 @@ fi
 # check_wiring proves .claude/settings.json carries a hooks.PreToolUse entry whose matcher is
 # EXACTLY AskUserQuestion and whose command runs the real script. python3 (stdlib json only, no
 # added toolchain) is required; its absence FAILS the case -- fail closed, never a silent skip.
-check_wiring() { # check_wiring <settings.json> -> 0 armed / nonzero not
+# Parameterised by MATCHER since 2026-08-31: the same script is now armed on two surfaces
+# (AskUserQuestion = the ask gate, Agent = Lane D, the coordinator's dispatch card), and each entry
+# can be disarmed independently, so each is proven independently.
+check_wiring() { # check_wiring <settings.json> <matcher> -> 0 armed / nonzero not
   command -v python3 >/dev/null 2>&1 || return 3
-  python3 - "$1" <<'PYEOF'
+  python3 - "$1" "$2" <<'PYEOF'
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(1)
 for entry in d.get("hooks", {}).get("PreToolUse", []):
-    if entry.get("matcher") != "AskUserQuestion":
+    if entry.get("matcher") != sys.argv[2]:
         continue
     for h in entry.get("hooks", []):
         if h.get("type") == "command" and h.get("command", "").endswith("/.claude/hooks/register-check.sh"):
@@ -430,29 +685,54 @@ PYEOF
 }
 # The three disarming shapes, planted as mutant fixtures derived from the REAL committed file, so
 # each red case proves the checker sees through exactly one disarming move.
+# The mutants are located BY MATCHER, not by index: a second entry (Agent) was appended in
+# 2026-08-31 and an index-addressed builder silently mutates whichever entry happens to sit there.
 if ! python3 - "$ROOT/.claude/settings.json" "$FIX" <<'PYEOF'
 import copy, json, sys
 src, out = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
-entry = d["hooks"]["PreToolUse"][0]
-assert "register-check.sh" in entry["hooks"][0]["command"], "settings.json PreToolUse[0] is no longer the register-check entry -- update the mutant builder"
-m1 = copy.deepcopy(d); m1["hooks"]["PreToolUse"][0]["matcher"] = "AskUserQuestionX"
+
+def idx(doc, matcher):
+    for i, e in enumerate(doc["hooks"]["PreToolUse"]):
+        if e.get("matcher") == matcher:
+            assert "register-check.sh" in e["hooks"][0]["command"], \
+                f"settings.json PreToolUse[{matcher}] is no longer a register-check entry -- update the mutant builder"
+            return i
+    raise AssertionError(f"settings.json declares no PreToolUse entry with matcher {matcher} -- the gate is disarmed on that surface")
+
+ask, agent = idx(d, "AskUserQuestion"), idx(d, "Agent")
+OTHER = "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/some-other-hook.sh"
+m1 = copy.deepcopy(d); m1["hooks"]["PreToolUse"][ask]["matcher"] = "AskUserQuestionX"
 m2 = copy.deepcopy(d); m2["hooks"]["PostToolUse"] = m2["hooks"].pop("PreToolUse")
-m3 = copy.deepcopy(d); m3["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/some-other-hook.sh"
-for name, m in [("settings-mutant-matcher.json", m1), ("settings-mutant-event.json", m2), ("settings-mutant-command.json", m3)]:
+m3 = copy.deepcopy(d); m3["hooks"]["PreToolUse"][ask]["hooks"][0]["command"] = OTHER
+m4 = copy.deepcopy(d); m4["hooks"]["PreToolUse"][agent]["matcher"] = "AgentX"
+m5 = copy.deepcopy(d); m5["hooks"]["PreToolUse"][agent]["hooks"][0]["command"] = OTHER
+m6 = copy.deepcopy(d); del m6["hooks"]["PreToolUse"][agent]
+for name, m in [("settings-mutant-matcher.json", m1), ("settings-mutant-event.json", m2),
+                ("settings-mutant-command.json", m3), ("settings-mutant-agent-matcher.json", m4),
+                ("settings-mutant-agent-command.json", m5), ("settings-mutant-agent-absent.json", m6)]:
     json.dump(m, open(f"{out}/{name}", "w"), indent=1)
 PYEOF
 then
   echo "register-check selftest: case W FAILED -- python3 missing or the settings mutant builder broke (fail closed)" >&2
   fail=1
-elif ! check_wiring "$ROOT/.claude/settings.json"; then
-  echo "register-check selftest: case W FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/AskUserQuestion declaration (the gate is disarmed)" >&2
+elif ! check_wiring "$ROOT/.claude/settings.json" AskUserQuestion; then
+  echo "register-check selftest: case W FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/AskUserQuestion declaration (the ask gate is disarmed)" >&2
+  fail=1
+elif ! check_wiring "$ROOT/.claude/settings.json" Agent; then
+  echo "register-check selftest: case WD FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/Agent declaration (Lane D, the coordinator's dispatch gate, is disarmed -- ADR-20260831-141500)" >&2
   fail=1
 else
   # W1 fuzzed matcher / W2 wrong event / W3 wrong command: the checker must refuse each.
-  check_wiring "$FIX/settings-mutant-matcher.json" && { echo "register-check selftest: case W1 FAILED -- checker accepted matcher AskUserQuestionX" >&2; fail=1; }
-  check_wiring "$FIX/settings-mutant-event.json"   && { echo "register-check selftest: case W2 FAILED -- checker accepted the entry under PostToolUse" >&2; fail=1; }
-  check_wiring "$FIX/settings-mutant-command.json" && { echo "register-check selftest: case W3 FAILED -- checker accepted a command pointing at another script" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-matcher.json" AskUserQuestion && { echo "register-check selftest: case W1 FAILED -- checker accepted matcher AskUserQuestionX" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-event.json"   AskUserQuestion && { echo "register-check selftest: case W2 FAILED -- checker accepted the entry under PostToolUse" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-command.json" AskUserQuestion && { echo "register-check selftest: case W3 FAILED -- checker accepted a command pointing at another script" >&2; fail=1; }
+  # W4-W6: the SAME three disarming shapes against the Agent entry, plus its deletion -- the one
+  # that costs nothing to do accidentally, since the ask gate stays green while Lane D vanishes.
+  check_wiring "$FIX/settings-mutant-agent-matcher.json" Agent && { echo "register-check selftest: case W4 FAILED -- checker accepted matcher AgentX" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-agent-command.json" Agent && { echo "register-check selftest: case W5 FAILED -- checker accepted an Agent command pointing at another script" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-agent-absent.json"  Agent && { echo "register-check selftest: case W6 FAILED -- checker accepted settings with the Agent entry deleted" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-event.json"         Agent && { echo "register-check selftest: case W7 FAILED -- checker accepted the Agent entry under PostToolUse" >&2; fail=1; }
 fi
 
 # D DRIFT: every standing agent carries the citation block (marker + pointer to the canonical rule).
@@ -466,6 +746,20 @@ done
 # C CANON: the canonical rule the blocks and the hook cite still exists where they point.
 if ! grep -q 'check the register before you ask' "$ROOT/docs/claude/sessions/workflow.md"; then
   echo "register-check selftest: case C FAILED -- docs/claude/sessions/workflow.md no longer carries the canonical register-check rule the blocks cite" >&2
+  fail=1
+fi
+
+# CC CORPUS RULE: the generalisation Lane D cost two rounds to learn is prose, and prose can be
+# deleted silently. The hook's own completeness comment cites it by name, so this case makes the
+# pairing non-deletable: the rule must exist, and the test that makes it executable must still be
+# named in the suite that enforces it (ADR-20260831-141500; workflow.md, "a gate that classifies
+# members of a corpus is tested against the CORPUS, not against fixtures").
+if ! grep -q 'only the corpus proves the classification' "$ROOT/docs/claude/sessions/workflow.md"; then
+  echo "register-check selftest: case CC FAILED -- docs/claude/sessions/workflow.md no longer carries the corpus-vs-fixtures rule that .claude/hooks/register-check.sh cites for its completeness claim" >&2
+  fail=1
+fi
+if ! grep -q 'every_record_in_the_corpus_is_citable_through_lane_d' "$ROOT/tools/codegen-rs/src/tests.rs"; then
+  echo "register-check selftest: case CC FAILED -- the corpus-completeness test every_record_in_the_corpus_is_citable_through_lane_d is gone from tools/codegen-rs/src/tests.rs; Lane D's completeness claim would be prose again" >&2
   fail=1
 fi
 

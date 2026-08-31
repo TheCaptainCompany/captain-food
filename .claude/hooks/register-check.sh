@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# Captain.Food register-check gate (Claude Code PreToolUse hook on AskUserQuestion).
+# Captain.Food register-check gate (Claude Code PreToolUse hook on AskUserQuestion and Agent).
+#
+# TWO SURFACES, ONE SCRIPT. The gate is dispatched on `tool_name` in the hook payload:
+#
+#   * ASK (AskUserQuestion, or no tool_name at all -- the selftest's bare-payload form): the
+#     original founder-facing gate. Lanes 1-3 below, unchanged.
+#   * DISPATCH (Agent): the COORDINATOR's committing surface, added 2026-08-31 by
+#     ADR-20260831-141500. A dispatch card is the coordinator's diff and it was ungated, while
+#     every agent was gated on the ask -- nine failures in one session, four of them caught only
+#     by the founder or a lens. Lane D below.
+#
+# WHY THE COORDINATOR NEEDED ONE AT ALL. `.claude/skills/decision-lookup/` already existed and was
+# invoked ZERO times in the session that produced those nine. An un-invoked skill is prose with
+# extra steps, so the enforcement must not depend on remembering -- the same argument that put the
+# ask gate on a hook rather than in an agent block.
 #
 # WHY THIS EXISTS. Three founder directives of 2026-08-21, in order: "agents will no longer ask
 # questions already answered" (ADR-20260821-010543 — the trail), the REG-2/REG-4 row gate
@@ -34,11 +48,77 @@
 #      depth); legacy keys mentioned as CONTEXT pass, logged (`key-legacy`) — ask-vs-cite is
 #      distinguished by the envelope, not by the key.
 #
+# LANE D — the DISPATCH card (tool_name == Agent). Two questions decide whether this survives
+# contact, and both are answered STRUCTURALLY rather than by a list:
+#
+#   THE DISCRIMINATOR: WHICH `Agent` CALLS ARE GATED. Not every Agent call is a dispatch card --
+#   lens consults (`young`, `vernon`, `evans`, `beck`, ...), the `reviewer` pass and read-only
+#   research travel through the SAME tool. Gating all of them makes the gate something to work
+#   around; a hand-maintained exemption list of agent names is the shape this repo has retired
+#   twice. So the discriminator is DERIVED FROM THE TARGET AGENT'S OWN DECLARATION: the gate fires
+#   iff `.claude/agents/<subagent_type>.md` grants a WRITE tool (`Write`/`Edit`, substring, so
+#   `MultiEdit`/`NotebookEdit` count) in its frontmatter `tools:` line. Today that is exactly
+#   `architect`, `executor` and `generator`; the other thirteen agents declare `Read, Grep, Glob,
+#   Bash` and pass untouched, logged `agent-advisory`. Nothing here enumerates those names --
+#   granting an agent a write tool pulls it into the gate in the same commit, and revoking one
+#   drops it, with no list to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE
+#   TRAIL THAT LICENSES IT.
+#
+#   IT FAILS CLOSED ON EVERY UNREADABLE SHAPE IT CAN DETECT -- and that sentence is deliberately not
+#   the universal "whenever the tool set cannot be read" it replaced, which was asserted three times
+#   on the back of an enumeration and falsified three times. What it detects: no `subagent_type`; no
+#   agent file (`general-purpose` is the live case -- environment.md documents pasting a charter into
+#   it as the standard workaround, and it holds the full tool set); no `tools:` key; a `tools:` key
+#   whose value is empty across its whole indented block; an UNBALANCED flow list; and a wildcard.
+#   The parse reads the WHOLE value, so continuation shapes are read rather than guessed at.
+#   NAMED RESIDUAL: this is a line-based reader, NOT a YAML parser. A value form outside its grammar
+#   could still be mis-read, and no enumeration here may be taken as proof that none exists -- the
+#   only honest evidence would be a corpus test over real agent files, which is why the claim is
+#   scoped to what it DETECTS rather than to what it cannot.
+#
+#   NAMED RESIDUAL, because "no list to drift" is only true of AGENT NAMES: the WRITE-TOOL token set
+#   below ({Write, Edit, MultiEdit, NotebookEdit}) is a closed list, and a future write-granting tool
+#   under another name would not be recognised until it is added. That is a real maintenance edge,
+#   stated rather than implied away. `Bash` is deliberately NOT in the set even though it can write
+#   files: every advisory lens in this roster declares it, so counting it would gate the entire
+#   roster and destroy the discriminator. The gate therefore tracks DECLARED AUTHORING INTENT, not
+#   raw capability.
+#
+#   THE ESCAPE HATCH IS THE FAILURE MODE. A gate satisfiable by pasting a literal
+#   `Register check: none` is theatre. So Lane D checks the trail's SHAPE in a way a bare marker
+#   cannot satisfy: a POSITIVE trail must name a record id that RESOLVES TO A FILE ON DISK
+#   (docs/adr/, docs/proposals/, docs/legal/, docs/status/), and a NEGATIVE trail must be the
+#   explicit no-controlling-record form AND name the `terms:` searched. `Register check: none`
+#   is neither and is refused; an id in the right shape naming a record that was never written is
+#   refused because it resolves to nothing.
+#
+#   IT IS NOT "STRICTLY STRONGER" THAN THE ASK SURFACE'S LANE 2, and an earlier version of this
+#   paragraph said so. The two grammars merely DIFFER, in both directions: `Register check:
+#   DECISIONS` passes Lane D (the file exists) and fails Lane 2 (whose `DECISIONS[^"]{0,24}[0-9]+`
+#   wants a section number), while `ADR-0032 (2026, open)` passes Lane 2 on shape alone. A bare
+#   `journal-<current ISO week>` also resolves by construction, so it is the cheapest Lane D
+#   citation that proves nothing. Lane D is stronger on the axis it was built for -- resolution --
+#   and that is the honest claim. Reconciling the two grammars is tracked, not done here.
+#
+#   WHAT LANE D DELIBERATELY DOES NOT DO: it does not run the envelope lane and does not run the
+#   passive key check. On a founder QUESTION, naming a decided row means asking something already
+#   answered; on a dispatch CARD, citing a decided record is exactly the behaviour being enforced.
+#   Refusing a card for citing its own controlling record would invert the gate.
+#
 # WHAT IT PROVES — AND WHAT IT DOES NOT. It verifies envelope/trail presence and shape and row
 # STATUS on the AskUserQuestion transport; it cannot prove a search happened, cannot classify a
 # prose question that omits the envelope (the honest hole: misclassifying a decision question as
 # a clarification is a prose dodge, caught by review, not by this gate), and cannot see questions
 # travelling as free text. Row files are read at the point of need — never the generated index.
+# ON LANE D the same honesty limit applies one level up, and it is the reason the skill exists
+# beside the hook: A HOOK GATES A TOOL CALL. The coordinator's PROSE ANSWERS to the founder are
+# not tool calls and cannot be blocked the way AskUserQuestion is — of the nine failures, the
+# dispatch-shaped ones are now gated and the answer-shaped ones are not. Lane D proves a card
+# CARRIES a resolvable trail; it cannot prove the trail is the RIGHT record, that it was read, or
+# that the card's claims follow from it. `.claude/skills/coordinator-register-check/` carries the
+# procedure for the ungateable half, and it is weaker on purpose-stated grounds — which is itself
+# an argument for routing more coordinator→founder questions through AskUserQuestion, where the
+# gate already bites.
 # The Lane-2 status check trusts the trail's OWN prose (an ADR/PROP/journal citation has no
 # machine-readable status file to read, unlike a docs/decisions/<KEY>.yaml row) — it cannot prove
 # the cited status is current or that `premise-changed:` names a real change; that stays with
@@ -66,6 +146,35 @@ KEY_GRAMMAR='[A-Z][A-Z0-9-]{2,63}'
 # is the exact incident the ADR names (the round-5 call-sheet gap).
 CLOSED_STATUS='decided|superseded|deferred|withdrawn'
 PREMISE_MARKER='premise-changed:'
+
+# ── Lane D constants (the dispatch surface) ─────────────────────────────────────────────────────
+# Both dirs are overridable so the selftest can plant a HERMETIC corpus: the live agent roster and
+# the live docs/ tree both change, and a case that depends on them is a case that rots.
+AGENTS_DIR="${REGISTER_CHECK_AGENTS:-$ROOT/.claude/agents}"
+DOCS_DIR="${REGISTER_CHECK_DOCS:-$ROOT/docs}"
+# Lane D's id grammar adds BRIEF- (docs/legal/, docs/proposals/) to the ask surface's set: failure 4
+# of the nine was composed without reading BRIEF-20260819 §4.2, so a brief must be citable as the
+# record that governs. Every alternative here resolves to a real path in `resolve_record` -- an id
+# shape that cannot resolve is a hole in the anti-theatre check, not a convenience.
+# THAT SENTENCE HAS NOW BEEN FALSE TWICE, and the second time it was false in the very comment that
+# confessed the first. Round 1: `ADR-00[0-9]{2}` sat in this grammar while the resolver globbed only
+# `ADR-<id>*`, so no legacy id could resolve. The confession then read "it is true now because
+# resolve_record covers all three eras, NOT because the claim was checked" -- and it was still not
+# true: all 80 `docs/decisions/*.yaml` rows were mis-handled (53 refused, 27 resolving to the parent
+# proposal instead of the cited row), REG-2 and QUOTE-TOKEN among them.
+#
+# It is true now BECAUSE IT IS CHECKED, which is the only reason a completeness claim may ever be
+# written down: `tools/codegen-rs/src/tests.rs :: every_record_in_the_corpus_is_citable_through_lane_d`
+# walks the real record directories and drives THIS script end to end over every one of them. If the
+# sentence stops being true, that test reds -- nobody has to notice. The rule it earned is recorded
+# in docs/claude/sessions/workflow.md ("a gate that classifies members of a corpus is tested against
+# the CORPUS, not against fixtures"). Do not restate the claim anywhere else, and never re-assert it
+# from reading the code: the last two readings of this code both concluded it was true.
+# `[A-Z][A-Z0-9-]{2,63}` is the register's OWN v2 key grammar (docs/decisions/README.md), not a
+# shape invented here: all 80 live keys match it, verified against `ls docs/decisions/`. It also
+# matches every other alternative's ids (`ADR-...` is `[A-Z]` then `[A-Z0-9-]`), which is harmless
+# -- the alternatives extract the SAME span, and `resolve_record`'s case order decides the kind.
+DISPATCH_RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|BRIEF-[0-9]{8}|journal-[0-9]{4}-W[0-9]{2}|DECISIONS|[A-Z][A-Z0-9-]{2,63}'
 
 payload="$(cat 2>/dev/null || true)"
 session="$(printf '%s' "$payload" | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
@@ -106,6 +215,203 @@ open_rows_list() { # bounded: up to 12 keys + total count
 
 if [ -z "$payload" ]; then
   block "empty-input" "register-check: empty/unreadable tool payload — failing closed."
+fi
+
+# Does a cited record id correspond to a file that actually exists? This is the anti-theatre half
+# of Lane D: it makes the trail's SHAPE checkable without pretending to check its TRUTH. An
+# invented id resolves to nothing and is refused; a real id that is the WRONG record resolves and
+# passes, and catching that stays with review, like every other honesty claim in this gate.
+#
+# THREE FILENAME ERAS, and missing two of them is not a near-miss -- it is a gate that REWARDS the
+# defect. docs/adr/ holds 164 `ADR-<stamp>-*.md`, 47 legacy `NNNN-*.md` and 54 prefixless middle-era
+# `<stamp>-*.md`: a resolver that globs `ADR-<id>*` alone refuses 101 of 265 real ADRs (38%),
+# including ADR-0032, ADR-0014 and ADR-20260720-233000 -- the claim-protocol ADR CLAUDE.md itself
+# cites for this very dispatch flow. A coordinator who does the check CORRECTLY, finds one of those
+# and writes a truthful trail would be refused, and offered exactly two exits: substitute an
+# `ADR-`-prefixed id that happens to resolve (a FABRICATED citation -- failure #5 of the nine this
+# gate exists to stop), or claim `no controlling record` about a record that exists and controls.
+# Both are the behaviour the gate was built to prevent. (Review round 1, F1.)
+#
+# THIS MIRRORS `record_resolves` in tools/codegen-rs/src/validate/decisions.rs -- deliberately, so
+# the two are findable from each other; that one is pinned by tests.rs and is the reference
+# semantics. The mirroring is of REACHABLE BEHAVIOUR, not of structure: the Rust side gates the stamp
+# era on `is_stamp`, which has no equivalent here, so in isolation this arm is a prefix glob. Over
+# the inputs `DISPATCH_RECORD_ID` can actually produce, the two agree -- which is the property the
+# corpus test checks and the only one claimed. Likewise the hyphen in the legacy glob: it guards
+# `ADR-2026` from matching the 54 prefixless files, a token the grammar cannot produce, so it is
+# defence in depth kept for parity with the Rust side rather than a live guard. The stamp era must
+# try BOTH the prefixed and the prefixless filename; that part is load-bearing.
+resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id
+  _id="$1"
+  case "$_id" in
+    ADR-*)
+      _rest="${_id#ADR-}"
+      case "$_rest" in
+        [0-9][0-9][0-9][0-9])
+          # legacy `ADR-00NN` -> `NNNN-*.md`; the trailing hyphen is the guard described above.
+          set -- "$DOCS_DIR/adr/$_rest"-*.md ;;
+        *)
+          # stamp era -> `ADR-<stamp>-*.md` (current) OR `<stamp>-*.md` (prefixless middle era).
+          set -- "$DOCS_DIR/adr/$_id"*.md "$DOCS_DIR/adr/$_rest"*.md ;;
+      esac ;;
+    PROP-*)    set -- "$DOCS_DIR/proposals/$_id"*.md ;;
+    BRIEF-*)   set -- "$DOCS_DIR/legal/$_id"*.md "$DOCS_DIR/proposals/$_id"*.md ;;
+    journal-*) set -- "$DOCS_DIR/status/$_id"*.md ;;
+    # `DECISIONS` stays AHEAD of the register-key arm: it names the generated index in
+    # docs/proposals/, not a row file, and the key grammar below would otherwise swallow it.
+    DECISIONS) set -- "$DOCS_DIR/proposals/DECISIONS.md" ;;
+    # A REGISTER ROW KEY (docs/decisions/<KEY>.yaml) -- no kind-specific path of its own; the
+    # universal candidate below is the whole resolution.
+    [A-Z]*)    set -- ;;
+    *) return 1 ;;
+  esac
+  # EVERY id may ALSO name a register row, which is why this candidate is universal rather than
+  # living in the `[A-Z]*` arm. Two live shapes need it: the per-proposal keys
+  # `PROP-20260809-003000--D1..D7`, which enter through the `PROP-*` arm, glob no proposal FILE
+  # (the `--D1` suffix is not part of any filename) and would otherwise be refused; and any future
+  # row whose key begins with another kind's prefix.
+  for _p in "$@" "$DOCS_DIR/decisions/$_id.yaml"; do [ -e "$_p" ] && return 0; done
+  return 1
+}
+
+# ── Lane D: the DISPATCH card (PreToolUse on the Agent tool) ────────────────────────────────────
+# Dispatched on tool_name. An ABSENT tool_name stays on the ask surface on purpose: that is the
+# selftest's bare-payload form and every pre-existing case uses it, so the ask gate's contract is
+# untouched by this lane's arrival.
+TOOL_NAME="$(printf '%s' "$payload" | grep -o '"tool_name":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
+
+if [ -n "$payload" ] && [ "$TOOL_NAME" = "Agent" ]; then
+  sub="$(printf '%s' "$payload" | grep -o '"subagent_type":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
+  agent_file="$AGENTS_DIR/$sub.md"
+  extra="agent=${sub:-<none>}"
+  gated=yes
+  why=""
+  if [ -z "$sub" ]; then
+    why="the call names no \`subagent_type\`"
+  elif [ ! -f "$agent_file" ]; then
+    why="no \`.claude/agents/$sub.md\` declares this agent, so its tool set cannot be read (an undeclared agent — \`general-purpose\` is the live case — holds the full set, including Write/Edit)"
+  else
+    # THE PARSE MUST FAIL CLOSED, AND THE OBVIOUS SPELLINGS FAIL OPEN. This took three review
+    # rounds, and the first two fixes were both "one more special case" -- which is why this one
+    # reads the WHOLE VALUE instead. `awk /^tools:/{print}` returns the literal `tools:` for a YAML
+    # list form (non-empty, so an emptiness test passes and a write-capable agent is declared
+    # advisory: A PARSE FAILURE REPORTED AS A READ DECLARATION OF READ-ONLY). Round 2 read only the
+    # FIRST PHYSICAL LINE and then guessed whether the value continued, via an emptiness test and a
+    # trailing comma; four more shapes still failed open, because VALUE CONTINUATION IS NOT
+    # DECIDABLE FROM THE FIRST LINE:
+    #     tools: [Read, Grep, Glob, Bash        tools: Read, Grep, Glob, Bash        tools: >
+    #       , Write]                              , Write, Edit                        Read, Write
+    # the break falling BEFORE the comma rather than after it, and the folded scalar carrying no
+    # punctuation at all. So: take the `tools:` line plus every following MORE-INDENTED line, up to
+    # the next key or the closing `---`, and run one token scan over the result. That DELETES the
+    # trailing-comma special case rather than joining it, and it removes a false POSITIVE the
+    # heuristic had introduced -- a genuinely read-only wrapped list (`Read, Grep,` / `  Glob,
+    # Bash`) was being gated and now reads advisory again.
+    has_tools="$(awk '/^---[[:space:]]*$/{c++; next} c==1 && /^tools:/{print "yes"; exit}' "$agent_file")"
+    tools_val="$(awk '
+      /^---[[:space:]]*$/ { c++; if (c >= 2) exit; next }
+      c == 1 {
+        if (collecting) {
+          # A continuation is an indented, non-blank line. Anything at column 0 is the next key.
+          if ($0 ~ /^[[:space:]]/ && $0 !~ /^[[:space:]]*$/) { val = val " " $0; next }
+          exit
+        }
+        if ($0 ~ /^tools:/) { sub(/^tools:[[:space:]]*/, ""); val = $0; collecting = 1 }
+      }
+      END { print val }' "$agent_file")"
+    tools_val="$(printf '%s' "$tools_val" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    # Strip quoting/flow punctuation only AFTER the balance check below -- `tr -d "[]"` destroys
+    # exactly the evidence that a flow list was truncated (review round 2, F-A).
+    tools_norm="$(printf '%s' "$tools_val" | tr -d '"'"'"'[]' | tr ',' ' ')"
+    _open="$(printf '%s' "$tools_val" | tr -cd '[' | wc -c)"
+    _close="$(printf '%s' "$tools_val" | tr -cd ']' | wc -c)"
+    if [ "$has_tools" != yes ]; then
+      why="\`$sub.md\` declares no \`tools:\` line, so it inherits the full tool set"
+    elif [ -z "$tools_val" ]; then
+      why="\`$sub.md\` has a \`tools:\` key with no value on it or on any indented line beneath it — the tool set cannot be read, and an unreadable declaration is never evidence of read-only"
+    elif [ "$_open" != "$_close" ]; then
+      why="\`$sub.md\` declares \`tools: $tools_val\`, whose flow list is unbalanced ($_open \`[\` vs $_close \`]\`) — the value is truncated and cannot be read"
+    elif case "$tools_val" in *"*"*) true ;; *) false ;; esac; then
+      why="\`$sub.md\` declares \`tools: $tools_val\` — a wildcard grants every tool, Write and Edit included"
+    else
+      # A CLOSED TOKEN SET, not a substring. `Write|Edit` as a substring also matches `TodoWrite`,
+      # which grants no filesystem write at all (latent today: no agent declares it).
+      for _t in $tools_norm; do
+        case "$_t" in
+          Write|Edit|MultiEdit|NotebookEdit)
+            why="\`$sub\` is write-capable (\`tools: $tools_val\`, grants \`$_t\`) — this call can produce a diff"
+            break ;;
+        esac
+      done
+      [ -z "$why" ] && gated=no
+    fi
+  fi
+
+  # An advisory (read-only) target is NOT a dispatch card: a lens consult, a reviewer pass or
+  # read-only research commits nothing, so requiring a trail there would train the gate away.
+  if [ "$gated" = no ]; then
+    note ALLOW "agent-advisory" "-"
+    exit 0
+  fi
+
+  trail_ok=no
+  saw_id=no
+  saw_neg=no
+  saw_marker=no
+  while IFS= read -r dline; do
+    [ -n "$dline" ] || continue
+    saw_marker=yes
+    if printf '%s' "$dline" | grep -qE "$NO_RECORD"; then
+      saw_neg=yes
+      # The negative is a PASSING trail — but only when it names what was searched, otherwise
+      # "no controlling record" is the same free pass as `Register check: none`.
+      if printf '%s' "$dline" | grep -qF 'terms:'; then trail_ok=yes; break; fi
+      continue
+    fi
+    dids="$(printf '%s' "$dline" | grep -oE "$DISPATCH_RECORD_ID" || true)"
+    [ -n "$dids" ] && saw_id=yes
+    for did in $dids; do
+      if resolve_record "$did"; then trail_ok=yes; break 2; fi
+    done
+  done <<EOF
+$(printf '%s' "$payload" | grep -oE "${MARKER}[^\"\\\\]*")
+EOF
+
+  if [ "$trail_ok" = yes ]; then
+    note ALLOW "dispatch-trail-ok" "-"
+    exit 0
+  fi
+
+  if [ "$saw_marker" = no ]; then
+    block "dispatch-trail-missing" "register-check: this dispatch carries no \`Register check:\` trail, and it is GATED because $why."
+  elif [ "$saw_neg" = yes ]; then
+    block "dispatch-trail-termless" "register-check: the trail claims no controlling record but names no \`terms:\` — an unsearchable negative is the \`Register check: none\` free pass under a longer name. Say what you searched."
+  elif [ "$saw_id" = yes ]; then
+    block "dispatch-trail-unresolved" "register-check: the trail names a record id, but none of the ids in it resolve to a file under docs/ (adr, proposals, legal, status). A citation that resolves to nothing is not a citation — fix the id, or state the explicit negative with its terms."
+  else
+    block "dispatch-trail-hollow" "register-check: the trail names no record id and no explicit negative — a bare \`Register check:\` marker is not a trail."
+  fi
+
+  note BLOCK "$reasons" "-"
+  printf '%s' "$block_msgs" >&2
+  cat >&2 <<'EOF'
+
+WHY THIS FIRED. A dispatch card is the coordinator's DIFF, and a call that can produce a diff
+carries the trail that licenses it (ADR-20260831-141500). Lens consults, the `reviewer` pass and
+read-only research are NOT gated -- the discriminator is the target agent's own `tools:` line, so
+only write-capable agents reach this message.
+
+Do the check, THEN DISPATCH -- never drop the card. Two legitimate shapes, one per claim:
+
+  Register check: <record id> (<date>, <status>) -- covers <X>, silent on <Y>
+  Register check: no controlling record -- terms: <terms searched>; nearest: <record id or none>
+
+The record id must RESOLVE to a file under docs/adr, docs/proposals, docs/legal or docs/status,
+and the negative must name its `terms:`. Procedure and worked examples:
+.claude/skills/coordinator-register-check/SKILL.md -- run `decision-lookup` for candidates, then
+READ the candidate itself (it is advisory, never evidence).
+EOF
+  exit 2
 fi
 if [ -n "${REGISTER_CHECK_DECISIONS:-}" ] && { [ ! -d "$DECISIONS_DIR" ] || ! ls "$DECISIONS_DIR"/[A-Z]*.yaml >/dev/null 2>&1; }; then
   block "override-broken" "register-check: REGISTER_CHECK_DECISIONS points at a missing/empty directory — failing closed rather than silently skipping the row check."
