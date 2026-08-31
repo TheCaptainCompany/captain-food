@@ -388,13 +388,20 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     let summary = format!("{} items - {}", state.cart_line_count, state.formatted_total);
     // #817 (C. conso. L221-14 / CRD 2011/83 Art. 8(2)): the pay button must carry an unambiguous
     // mention of the OBLIGATION TO PAY, not merely the amount. The copy is deliberately NOT written
-    // here: it resolves from the generated catalog by key, so `checkout.place_order` in
-    // `specs/screens/restaurant_frontoffice.translations.yaml` IS this button's label by
-    // construction. That is compiler-first over a parity test (ADR-20260803-234035) -- there is one
-    // string, not two a test must keep equal -- and this screen is `sdui: false`, so the
-    // declaration and the runtime had no other seam holding them together. The literal it replaces,
+    // here -- it resolves from the generated catalog, so there is ONE source for this label and
+    // `specs/screens/restaurant_frontoffice.translations.yaml` is it. The literal this replaces,
     // `"Place order - "{total}`, was doubly wrong: it stated an amount rather than an obligation,
-    // and it rendered ENGLISH to every customer including the French ones the article reaches.
+    // and it rendered ENGLISH to every customer including the French ones the article reaches --
+    // and this screen is `sdui: false`, so nothing else held the declaration and the runtime
+    // together.
+    //
+    // Be accurate about the level (PROP-20260802-130500 §1, ADR-20260803-234035): this is **level
+    // 3**, not the compiler-first level 4. The key below is a hand-authored `&str` -- `"checkout.
+    // place_ordr"` compiles fine and renders i18n's fail-visible `[key]` marker -- and nothing
+    // proves code-to-catalog at build time. What it buys is single source + a fail-visible fallback
+    // + the two mutation-checked tests below, which is genuinely stronger than a parity assertion
+    // between two hand-written strings, and is worth claiming at its real height and no higher.
+    // Reaching level 4 would need generated key constants; that is not this change.
     let place_order_label = crate::i18n::format_message(
         "checkout.place_order",
         &state.locale,
@@ -1103,11 +1110,20 @@ mod tests {
             section.contains(&total),
             "the payable total must be in the order-summary section's FIRST paint: {section}"
         );
-        // And no collapse affordance anywhere on the page: a <details>/<summary> pair, or a section
-        // marked collapsed, would put the recap one interaction away from the customer.
-        for affordance in ["<details", "data-collapsible", "data-collapsed", "aria-expanded"] {
-            assert!(!html.contains(affordance), "{affordance} would hide the recap: {html}");
+        // And no collapse affordance ON THAT SECTION. Scoping matters: `aria-expanded` is the
+        // REQUIRED ARIA attribute on any expandable control, so a page-wide scan would go red --
+        // with a false diagnostic naming the recap -- the day someone adds a correct disclosure
+        // widget elsewhere on the pay step. Punishing an accessibility fix is how a test gets
+        // deleted rather than read (review round 1, #833).
+        for affordance in ["data-collapsible", "data-collapsed", "aria-expanded"] {
+            assert!(
+                !section.contains(affordance),
+                "{affordance} on the order-summary section would hide the recap: {section}"
+            );
         }
+        // `<details` stays PAGE-WIDE on purpose: a `<details>` opened before the section and closed
+        // after it collapses the recap from the OUTSIDE, where a section-scoped check is blind.
+        assert!(!html.contains("<details"), "a <details> wrapper would hide the recap: {html}");
     }
 
     /// #440, the designed red made permanent: the KEY-ABSENT render. This test's ancestor asserted

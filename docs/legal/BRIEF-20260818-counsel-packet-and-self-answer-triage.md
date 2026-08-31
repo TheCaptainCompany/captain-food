@@ -189,10 +189,18 @@ safe under every branch (*charge the quoted amount or refuse*).
   distance regime — and what must appear next to a menu item and next to the total?
 - **QT-3 — the reprice confirmation's required content.** Old total and delta, or the new total
   alone? Is a fresh positive click required? Is **any** implied acceptance available (CRD Art. 22)?
-- **QT-4 — the confirm control.** Does `"Commander — 23,50 €"` satisfy **L221-14 / CRD Art. 8(2)**,
-  and does a **collapsible** order summary satisfy the required recap? **Downside if wrong**: the
-  sanction is that **the consumer is not bound** —
-  [#817](https://github.com/TheCaptainCompany/captain-food/issues/817).
+- **QT-4 — the confirm control.** **The subject of this question changed on 2026-08-31**
+  ([#833](https://github.com/TheCaptainCompany/captain-food/pull/833) closing
+  [#817](https://github.com/TheCaptainCompany/captain-food/issues/817)): the French button now reads
+  **`"Commander avec obligation de paiement — 23,50 EUR"`** and the order summary is **not
+  collapsible**. *Before #833* it read `"Commander — 23,50 €"` over a `collapsible: true` summary —
+  kept here only so the question stays readable; **counsel is not being asked about that string.**
+  Does the safe-harbour formula **followed by the total** satisfy **L221-14 / CRD Art. 8(2)**, given
+  that Art. 8(2) subpara. 2 requires the button be labelled *"only with the words … or a
+  corresponding unambiguous formulation"*? And does the now-uncollapsed summary satisfy the recap
+  limb? **Downside if wrong**: the sanction is that **the consumer is not bound**. See
+  `BRIEF-20260831-repricing-and-price-quote-counsel-packet.md` QT-4 for the full current form,
+  including the `23,50 EUR` vs `23,50 €` leg that touches QT-2.
 - **QT-5 — the pinned higher price.** May we charge the pinned, higher quoted price when the
   restaurant **lowered** its price inside the window — *prix pratiqué* breach, or *pratique
   commerciale trompeuse*?

@@ -109,13 +109,26 @@ checkout.processing:       { messages: { en: "Processing…", fr: "Traitement…
 # a distance order the button must carry an unambiguous mention of the OBLIGATION TO PAY, the
 # statutory safe-harbour formula being "commander avec obligation de paiement" (ou une formule
 # analogue dénuée d'ambiguïté). The previous copy — "Commander — {total}" — announced an AMOUNT,
-# which is a different statement. `fr` therefore carries the safe-harbour formula verbatim and `en`
-# carries the directive's own English formulation, so both locales state the same obligation; the
-# total stays on the button because the same article wants it legible at the moment of ordering.
+# which is a different statement.
+#
+# What the shipped label IS, stated precisely because counsel will be asked about this exact
+# string: `fr` is the safe-harbour formula FOLLOWED BY the total ("Commander avec obligation de
+# paiement — 23,50 EUR"), not the formula alone; `en` is the directive's own English formulation
+# followed by the same total, so both locales state the same obligation. Two consequences are
+# deliberately left OPEN here rather than resolved:
+#   * Art. 8(2)'s second subparagraph requires the button be labelled "only with the words ... or a
+#     corresponding unambiguous formulation". Whether a total appended to the formula is inside or
+#     outside that limb is precisely what QT-4 must weigh. Keeping the total is a DESIGN choice —
+#     the customer should not have to look away from the control to see what they are committing to
+#     — and it is NOT an assertion that the article permits it.
+#   * the total renders as "23,50 EUR", not "23,50 €" (crates/web/src/renderer.rs `format_currency`,
+#     one function shared by every money binding); QT-2 asks which display regime governs that.
+#
 # Whether any given wording SATISFIES the article is counsel's call (QT-4 on the counsel list in
-# docs/legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md) and no counsel is engaged:
-# this copy OVER-COMPLIES pending that answer, because the sanction is that the consumer is not
-# bound. This repo issues no legal clearance (ADR-20260812-143619).
+# docs/legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md) and no counsel is engaged.
+# This copy is chosen to OVER-COMPLY pending that answer, because the sanction is that the consumer
+# is not bound — it does not close the question, and this repo issues no legal clearance
+# (ADR-20260812-143619).
 checkout.place_order:
   params: { total: "formatted order total" }
   messages:
