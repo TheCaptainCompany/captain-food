@@ -3,6 +3,47 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the founder decided the quote's backstop and approved the design: 30 minutes, and
+> build it slice 1 first** (docs/records only: one register row closed, one proposal approved, one
+> ADR, the register prose row updated; no `specs/**`, no code, so no SPEC-LOG sentence and no
+> warning-baseline refresh is owed).
+> Two answers, both put through `AskUserQuestion` with a register-check trail, options, trade-offs
+> and a recommendation; both recorded in
+> [ADR-20260831-165146](../adr/ADR-20260831-165146-the-quote-backstop-is-thirty-minutes-and-the-priced-quote-token-is-approved.md).
+> **(1) `QUOTE-STALENESS` — N = 30 MINUTES, AS A BACKSTOP ONLY; M IS DROPPED.** Verbatim option
+> label: *"30 minutes (recommended)"* — the `business` lens's figure, taken unchanged with its
+> stated derivation: the **p99 of the cart-to-pay leg with the mandatory SCA/3DS bank-app detour in
+> it**, **not** a risk setting. It essentially never fires on a live session. **Why an N exists at
+> all, and it is the load-bearing context**: carts never expire
+> (`specs/ordering/actors.yaml:15` — re-verified at `9cd15c75`; the dispatch carried it as an
+> `UNVERIFIED input` and it checks out), so **N is the only clock on the whole cart**. The rejected
+> options are in the row with their costs — shorter (~5 min) fires on ordinary Friday-night sessions
+> and pays conversion on **correct** sessions; longer lets a quote outlive the service state it was
+> priced in; divergence-gated with no backstop leaves an unbounded-age quote honourable. **The
+> caveat survived the closure**: contract **C1** `quote_age_seconds` does not exist, so 30 is
+> **evidence-deferred** (ADR-20260808-144738 decision 5) and is re-derived from the observed p99
+> after the first peak — the row says what would change it.
+> **(2) [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) is
+> APPROVED.** Verbatim: *"Approve — build it, slice 1 first"*. Slice 1 (HEAD orderability at
+> checkout) was dispatched in parallel.
+> **The three surviving `Concerns` were re-expressed, not deleted** — an unchecked entry
+> mechanically blocks `Approved`, and the validator's own message says to resolve it by checking it
+> with a one-line resolution, never by deleting it. One is **genuinely discharged** (the N). The
+> other two were never approval gates and are now conditions on the PR that can satisfy them: the
+> **non-additive `PlaceOrder` change** is a **slice-4 gate** (`HOLD: human`, team-reviewed —
+> [ADR-20260815-134655](../adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md):
+> no PR waits on founder review, so an approval could neither discharge it nor be blocked by it),
+> and the **as-of fold's peak cost being a projection rather than a measurement** is a **slice-2
+> Done-when** — a statement about the absence of code cannot become false before the code exists, so
+> as written it blocked `Approved` **forever**. Both are now written into §11 at the slice they bind.
+> `make validate` accepts the result at **0 errors**, so the approval got past
+> `proposal-approved-unresolved-concern` honestly.
+> **The reversal stays flagged.** The proposal reverses
+> [ADR-20260810-112836](../adr/ADR-20260810-112836-cart-priced-live-on-read.md) **§2** in part — the
+> freeze locus moves from commitment to quote time, and the enforcement clause naming the
+> `expectedTotal` equality check is replaced outright — and that went unflagged in two records until
+> today. The header `Reverses in part` line and §2.4 are intact, and the approving ADR re-states it
+> in its own §4, because approval is exactly when a reversal gets re-buried.
 > **2026-08-31 — the weekly cap did not reliably measure: one timer slot for N concurrent runs, a
 > receipt naming the wrong branch, and a step 8 pointing at a file nothing writes**
 > ([#821](https://github.com/TheCaptainCompany/captain-food/issues/821) "loop-budget: the weekly cap

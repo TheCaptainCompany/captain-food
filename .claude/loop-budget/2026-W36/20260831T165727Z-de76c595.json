@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 618,
+  "recordedAt": "2026-08-31T16:57:27.430Z",
+  "branch": "quote-decisions-20260831",
+  "note": "Two founder decisions on the priced quote token: QUOTE-STALENESS decided (N=30min backstop, M dropped), PROP-20260831-134539 Approved, three Concerns re-expressed as slice gates, ADR-20260831-165146, W36 journal; docs-only to main, make validate 0 errors, check-drift clean. Timer inherited: start ran outside this session (guard exit 3 at first call, timer opened 70s before my first command on 'main'); billed as mine"
+}
