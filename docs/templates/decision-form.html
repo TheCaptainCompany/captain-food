@@ -105,11 +105,12 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--body);
 .qh h2{font-family:var(--display);font-weight:600;font-size:21px;margin:0;line-height:1.24;letter-spacing:-.01em;text-wrap:balance}
 .qh .why{margin:0;font-size:14px;color:var(--muted)}
 .gates{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--open);background:var(--open-soft);padding:2px 7px;align-self:flex-start;border-radius:2px}
-label.opt{display:flex;gap:12px;align-items:flex-start;padding:13px 20px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s}
+label.opt{display:flex;gap:12px;align-items:flex-start;padding:13px 20px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .12s;-webkit-user-select:none;user-select:none}/* user-select:none is LOAD-BEARING, not cosmetic (founder-reported 2026-08-30): an option row is a   long label, so any click that drifts a pixel becomes a text SELECTION. In the Artifact viewer a   selection raises the comment composer, which takes focus and swallows the click -- the radio   never gets picked and the founder sees a comment box he did not ask for. Selecting the question   text is not a use case; picking the option is. Textareas stay selectable below. */
 label.opt:hover{background:var(--sunk)}
 label.opt input{margin:4px 0 0;accent-color:var(--accent);width:16px;height:16px;flex:none;cursor:pointer}
 label.opt input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .opt-b{display:flex;flex-direction:column;gap:3px}
+textarea{-webkit-user-select:text;user-select:text}
 .opt-t{font-size:15px;font-weight:500;color:var(--ink);line-height:1.35}
 .opt-d{font-size:13.5px;color:var(--muted);line-height:1.5}
 label.opt:has(input:checked){background:var(--accent-soft)}
