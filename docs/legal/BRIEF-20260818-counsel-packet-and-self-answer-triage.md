@@ -143,6 +143,17 @@ wrong is a DECISION, not a typo, and it must not be closed by a wording edit.**
   Friday night. **This question gates Q8 (whose supply is the delivery fee), the receipt's shape, the
   consumer-law counterparty, and the whole P2B analysis. It is the first thing any professional you
   pay should be pointed at.**
+  **Absorbed 2026-08-31 — ask these WITH Q10, never separately**
+  ([BRIEF-20260831 §7(c)](BRIEF-20260831-repricing-and-price-quote-counsel-packet.md)): **QT-8** who
+  is the *professionnel* for the displayed food price, and what CRD **Art. 6a** / L111-7-1
+  marketplace disclosure is owed (**absent from the repo entirely**); **QT-9** the restaurant-facing
+  leg — is binding a restaurant to a **withdrawn** price enforceable, what P2B **Art. 3 / 3(2)**
+  disclosure and notice does it require, and is there C. com. **L442-1** significant-imbalance
+  exposure. Both are the **same characterisation question**: a platform that is merchant of record
+  is arguably not an intermediary at all, so Art. 6a and P2B do not even engage. Their practical
+  consequence today is a **sequencing constraint, not a wait** — the customer-facing half of the
+  repricing design (*never charge more than displayed*) is safe under **both** postures and ships
+  now; the restaurant-facing half is not buildable until this row resolves.
 - **Q1 — rider deactivation and rider status.** Irreducible and moving: LOM/ARPE plus **Platform Work
   Directive (EU) 2024/2831**, transposition due ~2026 (`VERIFY-FIRST` — exactly the kind of date that
   moves). **Downside**: URSSAF requalification with retroactive cotisations across the whole rider
@@ -160,6 +171,38 @@ wrong is a DECISION, not a typo, and it must not be closed by a wording edit.**
   carve-out in Art. 11(5) — `VERIFY-FIRST`), but **whether Captain is an "online intermediation
   service" is the same characterisation question as Q10**. A platform that is merchant of record is
   arguably not an intermediary at all — which is why the two cannot be answered separately.
+
+**Added 2026-08-31 — the repricing / priced-quote-token questions.** Full map, grades and the egress
+denials behind their `VERIFY-FIRST` marks:
+[BRIEF-20260831](BRIEF-20260831-repricing-and-price-quote-counsel-packet.md) §7. These are
+irreducible in the same sense as the rows above — a French consumer-law practitioner, not a cheaper
+channel. **None of them blocks the customer-facing build**, which is deliberately designed to be
+safe under every branch (*charge the quoted amount or refuse*).
+
+- **QT-1 — the formation moment.** When does the contract form under C. civ. **1127-2** for
+  checkout, and would a CGU term stating *"the contract forms only on restaurant acceptance"* be
+  abusive under **R212-1**, given the consumer cannot cancel at `PENDING`? **Downside if wrong**: if
+  the contract forms at the confirming click, **every** upward reprice after it is a unilateral
+  modification of a formed contract (C. civ. 1193) that no interstitial can cure.
+- **QT-2 — which price-display text reaches an online food storefront**: the sector *arrêté* (27
+  March 1987, drafted around the physical establishment) or the general **L112-1** *arrêté* plus the
+  distance regime — and what must appear next to a menu item and next to the total?
+- **QT-3 — the reprice confirmation's required content.** Old total and delta, or the new total
+  alone? Is a fresh positive click required? Is **any** implied acceptance available (CRD Art. 22)?
+- **QT-4 — the confirm control.** Does `"Commander — 23,50 €"` satisfy **L221-14 / CRD Art. 8(2)**,
+  and does a **collapsible** order summary satisfy the required recap? **Downside if wrong**: the
+  sanction is that **the consumer is not bound** —
+  [#817](https://github.com/TheCaptainCompany/captain-food/issues/817).
+- **QT-5 — the pinned higher price.** May we charge the pinned, higher quoted price when the
+  restaurant **lowered** its price inside the window — *prix pratiqué* breach, or *pratique
+  commerciale trompeuse*?
+
+Two more from the same map are **reducible**, and belong to the (b) channels above rather than to an
+avocat: **QT-6** (the VAT characterisation of an absorbed delta — *expert-comptable*, and a *rescrit
+fiscal* candidate; blocked upstream on
+[`CAPTAINNET-ZERO`](../decisions/CAPTAINNET-ZERO.yaml)) and **QT-7** (the **evidential** retention
+window for a price quote, distinct from the accounting clock — the framework is readable, the number
+is the ask).
 
 ---
 

@@ -3,6 +3,55 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the repricing obligation map is IN THE REPO, and the lens return that never landed
+> is the finding** (docs-only: one new legal brief, the standing counsel list extended, one proposal
+> `Concerns` entry discharged; no `specs/**`, no code, no SPEC-LOG sentence owed).
+> [BRIEF-20260831 "Repricing and the priced quote token: the obligation map"](../legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md)
+> records the `legal-specialist` lens's return of 2026-08-31 — **relayed by the coordinator from a
+> return that was not otherwise persisted**, which is the second occurrence in two weeks of the
+> defect [BRIEF-20260818](../legal/BRIEF-20260818-counsel-packet-and-self-answer-triage.md) already
+> records (a packet summarised into a record and never landed). Its cost was concrete: the executor
+> writing
+> [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) was handed the
+> labels `B1–B5` / `QT-1…QT-10` but not their text, **correctly refused to reproduce them from
+> memory**, and left an unchecked `Concerns` entry that mechanically blocked `Approved`. That entry
+> is now **discharged**, and §10 of the new brief reconciles `L1–L7` against `QT`/`B` row by row —
+> cross-referenced, not competing. **Every `L` row survived.**
+> **The load-bearing conclusion**: the binding price is the one displayed at the **confirming
+> click**, not the price at restaurant acceptance — the storefront-as-invitation-to-treat reading is
+> not freely available, because the design *looks* like an *offre* (pay button, hold, confirmation,
+> no customer cancel at `PENDING`), the CGU term that would buy it is itself on the **R212-1**
+> blacklist, and L221-14's sanction runs the other way. **The design is then built past the
+> question**: after the click, charge the quoted amount or **REFUSE**, never more — safe under both
+> characterisations, which is what lets the epic ship without waiting on counsel.
+> **Sequencing that falls out**: build the **customer-facing** half now (*never charge more than
+> displayed*); **do not** build the restaurant-facing half (*held to a withdrawn price for N
+> minutes*) until the funds posture resolves — under one branch it is a purchase commitment, under
+> the other a unilateral constraint on a business user. `QT-8`/`QT-9` are therefore **absorbed into
+> BRIEF-20260818 §3(c) Q10** rather than asked separately, and `QT-1`–`QT-5` join that file's
+> standing irreducible list (no second home invented). `QT-6` (absorbing the delta) is blocked
+> upstream on [`CAPTAINNET-ZERO`](../decisions/CAPTAINNET-ZERO.yaml) — **no new register row
+> opened**.
+> **Two findings the proposal's §8 could not reach.** (1) `ADR-20260810-112836:97` accepted that
+> *"the transient price a guest once saw is not in the log"* — true only while display and charge
+> were structurally identical, and **the quote token retires that premise**, so the quote becomes
+> the only evidence and needs a **third retention window** (the accounting clock
+> `FRENCH_COMMERCIAL_BOOKS_10Y` is over-retention for a quote that never became an order, GDPR Art.
+> 5(1)(e)). (2) A quote event on the Cart stream carrying `legalRetention` can take the Cart actor
+> out of stream deletion and **break** [`ERASURE-LAUNCH-GATE`](../decisions/ERASURE-LAUNCH-GATE.yaml)
+> — **pseudonymous-by-construction is free now and a migration later**.
+> **Relay citations re-verified, one corrected**: `specs/ordering/errors.yaml:250-262` is exact;
+> `specs/screens/restaurant_frontoffice.yaml:518` is a real `show_toast` but the **generic**
+> `on_error` handler on `place_order`, not a purpose-built price-change disclosure — the concern
+> survives and is worse for it, since a `PriceMismatch` reaches the customer today **only** as an
+> anonymous transient toast (DSA Art. 25 + EAA accessibility).
+> **No counsel is engaged** (founder, 2026-08-31: *"Not scheduled. We are on our own for now until
+> the product is ready"*), so what cannot be self-answered is **marked**, not answered. Nothing in
+> the brief was FETCHED — `legifrance.gouv.fr` and `economie.gouv.fr` returned **403 egress-policy
+> denials**, `eur-lex.europa.eu` **202 with a zero-byte body** on two URL forms — so **every article
+> number is VERIFY-FIRST even where the rule is graded (a)**. No lens output, and no aggregation of
+> lenses, is legal advice or clearance (ADR-20260812-143619).
+
 > **2026-08-31 — the priced quote token is DESIGNED, and the reversal it carries is now flagged in
 > both records** (docs-only: one proposal, two record edits, two register-row notes, no `specs/**`,
 > no code).
