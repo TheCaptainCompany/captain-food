@@ -87,8 +87,11 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 > **Claim protocol (2026-07-20, ADR-20260720-233000, #39; amended 2026-07-21 by
 > ADR-20260721-042018):** before working an issue, add the `status/in-progress` label + a claim
 > comment naming the `NN-slug` branch, **create the branch and open a draft PR (`Closes #NN`)
-> immediately**; NEVER work a claimed issue; on completion mark ready + enable auto-merge and
-> supervise checks until MERGED; the hourly stale-claim reaper releases claims silent for >24h.
+> immediately**; NEVER work a claimed issue; on completion the **COORDINATOR** marks ready + enables
+> auto-merge and supervises checks until MERGED
+> ([ADR-20260831-183847](adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md),
+> restoring ADR-20260810-011500 §2) — **never the executor**, which physically cannot and hands back
+> at green with the PR still in DRAFT; the hourly stale-claim reaper releases claims silent for >24h.
 > Method: `BACKLOG.md`.
 
 ## ✅ `claude-review` is no longer a required check — REV-1 executed (2026-08-26)

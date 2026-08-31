@@ -2573,6 +2573,54 @@ keys:
             );
         }
 
+        // ── F2 (review round 1): the QUIET filter must not delete the positive line ──────────
+        // `make test-quiet` / `make rust-quiet` are how CLAUDE.md tells token-bound sessions to run
+        // gates, and they show only lines matching QUIET_KEEP plus a 50-line tail. The pre-flight
+        // prints thousands of lines before that tail window, so a line QUIET_KEEP misses is GONE.
+        //
+        // The law is stated directly above that pattern in the Makefile: "FILTERING MAY DROP
+        // PROGRESS, NEVER VERDICTS." The `DB PRE-FLIGHT OK` line IS a verdict by this guard's own
+        // argument — it is the entire reason an empty skip receipt means anything. Worse is
+        // `UNAVAILABLE`: it announces a DECLARED degraded mode, and dropping it turns that mode
+        // SILENT (the ADR-20260810-231300 class), leaving a reader with no pre-flight line and no
+        // skip receipt — i.e. back to the exact over-read #830 closed, on the standard path.
+        //
+        // Measured before the fix: `DB PRE-FLIGHT OK`, the `DATABASE_URL=` follow-on, `UNAVAILABLE`
+        // and its "NO positive database evidence" follow-on were ALL dropped. `FAILED` and
+        // `SKIPPED` survived only by accident, matching pre-existing alternates for other tools.
+        let quiet_keep = makefile
+            .lines()
+            .find_map(|l| l.strip_prefix("QUIET_KEEP ?= "))
+            .expect(
+                "QUIET_KEEP not found in the Makefile — if the quiet wrapper's filter was renamed                  or moved, re-point this guard in the same commit; do NOT let it silently pass",
+            );
+        let keep = regex::Regex::new(quiet_keep).unwrap_or_else(|e| {
+            panic!("QUIET_KEEP is not a valid regex ({e}): {quiet_keep}")
+        });
+        for line in [
+            "test-crates: DB PRE-FLIGHT OK -- localhost:5432 - accepting connections",
+            "test-crates: DATABASE_URL=postgres://***@localhost:5432/postgres -- the DB-gated suites will RUN against it.",
+            "test-crates: DB PRE-FLIGHT UNAVAILABLE -- pg_isready is not on PATH, reachability NOT checked.",
+            "test-crates: this run has NO positive database evidence; an empty skip receipt proves nothing here.",
+            "test-crates: DB PRE-FLIGHT FAILED -- the configured database is NOT accepting connections.",
+            "test-crates: DB PRE-FLIGHT SKIPPED -- no DATABASE_URL; crates/db_test_gate decides this run",
+        ] {
+            assert!(
+                keep.is_match(line),
+                "QUIET_KEEP drops a pre-flight VERDICT line, so `make test-quiet` / `make \
+                 rust-quiet` hide it (the 50-line tail cannot recover it — thousands of lines \
+                 follow). The Makefile's own law, stated directly above QUIET_KEEP: FILTERING MAY \
+                 DROP PROGRESS, NEVER VERDICTS.\n\
+                 \n\
+                 dropped: {line}\n\
+                 QUIET_KEEP: {quiet_keep}\n\
+                 \n\
+                 Fix: add an alternate that matches it (`^test-crates:` covers every line the \
+                 target emits about itself, which the Makefile already argues is unambiguous). Do \
+                 NOT fix it by making the pre-flight quieter."
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

@@ -3,6 +3,17 @@
 - **Status**: Accepted (founder delegation, 2026-08-15; roster consulted per
   [ADR-20260812-143619](ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md))
 - **Date**: 2026-08-15
+- **Amended by**: [ADR-20260831-183847](ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md)
+  (2026-08-31) — **this ADR settles *when* the ready + auto-merge step is taken versus withheld; it
+  never settled *who* takes it.** The `Supersedes` note below records that
+  `.claude/agents/executor.md` step 7 was "rewritten accordingly in the same commit", and that
+  rewrite put the step into the EXECUTOR's voice as a side effect — contradicting
+  [ADR-20260810-011500](ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+  §2, which had already assigned "GitHub mechanics … ready + auto-merge" to the coordinator and is
+  listed under `Relates` below for a different clause. **The flip and the arming are the
+  coordinator's**; the executor hands back at green with the PR in draft. The decision recorded
+  here — auto-merge-on-green by default, `HOLD: human` for the named class — stands unchanged, and
+  applies to the coordinator's step.
 - **Supersedes (in part)**: the auto-merge reading of
   [ADR-20260721-042018](20260721-042018-claim-time-draft-pr-automerge-supervision.md) and
   [ADR-20260721-044613](20260721-044613-auto-merge-never-armed-before-completion.md) — their

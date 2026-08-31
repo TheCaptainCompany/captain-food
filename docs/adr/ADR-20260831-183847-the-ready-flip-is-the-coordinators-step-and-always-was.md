@@ -202,5 +202,36 @@ environment already enforces this decision; the record now agrees with it.
   while its decision stands — the decision rests on ADR-20260810-011500 §2, not on the 403.
 
 ### Follow-up actions
-- None required. The `gh` permission entries are reconciled in this commit; nothing else references
-  the executor-owned flip.
+
+**An earlier draft of this section said "None required … nothing else references the executor-owned
+flip." That was false, and the review proved it in one `git grep`** — the correction had reached 2
+binding sites out of 6. It is recorded rather than quietly deleted, because it is the same failure
+this ADR is about: a record asserting a sweep is complete is exactly what stops the next reader
+running the grep. CLAUDE.md already requires that grep after anything is renamed or reshaped; the
+command is
+
+```sh
+git grep -n "ready + auto-merge\|enable auto-merge\|mark the PR ready"
+```
+
+**Swept in the landing commit** — each now names the coordinator:
+
+| site | what it said |
+|---|---|
+| `.claude/agents/executor.md` step 7 | instructed the executor to perform the flip |
+| `CLAUDE.md` issue-workflow bullet | unowned imperative ("mark the PR ready…") |
+| `docs/STATUS.md` claim-protocol block | "on completion mark ready + enable auto-merge" — **loads every run**, second only to CLAUDE.md |
+| `docs/BACKLOG.md` §4 | "Completion = ready + auto-merge + supervision"; CLAUDE.md calls this method **binding**. Now states both endings, by role |
+| `docs/claude/sessions/evidence.md` (2) | "arm the PR on green gates", and "'PR armed and reported' is done" — which defined the executor's DONE as the impossible operation |
+| `docs/claude/sessions/workflow.md` §"no REST equivalent" | a **second** section in the same file, ~210 lines below the first, still framing this as an environment limitation ("as things stand") and still assigning "supervise CI to green over REST" to the executor |
+
+**Known remaining site, deliberately not swept here**:
+`.github/workflows/dev-loop.yml:85` embeds an executor prompt ending *"then mark the PR ready for
+review and STOP"* (line 91 already says "do NOT enable auto-merge"). It is a genuine binding site —
+arguably the strongest, since it drives an unattended loop — but CI was out of #830's scope. It
+needs one sentence, and it needs it before the next unattended run.
+
+**Not a follow-up**: the `gh` permission entries in `.claude/settings.json` were **kept**, on
+purpose — a permission is a conditional, not a claim the binary exists, and the `PowerShell(gh …)`
+half is evidence of a second host where `gh` is the normal way in. The fact is recorded in a
+`_comment_gh` key beside them instead.

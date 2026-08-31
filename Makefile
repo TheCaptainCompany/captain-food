@@ -141,8 +141,11 @@ test-crates:
 #
 # THE RULE, and it is the whole design: FILTERING MAY DROP PROGRESS, NEVER VERDICTS. A verdict is
 # any line that could turn green into red -- the DB-skip receipt (#230, "a skip that reports ok is
-# not evidence"), the first panic, every `test result:` summary, the validator's error lines, and
-# the warning-baseline diff. So the filter is grep-FIRST (every verdict line, wherever in the run it
+# not evidence"), EVERY `^test-crates:` line the workspace gate emits about itself (#830: the
+# DB pre-flight's POSITIVE line is a verdict, because it is the only thing that makes an empty skip
+# receipt mean anything, and its UNAVAILABLE line announces a DECLARED degraded mode that this
+# filter would otherwise make SILENT), the first panic, every `test result:` summary, the
+# validator's error lines, and the warning-baseline diff. So the filter is grep-FIRST (every verdict line, wherever in the run it
 # occurred) and tail-SECOND (the last lines, for context). A tail-only filter would lose an early
 # panic -- exactly the case that matters. Nothing is discarded: the full output is always in
 # $(QUIET_LOG), and the wrapper prints where.
@@ -164,7 +167,7 @@ QUIET_RUST_CMD ?= $(MAKE) --no-print-directory rust
 # verdicts (the validator prints "  [error] rule  location"; cargo prints "error[E0433]"). Keep this
 # pattern PURE ASCII: it is expanded INTO a recipe line, so a byte > 127 here breaks Cygwin make at
 # runtime even though the recipe text itself reads as ASCII to the guard test.
-QUIET_KEEP ?= ^(error|warning|panic|thread .* panicked|SKIP|skipped|test result:|FAILED|failures:)|\[error\]|\[warn |error\[E|error:|warning:|panicked at|error\(s\)|FAILED|failures:|SKIPPED|DB-GATED|drifted|baseline|test result:
+QUIET_KEEP ?= ^test-crates:|PRE-FLIGHT|^(error|warning|panic|thread .* panicked|SKIP|skipped|test result:|FAILED|failures:)|\[error\]|\[warn |error\[E|error:|warning:|panicked at|error\(s\)|FAILED|failures:|SKIPPED|DB-GATED|drifted|baseline|test result:
 
 # $(1) = label, $(2) = the command to run.
 define run-quiet

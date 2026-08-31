@@ -451,13 +451,21 @@ and `gh` is not on PATH either. There is **no REST equivalent** for either opera
 `PATCH /pulls/{n}` with `{"draft": false}` returns **200 with `draft` still `true`** — it silently
 ignores the field, which is the trap: it looks like it worked. So the ADR-20260815-115220 closing
 step ("mark ready and enable auto-merge together, as one indivisible step, then supervise to
-MERGED") is **not executable by an executor session** as things stand.
+MERGED") is **not executable by an executor session** — and since
+[ADR-20260831-183847](../../adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md)
+that is a **RECORDED ALLOCATION, not an environment limitation waiting to be lifted**: the flip and
+the arming are the coordinator's step, restoring ADR-20260810-011500 §2. (This paragraph said "as
+things stand" until #830 — phrasing that invited each reader to treat it as a temporary blocker and
+go looking for the workaround. There is not one, and there is no longer a reason to want one:
+installing `gh` would fail at the same 403, because the pin is on the GraphQL ENDPOINT, not the CLI
+— a plain `query { viewer { login } }` is refused too.)
 
 What the executor CAN and therefore MUST still do, so the hand-back is one action and not a
-re-investigation: push the final head, get the PR body complete, and **supervise CI to green over
-REST** (`GET /commits/{sha}/check-runs`, poll until every run is `completed`, then read
-`conclusion`). Hand back naming the two GraphQL operations and the PR node id. Budget zero minutes
-for finding a workaround — there is not one.
+re-investigation: push the final head, get the PR body and the records complete, leave the PR in
+DRAFT, and hand back naming the two GraphQL operations and the PR node id. **Supervising CI to
+MERGED is the coordinator's too**, since it owns the flip that starts it — but a check that your own
+push has ALREADY turned red, while you are still in the run, is yours to fix
+(`GET /commits/{sha}/check-runs`, read each `conclusion`); never end at "pushed, CI failing".
 
 Unchanged by this, because it never depended on the executor's access: **a dispatch names an issue
 with its number AND its title verbatim** (the CLAUDE.md naming rule). It is one line to write and it
