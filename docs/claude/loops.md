@@ -85,6 +85,43 @@ rather than merely detected. Consequences worth knowing:
   the historical single slot and behave exactly as before; set `LOOP_BUDGET_RUN_ID` to separate them.
 - `--elapsed-seconds` and `reset` no longer touch another run's timer. Both used to: the escape hatch
   the tool *recommends* on a refusal was itself deleting live timers.
+- **A refusal hands over the whole tuple** — started-at, branch, run id **and pid** — because that is
+  exactly what an executor reconstructed by hand from the ledger's last segment before deciding
+  whether a `stop` was even its to run.
+
+**`exit 2` and `exit 3` mean opposite things and every exit-3 path now says so.** Exit 2 = the week is
+spent (stop working); exit 3 = **integrity**, the timer state is wrong (not yours, already open,
+stale, missing). They share the "the guard said no" shape, and a run that hit exit 3 reported it
+correctly only *because the executor reasoned it through*. The guard holds the fact, so it prints it:
+
+```
+⛔ loop-budget: NO RUN TIMER IS OPEN for run 'demo-other' -- …
+   Another run DOES hold an open timer. It is not yours to bill:
+     started 2026-08-31T17:00:59Z on '821-…', 1.8m ago, run 'a68c75e1-…', pid 25563
+   (exit 3 = INTEGRITY, not budget exhaustion -- the week is within cap: 268.1m / 1440.0m used …)
+```
+
+#### Why not key the timer by worktree (`--git-dir`)
+
+It was proposed, and it is the smaller change: `git rev-parse --git-dir` instead of
+`--git-common-dir` gives each linked worktree its own timer, so overlapping runs in *different*
+worktrees stop sharing an object. It was **rejected**, for two reasons that are worth keeping so it
+is not re-proposed:
+
+1. **It re-creates [ADR-20260812-011057](../adr/ADR-20260812-011057-loop-budget-is-an-append-only-ledger-and-the-timer-is-never-committed.md)'s
+   failure 1** — *"the state resolved from the script's own path, so `start` in one checkout and
+   `stop` in another billed different counters"*, measured as six live checkouts holding six
+   different weekly totals **simultaneously**. That ADR's decision 1 chose `--git-common-dir`
+   precisely so `start` and `stop` are the same timer *whatever checkout each ran in*. Reverting it
+   is a decision reversal, and this repo's own workflow (start in the primary checkout, work in a
+   linked worktree) walks straight into it.
+2. **It partitions on the wrong noun.** What is billed is a **run**, not a directory. One run spans
+   worktrees (failure 1); one worktree hosts many runs — and at least one of the observed collisions
+   was a *sibling session in the same checkout*, which worktree keying cannot see at all.
+
+Keying on the run id is the same idea applied to the right noun: it makes overlapping runs bill
+separately **in any topology**, which is everything worktree keying offered, and it makes a mismatch
+**loud** rather than merely rarer. A silent under-count was the defect that actually cost time.
 
 ## How to bound each loop type
 

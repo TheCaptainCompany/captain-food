@@ -36,6 +36,21 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `$(MAKE)` even under `-n`, so it opens a timer and bills a segment (two 0-second receipts in this
 > commit are its output, kept rather than deleted because hook-written budget state is never
 > hand-edited).
+> **Addendum, on evidence arriving mid-run**: the contention is the **fourth** distorted segment of
+> the day, not the two first named — `20260831T165727Z-de76c595.json` (10.3 m, `quote-decisions-20260831`)
+> records a run that hit **exit 3** at `start` because a timer opened **70 s earlier on `main`** was
+> still open, and reconstructed ownership by hand before billing "as mine". Keying the timer by
+> **worktree** (`--git-dir`) was proposed as a smaller fix and **rejected**: it re-creates
+> ADR-20260812-011057's *failure 1* (six checkouts, six simultaneous totals — the ADR chose
+> `--git-common-dir` precisely so `start` and `stop` are one timer whatever checkout each ran in),
+> and it partitions on the wrong noun, since what is billed is a **run**, not a directory — one run
+> spans worktrees, one worktree hosts many runs, and at least one observed collision was a sibling
+> session **in the same checkout**, which worktree keying cannot see. Run-id keying delivers
+> everything worktree keying offered, in any topology, and makes a mismatch **loud** rather than
+> merely rarer. Folded in from the same evidence: **`exit 2` and `exit 3` mean opposite things**, so
+> every exit-3 path now prints `(exit 3 = INTEGRITY, not budget exhaustion …)` with the week's state,
+> and every refusal hands over the whole tuple — started-at, branch, run id **and pid** — which is
+> exactly what that executor reconstructed by hand.
 
 > **2026-08-31 — the repricing obligation map is IN THE REPO, and the lens return that never landed
 > is the finding** (docs-only: one new legal brief, the standing counsel list extended, one proposal

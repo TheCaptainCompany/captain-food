@@ -65,8 +65,8 @@ config_modified() { git -C "$REPO" status --porcelain -- .claude/loop-budget.jso
 # The timer file of an IDENTIFIED run. Keying the path on the owner is what makes another run's
 # timer unaddressable rather than merely detected.
 own_timer() { printf '%s/.git/loop-budget-timer--%s.json\n' "$REPO" "$1"; }
-stamp_owned() { printf '{"startedAt": %s, "branch": "%s", "owner": "%s"}\n' \
-  "$(( $(date +%s) * 1000 - $2 * 1000 ))" "${3:-selftest}" "$1" > "$(own_timer "$1")"; }
+stamp_owned() { printf '{"startedAt": %s, "branch": "%s", "owner": "%s", "pid": %s}\n' \
+  "$(( $(date +%s) * 1000 - $2 * 1000 ))" "${3:-selftest}" "$1" "${4:-424242}" > "$(own_timer "$1")"; }
 # The ledger path `stop` PRINTS. Asserting on the artifact the hook names beats globbing the
 # directory: several fixture segments share a one-second stamp, so a sort would pick by random suffix.
 receipt_path() { printf '%s' "$OUT" | sed -n 's/.*recorded as \([^ ]*\) (a NEW file.*/\1/p' | tail -1; }
@@ -377,6 +377,42 @@ if [ -f "$PROTOCOL" ]; then
 else
   bad "12 protocol prose" "expected the executor protocol at $PROTOCOL"
 fi
+
+# --- 13. exit 3 must SAY it is integrity, and a refusal must NAME the timer it found -------------
+# A run that hit exit 3 at `start` today (a timer opened 70 s earlier on 'main' was still open)
+# reported it correctly only because the executor reasoned it through, then reconstructed ownership
+# by hand from startedAt + branch + pid against the ledger's last segment, and billed 10.3m with a
+# note recording the ambiguity -- the honest outcome, reached by exactly the human-shaped step that
+# should not be necessary (segment 20260831T165727Z-de76c595.json, branch quote-decisions-20260831).
+# Two codes share the "the guard said no" shape and mean opposite things: exit 2 = the week is spent,
+# exit 3 = integrity. The guard's own output must carry that distinction, not the reader's care.
+rm -f "$REPO"/.git/loop-budget-timer*.json
+printf '{\n  "weeklyBudgetSeconds": %s\n}\n' "$BIG" > "$REPO/.claude/loop-budget.json"
+
+stamp_owned run-G 300 branch-G 987654
+run_as run-G bash "$HOOK" start
+expect_code "13a a double-open is refused (exit 3)" 3
+expect_out  "13b ...and the refusal SAYS it is integrity, not the weekly cap" "INTEGRITY"
+expect_out  "13c ...and says the week is NOT exhausted, so the two cannot be confused" "not budget"
+
+# ...and the refusal must hand over everything needed to identify the timer, so nobody reconstructs
+# it from the ledger again: when it started, on which branch, under which pid, for which run.
+run_as run-H bash "$HOOK" stop
+expect_code "13d a stop with no timer of its own is refused" 3
+expect_out  "13e ...naming the branch of the timer it found" "branch-G"
+expect_out  "13f ...naming the PID that holds it" "987654"
+expect_out  "13g ...and naming the run that owns it" "run-G"
+
+# The inverse must stay true: an OVER-CAP refusal must never claim to be an integrity failure.
+run bash "$HOOK" reset
+printf '{\n  "weeklyBudgetSeconds": 1\n}\n' > "$REPO/.claude/loop-budget.json"
+run bash "$HOOK" check
+expect_code "13h an exhausted week still refuses with exit 2, not 3" 2
+case "$OUT" in
+  *INTEGRITY*) bad "13i a budget refusal never claims to be an integrity failure" "the over-cap message says INTEGRITY" ;;
+  *) ok "13i a budget refusal never claims to be an integrity failure" ;;
+esac
+printf '{\n  "weeklyBudgetSeconds": %s\n}\n' "$BIG" > "$REPO/.claude/loop-budget.json"
 
 printf 'loop-budget selftest: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || { echo "loop-budget selftest: FAILED -- a budget guard is not firing (see above)." >&2; exit 2; }

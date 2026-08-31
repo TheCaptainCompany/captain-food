@@ -17,6 +17,11 @@
 #   loop-budget.sh prune                 # delete ledger weeks older than the retention window
 #   loop-budget.sh selftest              # run the guard tests (also run by .claude/hooks/stop-gate.sh)
 #
+# EXIT CODES: 0 ok - 2 the WEEK IS SPENT (only while the cap is a stop sign) - 3 INTEGRITY (the timer
+# state is wrong: not yours, already open, stale, missing) - 64 usage. 2 and 3 share the "the guard
+# said no" shape and mean opposite things, so every exit-3 path SAYS it is integrity and prints the
+# week's state next to it. Do not report an exit 3 as "budget exhausted".
+#
 # ---------------------------------------------------------------------------------------------
 # WHY THIS SHAPE (it replaced a single mutable {secondsUsed, startedAt} counter that produced seven
 # distinct failures in one day; every property below is STRUCTURAL, not a guard that can be skipped):
@@ -260,6 +265,7 @@ function readTimer(file) {
   return {
     file, startedAt: Number(t.startedAt), branch: t.branch || '?',
     owner: typeof t.owner === 'string' ? t.owner : '',   // '' = written before run ids, or by an unidentified run
+    pid: Number(t.pid) || 0,
     age: Math.round((now - Number(t.startedAt)) / 1000),
   };
 }
@@ -278,8 +284,11 @@ const openTimer = () => readTimer(TIMER);
 // into a fact the caller can act on, and touching is what caused the collision in the first place.
 const otherTimers = () => allTimers().filter((t) => t.file !== TIMER && t.age <= STALE_TIMER_SECONDS);
 const clearTimer = (file) => { try { fs.unlinkSync(file || TIMER); } catch (e) {} };
+// Everything a caller needs to IDENTIFY the timer it found -- started-at, branch, pid, owner. An
+// executor reconstructed exactly this tuple by hand from the ledger's last segment before deciding
+// whether a `stop` was even its to run; the guard holds all four and should simply say them.
 const describe = (t) => `started ${new Date(t.startedAt).toISOString()} on '${t.branch}', ${mins(t.age)}m ago, `
-  + (t.owner ? `run '${t.owner}'` : 'NO run id');
+  + (t.owner ? `run '${t.owner}'` : 'NO run id') + (t.pid ? `, pid ${t.pid}` : '');
 const reportOthers = (lead) => {
   const live = otherTimers();
   if (!live.length) return live;
@@ -291,6 +300,15 @@ const reportOthers = (lead) => {
 const total = used(wk);
 const over = total >= budget;
 const summary = () => `${mins(used(wk))}m / ${mins(budget)}m used (week ${wk})`;
+
+// EVERY exit-3 path ends here. Exit 2 (the week is spent) and exit 3 (integrity) share the "the
+// guard said no" shape and mean opposite things -- one says stop working, the other says the timer
+// state is wrong. A run that hit exit 3 today reported it correctly only because the executor
+// reasoned it through; the tool holds the fact and must say it, because the next reader may not.
+function refuse() {
+  console.error(`   (exit 3 = INTEGRITY, not budget exhaustion -- the week is ${over ? 'OVER CAP' : 'within cap'}: ${summary()}.)`);
+  process.exit(EXIT_REFUSED);
+}
 
 // ---- commands -----------------------------------------------------------------------------------
 if (cmd === 'check' || cmd === 'start') {
@@ -316,7 +334,7 @@ if (cmd === 'check' || cmd === 'start') {
       console.error(`     loop-budget.sh stop                 # bill it from ${new Date(t.startedAt).toISOString()}`);
       console.error(`     loop-budget.sh stop --elapsed-seconds <s>   # bill the true duration instead`);
       console.error(`     loop-budget.sh reset                # discard it without billing`);
-      process.exit(EXIT_REFUSED);
+      refuse();
     }
     if (t) {
       console.error(`⚠ loop-budget: DISCARDING a stale open timer of this run (${describe(t)}, older than ${mins(STALE_TIMER_SECONDS)}m).`);
@@ -371,7 +389,7 @@ if (cmd === 'stop') {
     }
     if (n > budget) {
       console.error(`⛔ loop-budget: --elapsed ${mins(n)}m exceeds the ENTIRE weekly cap (${mins(budget)}m). Refusing.`);
-      process.exit(EXIT_REFUSED);
+      refuse();
     }
     seconds = Math.round(n);
     // An explicit figure supersedes THIS RUN's timer -- and only this run's. It used to clear the
@@ -388,8 +406,7 @@ if (cmd === 'stop') {
         console.error(`   wrong run (#821). NOTHING was recorded and the timer is UNTOUCHED. Choose deliberately:`);
         console.error(`     loop-budget.sh stop --adopt                 # it IS this run (e.g. started before run ids existed)`);
         console.error(`     loop-budget.sh stop --elapsed-seconds <n>   # bill THIS run's own duration instead`);
-        console.error(`   Current: ${summary()}.`);
-        process.exit(EXIT_REFUSED);
+        refuse();
       }
       t = orphan; adopted = true;
     }
@@ -402,8 +419,7 @@ if (cmd === 'stop') {
       // hand from startedAt + branch + pid against the ledger's last segment.
       reportOthers(`   Another run DOES hold an open timer. It is not yours to bill:`);
       console.error(`   Record it honestly instead:  loop-budget.sh stop --elapsed-seconds <n> --note "<what ran>"`);
-      console.error(`   Current: ${summary()}.`);
-      process.exit(EXIT_REFUSED);
+      refuse();
     }
     if (t.age > STALE_TIMER_SECONDS) {
       // Do NOT bill it and do NOT clamp it: 4h of clamped phantom time is barely better than 4h21m
@@ -413,8 +429,7 @@ if (cmd === 'stop') {
       console.error(`   It was left open by an earlier run, so billing it would charge ${mins(t.age)}m of wall clock that nobody worked.`);
       console.error(`   NOTHING was recorded and the stale timer is now discarded. Record THIS run's true duration:`);
       console.error(`     loop-budget.sh stop --elapsed-seconds <n> --note "<what ran>"`);
-      console.error(`   Current: ${summary()}.`);
-      process.exit(EXIT_REFUSED);
+      refuse();
     }
     if (t.branch !== label) note = note || `start on '${t.branch}', stop on '${label}'`;
     if (adopted) note = note ? `${note}; adopted a timer carrying no run id` : `adopted a timer carrying no run id`;
