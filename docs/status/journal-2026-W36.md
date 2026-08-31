@@ -1,6 +1,28 @@
 # Status journal — 2026-W36
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
+
+> **2026-08-31 — the support address is `support@captain.food` with no voice leg, counsel waits for
+> production, and that sequencing rests on two things that are not currently true.** Founder answers
+> ([SUPPORT-CONTACT](../decisions/SUPPORT-CONTACT.yaml) closed;
+> [PUBLISH-PRECONDITIONS](../decisions/PUBLISH-PRECONDITIONS.yaml) timing recorded, row stays open
+> and counsel-owned). **No voice leg** decides a screen: the rider handback carries an in-app report,
+> not a call button, because a control that renders and does nothing is worse than no control.
+> **The key does not exist** — `grep -rn SUPPORT_CONTACT specs/ crates/` returns nothing, so
+> "required key with no default" was a recorded DESIGN and not a live constraint; the string lands
+> when #792's screen is built. I had asserted it as live and it was not.
+>
+> **Counsel after production is coherent, and it is safe only if production ships with no publicly
+> shown crawled listing** — this row gates the publish switch and nothing else, and a Tours partner
+> who signed up is not a crawled listing. Two things must hold, both ours and neither needing
+> counsel: the marketplace must default to partner-only (`restaurant.rs:83` filters `listing_status`
+> **only** when `orderable_only == Some(true)`, and the public `restaurants` query carries no guard,
+> so today the default SHOWS non-partner rows); and `RUN_SIRENE_WORKER` must actually be off — its
+> own declaration **contradicts itself**, prose reading *"STOPPED since 2026-07-28"* while
+> `deploy.production` is `"true"`. The recorded pause and the deployed value disagree and nobody has
+> reconciled them. If either fails, the obligations attach before counsel looks, which is the
+> opposite of what was chosen.
+
 Current state: [`../STATUS.md`](../STATUS.md).
 
 > **2026-08-31 — the founder decided the quote's backstop and approved the design: 30 minutes, and
