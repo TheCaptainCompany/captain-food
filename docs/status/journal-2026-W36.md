@@ -2,6 +2,31 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-08-31 — #639 part C has a proposal, and writing it corrected the design's headline claim:
+> the membership key `vernon` proposed is not the derivation `ScopeMembership` already uses, and
+> adopting it as stated would put the auth subject into the read-authorization index.**
+> [PROP-20260831-180622](../proposals/PROP-20260831-180622-staff-authentication-the-roster-the-invitation-and-the-door.md)
+> (docs-only: no `specs/**`, no code, so no SPEC-LOG sentence). `ScopeMembership.member_id`'s own
+> column note reads *"The DOMAIN id … **never the auth subject** — the sub→domain bridge happens once
+> per request at the edge"* (`projection_tables.yaml:1181`), so
+> `UUIDv5(scopeType|scopeId|memberType|authSubject)` is the same **shape** with a different **value**:
+> the "projection becomes a rename rather than a join" prize is real but unreachable that way, and
+> the route to it is a **person id** (`MemberId`) bridged from the subject, which restores a domain
+> id in the fourth term. Recorded because the claim had already been carried into a dispatch card as
+> established fact.
+>
+> **The second thing the proposal had to state before designing anything**: a `PUBLIC` operation is
+> **not reachable from a staff surface** — `Surface::role()` returns one role per surface
+> (`crates/web/src/router.rs:57`), both staff surfaces are 9/9 and 2/2 `requires_auth: true`, and a
+> control bound to an operation the client's role excludes is `SkipReason::RoleRefused`, **skipped
+> silently, not 403'd loudly**. So the staff sign-in door needs a renderer capability that does not
+> exist. Three forks are presented with both costs and none pre-resolved (invitation/membership
+> identity, check-or-lock for an act on another aggregate, where the door lives); four Concerns are
+> registered, which mechanically block `Approved`, the sharpest being that
+> `limit_depth`/`limit_complexity` occur **nowhere** in the tree while part C adds unauthenticated
+> write entry points to the public graph. [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml)
+> stays open and is carried as a declared dependency, not closed.
+
 > **2026-08-31 — the support address is `support@captain.food` with no voice leg, counsel waits for
 > production, and that sequencing rests on two things that are not currently true.** Founder answers
 > ([SUPPORT-CONTACT](../decisions/SUPPORT-CONTACT.yaml) closed;
