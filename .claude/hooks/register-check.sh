@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# Captain.Food register-check gate (Claude Code PreToolUse hook on AskUserQuestion).
+# Captain.Food register-check gate (Claude Code PreToolUse hook on AskUserQuestion and Agent).
+#
+# TWO SURFACES, ONE SCRIPT. The gate is dispatched on `tool_name` in the hook payload:
+#
+#   * ASK (AskUserQuestion, or no tool_name at all -- the selftest's bare-payload form): the
+#     original founder-facing gate. Lanes 1-3 below, unchanged.
+#   * DISPATCH (Agent): the COORDINATOR's committing surface, added 2026-08-31 by
+#     ADR-20260831-141500. A dispatch card is the coordinator's diff and it was ungated, while
+#     every agent was gated on the ask -- nine failures in one session, four of them caught only
+#     by the founder or a lens. Lane D below.
+#
+# WHY THE COORDINATOR NEEDED ONE AT ALL. `.claude/skills/decision-lookup/` already existed and was
+# invoked ZERO times in the session that produced those nine. An un-invoked skill is prose with
+# extra steps, so the enforcement must not depend on remembering -- the same argument that put the
+# ask gate on a hook rather than in an agent block.
 #
 # WHY THIS EXISTS. Three founder directives of 2026-08-21, in order: "agents will no longer ask
 # questions already answered" (ADR-20260821-010543 — the trail), the REG-2/REG-4 row gate
@@ -34,11 +48,56 @@
 #      depth); legacy keys mentioned as CONTEXT pass, logged (`key-legacy`) — ask-vs-cite is
 #      distinguished by the envelope, not by the key.
 #
+# LANE D — the DISPATCH card (tool_name == Agent). Two questions decide whether this survives
+# contact, and both are answered STRUCTURALLY rather than by a list:
+#
+#   THE DISCRIMINATOR: WHICH `Agent` CALLS ARE GATED. Not every Agent call is a dispatch card --
+#   lens consults (`young`, `vernon`, `evans`, `beck`, ...), the `reviewer` pass and read-only
+#   research travel through the SAME tool. Gating all of them makes the gate something to work
+#   around; a hand-maintained exemption list of agent names is the shape this repo has retired
+#   twice. So the discriminator is DERIVED FROM THE TARGET AGENT'S OWN DECLARATION: the gate fires
+#   iff `.claude/agents/<subagent_type>.md` grants a WRITE tool (`Write`/`Edit`, substring, so
+#   `MultiEdit`/`NotebookEdit` count) in its frontmatter `tools:` line. Today that is exactly
+#   `architect`, `executor` and `generator`; the other thirteen agents declare `Read, Grep, Glob,
+#   Bash` and pass untouched, logged `agent-advisory`. Nothing here enumerates those names --
+#   granting an agent a write tool pulls it into the gate in the same commit, and revoking one
+#   drops it, with no list to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE
+#   TRAIL THAT LICENSES IT.
+#
+#   It FAILS CLOSED in all three unknowns: no `subagent_type`, no agent file (`general-purpose` is
+#   the live case -- environment.md documents pasting a charter into it as the standard workaround
+#   for an unregistered agent, and it holds the full tool set), or an agent file with no `tools:`
+#   line (no declaration means the inherited set, which can write).
+#
+#   THE ESCAPE HATCH IS THE FAILURE MODE. A gate satisfiable by pasting a literal
+#   `Register check: none` is theatre. So Lane D checks the trail's SHAPE in a way a bare marker
+#   cannot satisfy: a POSITIVE trail must name a record id that RESOLVES TO A FILE ON DISK
+#   (docs/adr/, docs/proposals/, docs/legal/, docs/status/), and a NEGATIVE trail must be the
+#   explicit no-controlling-record form AND name the `terms:` searched. `Register check: none`
+#   is neither and is refused; an invented `ADR-20260101-000000` is refused because it resolves
+#   to nothing. That is strictly stronger than the ask surface's Lane 2, which accepts any
+#   id-SHAPED token -- deliberately not back-ported here, because tightening the ask gate is a
+#   separate change with its own blast radius.
+#
+#   WHAT LANE D DELIBERATELY DOES NOT DO: it does not run the envelope lane and does not run the
+#   passive key check. On a founder QUESTION, naming a decided row means asking something already
+#   answered; on a dispatch CARD, citing a decided record is exactly the behaviour being enforced.
+#   Refusing a card for citing its own controlling record would invert the gate.
+#
 # WHAT IT PROVES — AND WHAT IT DOES NOT. It verifies envelope/trail presence and shape and row
 # STATUS on the AskUserQuestion transport; it cannot prove a search happened, cannot classify a
 # prose question that omits the envelope (the honest hole: misclassifying a decision question as
 # a clarification is a prose dodge, caught by review, not by this gate), and cannot see questions
 # travelling as free text. Row files are read at the point of need — never the generated index.
+# ON LANE D the same honesty limit applies one level up, and it is the reason the skill exists
+# beside the hook: A HOOK GATES A TOOL CALL. The coordinator's PROSE ANSWERS to the founder are
+# not tool calls and cannot be blocked the way AskUserQuestion is — of the nine failures, the
+# dispatch-shaped ones are now gated and the answer-shaped ones are not. Lane D proves a card
+# CARRIES a resolvable trail; it cannot prove the trail is the RIGHT record, that it was read, or
+# that the card's claims follow from it. `.claude/skills/coordinator-register-check/` carries the
+# procedure for the ungateable half, and it is weaker on purpose-stated grounds — which is itself
+# an argument for routing more coordinator→founder questions through AskUserQuestion, where the
+# gate already bites.
 # The Lane-2 status check trusts the trail's OWN prose (an ADR/PROP/journal citation has no
 # machine-readable status file to read, unlike a docs/decisions/<KEY>.yaml row) — it cannot prove
 # the cited status is current or that `premise-changed:` names a real change; that stays with
@@ -66,6 +125,17 @@ KEY_GRAMMAR='[A-Z][A-Z0-9-]{2,63}'
 # is the exact incident the ADR names (the round-5 call-sheet gap).
 CLOSED_STATUS='decided|superseded|deferred|withdrawn'
 PREMISE_MARKER='premise-changed:'
+
+# ── Lane D constants (the dispatch surface) ─────────────────────────────────────────────────────
+# Both dirs are overridable so the selftest can plant a HERMETIC corpus: the live agent roster and
+# the live docs/ tree both change, and a case that depends on them is a case that rots.
+AGENTS_DIR="${REGISTER_CHECK_AGENTS:-$ROOT/.claude/agents}"
+DOCS_DIR="${REGISTER_CHECK_DOCS:-$ROOT/docs}"
+# Lane D's id grammar adds BRIEF- (docs/legal/, docs/proposals/) to the ask surface's set: failure 4
+# of the nine was composed without reading BRIEF-20260819 §4.2, so a brief must be citable as the
+# record that governs. Every alternative here RESOLVES to a real path below -- an id shape that
+# cannot resolve would be a hole in the anti-theatre check, not a convenience.
+DISPATCH_RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|BRIEF-[0-9]{8}|journal-[0-9]{4}-W[0-9]{2}|DECISIONS'
 
 payload="$(cat 2>/dev/null || true)"
 session="$(printf '%s' "$payload" | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
@@ -106,6 +176,117 @@ open_rows_list() { # bounded: up to 12 keys + total count
 
 if [ -z "$payload" ]; then
   block "empty-input" "register-check: empty/unreadable tool payload — failing closed."
+fi
+
+# Does a cited record id correspond to a file that actually exists? This is the anti-theatre half
+# of Lane D: it makes the trail's SHAPE checkable without pretending to check its TRUTH. An
+# invented id resolves to nothing and is refused; a real id that is the WRONG record resolves and
+# passes, and catching that stays with review, like every other honesty claim in this gate.
+resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id
+  case "$1" in
+    ADR-*)     set -- "$DOCS_DIR/adr/$1"*.md ;;
+    PROP-*)    set -- "$DOCS_DIR/proposals/$1"*.md ;;
+    BRIEF-*)   set -- "$DOCS_DIR/legal/$1"*.md "$DOCS_DIR/proposals/$1"*.md ;;
+    journal-*) set -- "$DOCS_DIR/status/$1"*.md ;;
+    DECISIONS) set -- "$DOCS_DIR/proposals/DECISIONS.md" ;;
+    *) return 1 ;;
+  esac
+  for _p in "$@"; do [ -e "$_p" ] && return 0; done
+  return 1
+}
+
+# ── Lane D: the DISPATCH card (PreToolUse on the Agent tool) ────────────────────────────────────
+# Dispatched on tool_name. An ABSENT tool_name stays on the ask surface on purpose: that is the
+# selftest's bare-payload form and every pre-existing case uses it, so the ask gate's contract is
+# untouched by this lane's arrival.
+TOOL_NAME="$(printf '%s' "$payload" | grep -o '"tool_name":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
+
+if [ -n "$payload" ] && [ "$TOOL_NAME" = "Agent" ]; then
+  sub="$(printf '%s' "$payload" | grep -o '"subagent_type":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
+  agent_file="$AGENTS_DIR/$sub.md"
+  extra="agent=${sub:-<none>}"
+  gated=yes
+  why=""
+  if [ -z "$sub" ]; then
+    why="the call names no \`subagent_type\`"
+  elif [ ! -f "$agent_file" ]; then
+    why="no \`.claude/agents/$sub.md\` declares this agent, so its tool set cannot be read (an undeclared agent — \`general-purpose\` is the live case — holds the full set, including Write/Edit)"
+  else
+    tools_line="$(awk '/^---$/{c++; next} c==1 && /^tools:/{print; exit}' "$agent_file")"
+    if [ -z "$tools_line" ]; then
+      why="\`$sub.md\` declares no \`tools:\` line, so it inherits the full tool set"
+    elif printf '%s' "$tools_line" | grep -qE 'Write|Edit'; then
+      why="\`$sub\` is write-capable (\`$tools_line\`) — this call can produce a diff"
+    else
+      gated=no
+    fi
+  fi
+
+  # An advisory (read-only) target is NOT a dispatch card: a lens consult, a reviewer pass or
+  # read-only research commits nothing, so requiring a trail there would train the gate away.
+  if [ "$gated" = no ]; then
+    note ALLOW "agent-advisory" "-"
+    exit 0
+  fi
+
+  trail_ok=no
+  saw_id=no
+  saw_neg=no
+  saw_marker=no
+  while IFS= read -r dline; do
+    [ -n "$dline" ] || continue
+    saw_marker=yes
+    if printf '%s' "$dline" | grep -qE "$NO_RECORD"; then
+      saw_neg=yes
+      # The negative is a PASSING trail — but only when it names what was searched, otherwise
+      # "no controlling record" is the same free pass as `Register check: none`.
+      if printf '%s' "$dline" | grep -qF 'terms:'; then trail_ok=yes; break; fi
+      continue
+    fi
+    dids="$(printf '%s' "$dline" | grep -oE "$DISPATCH_RECORD_ID" || true)"
+    [ -n "$dids" ] && saw_id=yes
+    for did in $dids; do
+      if resolve_record "$did"; then trail_ok=yes; break 2; fi
+    done
+  done <<EOF
+$(printf '%s' "$payload" | grep -oE "${MARKER}[^\"\\\\]*")
+EOF
+
+  if [ "$trail_ok" = yes ]; then
+    note ALLOW "dispatch-trail-ok" "-"
+    exit 0
+  fi
+
+  if [ "$saw_marker" = no ]; then
+    block "dispatch-trail-missing" "register-check: this dispatch carries no \`Register check:\` trail, and it is GATED because $why."
+  elif [ "$saw_neg" = yes ]; then
+    block "dispatch-trail-termless" "register-check: the trail claims no controlling record but names no \`terms:\` — an unsearchable negative is the \`Register check: none\` free pass under a longer name. Say what you searched."
+  elif [ "$saw_id" = yes ]; then
+    block "dispatch-trail-unresolved" "register-check: the trail names a record id, but none of the ids in it resolve to a file under docs/ (adr, proposals, legal, status). A citation that resolves to nothing is not a citation — fix the id, or state the explicit negative with its terms."
+  else
+    block "dispatch-trail-hollow" "register-check: the trail names no record id and no explicit negative — a bare \`Register check:\` marker is not a trail."
+  fi
+
+  note BLOCK "$reasons" "-"
+  printf '%s' "$block_msgs" >&2
+  cat >&2 <<'EOF'
+
+WHY THIS FIRED. A dispatch card is the coordinator's DIFF, and a call that can produce a diff
+carries the trail that licenses it (ADR-20260831-141500). Lens consults, the `reviewer` pass and
+read-only research are NOT gated -- the discriminator is the target agent's own `tools:` line, so
+only write-capable agents reach this message.
+
+Do the check, THEN DISPATCH -- never drop the card. Two legitimate shapes, one per claim:
+
+  Register check: <record id> (<date>, <status>) -- covers <X>, silent on <Y>
+  Register check: no controlling record -- terms: <terms searched>; nearest: <record id or none>
+
+The record id must RESOLVE to a file under docs/adr, docs/proposals, docs/legal or docs/status,
+and the negative must name its `terms:`. Procedure and worked examples:
+.claude/skills/coordinator-register-check/SKILL.md -- run `decision-lookup` for candidates, then
+READ the candidate itself (it is advisory, never evidence).
+EOF
+  exit 2
 fi
 if [ -n "${REGISTER_CHECK_DECISIONS:-}" ] && { [ ! -d "$DECISIONS_DIR" ] || ! ls "$DECISIONS_DIR"/[A-Z]*.yaml >/dev/null 2>&1; }; then
   block "override-broken" "register-check: REGISTER_CHECK_DECISIONS points at a missing/empty directory — failing closed rather than silently skipping the row check."

@@ -287,6 +287,31 @@ legacy:
   - OLD-ROW
 EOF
 
+# ── Lane D fixtures (the dispatch surface, ADR-20260831-141500) ─────────────────────────────────
+# A HERMETIC agent roster and docs tree, for the same reason the row fixtures exist: the live
+# roster and the live docs/ tree both change, and a case that depends on them rots. The LIVE
+# wiring is proven separately by the LD cases below, on properties that cannot legitimately move.
+mkdir -p "$FIX/agents" "$FIX/docs/adr"
+cat > "$FIX/agents/writer.md" <<'EOF'
+---
+name: writer
+tools: Read, Grep, Glob, Bash, Write, Edit
+---
+EOF
+cat > "$FIX/agents/lens.md" <<'EOF'
+---
+name: lens
+tools: Read, Grep, Glob, Bash
+---
+EOF
+cat > "$FIX/agents/notools.md" <<'EOF'
+---
+name: notools
+description: declares no `tools:` line, so it inherits the full set -- including Write
+---
+EOF
+: > "$FIX/docs/adr/ADR-20260821-095957-fixture-record.md"
+
 fail=0
 expect() { # expect <case> <want-exit> <decisions-dir> <payload> [want-reason]
   # want-reason (optional) is compared EXACTLY against the hook log's reason field: a case that
@@ -386,6 +411,85 @@ expect E7-envelope-counsel 2 "$FIX" '{"questions":[{"question":"Decision row: LA
 # E8 ALLOW: the documented escape -- the question asks for the external action itself.
 expect E8-counsel-action 0 "$FIX" '{"questions":[{"question":"Decision row: LAW-ROW -- external action: engage counsel this week?"}]}'
 
+# ── Lane D: the dispatch card (Agent surface, ADR-20260831-141500) ──────────────────────────────
+expect_d() { # expect_d <case> <want-exit> <payload> [want-reason]
+  local case="$1" want="$2" payload="$3" want_reason="${4:-}" got reason log="$FIX/case.log"
+  : > "$log"
+  printf '%s' "$payload" | REGISTER_CHECK_LOG="$log" REGISTER_CHECK_DECISIONS="$FIX" \
+    REGISTER_CHECK_AGENTS="$FIX/agents" REGISTER_CHECK_DOCS="$FIX/docs" bash "$HOOK" >/dev/null 2>&1
+  got=$?
+  if [ "$got" -ne "$want" ]; then
+    echo "register-check selftest: case $case FAILED (want exit $want, got $got)" >&2
+    fail=1
+  fi
+  if [ -n "$want_reason" ]; then
+    reason="$(tail -1 "$log" 2>/dev/null | cut -f3)"
+    if [ "$reason" != "$want_reason" ]; then
+      echo "register-check selftest: case $case FAILED (want reason '$want_reason', got '${reason:-none}')" >&2
+      fail=1
+    fi
+  fi
+}
+DTRAIL='Register check: ADR-20260821-095957 (2026-08-21, open) -- covers the ask gate, silent on the coordinator'
+
+# D1 BLOCK: THE INCIDENT SHAPE -- a dispatch card to a write-capable agent with no trail at all.
+expect_d D1-card-no-trail 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH -- build the thing. Base main = bddba6bc."}}' dispatch-trail-missing
+# D2 ALLOW: the same card carrying a trail whose record RESOLVES -- the green half of the pair.
+expect_d D2-card-valid-trail 0 "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"writer\",\"prompt\":\"DISPATCH. $DTRAIL\"}}" dispatch-trail-ok
+# D3 ALLOW: THE DISCRIMINATOR. A read-only agent is a lens consult / reviewer pass, not a card --
+#    it commits nothing, so it is never gated. This is the false-positive floor: if this reds, the
+#    gate fires on every mob briefing and gets worked around.
+expect_d D3-lens-advisory 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"lens","prompt":"What do you see in this event shape?"}}' agent-advisory
+# D4 BLOCK: THE ESCAPE HATCH. A literal `Register check: none` must not satisfy the gate, or the
+#    whole thing is theatre -- it names no record and is not the explicit negative.
+expect_d D4-literal-none 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: none"}}' dispatch-trail-hollow
+# D5 BLOCK: the negative without `terms:` -- "no controlling record" with nothing searched is the
+#    same free pass under a longer name.
+expect_d D5-termless-negative 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: no controlling record"}}' dispatch-trail-termless
+# D6 ALLOW: the negative WITH its terms is a PASSING trail -- a genuinely new question is the
+#    system working, and the card must not be dropped for lack of a record.
+expect_d D6-negative-with-terms 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: no controlling record -- terms: coordinator register check, PreToolUse Agent; nearest: none"}}' dispatch-trail-ok
+# D7 BLOCK: an INVENTED id. The shape is perfect and the record does not exist -- the check that
+#    makes a fabricated citation cost something. (The fixture docs tree holds exactly one ADR.)
+expect_d D7-unresolvable-id 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260101-000000 (2026-01-01, open) -- covers everything"}}' dispatch-trail-unresolved
+# D8 BLOCK: an agent with NO file -- `general-purpose` is the live case (environment.md documents
+#    pasting a charter into it), and it holds the full tool set. Fail closed.
+expect_d D8-undeclared-agent 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","prompt":"You are beck. Charter pasted."}}' dispatch-trail-missing
+# D9 BLOCK: no `subagent_type` at all -- fail closed, never fail open (ADR-20260810-231300).
+expect_d D9-no-subagent-type 2 '{"tool_name":"Agent","tool_input":{"prompt":"do a thing"}}' dispatch-trail-missing
+# D10 BLOCK: an agent file with no `tools:` line inherits the full set, so it is write-capable.
+expect_d D10-no-tools-line 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"notools","prompt":"go"}}' dispatch-trail-missing
+# D11 BLOCK: the ASK surface is untouched by Lane D's arrival -- an AskUserQuestion payload with no
+#    trail still reds on the ORIGINAL reason, not a dispatch one. (The lanes must not swap.)
+expect_d D11-ask-surface-intact 2 '{"tool_name":"AskUserQuestion","questions":[{"question":"Which funding model applies to tips?"}]}' trail-missing
+# D12 BLOCK: a card that cites a DECIDED-status record still passes the STATUS half but is refused
+#    here only because the id does not resolve -- proving Lane D never runs the ask surface's
+#    `trail-answered` rule. On a CARD, citing a decided record is the behaviour being enforced;
+#    D2's trail says `open` and D12's says `decided`, and both are judged solely on resolution.
+expect_d D12-decided-cite-ok 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260821-095957 (2026-08-21, decided) -- controlling, and cited as such"}}' dispatch-trail-ok
+
+# LD LIVE wiring: the fixture cases above would all pass with the LIVE paths mis-wired, so two
+# anchors on the real roster -- `executor` is write-capable and `reviewer` is read-only, and
+# either changing is a roster decision that should red this case and be looked at.
+printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"executor","prompt":"DISPATCH with no trail whatsoever."}}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 2 ]; then
+  echo "register-check selftest: case LD1 FAILED -- the LIVE .claude/agents roster did not gate a trail-less dispatch to write-capable 'executor'" >&2
+  fail=1
+fi
+printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"reviewer","prompt":"Review the full branch diff."}}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "register-check selftest: case LD2 FAILED -- the LIVE roster gated a read-only 'reviewer' consult; Lane D must never fire on an advisory call" >&2
+  fail=1
+fi
+# LD3: the live docs tree resolves a real record id -- the anti-theatre check is only as good as
+# its resolver, and a resolver pointed at the wrong root refuses EVERY citation (fail-shut drift
+# that would read as "the coordinator keeps writing bad trails").
+printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"executor\",\"prompt\":\"DISPATCH. $DTRAIL\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "register-check selftest: case LD3 FAILED -- a trail citing the LIVE ADR-20260821-095957 did not resolve; check REGISTER_CHECK_DOCS/docs layout before rewriting trails" >&2
+  fail=1
+fi
+
 # ── The LIVE corpus wiring (no env override) ────────────────────────────────────────────────────
 # L1: the live dir parses and gates -- REG-2 is decided forever (a reversal opens a NEW row).
 printf '%s' "{\"questions\":[{\"question\":\"Reopen REG-2? $TRAIL\"}]}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
@@ -411,16 +515,19 @@ fi
 # check_wiring proves .claude/settings.json carries a hooks.PreToolUse entry whose matcher is
 # EXACTLY AskUserQuestion and whose command runs the real script. python3 (stdlib json only, no
 # added toolchain) is required; its absence FAILS the case -- fail closed, never a silent skip.
-check_wiring() { # check_wiring <settings.json> -> 0 armed / nonzero not
+# Parameterised by MATCHER since 2026-08-31: the same script is now armed on two surfaces
+# (AskUserQuestion = the ask gate, Agent = Lane D, the coordinator's dispatch card), and each entry
+# can be disarmed independently, so each is proven independently.
+check_wiring() { # check_wiring <settings.json> <matcher> -> 0 armed / nonzero not
   command -v python3 >/dev/null 2>&1 || return 3
-  python3 - "$1" <<'PYEOF'
+  python3 - "$1" "$2" <<'PYEOF'
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(1)
 for entry in d.get("hooks", {}).get("PreToolUse", []):
-    if entry.get("matcher") != "AskUserQuestion":
+    if entry.get("matcher") != sys.argv[2]:
         continue
     for h in entry.get("hooks", []):
         if h.get("type") == "command" and h.get("command", "").endswith("/.claude/hooks/register-check.sh"):
@@ -430,29 +537,54 @@ PYEOF
 }
 # The three disarming shapes, planted as mutant fixtures derived from the REAL committed file, so
 # each red case proves the checker sees through exactly one disarming move.
+# The mutants are located BY MATCHER, not by index: a second entry (Agent) was appended in
+# 2026-08-31 and an index-addressed builder silently mutates whichever entry happens to sit there.
 if ! python3 - "$ROOT/.claude/settings.json" "$FIX" <<'PYEOF'
 import copy, json, sys
 src, out = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
-entry = d["hooks"]["PreToolUse"][0]
-assert "register-check.sh" in entry["hooks"][0]["command"], "settings.json PreToolUse[0] is no longer the register-check entry -- update the mutant builder"
-m1 = copy.deepcopy(d); m1["hooks"]["PreToolUse"][0]["matcher"] = "AskUserQuestionX"
+
+def idx(doc, matcher):
+    for i, e in enumerate(doc["hooks"]["PreToolUse"]):
+        if e.get("matcher") == matcher:
+            assert "register-check.sh" in e["hooks"][0]["command"], \
+                f"settings.json PreToolUse[{matcher}] is no longer a register-check entry -- update the mutant builder"
+            return i
+    raise AssertionError(f"settings.json declares no PreToolUse entry with matcher {matcher} -- the gate is disarmed on that surface")
+
+ask, agent = idx(d, "AskUserQuestion"), idx(d, "Agent")
+OTHER = "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/some-other-hook.sh"
+m1 = copy.deepcopy(d); m1["hooks"]["PreToolUse"][ask]["matcher"] = "AskUserQuestionX"
 m2 = copy.deepcopy(d); m2["hooks"]["PostToolUse"] = m2["hooks"].pop("PreToolUse")
-m3 = copy.deepcopy(d); m3["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/some-other-hook.sh"
-for name, m in [("settings-mutant-matcher.json", m1), ("settings-mutant-event.json", m2), ("settings-mutant-command.json", m3)]:
+m3 = copy.deepcopy(d); m3["hooks"]["PreToolUse"][ask]["hooks"][0]["command"] = OTHER
+m4 = copy.deepcopy(d); m4["hooks"]["PreToolUse"][agent]["matcher"] = "AgentX"
+m5 = copy.deepcopy(d); m5["hooks"]["PreToolUse"][agent]["hooks"][0]["command"] = OTHER
+m6 = copy.deepcopy(d); del m6["hooks"]["PreToolUse"][agent]
+for name, m in [("settings-mutant-matcher.json", m1), ("settings-mutant-event.json", m2),
+                ("settings-mutant-command.json", m3), ("settings-mutant-agent-matcher.json", m4),
+                ("settings-mutant-agent-command.json", m5), ("settings-mutant-agent-absent.json", m6)]:
     json.dump(m, open(f"{out}/{name}", "w"), indent=1)
 PYEOF
 then
   echo "register-check selftest: case W FAILED -- python3 missing or the settings mutant builder broke (fail closed)" >&2
   fail=1
-elif ! check_wiring "$ROOT/.claude/settings.json"; then
-  echo "register-check selftest: case W FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/AskUserQuestion declaration (the gate is disarmed)" >&2
+elif ! check_wiring "$ROOT/.claude/settings.json" AskUserQuestion; then
+  echo "register-check selftest: case W FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/AskUserQuestion declaration (the ask gate is disarmed)" >&2
+  fail=1
+elif ! check_wiring "$ROOT/.claude/settings.json" Agent; then
+  echo "register-check selftest: case WD FAILED -- .claude/settings.json no longer wires register-check.sh to a PreToolUse/Agent declaration (Lane D, the coordinator's dispatch gate, is disarmed -- ADR-20260831-141500)" >&2
   fail=1
 else
   # W1 fuzzed matcher / W2 wrong event / W3 wrong command: the checker must refuse each.
-  check_wiring "$FIX/settings-mutant-matcher.json" && { echo "register-check selftest: case W1 FAILED -- checker accepted matcher AskUserQuestionX" >&2; fail=1; }
-  check_wiring "$FIX/settings-mutant-event.json"   && { echo "register-check selftest: case W2 FAILED -- checker accepted the entry under PostToolUse" >&2; fail=1; }
-  check_wiring "$FIX/settings-mutant-command.json" && { echo "register-check selftest: case W3 FAILED -- checker accepted a command pointing at another script" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-matcher.json" AskUserQuestion && { echo "register-check selftest: case W1 FAILED -- checker accepted matcher AskUserQuestionX" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-event.json"   AskUserQuestion && { echo "register-check selftest: case W2 FAILED -- checker accepted the entry under PostToolUse" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-command.json" AskUserQuestion && { echo "register-check selftest: case W3 FAILED -- checker accepted a command pointing at another script" >&2; fail=1; }
+  # W4-W6: the SAME three disarming shapes against the Agent entry, plus its deletion -- the one
+  # that costs nothing to do accidentally, since the ask gate stays green while Lane D vanishes.
+  check_wiring "$FIX/settings-mutant-agent-matcher.json" Agent && { echo "register-check selftest: case W4 FAILED -- checker accepted matcher AgentX" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-agent-command.json" Agent && { echo "register-check selftest: case W5 FAILED -- checker accepted an Agent command pointing at another script" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-agent-absent.json"  Agent && { echo "register-check selftest: case W6 FAILED -- checker accepted settings with the Agent entry deleted" >&2; fail=1; }
+  check_wiring "$FIX/settings-mutant-event.json"         Agent && { echo "register-check selftest: case W7 FAILED -- checker accepted the Agent entry under PostToolUse" >&2; fail=1; }
 fi
 
 # D DRIFT: every standing agent carries the citation block (marker + pointer to the canonical rule).

@@ -11,11 +11,20 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/register-check.sh"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/register-check.sh"
+          }
+        ]
       }
     ]
   },
   "permissions": {
-    "_comment_hooks": "register-check (founder directive 2026-08-21, ADR-20260821-010543): a founder-facing AskUserQuestion must carry the register-check trail declared in docs/claude/sessions/workflow.md, or the PreToolUse hook above blocks it (exit 2) and feeds the protocol back. It verifies the trail's PRESENCE AND SHAPE only -- honesty stays with the mob/review; prose question surfaces are bound by the agent-file blocks. .claude/hooks/register-check-selftest.sh (run by stop-gate.sh every turn) proves the verdicts, this wiring, and the agent blocks' presence -- removing the hooks entry turns that selftest red rather than silently disarming the gate.",
+    "_comment_hooks": "register-check, on TWO surfaces, one script. (1) AskUserQuestion (founder directive 2026-08-21, ADR-20260821-010543): a founder-facing question must carry the register-check trail declared in docs/claude/sessions/workflow.md, or the PreToolUse hook blocks it (exit 2) and feeds the protocol back. (2) Agent (founder directive 2026-08-31, ADR-20260831-141500): the COORDINATOR gets the same gate on its committing surface -- a dispatch card is the coordinator's diff and it was ungated while every agent was gated on the ask. Lane D fires only when the TARGET agent's own frontmatter `tools:` line grants Write/Edit, so lens consults and the reviewer pass (read-only agents) pass untouched and no exemption LIST exists to drift; it fails closed on an unknown or undeclared agent. Both surfaces verify the trail's PRESENCE AND SHAPE only -- Lane D additionally requires a cited record id to RESOLVE to a file under docs/, so a literal `Register check: none` cannot satisfy it -- honesty stays with the mob/review; prose question surfaces are bound by the agent-file blocks and, for the coordinator, by .claude/skills/coordinator-register-check/. .claude/hooks/register-check-selftest.sh (run by stop-gate.sh every turn and by CI's gate-scripts job) proves the verdicts, BOTH wiring entries, and the agent blocks' presence -- removing either hooks entry turns that selftest red rather than silently disarming the gate.",
     "_comment_deny": "Deny what no verdict is ever derived from (ADR-20260816-020752, farley): build output and object stores are re-derivable from source, so reading them costs tokens and can never change a gate result. Mirrors .claudeignore -- keep the two in step. DELIBERATELY NOT DENIED: specs/generated/** (the drift gate's evidence; denying it makes check-drift unauditable), Cargo.lock (a lock diff is a supply-chain review), tools/codegen-rs/warning-baseline.json (the warning ratchet). Also here: honeycomb is DISABLED above, not deleted -- unauthenticated its tools cannot run and no runtime emits spans yet; RE-AUTH IS THE EVENT THAT RE-ENABLES IT (delete the entry). The .mcp.json definition stays so the eu1 EU-host pin (a GDPR constraint) is not lost with the server config.",
     "deny": [
       "Read(./target/**)",

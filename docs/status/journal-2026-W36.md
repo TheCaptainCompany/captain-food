@@ -3,6 +3,35 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the coordinator gets the register-check gate on its committing surface (#814).**
+> Every *agent* has been gated on the ask since 2026-08-21; the **coordinator had no gate on any
+> surface**, and in one session produced **nine** failures of exactly the class the gate prevents —
+> an option space presented as open that ADR-20260829-230418 had decided, a counsel posture proposed
+> without reading BRIEF-20260819 §4.2, a line-range citation (`pm_orchestrators.rs:844-852`) that
+> **reads as confirming the claim while showing the opposite**, and a dispatch about to contradict
+> PROP-20260815-142349. **Four of the nine were caught by the founder or a lens.** The ninth was
+> caught by running the check before dispatching — the proof the discipline works.
+> Now a `PreToolUse` hook on the **`Agent`** tool, as Lane D of the *same* `register-check.sh`
+> (extended, not forked — the gate-script self-verification set stays at four files, so neither
+> guard has to learn a fifth). Two design questions decided structurally rather than by a list:
+> the **discriminator** is the target agent's own `tools:` frontmatter — write-capable is gated,
+> read-only is not — so lens consults and reviewer passes pass untouched and granting an agent a
+> write tool arms the gate for it *in the same commit*, with no exemption list to go stale; and the
+> **escape hatch** is shut by requiring a cited record id to RESOLVE to a file under `docs/`, so a
+> literal `Register check: none` and a well-shaped invented id are both refused.
+> The validator returned the favour mid-write: §23 `record-citation-unresolved` refused the *fake
+> ADR id used as an illustration inside the ADR itself* — the same principle one corpus over,
+> caught by a gate rather than a reader.
+> **Recorded honestly rather than hidden**: a hook gates a TOOL CALL, so the coordinator's prose
+> answers to the founder stay ungateable. `.claude/skills/coordinator-register-check/` carries that
+> half and is *weaker* — the pre-existing `decision-lookup` skill was invoked **zero** times in the
+> session that produced the nine, which is why this one is a hook and not a paragraph, and why the
+> right move is routing more coordinator→founder questions through `AskUserQuestion`.
+> Records: [ADR-20260831-141500](../adr/ADR-20260831-141500-the-coordinator-gets-the-register-check-gate-on-its-committing-surface.md).
+> Proven by selftest cases D1-D12 / LD1-LD3 / W4-W7; three planted mutants (Lane D disarmed, the
+> `Agent` settings entry deleted, the resolver stubbed to accept anything) were each observed RED
+> before the suite was trusted.
+
 > **2026-08-31 — the `send:` route grammar: four unlaned command sends declared, gated and
 > dedup-keyed (#807).**
 > `PmStepDef::Send` carried no `to` and no `route_gate` while all four committed `send:` steps
