@@ -1,6 +1,19 @@
 # PROP-20260831-180622 — Staff authentication: the roster, the invitation, and the door (#639 part C)
 
-- **Status**: Proposed
+- **Status**: Proposed — **approved in principle by the FOUNDER on 2026-08-31, conditional on the
+  four Concerns.** It moves to `Approved` when they are checked, not before: an unchecked Concern
+  blocks it mechanically, and the founder's own words were *"approve; work the Concerns, then build
+  in the stated order"* — never *"ship it"*.
+- **Approver's scope choices** (2026-08-31, recorded per ADR-20260724-135945):
+  - **FORK 3 — where the sign-in door lives: R1.** One screen on the staff host addresses
+    `/public/graphql` while the rest of its surface addresses `/restaurant/graphql`. The
+    restaurateur stays on one address the whole way; the renderer gains the per-screen role
+    capability it does not have today. The separate-host alternative was declined.
+  - **`public-graph-limits`: the limits land in the SAME slice.** Not shipped-and-recorded. So step 6
+    carries `limit_depth` and `limit_complexity` rather than merely noting their absence, and the
+    Concern discharges when they land — this choice commits the work, it does not complete it.
+  - FORKS 1 and 2 (invitation identity; check-versus-lock) were **deliberately not put to him** — they
+    are the team's to settle under the independent reviewer pass. He did not ask for them back.
 - **Date**: 2026-08-31
 - **Tracking issue**: [#639 "STAFF-AUTH: restaurant staff, account managers and riders cannot sign in at all"](https://github.com/TheCaptainCompany/captain-food/issues/639) (part C)
 - **Realized by**: — (filled at completion)
