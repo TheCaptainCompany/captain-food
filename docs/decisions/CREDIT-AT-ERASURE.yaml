@@ -1,0 +1,32 @@
+key: "CREDIT-AT-ERASURE"
+status: "decided"
+question: "What happens to an unspent CustomerCredit balance when its subject is erased -- is it refunded, forfeited or retained, does a positive balance PARK the erasure, and what does the subject see before the irreversible act?"
+owner: "founder"
+opened: "2026-08-30"
+decided: "2026-08-31"
+decided_by: "ADR-20260831-033621"
+capacity: "founder"
+register: "docs/adr/ADR-20260831-033621-customer-credit-is-disposed-of-as-a-leg-of-erasure-goodwill-credit-is-refundable.md"
+evidence: "refund credit traceable to a captured payment, forfeit purely promotional credit, and disclose the balance at the confirmation step, before the irreversible act, so the subject decides with the number in front of them. Escheat and block-until-zero were both considered and rejected"
+note: >
+  Founder directive 2026-08-31, verbatim in the ADR, plus three rulings on the questions the
+  directive had no branch for: D1 A -- reclamation GOODWILL credit is REFUNDABLE (it is 100% of the
+  credit that can exist at V0), to the original captured instrument, capped at the un-refunded
+  remainder of that capture (the double-pay case). D2 A -- forfeiture is a rule of ACCOUNT
+  TERMINATION GENERALLY (closure, dormancy, the existing one-year expiry, erasure alike), because
+  GDPR Art. 12(5) requires exercising a right to be free of charge and an erasure-specific
+  forfeiture is arguable as a charge. D3 A -- a FAILED REFUND PROCEEDS AND IS RECORDED: the erasure
+  completes on the Art. 12(3) clock, the failure lands on the pseudonymous receipt and the amount
+  becomes an ordinary payable; a money problem never holds a right hostage, which is the founder's
+  own objection to block-until-zero applied consistently. Six lenses consulted (legal, business,
+  vernon, young, ux-designer, beck); the Consulted block lives in the deciding ADR.
+  NOT CLOSED BY THIS ROW, and the record must not be read as closing them: D4 (does the credit leg
+  ship inside #708 or after), D5 (shorten the credit expiry to ~180 days so "traceable" implies
+  "refundable" by construction) and D6 (which pot drains first when credit is spent -- free only
+  until a promotional grant exists) are OPEN and need their own keys, which the coordinator
+  declares. The THREE COUNSEL QUESTIONS on #764 are NOT DISCHARGED -- legal's verdict is 0
+  discharged, 1 narrowed, 2 untouched, and Q2 (is the credit ledger L123-22-retained or
+  shreddable?) is now HEAVIER, because both limbs produce an accounting movement someone may have
+  to prove. `decided` here is a recorded founder decision and is NOT legal clearance: no lens
+  output and no aggregation of lenses is legal advice. Raised on #764, found by the mob checkpoint
+  on PR #763; unblocks the erasure-engine chunk of #708 (ERASURE-LAUNCH-GATE, launch-gating).

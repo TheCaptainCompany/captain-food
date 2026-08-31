@@ -341,7 +341,12 @@ own output capture lives on the same disk — a build that fills it breaks the N
 capture ("Command output was lost") even for `rm`; redirect big-output commands to a worktree file
 (`> build.log 2>&1`) and Read it back, and remember `> /dev/null 2>&1` still gets a cleanup
 command through a full-capture condition; (3) a finished worktree's `target/` is reclaimable by
-the COORDINATOR only — executors must report, not delete, other agents' trees. Also confirmed:
-executors cannot perform GitHub API mutations (classifier blocks GITHUB_TOKEN in Bash; no gh/MCP
-in subagent toolsets) — dispatch cards must say "push only, PR mechanics are the coordinator's",
-which they now do.
+the COORDINATOR only — executors must report, not delete, other agents' trees. **Corrected 2026-08-31 (#764 records dispatch)** — this paragraph used to end *"executors cannot
+perform GitHub API mutations"*, and that is WRONG. `gh` is absent and the GitHub MCP tools are not
+in a subagent's toolset, but **the REST API is reachable**: `curl -H "Authorization: Bearer
+$GH_TOKEN" https://api.github.com/...` returned `200` from an executor subagent, and `-X POST` /
+`-X PATCH` work the same way. The rule is **prefer push; verify the token before assuming** — one
+`curl -o /dev/null -w '%{http_code}'` against the repo endpoint settles it in a second. Cost that
+earned the correction: believing the old sentence makes an executor hand back incomplete work
+(an un-updated issue, an uncommented PR) for a capability it actually has, and a dispatch card
+written from it says "PR mechanics are the coordinator's" when they need not be.

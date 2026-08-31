@@ -30,6 +30,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
 | `CONTROLLER-HANDOVER` | decided | 2026-08-19 | Is the association-to-company controller handover made reconstructible in the event log? -> ADR-20260819-103112 | founder |
+| `CREDIT-AT-ERASURE` | decided | 2026-08-31 | What happens to an unspent CustomerCredit balance when its subject is erased -- is it refunded, forfeited or retained, does a positive balance PARK the erasure, and what does the subject see before the irreversible act? -> ADR-20260831-033621 | founder |
 | `DISPATCH-CARD-CITATION` | decided | 2026-08-28 | WHICH `docs/**` SUBTREES ARE INSTRUCTION SURFACES for `decision-superseded-authority` — i.e. which of them should leave the `docs/**` exclusion and join `.claude/**` in the citation corpus? Opened for `docs/dispatch/**`; widened to the class after review #59 named `docs/claude/**` and `docs/PLAYBOOK.md` as the same exception with more weight. -> ADR-20260828-213000 | team |
 | `ERASURE-LAUNCH-GATE` | decided | 2026-08-29 | Does the Customer GDPR erasure flow (#708) ship BEFORE the first real order in Tours, or does the founder record an explicit, counsel-cleared acceptance of an exposure window? -> ADR-20260829-145848 | founder |
 | `GATE-STEP-LOCUS` | decided | 2026-08-27 | Do executable gate steps live INSIDE the always-run `changes` job, or in a sibling always-run job that `codegen` aggregates equally? -> ADR-20260827-081500 | team |
@@ -84,7 +85,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 70 — 12 open · 53 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 71 — 12 open · 54 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 101** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
