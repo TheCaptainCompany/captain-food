@@ -12485,7 +12485,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-checkout-payment"></a>`checkout.payment` | — | Payment | Paiement |
 | <a id="translation-checkout-payment-hold_notice"></a>`checkout.payment.hold_notice` | — | Your card is authorized now and charged when your order is delivered. | Votre carte est autorisée maintenant, débitée à la livraison. |
 | <a id="translation-checkout-processing"></a>`checkout.processing` | — | Processing… | Traitement… |
-| <a id="translation-checkout-place_order"></a>`checkout.place_order` | `total` | Place order — {total} | Commander — {total} |
+| <a id="translation-checkout-place_order"></a>`checkout.place_order` | `total` | Order with obligation to pay — {total} | Commander avec obligation de paiement — {total} |
 | <a id="translation-checkout-payment_failed-title"></a>`checkout.payment_failed.title` | — | Payment failed | Paiement refusé |
 | <a id="translation-checkout-payment_failed-body"></a>`checkout.payment_failed.body` | — | Your card was not charged. Your cart is intact. | Votre carte n'a pas été débitée. Votre panier est intact. |
 | <a id="translation-checkout-payment_failed-retry"></a>`checkout.payment_failed.retry` | — | Retry payment | Réessayer le paiement |

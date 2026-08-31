@@ -237,9 +237,23 @@ cart id, offer ids, prices, versions, rates. **No contact data.** Chosen later i
   to a menu item** and **next to the total**? (b)
 - **QT-3 — the reprice confirmation's required content.** Old total and delta, or the new total
   alone? Is a **fresh positive click** required? Is **any** implied acceptance available? (a/b)
-- **QT-4 — the confirm control.** Does `"Commander — 23,50 €"`
-  (`specs/screens/restaurant_frontoffice.translations.yaml:108-110`) satisfy **L221-14 / CRD Art.
-  8(2)**, and does a **collapsible** order summary satisfy the required recap? (a exists / b applied)
+- **QT-4 — the confirm control.** **Ask about the SHIPPED control, not the one this brief was first
+  written against** (changed by [#833](https://github.com/TheCaptainCompany/captain-food/pull/833),
+  2026-08-31). Today the French button reads **`"Commander avec obligation de paiement — 23,50 EUR"`**
+  (`specs/screens/restaurant_frontoffice.translations.yaml:132-136`) and the order summary is
+  **not collapsible** (`specs/screens/restaurant_frontoffice.yaml:476`). *Before #833* it read
+  `"Commander — 23,50 €"` over a `collapsible: true` summary — retained here only so the question
+  below stays intelligible; **counsel is not being asked about that string.** The questions:
+  - does the safe-harbour formula **followed by the total** satisfy **L221-14 / CRD Art. 8(2)**,
+    given that Art. 8(2) subpara. 2 requires the button be labelled *"only with the words 'order
+    with obligation to pay' or a corresponding unambiguous formulation"*? Is an appended amount
+    inside or outside that limb? **This is the live question** — the formula itself is verbatim, the
+    suffix is ours. (a exists / b applied)
+  - the total renders as **`23,50 EUR`, not `23,50 €`** (one shared `format_currency`,
+    `crates/web/src/renderer.rs`). Does the ISO code satisfy the display regime **QT-2** asks about,
+    on the confirm control specifically?
+  - does an **always-visible** order summary satisfy the recap limb, and was the previous
+    collapsible one a breach for orders placed before 2026-08-31? (b)
 - **QT-5 — the pinned higher price.** May we charge the pinned, higher quoted price when the
   restaurant **lowered** its price inside the window — is that a *prix pratiqué* breach, or a
   *pratique commerciale trompeuse*? (b)
@@ -321,7 +335,7 @@ are *questions for counsel* and `B` are *build blockers*. Neither renumbers the 
 | **L3** countdown / validity timer is a dark-pattern surface | **QT-10 fence 4** + §3 | Same; this brief adds the CRD Art. 22 limb (voidness) alongside the DSA Art. 25 limb |
 | **L4** a downward move may never be presented as a discount | **QT-10 fence 1** + §4 | Same. §4 adds that "no article is breached by charging less" is an **argument from absence** |
 | **L5** the legal display guarantee | **B1** | Same; B1 adds *the quote must be non-nullable on the command* |
-| **L6** obligation to pay + legible recap | **QT-4** + **B5** | Same; QT-4 asks whether `"Commander — 23,50 €"` and a collapsible summary actually satisfy it |
+| **L6** obligation to pay + legible recap | **QT-4** + **B5** | Same, but the SUBJECT moved: #833 shipped the safe-harbour formula and un-collapsed the recap on 2026-08-31, so QT-4 now asks whether the formula **plus an appended total** satisfies Art. 8(2) subpara. 2's *"only with the words"* limb — not whether `"Commander — 23,50 €"` did |
 | **L7** nothing in ordering/payments carries VAT | **B4** + **QT-6** | Same; B4 states it as a build blocker on the quote's shape |
 | — | **QT-2** which *arrêté*; **QT-5** the pinned higher price; **QT-7** the evidential clock; **QT-8/QT-9** the funds-posture leg | **New ground** §8 did not reach. QT-7 and §6 also **retire a premise of ADR-20260810-112836:24** that §8 did not identify |
 

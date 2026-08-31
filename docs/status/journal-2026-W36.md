@@ -2,6 +2,58 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-08-31 — The checkout button now states the OBLIGATION TO PAY rather than an amount, and
+> the pre-order total recap is no longer declared collapsible
+> ([#817](https://github.com/TheCaptainCompany/captain-food/issues/817), PR
+> [#833](https://github.com/TheCaptainCompany/captain-food/pull/833), `HOLD: human` at draft).**
+> C. conso. **L221-14** (transposing **CRD 2011/83 Art. 8(2)**) wants an unambiguous obligation-to-pay
+> mention on the button placed immediately before a distance order, next to a clear and legible recap
+> of the total; the sanction is **not a fine but that the consumer is not bound**, so a defect here
+> makes shipped, paid, rider-delivered orders voidable. `fr` now carries the statutory safe-harbour
+> formula *"Commander avec obligation de paiement — {total}"* and `en` the directive's own *"Order
+> with obligation to pay — {total}"*; the checkout `order_summary` section drops `collapsible: true`.
+> The requirement is grade (a); whether this wording **satisfies** it is **QT-4** on the counsel list
+> ([BRIEF-20260831](../legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md)) and no
+> counsel is engaged, so this is deliberate **over-compliance pending that answer** and not a legal
+> conclusion (ADR-20260812-143619).
+>
+> **Two things the issue did not know, both found by going to the runtime rather than the
+> declaration.** (1) **`checkout.place_order` was resolved by nothing.** The pay button rendered the
+> hard-coded literal `"Place order - "{total}` (`crates/web/src/checkout.rs`), so **every French
+> customer was shown an English button**, and fixing only the DSL copy would have changed nothing a
+> customer sees — the #780 class exactly. (Stated narrowly on purpose: the rest of that file *does*
+> consult the catalog through its `t` helper; it was this key, plus four other hard-coded literals,
+> that were unwired. The generalised claim "the runtime does not read the catalog" is false.)
+> (2) `collapsible: true` was read by **nothing** — not the codegen, not the renderer — and the
+> hand-written runtime always rendered the recap expanded; so the flag was never the guarantee, and
+> the guarantee now lives in a runtime assertion.
+>
+> **The fix is single-source, and that is worth claiming at its real height and no higher: level 3,
+> not compiler-first level 4** (PROP-20260802-130500 §1). The button resolves the key from the
+> generated catalog, so there is one string rather than two a parity test must keep equal — but the
+> key is a hand-authored `&str`, `"checkout.place_ordr"` compiles and renders the fail-visible
+> `[key]` marker, and nothing proves code→catalog at build time. Level 4 would need generated key
+> constants and is not this change. What backs it instead: both tests were **mutation-checked**
+> (revert the catalog copy / restore the literal / wrap the recap in `<details>`), all red.
+>
+> **Adjacent, NOT fixed here and needing an issue**: the recap's own text is hard-coded English in
+> the same runtime (`format!("{} items - {}", ...)` plus a literal `" from "` and `<h1>"Checkout"</h1>`),
+> so a French customer reads *"2 items - 23,50 EUR from Chez Marcel"*. Same class as the button
+> defect, different fix, and `PROP-20260831-134539` **§4 UC4** shows the composed target for that
+> screen (§11 slice 5 is *"Divergence policy and the disclosure UI"* and says nothing about the pay
+> button or the recap — citing it for this would overstate the source).
+>
+> **Review round 1 (FAIL, 2 blocking) found no runtime defect and two RECORDS defects, which is the
+> finding worth keeping.** The counsel packet, both briefs and the PROP still asked counsel QT-4
+> about `"Commander — 23,50 €"` and a collapsible summary — strings this change had just deleted —
+> and a packet built to be handed to a French practitioner would have returned an answer about a
+> control that no longer ships. Three durable records also asserted the legal question was *closed*
+> ("removes the question", "carries the formula **verbatim**" when the shipped label is the formula
+> **plus a suffix**, and a rationale that read the article), while the PR body said the judgement had
+> deliberately not been made. **A change to a legal surface is not done when the code is right: the
+> question the packet asks has to move with it**, and the shipped label's suffix is now stated as the
+> live QT-4 question, along with the fact that the total renders `23,50 EUR` and not `23,50 €`.
+
 > **2026-08-31 — two environment defects that taxed every dispatch are fixed, and the second one was
 > already written down two weeks ago, which is the finding worth keeping.**
 > [#830](https://github.com/TheCaptainCompany/captain-food/issues/830) /

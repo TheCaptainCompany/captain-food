@@ -386,6 +386,27 @@ const FAILED_PAYMENT_STATUS: &str = "FAILED";
 #[component]
 pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
     let summary = format!("{} items - {}", state.cart_line_count, state.formatted_total);
+    // #817 (C. conso. L221-14 / CRD 2011/83 Art. 8(2)): the pay button must carry an unambiguous
+    // mention of the OBLIGATION TO PAY, not merely the amount. The copy is deliberately NOT written
+    // here -- it resolves from the generated catalog, so there is ONE source for this label and
+    // `specs/screens/restaurant_frontoffice.translations.yaml` is it. The literal this replaces,
+    // `"Place order - "{total}`, was doubly wrong: it stated an amount rather than an obligation,
+    // and it rendered ENGLISH to every customer including the French ones the article reaches --
+    // and this screen is `sdui: false`, so nothing else held the declaration and the runtime
+    // together.
+    //
+    // Be accurate about the level (PROP-20260802-130500 §1, ADR-20260803-234035): this is **level
+    // 3**, not the compiler-first level 4. The key below is a hand-authored `&str` -- `"checkout.
+    // place_ordr"` compiles fine and renders i18n's fail-visible `[key]` marker -- and nothing
+    // proves code-to-catalog at build time. What it buys is single source + a fail-visible fallback
+    // + the two mutation-checked tests below, which is genuinely stronger than a parity assertion
+    // between two hand-written strings, and is worth claiming at its real height and no higher.
+    // Reaching level 4 would need generated key constants; that is not this change.
+    let place_order_label = crate::i18n::format_message(
+        "checkout.place_order",
+        &state.locale,
+        &[("total", &state.formatted_total)],
+    );
     let locale = state.locale.clone();
     let t = move |key: &str| crate::i18n::resolve(key, &locale);
     // The delivery seam's last hop (#440): the key rides a DATA ATTRIBUTE on the mount div (the
@@ -435,6 +456,11 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                     <input data-c="email_input" id="email"/>
                 </form>
             </section>
+            // #817 (C. conso. L221-14 / CRD 2011/83 Art. 8(2)): the recap of the total shown
+            // immediately before ordering must be CLEAR AND LEGIBLE, so this section renders
+            // EXPANDED -- no collapse affordance, the total is in the first paint. The screen
+            // declared `collapsible: true` until #817 and no renderer ever read the flag, which is
+            // why the guarantee lives in `the_total_recap_is_visible_before_ordering_...` below.
             <section data-c="checkout_section" data-s="order_summary">
                 // #730: a FAILED cart read renders the #472 error affordance — never blank money
                 // in the summary a customer is about to pay against.
@@ -543,7 +569,7 @@ pub fn CheckoutScreen(state: CheckoutViewState) -> impl IntoView {
                     disabled=place_order_disabled
                     title=disabled_reason
                 >
-                    "Place order - "{state.formatted_total}
+                    {place_order_label}
                 </button>
             </footer>
         </main>
@@ -745,6 +771,16 @@ mod tests {
         let open = html[..at].rfind('<').expect("tag start");
         let close = at + html[at..].find('>').expect("tag end");
         &html[open..=close]
+    }
+
+    /// The markup of the `data-s="<name>"` section -- so an assertion about the order summary
+    /// reads THAT section, not a total that happens to appear elsewhere on the page (it is also on
+    /// the pay button, which is the whole point of the other test).
+    #[cfg(feature = "ssr")]
+    fn section_at<'a>(html: &'a str, name: &str) -> &'a str {
+        let at = html.find(&format!("data-s=\"{name}\"")).expect("section exists");
+        let end = at + html[at..].find("</section>").expect("section end");
+        &html[at..end]
     }
 
     #[cfg(feature = "ssr")]
@@ -1013,6 +1049,81 @@ mod tests {
         // COLLECTION hides the delivery sections.
         let collection = render_checkout_html(view_state(false, false), "fr");
         assert!(!collection.contains("data-s=\"delivery_details\""));
+    }
+
+    /// #817 (C. conso. **L221-14**, transposing **CRD 2011/83 Art. 8(2)**): immediately before a
+    /// distance order the button must carry an unambiguous mention of the OBLIGATION TO PAY, next
+    /// to a legible total. The sanction is not a fine but that **the consumer is not bound**, so
+    /// this is pinned in BOTH locales and on BOTH sides of the seam this `sdui: false` screen has:
+    ///
+    ///   * the CATALOG assertion goes red if `checkout.place_order` is reverted in
+    ///     `specs/screens/restaurant_frontoffice.translations.yaml` to a price-only label;
+    ///   * the RENDER assertion goes red if the button stops resolving that key -- the literal it
+    ///     replaced (`"Place order - "{total}`) stated an amount AND was English on a French page.
+    ///
+    /// Whether this wording SATISFIES the article is counsel's call (QT-4 on the counsel list,
+    /// `docs/legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md`, and no counsel is
+    /// engaged). The test asserts what the copy SAYS -- never that it complies, which this repo has
+    /// no standing to assert (ADR-20260812-143619).
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn the_pay_button_states_the_obligation_to_pay_in_both_locales() {
+        for (lang, obligation) in
+            [("fr", "avec obligation de paiement"), ("en", "with obligation to pay")]
+        {
+            let catalog = crate::i18n::resolve("checkout.place_order", lang);
+            assert!(
+                catalog.contains(obligation),
+                "the {lang} checkout.place_order copy must state the obligation to pay, not only \
+                 the amount -- got {catalog:?}"
+            );
+            let state = view_state(true, false);
+            let total = state.formatted_total.clone();
+            let html = render_checkout_html(state, lang);
+            let expected = crate::i18n::format_message(
+                "checkout.place_order",
+                lang,
+                &[("total", total.as_str())],
+            );
+            assert!(
+                html.contains(&expected),
+                "the pay button must render the catalog label {expected:?} in {lang}: {html}"
+            );
+            // The total stays ON the button: the same article wants it legible at the moment of
+            // ordering, so the obligation mention must not have displaced it.
+            assert!(expected.contains(&total), "the label must keep the total: {expected:?}");
+        }
+    }
+
+    /// #817, the other half of the same article: the recap of the total is CLEAR AND LEGIBLE only
+    /// if the customer does not have to find and press something to see it. The screen declared the
+    /// order-summary section `collapsible: true` and NO renderer ever read that flag -- so the flag
+    /// was never the guarantee, and only an assertion on the rendered runtime can be.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn the_total_recap_is_visible_before_ordering_without_expanding_anything() {
+        let state = view_state(true, false);
+        let total = state.formatted_total.clone();
+        let html = render_checkout_html(state, "fr");
+        let section = section_at(&html, "order_summary");
+        assert!(
+            section.contains(&total),
+            "the payable total must be in the order-summary section's FIRST paint: {section}"
+        );
+        // And no collapse affordance ON THAT SECTION. Scoping matters: `aria-expanded` is the
+        // REQUIRED ARIA attribute on any expandable control, so a page-wide scan would go red --
+        // with a false diagnostic naming the recap -- the day someone adds a correct disclosure
+        // widget elsewhere on the pay step. Punishing an accessibility fix is how a test gets
+        // deleted rather than read (review round 1, #833).
+        for affordance in ["data-collapsible", "data-collapsed", "aria-expanded"] {
+            assert!(
+                !section.contains(affordance),
+                "{affordance} on the order-summary section would hide the recap: {section}"
+            );
+        }
+        // `<details` stays PAGE-WIDE on purpose: a `<details>` opened before the section and closed
+        // after it collapses the recap from the OUTSIDE, where a section-scoped check is blind.
+        assert!(!html.contains("<details"), "a <details> wrapper would hide the recap: {html}");
     }
 
     /// #440, the designed red made permanent: the KEY-ABSENT render. This test's ancestor asserted

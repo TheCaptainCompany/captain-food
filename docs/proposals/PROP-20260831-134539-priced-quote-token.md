@@ -245,22 +245,28 @@ Passed through with no interstitial (§6 D6). The wording is a **correction**, n
 │  1 ×  Frites                    4,50 €       │
 │  ─────────────────────────────────────────   │
 │  Total à payer                 21,50 €       │
-│      ↑ UNCOLLAPSED — #817. Today this recap   │
-│        is collapsible: true, at               │
-│        restaurant_frontoffice.yaml:462        │
+│      ↑ UNCOLLAPSED — #817, SHIPPED 2026-08-31 │
+│        by #833. Was collapsible: true; the    │
+│        section is now at                      │
+│        restaurant_frontoffice.yaml:476        │
 ├──────────────────────────────────────────────┤
 │  [ Stripe payment element ]                  │
 ├──────────────────────────────────────────────┤
 │  [  Commander avec obligation de paiement  ] │
-│      ↑ #817's safe-harbour wording; today the │
-│        label is "Commander — {total}"         │
-│        (translations.yaml:108-110)            │
+│      ↑ #817's safe-harbour wording, SHIPPED   │
+│        2026-08-31 by #833 -- but the shipped  │
+│        label APPENDS the total ("... — 23,50  │
+│        EUR", translations.yaml:132-136). This │
+│        mockup shows the formula alone. That   │
+│        difference is exactly what QT-4 asks   │
+│        counsel; do not read the mockup as     │
+│        settling it either way.                │
 └──────────────────────────────────────────────┘
    action place_order, variables now include
    quote (required, F3) and NOT expectedTotal.
 ```
 
-**#817 is a live independent defect and is not absorbed by this proposal.** It is named because this work **re-arms that button** and because a reprice disclosure sitting above a non-compliant confirm control is a worse composite than either defect alone.
+**#817 was a live independent defect, is not absorbed by this proposal, and SHIPPED on 2026-08-31** ([#833](https://github.com/TheCaptainCompany/captain-food/pull/833)). It stays named here because this work **re-arms that button**, and because a reprice disclosure sitting above a confirm control whose compliance is still unresolved (**QT-4**) is a worse composite than either defect alone.
 
 ### UC5 — PlaceOrder refused after the click (expiry, or an upward move above band)
 
@@ -502,7 +508,7 @@ Register row **`QUOTE-STALENESS`** is **decided** (`docs/decisions/QUOTE-STALENE
 | **L3** | A **countdown or validity timer** on a price shown to a consumer is a dark-pattern surface | DSA Art. 25 concern already raised on [#817](https://github.com/TheCaptainCompany/captain-food/issues/817) | The quote is **never rendered** (UC1). No "valid until", no timer, no urgency framing. N is a server-side backstop the customer never sees unless it fires with a real delta |
 | **L4** | A downward move may **never** be presented as a discount — prior-price and 30-day reference rules | Omnibus Directive (EU) 2019/2161, VERIFY-FIRST | UC3 renders **no banner at all**: no strike-through, no reference price, no "économisez". It is a correction, and the safest presentation of a correction is the corrected number alone |
 | **L5** | The **legal display guarantee**: the total displayed at the commit moment equals the total charged | `specs/ordering/rules.yaml:60-65` (C. conso. L112-1 / L221-5 posture) | This is the guarantee #816 shows is currently unenforced. The design makes it structural rather than a comparison that never runs — and the rule's enforcement clause must be rewritten in the same change, because it currently names a check that is unreachable |
-| **L6** | **Obligation to pay** on the order button, and a clear legible recap immediately before ordering. **Sanction: the consumer is not bound** | C. conso. L221-14 / CRD 2011/83 Art. 8(2), VERIFY-FIRST; [#817](https://github.com/TheCaptainCompany/captain-food/issues/817) | **Referenced, not absorbed.** #817 is independently live (`translations.yaml:108-110` label, `specs/screens/restaurant_frontoffice.yaml:462` `collapsible: true`). UC4 shows the composed target state because this work re-arms that button, and a reprice disclosure above a non-compliant confirm control is worse than either defect alone |
+| **L6** | **Obligation to pay** on the order button, and a clear legible recap immediately before ordering. **Sanction: the consumer is not bound** | C. conso. L221-14 / CRD 2011/83 Art. 8(2), VERIFY-FIRST; [#817](https://github.com/TheCaptainCompany/captain-food/issues/817) | **Referenced, not absorbed — and #817 SHIPPED on 2026-08-31** ([#833](https://github.com/TheCaptainCompany/captain-food/pull/833)), so this row no longer describes a live defect. The button now carries the safe-harbour formula followed by the total (`translations.yaml:132-136`) and the recap is uncollapsed (`specs/screens/restaurant_frontoffice.yaml:476`); *before #833* they were `"Commander — 23,50 €"` and `collapsible: true`. What remains OPEN is **QT-4**, now asking whether the formula **plus an appended total** satisfies Art. 8(2) subpara. 2's *"only with the words"* limb. UC4 still shows the composed target state because this work re-arms that button, and a reprice disclosure above a confirm control whose compliance is unresolved is worse than either defect alone |
 | **L7** | **Nothing in ordering or payments carries VAT**, and `TaxRate` hangs off mutable current state, so an accounting fold would join today's catalog to yesterday's order | `docs/legal/BRIEF-20260818-counsel-packet-and-self-answer-triage.md` §5 (*"a defect and not a trade-off"*), re-verified in §1 | **F2 / D3.** The rate is pinned at the coordinate, making past orders' rates deterministically resolvable. Putting the decomposition on the stored order shape stays migration-class work with a versioning story, `HOLD: human` |
 
 **Also constraining, and deliberately untouched.** `BRIEF-20260818` §2 records that the repo asserts **two opposite payment postures** — merchant-of-record vs commercial-agent — and that *"one of those records is wrong about what the system does with the customer's money."* This design does not depend on which is right and does not resolve it: it changes **what number is charged**, never **who holds the money**. That is stated so the reconciliation, when it happens, does not have to re-open this design.
