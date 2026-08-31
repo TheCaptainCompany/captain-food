@@ -877,6 +877,22 @@ keys:
       DOUBLE-CLOSE SAFETY IMPROVES: the routed door is keyed on the ROUTE plus the ORDER's id, so
       if both a partner report and a rider completion arrive for one order the second is absorbed
       at the door, where today it reaches the aggregate and is refused by the status invariant.
+
+      (e) A LEGAL-SURFACE CONSEQUENCE, and the reason this key is not a pure plumbing flip: a
+      successful COMMAND-door delivery ARMS THE DECLARED `schedules:`. `actors.yaml` declares
+      MarkOrderDelivered -> OrderExpired, the ORDER RETENTION CLOCK
+      (`ORDER_RETENTION_WINDOW_DAYS`, `reschedule: in-place`, set against
+      FRENCH_COMMERCIAL_BOOKS_10Y), and the delivery glue applies a delivered message's schedules
+      inside the completion transaction for COMMAND rows exactly as for recorded facts. Today the
+      saga's in-process arm creates no mailbox row at all, so it arms nothing: a delivery
+      completed by a PARTNER's DELIVERED report or by an INDEPENDENT RIDER's completion starts NO
+      retention clock, while the same order closed through the `markOrderDelivered` mutation does
+      -- the two paths to the same business fact have different retention behaviour, and only the
+      operator-driven one is covered. Flipping this key ON puts both saga legs on the same footing
+      as the mutation. That is a GDPR-relevant improvement rather than a regression, and it is
+      named here because the flip decision is made from this text: an order whose retention clock
+      was never armed is an order nothing will ever expire.
+
       ROLLBACK IS A FLIP, NOT A REDEPLOY. Flipping the default is a SEPARATE recorded decision,
       after smoke; the legacy arm is deleted in a SEPARATE change again, with golden payload
       equality as its precondition.

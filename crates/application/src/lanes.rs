@@ -1,4 +1,4 @@
-//! The lane SINK — where a ROUTED `deliver:` step puts its intent
+//! The lane SINK — where a ROUTED `deliver:` or `send:` step puts its intent
 //! (ADR-20260816-040239 "`deliver:` is a lane ENQUEUE, not a foreign-stream append").
 //!
 //! A `deliver: <event> to: <actor>` step is a TELL. The process manager legitimately DECIDES that
@@ -21,11 +21,34 @@
 //!    is thrown away enqueues nothing.
 //! 2. **The insert rides the passed `&mut Transaction`**, never a pool handle. That is the glue's
 //!    obligation; this module only hands it the intent.
-//! 3. **The door identity is FROZEN**: `inbound_message_id(source, external_id)` where
-//!    `external_id` is the TARGET AGGREGATE's id — never the triggering message's id, which
-//!    changes on every redelivery and would mint a second birth. Same treatment as
-//!    `actor_client::surrogate_actor_id`: changing this derivation re-mints the identity of every
-//!    in-flight and future routed message.
+//! 3. **The door identity is FROZEN, and its second half is DECLARED — not inherited from the
+//!    target**: `inbound_message_id(source, external_id)` where `source` is the ROUTE
+//!    (`pm:{ProcessManager}:{Message}`) and `external_id` is that route's DEDUP AXIS. Never the
+//!    triggering message's id, which changes on every redelivery and would mint a second birth.
+//!    The axis is the value that makes two enqueues THE SAME REQUEST to the target, and it is the
+//!    target aggregate's id only where the two coincide:
+//!
+//!    * a `deliver:` carries a fact the target absorbs onto its own stream, so the axis IS the
+//!      target aggregate's id;
+//!    * a `send:` takes whatever its spec step declares in `dedup_by:` — mandatory, with
+//!      deliberately NO default (validator rule `pm-send-dedup`, plus a pre-emitter `panic!`).
+//!      `GrantCustomerCredit` is keyed on the RECLAMATION while its ledger is keyed by CUSTOMER,
+//!      and a customer legitimately receives many goodwill credits: a target-inherited axis would
+//!      have keyed that door on the ledger and swallowed every credit after the first — money
+//!      owed, never paid, no error raised anywhere.
+//!
+//!    Read the axis as "the same request", NOT as "the key the target handler is idempotent on":
+//!    a target may REJECT a repeat rather than absorb it. `MarkOrderDelivered` is not idempotent —
+//!    it refuses anything but `READY → DELIVERED` — so on that route the door is the only thing
+//!    collapsing a partner report racing a rider completion, and it collapses them because both
+//!    name the same ORDER, not because the handler would have tolerated the second. The corollary
+//!    is the sharp edge of a rejecting target: a door minted by a REJECTED first attempt stays
+//!    minted, so a later legitimate attempt on the same axis is absorbed with no effect
+//!    (tracked as [#811](https://github.com/TheCaptainCompany/captain-food/issues/811), a
+//!    property of every routed COMMAND door, not of one route).
+//!
+//!    Same treatment as `actor_client::surrogate_actor_id`: changing either half re-mints the
+//!    identity of every in-flight and future routed message.
 //!
 //! A duplicate enqueue is a **SUCCESS** outcome to the process manager, never an error: the door
 //! collides on the primary key and the run completes. That is why [`LaneSink::stage`] cannot fail.
@@ -62,7 +85,7 @@ impl LaneMessageKind {
     }
 }
 
-/// One staged lane ENQUEUE — the intent a routed `deliver:` or `sends:` step produces.
+/// One staged lane ENQUEUE — the intent a routed `deliver:` or `send:` step produces.
 ///
 /// Business payload plus addressing only. The ENVELOPE (`cause_id`, `user_id`/`user_type`,
 /// `correlation_id`, `channel`, `partition`) is stamped by the delivery glue from the mailbox row
@@ -89,14 +112,18 @@ pub struct LaneEnqueue {
     /// FROZEN dedup axis, half one: the ROUTE identity (`pm:{ProcessManager}:{Message}`), so two
     /// different routed steps addressing the same aggregate can never collide.
     pub source: String,
-    /// FROZEN dedup axis, half two: the TARGET AGGREGATE's id as text. Never the trigger's
-    /// message id.
+    /// FROZEN dedup axis, half two: this ROUTE's DECLARED axis as text — the value that makes two
+    /// enqueues the same request to the target. Never the trigger's message id. A `deliver:` uses
+    /// the TARGET AGGREGATE's id; a `send:` uses the property its spec step names in `dedup_by:`
+    /// (`pm-send-dedup`, no default), which is the target aggregate's id only where the two
+    /// coincide — see the module docs for the money defect an inherited default would cause, and
+    /// for why "the key the target handler is idempotent on" does not describe a REJECTING target.
     pub external_id: String,
 }
 
-/// Where a routed `deliver:` step puts its intent. Infallible on purpose (see the module docs:
-/// staging is inert, and a duplicate is a success), and `Debug` so it can sit on the trigger
-/// envelope.
+/// Where a routed `deliver:` or `send:` step puts its intent. Infallible on purpose (see the
+/// module docs: staging is inert, and a duplicate is a success), and `Debug` so it can sit on the
+/// trigger envelope.
 pub trait LaneSink: Send + Sync + std::fmt::Debug {
     /// Buffer one enqueue for the delivery glue to convert inside the fenced transaction.
     fn stage(&self, enqueue: LaneEnqueue);

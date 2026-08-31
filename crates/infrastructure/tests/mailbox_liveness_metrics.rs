@@ -459,7 +459,14 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     let backlogged = spy.drain();
 
     let ages = backlogged.points(metric::ORDER_LANE_OLDEST_PENDING_AGE_MS);
-    assert_eq!(ages.len(), ROUTED.len(), "one age point per declared lane, always: {ages:?}");
+    // MEMBERSHIP, not a count: `ages.len() == ROUTED.len()` is satisfied by two Cart points and
+    // no CustomerCredit one, which is precisely a lane going unwatched while the total looks
+    // right. Same shape as the `records` assertion on the drained tick above.
+    assert_eq!(
+        ages.iter().map(|(a, _)| a.clone()).collect::<Vec<_>>(),
+        expected_lane_points(ROUTED, &[]).into_iter().map(|(a, _)| a).collect::<Vec<_>>(),
+        "one age point per DECLARED lane, by lane and not by count: {ages:?}"
+    );
     // Found BY LANE, not by index: the points are sorted by attribute set, so `ages[0]` stopped
     // being the Order lane the moment #807 widened ROUTED past a single entry. An index into a
     // sorted set is a silent coupling to the set's membership.
