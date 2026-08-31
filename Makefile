@@ -111,10 +111,22 @@ rust: rust-build rust-test validate check-drift
 # warning matched the recipe line and concluded the DB suites had not run; QUIET_KEEP's `DB-GATED`
 # alternative matched it too, so the quiet wrapper reprinted it as a verdict. With the echo gone,
 # `^test-crates:` is unambiguous: those lines exist only when the run actually emitted them.
+#
+# THE RECEIPT IS ONE-SIDED, AND `tools/db-preflight.sh` IS THE OTHER SIDE (#830). The receipt below
+# can only speak when suites SKIP -- so on a run where `DATABASE_URL` is set but the server is
+# stopped, it stays EMPTY while every DB-gated suite fails with a connection error minutes into the
+# build. Grepping a run for `DB-GATED SUITES SKIPPED` therefore reports the same thing on a live
+# database and on a dead one. That is CLAUDE.md's named defect class: a monitoring path that can
+# only fire when a signal ARRIVES. The pre-flight is the dead-man's-switch -- it fails BEFORE the
+# build when the database is unreachable, and prints a POSITIVE line when it is not, which is what
+# makes an empty receipt mean anything. The complete evidence claim is all three together:
+#   DB PRE-FLIGHT OK  +  empty skip receipt  +  exit 0  =>  the DB-gated suites RAN, live.
+# It runs FIRST and its status is NOT swallowed: a failure here must stop the target.
 DB_TEST_RECEIPT = target/db-test-skips.log
 test-crates:
 	@rm -f $(DB_TEST_RECEIPT)
 	@mkdir -p target
+	@bash tools/db-preflight.sh
 	@echo "test-crates: running cargo test --workspace --no-fail-fast"
 	@DB_TEST_SKIP_RECEIPT=$(abspath $(DB_TEST_RECEIPT)) $(CARGO) test --workspace --no-fail-fast; \
 	  status=$$?; \
