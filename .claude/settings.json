@@ -49,6 +49,7 @@
       "Read(./**/*.woff)",
       "Read(./**/*.woff2)"
     ],
+    "_comment_gh": "THE `gh` ENTRIES BELOW ARE KEPT ON PURPOSE, AND `gh` IS NOT INSTALLED IN AGENT CONTAINERS (#830, ADR-20260831-183847). `which gh` exits 1 here, so every one of the 15 Bash(gh ...) and 13 PowerShell(gh ...) rules is inert in this environment -- which reads as a lie until you notice what a permission IS: a conditional (\"if this is invoked, do not prompt\"), never an assertion that the binary exists. The PowerShell half is the tell that a Windows host runs this repo too, and there `gh` is the normal way in; deleting these rules would trade a cosmetic inconsistency for real permission prompts on a host that is not this one. So they stay, and the FACT is recorded instead -- here, in docs/claude/sessions/gates.md, and in the ADR. What follows from the absence: use `curl` with $GH_TOKEN against repos/{owner}/{repo} REST endpoints (the search API and other non-repo-scoped paths are blocked too), and note that GraphQL is 403-pinned to a PR-review subset -- so `gh pr ready` / `gh pr merge --auto` would NOT work even if the binary were installed, because both are GraphQL mutations and the pin is on the endpoint, not the CLI. That is why marking a PR ready is the coordinator's step, not a tooling gap to close.",
     "allow": [
       "Bash(gh issue view:*)",
       "Bash(gh issue list:*)",

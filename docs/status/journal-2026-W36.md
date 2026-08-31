@@ -2,6 +2,56 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-08-31 — two environment defects that taxed every dispatch are fixed, and the second one was
+> already written down two weeks ago, which is the finding worth keeping.**
+> [#830](https://github.com/TheCaptainCompany/captain-food/issues/830) /
+> [#831](https://github.com/TheCaptainCompany/captain-food/pull/831), no `specs/**` (so no SPEC-LOG
+> sentence, no `make warning-baseline`).
+>
+> **D1 — the DB gate passed on a dead database.** `crates/db_test_gate` (#474) decides on whether
+> `DATABASE_URL` is *set*, never on whether the server answers, and it cannot: it runs inside
+> libtest, once per suite, after the workspace is already built. So a `DATABASE_URL` pointing at a
+> stopped Postgres failed every DB-gated suite at once, minutes in, with connection errors that read
+> as regressions in the diff under test (~12 min, measured 2026-08-30) — while the skip receipt
+> `target/db-test-skips.log` stayed **empty**, because nothing *skipped*. Grepping a run for
+> `DB-GATED SUITES SKIPPED` returned the same answer on a live database and on a dead one: it proves
+> nothing was skipped and says nothing about whether anything *ran*. Exactly CLAUDE.md's named class
+> — *a monitoring path that can only fire when a signal ARRIVES*. `tools/db-preflight.sh` is the
+> dead-man's-switch, run FIRST by `make test-crates`: it fails before the build when the database is
+> unreachable (0.06s, zero compilation) and prints a **positive** line when it is reachable, so the
+> evidence is two-sided. The reportable claim is now the triple — `DB PRE-FLIGHT OK` + empty receipt
+> + exit 0 — and never one third of it. Pinned by
+> `the_db_preflight_guards_test_crates_and_can_actually_fail`, proven red against three planted
+> defects (call deleted from the recipe; failure branch exiting 0; redaction removed, which leaked a
+> password) and against a genuinely stopped Postgres.
+>
+> **D2 — the documented closing step of every dispatch was unexecutable, and saying so again would
+> not have helped.** No executor session can mark a PR ready or arm auto-merge: both are GraphQL-only
+> mutations, the endpoint answers **403** ("only the pinned set of PR-review operations is served"),
+> `gh` is not installed, and REST has no auto-merge endpoint and ignores `"draft": false` while
+> returning 200. **But `docs/claude/sessions/workflow.md` has recorded all of that — and the correct
+> conclusion, that the flip is a coordinator action — since 2026-08-17 (#623), and three executor
+> runs still paid ~8 minutes each rediscovering it on 2026-08-30/31.** The reason is the lesson:
+> `.claude/agents/executor.md` step 7 still *told the executor to do it*, and a charter is loaded on
+> every run while a topic file is loaded only when something suggests it — nothing did, because step
+> 7 read as an ordinary instruction right up to the 403. **When an operational note contradicts a
+> binding instruction, the note loses silently, every time.** So the fix went to the binding text,
+> not to a fourth note:
+> [ADR-20260831-183847](../adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md)
+> records that the ready flip is the coordinator's step, restoring
+> [ADR-20260810-011500](../adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+> §2 — which had assigned "GitHub mechanics … ready + auto-merge" to the coordinator all along, and
+> which ADR-20260815-115220 contradicted without noticing while rewriting the charter in the
+> executor's voice. That ADR settled *when* the step is taken, never *who* takes it.
+> **Auto-merge-on-green survives intact**: what converges is the executor's ending (always draft),
+> what does not is the merge condition (armed by default; withheld under `HOLD: human`) — a
+> simplification of the handover, not a loss of the property.
+>
+> `.claude/settings.json`'s 15 `Bash(gh …)` + 13 `PowerShell(gh …)` entries were **kept**, not
+> deleted: a permission is a conditional, not a claim that the binary exists, and the PowerShell half
+> says a Windows host uses this repo where `gh` is the normal way in. The fact is recorded in a
+> `_comment_gh` key instead.
+
 > **2026-08-31 — #639 part C has a proposal, and writing it corrected the design's headline claim:
 > the membership key `vernon` proposed is not the derivation `ScopeMembership` already uses, and
 > adopting it as stated would put the auth subject into the read-authorization index.**

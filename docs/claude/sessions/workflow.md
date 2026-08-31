@@ -232,16 +232,30 @@ The suggestion in that message does not help, and neither do the obvious REST at
 - `gh` is **not installed** in this container, so every instruction phrased as `gh pr ready` /
   `gh pr merge --auto` is unexecutable here regardless.
 
-**What this means for the protocol.** ADR-20260815-115220's "mark ready and arm auto-merge together,
-as one indivisible step" is a COORDINATOR action, not an executor one — the executor's terminal state
-on a green branch is *draft, all checks green, body and records complete, handoff comment posted*.
-Anything else is the executor reporting a step it had no way to take. Say so explicitly in the PR
-comment, with the two commands the coordinator needs, so the handoff is one paste and not an
+**What this means for the protocol — now RECORDED, not merely observed
+([ADR-20260831-183847](../../adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md),
+#830).** ADR-20260815-115220's "mark ready and arm auto-merge together, as one indivisible step" is
+a COORDINATOR action, not an executor one — as
+[ADR-20260810-011500](../../adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+§2 had already assigned it ("handles GitHub mechanics … ready + auto-merge"). The executor's terminal
+state on a green branch is *draft, all checks green, body and records complete, handoff comment
+posted*. Anything else is the executor reporting a step it had no way to take. Say so explicitly in
+the PR comment, with the two commands the coordinator needs, so the handoff is one paste and not an
 investigation.
 
 Cost that earned this: a full round of REST/GraphQL probing at the end of a run, after the work was
 already green, plus a PR body that had to be re-edited because it announced a state that could not
 be reached.
+
+**And then it was paid three more times.** This section, with that conclusion, has been here since
+2026-08-17 — yet three executor runs rediscovered the whole thing on 2026-08-30/31 at ~8 minutes
+each. The reason is worth more than the finding: **`.claude/agents/executor.md` step 7 still told the
+executor to do it**, and a charter is loaded on every run while a topic file is loaded only when
+something suggests it. Nothing suggested it, because step 7 read as an ordinary executable
+instruction right up to the moment it 403'd. That is the general rule to take away — *when an
+operational note contradicts a binding instruction, the note loses, silently, every time*; fix the
+instruction, or expect to write the note again. Both binding sites (executor.md step 7 and CLAUDE.md's
+issue-workflow bullet) were corrected under #830.
 
 ### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
 
