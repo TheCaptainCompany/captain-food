@@ -346,9 +346,15 @@ re-enables it**. Auth, keys, query discipline:
   `https://claude.ai/code/session_<id>` — the claim predates any commit, so it must be traceable to
   its run), create `NN-slug` from `main`, open a **draft PR** whose body starts with `Closes #NN`.
   **Never enable auto-merge there** — a claim-time diff passes CI trivially. When the work is done
-  and `make rust` is green, mark the PR **ready for review** and **enable auto-merge together, as one
-  indivisible step**, then **supervise the checks until MERGED** (fix + push on failure; never end at
-  "pushed, CI pending"). That is the **default posture**; a dispatch marks **`HOLD: human`** for the
+  and `make rust` is green, **the COORDINATOR** — never the executor, which physically cannot: both
+  are GraphQL-only mutations and the endpoint is 403-pinned in executor sessions
+  ([ADR-20260831-183847](docs/adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md),
+  restoring [ADR-20260810-011500](docs/adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+  §2) — marks the PR **ready for review** and **enables auto-merge together, as one
+  indivisible step**, then **supervises the checks until MERGED** (fix + push on failure; never end at
+  "pushed, CI pending"). **The executor hands back at green with the PR still in draft.** That
+  allocation is fixed; what a dispatch's posture selects is the MERGE CONDITION, not the actor. That
+  is the **default posture**; a dispatch marks **`HOLD: human`** for the
   named class — stored event shapes / fold semantics / migrations, payments / funds / erasure, legal
   surfaces, non-additive GraphQL changes, the mailbox runtime, the merge machinery itself — and those
   PRs stop at ready-for-review until the TEAM's independent reviewer pass, never a founder wait;

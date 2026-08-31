@@ -111,10 +111,22 @@ rust: rust-build rust-test validate check-drift
 # warning matched the recipe line and concluded the DB suites had not run; QUIET_KEEP's `DB-GATED`
 # alternative matched it too, so the quiet wrapper reprinted it as a verdict. With the echo gone,
 # `^test-crates:` is unambiguous: those lines exist only when the run actually emitted them.
+#
+# THE RECEIPT IS ONE-SIDED, AND `tools/db-preflight.sh` IS THE OTHER SIDE (#830). The receipt below
+# can only speak when suites SKIP -- so on a run where `DATABASE_URL` is set but the server is
+# stopped, it stays EMPTY while every DB-gated suite fails with a connection error minutes into the
+# build. Grepping a run for `DB-GATED SUITES SKIPPED` therefore reports the same thing on a live
+# database and on a dead one. That is CLAUDE.md's named defect class: a monitoring path that can
+# only fire when a signal ARRIVES. The pre-flight is the dead-man's-switch -- it fails BEFORE the
+# build when the database is unreachable, and prints a POSITIVE line when it is not, which is what
+# makes an empty receipt mean anything. The complete evidence claim is all three together:
+#   DB PRE-FLIGHT OK  +  empty skip receipt  +  exit 0  =>  the DB-gated suites RAN, live.
+# It runs FIRST and its status is NOT swallowed: a failure here must stop the target.
 DB_TEST_RECEIPT = target/db-test-skips.log
 test-crates:
 	@rm -f $(DB_TEST_RECEIPT)
 	@mkdir -p target
+	@bash tools/db-preflight.sh
 	@echo "test-crates: running cargo test --workspace --no-fail-fast"
 	@DB_TEST_SKIP_RECEIPT=$(abspath $(DB_TEST_RECEIPT)) $(CARGO) test --workspace --no-fail-fast; \
 	  status=$$?; \
@@ -129,8 +141,11 @@ test-crates:
 #
 # THE RULE, and it is the whole design: FILTERING MAY DROP PROGRESS, NEVER VERDICTS. A verdict is
 # any line that could turn green into red -- the DB-skip receipt (#230, "a skip that reports ok is
-# not evidence"), the first panic, every `test result:` summary, the validator's error lines, and
-# the warning-baseline diff. So the filter is grep-FIRST (every verdict line, wherever in the run it
+# not evidence"), EVERY `^test-crates:` line the workspace gate emits about itself (#830: the
+# DB pre-flight's POSITIVE line is a verdict, because it is the only thing that makes an empty skip
+# receipt mean anything, and its UNAVAILABLE line announces a DECLARED degraded mode that this
+# filter would otherwise make SILENT), the first panic, every `test result:` summary, the
+# validator's error lines, and the warning-baseline diff. So the filter is grep-FIRST (every verdict line, wherever in the run it
 # occurred) and tail-SECOND (the last lines, for context). A tail-only filter would lose an early
 # panic -- exactly the case that matters. Nothing is discarded: the full output is always in
 # $(QUIET_LOG), and the wrapper prints where.
@@ -152,7 +167,7 @@ QUIET_RUST_CMD ?= $(MAKE) --no-print-directory rust
 # verdicts (the validator prints "  [error] rule  location"; cargo prints "error[E0433]"). Keep this
 # pattern PURE ASCII: it is expanded INTO a recipe line, so a byte > 127 here breaks Cygwin make at
 # runtime even though the recipe text itself reads as ASCII to the guard test.
-QUIET_KEEP ?= ^(error|warning|panic|thread .* panicked|SKIP|skipped|test result:|FAILED|failures:)|\[error\]|\[warn |error\[E|error:|warning:|panicked at|error\(s\)|FAILED|failures:|SKIPPED|DB-GATED|drifted|baseline|test result:
+QUIET_KEEP ?= ^test-crates:|PRE-FLIGHT|^(error|warning|panic|thread .* panicked|SKIP|skipped|test result:|FAILED|failures:)|\[error\]|\[warn |error\[E|error:|warning:|panicked at|error\(s\)|FAILED|failures:|SKIPPED|DB-GATED|drifted|baseline|test result:
 
 # $(1) = label, $(2) = the command to run.
 define run-quiet

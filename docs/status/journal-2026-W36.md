@@ -2,6 +2,76 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-08-31 — two environment defects that taxed every dispatch are fixed, and the second one was
+> already written down two weeks ago, which is the finding worth keeping.**
+> [#830](https://github.com/TheCaptainCompany/captain-food/issues/830) /
+> [#831](https://github.com/TheCaptainCompany/captain-food/pull/831), no `specs/**` (so no SPEC-LOG
+> sentence, no `make warning-baseline`).
+>
+> **D1 — the DB gate passed on a dead database.** `crates/db_test_gate` (#474) decides on whether
+> `DATABASE_URL` is *set*, never on whether the server answers, and it cannot: it runs inside
+> libtest, once per suite, after the workspace is already built. So a `DATABASE_URL` pointing at a
+> stopped Postgres failed every DB-gated suite at once, minutes in, with connection errors that read
+> as regressions in the diff under test (~12 min, measured 2026-08-30) — while the skip receipt
+> `target/db-test-skips.log` stayed **empty**, because nothing *skipped*. Grepping a run for
+> `DB-GATED SUITES SKIPPED` returned the same answer on a live database and on a dead one: it proves
+> nothing was skipped and says nothing about whether anything *ran*. Exactly CLAUDE.md's named class
+> — *a monitoring path that can only fire when a signal ARRIVES*. `tools/db-preflight.sh` is the
+> dead-man's-switch, run FIRST by `make test-crates`: it fails before the build when the database is
+> unreachable (0.06s, zero compilation) and prints a **positive** line when it is reachable, so the
+> evidence is two-sided. The reportable claim is now the triple — `DB PRE-FLIGHT OK` + empty receipt
+> + exit 0 — and never one third of it. Pinned by
+> `the_db_preflight_guards_test_crates_and_can_actually_fail`, proven red against three planted
+> defects (call deleted from the recipe; failure branch exiting 0; redaction removed, which leaked a
+> password) and against a genuinely stopped Postgres.
+>
+> **D2 — the documented closing step of every dispatch was unexecutable, and saying so again would
+> not have helped.** No executor session can mark a PR ready or arm auto-merge: both are GraphQL-only
+> mutations, the endpoint answers **403** ("only the pinned set of PR-review operations is served"),
+> `gh` is not installed, and REST has no auto-merge endpoint and ignores `"draft": false` while
+> returning 200. **But `docs/claude/sessions/workflow.md` has recorded all of that — and the correct
+> conclusion, that the flip is a coordinator action — since 2026-08-17 (#623), and three executor
+> runs still paid ~8 minutes each rediscovering it on 2026-08-30/31.** The reason is the lesson:
+> `.claude/agents/executor.md` step 7 still *told the executor to do it*, and a charter is loaded on
+> every run while a topic file is loaded only when something suggests it — nothing did, because step
+> 7 read as an ordinary instruction right up to the 403. **When an operational note contradicts a
+> binding instruction, the note loses silently, every time.** So the fix went to the binding text,
+> not to a fourth note:
+> [ADR-20260831-183847](../adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md)
+> records that the ready flip is the coordinator's step, restoring
+> [ADR-20260810-011500](../adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+> §2 — which had assigned "GitHub mechanics … ready + auto-merge" to the coordinator all along, and
+> which ADR-20260815-115220 contradicted without noticing while rewriting the charter in the
+> executor's voice. That ADR settled *when* the step is taken, never *who* takes it.
+> **Auto-merge-on-green survives intact**: what converges is the executor's ending (always draft),
+> what does not is the merge condition (armed by default; withheld under `HOLD: human`) — a
+> simplification of the handover, not a loss of the property.
+>
+> `.claude/settings.json`'s 15 `Bash(gh …)` + 13 `PowerShell(gh …)` entries were **kept**, not
+> deleted: a permission is a conditional, not a claim that the binary exists, and the PowerShell half
+> says a Windows host uses this repo where `gh` is the normal way in. The fact is recorded in a
+> `_comment_gh` key instead.
+>
+> **The review then found the same defect one level up, in this very change.** The first pass fixed
+> the two files it was already editing, wrote *"both binding sites … were corrected"*, and recorded
+> "no follow-up required" — while **four more binding sites** sat uncorrected, findable in one
+> `git grep`: `docs/STATUS.md` (loads every run, second only to CLAUDE.md), `docs/BACKLOG.md` (the
+> binding method), two in `evidence.md` — one defining the executor's DONE as *"PR armed and
+> reported"*, i.e. the impossible operation — and a **second section of `workflow.md`**, ~200 lines
+> below the first. **An author sweeps the files they are already editing and calls it complete**, so
+> the count in a completeness claim is the thing to distrust; the ADR now carries the grep instead of
+> the word "both", and keeps the false claim on the record rather than deleting it.
+>
+> **And the quiet filter was deleting the new evidence.** `QUIET_KEEP` dropped `DB PRE-FLIGHT OK`,
+> `UNAVAILABLE` and both follow-on lines; `FAILED` and `SKIPPED` survived only by accident of
+> alternates meant for other tools, and the 50-line tail cannot recover the rest. So on
+> `make test-quiet` / `make rust-quiet` — which CLAUDE.md names as how token-bound sessions run gates
+> — a container without `postgresql-client` would show no pre-flight line and no skip receipt, and a
+> reader would write "empty receipt + exit 0 ⇒ DB suites ran": **the exact over-read this change
+> closed, restored on the recommended path**, with a DECLARED degraded mode turned silent. Fixed with
+> `^test-crates:|PRE-FLIGHT` and pinned. The axis to watch here is the **false negative** on the
+> positive line, not the false positive the brief anticipated.
+
 > **2026-08-31 — #639 part C has a proposal, and writing it corrected the design's headline claim:
 > the membership key `vernon` proposed is not the derivation `ScopeMembership` already uses, and
 > adopting it as stated would put the auth subject into the read-authorization index.**

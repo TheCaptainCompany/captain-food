@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1460,
+  "recordedAt": "2026-08-31T18:54:51.339Z",
+  "branch": "main",
+  "note": "#830 executor: DB pre-flight (D1) + ready-flip ownership ADR (D2); adopted a timer carrying no run id"
+}

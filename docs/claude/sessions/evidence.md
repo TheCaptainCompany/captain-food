@@ -295,12 +295,17 @@ every wake should re-check `CronList` and re-arm missing jobs. Never trust a 5-m
 exist an hour later.
 (2) **A stalled executor generates no events, so event-driven supervision cannot see it.** The
 probe must escalate, not just report: N consecutive no-commit/no-tree-change probes on a "running"
-executor (~45 min) ⇒ SendMessage a convergence order (status + 15-minute budget: arm the PR on
-green gates, or report the concrete failure). The 07:44 manual intervention recovered 5 lost hours
+executor (~45 min) ⇒ SendMessage a convergence order (status + 15-minute budget: reach green and
+hand the PR back in draft, or report the concrete failure). The 07:44 manual intervention recovered 5 lost hours
 in two minutes — automate it.
 (3) **Executors stall at the finish line, not mid-work.** The dispatch template must bind the
-final actions (push, PR body, ready + auto-merge) into the SAME work unit as the last gate — "gates
-green" is not done; "PR armed and reported" is done. Also: commit at phase boundaries at least
+final actions (push, PR body, the records, the hand-back) into the SAME work unit as the last gate —
+"gates green" is not done; **"pushed, recorded and handed back" is done**. That is the executor's
+whole ending: arming the PR is the COORDINATOR's step
+([ADR-20260831-183847](../../adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md)).
+This rule read *"'PR armed and reported' is done"* until #830, which defined the executor's DONE as
+an operation no executor session can perform — so the stall it exists to prevent was, in part, this
+sentence. Also: commit at phase boundaries at least
 hourly (a 3-hour implementation with no commit is indistinguishable from a hang from outside), run
 `cargo machete` locally (CI's lint gate does), and keep baseline checkouts of main in the
 SCRATCHPAD — a stray clone in the repo root became a committed gitlink via a coordinator
