@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 620,
+  "recordedAt": "2026-08-31T18:12:48.856Z",
+  "branch": "821-loop-budget-timer-ownership",
+  "note": "#822 review round 1: F1 (journal stated 30 new cases all observed red; measured 41 new / 24 red vs main / 17 green-against-main, method recorded so it is re-runnable) and F2 (blockquote separator lost in the main merge) fixed in 666d0cea. Everything else filed as #828, F3 leading (a session and its subagents share one CLAUDE_CODE_SESSION_ID, verified from inside a subagent, so loops.md:123's 'in any topology' is a false universal). No round 3. CI green; PR stays draft."
+}
