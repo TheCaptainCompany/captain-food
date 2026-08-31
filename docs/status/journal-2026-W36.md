@@ -44,6 +44,7 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `expectedTotal` equality check is replaced outright — and that went unflagged in two records until
 > today. The header `Reverses in part` line and §2.4 are intact, and the approving ADR re-states it
 > in its own §4, because approval is exactly when a reversal gets re-buried.
+
 > **2026-08-31 — the weekly cap did not reliably measure: one timer slot for N concurrent runs, a
 > receipt naming the wrong branch, and a step 8 pointing at a file nothing writes**
 > ([#821](https://github.com/TheCaptainCompany/captain-food/issues/821) "loop-budget: the weekly cap
@@ -71,12 +72,20 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > executor following the documented protocol committed nothing and left its run unbilled, a
 > systematic under-count by exactly the people who follow the protocol. Step 8 now names the ledger
 > file, and the stale siblings in the continuous-development proposal and the Makefile go with it.
-> **Every one of the 30 new selftest cases was observed RED first**; `make validate` 0 errors,
-> `check-drift` clean, `hooks-test` green armed. Found in passing and now commented where the trap
-> lives: **`make -n budgeted-loop` is not a dry run** — GNU make executes recipe lines containing
-> `$(MAKE)` even under `-n`, so it opens a timer and bills a segment (two 0-second receipts in this
-> commit are its output, kept rather than deleted because hook-written budget state is never
-> hand-edited).
+> **41 new selftest cases (58 → 99), of which 24 are RED against `main`** — measured, not recalled:
+> revert every file this PR touches except the selftest, run the suite. The other **17 pass against
+> `main` too** (`7d` `7g` `7i` `10a` `10e` `10f` `10h` `10k`–`10p` `10u` `12a` `13h` `13i`): they are
+> characterization cases pinning behaviour this change did not alter, and must NOT be read as
+> regression-proven here — weaken one and no red follows. Four more (`13a` `13d` `13e` `13g`) were
+> already green when written, because the run-id keying committed earlier in this same PR had
+> delivered them: a good fact about the design, recorded because "observed RED first" is not a
+> universal and must never be asserted as one. (The 15:11 receipt bakes in the earlier, wrong
+> figure of 30; the ledger is append-only, so that divergence stands as history.)
+> `make validate` 0 errors, `check-drift` clean, `hooks-test` green armed. Found in passing and
+> now commented where the trap lives: **`make -n budgeted-loop` is not a dry run** — GNU make
+> executes recipe lines containing `$(MAKE)` even under `-n`, so it opens a timer and bills a
+> segment (two 0-second receipts in this commit are its output, kept rather than deleted because
+> hook-written budget state is never hand-edited).
 > **Addendum, on evidence arriving mid-run**: the contention is the **fourth** distorted segment of
 > the day, not the two first named — `20260831T165727Z-de76c595.json` (10.3 m, `quote-decisions-20260831`)
 > records a run that hit **exit 3** at `start` because a timer opened **70 s earlier on `main`** was
