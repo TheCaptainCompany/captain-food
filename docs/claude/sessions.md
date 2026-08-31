@@ -57,6 +57,7 @@ The rules live in [`sessions/`](sessions/); this page is the index.
 - [A commit touching `CLAUDE.md` or `.claude/agents/*.md` needs in-conversation user approval](sessions/workflow.md#a-commit-touching-claudemd-or-claudeagentsmd-needs-in-conversation-user-approval)
 - [One more shell trap in commit messages](sessions/workflow.md#one-more-shell-trap-in-commit-messages)
 - [Asking the founder a decision — use the form template](sessions/workflow.md#asking-the-founder-a-decision--use-the-form-template)
+- [A record that pins a fact to "in flight" expires, and nothing detects it — date the claim instead](sessions/workflow.md#a-record-that-pins-a-fact-to-in-flight-expires-and-nothing-detects-it--date-the-claim-instead)
 
 ## 9. This file is your obligation, not just your reference
 

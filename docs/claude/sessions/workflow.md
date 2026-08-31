@@ -289,6 +289,45 @@ does in a shared tree, and the path list is what caught it; and **the loop-budge
 per-checkout and collides** — the second session does not fight over the shared timer, it records
 its own time with `stop --elapsed-seconds <n>`.
 
+**Sharpened 2026-08-31: the rule above was ALREADY recorded and the collision happened anyway,
+because the DISPATCH CARD named a weaker mitigation.** The card for a straight-to-`main` docs run
+said *"stage only your paths, never `git add -A`"* — correct, and insufficient: **staging protects
+the INDEX, not the BRANCH**. The executor obeyed it, passed its base-SHA precondition cleanly
+(`git rev-parse HEAD` equalled `origin/main`), and committed onto a *sibling executor's* branch that
+had been cut from main's tip and was the checked-out HEAD. Cost: a cherry-pick, a journal-conflict
+resolution and a `git branch -f` to lift the commit off a PR it did not belong to. Two rules follow,
+and the first binds the COORDINATOR:
+
+- **A card may not name a mitigation WEAKER than the recorded rule.** The executor reads the card,
+  not this file, so a card saying "stage carefully" silently overrides "use a worktree". A
+  straight-to-`main` card **names the worktree**; staging discipline is a second belt, never a
+  substitute for it.
+- **`git rev-parse HEAD == origin/main` does not mean you are ON `main`.** The SHA answers *which
+  commit*; `git rev-parse --abbrev-ref HEAD` answers *which branch*; and a branch freshly cut from
+  main's tip satisfies the first while failing the second. A base-SHA precondition runs **both, in
+  the same call**, and again immediately before committing.
+
+**Why this is NOT a hook — argued against ADR-20260803-234035 rather than defaulted.**
+`git worktree add <path> main` **is already the gate, and it fails closed**: where `main` (or the
+sibling branch) is checked out elsewhere it exits **128** with
+`fatal: 'main' is already used by worktree at <path>`. Creating your own worktree therefore makes
+"silently on someone else's branch" *unreachable* rather than *detectable* — the level the
+compiler-first directive demands be tried before any gate is written, reached here with no new code.
+A `PreToolUse` guard on `git commit` was considered and rejected on its merits: the hook payload does
+not carry the dispatch card, so the gate cannot know the intended branch — and the same observed
+state (on `main`, about to commit) is **correct** for a docs dispatch and **catastrophic** for a code
+one, which makes pass and fail indistinguishable to it; matching `git commit` inside arbitrary shell
+(`git -C`, `&&` chains, heredocs, subshells) means parsing shell; and it would fire on every commit
+in the repo — maximum blast radius for a failure the worktree already eliminates.
+
+**When each applies — the disk objection is about `target/`, not about worktrees.** A docs/spec
+worktree never builds, so it costs the checkout and nothing else: **36 MB** measured here (`du -sh`
+on a fresh `main` worktree with no `target/`) against the shared checkout's **23 GB**, of which
+`target/` is **22 GB**. So a **docs/spec** run in an occupied tree takes a worktree
+**unconditionally** — 36 MB is not a disk decision — while a **Rust** run weighs the cold `target/`
+and points `CARGO_TARGET_DIR` at the main checkout's, as above. "No worktree" as a blanket card
+instruction was priced against the 22 GB case and must not be copied onto a docs card.
+
 ### Rescue an agent killed mid-edit with a `wip:` commit that says what was NOT verified
 
 When a session dies mid-change, `git add` the touched files and commit as an explicit `wip:` whose
@@ -624,6 +663,52 @@ briefing and the independent review, which is why the trail must name its artifa
 Ask only what is genuinely his: a real option space, an external or legal action, or a fact only he
 knows. Order the questions by dependency and say so with the `gates` field. Never make a field
 required, and always end with a free-text question.
+
+### A record that pins a fact to "in flight" expires, and nothing detects it — date the claim instead
+
+`ADR-20260815-030206` carried a lens quote asserting the `source:` enumeration was ***"not on
+`main`"***, living on the in-flight `564-mechanical-reader-derivation` branch. It merged as PR #566
+on **2026-08-16**; the sentence stayed; and on **2026-08-31** it produced a **false negative in a
+register check** — read literally at HEAD, the very record that should have answered *"what does
+`main` enforce?"* said the thing was not shipped. That is the register check's own failure mode
+turned against it, and it has now cost twice: the stale reading, then the correction sweep.
+
+**The fix is in the WRITING, not in a checker.** A merge-state claim is a claim about a moment, so
+**give it its moment**: *"as of 2026-08-15, on branch `564-…` (PR #566)"*. A dated claim is never
+false, only old, so the expiry it would otherwise acquire cannot exist — the defect becomes
+unspellable instead of detectable. Binds *"not on `main`"*, *"in flight"*, *"unmerged"* and
+*"until #NNN lands"* wherever they describe **repository state**; verbatim founder or lens quotes
+stay verbatim and get a dated editor's note beside them, never a rewrite.
+
+**Why there is no scanner for this — measured, not assumed.** Three findings, each cheap to
+re-derive:
+
+- **The phrase is dominated by DOMAIN usage.** `in flight`/`in-flight` appears **63** times across
+  `docs/adr/` + `docs/proposals/`, overwhelmingly as business facts — *in-flight order*, *funds in
+  flight*, *in-flight command*, *in-flight saga hops*. The genuinely checkable set is **3**
+  merge-state assertions naming a PR/branch (all three currently correct or already repaired) plus
+  **6** `until #NNN lands` lines over 5 distinct issues. A phrase-keyed scanner would be mostly
+  false positives guarding nine lines.
+- **A local hook CANNOT decide merge state here.** `gh` is **not installed** in the agent container
+  (`gh: command not found`), and the clone is **shallow** — 205 commits reachable from `origin/main`,
+  oldest **2026-08-17** — so `git log --grep='(#566)'` cannot see a 2026-08-16 merge. The exact case
+  that earned this rule is unresolvable by any purely local check.
+- **CI has the token but not the surface.** The failure rode a **docs-direct-to-`main`** push, which
+  no PR-triggered check sees until after the fact.
+
+**What IS already gated, and exactly where it stops.** `make validate`'s
+**`record-citation-unresolved`** rule refuses a cited `ADR-`/`PROP-` id with no matching file under
+`docs/adr/` or `docs/proposals/` — it fired on the first draft of this very entry, because the
+dispatch card that commissioned it cited an ADR living only on an unmerged branch. That is the
+**existence** half, and it is executable. The **tense** half — a resolvable record whose sentence
+about `main` has since become false — is what no gate reaches, and it is precisely the half that
+produced the false negative. Do not read a green `record-citation-unresolved` as proof that a cited
+record still says something true.
+
+So this stays prose on purpose. Revisit if the checkable set grows past a handful **or** if a
+merge-state claim goes stale a second time — and derive the count first, because a scanner that
+matches nothing is the more expensive mistake.
+
 
 ## Delegate execution to a cheaper model tier (founder, 2026-08-28)
 
