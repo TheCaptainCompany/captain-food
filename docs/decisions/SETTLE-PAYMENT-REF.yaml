@@ -1,0 +1,41 @@
+key: "SETTLE-PAYMENT-REF"
+status: "decided"
+question: "Does the settlement leg keep the two-hop ask for paymentIntentId, or does OrderPlaced carry it so the fact arrives with the order?"
+owner: "founder"
+opened: "2026-08-31"
+decided: "2026-08-31"
+decided_by: "ADR-20260831-121957"
+capacity: "founder"
+register: "docs/proposals/DECISIONS.md §42"
+note: >
+  NO MIGRATION (CLAUDE.md question 2), and this is the choice that makes it so: keeping the two-hop
+  ask is precisely what leaves OrderPlaced untouched. The rejected alternative is the one that would
+  have opened a stored-shape question.
+
+  IT RAISES PMW-2's VALUE and the PMW-2 row now says so rather than leaving the reader to connect
+  it: this decision converts residency from an efficiency item into the thing that pays for a
+  decision already taken on the money path.
+evidence: >
+  Founder decision 2026-08-31, put to him with options, trade-offs and a recommendation: he chose
+  (A), KEEP THE TWO-HOP ASK. PROP-20260815-142349 §9 STANDS UNAMENDED. No event shape changes;
+  paymentIntentId is NOT added to the Order's facts.
+
+  THE REJECTED ARGUMENT, RECORDED INTACT so it is not re-litigated every quarter (young): "'forced
+  by typing' is only true because of an event shape we own" -- the settlement leg needs
+  paymentIntentId from Order, and the two-hop ask exists only because OrderPlaced does not carry it,
+  a shape the team chose and can change. PRECEDENT: PROP-20260808-142532 D2 (:369), Approved
+  2026-08-08, decided THE IDENTICAL cross-aggregate-field pattern EVENT-CARRIED -- OrderPlaced gains
+  restaurantName/restaurantPhone rather than the projector reading across streams, on the reasoning
+  that the event-carried value "survives projection rebuild after restaurant stream deletion" and
+  that "the fact 'this order was placed with Pizza Luigi' is genuinely part of the placement fact".
+
+  THE ACCEPTED COST, STATED AND NOT BURIED: two stream folds per settlement decision, on the money
+  path, at Friday peak, WITH NO RESIDENCY. Re-verified at HEAD: the activation cache's `load`
+  (crates/infrastructure/src/mailbox/activation.rs:237) returns early for any foreign stream at
+  :238-240 -- `if stream_name != self.scoped { return self.inner.load(stream_name).await; }` -- so
+  every cross-stream load goes straight past the cache, which is exactly the load this shape
+  creates. PMW-2 has not moved since 2026-08-15.
+
+  WHAT SURVIVES THE REJECTION: young's line 4 of the reply discipline still governs the shape --
+  ask for values that are WRITE-ONCE or MONOTONE. paymentIntentId is write-once, so the two-hop ask
+  is immune to staleness by construction; the cost is latency, never correctness.

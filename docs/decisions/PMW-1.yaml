@@ -1,0 +1,36 @@
+key: "PMW-1"
+status: "decided"
+question: "What is the final `read:`-step grammar for `specs/*/processmanager.yaml` -- how do you SPELL 'fold the aggregate's stream'?"
+owner: "founder"
+opened: "2026-08-15"
+decided: "2026-08-15"
+decided_by: "PROP-20260815-142349"
+capacity: "founder"
+register: "docs/proposals/DECISIONS.md §42"
+note: >
+  MIGRATED out of docs/decisions/_legacy.yaml on 2026-08-31 under burn-down trigger (c) -- a
+  reconsiders target must be declared (docs/decisions/README.md, ADR-20260821-103403). The
+  challenge is PMW-4; this row is NOT flipped back to open, and its `superseded_by` is set only
+  when PMW-4 closes (the two-file supersession move, same commit).
+
+  ITS PROSE ROW CARRIES TWO STALE NUMBERS, corrected in place on 2026-08-31 with their antecedents
+  (ADR-20260817-105845). It said "thirteen declared `read:` steps" and "three already stream
+  folds"; at 6b74739b the counts are FIFTEEN and FOUR --
+  `grep -rn '^\s*- read:' specs/*/processmanager.yaml` -> 15 (ordering :30,41,63,71,163; payments
+  :51,68,84,99,130,159,187,217; delivery :34,44) and
+  `grep -rn 'source: ' specs/*/processmanager.yaml` -> 4 EVENT_STREAM (ordering :32,43,73;
+  delivery :46) / 11 PROJECTION. The row also said the #566 enumeration was "not yet on `main`";
+  it merged 2026-08-16 as b0fd7fdf.
+evidence: >
+  CLOSED 2026-08-15 by PROP-20260815-142349 "Actor `answers:` + the PM `ask:`/`branch:` decision
+  grammar", Approved (founder, verbatim: "I'm ok for the dsl for process manager"): decided (a) +
+  the additive §8 decision grammar. Verbatim from the register row: "The (a)-vs-(b) tension is
+  resolved by taking both halves without overlap: `read:` stays exactly as PR #566 lands it, and
+  (b)'s richer grammar arrives not as a lone `ask:` step but as the additive `ask:`/`branch:` step
+  kinds + the `from_ask` value form, with replies typed by the answering actor's declared state."
+
+  THE PREMISE OF THE FIRST CONJUNCT IS GONE. PMW-1 was silent on what happens if "`read:` stays"
+  is struck, and on 2026-08-31 the founder struck it, verbatim: "`read:` stays, exactly as PR #566
+  lands it with `source: PROJECTION | EVENT_STREAM` <=== must be retired from the process manager".
+  The SECOND conjunct (the additive `ask:`/`branch:`/`from_ask` grammar, #582) is untouched and
+  half of it has landed. Challenge row: PMW-4. Record: ADR-20260831-121957.

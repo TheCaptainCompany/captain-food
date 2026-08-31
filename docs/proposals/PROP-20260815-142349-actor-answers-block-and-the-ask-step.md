@@ -701,15 +701,25 @@ needed because nothing happened.
 | (b) Wait for a first consumer | No speculative grammar; shape driven by a real call site. | The "first consumer" of a *remote* ask is exactly PMW-3's unresolved transport — waiting welds the cheap typed half to the expensive parked half. The intermediate-step posture CLAUDE.md forbids; meanwhile reply shapes keep rotting (`HookOutcome::Skip(String)` carries prose — a defect AND a wire blocker). |
 | (c) Full transport now (`answers:` + tonic/gRPC) | Realises the queryable-actor sentence completely. | PMW-3 is explicitly **NOT adopted**; fencing (a query has no message_id/position), head-of-line (a query queues a Stripe capture behind itself), and the grain directory (lanes are lease-raced, not assigned) are all unsolved. Zero tonic/prost/.proto in the tree. Building it would be a decision reversal against the register, not a spec edit. |
 
-### D2 — PM step grammar: new `ask:` step kind vs a third `source:` value
+### D2 — PM step grammar: new `ask:` step kind vs a third `source:` value — **DECIDED (a), and the question it sat on has since been dissolved**
 
 Composed on
-[PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566)
-as it stands: `source:` is required on every `read:` step, the set is closed at two
-(`READ_SOURCES: [PROJECTION, EVENT_STREAM]`, `validate/process_managers.rs:49`), the key set is
-closed (`READ_KEYS`, :53), and the branch's own validator comment refuses a third token: *"Both
-need a THIRD source token, and inventing one here would be a patch standing in for a decision.
-Refusing them keeps the option open instead."*
+[PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566),
+**merged 2026-08-16 as `b0fd7fdf`**: `source:` is required on every `read:` step, the set is closed
+at two (`READ_SOURCES: [PROJECTION, EVENT_STREAM]`,
+`tools/codegen-rs/src/validate/process_managers.rs:49`), the key set is closed (`READ_KEYS`, `:53`),
+and its validator comment refuses a third token: *"Both need a THIRD source token, and inventing one
+here would be a patch standing in for a decision. Refusing them keeps the option open instead."*
+
+**(a) was adopted, and it is now the ONLY option that survives** — because on 2026-08-31 the founder
+retired `read:` from the process manager altogether
+([ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md),
+row **PMW-4**). Option (b) proposed a third `source:` value on a step kind that no longer exists;
+option (c) proposed reusing `call:` and would have made the `ask:`-plus-`call:` refusal rule
+unspellable. **The option table below is retained because its reasoning still decides the shape of
+`ask:` — it is no longer a live choice.** Two of (a)'s recorded pros are now load-bearing rather
+than persuasive: an ask has **no table**, so forcing it through `read:` makes `model:` a lie; and the
+routing key becomes explicit and typed.
 
 | Option | Pros | Cons |
 |---|---|---|
@@ -795,13 +805,53 @@ founder wait.
 
 ## 18. Sequencing
 
-Strictly behind
-[PR #566 "A process-manager read step declares its SOURCE, not only its shape (#564 PR1)"](https://github.com/TheCaptainCompany/captain-food/pull/566)
-— verified open and draft (head `564-mechanical-reader-derivation`, not on `main`); the
-`ask:`/`branch:` walkers compose on the closed READ_KEYS step machinery and the same
-processmanager.yaml regions that branch owns. Dispatching before its merge would put two sessions
-in the same files. (PMW-2 deliberately not ridden: the local ask's fold hits Postgres per ask until
-residency lands — an accepted cost, not reopened.)
+**#566 is MERGED** — 2026-08-16, `b0fd7fdf` — so the blocking dependency this section was written
+against is discharged. The `ask:`/`branch:` walkers compose on the closed `READ_KEYS` step machinery
+it landed (`tools/codegen-rs/src/validate/process_managers.rs:53`).
+
+**Part 1 of [#582](https://github.com/TheCaptainCompany/captain-food/issues/582) — the actors half —
+has landed**: `answers:` blocks exist at `specs/ordering/actors.yaml:112` (`Order.paymentReference`)
+and `specs/payments/actors.yaml:49` (`Payment.settlementView`), with the validator module
+`tools/codegen-rs/src/validate/answers.rs`. **The PM half — `ask:` / `branch:` / `from_ask` — is what
+remains.**
+
+**What changed under it, and it changes the sequencing rather than the design.** The founder retired
+`read:` from the process manager on 2026-08-31
+([ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md),
+register row **PMW-4**). `source:` fixed the *physics* and left the *ownership* of the fold with the
+PM. So the PM half is no longer *additive alongside* `read:` — **it is what `read:` becomes**, and
+the deliverable is **nine legs**, eight of them on the money path, not a grammar key
+(`specs/payments/processmanager.yaml:53,70,86,101` settlement and `:132,161,189,219` refund, all on
+`OrderTracking`; plus `specs/delivery/processmanager.yaml:36`). The build is **`HOLD: human`** — a
+behaviour change on the money path — and is **not** a migration: no `read:` step is emitted into
+data, written to a PM state column, or carried in any event payload.
+
+**Two survivors are NOT absorbed by `ask:`, and they are two different classes** — how they are
+spelled is the open half of PMW-4, with a two-kind shape recommended (`index:` with `by:` → the
+unowned key scalar; `authority:` → the authoritative rule) and a single differently-named kind
+recorded as the dissent. A *generic* escape hatch is refused: *"two carve-outs riding a surviving
+`read:`, or a generic exemption `$ref`, is `source:` again wearing a new name."*
+
+**§9 STANDS UNAMENDED — founder decision 2026-08-31, row `SETTLE-PAYMENT-REF`.** The settlement leg
+**keeps the two-hop ask**; `paymentIntentId` is **not** added to the Order's facts and no event shape
+changes. The challenge (event-carry it, on the precedent of PROP-20260808-142532 D2) was **considered
+and rejected**, and is recorded intact in
+[ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md)
+§4e so it is not re-litigated. The accepted cost is **two stream folds per settlement decision, on the
+money path, at Friday peak, with no residency** (`crates/infrastructure/src/mailbox/activation.rs:237`,
+foreign-stream bypass at `:238-240`) — which is what raises PMW-2's value.
+
+**One adjacent founder decision worth knowing while reading §9 and the `:142` payload rule** (row
+`QUOTE-TOKEN`, ADR-20260831-121957 §4d): the priced cart will return an **opaque quote token carrying
+the catalog stream version it was computed at**, and `PlaceOrder` will carry it. That is **not** a
+breach of this proposal's *"no version field in any payload — the served version rides the ENVELOPE"*
+rule at `:142`: that rule governs an **ask reply**, whose authority expires at send, whereas **a price
+quote the customer was shown is business data** on a **command**, like an `ExternalReference`. Adjacent
+speech act, not the same one — the tension was named when the decision was taken, not discovered after.
+
+**Unchanged.** PMW-3 (a transport) stays parked and not adopted — D6 below. **PMW-2 deliberately not
+ridden** by this proposal: the local ask's fold hits Postgres per ask until residency lands — an
+accepted cost, not reopened, and now an explicitly **priced** one.
 
 ## 19. Slice 1 — the build list, with its ADR-0032 obligations
 
