@@ -339,7 +339,8 @@ unverified work as finished, which is the same defect the
 ### The stop hook cannot see in-flight work — its prompt is not a signal that anything is finished
 
 A stop-hook prompt reported an unpushed commit; the coordinator pushed it, the executor then
-amended that same commit (adding `.claude/loop-budget.json`), and local and remote diverged —
+amended that same commit (adding `.claude/loop-budget.json`, which was still the committed budget
+state before the ledger replaced it), and local and remote diverged —
 identical content, different SHAs — needing a `--force-with-lease` to realign. **An
 unpushed-commit prompt is not a signal that the work is finished.** The coordinator pushes only
 after the executor reports the phase complete and the tree is clean; the executor says explicitly

@@ -3,6 +3,40 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the weekly cap did not reliably measure: one timer slot for N concurrent runs, a
+> receipt naming the wrong branch, and a step 8 pointing at a file nothing writes**
+> ([#821](https://github.com/TheCaptainCompany/captain-food/issues/821) "loop-budget: the weekly cap
+> under-counts under concurrency", PR [#822](https://github.com/TheCaptainCompany/captain-food/pull/822),
+> `HOLD: human`). The cap is the founder's governance control on autonomous loops (ADR-0014), and it
+> failed **worst exactly when the session was most parallel**. **D1**: the running timer is one file in
+> the git **common dir** — `git worktree` does *not* isolate it — so `stop` billed whatever it found.
+> The W36 ledger records the collision twice: a segment noting *"a concurrent session in this shared
+> checkout closed the timer I inherited at 12:05:26Z"*, and a **33.3-minute unbilled remainder** after
+> a `stop` billed 3.2 minutes of a ~39-minute run **and printed success**. A silent under-count is
+> worse than a refusal: the executor that trusts the output records the wrong number. Fixed
+> **structurally**, not by a comparison — a run has an owner id (`--run` > `$LOOP_BUDGET_RUN_ID` >
+> `$CLAUDE_CODE_SESSION_ID` > none) and the timer **file name carries it**, so another run's timer is
+> *unaddressable* rather than merely detected (the nearest shell reaches to compiler-first,
+> ADR-20260803-234035; PROP-20260802-130500 §1 caps a shell binding at level 3). Two consequences on
+> purpose: **concurrent runs are now normal** — each opens its own timer and bills its own real time,
+> so no second session is pushed into estimating with `--elapsed` — and a `stop` that cannot prove
+> ownership **refuses and names whose timer it found**. `--elapsed-seconds` and `reset` no longer
+> delete another run's live timer; both used to, so the escape hatch the tool *recommends on a
+> refusal* was itself the weapon. **D2**: the receipt stamped the branch of the checkout `stop` ran
+> from, not the branch the run was on (live instance: `2026-W36/20260831T142143Z-0568abb8.json` says
+> `main` while its note describes `819-` work). The branch is now captured at `start`. The defective
+> receipt is **not** retro-edited — the ledger is append-only (ADR-20260812-011057). **D3**: the
+> executor protocol's step 8 said commit `.claude/loop-budget.json`, which **nothing writes** — an
+> executor following the documented protocol committed nothing and left its run unbilled, a
+> systematic under-count by exactly the people who follow the protocol. Step 8 now names the ledger
+> file, and the stale siblings in the continuous-development proposal and the Makefile go with it.
+> **Every one of the 30 new selftest cases was observed RED first**; `make validate` 0 errors,
+> `check-drift` clean, `hooks-test` green armed. Found in passing and now commented where the trap
+> lives: **`make -n budgeted-loop` is not a dry run** — GNU make executes recipe lines containing
+> `$(MAKE)` even under `-n`, so it opens a timer and bills a segment (two 0-second receipts in this
+> commit are its output, kept rather than deleted because hook-written budget state is never
+> hand-edited).
+
 > **2026-08-31 — the repricing obligation map is IN THE REPO, and the lens return that never landed
 > is the finding** (docs-only: one new legal brief, the standing counsel list extended, one proposal
 > `Concerns` entry discharged; no `specs/**`, no code, no SPEC-LOG sentence owed).

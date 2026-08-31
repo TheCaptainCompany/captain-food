@@ -5,8 +5,10 @@
 #
 #   loop-budget.sh check                 # exit 0 if budget remains this week, 2 if exhausted (skip the run);
 #                                        # over-cap exits 0 when config sets "capIsAStopSign": false (see below)
-#   loop-budget.sh start                 # check + open a run timer (writes NOTHING tracked)
-#   loop-budget.sh stop [--note "..."]   # close the timer and APPEND the segment to the ledger
+#   loop-budget.sh start                 # check + open THIS RUN's timer (writes NOTHING tracked)
+#   loop-budget.sh stop [--note "..."]   # close THIS RUN's timer and APPEND the segment to the ledger
+#   loop-budget.sh <cmd> --run <id>      # address a named run's timer (handover; `start` prints the id)
+#   loop-budget.sh stop --adopt          # deliberately bill a timer that carries NO run id
 #   loop-budget.sh stop --elapsed-seconds 900   # record a run whose timer was never opened / was stale
 #                                        # (`--elapsed` is the older spelling and still works, but it
 #                                        #  REFUSES a value under 60 -- see the seconds/minutes note)
@@ -23,7 +25,18 @@
 #      inside `.git/`, which git cannot track by construction. An open timer therefore cannot be
 #      committed, cannot travel between branches, and `start` cannot dirty a working tree. The
 #      common dir is SHARED by every linked worktree, so `start` in one checkout and `stop` in
-#      another are provably the same timer.
+#      another are provably the same timer -- `git worktree` does NOT isolate it.
+#   1b. EACH RUN OWNS ITS TIMER, and the FILE NAME carries the owner (#821). A shared anchor is
+#      what `stop` needs to FIND a timer; it is not a licence to BILL one. With a single slot and N
+#      concurrent runs, `stop` billed whatever it found: the 2026-W36 ledger holds a segment noting
+#      "a concurrent session in this shared checkout closed the timer I inherited", and another with
+#      a 33.3-minute unbilled remainder after a `stop` billed 3.2 minutes of a ~39-minute run and
+#      printed success. Keying the PATH on the owner makes another run's timer unaddressable rather
+#      than merely detected -- the nearest thing to compiler-first that shell reaches
+#      (ADR-20260803-234035; PROP-20260802-130500 §1 caps a shell binding at level 3). Two
+#      consequences on purpose: concurrent runs each open their OWN timer and each bill their OWN
+#      real duration (no second session forced to estimate with `--elapsed`), and a `stop` that
+#      cannot prove ownership REFUSES and names whose timer it found instead of billing it.
 #   2. THE TOTAL IS AN APPEND-ONLY LEDGER, not a counter. Each recorded run writes ONE new file
 #      `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json`; the week's usage is their sum. Nothing
 #      ever rewrites a number, so `stop` CANNOT lower the total -- monotonicity is arithmetic, not a
@@ -48,6 +61,8 @@ BUDGET_CMD="${1:-check}"
 BUDGET_ELAPSED=""
 BUDGET_ELAPSED_UNIT_STATED=""
 BUDGET_NOTE=""
+BUDGET_RUN_ID=""
+BUDGET_ADOPT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     # The UNAMBIGUOUS spelling: the unit is in the flag, so any value is taken at face value.
@@ -61,6 +76,13 @@ while [ $# -gt 0 ]; do
     --elapsed=*) BUDGET_ELAPSED="${1#*=}"; shift ;;
     --note)      BUDGET_NOTE="${2:-}"; shift 2 || shift ;;
     --note=*)    BUDGET_NOTE="${1#*=}"; shift ;;
+    # Address a NAMED run's timer. `start` prints the id; this is the handover path (and the only
+    # way to touch a timer another run opened), so it is always an explicit assertion.
+    --run)       BUDGET_RUN_ID="${2:-}"; shift 2 || shift ;;
+    --run=*)     BUDGET_RUN_ID="${1#*=}"; shift ;;
+    # Bill/discard a timer that carries NO run id (opened before this hook had them, or by a run
+    # with no identity at all). Deliberate by construction: "bill whatever you found" is the defect.
+    --adopt)     BUDGET_ADOPT=1; shift ;;
     *) echo "loop-budget: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done
@@ -114,16 +136,27 @@ if BUDGET_COMMON="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)" && [
     /*|[A-Za-z]:[/\\]*) ;;                      # already absolute (linked worktree, or Windows)
     *) BUDGET_COMMON="$ROOT/$BUDGET_COMMON" ;;  # relative (main worktree prints ".git")
   esac
-  BUDGET_TIMER="$BUDGET_COMMON/loop-budget-timer.json"
+  BUDGET_TIMER_PREFIX="$BUDGET_COMMON/loop-budget-timer"
 else
   # No git at all (tarball export, sandbox): fall back to a temp path keyed on the checkout, so
   # start/stop in the SAME checkout still agree. Different checkouts get different timers, which is
   # the best that can be done without a shared anchor.
-  BUDGET_TIMER="${TMPDIR:-/tmp}/loop-budget-timer-$(printf '%s' "$ROOT" | cksum | cut -d' ' -f1).json"
+  BUDGET_TIMER_PREFIX="${TMPDIR:-/tmp}/loop-budget-timer-$(printf '%s' "$ROOT" | cksum | cut -d' ' -f1)"
 fi
 
+# WHO IS RUNNING. Most explicit first:
+#   --run <id>                an explicit assertion (handover, or billing a named run's timer)
+#   $LOOP_BUDGET_RUN_ID       for a script that opens and closes a run in one process tree
+#   $CLAUDE_CODE_SESSION_ID   ambient inside a Claude Code session: stable across tool calls and
+#                             DISTINCT between concurrent sessions, so ownership costs the caller
+#                             no discipline at all -- which is the only kind of discipline that
+#                             survives a night of parallel sessions
+#   (none)                    no identity available (plain cron, tarball): one shared slot, exactly
+#                             as before this change, so nothing that works today stops working
+BUDGET_RUN="${BUDGET_RUN_ID:-${LOOP_BUDGET_RUN_ID:-${CLAUDE_CODE_SESSION_ID:-}}}"
+
 BUDGET_LABEL="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-export BUDGET_CMD BUDGET_CONFIG BUDGET_LEDGER BUDGET_TIMER BUDGET_ELAPSED BUDGET_ELAPSED_UNIT_STATED BUDGET_NOTE BUDGET_LABEL ROOT
+export BUDGET_CMD BUDGET_CONFIG BUDGET_LEDGER BUDGET_TIMER_PREFIX BUDGET_ELAPSED BUDGET_ELAPSED_UNIT_STATED BUDGET_NOTE BUDGET_LABEL BUDGET_RUN BUDGET_ADOPT ROOT
 
 node <<'NODE'
 'use strict';
@@ -133,9 +166,11 @@ const crypto = require('crypto');
 
 const CONFIG = process.env.BUDGET_CONFIG;
 const LEDGER = process.env.BUDGET_LEDGER;
-const TIMER  = process.env.BUDGET_TIMER;
+const PREFIX = process.env.BUDGET_TIMER_PREFIX;
 const cmd    = process.env.BUDGET_CMD;
 const label  = process.env.BUDGET_LABEL || '?';
+const runId  = process.env.BUDGET_RUN || '';
+const adopt  = process.env.BUDGET_ADOPT === '1';
 
 // A timer older than this was left open by a run that died or never called `stop`. It is STALE by
 // definition and is NEVER billed. 4h is chosen against the ORDER OF MAGNITUDE of the cap (read the
@@ -182,7 +217,7 @@ function segments(week) {
 }
 function used(week) { return segments(week).reduce((a, s) => a + s.seconds, 0); }
 
-function record(seconds, note) {
+function record(seconds, note, branch) {
   // APPEND-ONLY. A new file every time, so this can never decrease the total and can never conflict
   // with a segment another branch recorded concurrently.
   const before = used(wk);
@@ -190,7 +225,13 @@ function record(seconds, note) {
   const file = path.join(weekDir(wk), `${stamp}-${crypto.randomBytes(4).toString('hex')}.json`);
   fs.mkdirSync(weekDir(wk), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({
-    week: wk, seconds, recordedAt: new Date(now).toISOString(), branch: label,
+    // The branch of the RUN, captured at `start` -- not the branch of the checkout `stop` happened
+    // to run from. Run `stop` from the primary checkout while the work lives in a linked worktree
+    // and the old code stamped "main" on a receipt whose note described branch work (#821 D2:
+    // .claude/loop-budget/2026-W36/20260831T142143Z-0568abb8.json, left as-is because the ledger is
+    // append-only). The receipt is the only durable record of where a run's time went.
+    // NB: never add `startedAt` here -- `audit` REFUSES that field in tracked state, by design.
+    week: wk, seconds, recordedAt: new Date(now).toISOString(), branch: branch || label,
     ...(note ? { note } : {}),
   }, null, 2) + '\n');
   const after = used(wk);
@@ -202,14 +243,50 @@ function record(seconds, note) {
   return { file, before, after };
 }
 
-// ---- the running timer: untracked, shared across worktrees --------------------------------------
-function openTimer() {
-  const t = readJson(TIMER);
+// ---- the running timer: untracked, shared anchor, OWNED per run ---------------------------------
+// The anchor is shared so a timer can always be FOUND; the file name carries the owner so another
+// run's timer cannot be ADDRESSED. A run with no identity keeps the historical unsuffixed path, so
+// cron/tarball callers behave exactly as they did.
+// A Claude session id is a UUID, and this repo publishes it in its own claim comments
+// (`https://claude.ai/code/session_<id>`), so it is an identifier, not a secret. It stays in the
+// untracked timer and in stderr; NOTHING about it reaches the committed ledger.
+const slug = (id) => id.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+const timerPath = (id) => (id ? `${PREFIX}--${slug(id)}.json` : `${PREFIX}.json`);
+const TIMER = timerPath(runId);
+
+function readTimer(file) {
+  const t = readJson(file);
   if (!t || !Number(t.startedAt)) return null;
-  return { startedAt: Number(t.startedAt), branch: t.branch || '?', age: Math.round((now - Number(t.startedAt)) / 1000) };
+  return {
+    file, startedAt: Number(t.startedAt), branch: t.branch || '?',
+    owner: typeof t.owner === 'string' ? t.owner : '',   // '' = written before run ids, or by an unidentified run
+    age: Math.round((now - Number(t.startedAt)) / 1000),
+  };
 }
-const clearTimer = () => { try { fs.unlinkSync(TIMER); } catch (e) {} };
-const describe = (t) => `started ${new Date(t.startedAt).toISOString()} on '${t.branch}', ${mins(t.age)}m ago`;
+function allTimers() {
+  const dir = path.dirname(PREFIX), base = path.basename(PREFIX);
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (e) { return []; }
+  return names
+    .filter((n) => n === `${base}.json` || (n.startsWith(`${base}--`) && n.endsWith('.json')))
+    .sort()
+    .map((n) => readTimer(path.join(dir, n)))
+    .filter(Boolean);
+}
+const openTimer = () => readTimer(TIMER);
+// Every OTHER run's timer. Reported, never touched: reporting is what turns an invisible collision
+// into a fact the caller can act on, and touching is what caused the collision in the first place.
+const otherTimers = () => allTimers().filter((t) => t.file !== TIMER && t.age <= STALE_TIMER_SECONDS);
+const clearTimer = (file) => { try { fs.unlinkSync(file || TIMER); } catch (e) {} };
+const describe = (t) => `started ${new Date(t.startedAt).toISOString()} on '${t.branch}', ${mins(t.age)}m ago, `
+  + (t.owner ? `run '${t.owner}'` : 'NO run id');
+const reportOthers = (lead) => {
+  const live = otherTimers();
+  if (!live.length) return live;
+  console.error(lead);
+  for (const o of live) console.error(`     ${describe(o)}`);
+  return live;
+};
 
 const total = used(wk);
 const over = total >= budget;
@@ -231,20 +308,30 @@ if (cmd === 'check' || cmd === 'start') {
   }
   if (cmd === 'start') {
     const t = openTimer();
+    // THIS RUN's own timer, still live: a genuine double-open, and still a refusal. What is NO
+    // LONGER a refusal is another run's timer -- see below.
     if (t && t.age <= STALE_TIMER_SECONDS) {
-      console.error(`⛔ loop-budget: a run timer is ALREADY OPEN (${describe(t)}).`);
-      console.error(`   Two overlapping runs would bill one segment twice. Close it first:`);
+      console.error(`⛔ loop-budget: THIS RUN's timer is ALREADY OPEN (${describe(t)}).`);
+      console.error(`   Two overlapping starts would bill one segment twice. Close it first:`);
       console.error(`     loop-budget.sh stop                 # bill it from ${new Date(t.startedAt).toISOString()}`);
       console.error(`     loop-budget.sh stop --elapsed-seconds <s>   # bill the true duration instead`);
       console.error(`     loop-budget.sh reset                # discard it without billing`);
       process.exit(EXIT_REFUSED);
     }
     if (t) {
-      console.error(`⚠ loop-budget: DISCARDING a stale open timer (${describe(t)}, older than ${mins(STALE_TIMER_SECONDS)}m).`);
+      console.error(`⚠ loop-budget: DISCARDING a stale open timer of this run (${describe(t)}, older than ${mins(STALE_TIMER_SECONDS)}m).`);
       console.error(`   It is NOT billed: an unclosed timer measures wall-clock since a dead run, not work done.`);
     }
-    fs.writeFileSync(TIMER, JSON.stringify({ startedAt: now, branch: label, pid: process.pid }, null, 2) + '\n');
+    fs.writeFileSync(TIMER, JSON.stringify({ startedAt: now, branch: label, owner: runId, pid: process.pid }, null, 2) + '\n');
     console.error(`✓ ${over ? 'loop budget OVER CAP (override active)' : 'loop budget OK'}: ${summary()}. Timer open (untracked: ${TIMER}).`);
+    console.error(runId
+      ? `  run id: ${runId}  -- \`stop\` matches on this; pass it as --run <id> if another process closes the run.`
+      : `  run id: (none) -- no identity available, so this run uses the shared unowned slot. Concurrent`
+        + `\n          runs here CANNOT be told apart: set LOOP_BUDGET_RUN_ID to bill them separately.`);
+    // Concurrency is REPORTED, never refused. Refusing here is what created the incident: a session
+    // that could not open a timer went and "resolved" somebody else's, and the run whose timer was
+    // closed lost its remainder. Each run now bills its own real time instead of estimating.
+    reportOthers(`  note: ${otherTimers().length} other run(s) hold open timers. They are NOT yours -- do not stop or reset them:`);
     process.exit(EXIT_OK);
   }
   console.error(`✓ loop budget OK: ${summary()}.`);
@@ -257,6 +344,14 @@ if (cmd === 'stop') {
   const raw = process.env.BUDGET_ELAPSED || '';
   let seconds = null;
   let note = process.env.BUDGET_NOTE || '';
+
+  // The timer this run may bill is its OWN. The one exception is a timer carrying NO run id
+  // (written before this hook had them, or by an unidentified run): that is billable, but only on
+  // an explicit --adopt, because "bill whatever you found" is precisely the defect being closed.
+  const ownTimer = openTimer();
+  const orphan   = (!ownTimer && runId) ? readTimer(timerPath('')) : null;
+  let billBranch = label;
+  let adopted = false;
 
   if (raw !== '') {
     const n = Number(raw);
@@ -279,13 +374,33 @@ if (cmd === 'stop') {
       process.exit(EXIT_REFUSED);
     }
     seconds = Math.round(n);
-    clearTimer();                       // an explicit figure supersedes whatever the timer held
+    // An explicit figure supersedes THIS RUN's timer -- and only this run's. It used to clear the
+    // timer unconditionally, so the run that followed the tool's own advice to "record it honestly
+    // instead" destroyed a concurrent run's live timer: the escape hatch was the weapon.
+    if (ownTimer) { billBranch = ownTimer.branch; clearTimer(ownTimer.file); }
+    reportOthers(`  note: left ${otherTimers().length} other run(s)' open timer(s) untouched:`);
   } else {
-    const t = openTimer();
+    let t = ownTimer;
+    if (!t && orphan) {
+      if (!adopt) {
+        console.error(`⛔ loop-budget: the only open timer carries NO run id (${describe(orphan)}), and this run is '${runId}'.`);
+        console.error(`   Billing a timer this run did not open is how a concurrent session's time got charged to the`);
+        console.error(`   wrong run (#821). NOTHING was recorded and the timer is UNTOUCHED. Choose deliberately:`);
+        console.error(`     loop-budget.sh stop --adopt                 # it IS this run (e.g. started before run ids existed)`);
+        console.error(`     loop-budget.sh stop --elapsed-seconds <n>   # bill THIS run's own duration instead`);
+        console.error(`   Current: ${summary()}.`);
+        process.exit(EXIT_REFUSED);
+      }
+      t = orphan; adopted = true;
+    }
     if (!t) {
       // NEVER a silent no-op. An unrecorded run defeats the cap, which is the whole point of ADR-0014.
-      console.error(`⛔ loop-budget: NO RUN TIMER IS OPEN -- this run would be recorded as ZERO and silently vanish from the weekly cap.`);
+      console.error(`⛔ loop-budget: NO RUN TIMER IS OPEN for run '${runId || '(none)'}' -- this run would be recorded as ZERO and silently vanish from the weekly cap.`);
       console.error(`   Either the run never called \`loop-budget.sh start\`, or \`stop\` already ran.`);
+      // Naming the other holder is the diagnostic that was missing: without it "my timer is gone"
+      // and "I forgot to start" look identical, and tonight's sessions reconstructed ownership by
+      // hand from startedAt + branch + pid against the ledger's last segment.
+      reportOthers(`   Another run DOES hold an open timer. It is not yours to bill:`);
       console.error(`   Record it honestly instead:  loop-budget.sh stop --elapsed-seconds <n> --note "<what ran>"`);
       console.error(`   Current: ${summary()}.`);
       process.exit(EXIT_REFUSED);
@@ -293,7 +408,7 @@ if (cmd === 'stop') {
     if (t.age > STALE_TIMER_SECONDS) {
       // Do NOT bill it and do NOT clamp it: 4h of clamped phantom time is barely better than 4h21m
       // of unclamped phantom time. Discard, say so unmissably, and demand the true figure.
-      clearTimer();
+      clearTimer(t.file);
       console.error(`⛔ loop-budget: the open timer is STALE (${describe(t)}) -- older than ${mins(STALE_TIMER_SECONDS)}m.`);
       console.error(`   It was left open by an earlier run, so billing it would charge ${mins(t.age)}m of wall clock that nobody worked.`);
       console.error(`   NOTHING was recorded and the stale timer is now discarded. Record THIS run's true duration:`);
@@ -302,11 +417,13 @@ if (cmd === 'stop') {
       process.exit(EXIT_REFUSED);
     }
     if (t.branch !== label) note = note || `start on '${t.branch}', stop on '${label}'`;
+    if (adopted) note = note ? `${note}; adopted a timer carrying no run id` : `adopted a timer carrying no run id`;
     seconds = t.age;
-    clearTimer();
+    billBranch = t.branch;              // D2: the receipt names the branch the RUN was on
+    clearTimer(t.file);
   }
 
-  const r = record(seconds, note);
+  const r = record(seconds, note, billBranch);
   console.error(`• loop budget: +${mins(seconds)}m -> ${mins(r.after)}m / ${mins(budget)}m used (week ${wk}).`);
   console.error(`  recorded as ${path.relative(process.env.ROOT || '.', r.file)} (a NEW file -- commit it).`);
   process.exit(r.after >= budget && capIsAStopSign ? EXIT_OVER : EXIT_OK);
@@ -316,18 +433,37 @@ if (cmd === 'status') {
   console.error(`loop budget ${summary()}`);
   const segs = segments(wk);
   for (const s of segs) console.error(`  ${String(mins(s.seconds)).padStart(7)}m  ${s.entry.recordedAt || '?'}  ${s.entry.branch || '?'}  ${s.entry.note || ''}`);
-  console.error(`  ${segs.length} segment(s) this week; timer file: ${TIMER}`);
-  const t = openTimer();
-  console.error(t ? `  OPEN TIMER: ${describe(t)}${t.age > STALE_TIMER_SECONDS ? '  <-- STALE, will not be billed' : ''}` : `  no open timer`);
+  console.error(`  ${segs.length} segment(s) this week; this run is '${runId || '(no id)'}', timer file: ${TIMER}`);
+  // EVERY open timer, not just this run's: concurrency was invisible here, so a session could not
+  // see that another run held the slot it was about to bill.
+  const all = allTimers();
+  if (!all.length) console.error(`  no open timer`);
+  for (const t of all) {
+    console.error(`  ${t.file === TIMER ? 'OPEN TIMER (this run)' : 'open timer (ANOTHER run)'}: ${describe(t)}`
+      + `${t.age > STALE_TIMER_SECONDS ? '  <-- STALE, will not be billed' : ''}`);
+  }
   // status is the REPORT command (the ADR names it as the constraint's replacement), so under the
   // override it must be the last place still emitting a refusal signal (ADR-20260813-132540).
   process.exit(over && capIsAStopSign ? EXIT_OVER : EXIT_OK);
 }
 
 if (cmd === 'reset') {
-  const t = openTimer();
-  clearTimer();
-  console.error(t ? `✓ loop-budget: discarded an open timer (${describe(t)}) WITHOUT billing it. ${summary()}.` : `✓ loop-budget: no open timer to discard. ${summary()}.`);
+  // Ownership-scoped like `stop`: discarding was the OTHER weapon that closed a concurrent run's
+  // timer. `reset` throws time away, so doing it to a run that is not yours is strictly worse than
+  // mis-billing it -- the run then has nothing left to record.
+  const own = openTimer();
+  const orphan = (!own && runId) ? readTimer(timerPath('')) : null;
+  const target = own || (adopt ? orphan : null);
+  if (target) {
+    clearTimer(target.file);
+    console.error(`✓ loop-budget: discarded an open timer (${describe(target)}) WITHOUT billing it. ${summary()}.`);
+  } else if (orphan) {
+    console.error(`✓ loop-budget: this run ('${runId}') has no timer to discard. One open timer carries NO run id`);
+    console.error(`  (${describe(orphan)}); discard it deliberately with:  loop-budget.sh reset --adopt`);
+  } else {
+    console.error(`✓ loop-budget: no open timer to discard. ${summary()}.`);
+  }
+  reportOthers(`  note: left ${otherTimers().length} other run(s)' open timer(s) untouched:`);
   process.exit(EXIT_OK);
 }
 

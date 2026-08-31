@@ -39,7 +39,12 @@ git -C "$REPO" commit -qm "selftest fixture" >/dev/null
 
 pass=0; fail=0
 OUT=""; CODE=0
-run() { OUT="$("$@" 2>&1)"; CODE=$?; return 0; }
+# Identity is AMBIENT: inside a Claude Code session $CLAUDE_CODE_SESSION_ID is set, and the hook
+# reads it as the run's owner. A fixture that INHERITS it tests the caller's identity, not the
+# code, and every "different run" case would silently collapse into one run. So every invocation
+# below states its identity explicitly: `run` = a run with NO identity, `run_as <id>` = that run.
+run()    { OUT="$(env -u CLAUDE_CODE_SESSION_ID -u LOOP_BUDGET_RUN_ID "$@" 2>&1)"; CODE=$?; return 0; }
+run_as() { local _id="$1"; shift; OUT="$(env -u CLAUDE_CODE_SESSION_ID LOOP_BUDGET_RUN_ID="$_id" "$@" 2>&1)"; CODE=$?; return 0; }
 ok()   { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
 bad()  { fail=$((fail+1)); printf '  FAIL %s\n     %s\n' "$1" "${2:-}" >&2; printf '     output: %s\n' "$OUT" >&2; }
 expect_code() { [ "$CODE" = "$2" ] && ok "$1" || bad "$1" "expected exit $2, got $CODE"; }
@@ -50,10 +55,21 @@ total() { find "$LEDGER" -name '*.json' -type f 2>/dev/null -exec cat {} + | nod
     let t=0; for (const m of d.matchAll(/"seconds":\s*(\d+)/g)) t+=Number(m[1]);
     console.log(t);
   });'; }
+# A segment measured from a TIMER is wall-clock, so it lands a second or two above the stamped age.
+# The window is far too small to confuse 120s with 600s -- which is exactly the property under test.
+near() { [ "$1" -ge "$2" ] && [ "$1" -le "$(($2 + ${3:-5}))" ]; }
 entries() { find "$LEDGER" -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' '; }
 stamp_timer() { printf '{"startedAt": %s, "branch": "selftest"}\n' "$(( $(date +%s) * 1000 - ${1:-0} * 1000 ))" > "$TIMER"; }
 # Tracked state must be untouched by everything except an APPENDED ledger file.
 config_modified() { git -C "$REPO" status --porcelain -- .claude/loop-budget.json | grep -q . && echo yes || echo no; }
+# The timer file of an IDENTIFIED run. Keying the path on the owner is what makes another run's
+# timer unaddressable rather than merely detected.
+own_timer() { printf '%s/.git/loop-budget-timer--%s.json\n' "$REPO" "$1"; }
+stamp_owned() { printf '{"startedAt": %s, "branch": "%s", "owner": "%s"}\n' \
+  "$(( $(date +%s) * 1000 - $2 * 1000 ))" "${3:-selftest}" "$1" > "$(own_timer "$1")"; }
+# The ledger path `stop` PRINTS. Asserting on the artifact the hook names beats globbing the
+# directory: several fixture segments share a one-second stamp, so a sort would pick by random suffix.
+receipt_path() { printf '%s' "$OUT" | sed -n 's/.*recorded as \([^ ]*\) (a NEW file.*/\1/p' | tail -1; }
 
 echo "loop-budget selftest ($REPO)"
 
@@ -164,13 +180,26 @@ fi
 WT="$TMP/linked"
 git -C "$REPO" worktree add -q -b linked "$WT" >/dev/null 2>&1
 if [ -d "$WT/.claude/hooks" ]; then
-  bash "$HOOK" reset >/dev/null 2>&1
+  run bash "$HOOK" reset
   t0="$(total)"
   run bash "$REPO/.claude/hooks/loop-budget.sh" start
   expect_code "7a start in the MAIN worktree" 0
   run bash "$WT/.claude/hooks/loop-budget.sh" stop --note "cross-worktree"
   expect_code "7b stop in a LINKED worktree finds the same timer (was: two independent counters)" 0
   expect_out  "7c ...and records the segment there" "loop budget: +"
+  # ...but a SHARED ANCHOR must not become a shared LICENCE. `git worktree` does NOT isolate the
+  # timer -- it is one file in the common dir -- so the same identity across worktrees is the same
+  # run and still bills, while a DIFFERENT run in the linked worktree must not bill this one.
+  t0="$(total)"
+  run_as wt-run bash "$REPO/.claude/hooks/loop-budget.sh" start
+  expect_code "7d start in the MAIN worktree as an identified run" 0
+  run_as other-run bash "$WT/.claude/hooks/loop-budget.sh" stop --note "not my timer"
+  expect_code "7e a DIFFERENT run stopping in the LINKED worktree is REFUSED, not billed" 3
+  [ -f "$(own_timer wt-run)" ] && ok "7f ...and leaves the timer open for the run that owns it" || bad "7f timer survives" "another run consumed it"
+  [ "$(total)" = "$t0" ] && ok "7g ...and bills nothing" || bad "7g nothing billed" "total moved"
+  run_as wt-run bash "$WT/.claude/hooks/loop-budget.sh" stop --note "same run, other worktree"
+  expect_code "7h the SAME run stopping in the linked worktree still bills (the shared anchor holds)" 0
+  [ ! -f "$(own_timer wt-run)" ] && ok "7i ...and closes its own timer" || bad "7i timer closed" "timer survived its owner's stop"
   git -C "$REPO" worktree remove --force "$WT" >/dev/null 2>&1 || true
 else
   bad "7 cross-worktree timer" "worktree fixture not created"
@@ -220,6 +249,134 @@ run bash "$HOOK" check
 expect_code "9l the flag ABSENT restores the stop sign (exit 2) -- the recorded path back works" 2
 run bash "$HOOK" status
 expect_code "9m ...and status over the cap exits 2 again with the flag absent" 2
+
+# --- 10. D1: ONE TIMER SLOT FOR N CONCURRENT RUNS -- `stop` billed whatever it found -------------
+# The 2026-W36 ledger records this collision twice: one segment notes "a concurrent session in this
+# shared checkout closed the timer I inherited at 12:05:26Z", and another carries a 33.3-minute
+# UNBILLED REMAINDER after a `stop` reported success having billed 3.2 minutes of a ~39-minute run.
+# A `stop` that bills a third of a run and prints success is the defect -- a silent under-count that
+# the executor trusting the output then records as fact, and it fails worst exactly when the session
+# is most parallel, which is when the cap matters most.
+#
+# The fix is STRUCTURAL rather than a comparison: a run has an owner identity (--run /
+# $LOOP_BUDGET_RUN_ID / $CLAUDE_CODE_SESSION_ID) and the timer FILE is keyed on it, so an identified
+# run cannot address another run's timer at all. The ownership COMPARISON survives for the one case
+# the keying cannot cover: a timer with no owner (opened by the pre-#821 hook, or by a run with no
+# identity at all), which is billable only on an explicit --adopt.
+#
+# Cases 8-9 spent the fixture's cap on purpose; these cases are about billing, not about the cap, so
+# they run with headroom. (`start` under an exhausted cap is a separate assertion -- 8e/9c.)
+BIG=100000
+printf '{\n  "weeklyBudgetSeconds": %s\n}\n' "$BIG" > "$REPO/.claude/loop-budget.json"
+rm -f "$REPO"/.git/loop-budget-timer*.json
+
+run_as run-A bash "$HOOK" start
+expect_code "10a start succeeds for an identified run" 0
+expect_out  "10b ...and NAMES the run id it opened, so a later stop can be matched to it" "run-A"
+run_as run-B bash "$HOOK" start
+expect_code "10c a DIFFERENT run opens its OWN timer instead of being refused" 0
+{ [ -f "$(own_timer run-A)" ] && [ -f "$(own_timer run-B)" ]; } \
+  && ok "10d ...so two concurrent runs hold two timers, and neither has to guess with --elapsed" \
+  || bad "10d two concurrent timers" "expected $(own_timer run-A) and $(own_timer run-B)"
+run_as run-B bash "$HOOK" start
+expect_code "10e a second start from the SAME run is still REFUSED -- a double-open is still a defect" 3
+
+# Give the two runs DIFFERENT durations, so a cross-billed stop is arithmetically visible.
+stamp_owned run-A 600 branch-A
+stamp_owned run-B 120 branch-B
+t0="$(total)"
+run_as run-B bash "$HOOK" stop --note "run B"
+expect_code "10f run B's stop succeeds" 0
+near "$(( $(total) - t0 ))" 120 && ok "10g ...and bills run B's OWN 120s, never run A's 600s (the cross-billing defect)" || bad "10g bills its own run" "total $t0 -> $(total), expected +120"
+[ -f "$(own_timer run-A)" ] && ok "10h ...and leaves run A's timer OPEN -- it was never run B's to close" || bad "10h other timer survives" "run B closed run A's timer"
+t1="$(total)"
+run_as run-A bash "$HOOK" stop --note "run A"
+expect_code "10i run A then bills its own run" 0
+near "$(( $(total) - t1 ))" 600 && ok "10j ...for its FULL 600s -- no unbilled remainder" || bad "10j no remainder" "total $t1 -> $(total), expected +600"
+
+# The honest escape hatch must stay honest: `stop --elapsed-seconds` cleared the timer
+# unconditionally, so the run told to "record it honestly instead" destroyed a live run's timer.
+stamp_owned run-A 600 branch-A
+t0="$(total)"
+run_as run-C bash "$HOOK" stop --elapsed-seconds 300 --note "run C has no timer of its own"
+expect_code "10k a run with no timer of its own still records honestly with --elapsed-seconds" 0
+[ "$(total)" = "$((t0+300))" ] && ok "10l ...billing exactly its own stated duration" || bad "10l stated duration" "total $t0 -> $(total)"
+[ -f "$(own_timer run-A)" ] && ok "10m ...and does NOT delete run A's live timer (was: unconditional clearTimer)" || bad "10m elapsed spares other timers" "the escape hatch closed another run's timer"
+
+run_as run-C bash "$HOOK" reset
+expect_code "10n reset with no timer of its own succeeds" 0
+[ -f "$(own_timer run-A)" ] && ok "10o ...and leaves run A's timer alone -- reset was the other weapon" || bad "10o reset is ownership-scoped" "reset discarded another run's timer"
+
+run_as run-C bash "$HOOK" stop
+expect_code "10p stop with no timer of its own is refused" 3
+expect_out  "10q ...and NAMES the other run holding an open timer (theft vs a forgotten start)" "run-A"
+
+# A timer with NO owner: written by the pre-#821 hook, or by a run with no identity. Billing it is
+# a real need (the upgrade path), so it must be possible -- but never automatic.
+rm -f "$REPO"/.git/loop-budget-timer*.json
+stamp_timer 300
+t0="$(total)"
+run_as run-D bash "$HOOK" stop
+expect_code "10r an identified run REFUSES to silently bill an UNOWNED timer" 3
+[ "$(total)" = "$t0" ] && ok "10s ...and bills nothing" || bad "10s nothing billed" "total moved"
+run_as run-D bash "$HOOK" stop --adopt --note "adopted an unowned timer"
+expect_code "10t ...but --adopt bills it deliberately (the upgrade path for a pre-#821 timer)" 0
+near "$(( $(total) - t0 ))" 300 && ok "10u ...for its real duration" || bad "10u real duration" "total $t0 -> $(total), expected +300"
+
+# --- 11. D2: the receipt stamped the branch of the checkout `stop` RAN FROM ----------------------
+# Live instance, committed as-is rather than edited because the ledger is append-only:
+# .claude/loop-budget/2026-W36/20260831T142143Z-0568abb8.json says "branch": "main" while its own
+# note describes work that was on 819-founder-invoked-slash-commands. The receipt is the only durable
+# record of where a run's time went, and it named a branch the run was never on.
+rm -f "$REPO"/.git/loop-budget-timer*.json
+git -C "$REPO" checkout -q -B work-branch
+stamp_owned run-E 240 work-branch
+git -C "$REPO" checkout -q -B some-other-branch
+run_as run-E bash "$HOOK" stop --note "started on work-branch, stopped elsewhere"
+expect_code "11a stop from a different branch succeeds" 0
+receipt="$REPO/$(receipt_path)"
+if [ -f "$receipt" ]; then
+  grep -q '"branch": "work-branch"' "$receipt" \
+    && ok "11b the receipt names the branch the RUN was on, not the checkout stop ran from" \
+    || bad "11b receipt branch is true of the run" "receipt says $(grep '"branch"' "$receipt" | tr -d ' ')"
+else
+  bad "11b receipt branch is true of the run" "stop named no receipt (looked for '$receipt')"
+fi
+
+# --- 12. D3: the DOCUMENTED artifact must be the artifact `stop` actually writes -----------------
+# The executor protocol's step 8 said "commit .claude/loop-budget.json" -- pure config that nothing
+# writes. An executor following the documented protocol literally commits nothing and leaves its run
+# unbilled: a systematic under-count of the cap by exactly the people who follow the protocol instead
+# of reading the hook source. This case compares the prose against the path the hook JUST wrote, so
+# it goes red if either one moves -- it is not asserting a spelling somebody chose.
+PROTOCOL="$ROOT/.claude/agents/executor.md"
+run_as run-F bash "$HOOK" start
+run_as run-F bash "$HOOK" stop --note "what does stop actually write?"
+written="$(receipt_path)"
+case "$written" in
+  .claude/loop-budget/*/*.json) ok "12a stop writes the append-only ledger path ($written)" ;;
+  *) bad "12a stop writes the ledger path" "it wrote '$written'" ;;
+esac
+if [ -f "$PROTOCOL" ]; then
+  ledger_dir="$(dirname "$(dirname "$written")")"
+  step="$(grep -A6 'Record the budget' "$PROTOCOL" | tr '\n' ' ')"
+  case "$step" in
+    *"$ledger_dir/"*) ok "12b the protocol's budget step names the ledger directory the hook writes" ;;
+    *) bad "12b protocol names the written artifact" "the hook writes $ledger_dir/... but step 8 says: $step" ;;
+  esac
+  # NOT "the step must never mention the config file" -- prose that names it in order to warn against
+  # it is GOOD prose, and a test that forbids the string forbids the fix. The property is about what
+  # the instruction POINTS AT: the first budget artifact named after the word "commit" must be the
+  # ledger (.claude/loop-budget/...), never the config (.claude/loop-budget.json).
+  after_commit="${step#*commit}"
+  target=".claude/loop-budget${after_commit#*.claude/loop-budget}"
+  case "$target" in
+    .claude/loop-budget/*) ok "12c 'commit' in step 8 points at the ledger, not at the config file nothing writes" ;;
+    *) bad "12c 'commit' in step 8 points at the ledger" "it points at: $(printf '%.40s' "$target")" ;;
+  esac
+else
+  bad "12 protocol prose" "expected the executor protocol at $PROTOCOL"
+fi
 
 printf 'loop-budget selftest: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || { echo "loop-budget selftest: FAILED -- a budget guard is not firing (see above)." >&2; exit 2; }

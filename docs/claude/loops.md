@@ -13,7 +13,7 @@ corruptions in one day (ADR-20260812-011057):
 |---|---|---|---|
 | **Cap** | `.claude/loop-budget.json` — `{ weeklyBudgetSeconds }` | committed | **nothing**; you, by hand |
 | **Usage** | `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json` — one file per recorded run | committed | `stop`, append-only |
-| **Running timer** | `$(git rev-parse --git-common-dir)/loop-budget-timer.json` | **never** (inside `.git/`) | `start` / `stop` |
+| **Running timer** | `$(git rev-parse --git-common-dir)/loop-budget-timer[--<run id>].json` | **never** (inside `.git/`) | `start` / `stop` |
 
 **The cap lives in `.claude/loop-budget.json` and nowhere else** — do not restate it here or in any
 other prose, and do not derive it from a number you remember: read the file, or run
@@ -39,21 +39,52 @@ measured actual time, and inflating one steals from the next week.
 
 - Guard: `.claude/hooks/loop-budget.sh check|start|stop|status|reset|prune|audit|selftest`
   - `check` → exit 0 if budget remains, **exit 2 if spent** (skip the run). Strictly **read-only**.
-  - `start` → check + open the timer. Writes **nothing tracked**, so it can never dirty a tree.
-    **Refuses** (exit 3) if a timer is already open; **discards without billing** one older than 4 h.
-  - `stop` → close the timer and append the segment. **Refuses** (exit 3) when no timer is open —
-    never a silent zero — and when the timer is stale.
+  - `start` → check + open **this run's** timer. Writes **nothing tracked**, so it can never dirty a
+    tree. **Refuses** (exit 3) if *this run* already has one open; **discards without billing** one
+    older than 4 h. Another run's open timer is **reported, not refused** — concurrent runs each
+    hold their own timer and each bill their own real time.
+  - `stop` → close **this run's** timer and append the segment. **Refuses** (exit 3) when no timer of
+    this run's is open — never a silent zero — when the timer is stale, and when the only open timer
+    carries **no run id** (see below).
   - `stop --elapsed-seconds <n> --note "…"` → the honest escape hatch when `start` never ran or the
     timer was stale. Use it rather than hand-editing anything.
-  - `status` → the week's breakdown; `reset` → drop an open timer without billing it.
+  - `status` → the week's breakdown **and every open timer**, marking which one is this run's.
+  - `reset` → drop **this run's** open timer without billing it.
+  - `--run <id>` → address a *named* run's timer (the handover path; `start` prints the id).
+    `--adopt` → deliberately bill or discard a timer that carries **no** run id.
   - `audit` → the ~10 ms invariant check the stop-gate runs every turn; `selftest` → the full suite.
 - Make targets: `make budget-check` and `make budgeted-loop` (skips cleanly when the week is spent, else
   runs `night-loop` and records the elapsed time). Note `budgeted-loop` prints "weekly budget exhausted"
   for **any** non-zero `start`, so read the guard's own stderr above it — exit 3 means a timer was
   already open, not that the week is spent.
 
-**Commit the new ledger file** your `stop` prints. It is a fresh path every time, so it never
-conflicts with a concurrent session's and a merge sums both.
+**Commit the new ledger file** your `stop` prints — `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json`.
+It is a fresh path every time, so it never conflicts with a concurrent session's and a merge sums both.
+`.claude/loop-budget.json` is **config**; committing it records no time at all.
+
+### Each run OWNS its timer (#821)
+
+`git worktree` does **not** isolate the timer: it is one file in the git **common dir**, shared by
+every linked worktree *and* by every concurrent session in the same checkout. A shared anchor is what
+lets `stop` **find** a timer; it was never a licence to **bill** one. With a single slot, `stop`
+billed whatever it found — the 2026-W36 ledger holds a segment noting *"a concurrent session in this
+shared checkout closed the timer I inherited"*, and another with a **33.3-minute unbilled remainder**
+after a `stop` billed 3.2 minutes of a ~39-minute run **and printed success**. A silent under-count is
+worse than a refusal, because the executor trusting the output records the wrong number.
+
+So a run has an **owner id** — `--run <id>`, else `$LOOP_BUDGET_RUN_ID`, else `$CLAUDE_CODE_SESSION_ID`,
+else none — and the timer **file name carries it**, which makes another run's timer *unaddressable*
+rather than merely detected. Consequences worth knowing:
+
+- **Concurrency is normal.** Two sessions both `start`; each bills its own duration. Neither is
+  refused, and neither has to estimate with `--elapsed`.
+- **A `stop` that cannot prove ownership refuses and says whose timer it found.** If you are handed
+  a run to close, use the id `start` printed: `stop --run <id>`.
+- **A timer with no run id** (opened before this existed, or by a caller with no identity — plain
+  cron, a tarball export) is billable only with `stop --adopt`. Runs with no identity at all share
+  the historical single slot and behave exactly as before; set `LOOP_BUDGET_RUN_ID` to separate them.
+- `--elapsed-seconds` and `reset` no longer touch another run's timer. Both used to: the escape hatch
+  the tool *recommends* on a refusal was itself deleting live timers.
 
 ## How to bound each loop type
 
