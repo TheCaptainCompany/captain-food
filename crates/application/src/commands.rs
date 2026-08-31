@@ -2602,14 +2602,31 @@ pub async fn place_order(
     }
     // TODO(invariant): OutsideDeliveryArea — needs a delivery-area policy port (the restaurant's
     //                  delivery zone is not modelled in any read port yet).
-    // TODO(invariant): OfferUnavailable / InsufficientStock / InvalidOptionSelection — re-validating
-    //                  each line's ORDERABILITY at checkout (pricing below already fails closed on a
-    //                  line that has left the catalog, but availability/stock re-checks are pending).
     // Price the cart server-side from the LIVE catalog (rules.yaml#/ServerPriceAuthority): the fold's
     // lines (offer + quantity + selected options — authoritative, from the cart's own stream) are
     // repriced through the Catalog read port. Fail-closed: an unresolvable line price rejects with
     // `PriceUnresolvable` — never a fallback to any client number.
     let priced = crate::pricing::price_cart(catalogs, cmd.cart_id, cmd.restaurant_id, &cart.lines).await?;
+    // ORDERABILITY RE-DERIVED AT CHECKOUT (#823, rules.yaml#/CheckoutPricesCartCreatesPaymentIntent).
+    // The SAME guard the cart-edit handlers use, run again on the cart the customer is actually
+    // paying for: availability, tracked stock and the option selection are properties of the LIVE
+    // catalog NOW, never inherited from the instant the line was added. Pricing above is not this
+    // check — it fails closed only on a line that LEFT the catalog, so a dish added at 19:50 and
+    // 86'd at 20:20 still resolves a price at 20:40 and, before this, was bought: oversell at peak,
+    // and the ticket lands on a pass that has none.
+    //
+    // POSITION is load-bearing, on two sides:
+    //   * AFTER `price_cart`, so a line that has no live price at all still rejects with
+    //     `PriceUnresolvable` first — the fail-closed pricing contract keeps its own error code
+    //     (tests.yaml#/TestPlaceOrderRejectsUnresolvablePrice) instead of turning into OfferNotFound.
+    //   * BEFORE any external effect — the Stripe `payments.request` below and the credit spend
+    //     after it. Refusing after either would strand a real PaymentIntent, or consume goodwill,
+    //     for an order we never meant to take. Same reasoning as the service-hours guard above.
+    // Read-only and money-free: this changes no price and emits no fact, so a successful checkout
+    // costs and emits exactly what it did before.
+    for line in &cart.lines {
+        require_orderable_line(catalogs, &cmd.restaurant_id, line).await?;
+    }
     // The client's expectedTotal (optional) is a CONFIRMATION only — checked for equality against the
     // recomputed total so the customer is never charged an amount other than the one displayed.
     if let Some(expected) = &cmd.expected_total {

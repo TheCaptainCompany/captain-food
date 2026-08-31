@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 196,
+  "recordedAt": "2026-08-31T19:31:31.984Z",
+  "branch": "830-db-preflight-and-ready-flip-ownership",
+  "note": "#830 pre-merge: ADR Positive section corrected (settings.json kept, not deleted)"
+}

@@ -113,13 +113,23 @@ isn't enough.
      merge half-done work. **Do NOT enable auto-merge here** — see the rule below.
 2. **Never work an issue that carries `status/in-progress`** — pick the next unclaimed rank.
 3. **Work happens on the PR**: push commits to `NN-slug`; the `ci` workflow gates every push.
-4. **Completion = ready + auto-merge + supervision** (never end at "pushed, CI pending"):
-   local gates green (`make rust`), the work recorded in the same change — durable state in
-   `STATUS.md`, the dated entry at the TOP of the current `docs/status/journal-YYYY-Www.md`, and an
-   ADR for an actual cross-cutting decision — then **mark the PR
-   ready for review and enable auto-merge together, as one indivisible step** (repo default merge
-   method) — never one without the other — and **supervise until MERGED**: watch the checks, fix
-   and push on any failure. The merge auto-closes the issue (`Closes #NN`), which ends the claim.
+4. **Completion has TWO endings, and they belong to different roles**
+   ([ADR-20260831-183847](adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md),
+   restoring ADR-20260810-011500 §2 — the older clause that always assigned "GitHub mechanics …
+   ready + auto-merge" to the coordinator):
+   - **The EXECUTOR's ending** (never end at "pushed, CI pending"): local gates green (`make rust`),
+     the work recorded in the same change — durable state in `STATUS.md`, the dated entry at the TOP
+     of the current `docs/status/journal-YYYY-Www.md`, and an ADR for an actual cross-cutting
+     decision — everything pushed, the PR body complete, and the **PR still in DRAFT**. Then hand
+     back. An executor cannot mark a PR ready or arm auto-merge: both are GraphQL-only mutations and
+     the endpoint is 403-pinned in executor sessions.
+   - **The COORDINATOR's ending**: **mark the PR ready for review and enable auto-merge together, as
+     one indivisible step** (repo default merge method) — never one without the other — and
+     **supervise until MERGED**: watch the checks, fix and push on any failure. The merge auto-closes
+     the issue (`Closes #NN`), which ends the claim.
+
+   The posture a dispatch names (auto-merge-on-green by default, `HOLD: human` for the named class)
+   selects the **merge condition**, never the actor: the executor's ending is draft either way.
    Checks can't be made green / scope exploded? Comment the diagnosis on the PR — don't go silent.
 5. Merge (or close) ends the claim naturally. Abandoning? Remove the label and close the draft PR.
 6. **Board mirror (native Project workflows — no label trigger exists)**: enable

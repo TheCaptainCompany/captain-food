@@ -2366,6 +2366,264 @@ keys:
         }
     }
 
+    /// The #830 DEAD-MAN'S-SWITCH guard: `make test-crates` must pre-flight the database, and the
+    /// pre-flight must actually be able to fail.
+    ///
+    /// **The defect this closes.** `crates/db_test_gate` (#474) decides on whether `DATABASE_URL`
+    /// is *set*, never on whether the server answers — it cannot, since it runs inside libtest,
+    /// once per suite, after the whole workspace is built. So with a `DATABASE_URL` pointing at a
+    /// stopped Postgres, every DB-gated suite fails with a connection error minutes into the run,
+    /// misattributed to the diff under test (~12 minutes, measured 2026-08-30), while the skip
+    /// receipt `target/db-test-skips.log` stays EMPTY — because nothing *skipped*. Grepping a run
+    /// for `DB-GATED SUITES SKIPPED` therefore returns the same answer on a live database and on a
+    /// dead one. CLAUDE.md names the class: "a monitoring path that can only fire when a signal
+    /// ARRIVES — a threshold alert goes quiet exactly when it should scream; liveness needs a
+    /// dead-man's-switch."
+    ///
+    /// **Why a test and not just the script.** A check that has never been observed to fail is an
+    /// unverified claim, and this one guards a condition that is *absent* on every healthy run — so
+    /// nothing else would ever exercise its failure branch. All four branches are driven here.
+    ///
+    /// Hermetic: three of the four cases inject a fake `pg_isready` on the child's `PATH`, so the
+    /// branching is proven with no Postgres anywhere. The fourth uses a real dead port, so the
+    /// wiring to the real binary is proven too — and `redacts` pins that a password in
+    /// `DATABASE_URL` never reaches output that lands in PR bodies and CI logs.
+    ///
+    /// Style of `makefile_recipe_lines_are_ascii`: executable, loud, never skips. A missing script
+    /// or Makefile FAILS rather than silently no-oping.
+    #[test]
+    fn the_db_preflight_guards_test_crates_and_can_actually_fail() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        let script = root.join("tools/db-preflight.sh");
+        assert!(
+            script.is_file(),
+            "tools/db-preflight.sh is missing ({}). It is the only thing that fails a run whose \
+             DATABASE_URL points at a dead database BEFORE the build; without it an empty skip \
+             receipt is once again indistinguishable from a healthy run (#830).",
+            script.display()
+        );
+
+        // The pin: the target must still CALL it. Deleting the call is the silent way to lose the
+        // check, and it would leave this test green if the test only exercised the script.
+        let makefile_path = root.join("Makefile");
+        let makefile = std::fs::read_to_string(&makefile_path).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {} ({e}) — do NOT let this guard silently pass",
+                makefile_path.display()
+            )
+        });
+        let recipe: String = makefile
+            .lines()
+            .skip_while(|l| !l.starts_with("test-crates:"))
+            .take_while(|l| l.starts_with("test-crates:") || l.starts_with('\t'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !recipe.is_empty(),
+            "no `test-crates:` recipe found in the Makefile — if the target was renamed, re-point \
+             this guard in the same commit (#830)"
+        );
+        assert!(
+            recipe.contains("tools/db-preflight.sh"),
+            "the `test-crates` recipe no longer invokes tools/db-preflight.sh (#830). The skip \
+             receipt is ONE-SIDED — it can only speak when suites SKIP — so without the pre-flight \
+             a run against a stopped database reports exactly what a healthy run reports. The \
+             recipe as found:\n{recipe}"
+        );
+        // It must run BEFORE cargo: failing after the build costs the ~12 minutes the check exists
+        // to save, and the misattributed suite failures would already be on screen.
+        let preflight_at = recipe.find("tools/db-preflight.sh").expect("checked above");
+        if let Some(cargo_at) = recipe.find("cargo") {
+            assert!(
+                preflight_at < cargo_at,
+                "tools/db-preflight.sh must run BEFORE cargo in the `test-crates` recipe (#830); \
+                 it is currently after it, which defeats the point — the build and the \
+                 misattributed failures happen first. Recipe:\n{recipe}"
+            );
+        }
+
+        // ── the four branches ────────────────────────────────────────────────────────────────
+        // A fake `pg_isready` lets the script's own branching be proven with no database present.
+        let tmp = std::env::temp_dir().join(format!("db-preflight-guard-{}", std::process::id()));
+        let bin = tmp.join("bin");
+        std::fs::create_dir_all(&bin).expect("create the fake-PATH dir");
+        let fake = |name: &str, body: &str| {
+            let p = bin.join(name);
+            std::fs::write(&p, body).expect("write the fake pg_isready");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755))
+                    .expect("chmod the fake pg_isready");
+            }
+        };
+
+        // The interpreter is named by ABSOLUTE path on purpose: case 4 hands the child an empty
+        // `PATH`, and `Command::new("bash")` resolves the program through exactly that `PATH` — so
+        // a relative name fails to spawn at all and the case reports a harness error instead of a
+        // verdict. (It did, first run.)
+        let bash = ["/bin/bash", "/usr/bin/bash"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).is_file())
+            .expect("no bash at /bin/bash or /usr/bin/bash — this guard needs one to run the script");
+
+        // `PATH` is the child's only, via Command::env — `std::env::set_var` is banned (#388).
+        let run = |url: Option<&str>, path: &str| -> (bool, String) {
+            let mut cmd = std::process::Command::new(bash);
+            cmd.arg(&script).env("PATH", path).env_remove("DATABASE_URL");
+            if let Some(u) = url {
+                cmd.env("DATABASE_URL", u);
+            }
+            let out = cmd.output().unwrap_or_else(|e| {
+                panic!("could not run {} ({e})", script.display())
+            });
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            (out.status.success(), text)
+        };
+        let with_fake = format!("{}:/usr/bin:/bin", bin.display());
+        let real_path = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into());
+
+        // 1. REACHABLE => exit 0 AND a POSITIVE line. The positive half is the whole point: it is
+        //    what an empty skip receipt needs beside it to mean anything at all.
+        fake("pg_isready", "#!/bin/sh\necho 'fakehost:5432 - accepting connections'\nexit 0\n");
+        let (ok, out) = run(Some("postgres://u:hunter2@fakehost:5432/db"), &with_fake);
+        assert!(ok, "a reachable database must PASS the pre-flight, got:\n{out}");
+        assert!(
+            out.contains("DB PRE-FLIGHT OK"),
+            "a reachable database must print the POSITIVE line `DB PRE-FLIGHT OK` — without it the \
+             evidence triple (pre-flight OK + empty receipt + exit 0) cannot be assembled and an \
+             empty receipt proves nothing again (#830). Got:\n{out}"
+        );
+        assert!(
+            !out.contains("hunter2"),
+            "DATABASE_URL's PASSWORD leaked into pre-flight output, which lands in PR bodies, CI \
+             logs and session transcripts. The `redact` helper must strip userinfo. Got:\n{out}"
+        );
+
+        // 2. UNREACHABLE => the failure branch. This is the case that has no natural trigger on a
+        //    healthy machine, so it exists nowhere else.
+        fake("pg_isready", "#!/bin/sh\necho 'fakehost:5432 - no response'\nexit 2\n");
+        let (ok, out) = run(Some("postgres://u:hunter2@fakehost:5432/db"), &with_fake);
+        assert!(
+            !ok,
+            "an UNREACHABLE database must FAIL the pre-flight. It passed, which means \
+             `make test-crates` would build the workspace and then fail inside every DB-gated \
+             suite with connection errors that read as regressions in the diff under test — the \
+             exact ~12-minute misattribution #830 removed. Got:\n{out}"
+        );
+        for needle in ["DB PRE-FLIGHT FAILED", "service postgresql start", "DB_TESTS_REQUIRED=0"] {
+            assert!(
+                out.contains(needle),
+                "the pre-flight's failure message must carry the REMEDY (missing: `{needle}`). A \
+                 check that fails without saying what to do next just relocates the 12 minutes. \
+                 Got:\n{out}"
+            );
+        }
+        assert!(
+            !out.contains("hunter2"),
+            "DATABASE_URL's PASSWORD leaked into the FAILURE message — the path most likely to be \
+             pasted into an issue. Got:\n{out}"
+        );
+
+        // 3. NO DATABASE_URL => stand aside, exit 0. `db_test_gate` owns that branch and is loud on
+        //    it (panic, or a skip with a receipt); a second opinion here would be the eighteenth
+        //    hand-written spelling of the polarity #474 removed.
+        let (ok, out) = run(None, &with_fake);
+        assert!(
+            ok,
+            "with no DATABASE_URL the pre-flight must stand aside and let crates/db_test_gate \
+             decide (it PANICS unless DB_TESTS_REQUIRED names an explicit opt-out). Got:\n{out}"
+        );
+
+        // 4. NO pg_isready => a DECLARED degraded mode. Failing the build over a missing client
+        //    utility would block runs whose database is fine; degrading SILENTLY would restore the
+        //    false signal. So: exit 0, and say out loud that the positive half is missing.
+        let empty = tmp.join("empty");
+        std::fs::create_dir_all(&empty).expect("create the empty PATH dir");
+        let (ok, out) = run(Some("postgres://u@h:5432/db"), &empty.display().to_string());
+        assert!(ok, "a missing pg_isready must not fail the build, got:\n{out}");
+        assert!(
+            out.contains("DB PRE-FLIGHT UNAVAILABLE"),
+            "with no pg_isready the pre-flight must DECLARE the degradation — a silent skip here \
+             would put the run back to an empty receipt proving nothing, which is the whole defect \
+             (#830). Got:\n{out}"
+        );
+
+        // 5. End-to-end against the REAL pg_isready and a REAL dead port: proves the wiring, not
+        //    just the branching. Port 1 is privileged and never has a listener.
+        if std::process::Command::new("sh")
+            .arg("-c")
+            .arg("command -v pg_isready")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            let (ok, out) = run(Some("postgres://u:hunter2@127.0.0.1:1/db"), &real_path);
+            assert!(
+                !ok,
+                "the REAL pg_isready against a dead port must fail the pre-flight (#830). Got:\n{out}"
+            );
+            assert!(
+                out.contains("DB PRE-FLIGHT FAILED") && !out.contains("hunter2"),
+                "real-binary path: expected the redacted failure message. Got:\n{out}"
+            );
+        }
+
+        // ── F2 (review round 1): the QUIET filter must not delete the positive line ──────────
+        // `make test-quiet` / `make rust-quiet` are how CLAUDE.md tells token-bound sessions to run
+        // gates, and they show only lines matching QUIET_KEEP plus a 50-line tail. The pre-flight
+        // prints thousands of lines before that tail window, so a line QUIET_KEEP misses is GONE.
+        //
+        // The law is stated directly above that pattern in the Makefile: "FILTERING MAY DROP
+        // PROGRESS, NEVER VERDICTS." The `DB PRE-FLIGHT OK` line IS a verdict by this guard's own
+        // argument — it is the entire reason an empty skip receipt means anything. Worse is
+        // `UNAVAILABLE`: it announces a DECLARED degraded mode, and dropping it turns that mode
+        // SILENT (the ADR-20260810-231300 class), leaving a reader with no pre-flight line and no
+        // skip receipt — i.e. back to the exact over-read #830 closed, on the standard path.
+        //
+        // Measured before the fix: `DB PRE-FLIGHT OK`, the `DATABASE_URL=` follow-on, `UNAVAILABLE`
+        // and its "NO positive database evidence" follow-on were ALL dropped. `FAILED` and
+        // `SKIPPED` survived only by accident, matching pre-existing alternates for other tools.
+        let quiet_keep = makefile
+            .lines()
+            .find_map(|l| l.strip_prefix("QUIET_KEEP ?= "))
+            .expect(
+                "QUIET_KEEP not found in the Makefile — if the quiet wrapper's filter was renamed                  or moved, re-point this guard in the same commit; do NOT let it silently pass",
+            );
+        let keep = regex::Regex::new(quiet_keep).unwrap_or_else(|e| {
+            panic!("QUIET_KEEP is not a valid regex ({e}): {quiet_keep}")
+        });
+        for line in [
+            "test-crates: DB PRE-FLIGHT OK -- localhost:5432 - accepting connections",
+            "test-crates: DATABASE_URL=postgres://***@localhost:5432/postgres -- the DB-gated suites will RUN against it.",
+            "test-crates: DB PRE-FLIGHT UNAVAILABLE -- pg_isready is not on PATH, reachability NOT checked.",
+            "test-crates: this run has NO positive database evidence; an empty skip receipt proves nothing here.",
+            "test-crates: DB PRE-FLIGHT FAILED -- the configured database is NOT accepting connections.",
+            "test-crates: DB PRE-FLIGHT SKIPPED -- no DATABASE_URL; crates/db_test_gate decides this run",
+        ] {
+            assert!(
+                keep.is_match(line),
+                "QUIET_KEEP drops a pre-flight VERDICT line, so `make test-quiet` / `make \
+                 rust-quiet` hide it (the 50-line tail cannot recover it — thousands of lines \
+                 follow). The Makefile's own law, stated directly above QUIET_KEEP: FILTERING MAY \
+                 DROP PROGRESS, NEVER VERDICTS.\n\
+                 \n\
+                 dropped: {line}\n\
+                 QUIET_KEEP: {quiet_keep}\n\
+                 \n\
+                 Fix: add an alternate that matches it (`^test-crates:` covers every line the \
+                 target emits about itself, which the Makefile already argues is unambiguous). Do \
+                 NOT fix it by making the pre-flight quieter."
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// The mailbox door stays CLOSED (#284 slice 3, PROP-20260728-152752 §2.1; #290 phase 1,
     /// PROP-20260802-130500 D1): a `MailboxEntry` may be assembled only inside the actor_client
     /// boundary crate — the shared constructors in `actor_client::enqueue`, the reminders

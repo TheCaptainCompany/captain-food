@@ -65,7 +65,18 @@ ServerPriceAuthority:
     the server's recomputation can never be charged, only rejected and re-confirmed.
 
 CheckoutPricesCartCreatesPaymentIntent:
-  description: "Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment."
+  description: >
+    Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart),
+    and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or
+    out-of-area address / declined payment. ORDERABILITY IS RE-DERIVED AT CHECKOUT, never inherited
+    from the moment the line was added: every cart line is re-validated against the LIVE catalog for
+    availability (OfferUnavailable), tracked stock covering its quantity (InsufficientStock) and a
+    still-valid option selection (InvalidOptionSelection), strictly BEFORE the payment call so a
+    refusal can never strand a Stripe hold. Pricing alone is not this check — it fails closed only on
+    a line that LEFT the catalog, while an offer the kitchen 86'd between adding and paying still
+    resolves a price; without the re-check that order is accepted and the ticket lands on a pass that
+    has none. Untracked stock (no quantity) never blocks — untracked is not zero (availability ≠
+    stock; orderable = AVAILABLE and stock > 0).
 
 CheckoutRefusesOnlyOutsideServiceHours:
   description: >

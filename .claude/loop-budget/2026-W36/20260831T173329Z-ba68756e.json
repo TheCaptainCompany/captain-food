@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3000,
+  "recordedAt": "2026-08-31T17:33:29.792Z",
+  "branch": "main",
+  "note": "#823 checkout orderability guard (slice 1 of PROP-20260831-134539): specs+code+tests, gates green, PR #824"
+}

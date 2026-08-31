@@ -1,6 +1,175 @@
 # Status journal — 2026-W36
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
+
+> **2026-08-31 — The checkout button now states the OBLIGATION TO PAY rather than an amount, and
+> the pre-order total recap is no longer declared collapsible
+> ([#817](https://github.com/TheCaptainCompany/captain-food/issues/817), PR
+> [#833](https://github.com/TheCaptainCompany/captain-food/pull/833), `HOLD: human` at draft).**
+> C. conso. **L221-14** (transposing **CRD 2011/83 Art. 8(2)**) wants an unambiguous obligation-to-pay
+> mention on the button placed immediately before a distance order, next to a clear and legible recap
+> of the total; the sanction is **not a fine but that the consumer is not bound**, so a defect here
+> makes shipped, paid, rider-delivered orders voidable. `fr` now carries the statutory safe-harbour
+> formula *"Commander avec obligation de paiement — {total}"* and `en` the directive's own *"Order
+> with obligation to pay — {total}"*; the checkout `order_summary` section drops `collapsible: true`.
+> The requirement is grade (a); whether this wording **satisfies** it is **QT-4** on the counsel list
+> ([BRIEF-20260831](../legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md)) and no
+> counsel is engaged, so this is deliberate **over-compliance pending that answer** and not a legal
+> conclusion (ADR-20260812-143619).
+>
+> **Two things the issue did not know, both found by going to the runtime rather than the
+> declaration.** (1) **`checkout.place_order` was resolved by nothing.** The pay button rendered the
+> hard-coded literal `"Place order - "{total}` (`crates/web/src/checkout.rs`), so **every French
+> customer was shown an English button**, and fixing only the DSL copy would have changed nothing a
+> customer sees — the #780 class exactly. (Stated narrowly on purpose: the rest of that file *does*
+> consult the catalog through its `t` helper; it was this key, plus four other hard-coded literals,
+> that were unwired. The generalised claim "the runtime does not read the catalog" is false.)
+> (2) `collapsible: true` was read by **nothing** — not the codegen, not the renderer — and the
+> hand-written runtime always rendered the recap expanded; so the flag was never the guarantee, and
+> the guarantee now lives in a runtime assertion.
+>
+> **The fix is single-source, and that is worth claiming at its real height and no higher: level 3,
+> not compiler-first level 4** (PROP-20260802-130500 §1). The button resolves the key from the
+> generated catalog, so there is one string rather than two a parity test must keep equal — but the
+> key is a hand-authored `&str`, `"checkout.place_ordr"` compiles and renders the fail-visible
+> `[key]` marker, and nothing proves code→catalog at build time. Level 4 would need generated key
+> constants and is not this change. What backs it instead: both tests were **mutation-checked**
+> (revert the catalog copy / restore the literal / wrap the recap in `<details>`), all red.
+>
+> **Adjacent, NOT fixed here and needing an issue**: the recap's own text is hard-coded English in
+> the same runtime (`format!("{} items - {}", ...)` plus a literal `" from "` and `<h1>"Checkout"</h1>`),
+> so a French customer reads *"2 items - 23,50 EUR from Chez Marcel"*. Same class as the button
+> defect, different fix, and `PROP-20260831-134539` **§4 UC4** shows the composed target for that
+> screen (§11 slice 5 is *"Divergence policy and the disclosure UI"* and says nothing about the pay
+> button or the recap — citing it for this would overstate the source).
+>
+> **Review round 1 (FAIL, 2 blocking) found no runtime defect and two RECORDS defects, which is the
+> finding worth keeping.** The counsel packet, both briefs and the PROP still asked counsel QT-4
+> about `"Commander — 23,50 €"` and a collapsible summary — strings this change had just deleted —
+> and a packet built to be handed to a French practitioner would have returned an answer about a
+> control that no longer ships. Three durable records also asserted the legal question was *closed*
+> ("removes the question", "carries the formula **verbatim**" when the shipped label is the formula
+> **plus a suffix**, and a rationale that read the article), while the PR body said the judgement had
+> deliberately not been made. **A change to a legal surface is not done when the code is right: the
+> question the packet asks has to move with it**, and the shipped label's suffix is now stated as the
+> live QT-4 question, along with the fact that the total renders `23,50 EUR` and not `23,50 €`.
+
+> **2026-08-31 — two environment defects that taxed every dispatch are fixed, and the second one was
+> already written down two weeks ago, which is the finding worth keeping.**
+> [#830](https://github.com/TheCaptainCompany/captain-food/issues/830) /
+> [#831](https://github.com/TheCaptainCompany/captain-food/pull/831), no `specs/**` (so no SPEC-LOG
+> sentence, no `make warning-baseline`).
+>
+> **D1 — the DB gate passed on a dead database.** `crates/db_test_gate` (#474) decides on whether
+> `DATABASE_URL` is *set*, never on whether the server answers, and it cannot: it runs inside
+> libtest, once per suite, after the workspace is already built. So a `DATABASE_URL` pointing at a
+> stopped Postgres failed every DB-gated suite at once, minutes in, with connection errors that read
+> as regressions in the diff under test (~12 min, measured 2026-08-30) — while the skip receipt
+> `target/db-test-skips.log` stayed **empty**, because nothing *skipped*. Grepping a run for
+> `DB-GATED SUITES SKIPPED` returned the same answer on a live database and on a dead one: it proves
+> nothing was skipped and says nothing about whether anything *ran*. Exactly CLAUDE.md's named class
+> — *a monitoring path that can only fire when a signal ARRIVES*. `tools/db-preflight.sh` is the
+> dead-man's-switch, run FIRST by `make test-crates`: it fails before the build when the database is
+> unreachable (0.06s, zero compilation) and prints a **positive** line when it is reachable, so the
+> evidence is two-sided. The reportable claim is now the triple — `DB PRE-FLIGHT OK` + empty receipt
+> + exit 0 — and never one third of it. Pinned by
+> `the_db_preflight_guards_test_crates_and_can_actually_fail`, proven red against three planted
+> defects (call deleted from the recipe; failure branch exiting 0; redaction removed, which leaked a
+> password) and against a genuinely stopped Postgres.
+>
+> **D2 — the documented closing step of every dispatch was unexecutable, and saying so again would
+> not have helped.** No executor session can mark a PR ready or arm auto-merge: both are GraphQL-only
+> mutations, the endpoint answers **403** ("only the pinned set of PR-review operations is served"),
+> `gh` is not installed, and REST has no auto-merge endpoint and ignores `"draft": false` while
+> returning 200. **But `docs/claude/sessions/workflow.md` has recorded all of that — and the correct
+> conclusion, that the flip is a coordinator action — since 2026-08-17 (#623), and three executor
+> runs still paid ~8 minutes each rediscovering it on 2026-08-30/31.** The reason is the lesson:
+> `.claude/agents/executor.md` step 7 still *told the executor to do it*, and a charter is loaded on
+> every run while a topic file is loaded only when something suggests it — nothing did, because step
+> 7 read as an ordinary instruction right up to the 403. **When an operational note contradicts a
+> binding instruction, the note loses silently, every time.** So the fix went to the binding text,
+> not to a fourth note:
+> [ADR-20260831-183847](../adr/ADR-20260831-183847-the-ready-flip-is-the-coordinators-step-and-always-was.md)
+> records that the ready flip is the coordinator's step, restoring
+> [ADR-20260810-011500](../adr/ADR-20260810-011500-team-ownership-sessions-start-autonomously-coordinator-never-authors.md)
+> §2 — which had assigned "GitHub mechanics … ready + auto-merge" to the coordinator all along, and
+> which ADR-20260815-115220 contradicted without noticing while rewriting the charter in the
+> executor's voice. That ADR settled *when* the step is taken, never *who* takes it.
+> **Auto-merge-on-green survives intact**: what converges is the executor's ending (always draft),
+> what does not is the merge condition (armed by default; withheld under `HOLD: human`) — a
+> simplification of the handover, not a loss of the property.
+>
+> `.claude/settings.json`'s 15 `Bash(gh …)` + 13 `PowerShell(gh …)` entries were **kept**, not
+> deleted: a permission is a conditional, not a claim that the binary exists, and the PowerShell half
+> says a Windows host uses this repo where `gh` is the normal way in. The fact is recorded in a
+> `_comment_gh` key instead.
+>
+> **The review then found the same defect one level up, in this very change.** The first pass fixed
+> the two files it was already editing, wrote *"both binding sites … were corrected"*, and recorded
+> "no follow-up required" — while **four more binding sites** sat uncorrected, findable in one
+> `git grep`: `docs/STATUS.md` (loads every run, second only to CLAUDE.md), `docs/BACKLOG.md` (the
+> binding method), two in `evidence.md` — one defining the executor's DONE as *"PR armed and
+> reported"*, i.e. the impossible operation — and a **second section of `workflow.md`**, ~200 lines
+> below the first. **An author sweeps the files they are already editing and calls it complete**, so
+> the count in a completeness claim is the thing to distrust; the ADR now carries the grep instead of
+> the word "both", and keeps the false claim on the record rather than deleting it.
+>
+> **And the quiet filter was deleting the new evidence.** `QUIET_KEEP` dropped `DB PRE-FLIGHT OK`,
+> `UNAVAILABLE` and both follow-on lines; `FAILED` and `SKIPPED` survived only by accident of
+> alternates meant for other tools, and the 50-line tail cannot recover the rest. So on
+> `make test-quiet` / `make rust-quiet` — which CLAUDE.md names as how token-bound sessions run gates
+> — a container without `postgresql-client` would show no pre-flight line and no skip receipt, and a
+> reader would write "empty receipt + exit 0 ⇒ DB suites ran": **the exact over-read this change
+> closed, restored on the recommended path**, with a DECLARED degraded mode turned silent. Fixed with
+> `^test-crates:|PRE-FLIGHT` and pinned. The axis to watch here is the **false negative** on the
+> positive line, not the false positive the brief anticipated.
+
+> **2026-08-31 — #639 part C has a proposal, and writing it corrected the design's headline claim:
+> the membership key `vernon` proposed is not the derivation `ScopeMembership` already uses, and
+> adopting it as stated would put the auth subject into the read-authorization index.**
+> [PROP-20260831-180622](../proposals/PROP-20260831-180622-staff-authentication-the-roster-the-invitation-and-the-door.md)
+> (docs-only: no `specs/**`, no code, so no SPEC-LOG sentence). `ScopeMembership.member_id`'s own
+> column note reads *"The DOMAIN id … **never the auth subject** — the sub→domain bridge happens once
+> per request at the edge"* (`projection_tables.yaml:1181`), so
+> `UUIDv5(scopeType|scopeId|memberType|authSubject)` is the same **shape** with a different **value**:
+> the "projection becomes a rename rather than a join" prize is real but unreachable that way, and
+> the route to it is a **person id** (`MemberId`) bridged from the subject, which restores a domain
+> id in the fourth term. Recorded because the claim had already been carried into a dispatch card as
+> established fact.
+>
+> **The second thing the proposal had to state before designing anything**: a `PUBLIC` operation is
+> **not reachable from a staff surface** — `Surface::role()` returns one role per surface
+> (`crates/web/src/router.rs:57`), both staff surfaces are 9/9 and 2/2 `requires_auth: true`, and a
+> control bound to an operation the client's role excludes is `SkipReason::RoleRefused`, **skipped
+> silently, not 403'd loudly**. So the staff sign-in door needs a renderer capability that does not
+> exist. Three forks are presented with both costs and none pre-resolved (invitation/membership
+> identity, check-or-lock for an act on another aggregate, where the door lives); four Concerns are
+> registered, which mechanically block `Approved`, the sharpest being that
+> `limit_depth`/`limit_complexity` occur **nowhere** in the tree while part C adds unauthenticated
+> write entry points to the public graph. [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml)
+> stays open and is carried as a declared dependency, not closed.
+
+> **2026-08-31 — the support address is `support@captain.food` with no voice leg, counsel waits for
+> production, and that sequencing rests on two things that are not currently true.** Founder answers
+> ([SUPPORT-CONTACT](../decisions/SUPPORT-CONTACT.yaml) closed;
+> [PUBLISH-PRECONDITIONS](../decisions/PUBLISH-PRECONDITIONS.yaml) timing recorded, row stays open
+> and counsel-owned). **No voice leg** decides a screen: the rider handback carries an in-app report,
+> not a call button, because a control that renders and does nothing is worse than no control.
+> **The key does not exist** — `grep -rn SUPPORT_CONTACT specs/ crates/` returns nothing, so
+> "required key with no default" was a recorded DESIGN and not a live constraint; the string lands
+> when #792's screen is built. I had asserted it as live and it was not.
+>
+> **Counsel after production is coherent, and it is safe only if production ships with no publicly
+> shown crawled listing** — this row gates the publish switch and nothing else, and a Tours partner
+> who signed up is not a crawled listing. Two things must hold, both ours and neither needing
+> counsel: the marketplace must default to partner-only (`restaurant.rs:83` filters `listing_status`
+> **only** when `orderable_only == Some(true)`, and the public `restaurants` query carries no guard,
+> so today the default SHOWS non-partner rows); and `RUN_SIRENE_WORKER` must actually be off — its
+> own declaration **contradicts itself**, prose reading *"STOPPED since 2026-07-28"* while
+> `deploy.production` is `"true"`. The recorded pause and the deployed value disagree and nobody has
+> reconciled them. If either fails, the obligations attach before counsel looks, which is the
+> opposite of what was chosen.
+
 Current state: [`../STATUS.md`](../STATUS.md).
 
 > **2026-08-31 — the founder's six invoked commands are built, user-invoked only** (`.claude/skills/**`
@@ -53,6 +222,186 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > lines, and the second-order question stays open as a `/mob-question`.
 > Reversibility class as dispatched **reversible**; `HOLD: human` all the same, because this is the
 > coordinator's own routing surface.
+> **2026-08-31 — the oversell hole on the money path is CLOSED: checkout re-derives orderability
+> instead of trusting cart-edit time**
+> ([#823](https://github.com/TheCaptainCompany/captain-food/issues/823) / PR
+> [#824](https://github.com/TheCaptainCompany/captain-food/pull/824), slice 1 of
+> [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) §11 — the one
+> slice that is not `HOLD: human`; approved by the founder 2026-08-31, recorded in
+> [ADR-20260831-165146](../adr/ADR-20260831-165146-the-quote-backstop-is-thirty-minutes-and-the-priced-quote-token-is-approved.md),
+> which is the recorded approval covering this change's `specs/**` edit).
+> `require_orderable_line` — the availability-and-stock guard — existed, was correct, and was called
+> from the two cart-edit handlers **only**. It was never called at checkout. A dish added at 19:50,
+> 86'd by the kitchen at 20:20 and paid for at 20:40 **was accepted**: pricing fails closed only on
+> a line that LEFT the catalog, so an offer merely flagged `UNAVAILABLE` — or stock-tracked and now
+> below the line quantity — still resolved a price and sailed through to a real Stripe intent. This
+> is the failure shape [#780](https://github.com/TheCaptainCompany/captain-food/issues/780) already
+> named (a mechanism written and never connected), on the money path, at peak.
+> **The two reds were proved before the fix**, and their panic message is the finding stated by the
+> test runner itself: *"the spec expects a typed rejection: PaymentRequestOutput { payment_intent_id:
+> PaymentIntentId(\"pi_123\") … }"* — i.e. the checkout did not merely accept, it minted the intent.
+> **The third test is the false-positive floor and is GREEN on both sides by construction**: an
+> offer that tracks no stock must never block, because untracked is not zero and treating it as zero
+> would refuse every order for every restaurant that does not count portions. A card asking for all
+> three to be RED on `main` is asking the impossible of that one — an acceptance assertion cannot
+> fail where nothing blocks — and that is worth recording, because the same shape will recur every
+> time a guard ships with its floor.
+> **Position is the whole safety argument** and is documented at the call site: AFTER `price_cart`,
+> so a line with no live price keeps its own `PriceUnresolvable` code rather than degrading to
+> `OfferNotFound`; and BEFORE the Stripe call and the store-credit spend, so a refusal can never
+> strand a real PaymentIntent or consume goodwill. No new error was declared — `OfferUnavailable`
+> and `InsufficientStock` already existed with en/fr messages and are already surfaced by the
+> checkout screen's error toast.
+> **`OutsideDeliveryArea` stays a `TODO(invariant)`**: it needs a delivery-area policy port that
+> does not exist in any read model, so only the half actually discharged was retired.
+
+> **2026-08-31 — the founder decided the quote's backstop and approved the design: 30 minutes, and
+> build it slice 1 first** (docs/records only: one register row closed, one proposal approved, one
+> ADR, the register prose row updated; no `specs/**`, no code, so no SPEC-LOG sentence and no
+> warning-baseline refresh is owed).
+> Two answers, both put through `AskUserQuestion` with a register-check trail, options, trade-offs
+> and a recommendation; both recorded in
+> [ADR-20260831-165146](../adr/ADR-20260831-165146-the-quote-backstop-is-thirty-minutes-and-the-priced-quote-token-is-approved.md).
+> **(1) `QUOTE-STALENESS` — N = 30 MINUTES, AS A BACKSTOP ONLY; M IS DROPPED.** Verbatim option
+> label: *"30 minutes (recommended)"* — the `business` lens's figure, taken unchanged with its
+> stated derivation: the **p99 of the cart-to-pay leg with the mandatory SCA/3DS bank-app detour in
+> it**, **not** a risk setting. It essentially never fires on a live session. **Why an N exists at
+> all, and it is the load-bearing context**: carts never expire
+> (`specs/ordering/actors.yaml:15` — re-verified at `9cd15c75`; the dispatch carried it as an
+> `UNVERIFIED input` and it checks out), so **N is the only clock on the whole cart**. The rejected
+> options are in the row with their costs — shorter (~5 min) fires on ordinary Friday-night sessions
+> and pays conversion on **correct** sessions; longer lets a quote outlive the service state it was
+> priced in; divergence-gated with no backstop leaves an unbounded-age quote honourable. **The
+> caveat survived the closure**: contract **C1** `quote_age_seconds` does not exist, so 30 is
+> **evidence-deferred** (ADR-20260808-144738 decision 5) and is re-derived from the observed p99
+> after the first peak — the row says what would change it.
+> **(2) [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) is
+> APPROVED.** Verbatim: *"Approve — build it, slice 1 first"*. Slice 1 (HEAD orderability at
+> checkout) was dispatched in parallel.
+> **The three surviving `Concerns` were re-expressed, not deleted** — an unchecked entry
+> mechanically blocks `Approved`, and the validator's own message says to resolve it by checking it
+> with a one-line resolution, never by deleting it. One is **genuinely discharged** (the N). The
+> other two were never approval gates and are now conditions on the PR that can satisfy them: the
+> **non-additive `PlaceOrder` change** is a **slice-4 gate** (`HOLD: human`, team-reviewed —
+> [ADR-20260815-134655](../adr/ADR-20260815-134655-the-team-merges-its-own-work-no-pr-waits-on-founder-review.md):
+> no PR waits on founder review, so an approval could neither discharge it nor be blocked by it),
+> and the **as-of fold's peak cost being a projection rather than a measurement** is a **slice-2
+> Done-when** — a statement about the absence of code cannot become false before the code exists, so
+> as written it blocked `Approved` **forever**. Both are now written into §11 at the slice they bind.
+> `make validate` accepts the result at **0 errors**, so the approval got past
+> `proposal-approved-unresolved-concern` honestly.
+> **The reversal stays flagged.** The proposal reverses
+> [ADR-20260810-112836](../adr/ADR-20260810-112836-cart-priced-live-on-read.md) **§2** in part — the
+> freeze locus moves from commitment to quote time, and the enforcement clause naming the
+> `expectedTotal` equality check is replaced outright — and that went unflagged in two records until
+> today. The header `Reverses in part` line and §2.4 are intact, and the approving ADR re-states it
+> in its own §4, because approval is exactly when a reversal gets re-buried.
+
+> **2026-08-31 — the weekly cap did not reliably measure: one timer slot for N concurrent runs, a
+> receipt naming the wrong branch, and a step 8 pointing at a file nothing writes**
+> ([#821](https://github.com/TheCaptainCompany/captain-food/issues/821) "loop-budget: the weekly cap
+> under-counts under concurrency", PR [#822](https://github.com/TheCaptainCompany/captain-food/pull/822),
+> `HOLD: human`). The cap is the founder's governance control on autonomous loops (ADR-0014), and it
+> failed **worst exactly when the session was most parallel**. **D1**: the running timer is one file in
+> the git **common dir** — `git worktree` does *not* isolate it — so `stop` billed whatever it found.
+> The W36 ledger records the collision twice: a segment noting *"a concurrent session in this shared
+> checkout closed the timer I inherited at 12:05:26Z"*, and a **33.3-minute unbilled remainder** after
+> a `stop` billed 3.2 minutes of a ~39-minute run **and printed success**. A silent under-count is
+> worse than a refusal: the executor that trusts the output records the wrong number. Fixed
+> **structurally**, not by a comparison — a run has an owner id (`--run` > `$LOOP_BUDGET_RUN_ID` >
+> `$CLAUDE_CODE_SESSION_ID` > none) and the timer **file name carries it**, so another run's timer is
+> *unaddressable* rather than merely detected (the nearest shell reaches to compiler-first,
+> ADR-20260803-234035; PROP-20260802-130500 §1 caps a shell binding at level 3). Two consequences on
+> purpose: **concurrent runs are now normal** — each opens its own timer and bills its own real time,
+> so no second session is pushed into estimating with `--elapsed` — and a `stop` that cannot prove
+> ownership **refuses and names whose timer it found**. `--elapsed-seconds` and `reset` no longer
+> delete another run's live timer; both used to, so the escape hatch the tool *recommends on a
+> refusal* was itself the weapon. **D2**: the receipt stamped the branch of the checkout `stop` ran
+> from, not the branch the run was on (live instance: `2026-W36/20260831T142143Z-0568abb8.json` says
+> `main` while its note describes `819-` work). The branch is now captured at `start`. The defective
+> receipt is **not** retro-edited — the ledger is append-only (ADR-20260812-011057). **D3**: the
+> executor protocol's step 8 said commit `.claude/loop-budget.json`, which **nothing writes** — an
+> executor following the documented protocol committed nothing and left its run unbilled, a
+> systematic under-count by exactly the people who follow the protocol. Step 8 now names the ledger
+> file, and the stale siblings in the continuous-development proposal and the Makefile go with it.
+> **41 new selftest cases (58 → 99), of which 24 are RED against `main`** — measured, not recalled:
+> revert every file this PR touches except the selftest, run the suite. The other **17 pass against
+> `main` too** (`7d` `7g` `7i` `10a` `10e` `10f` `10h` `10k`–`10p` `10u` `12a` `13h` `13i`): they are
+> characterization cases pinning behaviour this change did not alter, and must NOT be read as
+> regression-proven here — weaken one and no red follows. Four more (`13a` `13d` `13e` `13g`) were
+> already green when written, because the run-id keying committed earlier in this same PR had
+> delivered them: a good fact about the design, recorded because "observed RED first" is not a
+> universal and must never be asserted as one. (The 15:11 receipt bakes in the earlier, wrong
+> figure of 30; the ledger is append-only, so that divergence stands as history.)
+> `make validate` 0 errors, `check-drift` clean, `hooks-test` green armed. Found in passing and
+> now commented where the trap lives: **`make -n budgeted-loop` is not a dry run** — GNU make
+> executes recipe lines containing `$(MAKE)` even under `-n`, so it opens a timer and bills a
+> segment (two 0-second receipts in this commit are its output, kept rather than deleted because
+> hook-written budget state is never hand-edited).
+> **Addendum, on evidence arriving mid-run**: the contention is the **fourth** distorted segment of
+> the day, not the two first named — `20260831T165727Z-de76c595.json` (10.3 m, `quote-decisions-20260831`)
+> records a run that hit **exit 3** at `start` because a timer opened **70 s earlier on `main`** was
+> still open, and reconstructed ownership by hand before billing "as mine". Keying the timer by
+> **worktree** (`--git-dir`) was proposed as a smaller fix and **rejected**: it re-creates
+> ADR-20260812-011057's *failure 1* (six checkouts, six simultaneous totals — the ADR chose
+> `--git-common-dir` precisely so `start` and `stop` are one timer whatever checkout each ran in),
+> and it partitions on the wrong noun, since what is billed is a **run**, not a directory — one run
+> spans worktrees, one worktree hosts many runs, and at least one observed collision was a sibling
+> session **in the same checkout**, which worktree keying cannot see. Run-id keying delivers
+> everything worktree keying offered, in any topology, and makes a mismatch **loud** rather than
+> merely rarer. Folded in from the same evidence: **`exit 2` and `exit 3` mean opposite things**, so
+> every exit-3 path now prints `(exit 3 = INTEGRITY, not budget exhaustion …)` with the week's state,
+> and every refusal hands over the whole tuple — started-at, branch, run id **and pid** — which is
+> exactly what that executor reconstructed by hand.
+
+> **2026-08-31 — the repricing obligation map is IN THE REPO, and the lens return that never landed
+> is the finding** (docs-only: one new legal brief, the standing counsel list extended, one proposal
+> `Concerns` entry discharged; no `specs/**`, no code, no SPEC-LOG sentence owed).
+> [BRIEF-20260831 "Repricing and the priced quote token: the obligation map"](../legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md)
+> records the `legal-specialist` lens's return of 2026-08-31 — **relayed by the coordinator from a
+> return that was not otherwise persisted**, which is the second occurrence in two weeks of the
+> defect [BRIEF-20260818](../legal/BRIEF-20260818-counsel-packet-and-self-answer-triage.md) already
+> records (a packet summarised into a record and never landed). Its cost was concrete: the executor
+> writing
+> [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) was handed the
+> labels `B1–B5` / `QT-1…QT-10` but not their text, **correctly refused to reproduce them from
+> memory**, and left an unchecked `Concerns` entry that mechanically blocked `Approved`. That entry
+> is now **discharged**, and §10 of the new brief reconciles `L1–L7` against `QT`/`B` row by row —
+> cross-referenced, not competing. **Every `L` row survived.**
+> **The load-bearing conclusion**: the binding price is the one displayed at the **confirming
+> click**, not the price at restaurant acceptance — the storefront-as-invitation-to-treat reading is
+> not freely available, because the design *looks* like an *offre* (pay button, hold, confirmation,
+> no customer cancel at `PENDING`), the CGU term that would buy it is itself on the **R212-1**
+> blacklist, and L221-14's sanction runs the other way. **The design is then built past the
+> question**: after the click, charge the quoted amount or **REFUSE**, never more — safe under both
+> characterisations, which is what lets the epic ship without waiting on counsel.
+> **Sequencing that falls out**: build the **customer-facing** half now (*never charge more than
+> displayed*); **do not** build the restaurant-facing half (*held to a withdrawn price for N
+> minutes*) until the funds posture resolves — under one branch it is a purchase commitment, under
+> the other a unilateral constraint on a business user. `QT-8`/`QT-9` are therefore **absorbed into
+> BRIEF-20260818 §3(c) Q10** rather than asked separately, and `QT-1`–`QT-5` join that file's
+> standing irreducible list (no second home invented). `QT-6` (absorbing the delta) is blocked
+> upstream on [`CAPTAINNET-ZERO`](../decisions/CAPTAINNET-ZERO.yaml) — **no new register row
+> opened**.
+> **Two findings the proposal's §8 could not reach.** (1) `ADR-20260810-112836:97` accepted that
+> *"the transient price a guest once saw is not in the log"* — true only while display and charge
+> were structurally identical, and **the quote token retires that premise**, so the quote becomes
+> the only evidence and needs a **third retention window** (the accounting clock
+> `FRENCH_COMMERCIAL_BOOKS_10Y` is over-retention for a quote that never became an order, GDPR Art.
+> 5(1)(e)). (2) A quote event on the Cart stream carrying `legalRetention` can take the Cart actor
+> out of stream deletion and **break** [`ERASURE-LAUNCH-GATE`](../decisions/ERASURE-LAUNCH-GATE.yaml)
+> — **pseudonymous-by-construction is free now and a migration later**.
+> **Relay citations re-verified, one corrected**: `specs/ordering/errors.yaml:250-262` is exact;
+> `specs/screens/restaurant_frontoffice.yaml:518` is a real `show_toast` but the **generic**
+> `on_error` handler on `place_order`, not a purpose-built price-change disclosure — the concern
+> survives and is worse for it, since a `PriceMismatch` reaches the customer today **only** as an
+> anonymous transient toast (DSA Art. 25 + EAA accessibility).
+> **No counsel is engaged** (founder, 2026-08-31: *"Not scheduled. We are on our own for now until
+> the product is ready"*), so what cannot be self-answered is **marked**, not answered. Nothing in
+> the brief was FETCHED — `legifrance.gouv.fr` and `economie.gouv.fr` returned **403 egress-policy
+> denials**, `eur-lex.europa.eu` **202 with a zero-byte body** on two URL forms — so **every article
+> number is VERIFY-FIRST even where the rule is graded (a)**. No lens output, and no aggregation of
+> lenses, is legal advice or clearance (ADR-20260812-143619).
 
 > **2026-08-31 — the priced quote token is DESIGNED, and the reversal it carries is now flagged in
 > both records** (docs-only: one proposal, two record edits, two register-row notes, no `specs/**`,

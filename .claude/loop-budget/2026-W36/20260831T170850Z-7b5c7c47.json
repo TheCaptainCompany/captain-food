@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 471,
+  "recordedAt": "2026-08-31T17:08:50.731Z",
+  "branch": "821-loop-budget-timer-ownership",
+  "note": "#821 mid-run fold: exit 3 declares itself INTEGRITY (not budget), refusals name the whole tuple incl. pid; --git-dir worktree keying weighed and rejected with its reason recorded in loops.md (re-creates ADR-20260812-011057 failure 1; partitions on the wrong noun). 9 new selftest cases, 3 seen RED first; 99/0. PR #822 still draft, HOLD: human."
+}

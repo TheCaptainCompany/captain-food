@@ -262,7 +262,7 @@ sequenceDiagram
   `status/in-progress`; the reaper is not raced.
 - `specs/**` is untouched by every executor run — assert it in the workflow (`git diff --name-only`
   against `specs/` must be empty) rather than trusting the prompt.
-- Budget guard enforced and `.claude/loop-budget.json` committed each run (ADR-0014).
+- Budget guard enforced and the ledger file each `stop` writes (`.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json`) committed each run (ADR-0014, ADR-20260812-011057). `.claude/loop-budget.json` is config; nothing writes it.
 - An ADR records the autonomy posture chosen in D1–D5.
 
 ## 8. Open questions for the product owner

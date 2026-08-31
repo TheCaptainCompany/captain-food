@@ -612,6 +612,38 @@ a DB-gated suite PANICS with the command to run it, and the only way out is an e
 `DB_TESTS_REQUIRED=0`, which prints a summary naming every skipped suite. So there is nothing to
 set in the happy path — just export `DATABASE_URL` (the ~40s `initdb` recipe is §above).
 
+**REQUIRED means "a URL is set", not "a database answers" — and Postgres is NOT up by default in
+this container.** `db_test_gate` decides on whether `DATABASE_URL` is set; it cannot ask whether the
+server is reachable, because it runs inside libtest, once per suite, after the whole workspace has
+already been built. So a `DATABASE_URL` pointing at a stopped Postgres fails every DB-gated suite at
+once, minutes into the run, with connection errors that read as regressions in the diff under test.
+That misattribution cost one executor ~12 minutes on 2026-08-30. Start it with
+`service postgresql start` (needs a sandbox bypass).
+
+**An empty skip receipt is NOT proof the DB-gated suites ran.** This is the correction #830 landed,
+and it is worth reading twice, because the receipt is easy to over-read. `target/db-test-skips.log`
+is written only when a suite **skips**. On a dead database nothing skips — the suites *fail* — so
+the receipt is empty, exactly as it is on a perfectly healthy run. Grepping a run for `DB-GATED
+SUITES SKIPPED` and finding nothing therefore tells you **only that nothing was skipped**; it says
+nothing whatever about whether anything *ran*. It is CLAUDE.md's named defect class in its own
+words: *"a monitoring path that can only fire when a signal ARRIVES — a threshold alert goes quiet
+exactly when it should scream; liveness needs a dead-man's-switch."*
+
+`tools/db-preflight.sh` is that dead-man's-switch, and `make test-crates` runs it FIRST: it fails
+before the build when the configured database is unreachable, and prints a positive line when it is
+not. **Quote all three parts, never one:**
+
+```text
+test-crates: DB PRE-FLIGHT OK -- localhost:5432 - accepting connections   <- the database was LIVE
+(no `DB-GATED SUITES SKIPPED` line)                                       <- and nothing skipped
+exit 0                                                                    <- and the suites passed
+```
+
+Only together do those mean "the DB-gated suites ran, against a live database, and passed". Any one
+alone is compatible with a run that exercised no database behaviour at all. If the pre-flight prints
+`DB PRE-FLIGHT UNAVAILABLE` (no `pg_isready` on PATH), the positive half is missing for that run and
+the receipt is back to proving nothing — say so rather than reporting the run as DB-covered.
+
 **Derive that count, never quote it** — it moves with every DB-gated test added, and it was already
 wrong twice in one branch (prose said 42 while the run printed 45; the run printed 45 while 50 suites
 had really skipped, because `actor_runtime`'s local copy of the gate was not writing the receipt):

@@ -1,9 +1,36 @@
-key: "PUBLISH-PRECONDITIONS"
-status: "open"
-question: "What must exist before the first crawled listing is shown publicly, now that PUBLISH-SCOPE is national? Specifically: does Art. 6(1)(f) carry national publication of SIRENE-derived listings including sole traders' name and often-domicile address, is an Art. 35 DPIA mandatory and does it trigger Art. 36 prior consultation, and is Art. 14 satisfied individually or under the 14(5)(b) derogation?"
-owner: "counsel"
-opened: "2026-08-30"
-capacity: "counsel"
-register: "docs/adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md"
-evidence: "What must exist before the first crawled listing is shown publicly. `legal-specialist` grades four as illegal-to-launch-without: an Art. 14 notice reachable from every seeded listing; an objection channel that is not GBP-gated, keyed on SIREN/SIRET so a re-import cannot resurrect a removal; INSEE diffusion-status filtering **at import, not at display**; and the suppression list honoured by both the ACL and the prospection fold. Plus a written balancing test, a DPIA covering prospects, and an Art. 30 record. **No lens output is legal advice or clearance.**"
-note: "Residue 3 of ADR-20260830-213135, NARROWED to what only counsel can answer -- the founder's next move is to engage counsel, not to answer. NO lens output is legal advice or clearance. The four MECHANICAL obligations are deliberately NOT decision rows: they were decided 2026-08-08 (PROP-20260808-142532 D3/D4, Approved) and filing them again would re-ask an answered question per ADR-20260828-120500. They are issues. Sharpest sequencing fact: Art. 14(3)(a) runs the notice clock from OBTAINING, not from display, so the notice is already owed for rows we hold; and the balancing test, Art. 30 record and diffusion filter attach to the CRAWL, not the publish, so restarting the crawl is itself a regulated act that starts clocks. Counsel packet of eight questions is in the ADR."
+key: PUBLISH-PRECONDITIONS
+status: open
+question: 'What must exist before the first crawled listing is shown publicly, now that PUBLISH-SCOPE
+  is national? Specifically: does Art. 6(1)(f) carry national publication of SIRENE-derived listings including
+  sole traders'' name and often-domicile address, is an Art. 35 DPIA mandatory and does it trigger Art.
+  36 prior consultation, and is Art. 14 satisfied individually or under the 14(5)(b) derogation?'
+owner: counsel
+opened: '2026-08-30'
+capacity: counsel
+register: docs/adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md
+evidence: 'What must exist before the first crawled listing is shown publicly. `legal-specialist` grades
+  four as illegal-to-launch-without: an Art. 14 notice reachable from every seeded listing; an objection
+  channel that is not GBP-gated, keyed on SIREN/SIRET so a re-import cannot resurrect a removal; INSEE
+  diffusion-status filtering **at import, not at display**; and the suppression list honoured by both
+  the ACL and the prospection fold. Plus a written balancing test, a DPIA covering prospects, and an Art.
+  30 record. **No lens output is legal advice or clearance.**'
+note: 'Residue 3 of ADR-20260830-213135, NARROWED to what only counsel can answer -- the founder''s next
+  move is to engage counsel, not to answer. NO lens output is legal advice or clearance. The four MECHANICAL
+  obligations are deliberately NOT decision rows: they were decided 2026-08-08 (PROP-20260808-142532 D3/D4,
+  Approved) and filing them again would re-ask an answered question per ADR-20260828-120500. They are
+  issues. Sharpest sequencing fact: Art. 14(3)(a) runs the notice clock from OBTAINING, not from display,
+  so the notice is already owed for rows we hold; and the balancing test, Art. 30 record and diffusion
+  filter attach to the CRAWL, not the publish, so restarting the crawl is itself a regulated act that
+  starts clocks. Counsel packet of eight questions is in the ADR. TIMING (founder, 2026-08-31): Founder,
+  2026-08-31: engage counsel AFTER the product is working in production -- verbatim ''After product on
+  production workibg''. The mediateur de la consommation follows counsel, not before it. That sequencing
+  is SAFE ONLY IF production ships with no publicly shown crawled listing, because this row gates the
+  publish switch and nothing else. It does NOT gate the Tours partner storefront: a partner who signed
+  up is not a crawled listing and raises none of these questions. TWO THINGS MUST HOLD, both in our control
+  and neither needing counsel: (1) the marketplace must default to partner-only -- restaurant.rs:83 filters
+  listing_status ONLY when orderable_only == Some(true), and the public restaurants query carries no guard,
+  so today the default is to SHOW non-partner rows; (2) RUN_SIRENE_WORKER must actually be off -- its
+  own declaration in specs/network/configuration.yaml CONTRADICTS ITSELF, prose saying STOPPED since 2026-07-28
+  while deploy.production is "true", so the recorded pause and the deployed value disagree and the disagreement
+  has never been reconciled. If either fails, production shows crawled listings and every obligation in
+  this row attaches BEFORE counsel has looked, which is the opposite of what the founder chose.'
