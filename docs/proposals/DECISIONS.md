@@ -34,6 +34,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `AGGREGATES-OWN-THE-FACTS` | decided | 2026-08-29 | Does the foreign-stream-append isolation subject (twelve deliver: steps still appended by process managers, plus the #595 unlaned reclamation birth) get resolved FIRST, before any new development builds on the pre-isolation shape? -> ADR-20260829-230418 | founder |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
+| `CMD-INVOKE` | decided | 2026-08-31 | How does the founder route an incoming message to the coordinator -- by the coordinator inferring intent, or by an explicit user-invoked command whose tag selects the handling? -> ADR-20260831-204546 | founder |
 | `CONTRIB-DEFAULT` | decided | 2026-08-19 | Is the customer contribution pre-filled by default? -> ADR-20260819-103112 | founder |
 | `CONTROLLER-HANDOVER` | decided | 2026-08-19 | Is the association-to-company controller handover made reconstructible in the event log? -> ADR-20260819-103112 | founder |
 | `CREDIT-AT-ERASURE` | decided | 2026-08-31 | What happens to an unspent CustomerCredit balance when its subject is erased -- is it refunded, forfeited or retained, does a positive balance PARK the erasure, and what does the subject see before the irreversible act? -> ADR-20260831-033621 | founder |
@@ -94,7 +95,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 80 — 18 open · 57 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 81 — 18 open · 58 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 100** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 
@@ -2788,6 +2789,46 @@ recommendation cell. The one question this page exists to answer is not mechanic
 makes coordinator-authored **numbers** traceable to antecedents; REG-1 makes coordinator-authored
 **questions** traceable to rows. Same failure class — *a coordinator assertion consumed by thirteen
 readers as established fact* — disjoint mechanisms.
+
+---
+
+## 49. The founder elects user-invoked commands — six of them, and `/direct-question` amends the mob rule (founder directive, 2026-08-31) — ✅ DECIDED 2026-08-31
+
+Row `CMD-INVOKE` (`docs/decisions/CMD-INVOKE.yaml`), decided by
+[ADR-20260831-204546](../adr/ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md),
+realized by [#819 "Six founder-invoked slash commands"](https://github.com/TheCaptainCompany/captain-food/issues/819)
+/ [#820](https://github.com/TheCaptainCompany/captain-food/pull/820).
+
+**Founder verbatim, 2026-08-31**: *"So to avoid any risk I will choose user invoked approach for now
+with these 3 types: /direct-question: ask direct question(s) to you don't need the mob ·
+/mob-question: ask the question(s) to the mob · /work: tell you to launch the work on something. Do
+you see other types of invocation?"* and *"/decision instead of decide, decide could mean that you
+have to decide and I here I want you record decisions. Ok for /status and /correct"*.
+
+| Row | What it settles | Status |
+|---|---|---|
+| **CMD-INVOKE** | **Six user-invoked commands** — `/direct-question`, `/mob-question`, `/work`, `/decision`, `/status`, `/correct` — each a skill under `.claude/skills/` with `disable-model-invocation: true`, so the founder can fire them and the model cannot. `/decide` → `/decision` on his ground that *decide* instructs the coordinator while *decision* names the artifact he records. **The amendment**: ADR-20260812-143619's carve-out list goes from **three to four**, and the fourth is a different **kind** — the three existing are class-based and lens-asked, `/direct-question` is **founder-elected per message** and predicted by no class. **What is not weakened**: it skips the **mob**, never the **register check**; the skill carries a written escalation duty (controlling record contradicted / `HOLD: human` axis / *"I do not know and one lens would"* → say so and fan out anyway) | ✅ **DECIDED 2026-08-31** |
+| **The `/status` name** | `/status` **collides with a Claude Code built-in**. Resolution is first-match-wins with skills ahead of built-ins, so ours shadows it on this bundle — a guarantee resting on array order inside a vendor binary that can reorder on upgrade. *"Ok for /status"* is his verbatim, so the name is **founder-owned** (ADR-20260810-011500), not a coordinator fix | 🟠 **OPEN — with the founder** |
+
+**The process defect this row also records, because it is more reusable than the decision.** The
+branch that introduced the carve-out **also introduced the skill written to catch it**
+(`.claude/skills/decision/SKILL.md`, *"Step one, always: the reversal check"*, using the
+`ADR-20260810-112836` landmine as its worked example). The PR wrote the warning and reproduced the
+defect. The cause is not carelessness: #819's trail read *"no controlling record — terms: slash
+command, user-invoked, disable-model-invocation, /direct-question, /mob-question"* — every term a
+**mechanism** term, none a **substance** term (*mob*, *fan-out*, *founder message*, *carve-out*),
+while the branch's own deliverable treats ADR-20260812-143619 **as controlling**. **Rule earned: a
+register check searches the SUBSTANCE THE CHANGE AMENDS, not the MECHANISM IT IS BUILT FROM.** A
+trail whose terms are all implementation nouns has not yet run — which is why a negative trail is
+never self-certifying. Failure class #1/#8 of the table of nine, committed by the check itself.
+
+**Roster note**: the dispatch classed the work *reversible* and set the roster at "card plus
+independent review" — correct pricing for **writing six skill files**, wrong for **amending a
+founder rule about how founder messages are answered**. The class was assessed on the artifact, not
+on the decision the artifact carried. ADR-20260831-204546's `Consulted:` block records the roster as
+**NOT ASKED** rather than inventing lens lines. Whether a founder-elected per-message opt-out should
+sit beside three class-based carve-outs has had **no mob read** and remains available as a
+`/mob-question` on that record.
 
 ---
 

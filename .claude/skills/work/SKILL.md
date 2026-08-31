@@ -37,6 +37,13 @@ the answer:
 never the coordinator picking. Skipping the top item needs a stated reason, and an item is **never
 re-ranked to make it dispatchable**: a blocked top item is reported blocked.
 
+**If the chunk has no issue yet, file one before claiming.** The claim protocol needs an `#NN` for
+the `Closes #NN` line and the `status/in-progress` label, and `docs/BACKLOG.md` has no
+issue-creation step — so this is the gap that must not stall the run. File it with the title in the
+CLAUDE.md naming form, the reversibility class, and the register-check trail; then claim it. Note
+that `GET /search/issues` is refused in this container, so a duplicate check lists
+`GET /repos/{owner}/{repo}/issues` and filters locally.
+
 **2. Is it dispatchable?** Run the register check before writing the card — the `Agent`-tool hook
 will refuse a dispatch to a write-capable agent without a resolvable trail, and that refusal at
 dispatch time is late. Two blockers stop the run before it starts:

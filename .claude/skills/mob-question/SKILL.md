@@ -56,8 +56,8 @@ A unanimous roster is reported as unanimous. Manufactured consensus is not.
 
 ## The escalation duty
 
-The same three conditions as `/direct-question`, pointing the other way — here the fan-out is
-already happening, so the duty is to **say what the fan-out cannot settle**:
+The same duty as `/direct-question`, **re-pointed** — here the fan-out is already happening, so
+the duty is to **say what the fan-out cannot settle**. The conditions are not the same list:
 
 - **A controlling record the question appears to contradict** makes this a **decision reversal**,
   not an option space. Say so in the briefing and in the answer, name the record, and route it to

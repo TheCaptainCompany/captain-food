@@ -51,6 +51,12 @@ human` names the team's reviewer pass, never a founder wait, and the coordinator
 check state comes from the API. Prefer both over the conversation — a long session's memory of what
 shipped is exactly the projection that goes stale.
 
+**Section 3 has its own source, and the authority order matters.** Decision-queue rows come from
+`docs/decisions/<KEY>.yaml`, which is authoritative for **current status**; the prose row in
+[`docs/proposals/DECISIONS.md`](../../../docs/proposals/DECISIONS.md) is its **history**. Read the
+YAML. A status built from the prose rows will report a row as founder-owed that the YAML records as
+`decided` — the exact failure of telling him he owes an answer he already gave.
+
 Two cheap accuracy rules, because a wrong `/status` is worse than a slow one:
 
 - **A record that pins a fact to "in flight" expires and nothing detects it.** Date the claim, or

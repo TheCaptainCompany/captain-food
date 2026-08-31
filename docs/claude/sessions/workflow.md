@@ -493,19 +493,31 @@ Each is a skill in `.claude/skills/<name>/SKILL.md` carrying its own procedure a
 | [`/status`](../../../.claude/skills/status/SKILL.md) | Asking where things stand | Read-only — no check, no record, no fan-out, and it **never becomes work** |
 | [`/correct`](../../../.claude/skills/correct/SKILL.md) | Telling you something is wrong | Authoritative; the work is **propagation** to everything downstream, then the record |
 
-All six set **`disable-model-invocation: true`**, which is a real and enforced `SKILL.md` frontmatter
-key (verified in the Claude Code bundle, 2.1.251: the skill loader parses it beside `allowed-tools`
-and `user-invocable`, and the Skill tool refuses a call with `errorCode 4`). The founder chose
-user-invoked *to avoid risk*; a command that could also auto-fire would blur exactly the distinction
-he is buying, so the key is load-bearing and not decoration. **Verify it still exists before
-trusting it** — a frontmatter key that silently does nothing is this repo's most-repeated defect.
+All six set **`disable-model-invocation: true`**, a real and **enforced** `SKILL.md` frontmatter key:
+the loader parses it beside `allowed-tools` and `user-invocable`, and the Skill tool refuses the call
+with `errorCode 4` unless the user typed the command that turn (`disableModelInvocation &&
+!userTypedThisTurn`). `user-invocable` defaults to true when absent, so the six stay founder-invocable
+while excluded from the model-visible list. The founder chose user-invoked *to avoid risk*; a command
+that could also auto-fire would blur exactly the distinction he is buying, so the key is load-bearing
+and not decoration.
+
+**Verify it against the artifact that actually RUNS, and re-check which one that is** — a frontmatter
+key that silently does nothing is this repo's most-repeated defect, and the version question here has
+a trap that cost two wrong citations in one session. This container carries **two** installs:
+`/opt/node22/lib/node_modules/@anthropic-ai/claude-code` is a JS bundle whose `package.json` and
+embedded `VERSION` both say **2.1.42**, while `/opt/node22/bin/claude` is a symlink resolving to a
+**native ELF binary** `/opt/claude-code/bin/claude` reporting **2.1.251** — and the symlink target
+changed mid-session. Reading `package.json` under `node_modules` describes a bundle that is **not
+executing**. Go to `readlink -f "$(which claude)"` at the moment of use, cite that path, and for the
+native binary use `strings` rather than `grep` on a `cli.js` that may not be the running code.
 
 **The one rule that must survive contact:**
 
 > **`/direct-question` skips the MOB. It never skips the REGISTER CHECK.**
 
-Of the coordinator's nine catalogued failures, **only #9 was caught at the dispatch gate**; the
-rest were answer- or question-shaped. The `PreToolUse` hook
+Of the coordinator's nine catalogued failures the hook caught **none** — #9, the only one stopped
+before it did damage, was caught by *the check itself*, the procedure being run rather than the gate
+firing; the rest were answer- or question-shaped. The `PreToolUse` hook
 gates `AskUserQuestion` and `Agent` — never a prose answer. So a direct answer is the surface where
 the check is least enforced and most needed, and dropping the mob removes the other reader who might
 have caught it. Both cannot go. The trail rides the answer in the canonical format defined below.
