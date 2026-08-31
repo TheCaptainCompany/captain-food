@@ -40,7 +40,8 @@ in-session on 2026-08-31, and each is independently sufficient:
 
 2. **`gh` is not installed** (`which gh` → exit 1) — so the remedy the 403 itself proposes does not
    resolve either. `.claude/settings.json` nonetheless carried 15 `Bash(gh …)` and 13
-   `PowerShell(gh …)` permission entries, reconciled in the same commit as this ADR.
+   `PowerShell(gh …)` permission entries — reconciled in the same commit as this ADR by **recording
+   the fact beside them, not by deleting them** (see *Consequences → Positive*).
 
 3. **REST cannot substitute.** There is no REST endpoint for auto-merge at all, and `draft` is not
    an updatable field on `PATCH /repos/{owner}/{repo}/pulls/{number}` — GitHub documents converting
@@ -193,7 +194,14 @@ environment already enforces this decision; the record now agrees with it.
   know how to stop.
 - Two recorded decisions stop contradicting each other, resolved toward the one that was never argued
   against.
-- `.claude/settings.json` stops claiming permissions for a binary that does not exist.
+- `.claude/settings.json` records the FACT of `gh`'s absence, in a `_comment_gh` key beside the
+  entries, without deleting them. The 15 `Bash(gh …)` and 13 `PowerShell(gh …)` rules are **kept on
+  purpose**: a permission is a **conditional** ("if this is invoked, do not prompt"), never an
+  assertion that the binary exists, and the PowerShell half is evidence of a second host where `gh`
+  is the normal way in — so deleting them would trade a cosmetic inconsistency here for real
+  permission prompts there. (An earlier draft of this line claimed the change "stops claiming
+  permissions for a binary that does not exist", i.e. that the entries were removed. They were not,
+  and the review confirmed keeping them was correct.)
 
 ### Negative
 - The coordinator session must be alive at hand-back to arm auto-merge. It already had to be.
@@ -225,11 +233,20 @@ git grep -n "ready + auto-merge\|enable auto-merge\|mark the PR ready"
 | `docs/claude/sessions/evidence.md` (2) | "arm the PR on green gates", and "'PR armed and reported' is done" — which defined the executor's DONE as the impossible operation |
 | `docs/claude/sessions/workflow.md` §"no REST equivalent" | a **second** section in the same file, ~210 lines below the first, still framing this as an environment limitation ("as things stand") and still assigning "supervise CI to green over REST" to the executor |
 
-**Known remaining site, deliberately not swept here**:
+**Known remaining site, deliberately not swept here — and it does NOT take a copy of the fix**:
 `.github/workflows/dev-loop.yml:85` embeds an executor prompt ending *"then mark the PR ready for
-review and STOP"* (line 91 already says "do NOT enable auto-merge"). It is a genuine binding site —
-arguably the strongest, since it drives an unattended loop — but CI was out of #830's scope. It
-needs one sentence, and it needs it before the next unattended run.
+review and STOP"*. CI was out of #830's scope, but two things make this the **worst-placed** instance
+rather than one more site on the list:
+
+1. **It drives an UNATTENDED loop.** Everywhere else, an agent that meets the 403 is in a session
+   with a coordinator who can be told. There, the agent will attempt a mutation it cannot perform and
+   then `STOP` — with nobody watching, and with the run's terminal state indistinguishable from
+   success.
+2. **That loop has a DIFFERENT posture, so this ADR's wording does not transplant.** Line 91 reads
+   *"PR-ONLY: do NOT enable auto-merge. A human merges"* — the pre-ADR-20260815-115220 posture,
+   deliberately retained there. The correct edit is therefore **not** "the coordinator marks ready
+   and arms auto-merge"; it is to give that loop an ending it can actually reach, under its own
+   PR-only posture. Whoever picks this up should decide that ending first, not copy a sentence.
 
 **Not a follow-up**: the `gh` permission entries in `.claude/settings.json` were **kept**, on
 purpose — a permission is a conditional, not a claim the binary exists, and the `PowerShell(gh …)`
