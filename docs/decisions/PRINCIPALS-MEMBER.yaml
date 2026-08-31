@@ -1,9 +1,26 @@
-key: "PRINCIPALS-MEMBER"
-status: "open"
-question: "Part C needs a restaurant MEMBER principal that does not exist. What is the change to actors.yaml principals, ScopeType and UserType, and what is the versioning story for it?"
-owner: "team"
-opened: "2026-08-30"
-capacity: "team"
-register: "docs/adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md"
-evidence: "**The kernel change** to `principals` / `ScopeType` / `UserType` \u2014 a register row."
-note: "Residue 5 of ADR-20260830-213135, which already committed to a register row rather than an inline edit. owner: team because the specs freeze is lifted (ADR-20260810-221840) -- but this is CLAUDE.md question 2, a MIGRATION: UserType is stored on every domain_events row (ADR-0041) and ScopeType is stored in ScopeMembership, so the versioning story is recorded BEFORE it lands, stored events are immutable, and upcasting is never mutation. The row's answer IS that story."
+key: PRINCIPALS-MEMBER
+status: open
+question: Part C needs a restaurant MEMBER principal that does not exist. What is the change to actors.yaml
+  principals, ScopeType, UserType and requires.acting, and what is the versioning story for it?
+owner: team
+opened: '2026-08-30'
+capacity: team
+register: docs/adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md
+evidence: '**The kernel change** to `principals` / `ScopeType` / `UserType` — a register row.'
+note: 'Residue 5 of ADR-20260830-213135, which already committed to a register row rather than an inline
+  edit. owner: team because the specs freeze is lifted (ADR-20260810-221840) -- but this is CLAUDE.md
+  question 2, a MIGRATION: UserType is stored on every domain_events row (ADR-0041) and ScopeType is stored
+  in ScopeMembership, so the versioning story is recorded BEFORE it lands, stored events are immutable,
+  and upcasting is never mutation. The row''s answer IS that story. SCOPE CORRECTED 2026-08-31 (vernon):
+  the row named principals/ScopeType/UserType and MISSED requires.acting, which is where the type-checking
+  actually bites -- principals maps each role to the scalar that requires.acting compares actor.id against,
+  so once the PERSON is the principal, RESTAURANT can no longer be a scalar equality: a member acts WITHIN
+  a scope, making acting a membership question rather than an id comparison. Verified: zero `requires:`
+  blocks exist in any specs/*/api.yaml today (one comment hit in common/api.yaml:52), so principals has
+  exactly one consumer and it is a comment -- the kernel change is CHEAPER than this row implied and its
+  semantics are fully open. COST WINDOW (evans): the sole claim writer hardcodes role CUSTOMER, so no
+  domain_events row was ever authored by a RESTAURANT principal -- the rename is a spec edit plus a projection
+  replay TODAY, and becomes permanent at the first restaurant credential part C issues. Confirm with SELECT
+  user_type, count(*) FROM domain_events GROUP BY 1 before relying on it; UNVERIFIED input until run.
+  Do NOT rename the stored token: RESTAURANT stays a legal UserType value forever (ADR-0041, immutable
+  log); the correct vocabulary is added ALONGSIDE and RESTAURANT becomes a value no new event carries.'
