@@ -672,8 +672,8 @@
     "fr": "Vérifié par SMS"
   },
   "checkout.place_order": {
-    "en": "Place order — {total}",
-    "fr": "Commander — {total}"
+    "en": "Order with obligation to pay — {total}",
+    "fr": "Commander avec obligation de paiement — {total}"
   },
   "checkout.processing": {
     "en": "Processing…",

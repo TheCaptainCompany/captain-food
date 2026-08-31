@@ -2,6 +2,38 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-08-31 — The checkout button now states the OBLIGATION TO PAY rather than an amount, and
+> the pre-order total recap is no longer declared collapsible
+> ([#817](https://github.com/TheCaptainCompany/captain-food/issues/817), PR
+> [#833](https://github.com/TheCaptainCompany/captain-food/pull/833), `HOLD: human` at draft).**
+> C. conso. **L221-14** (transposing **CRD 2011/83 Art. 8(2)**) wants an unambiguous obligation-to-pay
+> mention on the button placed immediately before a distance order, next to a clear and legible recap
+> of the total; the sanction is **not a fine but that the consumer is not bound**, so a defect here
+> makes shipped, paid, rider-delivered orders voidable. `fr` now carries the statutory safe-harbour
+> formula *"Commander avec obligation de paiement — {total}"* and `en` the directive's own *"Order
+> with obligation to pay — {total}"*; the checkout `order_summary` section drops `collapsible: true`.
+> The requirement is grade (a); whether this wording **satisfies** it is **QT-4** on the counsel list
+> ([BRIEF-20260831](../legal/BRIEF-20260831-repricing-and-price-quote-counsel-packet.md)) and no
+> counsel is engaged, so this is deliberate **over-compliance pending that answer** and not a legal
+> conclusion (ADR-20260812-143619).
+>
+> **Two things the issue did not know, both found by going to the runtime rather than the
+> declaration.** (1) The pay button never resolved `checkout.place_order` at all: it rendered the
+> hard-coded literal `"Place order - "{total}` (`crates/web/src/checkout.rs`), so **every French
+> customer has been shown an English button**, and fixing only the DSL copy would have changed
+> nothing a customer sees — the #780 class exactly. The fix is compiler-first rather than a parity
+> test (ADR-20260803-234035): the button resolves the key from the generated catalog, so the spec's
+> message **is** the label by construction, one string instead of two a test must keep equal.
+> (2) `collapsible: true` was read by **nothing** — not the codegen, not the renderer — and the
+> hand-written runtime always rendered the recap expanded; so the flag was never the guarantee, and
+> the guarantee now lives in a runtime assertion. Both new tests were mutation-checked (revert the
+> catalog copy / restore the literal / wrap the recap in `<details>`): all three go red.
+>
+> **Adjacent, NOT fixed here and needing an issue**: the recap's own text is hard-coded English in
+> the same runtime (`format!("{} items - {}", ...)` plus a literal `" from "` and `<h1>"Checkout"</h1>`),
+> so a French customer reads *"2 items - 23,50 EUR from Chez Marcel"*. Same class as the button
+> defect, different fix, and `PROP-20260831-134539` slice 5 rebuilds that component.
+
 > **2026-08-31 — two environment defects that taxed every dispatch are fixed, and the second one was
 > already written down two weeks ago, which is the finding worth keeping.**
 > [#830](https://github.com/TheCaptainCompany/captain-food/issues/830) /
