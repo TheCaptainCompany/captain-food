@@ -1,33 +1,58 @@
 key: "QUOTE-STALENESS"
-status: "open"
+status: "decided"
 question: "What is the staleness policy for a priced quote token -- accept within N minutes, within M catalog versions, or both?"
 owner: "team"
+capacity: "founder"
 opened: "2026-08-31"
+decided: "2026-08-31"
+decided_by: "ADR-20260831-165146"
 register: "docs/proposals/DECISIONS.md §42"
 note: >
-  Sub-decision of QUOTE-TOKEN (decided 2026-08-31). The founder named neither N nor M; rather than
-  re-ask, the team is PRICING it. Not dispatchable as part of the retirement work -- it rides the
-  quote-token proposal.
+  DECIDED: N = 30 MINUTES, AS A BACKSTOP ONLY. M (a catalog version count) is DROPPED. Sub-decision
+  of QUOTE-TOKEN (decided 2026-08-31). The founder took the team's priced recommendation
+  (PROP-20260831-134539 section 7) unchanged, choosing the option labelled "30 minutes
+  (recommended)".
 
-  PRICED 2026-08-31 in PROP-20260831-134539 section 7, and the row STAYS OPEN -- a pricing is not a
-  decision. The recommendation: N = 30 MINUTES AS A BACKSTOP ONLY, sized from the p99 of the
-  cart-to-pay leg with SCA/3DS in it (not from risk appetite), and M IS DROPPED -- the catalog
-  stream also carries OfferStockUpdated from POS callbacks (specs/catalog/events.yaml:198), so at a
-  busy service any small M is a 100%-fire timer wearing a correctness costume. Keep the version as
-  the as-of anchor and for audit; gate on delta-total instead.
+  WHAT 30 IS DERIVED FROM, because the number is meaningless without it: the p99 of the cart-to-pay
+  leg WITH THE MANDATORY SCA/3DS BANK-APP DETOUR IN IT -- the tail is a customer bounced into a
+  banking app, not a customer deliberating. It is NOT a risk setting. The 99th-percentile customer
+  never meets it, so on a live session it essentially never fires. Sizing it from risk appetite
+  would have produced a much smaller number and paid a conversion cost on the ETA path for a
+  correctness benefit the delta-total gate already provides.
 
-  EVIDENCE-DEFERRED (ADR-20260808-144738): 30 is a judgement because the instrument that would let
-  it be derived does not exist -- `grep -rn "quote\|reprice" specs/observability.yaml` returns 0
-  hits. The proposal owes a `quote_age_seconds` contract at place-order (section 9 C1); whoever
-  closes this row should close it as "30 as a backstop, to be re-derived from quote_age_seconds
-  after the first peak", never as a permanent constant.
+  WHY N EXISTS AT ALL: carts never expire (specs/ordering/actors.yaml:15, re-verified 2026-08-31 at
+  9cd15c75 -- the comment reads "carts never expire, so there is no abandonment state"), so the
+  token's N is THE ONLY CLOCK ON THE WHOLE CART. That is a bigger job than the name "staleness
+  policy" suggests, and it was put to the founder as such.
 
-  IT IS A PRODUCT DECISION WEARING A NUMBER, and both directions cost something real: too tight and
-  a slow customer is repriced at the cart step for no business reason (a conversion cost on the ETA
-  path); too loose and the token authorises a price the catalog no longer offers, which is the
-  guarantee it exists to protect. Whatever is chosen must be observable -- a quote rejected for
-  staleness is a customer-visible event at the cart step, before the Stripe element.
+  WHY M IS DROPPED: the catalog stream also carries OfferStockUpdated from POS callbacks
+  (specs/catalog/events.yaml:198), so at a busy service the stream advances constantly for reasons
+  that have nothing to do with price -- any small M is a 100%-fire timer wearing a correctness
+  costume. The version stays as the as-of anchor and for audit; the gate is on delta-total.
+
+  ALTERNATIVES REJECTED, WITH THEIR COSTS. (a) SHORTER (about 5 minutes or less): fires on ordinary
+  Friday-night sessions, and every firing is a reprice interstitial shown to a customer who did
+  nothing wrong -- conversion paid on CORRECT sessions. (b) LONGER: a quote outlives the service
+  state it was priced in, which is the guarantee the token exists to protect. (c) DIVERGENCE-GATED
+  WITH NO BACKSTOP AT ALL: honest about the missing instrument, but with carts that never expire it
+  leaves an unbounded-age quote honourable.
+
+  THE STANDING CAVEAT, AND WHAT WOULD CHANGE THE NUMBER. 30 is a DERIVED JUDGEMENT, not a
+  measurement: the instrument that would let N be re-derived from evidence does not exist
+  (PROP-20260831-134539 section 9 C1 -- `quote_age_seconds` at PlaceOrder; `grep -rn "quote|reprice"
+  specs/observability.yaml` returned 0 hits, 2026-08-31). Under ADR-20260808-144738 this is an
+  EVIDENCE-DEFERRED decision. WHAT WOULD CHANGE IT: contract C1 shipping with the mechanism and one
+  observed peak -- then N is re-derived from the observed cart-to-pay p99 rather than defended as a
+  guess. It is a backstop to be re-derived, never a permanent constant, and re-deriving it needs no
+  new founder question unless the direction of the answer changes.
+
+  NOT A RISK CONTROL, AND THE RECORD SHOULD NOT BE READ AS ONE: what protects the price is
+  divergence (PROP-20260831-134539 F4/F6 -- charge the quoted amount or refuse, never more; fire on
+  a non-zero delta, never on expiry). N only bounds how old a quote may be before the write side
+  insists on re-pricing.
 evidence: >
-  Recorded open by ADR-20260831-121957 §4d: "OPEN sub-decision -- the staleness policy. Accept a
-  quote within N minutes / M catalog versions? The founder named neither N nor M; it is being priced
-  rather than re-asked."
+  Founder decision 2026-08-31, put through AskUserQuestion with a register-check trail, options,
+  trade-offs and a recommendation; his answer is the option label, verbatim: "30 minutes
+  (recommended)". Recorded by ADR-20260831-165146. The recommendation he took is
+  PROP-20260831-134539 section 7 verbatim: "N = 30 minutes, as a backstop only. M (a version count)
+  is dropped."
