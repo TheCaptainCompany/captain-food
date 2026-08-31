@@ -1,0 +1,29 @@
+key: "CREDIT-DRAIN-ORDER"
+status: "open"
+question: "When a customer spends store credit, which provenance drains first -- purely promotional credit, or credit traceable to a captured payment?"
+owner: "founder"
+opened: "2026-08-31"
+register: "docs/adr/ADR-20260831-033621-customer-credit-is-disposed-of-as-a-leg-of-erasure-goodwill-credit-is-refundable.md (`What is NOT decided`, D6)"
+evidence: "D6 — spend order. Which pot drains first when credit is spent: OPEN. D6 is free only until a promotional grant exists — the moment two provenances can coexist on one balance, the choice starts costing money and is no longer free to defer."
+note: >
+  Residue of CREDIT-AT-ERASURE (decided 2026-08-31, ADR-20260831-033621), split out under
+  docs/decisions/README.md's "Partial closure = split at close time". Raised on
+  https://github.com/TheCaptainCompany/captain-food/issues/764.
+  WHY THE QUESTION IS NOT ANSWERABLE FROM THE CODE TODAY. `CustomerCreditState`
+  (crates/domain/src/customer_credit.rs) is a single `balance_cents` scalar plus two idempotency
+  vectors (`granted_reclamations`, `consumed_orders`); a consume simply subtracts. There are NO LOTS,
+  so there is no drain order to observe -- the balance is fungible, and once one promotional euro
+  exists, "how much of this balance is traceable" HAS NO ANSWER at all. Whatever the founder picks
+  is therefore also a decision to give the balance provenance, which is the same stored-shape
+  precondition CREDIT-LEG-SEQUENCING names.
+  OPTION A -- PROMOTIONAL FIRST. Maximises what survives as refundable, is customer-favourable, and
+  is the only ordering that cannot be accused of engineering a smaller refund; business and ux
+  reached it independently.
+  OPTION B -- TRACEABLE FIRST. Retires the refundable liability soonest and interacts with
+  CREDIT-EXPIRY-WINDOW (traceable credit spent before it ages out of Stripe's refund window).
+  THIS ROW HAS A CLOCK. It is FREE until the first promotional grant exists; after that it is a
+  MIGRATION, because the balance it applies to is already spent-against and the provenance split
+  has to be reconstructed rather than declared. No promotional grant mechanism exists in
+  specs/payments/** today (goodwill reclamation credit is the only grant path), so the free window
+  is open now and closes at the first promo feature, not at the first order.
+  This row states no answer: it is a question for the founder.

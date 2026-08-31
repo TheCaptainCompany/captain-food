@@ -1,0 +1,34 @@
+key: "CREDIT-EXPIRY-WINDOW"
+status: "open"
+question: "Does the customer store-credit expiry shorten from 1 year to ~180 days minus a settlement margin, so that `traceable` implies `refundable` by construction -- or does it stay at 1 year and the resulting traceable-but-unrefundable balance get adjudicated?"
+owner: "founder"
+opened: "2026-08-31"
+register: "docs/adr/ADR-20260831-033621-customer-credit-is-disposed-of-as-a-leg-of-erasure-goodwill-credit-is-refundable.md (`What is NOT decided`, D5)"
+evidence: "D5 — expiry shortening. Whether the credit expiry shortens to ~180 days so that \"traceable\" implies \"refundable\" by construction: OPEN."
+note: >
+  Residue of CREDIT-AT-ERASURE (decided 2026-08-31, ADR-20260831-033621), split out under
+  docs/decisions/README.md's "Partial closure = split at close time"; the recording run could not
+  file it because an executor never files an out-of-dispatch decision file. Raised on
+  https://github.com/TheCaptainCompany/captain-food/issues/764.
+  THE STATE THE RULING HAS NO BRANCH FOR. The ruling's split is refund-what-is-traceable /
+  forfeit-what-is-promotional. Stripe cannot refund a capture indefinitely (~180 days in practice),
+  so a credit aged 6-12 months is TRACEABLE AND NOT REFUNDABLE -- a third state neither limb covers.
+  Under D3 (a failed refund proceeds and is recorded) it does not block the erasure, but it turns
+  every such balance into an ordinary payable by design rather than by accident.
+  OPTION A -- expire at 180 days minus a settlement margin. Makes the bad state UNREACHABLE BY
+  CONSTRUCTION rather than handled (compiler-first, ADR-20260803-234035). It is a customer-facing
+  promise change: it needs a docs/SPEC-LOG.md line when it lands, and the existing promise is
+  recorded, not merely implemented.
+  OPTION B -- keep 1 year and adjudicate the gap (a policy branch for traceable-but-unrefundable).
+  THE TENSION EITHER WAY, and it is not resolved by picking A. If traceable credit is the customer's
+  money -- which is what D1 says, and what makes refunding it the right answer -- then ANY expiry
+  extinguishes the customer's money on a timer, and faces the same unfair-terms screen the
+  forfeiture limb faces. Shortening the window to 180 days makes the screen SHARPER, not softer.
+  D2 already sited forfeiture as a rule of account termination generally, so this row cannot be
+  answered as an erasure-local question.
+  STATE OF THE ART. The 1-year expiry is chosen but UNBUILT: ADR-20260726-163737 records "Expire
+  after 1 year -> CHOSEN default" in its Credit expiry option table and then "Credit expiry (1-year
+  sweep) is a follow-up (observability + a scheduled fold), not in the first cut." No expiry
+  machinery exists in the tree, so the window is free to move today at zero migration cost. That is
+  a reason to answer this row before the sweep is built, not a reason to defer it.
+  This row states no answer: it is a question for the founder.

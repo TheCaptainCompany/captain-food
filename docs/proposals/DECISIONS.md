@@ -25,6 +25,10 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PUBLISH-PRECONDITIONS` | open | 2026-08-30 | What must exist before the first crawled listing is shown publicly, now that PUBLISH-SCOPE is national? Specifically: does Art. 6(1)(f) carry national publication of SIRENE-derived listings including sole traders' name and often-domicile address, is an Art. 35 DPIA mandatory and does it trigger Art. 36 prior consultation, and is Art. 14 satisfied individually or under the 14(5)(b) derogation? | counsel |
 | `REVOKED-COLLEAGUE-NOTICE` | open | 2026-08-30 | When a restaurant owner revokes a colleague's access, must the colleague be notified, by whom, and with what content? | counsel |
 | `SUPPORT-CONTACT` | open | 2026-08-30 | SUPPORT_CONTACT is a required configuration key with no default, so the #792 refusal screen cannot boot without a value. What string is published, who reads it, and does it carry a voice leg at peak? | founder |
+| `CREDIT-DRAIN-ORDER` | open | 2026-08-31 | When a customer spends store credit, which provenance drains first -- purely promotional credit, or credit traceable to a captured payment? | founder |
+| `CREDIT-EXPIRY-WINDOW` | open | 2026-08-31 | Does the customer store-credit expiry shorten from 1 year to ~180 days minus a settlement margin, so that `traceable` implies `refundable` by construction -- or does it stay at 1 year and the resulting traceable-but-unrefundable balance get adjudicated? | founder |
+| `CREDIT-LEG-SEQUENCING` | open | 2026-08-31 | Does the erasure credit-settlement leg ship inside #708 -- given that the refund/forfeit split first needs provenance on `CustomerCreditGranted` (a stored-event-shape change) and that `CustomerCredit-{customerId}` has no lane, so the leg would become its SECOND unlaned writer -- or does it ship after those two preconditions are met? | founder |
+| `ERASURE-PM-RESUME` | open | 2026-08-31 | How does the erasure process manager name its erasure subject when it resumes from PARKED on an order terminal fact -- a `from_read` lookup through a projection (A), `customerId` added to the four order terminal facts (B), or a PM-owned order-to-customer index in the process row (C)? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `AGGREGATES-OWN-THE-FACTS` | decided | 2026-08-29 | Does the foreign-stream-append isolation subject (twelve deliver: steps still appended by process managers, plus the #595 unlaned reclamation birth) get resolved FIRST, before any new development builds on the pre-isolation shape? -> ADR-20260829-230418 | founder |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
@@ -85,7 +89,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 71 — 12 open · 54 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 75 — 16 open · 54 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 101** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

@@ -1,0 +1,42 @@
+key: "ERASURE-PM-RESUME"
+status: "open"
+question: "How does the erasure process manager name its erasure subject when it resumes from PARKED on an order terminal fact -- a `from_read` lookup through a projection (A), `customerId` added to the four order terminal facts (B), or a PM-owned order-to-customer index in the process row (C)?"
+owner: "founder"
+opened: "2026-08-31"
+register: "docs/proposals/PROP-20260829-150752-customer-erasure.md §3.1 / §3.3 leg 0 (approved design); no prior register row -- searched docs/decisions/*.yaml, docs/decisions/_legacy.yaml, docs/adr/ and docs/proposals/ for `state.by`, `from_read`, PARKED-resume and erasure correlation; nearest declared rows are ERASURE-LAUNCH-GATE and CREDIT-AT-ERASURE, neither of which reaches the correlation mechanism"
+evidence: "it parks (`PARKED(reason)` on the `ErasureProcessRow`, visible on the supervision surface and still on the §3.8 dead-man's clock — a parked erasure alerts, it never silently waits) and resumes when the blocking order records its terminal fact (the PM reacts to the order-terminal facts it parked on — push, not poll)"
+note: >
+  THE DESIGN AS APPROVED CANNOT BE BUILT, and this blocks the erasure RUNTIME chunk of
+  https://github.com/TheCaptainCompany/captain-food/issues/708, which ERASURE-LAUNCH-GATE
+  (ADR-20260829-145848) makes launch-blocking. Raised by the architect on
+  https://github.com/TheCaptainCompany/captain-food/issues/764.
+  THE MECHANICAL FACT, verified in the tree. A PM correlates a trigger to its run through
+  `state.by`, and `raw_msg_expr` (tools/codegen-rs/src/emit/pm_orchestrators.rs:964-972, called from
+  `emit_state` at :1392) admits ONLY a `from` property OF THE TRIGGER MESSAGE -- every other form
+  panics with "by/pk value must be a `from` message property". The four order terminal facts the
+  journey parks on carry no `customerId`: `OrderDelivered` (specs/ordering/events.yaml:252-262),
+  `OrderCancelledByCustomer` (:265-278) and `OrderCancelledByRestaurant` (:281-294) carry
+  `orderId` + `restaurantId`, and `OrderExpired` (:568-582) carries `orderId` alone. So the subject
+  whose erasure is parked cannot be named from the trigger at all, and the resume leg has no
+  spelling.
+  OPTION A -- teach `state.by` a `from_read` form (look the customer up from `OrderTracking`). No
+  stored-event change, codegen-local; the `PmVal::FromRead` value form already exists for `set:`
+  values, so this extends an existing shape rather than inventing one. YOUNG's objection is real and
+  must be answered, not waved: a PROJECTION becomes an input to a WRITE-SIDE CORRELATION DECISION,
+  so under projector lag the PM does not resume while a GDPR clock keeps running. Choosing A needs a
+  stated staleness posture (what the PM does when the read has not caught up, and how that is
+  observable).
+  OPTION B -- add `customerId` to the four order terminal facts. The write side then correlates FROM
+  THE LOG ALONE and the resume is replay-neutral -- doctrinally the cleanest read/write separation.
+  But it is a STORED EVENT SHAPE CHANGE: HOLD:human, upcasting never mutation, versioning story
+  recorded before it lands. It also puts a `customerId` on four more payloads retained 3650 days,
+  which is #765's exact tension (minimisation against a long retention window).
+  OPTION C -- the erasure PM subscribes on `orderId` and keeps its OWN order-to-customer index in
+  its process row. VERNON-clean: PM state is table-based and its own, no projection read on the
+  write path, no event-shape change, no new field on a retained payload. Costs a third correlation
+  table; the index must be POPULATED AT REQUEST TIME (the open-order set is known then), and an
+  order created AFTER the erasure request is not in it -- so C needs its own answer for the
+  order-placed-during-grace case that §3.1 explicitly allows.
+  ARCHITECT'S RECOMMENDATION, stated twice and recorded as a RECOMMENDATION, NOT AN ANSWER: C, with
+  A as the fallback.
+  This row states no answer: it is a question for the founder.

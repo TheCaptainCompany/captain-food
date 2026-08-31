@@ -1,0 +1,33 @@
+key: "CREDIT-LEG-SEQUENCING"
+status: "open"
+question: "Does the erasure credit-settlement leg ship inside #708 -- given that the refund/forfeit split first needs provenance on `CustomerCreditGranted` (a stored-event-shape change) and that `CustomerCredit-{customerId}` has no lane, so the leg would become its SECOND unlaned writer -- or does it ship after those two preconditions are met?"
+owner: "founder"
+opened: "2026-08-31"
+register: "docs/adr/ADR-20260831-033621-customer-credit-is-disposed-of-as-a-leg-of-erasure-goodwill-credit-is-refundable.md (`What is NOT decided`, D4)"
+evidence: "D4 — sequencing. Whether the credit leg ships inside #708 or after it: OPEN."
+note: >
+  Residue of CREDIT-AT-ERASURE (decided 2026-08-31, ADR-20260831-033621), split out under
+  docs/decisions/README.md's "Partial closure = split at close time". Raised on
+  https://github.com/TheCaptainCompany/captain-food/issues/764.
+  THE QUESTION IS DELIBERATELY WIDER THAN D4's WORDING. D4 reads as a scheduling question, and the
+  architect's finding is that it is mis-framed as one: it cannot be answered without its two hard
+  preconditions in view, because both of them are what "inside #708" would actually cost.
+  PRECONDITION 1 -- PROVENANCE IS A STORED-EVENT-SHAPE CHANGE. `CustomerCreditGranted`
+  (specs/payments/events.yaml:184-195) carries `customerId`, `amount` and `reclamationId` and
+  nothing else. The D1/D2 refund-vs-forfeit split is a decision ABOUT PROVENANCE, so shipping the
+  leg means adding provenance to a stored event: HOLD:human class, upcasting never mutation, and the
+  versioning story recorded before it lands (CLAUDE.md, question 2 of the specs rule).
+  PRECONDITION 2 -- SINGLE-WRITER ON `CustomerCredit-{customerId}`. The one existing writer is the
+  ReclamationProcess `send:` at specs/ordering/processmanager.yaml:259 (GrantCustomerCredit, the
+  GOODWILL_CREDIT arm). That route is NOT laned: it is not one of the twelve `deliver:` steps C3
+  covers, and ADR-20260831-033621's own recommendations already name adding `CustomerCredit` to the
+  foreign-stream-append isolation programme's scope question (AGGREGATES-OWN-THE-FACTS). If the
+  erasure credit leg lands before that route moves, the leg becomes the SECOND UNLANED WRITER to
+  that stream, separated from the first only by an optimistic version conflict -- on the money path,
+  during an irreversible act, on the Art. 12(3) clock.
+  WHY IT MATTERS BEYOND SEQUENCING. CREDIT-AT-ERASURE is what unblocks the erasure engine chunk of
+  https://github.com/TheCaptainCompany/captain-food/issues/708, and ERASURE-LAUNCH-GATE
+  (ADR-20260829-145848) makes #708 launch-gating. So "inside #708" is not a convenience choice: it
+  decides whether a stored-shape migration and an isolation move are pulled INTO the launch-gating
+  chunk or sequenced ahead of it.
+  This row states no answer: it is a question for the founder.
