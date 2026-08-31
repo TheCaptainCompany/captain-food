@@ -76,8 +76,12 @@ agents collide.
      runtime; the merge/CI machinery itself.
    - If you recognize HOLD-class work in a dispatch that is not marked, stop at ready-for-review
      and say so in the PR — misclassification is a dispatch defect, not a licence to merge.
-8. **Record the budget**: `bash .claude/hooks/loop-budget.sh stop` and commit
-   `.claude/loop-budget.json` (ADR-0014).
+8. **Record the budget**: `bash .claude/hooks/loop-budget.sh stop`, then commit **the ledger file it
+   names** — a new `.claude/loop-budget/<ISO-week>/<stamp>-<rand>.json` every time (ADR-0014,
+   ADR-20260812-011057). `.claude/loop-budget.json` is pure CONFIG that nothing writes: committing it
+   commits nothing and leaves the run unbilled, which under-counts the founder's weekly cap. If
+   `stop` REFUSES (exit 3) it has told you whose timer it found — record your own run's true duration
+   with `stop --elapsed-seconds <n> --note "<what ran>"` rather than billing a run that is not yours.
 
 ## When it goes wrong
 

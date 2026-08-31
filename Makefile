@@ -210,19 +210,25 @@ stub-tests:
 night-loop: validate generate
 	@echo "night-loop: complete."
 
-# Self-imposed WEEKLY time budget (Claude Code has no native cap). State: .claude/loop-budget.json
-# (resets each ISO week). `budget-check` exits 2 when the week's budget is spent -- unless the config
+# Self-imposed WEEKLY time budget (Claude Code has no native cap). Cap: .claude/loop-budget.json
+# (config; nothing writes it). Usage: the append-only ledger .claude/loop-budget/<ISO-week>/*.json,
+# which resets each ISO week because the next week is a new directory. `budget-check` exits 2 when the week's budget is spent -- unless the config
 # sets "capIsAStopSign": false, in which case over-cap is reported on stderr but exits 0
 # (ADR-20260813-132540).
 budget-check:
 	bash .claude/hooks/loop-budget.sh check
 
 # Budget-aware night loop: skip cleanly when the guard refuses, else run and record elapsed.
+# `make -n budgeted-loop` IS NOT A DRY RUN: GNU make executes any recipe line containing $(MAKE)
+# even under -n, and this whole if/then is ONE backslash-continued line, so a "dry run" really opens
+# a timer, runs night-loop under -n, and BILLS a segment to the weekly cap (measured on #821: two
+# 0-second receipts). Use `make budget-check` to look without billing.
 # A non-zero `start` is NOT always "budget exhausted": exit 2 = over cap (only while the cap is a
 # stop sign), exit 3 = timer integrity (a run timer is already open). The guard's own stderr above
 # this message says which.
 budgeted-loop:
-	@if bash .claude/hooks/loop-budget.sh start; then \
+	@LOOP_BUDGET_RUN_ID="budgeted-loop-$$$$-$$(date -u +%Y%m%dT%H%M%SZ)"; export LOOP_BUDGET_RUN_ID; \
+	if bash .claude/hooks/loop-budget.sh start; then \
 		$(MAKE) night-loop; rc=$$?; \
 		bash .claude/hooks/loop-budget.sh stop; \
 		exit $$rc; \

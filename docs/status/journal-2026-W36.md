@@ -125,6 +125,63 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > today. The header `Reverses in part` line and §2.4 are intact, and the approving ADR re-states it
 > in its own §4, because approval is exactly when a reversal gets re-buried.
 
+> **2026-08-31 — the weekly cap did not reliably measure: one timer slot for N concurrent runs, a
+> receipt naming the wrong branch, and a step 8 pointing at a file nothing writes**
+> ([#821](https://github.com/TheCaptainCompany/captain-food/issues/821) "loop-budget: the weekly cap
+> under-counts under concurrency", PR [#822](https://github.com/TheCaptainCompany/captain-food/pull/822),
+> `HOLD: human`). The cap is the founder's governance control on autonomous loops (ADR-0014), and it
+> failed **worst exactly when the session was most parallel**. **D1**: the running timer is one file in
+> the git **common dir** — `git worktree` does *not* isolate it — so `stop` billed whatever it found.
+> The W36 ledger records the collision twice: a segment noting *"a concurrent session in this shared
+> checkout closed the timer I inherited at 12:05:26Z"*, and a **33.3-minute unbilled remainder** after
+> a `stop` billed 3.2 minutes of a ~39-minute run **and printed success**. A silent under-count is
+> worse than a refusal: the executor that trusts the output records the wrong number. Fixed
+> **structurally**, not by a comparison — a run has an owner id (`--run` > `$LOOP_BUDGET_RUN_ID` >
+> `$CLAUDE_CODE_SESSION_ID` > none) and the timer **file name carries it**, so another run's timer is
+> *unaddressable* rather than merely detected (the nearest shell reaches to compiler-first,
+> ADR-20260803-234035; PROP-20260802-130500 §1 caps a shell binding at level 3). Two consequences on
+> purpose: **concurrent runs are now normal** — each opens its own timer and bills its own real time,
+> so no second session is pushed into estimating with `--elapsed` — and a `stop` that cannot prove
+> ownership **refuses and names whose timer it found**. `--elapsed-seconds` and `reset` no longer
+> delete another run's live timer; both used to, so the escape hatch the tool *recommends on a
+> refusal* was itself the weapon. **D2**: the receipt stamped the branch of the checkout `stop` ran
+> from, not the branch the run was on (live instance: `2026-W36/20260831T142143Z-0568abb8.json` says
+> `main` while its note describes `819-` work). The branch is now captured at `start`. The defective
+> receipt is **not** retro-edited — the ledger is append-only (ADR-20260812-011057). **D3**: the
+> executor protocol's step 8 said commit `.claude/loop-budget.json`, which **nothing writes** — an
+> executor following the documented protocol committed nothing and left its run unbilled, a
+> systematic under-count by exactly the people who follow the protocol. Step 8 now names the ledger
+> file, and the stale siblings in the continuous-development proposal and the Makefile go with it.
+> **41 new selftest cases (58 → 99), of which 24 are RED against `main`** — measured, not recalled:
+> revert every file this PR touches except the selftest, run the suite. The other **17 pass against
+> `main` too** (`7d` `7g` `7i` `10a` `10e` `10f` `10h` `10k`–`10p` `10u` `12a` `13h` `13i`): they are
+> characterization cases pinning behaviour this change did not alter, and must NOT be read as
+> regression-proven here — weaken one and no red follows. Four more (`13a` `13d` `13e` `13g`) were
+> already green when written, because the run-id keying committed earlier in this same PR had
+> delivered them: a good fact about the design, recorded because "observed RED first" is not a
+> universal and must never be asserted as one. (The 15:11 receipt bakes in the earlier, wrong
+> figure of 30; the ledger is append-only, so that divergence stands as history.)
+> `make validate` 0 errors, `check-drift` clean, `hooks-test` green armed. Found in passing and
+> now commented where the trap lives: **`make -n budgeted-loop` is not a dry run** — GNU make
+> executes recipe lines containing `$(MAKE)` even under `-n`, so it opens a timer and bills a
+> segment (two 0-second receipts in this commit are its output, kept rather than deleted because
+> hook-written budget state is never hand-edited).
+> **Addendum, on evidence arriving mid-run**: the contention is the **fourth** distorted segment of
+> the day, not the two first named — `20260831T165727Z-de76c595.json` (10.3 m, `quote-decisions-20260831`)
+> records a run that hit **exit 3** at `start` because a timer opened **70 s earlier on `main`** was
+> still open, and reconstructed ownership by hand before billing "as mine". Keying the timer by
+> **worktree** (`--git-dir`) was proposed as a smaller fix and **rejected**: it re-creates
+> ADR-20260812-011057's *failure 1* (six checkouts, six simultaneous totals — the ADR chose
+> `--git-common-dir` precisely so `start` and `stop` are one timer whatever checkout each ran in),
+> and it partitions on the wrong noun, since what is billed is a **run**, not a directory — one run
+> spans worktrees, one worktree hosts many runs, and at least one observed collision was a sibling
+> session **in the same checkout**, which worktree keying cannot see. Run-id keying delivers
+> everything worktree keying offered, in any topology, and makes a mismatch **loud** rather than
+> merely rarer. Folded in from the same evidence: **`exit 2` and `exit 3` mean opposite things**, so
+> every exit-3 path now prints `(exit 3 = INTEGRITY, not budget exhaustion …)` with the week's state,
+> and every refusal hands over the whole tuple — started-at, branch, run id **and pid** — which is
+> exactly what that executor reconstructed by hand.
+
 > **2026-08-31 — the repricing obligation map is IN THE REPO, and the lens return that never landed
 > is the finding** (docs-only: one new legal brief, the standing counsel list extended, one proposal
 > `Concerns` entry discharged; no `specs/**`, no code, no SPEC-LOG sentence owed).

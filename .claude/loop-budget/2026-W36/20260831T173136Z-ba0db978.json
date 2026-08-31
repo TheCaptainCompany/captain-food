@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1366,
+  "recordedAt": "2026-08-31T17:31:36.470Z",
+  "branch": "821-loop-budget-timer-ownership",
+  "note": "#821 conflict resolution + CI supervision: main moved mid-run, PR went mergeable_state=dirty, and a conflicting PR produces NO pull_request CI runs at all (looked like an outage, was not). Merged origin/main, journal conflict resolved keeping both entries newest-first; CI green on c542d7f6. Recorded with --elapsed-seconds because the timer for this stretch was already closed."
+}

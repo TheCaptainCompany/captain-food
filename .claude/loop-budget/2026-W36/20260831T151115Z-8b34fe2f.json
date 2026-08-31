@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1631,
+  "recordedAt": "2026-08-31T15:11:15.812Z",
+  "branch": "main",
+  "note": "#821 loop-budget concurrency defects: timer ownership (per-run timer files), receipt branch, step 8 artifact; 30 new selftest cases seen RED first; PR #822 draft, HOLD: human. Timer opened by the pre-#821 hook on main before branching to 821-loop-budget-timer-ownership, hence branch 'main' and the --adopt.; adopted a timer carrying no run id"
+}
