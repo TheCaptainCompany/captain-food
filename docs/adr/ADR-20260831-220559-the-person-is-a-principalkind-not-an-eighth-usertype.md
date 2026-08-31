@@ -143,20 +143,40 @@ id, never this, because the sub→domain bridge happens once per request at the 
 - **`MemberId` and `PrincipalKind` have no consumer yet.** They are vocabulary minted ahead of the
   aggregates that use them (`RestaurantInvitation`, `RestaurantMembership`, later steps). This is
   deliberate — the register row's answer *is* the vocabulary — but a scalar with no reference is a
-  promise until something references it.
-- **The `by_auth_ref` port still takes an `ExternalReference`**, so the identity bridge itself is
-  the one place the old confusion survives. It is now *visible* rather than invisible: the fake
+  promise until something references it. **And nothing enforces this bullet**: the validator has
+  `translation-key-unused` and `view-fedby-unused` but no `scalar-unused` rule, so the promise is
+  kept by prose alone. Filed as part of [#836](https://github.com/TheCaptainCompany/captain-food/issues/836)
+  (a warning, not an error — minting vocabulary one step ahead is deliberate here).
+- **The `by_auth_ref` port still takes an `ExternalReference`** ([#836](https://github.com/TheCaptainCompany/captain-food/issues/836)),
+  so the identity bridge itself is the one place the old confusion survives. It is now *visible* rather than invisible: the fake
   repository and the projection test each name both scalars, with a comment saying why.
-- Two generated GraphQL scalars are added to a schema no client reads yet — a small, reversible
-  surface increase.
+- The same **three** generated GraphQL type declarations named in Positive (`scalar AuthSubject`,
+  `scalar MemberId`, `enum PrincipalKind`) are added to a schema no client reads yet — a small,
+  reversible surface increase. (This bullet read "Two generated GraphQL scalars", contradicting
+  Positive's three by dropping the enum; corrected in the same PR.)
 
 ### Follow-up actions
 
-- **Step 1b — retype the `by_auth_ref` read port to `AuthSubject`.** Three edits: the trait in
-  `crates/application/src/queries.rs`, the emitted `me` resolver in
-  `tools/codegen-rs/src/emit/server_graphql.rs:703`, and the caller in
-  `crates/infrastructure/src/mailbox/handler.rs:400`. Kept out of this change because the last of
-  those is fenced to a concurrent session and the middle one is an emitter change.
+- **Step 1b — retype the `by_auth_ref` read port to `AuthSubject`** ([#836](https://github.com/TheCaptainCompany/captain-food/issues/836)).
+  **Ten edit sites**, enumerated from `grep -rn "by_auth_ref" crates/ tools/` at `3587e32`, because
+  retyping a trait parameter forces every `impl` signature (Rust requires an exact match) plus every
+  hand-written caller: the **trait decl** (`crates/application/src/queries.rs:345`); **five impls**
+  (`crates/infrastructure/src/persistence/customer.rs:54`,
+  `crates/application/src/behaviour_support.rs:904`, and the three `Empty` fakes at
+  `crates/server/tests/graphql_subscriptions.rs:196`,
+  `crates/server/tests/storefront_menu_paint.rs:238`, `crates/server/tests/graphql_cart_read.rs:356`);
+  the **`me` resolver emitter** (`tools/codegen-rs/src/emit/server_graphql.rs:703`, whose output
+  `crates/server/src/graphql/generated/query.rs:136` regenerates and is never hand-edited); and
+  **three hand-written callers** (`crates/infrastructure/src/mailbox/handler.rs:400`,
+  `crates/server/src/auth.rs:2181`, `crates/infrastructure/tests/main/customer_projection.rs:147`).
+  Kept out of this change because `handler.rs` was fenced to a concurrent session and the emitter is
+  a codegen change. **`crates/server/src/auth.rs:2181` is the substantive one**: the gated
+  `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` sub→domain resolver — the bridge-at-the-edge that
+  `AuthSubject`'s own docstring cites [ADR-20260818-004646](ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md)
+  for, the one site where the type and the doctrine most conspicuously still disagree, and neither
+  fenced nor generated. **This entry read "Three edits" when first written** — a derived number
+  stated without its antecedents, the exact defect [ADR-20260817-105845](ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
+  names; caught by the independent reviewer pass on PR #835 and corrected in the same PR.
 - Steps 2–7 of PROP-20260831-180622 proceed on this vocabulary. Its four Concerns remain unchecked.
 - When `requires.acting` gains its first real block (#636), the membership predicate decided in §5
   is what it must compile to — not an id comparison.

@@ -52,6 +52,29 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > session** by the dispatch. It is now *visible* instead of invisible — the fake repository and the
 > projection test each name both scalars with a comment saying why — and is written up as step 1b.
 > `PROP-20260831-180622`'s four Concerns remain unchecked; this step discharges none of them.
+>
+> **The independent reviewer pass found no code defect and two false statements in the records** —
+> both of the class that outlives the PR, so both were corrected in the same PR rather than filed.
+> (1) `PROP-20260831-180622` is a LIVING document (ADR-20260801-020000) that this step falsified in
+> **six** places, not the five the re-presentation card listed: the `Related` block still called
+> [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) *"open ... not closed by it"*, the
+> `kernel-change` Concern still said the row *"is OPEN"*, and four sites still said *"four `authRef`
+> sites"*. All rewritten to cite the closure and the seven; **the Concern's box stays `- [ ]`** —
+> closing the row it depended on is not discharging it, and `requires.acting` is still built by
+> nothing. (2) The ADR's own follow-up said step 1b was *"Three edits"*. It is **ten**: retyping a
+> trait parameter forces every `impl` signature (Rust requires an exact match) plus every
+> hand-written caller — one trait decl, five impls, the `me` emitter, and three callers. The omitted
+> one that matters is `crates/server/src/auth.rs:2181`, the gated
+> `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` sub->domain resolver: the bridge-at-the-edge the new
+> `AuthSubject` docstring cites ADR-20260818-004646 for, neither fenced nor generated. A derived
+> number stated without its antecedents is exactly the defect
+> [ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
+> names, and this is the second time in one chunk a "four"/"three" count reached a record unverified.
+> Step 1b, plus three findings the pass raised about the bridge (no step-1b marker on the trait decl;
+> the `.0`-against-`.0` comparison that is the one place a confusion could still pass silently; and
+> `MemberId`/`PrincipalKind` unreferenced with **no `scalar-unused` validator rule**, so the ADR's own
+> Negative is enforced by nothing), are filed as
+> [#836](https://github.com/TheCaptainCompany/captain-food/issues/836).
 
 > **2026-08-31 — The checkout button now states the OBLIGATION TO PAY rather than an amount, and
 > the pre-order total recap is no longer declared collapsible
