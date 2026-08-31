@@ -36,12 +36,12 @@ pub struct TriggerEnvelope {
     /// with the checkpoint advance. A route that owns NO transaction (a unit test, `prepare`) still
     /// cannot build a laned envelope, which is the whole point of the private field.
     ///
-    /// `None` — the DEFAULT, and the only value on any route that cannot stage — means the routed
-    /// branch is off and the legacy foreign-stream append runs unchanged. That is the
-    /// gate-then-stabilize rollback path: the route's own gate
-    /// (`configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` on the mailbox route,
-    /// `#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE` on the runner's) resolves to `None` here when OFF,
-    /// so flipping it back is a config flip, never a redeploy.
+    /// `None` — the DEFAULT, and the only value on any route that cannot stage — means NO routed
+    /// step on this delivery may stage, whatever the gates say: every one falls back to the legacy
+    /// foreign-stream append. It answers *can we stage at all*, and **only that**. Which of the
+    /// declared routes is actually ON is `gates` below, read per route by
+    /// [`Self::lane_sink_for`] — the two were fused until #797, and the fusion is what made a
+    /// rollback of one route a rollback of every route sharing the caller.
     ///
     /// **PRIVATE on purpose (#597)** — ADR-20260816-040239's constraint 1 ("the enqueue is never in
     /// `prepare`") used to hold by structural reading alone, guarded by nothing: any construction
@@ -52,6 +52,17 @@ pub struct TriggerEnvelope {
     /// `laned` at a single greppable, documented seam. Compiler first, a check is the fallback
     /// (ADR-20260803-234035).
     lanes: Option<std::sync::Arc<dyn crate::lanes::LaneSink>>,
+    /// Where each declared route's gate STANDS on this process (#797) — one field per
+    /// [`Route`](crate::generated::process_managers::Route), generated from the DSL's
+    /// `route_gate:` declarations.
+    ///
+    /// It sits next to the sink rather than replacing it because the two answer different
+    /// questions and BOTH must be yes: `lanes` answers *can this route stage at all* (does the
+    /// caller own a fenced transaction), `gates` answers *should THIS route stage* (is its own
+    /// configuration key on). Before #797 only the first was asked, so route selection was
+    /// `sink.is_some()` and every route hosted by one runner shared that runner's single boolean —
+    /// meaning rolling one route back rolled the others back with it.
+    gates: crate::generated::process_managers::RouteGates,
 }
 
 /// Hand-written because the lane sink is a trait object with no meaningful identity: two
@@ -75,7 +86,13 @@ impl TriggerEnvelope {
         correlation_id: uuid::Uuid,
         occurred_at: chrono::DateTime<chrono::Utc>,
     ) -> Self {
-        Self { event_id, correlation_id, occurred_at, lanes: None }
+        Self {
+            event_id,
+            correlation_id,
+            occurred_at,
+            lanes: None,
+            gates: crate::generated::process_managers::RouteGates::NONE,
+        }
     }
 
     /// The envelope of a trigger delivered on a route that OWNS THE TRANSACTION the sink's staged
@@ -98,14 +115,31 @@ impl TriggerEnvelope {
         correlation_id: uuid::Uuid,
         occurred_at: chrono::DateTime<chrono::Utc>,
         lanes: std::sync::Arc<dyn crate::lanes::LaneSink>,
+        gates: crate::generated::process_managers::RouteGates,
     ) -> Self {
-        Self { event_id, correlation_id, occurred_at, lanes: Some(lanes) }
+        Self { event_id, correlation_id, occurred_at, lanes: Some(lanes), gates }
     }
 
-    /// The lane sink a ROUTED `deliver:` or `sends:` step stages into, or `None` on a route that
-    /// cannot stage. Crate-internal: the generated step pipeline and the hand-written wrapper seams
-    /// are the only readers, and the only writers are the two constructors above.
-    pub(crate) fn lane_sink(&self) -> Option<&std::sync::Arc<dyn crate::lanes::LaneSink>> {
-        self.lanes.as_ref()
+    /// The lane sink THIS route stages into, or `None` when the route must take the legacy
+    /// append — because the caller owns no transaction to stage into, or because this route's own
+    /// gate is off.
+    ///
+    /// **There is deliberately no accessor that ignores the route** (#797). A bare
+    /// `lane_sink()` made the route-selection predicate `sink.is_some()`: every routed step on a
+    /// given delivery route read the same boolean, so adding a second route to a runner silently
+    /// bound it to the first route's flag, and turning one off turned the other off too. Rolling
+    /// back a route you did not intend to change is not a rollback (farley), and the gate names
+    /// WHICH AGGREGATE BOUNDARY is being closed, so sharing one boolean shares a fence between
+    /// unrelated aggregates (vernon). Taking a [`Route`](crate::generated::process_managers::Route)
+    /// makes staging-without-naming-your-route unspellable rather than merely discouraged
+    /// (compiler first, ADR-20260803-234035).
+    ///
+    /// Crate-internal: the generated step pipeline and the hand-written wrapper seams are the only
+    /// readers, and the only writers are the two constructors above.
+    pub(crate) fn lane_sink_for(
+        &self,
+        route: crate::generated::process_managers::Route,
+    ) -> Option<&std::sync::Arc<dyn crate::lanes::LaneSink>> {
+        self.lanes.as_ref().filter(|_| self.gates.enabled(route))
     }
 }

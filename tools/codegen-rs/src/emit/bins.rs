@@ -640,7 +640,7 @@ pub(crate) const CLAIM_ISOLATED: &str = "TRUE OF THE DEPLOYABLE TOO";
 /// The `src/main.rs` of a WIRED bin (#385): a thin parameter list over `bin_runtime` — config
 /// gate, telemetry, pool, the family spawn, the probe server. No business logic: every helper
 /// assembles existing application/infrastructure code (dispatch non-negotiable (a)).
-fn wired_main(b: &BinSpec) -> String {
+fn wired_main(b: &BinSpec, model: &Model) -> String {
     let mut uses = String::new();
     if !b.domain_scopes.is_empty() {
         uses.push_str(
@@ -703,8 +703,21 @@ fn wired_main(b: &BinSpec) -> String {
                 } else {
                     "None"
                 };
+                // One field per DECLARED route (#797), each fed from its OWN configuration key —
+                // `Route::config_key()` snake-cased is the generated `Config` field's name, so the
+                // two cannot drift and a fused pair is not expressible here.
+                let route_gate_fields: String = crate::emit::pm_orchestrators::route_decls(model)
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "                {}: config.{},\n",
+                            r.field(),
+                            r.config_key.to_ascii_lowercase()
+                        )
+                    })
+                    .collect();
                 body.push_str(&format!(
-                    "        {payments_opt}let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);\n        let status = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {{\n            pool: pool.clone(),\n            bin: BIN,\n            pm: PM,\n            mailbox_lane: {lane},\n            partner: {partner},\n            payments: {payments_field},\n            waiter,\n            // #595: one value across the fleet -- the bin reads the SAME generated key as the monolith.\n            replacement_birth_lane: config.route_replacement_birth_through_lane,\n        }})\n        .await;\n        tracing::info!(pm = PM, \"saga runner spawned (restricted to this PM)\");\n        saga_status = Some(status);\n",
+                    "        {payments_opt}let waiter = bin_runtime::event_waiter(&config.database_url, config.run_event_push);\n        let status = bin_runtime::spawn_pm_runtime(bin_runtime::PmRuntime {{\n            pool: pool.clone(),\n            bin: BIN,\n            pm: PM,\n            mailbox_lane: {lane},\n            partner: {partner},\n            payments: {payments_field},\n            waiter,\n            // #595/#797: one value across the fleet -- the bin reads the SAME generated keys as\n            // the monolith, one per DECLARED route. A route missing from this bin's scoped Config\n            // is a compile error naming exactly the decision nobody made.\n            route_gates: bin_runtime::RouteGates {{\n{route_gate_fields}            }},\n        }})\n        .await;\n        tracing::info!(pm = PM, \"saga runner spawned (restricted to this PM)\");\n        saga_status = Some(status);\n",
                 ));
                 if b.mailboxed {
                     body.push_str(
@@ -858,7 +871,7 @@ async fn main() {{
 fn bin_main(b: &BinSpec, model: &Model) -> String {
     match b.family {
         // The CQRS spine (PR #387) — template untouched, byte-parity with the merged wiring.
-        "actor" | "pm" | "projector" => return wired_main(b),
+        "actor" | "pm" | "projector" => return wired_main(b, model),
         // The API tier (#385 remainder): subgraph slices, role gateways, surfaces, bam.
         "subgraph" => return subgraph_main(b),
         "gateway" => return gateway_main(b, model),

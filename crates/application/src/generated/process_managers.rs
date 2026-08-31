@@ -27,14 +27,100 @@ pub struct RoutedLane {
     pub source: &'static str,
 }
 
-/// Every routed `deliver:` in the DSL, sorted. The DECLARED population the Order-lane
-/// liveness watch reports on — every tick, every lane, zero included, whatever
-/// `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` says: a lane that only reports
-/// when something was routed is a lane whose silence is ambiguous.
+/// Every routed `deliver:`/`sends:` in the DSL, sorted. The DECLARED population the
+/// Order-lane liveness watch reports on — every tick, every lane, zero included, whatever
+/// each route's own gate says: a lane that only reports when something was routed is a
+/// lane whose silence is ambiguous.
 pub const ROUTED_LANES: &[RoutedLane] = &[
     RoutedLane { actor_type: "Order", event_type: "OrderPlaced", source: "pm:PlaceOrderProcess:OrderPlaced" },
     RoutedLane { actor_type: "Order", event_type: "PlaceReplacementOrder", source: "pm:ReclamationProcess:PlaceReplacementOrder" },
 ];
+
+/// Every DECLARED lane ROUTE, one variant per routed `deliver:`/`sends:` in
+/// `specs/*/processmanager.yaml` (#797, ADR-20260829-230418 C3).
+///
+/// A routed step consults ITS OWN route — `env.lane_sink_for(Route::X)` — never bare sink
+/// presence. That is what makes the gate per ROUTE rather than per runner: two routes
+/// hosted by the same runner can be flipped independently, so turning off a misbehaving
+/// route never turns off an unrelated one. A rollback that changes something you did not
+/// intend to change is not a rollback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Route {
+    /// Routed `deliver:` of the FACT `OrderPlaced` → the `Order` lane, gated on `configuration.yaml#/keys/ROUTE_ORDER_BIRTH_THROUGH_LANE`.
+    OrderPlacedToOrder,
+    /// Routed `sends:` of the COMMAND `PlaceReplacementOrder` → the `Order` lane, gated on `configuration.yaml#/keys/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`.
+    PlaceReplacementOrderToOrder,
+}
+
+impl Route {
+    /// Every declared route, sorted — the population a gate or a report iterates.
+    pub const ALL: &'static [Route] = &[
+        Route::OrderPlacedToOrder,
+        Route::PlaceReplacementOrderToOrder,
+    ];
+
+    /// The `configuration.yaml` key whose position this route reads. Emitted from the
+    /// DSL `route_gate:` `$ref`, so a key that does not exist is a `make validate`
+    /// error, never a silently-`false` lookup at runtime.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            Route::OrderPlacedToOrder => "ROUTE_ORDER_BIRTH_THROUGH_LANE",
+            Route::PlaceReplacementOrderToOrder => "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
+        }
+    }
+
+    /// `actors.yaml` key of the target whose lane receives the message.
+    pub fn actor_type(self) -> &'static str {
+        match self {
+            Route::OrderPlacedToOrder => "Order",
+            Route::PlaceReplacementOrderToOrder => "Order",
+        }
+    }
+
+    /// The message handed over — an `events.yaml` key for a FACT route, a `commands.yaml` key for a COMMAND route.
+    pub fn message_type(self) -> &'static str {
+        match self {
+            Route::OrderPlacedToOrder => "OrderPlaced",
+            Route::PlaceReplacementOrderToOrder => "PlaceReplacementOrder",
+        }
+    }
+}
+
+/// Where every route's gate STANDS on this process — one field per [`Route`].
+///
+/// Deliberately NOT `Default` and deliberately not built from a config struct here:
+/// `application` cannot see `crates/server`'s configuration, so every construction site
+/// writes a struct literal naming every field. Declaring a route therefore breaks every
+/// site with E0063 until a human decides which key feeds it — the compiler-first form of
+/// "adding a route without adding its key is a build failure" (farley, #797). The
+/// `route_gates_are_not_fused` guard covers the one thing the compiler cannot: a site
+/// feeding one route's field from ANOTHER route's configuration value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteGates {
+    /// [`Route::OrderPlacedToOrder`] — `configuration.yaml#/keys/ROUTE_ORDER_BIRTH_THROUGH_LANE`.
+    pub order_placed_to_order: bool,
+    /// [`Route::PlaceReplacementOrderToOrder`] — `configuration.yaml#/keys/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`.
+    pub place_replacement_order_to_order: bool,
+}
+
+impl RouteGates {
+    /// Every route OFF — the LEGACY position for all of them, and the value a route that
+    /// cannot stage carries. Never a `Default` impl: `..Default::default()` would let a
+    /// new route slip past a construction site unnoticed, which is the whole failure
+    /// this type exists to make impossible.
+    pub const NONE: Self = Self {
+        order_placed_to_order: false,
+        place_replacement_order_to_order: false,
+    };
+
+    /// Is THIS route's gate on?
+    pub fn enabled(&self, route: Route) -> bool {
+        match route {
+            Route::OrderPlacedToOrder => self.order_placed_to_order,
+            Route::PlaceReplacementOrderToOrder => self.place_replacement_order_to_order,
+        }
+    }
+}
 
 /// Generated step pipelines for `processmanager.yaml#/DeliveryDispatchProcess`.
 pub mod delivery_dispatch_process {
@@ -640,7 +726,7 @@ pub mod place_order_process {
     #[async_trait::async_trait]
     pub trait PaymentAuthorizedHooks: Send + Sync {
         /// Build the FULL `OrderPlaced` payload — the DSL `with` covers only [orderId]; the rest is computed
-        /// (spec note: — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.). `Skip` ends the leg as a benign no-op; `Err` aborts and surfaces.
+        /// (spec note: — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently. ROUTED (#588, ADR-20260816-040239): `route_gate:` is what makes this step a lane ENQUEUE rather than a foreign-stream append, and it names THIS route's own key -- the generated step consults Route::OrderPlacedToOrder, never bare sink presence, so it can be rolled back without touching any other route (#797).). `Skip` ends the leg as a benign no-op; `Err` aborts and surfaces.
         async fn build_order_placed(&self, event: &domain::generated::events::PaymentAuthorized, row: &crate::pm_state::PaymentProcessRow) -> Result<super::HookOutcome<domain::generated::events::OrderPlaced>, domain::shared::errors::DomainError>;
 
         /// Per-aggregate idempotency predicate: given the target stream as loaded, should this
@@ -675,12 +761,12 @@ pub mod place_order_process {
         if row.process_status != domain::generated::scalars::PaymentProcessStatus::AWAITING_PAYMENT_RESULT {
             return Ok(Outcome::Skipped(format!("payment_process_manager run is {:?}, expected AWAITING_PAYMENT_RESULT — Already-resolved run → skip (benign Stripe re-delivery).", row.process_status)));
         }
-        // deliver OrderPlaced → Order (the aggregate records the fact) — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently.
+        // deliver OrderPlaced → Order (the aggregate records the fact) — Birth of the Order, materialized from the frozen checkout snapshot; the Order records it idempotently. ROUTED (#588, ADR-20260816-040239): `route_gate:` is what makes this step a lane ENQUEUE rather than a foreign-stream append, and it names THIS route's own key -- the generated step consults Route::OrderPlacedToOrder, never bare sink presence, so it can be rolled back without touching any other route (#797).
         let order_placed = match hooks.build_order_placed(event, &row).await? {
             super::HookOutcome::Ready(v) => v,
             super::HookOutcome::Skip(reason) => return Ok(Outcome::Skipped(reason)),
         };
-        if let Some(lanes) = env.lane_sink() {
+        if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::OrderPlacedToOrder) {
             lanes.stage(crate::lanes::LaneEnqueue {
                 kind: crate::lanes::LaneMessageKind::Event,
                 actor_type: "Order",

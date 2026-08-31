@@ -51,7 +51,10 @@ fn deps_over(pool: &PgPool) -> CommandDeps {
         ),
         enforce_service_hours_guard: false,
         enforce_acceptance_timeout: false,
-        route_order_birth_through_lane: false,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: false,
+            place_replacement_order_to_order: false,
+        },
     }
 }
 

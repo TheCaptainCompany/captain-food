@@ -76,6 +76,18 @@ mod tests {
     }
 }
 
+/// Read one boolean gate from the environment, with the spec key's own default when unset.
+///
+/// The standalone fleet has no generated `Config` (that lives in `crates/server`), so each gate is
+/// read here by name. Kept as one function so every gate parses the same tokens — a gate that only
+/// understands `true` while its neighbour also understands `1` is a rollback that silently does
+/// nothing.
+fn env_flag(key: &str, default: bool) -> bool {
+    std::env::var(key)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+        .unwrap_or(default)
+}
+
 /// Fully Pg-backed [`CommandDeps`] for a process hosting mailbox workers OUTSIDE the monolith
 /// composition root — a standalone adapter, or a per-actor bin (#385). External services resolve
 /// exactly like the monolith's: ENV-GATED with the fail-closed stand-in as the default —
@@ -157,9 +169,19 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // order, INVISIBLY — invisible because `order_birth_lag_ms` only records on the routed
         // path. Bounded by the rolling-deploy window; `runtime_flag_state` below is what makes it
         // observable while that window is open.
-        route_order_birth_through_lane: std::env::var("ROUTE_ORDER_BIRTH_THROUGH_LANE")
-            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
-            .unwrap_or(true),
+        //
+        // #797: one field per DECLARED route, each read from its OWN key. A standalone worker
+        // fleet hosts only the OrderPlaced route today (the reclamation seam runs on the polling
+        // runner), but the replacement gate is read from its own key here too rather than pinned
+        // to a literal — a route whose value is decided by which composition root happens to
+        // construct it is a route with no single rollback lever.
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: env_flag("ROUTE_ORDER_BIRTH_THROUGH_LANE", true),
+            place_replacement_order_to_order: env_flag(
+                "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
+                false,
+            ),
+        },
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -175,7 +197,7 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
     );
     telemetry::meters::runtime::declare_flag(
         "ROUTE_ORDER_BIRTH_THROUGH_LANE",
-        deps.route_order_birth_through_lane,
+        deps.route_gates.order_placed_to_order,
     );
     deps
 }

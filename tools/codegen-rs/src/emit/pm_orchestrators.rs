@@ -71,7 +71,11 @@ pub(crate) enum PmStepDef {
     /// `that` = (subject, field, const-member) when structurally expressible.
     Guard { that: Option<(String, String, String)>, throws: Option<String>, skip: bool, note: Option<String> },
     Call { port: String, operation: String, note: Option<String> },
-    Deliver { event: String, to: String, with: Vec<(String, PmVal)>, note: Option<String> },
+    /// `route_gate` = the `configuration.yaml#/keys/<KEY>` name this deliver's LANE ROUTING is
+    /// gated on, when the DSL declares one. `Some` IS what makes the step routed: there is no
+    /// separate routed-set list to keep in step, and a route whose key does not resolve is a
+    /// dangling `$ref` — a `make validate` error (#797).
+    Deliver { event: String, to: String, with: Vec<(String, PmVal)>, note: Option<String>, route_gate: Option<String> },
     Send { command: String, with: Vec<(String, PmVal)>, for_each: Option<String>, note: Option<String> },
     StateStep { by: Vec<(String, PmVal)>, expect: Vec<(String, String)>, set: Vec<(String, PmVal)>, note: Option<String> },
 }
@@ -81,11 +85,33 @@ pub(crate) struct PmLegDef {
     pub(crate) msg: String,
     pub(crate) description: Option<String>,
     pub(crate) steps: Vec<PmStepDef>,
-    /// Commands the leg's hand-written wrapper sends that no step can express (`sends:`, #595) —
-    /// bare command names. They are NOT steps and generate no pipeline code; they are carried so
-    /// the DECLARED routed-lane table below sees them, because a lane that is watched only
-    /// because some OTHER route happens to address it is a lane one deletion away from unwatched.
-    pub(crate) sends: Vec<String>,
+    /// Commands the leg's hand-written wrapper sends that no step can express (`sends:`, #595).
+    /// They are NOT steps and generate no pipeline code; they are carried so the DECLARED
+    /// routed-lane table below sees them, because a lane that is watched only because some OTHER
+    /// route happens to address it is a lane one deletion away from unwatched.
+    pub(crate) sends: Vec<PmSendDecl>,
+}
+
+/// One DECLARED wrapper-seam `sends:` entry.
+///
+/// `to` + `route_gate` are what a ROUTED send needs and a plain declaration does not: the target
+/// actor whose lane receives the command, and the `configuration.yaml` key that route is gated on.
+/// Both present ⇒ routed; both absent ⇒ the command is declared for wiring/coverage only. One
+/// without the other is refused by `pm-route-gate` (`validate::process_managers`) — a gate with no
+/// target is a gate on nothing, and a target with no gate is worse than an ungateable route:
+/// `route_decls` below reads the both-present PAIR, so the send would silently leave `ROUTED_LANES`
+/// (its lane dropping out of #783's dead-man's-switch population) with no `Route` variant emitted
+/// for it, at 0 validate errors. That rule was named here before it existed, and the shape it
+/// claims to refuse was reachable — round 2 of #797's review.
+pub(crate) struct PmSendDecl {
+    /// The full `commands.yaml#/Name` ref string — what `pm-sends-kind`/`pm-sends-no-inbox` read.
+    pub(crate) command_ref: String,
+    /// Bare command name.
+    pub(crate) command: String,
+    /// `actors.yaml` key of the target whose lane receives it, when routed.
+    pub(crate) to: Option<String>,
+    /// `configuration.yaml#/keys/<KEY>` name gating the route, when routed.
+    pub(crate) route_gate: Option<String>,
 }
 
 pub(crate) struct PmOrchDef {
@@ -100,27 +126,87 @@ pub(crate) struct PmOrchDef {
 /// the PlaceOrder command leg is the server-side pricing path; it stays `commands::place_order`).
 pub(crate) const PM_HAND_WRITTEN_LEGS: &[(&str, &str)] = &[("PlaceOrderProcess", "PlaceOrder")];
 
-/// The `deliver:` steps ROUTED through the target actor's mailbox lane instead of appending to its
-/// stream from the saga — `(target actor, event)` (ADR-20260816-040239).
+/// One DECLARED lane ROUTE — a `deliver:` or wrapper-seam `sends:` that goes through the target
+/// actor's mailbox lane instead of being appended to its stream from the saga
+/// (ADR-20260816-040239), together with the configuration key that route is gated on (#797).
 ///
-/// **Why this is a list and not the predicate.** The ADR's semantic rule is "a `deliver:` whose
-/// target declares the event in its `receives` is a lane ENQUEUE", and phase 0 established that
-/// **13 of 13** `deliver:` steps in the DSL satisfy it — twelve of them on the money or dispatch
-/// path. Gate-then-stabilize does not price a money-path commit change by blast count, so the
-/// change ships routing the ONE pair the acceptance clock needs and leaves the other twelve on the
-/// legacy append until each is moved by its own recorded decision. The list is the record of which
-/// ones have been moved; the runtime flag
-/// (`configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE`) is what turns the routed branch on.
+/// **The routed set is DSL-declared, not a const in this file.** It used to be two hand-kept
+/// lists here (`PM_LANE_ROUTED_DELIVERS`, `SENDS_LANE_ROUTED`) with the runtime flag named only in
+/// prose, and the routed step then read bare sink PRESENCE — so route selection was `sink.is_some()`
+/// and every route on a given runner shared one boolean. A route declares its own gate now, so the
+/// two cannot drift: the gate is a `$ref` the refs walker resolves, and the step consults
+/// `Route::<this route>` by name.
 ///
-/// Not routed and not routable through this seam: the replacement-order birth in
-/// `process_managers/reclamation.rs`, which the polling `ProcessManagerRunner` reaches with no
-/// delivery transaction to stage into — tracked as
-/// [#595](https://github.com/TheCaptainCompany/captain-food/issues/595).
-pub(crate) const PM_LANE_ROUTED_DELIVERS: &[(&str, &str)] = &[("Order", "OrderPlaced")];
+/// Gate-then-stabilize still prices a route move one route at a time: `route_gate:` presence is the
+/// RECORD of which pairs have been moved, never a predicate that sweeps every `deliver:` the moment
+/// the grammar allows it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RouteDecl {
+    /// `actors.yaml` key of the TARGET — its mailbox lane receives the message.
+    pub(crate) actor_type: String,
+    /// `events.yaml` key for a routed `deliver:` (a FACT), `commands.yaml` key for a routed
+    /// `sends:` (a REQUEST the target may refuse).
+    pub(crate) message_type: String,
+    /// FROZEN door identity, first half: `pm:{ProcessManager}:{Message}`.
+    pub(crate) source: String,
+    /// `configuration.yaml#/keys/<KEY>` name gating this route.
+    pub(crate) config_key: String,
+    /// A routed `deliver:` (fact) rather than a routed `sends:` (command).
+    pub(crate) is_fact: bool,
+}
 
-/// Is this `deliver:` step routed through the target's mailbox lane?
-pub(crate) fn deliver_is_lane_routed(to: &str, event: &str) -> bool {
-    PM_LANE_ROUTED_DELIVERS.contains(&(to, event))
+impl RouteDecl {
+    /// The generated `Route` variant name: `{Message}To{Actor}` — the pair IS the route identity,
+    /// and both halves are in the name so two routes to the same lane cannot collide.
+    pub(crate) fn variant(&self) -> String {
+        format!("{}To{}", self.message_type, self.actor_type)
+    }
+
+    /// The generated `RouteGates` field name.
+    pub(crate) fn field(&self) -> String {
+        snake_type(&self.variant())
+    }
+}
+
+/// Every DECLARED route, sorted and deduped — read from the MODEL, which is the only place the
+/// routed set is written down (#797).
+pub(crate) fn route_decls(model: &Model) -> Vec<RouteDecl> {
+    let mut out: Vec<RouteDecl> = Vec::new();
+    for pm in parse_pm_orchestrators(model) {
+        for leg in &pm.legs {
+            for step in &leg.steps {
+                if let PmStepDef::Deliver { event, to, route_gate: Some(key), .. } = step {
+                    out.push(RouteDecl {
+                        actor_type: to.clone(),
+                        message_type: event.clone(),
+                        source: format!("pm:{}:{}", pm.name, event),
+                        config_key: key.clone(),
+                        is_fact: true,
+                    });
+                }
+            }
+            for send in &leg.sends {
+                match (&send.to, &send.route_gate) {
+                    (Some(to), Some(key)) => out.push(RouteDecl {
+                        actor_type: to.clone(),
+                        message_type: send.command.clone(),
+                        source: format!("pm:{}:{}", pm.name, send.command),
+                        config_key: key.clone(),
+                        is_fact: false,
+                    }),
+                    // `pm-route-gate` (validate::process_managers) reports the half-declared forms;
+                    // the emitter treats them as unrouted so a validate error is a validate error,
+                    // never a codegen panic. Falling through here is precisely why the rule has to
+                    // exist: without it this arm drops the route from ROUTED_LANES and the `Route`
+                    // enum in silence, at 0 errors.
+                    _ => {}
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Aggregate → payload key property for `deliver` stream addressing. Convention: `<camel(agg)>Id`;
@@ -131,6 +217,46 @@ pub(crate) fn pm_aggregate_key(aggregate: &str) -> String {
     } else {
         format!("{}Id", camel(aggregate))
     }
+}
+
+/// Read a `{ $ref: 'configuration.yaml#/keys/<KEY>' }` node into the bare KEY name (#797).
+///
+/// The `$ref` — not a bare string — is the whole point: the refs walker resolves it, so a route
+/// gated on a key that does not exist is a `make validate` error rather than a silently-`false`
+/// lookup at runtime. That is the compiler-first half of "adding a route without adding its key
+/// is a build failure".
+pub(crate) fn config_key_ref(node: Option<&Value>, loc: &str) -> Option<String> {
+    let node = node?;
+    let r = node
+        .get("$ref")
+        .and_then(|r| r.as_str())
+        .unwrap_or_else(|| panic!("{}: route_gate must be a $ref to configuration.yaml#/keys/<KEY>", loc));
+    Some(
+        r.strip_prefix("configuration.yaml#/keys/")
+            .unwrap_or_else(|| {
+                panic!("{}: route_gate must $ref configuration.yaml#/keys/<KEY>, got '{}'", loc, r)
+            })
+            .to_string(),
+    )
+}
+
+/// Parse a leg's `sends:` list. Each entry is `{ command: {$ref}, [to: {$ref}], [route_gate: {$ref}] }`.
+pub(crate) fn parse_pm_sends(node: Option<&Value>, loc: &str) -> Vec<PmSendDecl> {
+    let mut out = Vec::new();
+    for (i, e) in node.and_then(|x| x.as_sequence()).into_iter().flatten().enumerate() {
+        let sloc = format!("{}.sends[{}]", loc, i);
+        let command_ref = e
+            .get("command")
+            .and_then(|c| c.get("$ref"))
+            .and_then(|r| r.as_str())
+            .unwrap_or_else(|| panic!("{}: a sends: entry needs `command: {{ $ref: 'commands.yaml#/<Name>' }}`", sloc))
+            .to_string();
+        let command = ref_name(&command_ref).unwrap_or_else(|| panic!("{}: unreadable command $ref", sloc));
+        let to = e.get("to").and_then(|x| x.get("$ref")).and_then(|r| r.as_str()).and_then(ref_name);
+        let route_gate = config_key_ref(e.get("route_gate"), &sloc);
+        out.push(PmSendDecl { command_ref, command, to, route_gate });
+    }
+    out
 }
 
 pub(crate) fn pm_val_entries(node: Option<&Value>, loc: &str) -> Vec<(String, PmVal)> {
@@ -272,6 +398,7 @@ pub(crate) fn parse_pm_orchestrators(model: &Model) -> Vec<PmOrchDef> {
                                 .unwrap_or_else(|| panic!("{}: deliver without target $ref", sloc)),
                             with: pm_val_entries(body.get("with"), &sloc),
                             note,
+                            route_gate: config_key_ref(body.get("route_gate"), &sloc),
                         }
                     }
                     "send" => PmStepDef::Send {
@@ -308,14 +435,7 @@ pub(crate) fn parse_pm_orchestrators(model: &Model) -> Vec<PmOrchDef> {
                     other => panic!("{}: unknown step kind '{}'", sloc, other),
                 });
             }
-            let sends: Vec<String> = leg
-                .get("sends")
-                .and_then(|x| x.as_sequence())
-                .into_iter()
-                .flatten()
-                .filter_map(|c| c.get("$ref").and_then(|r| r.as_str()))
-                .filter_map(|r| r.strip_prefix("commands.yaml#/").map(|n| n.to_string()))
-                .collect();
+            let sends: Vec<PmSendDecl> = parse_pm_sends(leg.get("sends"), &format!("processmanager.yaml#/{}/{}", name, msg));
             legs.push(PmLegDef {
                 msg_file: pr.file.clone(),
                 msg,
@@ -1036,13 +1156,13 @@ impl<'a> PmLegGen<'a> {
         );
     }
 
-    pub(crate) fn emit_deliver(&mut self, event: &str, to: &str, with: &[(String, PmVal)], note: &Option<String>, ind: usize) {
+    pub(crate) fn emit_deliver(&mut self, event: &str, to: &str, with: &[(String, PmVal)], note: &Option<String>, route_gate: &Option<String>, ind: usize) {
         if self.admission_pending {
             self.emit_admission(ind);
         }
-        // A routed deliver reads `env.lane_sink()`, which only EVENT legs carry (`env_needed`).
+        // A routed deliver reads `env.lane_sink_for(..)`, which only EVENT legs carry (`env_needed`).
         assert!(
-            !self.is_cmd || !deliver_is_lane_routed(to, event),
+            !self.is_cmd || route_gate.is_none(),
             "processmanager.yaml#/{}: a lane-ROUTED deliver ({} -> {}) on a COMMAND leg has no \
              trigger envelope to carry the lane sink",
             self.pm.name, event, to
@@ -1095,7 +1215,8 @@ impl<'a> PmLegGen<'a> {
             .and_then(|n| n.get("properties"))
             .map(|p| p.get(key_prop.as_str()).is_some())
             .unwrap_or(false);
-        let routed = deliver_is_lane_routed(to, event);
+        let routed = route_gate.is_some();
+        let route_variant = format!("{}To{}", event, to);
         let pm_name = self.pm.name.clone();
         let append = |gen: &mut Self, key_expr: &str, ind: usize| {
             let (route_ind, legacy_ind) = if routed { (ind + 4, ind + 4) } else { (ind, ind) };
@@ -1103,13 +1224,21 @@ impl<'a> PmLegGen<'a> {
                 // ADR-20260816-040239: this `deliver:` is a lane ENQUEUE. The saga DECIDES the
                 // fact; the target actor's own mailbox lane APPENDS it, so the write passes the
                 // target's serialization point and the delivery's `Recorded` verdict is what its
-                // `schedules:` key on. `env.lane_sink()` is `Some` only on a route that built the
-                // envelope with `TriggerEnvelope::laned` — i.e. one that owns a fenced transaction
-                // to stage into (the field is private, #597) — AND with
-                // `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` ON; `None` takes the
-                // legacy foreign-stream append below unchanged (gate-then-stabilize — rollback
-                // is a config flip, not a redeploy).
-                gen.push(ind, "if let Some(lanes) = env.lane_sink() {");
+                // `schedules:` key on. `env.lane_sink_for(Route::X)` is `Some` only on a route
+                // that built the envelope with `TriggerEnvelope::laned` — i.e. one that owns a
+                // fenced transaction to stage into (the field is private, #597) — AND whose
+                // `RouteGates` has THIS route's own key on. Naming the route is what makes the
+                // gate per ROUTE rather than per runner (#797): bare sink presence would flip
+                // every route hosted by the same runner together. `None` takes the legacy
+                // foreign-stream append below unchanged (gate-then-stabilize — rollback is a
+                // config flip, not a redeploy).
+                gen.push(
+                    ind,
+                    &format!(
+                        "if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::{}) {{",
+                        route_variant
+                    ),
+                );
                 gen.push(route_ind, "lanes.stage(crate::lanes::LaneEnqueue {");
                 // A `deliver:` is a FACT, so it always takes the EVENT door (#595 made the door a
                 // typed field because the `sends:` arm takes the COMMAND one).
@@ -1522,7 +1651,7 @@ pub(crate) fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (Stri
             panic!("processmanager.yaml#/{}/{}: non-structural guard outside the supported positions", pm.name, leg.msg)
         }
         PmStepDef::Call { port, operation, note } => gen.emit_call(port, operation, note, ind),
-        PmStepDef::Deliver { event, to, with, note } => gen.emit_deliver(event, to, with, note, ind),
+        PmStepDef::Deliver { event, to, with, note, route_gate } => gen.emit_deliver(event, to, with, note, route_gate, ind),
         PmStepDef::Send { command, with, for_each, note } => gen.emit_send(command, with, for_each, note, ind),
         PmStepDef::StateStep { by, expect, set, note } => gen.emit_state(i, by, expect, set, note, consumed, ind),
     };
@@ -1653,87 +1782,44 @@ pub(crate) fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (Stri
     (trait_code, fn_code)
 }
 
-/// The `sends:` commands ROUTED through the target actor's mailbox lane — `(command, target
-/// actor)` (#595, ADR-20260829-230418 C2).
-///
-/// The `deliver:` twin of this list is [`PM_LANE_ROUTED_DELIVERS`] and it exists for the same
-/// reason: gate-then-stabilize prices a route move one route at a time, so the routed set is a
-/// RECORD of which pairs have been moved, not a predicate that sweeps every pair the moment the
-/// grammar allows it.
-pub(crate) const SENDS_LANE_ROUTED: &[(&str, &str)] = &[("PlaceReplacementOrder", "Order")];
-
-/// Every ROUTED `deliver:` target as `(target actor, event)` — the FACT half of `ROUTED_LANES`,
-/// recomputed from the MODEL.
+/// Every ROUTED `deliver:` target as `(target actor, event)` — the FACT half of `ROUTED_LANES`.
 ///
 /// It exists so the #780 route gate has an ORACLE that is not the artifact under test: asking
 /// `ROUTED_LANES` which pairs are routed, in order to check `ROUTED_LANES`, measures nothing. A
 /// routed `sends:` is deliberately excluded — a command may be refused, so it does not belong to a
 /// gate about facts that must be recorded.
 pub(crate) fn routed_fact_targets(model: &Model) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    for pm in parse_pm_orchestrators(model) {
-        for leg in &pm.legs {
-            for step in &leg.steps {
-                if let PmStepDef::Deliver { event, to, .. } = step {
-                    if deliver_is_lane_routed(to, event) {
-                        out.push((to.clone(), event.clone()));
-                    }
-                }
-            }
-        }
-    }
+    let mut out: Vec<(String, String)> = route_decls(model)
+        .into_iter()
+        .filter(|r| r.is_fact)
+        .map(|r| (r.actor_type, r.message_type))
+        .collect();
     out.sort();
     out.dedup();
     out
 }
 
-/// Emit `ROUTED_LANES` — the mailbox lanes a ROUTED `deliver:` or `sends:` addresses, DECLARED at
-/// runtime
-/// (#598).
+/// Emit the ROUTE surface: `ROUTED_LANES` (the lanes a routed message lands on, #598), the
+/// `Route` enumeration and the per-route `RouteGates` (#797).
 ///
-/// Until this table existed the routed set lived only in the codegen's own
-/// [`PM_LANE_ROUTED_DELIVERS`], so nothing at runtime could name "the lanes a routed birth lands
-/// on". The Order-lane dead-man's switch needs exactly that: it must report on every DECLARED
-/// lane on every tick, zero included, and a watcher whose lane set is a hand-kept literal is one
-/// forgotten edit away from a lane that is silently unwatched — the failure the switch exists to
-/// make impossible.
+/// Until `ROUTED_LANES` existed the routed set lived only in the codegen's own hand-kept consts,
+/// so nothing at runtime could name "the lanes a routed birth lands on". The Order-lane
+/// dead-man's switch needs exactly that: it must report on every DECLARED lane on every tick, zero
+/// included, and a watcher whose lane set is a hand-kept literal is one forgotten edit away from a
+/// lane that is silently unwatched — the failure the switch exists to make impossible.
+///
+/// `Route` and `RouteGates` are the #797 half. Before them a routed step read bare
+/// `env.lane_sink()` PRESENCE, so the route-selection predicate was `sink.is_some()` and every
+/// route hosted by one runner shared that runner's single boolean. Now each routed step names its
+/// OWN route, `RouteGates` carries one field per route, and — because `RouteGates` derives no
+/// `Default` — declaring a route makes every construction site an E0063 until a human decides
+/// which configuration key feeds it. Generate the enumeration, keep the decision human-owned.
 ///
 /// `source` is carried because it is the FROZEN door identity's first half
 /// (`pm:{ProcessManager}:{Event}`): changing either half re-mints the identity of every in-flight
 /// routed message, so having the produced string in a committed generated file puts a rename in
 /// the diff instead of in production.
-fn emit_routed_lanes(pms: &[PmOrchDef]) -> String {
-    let mut rows: Vec<(String, String, String)> = Vec::new();
-    for pm in pms {
-        for leg in &pm.legs {
-            for step in &leg.steps {
-                if let PmStepDef::Deliver { event, to, .. } = step {
-                    if deliver_is_lane_routed(to, event) {
-                        rows.push((
-                            to.clone(),
-                            event.clone(),
-                            format!("pm:{}:{}", pm.name, event),
-                        ));
-                    }
-                }
-            }
-            // Declared wrapper-seam sends (#595): a `sends:` command addresses the lane of the
-            // actor that RECEIVES it — the same addressing `flush_lane_enqueues_in_tx` resolves —
-            // so the route is declared here on the same footing as a routed `deliver:`.
-            for command in &leg.sends {
-                if let Some(actor) = SENDS_LANE_ROUTED.iter().find_map(|(c, a)| (c == command).then_some(*a))
-                {
-                    rows.push((
-                        actor.to_string(),
-                        command.clone(),
-                        format!("pm:{}:{}", pm.name, command),
-                    ));
-                }
-            }
-        }
-    }
-    rows.sort();
-    rows.dedup();
+fn emit_routes(routes: &[RouteDecl]) -> String {
     let mut out = String::from(
         "\n/// One ROUTED target — the lane a process manager hands a message to instead of acting on\n\
          /// that aggregate's stream itself (ADR-20260816-040239; `sends:` routes added by #595).\n\
@@ -1747,19 +1833,105 @@ fn emit_routed_lanes(pms: &[PmOrchDef]) -> String {
          \x20   /// FROZEN door identity, first half: `pm:{ProcessManager}:{Event}`.\n\
          \x20   pub source: &'static str,\n\
          }\n\n\
-         /// Every routed `deliver:` in the DSL, sorted. The DECLARED population the Order-lane\n\
-         /// liveness watch reports on — every tick, every lane, zero included, whatever\n\
-         /// `configuration.yaml#/ROUTE_ORDER_BIRTH_THROUGH_LANE` says: a lane that only reports\n\
-         /// when something was routed is a lane whose silence is ambiguous.\n\
+         /// Every routed `deliver:`/`sends:` in the DSL, sorted. The DECLARED population the\n\
+         /// Order-lane liveness watch reports on — every tick, every lane, zero included, whatever\n\
+         /// each route's own gate says: a lane that only reports when something was routed is a\n\
+         /// lane whose silence is ambiguous.\n\
          pub const ROUTED_LANES: &[RoutedLane] = &[\n",
     );
-    for (to, event, source) in &rows {
+    for r in routes {
         out.push_str(&format!(
             "    RoutedLane {{ actor_type: \"{}\", event_type: \"{}\", source: \"{}\" }},\n",
-            to, event, source
+            r.actor_type, r.message_type, r.source
         ));
     }
     out.push_str("];\n");
+
+    out.push_str(
+        "\n/// Every DECLARED lane ROUTE, one variant per routed `deliver:`/`sends:` in\n\
+         /// `specs/*/processmanager.yaml` (#797, ADR-20260829-230418 C3).\n\
+         ///\n\
+         /// A routed step consults ITS OWN route — `env.lane_sink_for(Route::X)` — never bare sink\n\
+         /// presence. That is what makes the gate per ROUTE rather than per runner: two routes\n\
+         /// hosted by the same runner can be flipped independently, so turning off a misbehaving\n\
+         /// route never turns off an unrelated one. A rollback that changes something you did not\n\
+         /// intend to change is not a rollback.\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]\n\
+         pub enum Route {\n",
+    );
+    for r in routes {
+        out.push_str(&format!(
+            "    /// {} `{}` → the `{}` lane, gated on `configuration.yaml#/keys/{}`.\n    {},\n",
+            if r.is_fact { "Routed `deliver:` of the FACT" } else { "Routed `sends:` of the COMMAND" },
+            r.message_type,
+            r.actor_type,
+            r.config_key,
+            r.variant()
+        ));
+    }
+    out.push_str("}\n\nimpl Route {\n");
+    out.push_str("    /// Every declared route, sorted — the population a gate or a report iterates.\n");
+    out.push_str("    pub const ALL: &'static [Route] = &[\n");
+    for r in routes {
+        out.push_str(&format!("        Route::{},\n", r.variant()));
+    }
+    out.push_str("    ];\n\n");
+    out.push_str(
+        "    /// The `configuration.yaml` key whose position this route reads. Emitted from the\n\
+        \x20   /// DSL `route_gate:` `$ref`, so a key that does not exist is a `make validate`\n\
+        \x20   /// error, never a silently-`false` lookup at runtime.\n\
+        \x20   pub fn config_key(self) -> &'static str {\n        match self {\n",
+    );
+    for r in routes {
+        out.push_str(&format!("            Route::{} => \"{}\",\n", r.variant(), r.config_key));
+    }
+    out.push_str("        }\n    }\n\n");
+    out.push_str("    /// `actors.yaml` key of the target whose lane receives the message.\n    pub fn actor_type(self) -> &'static str {\n        match self {\n");
+    for r in routes {
+        out.push_str(&format!("            Route::{} => \"{}\",\n", r.variant(), r.actor_type));
+    }
+    out.push_str("        }\n    }\n\n");
+    out.push_str("    /// The message handed over — an `events.yaml` key for a FACT route, a `commands.yaml` key for a COMMAND route.\n    pub fn message_type(self) -> &'static str {\n        match self {\n");
+    for r in routes {
+        out.push_str(&format!("            Route::{} => \"{}\",\n", r.variant(), r.message_type));
+    }
+    out.push_str("        }\n    }\n}\n");
+
+    out.push_str(
+        "\n/// Where every route's gate STANDS on this process — one field per [`Route`].\n\
+         ///\n\
+         /// Deliberately NOT `Default` and deliberately not built from a config struct here:\n\
+         /// `application` cannot see `crates/server`'s configuration, so every construction site\n\
+         /// writes a struct literal naming every field. Declaring a route therefore breaks every\n\
+         /// site with E0063 until a human decides which key feeds it — the compiler-first form of\n\
+         /// \"adding a route without adding its key is a build failure\" (farley, #797). The\n\
+         /// `route_gates_are_not_fused` guard covers the one thing the compiler cannot: a site\n\
+         /// feeding one route's field from ANOTHER route's configuration value.\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n\
+         pub struct RouteGates {\n",
+    );
+    for r in routes {
+        out.push_str(&format!(
+            "    /// [`Route::{}`] — `configuration.yaml#/keys/{}`.\n    pub {}: bool,\n",
+            r.variant(), r.config_key, r.field()
+        ));
+    }
+    out.push_str("}\n\nimpl RouteGates {\n");
+    out.push_str(
+        "    /// Every route OFF — the LEGACY position for all of them, and the value a route that\n\
+        \x20   /// cannot stage carries. Never a `Default` impl: `..Default::default()` would let a\n\
+        \x20   /// new route slip past a construction site unnoticed, which is the whole failure\n\
+        \x20   /// this type exists to make impossible.\n    pub const NONE: Self = Self {\n",
+    );
+    for r in routes {
+        out.push_str(&format!("        {}: false,\n", r.field()));
+    }
+    out.push_str("    };\n\n");
+    out.push_str("    /// Is THIS route's gate on?\n    pub fn enabled(&self, route: Route) -> bool {\n        match route {\n");
+    for r in routes {
+        out.push_str(&format!("            Route::{} => self.{},\n", r.variant(), r.field()));
+    }
+    out.push_str("        }\n    }\n}\n");
     out
 }
 
@@ -1779,7 +1951,7 @@ pub(crate) fn emit_pm_orchestrators(model: &Model) -> String {
          /// How a hook resolves: the value is ready, or the leg (or just this call) ends as a benign skip.\n\
          pub enum HookOutcome<T> {\n    Ready(T),\n    Skip(String),\n}\n",
     );
-    out.push_str(&emit_routed_lanes(&pms));
+    out.push_str(&emit_routes(&route_decls(model)));
     for pm in &pms {
         let table = pm.state_table.as_ref().map(|t| {
             tables

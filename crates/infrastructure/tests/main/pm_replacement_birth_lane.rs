@@ -142,8 +142,8 @@ async fn seed_resolution(pool: &PgPool) {
     .expect("seed the resolution");
 }
 
-/// The ports the Order lane's COMMAND route needs. `route_order_birth_through_lane` stays at the
-/// SPEC default — this suite turns exactly one knob, and it is not that one.
+/// The ports the Order lane's COMMAND route needs. The OrderPlaced route's gate stays at the SPEC
+/// default — this suite turns exactly one knob, and it is not that one.
 fn order_deps(pool: &PgPool) -> CommandDeps {
     CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
@@ -166,7 +166,10 @@ fn order_deps(pool: &PgPool) -> CommandDeps {
         ),
         enforce_service_hours_guard: false,
         enforce_acceptance_timeout: false,
-        route_order_birth_through_lane: true,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: true,
+            place_replacement_order_to_order: false,
+        },
     }
 }
 
@@ -198,10 +201,16 @@ async fn drain_all(worker: &MailboxWorker) -> u64 {
 }
 
 /// The runner restricted to ReclamationProcess, with the #595 route ON or OFF.
+///
+/// #797: the OrderPlaced route's gate is held at `false` INDEPENDENTLY of `laned`. That the two
+/// can now be set apart at all is the point of the chunk — before it, one boolean decided both.
 fn runner(pool: &PgPool, laned: bool) -> ProcessManagerRunner {
-    ProcessManagerRunner::new(pool.clone())
-        .with_only("ReclamationProcess")
-        .with_replacement_birth_lane(laned)
+    ProcessManagerRunner::new(pool.clone()).with_only("ReclamationProcess").with_route_gates(
+        application::generated::process_managers::RouteGates {
+            order_placed_to_order: false,
+            place_replacement_order_to_order: laned,
+        },
+    )
 }
 
 async fn birth_payloads(pool: &PgPool, order_id: uuid::Uuid) -> Vec<serde_json::Value> {

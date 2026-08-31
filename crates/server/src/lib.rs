@@ -819,8 +819,15 @@ pub async fn router() -> Router {
                     let runner = ProcessManagerRunner::new(pool.clone())
                         .with_partner(partner)
                         .with_payments(saga_payments)
-                        // #595: resolved ONCE here, handed in — the runner never reads config.
-                        .with_replacement_birth_lane(config.route_replacement_birth_through_lane);
+                        // #595/#797: resolved ONCE here, handed in — the runner never reads
+                        // config. Every declared route's gate travels together and each is fed
+                        // from its OWN key, so the runner can host two routes without binding
+                        // them to one boolean.
+                        .with_route_gates(application::generated::process_managers::RouteGates {
+                            order_placed_to_order: config.route_order_birth_through_lane,
+                            place_replacement_order_to_order: config
+                                .route_replacement_birth_through_lane,
+                        });
                     saga_status = Some(runner.status());
                     // The backfill runs INSIDE the runner's task, before its first tick — the
                     // ordering the re-verification demanded (see the pm_backfill comment above).
@@ -923,7 +930,12 @@ pub async fn router() -> Router {
                         // at DELIVERY time by the OrderAcceptanceTimedOut route — same
                         // composition-root resolution.
                         enforce_acceptance_timeout: config.enforce_acceptance_timeout,
-                        route_order_birth_through_lane: config.route_order_birth_through_lane,
+                        // #797: one field per DECLARED route, each fed from its own key.
+                        route_gates: application::generated::process_managers::RouteGates {
+                            order_placed_to_order: config.route_order_birth_through_lane,
+                            place_replacement_order_to_order: config
+                                .route_replacement_birth_through_lane,
+                        },
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare

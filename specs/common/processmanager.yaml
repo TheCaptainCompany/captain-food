@@ -25,8 +25,9 @@ description: >
                     COMMAND legs reject with the thrown error. EVENT legs never reject the FACT —
                     but an error condition still `throws` (run aborts, error surfaced); only benign
                     alternatives `skip`.
-        * sends   : OPTIONAL list of $refs to commands.yaml the leg's HAND-WRITTEN wrapper sends
-                    but no `send` step can express — the escape hatch twin of `emits` (#595).
+        * sends   : OPTIONAL list of { command, to?, route_gate?, note? } the leg's HAND-WRITTEN
+                    wrapper sends but no `send` step can express — the escape hatch twin of
+                    `emits` (#595). `command` is a $ref to commands.yaml.
                     Use only where the step form genuinely cannot say it (a derived payload, or a
                     branch the step DSL has no form for); a command a `send` step CAN express must
                     use the step, which declares itself. Declaring it here is not decoration: it
@@ -35,6 +36,8 @@ description: >
                     switch on its own declaration). Validator: `pm-sends-kind` (must reference a
                     command) and `pm-sends-no-inbox` (some actor must actually RECEIVE it —
                     otherwise the enqueued row lands FAILED 'unroutable command type').
+                    `to` + `route_gate` make it a ROUTED send — see `deliver.route_gate` below;
+                    both together or neither (#797).
         * steps   : ordered list; each step is one of:
             - read    : { model, as, where?, note? } — read a read model. `model` is a $ref to a
                         projection table (database/tables/projection_tables.yaml) or view
@@ -53,9 +56,18 @@ description: >
                         (`message`, `state`, or a read alias) → field → { const: <ENUM> }.
             - call    : { port, operation, note? } — invoke a declared outbound port operation
                         (external system; not a domain message).
-            - deliver : { event, to, with?, for_each?, note? } — hand a fact to the aggregate that
-                        records it (births / facts the PM is authoritative for). `event` is a $ref to
-                        events.yaml; `to` a $ref to an actors.yaml aggregate whose inbox receives it.
+            - deliver : { event, to, route_gate?, with?, for_each?, note? } — hand a fact to the
+                        aggregate that records it (births / facts the PM is authoritative for).
+                        `event` is a $ref to events.yaml; `to` a $ref to an actors.yaml aggregate
+                        whose inbox receives it.
+                        `route_gate` is a $ref to configuration.yaml#/keys/<KEY> and its PRESENCE is
+                        what makes this step a lane ENQUEUE rather than a foreign-stream append
+                        (ADR-20260816-040239): the generated step consults THAT route's own key, so
+                        each routed step is turned off on its own (#797,
+                        ADR-20260830-204220). Absent = the legacy append. The gate is a $ref, not a
+                        key name, so a route naming a key that does not exist fails `make validate`
+                        instead of resolving to `false` in production — gate-then-stabilize prices a
+                        route move one route at a time, and this is the record of which ones moved.
             - send    : { command, to, with?, for_each?, note? } — dispatch a command; the target
                         aggregate validates and may reject (on an EVENT leg a rejection is logged and
                         skipped, never re-thrown).

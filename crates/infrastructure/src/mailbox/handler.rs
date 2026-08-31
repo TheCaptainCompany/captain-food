@@ -693,7 +693,9 @@ impl MailboxCommandHandler {
                         super::record_order_birth_lag(
                             message,
                             &staged,
-                            self.deps.route_order_birth_through_lane,
+                            self.deps.route_gates.enabled(
+                                application::generated::process_managers::Route::OrderPlacedToOrder,
+                            ),
                         );
                         // Recorded facts may declare `schedules:` too (same third-effect rule).
                         super::apply_schedules_in_tx(tx, message, &self.reminder_windows)
@@ -984,34 +986,31 @@ impl MailboxCommandHandler {
             application::staging::StagingPaymentProcessState::new(self.deps.pm_state.clone());
         let refund_staging =
             application::staging::StagingRefundProcessState::new(self.deps.refund_state.clone());
-        // The lane sink for ROUTED `deliver:` steps (#588, ADR-20260816-040239). Handed to the
-        // saga ONLY when `ROUTE_ORDER_BIRTH_THROUGH_LANE` is on; `None` leaves every deliver on
-        // the legacy foreign-stream append, which is the whole rollback story. It is safe to hand
-        // over here and nowhere else: THIS is the phase that owns the fenced transaction — the
-        // prepare phase (`pm_delivery::prepare`) owns none and re-runs on redelivery, so an
+        // The lane sink for ROUTED `deliver:` steps (#588, ADR-20260816-040239). It is safe to
+        // hand over here and nowhere else: THIS is the phase that owns the fenced transaction —
+        // the prepare phase (`pm_delivery::prepare`) owns none and re-runs on redelivery, so an
         // enqueue staged there would survive a verdict that never committed.
+        //
+        // WHICH routes may use it is a separate question, answered per route by `route_gates`
+        // below (#797) — not by whether the sink is present at all.
         let lane_sink = Arc::new(application::lanes::StagingLaneSink::new());
         // The trigger envelope: the chained row IS the trigger (its deterministic id doubles as
         // the dedup key the run row records).
         //
-        // `laned` vs `unlaned` is the WHOLE routing decision, and since #597 it is the only way to
-        // express it: `TriggerEnvelope::lanes` is private, so no phase can attach a sink by a field
-        // write. Naming `laned` here is a claim this function can honour — `tx` is in scope, and
-        // the flush below rides it.
-        let env = if self.deps.route_order_birth_through_lane {
-            TriggerEnvelope::laned(
-                message.message_id,
-                message.correlation_id,
-                message.received_at,
-                lane_sink.clone() as Arc<dyn application::lanes::LaneSink>,
-            )
-        } else {
-            TriggerEnvelope::unlaned(
-                message.message_id,
-                message.correlation_id,
-                message.received_at,
-            )
-        };
+        // `laned` vs `unlaned` says whether this phase CAN stage, and since #597 it is the only
+        // way to express it: `TriggerEnvelope::lanes` is private, so no phase can attach a sink by
+        // a field write. Naming `laned` here is a claim this function can honour — `tx` is in
+        // scope, and the flush below rides it. The claim is unconditional, so the constructor
+        // choice is too; the per-route decision travels beside it as `route_gates`, and each
+        // routed step reads its own (#797). Handing the sink only when ONE route's key was on is
+        // what fused every route this delivery hosts onto that key.
+        let env = TriggerEnvelope::laned(
+            message.message_id,
+            message.correlation_id,
+            message.received_at,
+            lane_sink.clone() as Arc<dyn application::lanes::LaneSink>,
+            self.deps.route_gates,
+        );
         // TYPED, AND THEREFORE TOTAL (#780). This was a match over `(actor_type, &DomainEvent)`
         // ending in `(actor, _) => Failed("no PM event leg")` — a catch-all on the money path, in a
         // file the router's no-catch-all scan does not read. `PmFactLeg` has exactly the three legs

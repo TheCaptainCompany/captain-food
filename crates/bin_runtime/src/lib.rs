@@ -143,6 +143,12 @@ pub fn spawn_actor_fleet(
     );
 }
 
+/// The generated per-route lane gates, re-exported so a spine bin can name them without linking
+/// `application` directly (#797) — the same courtesy this crate already extends for the probe
+/// families. Declaring a route adds a field here, and every `PmRuntime` literal below stops
+/// compiling until a human says which configuration key feeds it.
+pub use application::generated::process_managers::{Route, RouteGates};
+
 /// Everything a `pm-{name}` bin hosts besides its (optional) mailbox lane: the saga runner
 /// restricted to its OWN process manager, sequenced after the startup Stripe-fact backfill
 /// exactly like the monolith (#272 review MAJOR-2: the backfill must complete before the runner's
@@ -160,10 +166,14 @@ pub struct PmRuntime {
     /// The payment port (PlaceOrder/Refund/Reclamation declare it).
     pub payments: Option<Arc<dyn PaymentService>>,
     pub waiter: Option<infrastructure::EventWaiter>,
-    /// #595 (`configuration.yaml#/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`), resolved from the bin's
-    /// generated `Config`. It MUST match the monolith's value: a split fleet lanes some replacement
-    /// births and appends others, which is invisible in every series except `runtime_flag_state`.
-    pub replacement_birth_lane: bool,
+    /// Where EVERY declared lane route's gate stands (#797), resolved from the bin's generated
+    /// `Config` — one field per [`Route`](application::generated::process_managers::Route).
+    ///
+    /// Each MUST match the monolith's value for the same key: a split fleet lanes some births and
+    /// appends others, which is invisible in every series except `runtime_flag_state`. Carrying
+    /// the whole struct rather than one route's boolean is what keeps the routes independently
+    /// flippable — one boolean per runner is the fused gate #797 removed.
+    pub route_gates: application::generated::process_managers::RouteGates,
 }
 
 /// Spawn the restricted saga runner. Returns the `/saga`-shaped status handle (the bin's health
@@ -180,7 +190,7 @@ pub async fn spawn_pm_runtime(
     if let Some(payments) = rt.payments {
         runner = runner.with_payments(payments);
     }
-    runner = runner.with_replacement_birth_lane(rt.replacement_birth_lane);
+    runner = runner.with_route_gates(rt.route_gates);
     let status = runner.status();
     // The startup backfill (monolith parity): only the money PMs (the mailbox-laned ones) need
     // it. Idempotent — the standalone fleet runs its own pass too; the point of THIS one is

@@ -486,7 +486,7 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
         &[
             ("ENFORCE_ACCEPTANCE_TIMEOUT", deps.enforce_acceptance_timeout),
             ("ENFORCE_SERVICE_HOURS_GUARD", deps.enforce_service_hours_guard),
-            ("ROUTE_ORDER_BIRTH_THROUGH_LANE", deps.route_order_birth_through_lane),
+            ("ROUTE_ORDER_BIRTH_THROUGH_LANE", deps.route_gates.order_placed_to_order),
         ],
     );
 

@@ -16898,7 +16898,7 @@ mod fact_route_gate {
     /// already sends real traffic down (`ROUTE_ORDER_BIRTH_THROUGH_LANE`).
     ///
     /// The routed population is recomputed from the MODEL through the emitter's own
-    /// `deliver_is_lane_routed`, so the const under test never stands in for its own oracle.
+    /// `route_decls`, so the artifact under test never stands in for its own oracle.
     #[test]
     fn a_routed_deliver_target_is_never_a_parked_fact() {
         let model = real_model();
@@ -16928,8 +16928,8 @@ mod fact_route_gate {
             parked.contains(&("DeliveryJob".into(), "DeliveryRequested".into())),
             "the planted pair must actually be parked, or this test is vacuous"
         );
-        // The planted route: what `emit_routed_lanes` would produce if the pair were added to
-        // `PM_LANE_ROUTED_DELIVERS`.
+        // The planted route: what the emitter would produce if the pair's `deliver:` gained a
+        // `route_gate:`.
         let planted = vec![("DeliveryJob".to_string(), "DeliveryRequested".to_string())];
         let offenders: Vec<_> = planted.iter().filter(|p| parked.contains(p)).collect();
         assert_eq!(offenders.len(), 1, "routing a parked fact must be caught");
@@ -17123,5 +17123,462 @@ mod receives_deferred_grammar {
             );
         }
         assert!(!declared.is_empty(), "the check must not be vacuous");
+    }
+}
+
+// ─── #797 PER-ROUTE LANE GATES: no construction site may fuse two routes onto one key ────────────
+
+/// The one thing the type system cannot carry about [`RouteGates`].
+///
+/// The compiler already covers most of #797: `RouteGates` derives no `Default`, so declaring a
+/// route in the DSL breaks every construction site with E0063 until a human names a value for it,
+/// and `TriggerEnvelope` exposes no accessor that ignores the route, so staging without naming
+/// your own `Route::X` does not compile. What neither can see is a site that names every field and
+/// feeds ONE ROUTE'S FIELD FROM ANOTHER ROUTE'S CONFIGURATION VALUE — copy-paste fusion, which
+/// produces exactly the defect this issue was filed about while typechecking perfectly.
+///
+/// The gate asserts the PROPERTY, not a spelling: for every `RouteGates { .. }` literal anywhere in
+/// `crates/**`, a field initialised from a value that names ANY declared route's configuration key
+/// must name ITS OWN. A literal `true`/`false` (tests, `NONE`) names no key and is left alone.
+/// "Names a key" is matched CASE-INSENSITIVELY, on whole identifier runs — a key appears in this
+/// tree both as the generated `Config` field (`config.route_order_birth_through_lane`) and as its
+/// canonical UPPERCASE name passed to `env_flag`, and each spelling carries its own verified-red
+/// plant below. Both are needed for "not a spelling" to be a finding rather than a hope: the first
+/// version of this guard matched case-sensitively and was green on the fused UPPERCASE wiring.
+///
+/// It also refuses `..rest` in such a literal: functional-update syntax would let a newly declared
+/// route inherit a value silently, which is the E0063 the type exists to produce.
+///
+/// The population is recomputed from the MODEL through the emitter's own `route_decls`, so the
+/// generated artifact never stands in for its own oracle (beck, the #780 rule).
+#[cfg(test)]
+mod route_gate_fusion {
+    use super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn rust_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().and_then(|n| n.to_str()) != Some("target") {
+                        walk(&p, out);
+                    }
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&root.join("crates"), &mut out);
+        out.sort();
+        out
+    }
+
+    /// One `RouteGates { .. }` literal: its named fields as `(field, initializer tokens)`, and
+    /// whether it carries a `..rest`.
+    struct GatesLiteral {
+        fields: Vec<(String, String)>,
+        has_rest: bool,
+    }
+
+    /// Every `RouteGates { .. }` literal in `src`.
+    fn route_gates_literals(src: &str) -> Vec<GatesLiteral> {
+        let Ok(file) = syn::parse_file(src) else { return Vec::new() };
+        #[derive(Default)]
+        struct V(Vec<GatesLiteral>);
+        impl<'ast> syn::visit::Visit<'ast> for V {
+            fn visit_expr_struct(&mut self, e: &'ast syn::ExprStruct) {
+                if e.path.segments.last().map(|s| s.ident.to_string()).as_deref()
+                    == Some("RouteGates")
+                {
+                    let mut fields = Vec::new();
+                    for f in &e.fields {
+                        if let syn::Member::Named(name) = &f.member {
+                            let value = &f.expr;
+                            fields.push((name.to_string(), quote::quote!(#value).to_string()));
+                        }
+                    }
+                    // A literal with a `..rest` and NO fields is still a literal to report.
+                    self.0.push(GatesLiteral { fields, has_rest: e.rest.is_some() });
+                }
+                syn::visit::visit_expr_struct(self, e);
+            }
+        }
+        let mut v = V::default();
+        syn::visit::Visit::visit_file(&mut v, &file);
+        v.0
+    }
+
+    /// (field name, its OWN configuration key AS DECLARED — canonical UPPERCASE), from the model.
+    fn field_to_config_key() -> std::collections::BTreeMap<String, String> {
+        route_decls(&real_model()).into_iter().map(|r| (r.field(), r.config_key.clone())).collect()
+    }
+
+    /// (field name, the lowercased identifier of its OWN configuration key), from the model.
+    fn field_to_config_ident() -> std::collections::BTreeMap<String, String> {
+        field_to_config_key().into_iter().map(|(f, k)| (f, k.to_ascii_lowercase())).collect()
+    }
+
+    /// The identifier-shaped runs in an initializer's tokens, LOWERCASED.
+    ///
+    /// Case-INSENSITIVE, and matched on whole runs rather than by substring. A configuration key
+    /// is named two ways in this tree and only one of them is snake_case: the generated `Config`
+    /// field (`config.route_order_birth_through_lane`, `crates/server` and the per-actor bins)
+    /// and the canonical UPPERCASE key STRING that a composition root with no generated `Config`
+    /// passes to `env_flag` (`env_flag("ROUTE_ORDER_BIRTH_THROUGH_LANE", true)` — the standalone
+    /// adapter and the per-actor bin fleet, `crates/infrastructure/src/mailbox/standalone.rs`).
+    ///
+    /// The first version of this guard compared with a case-SENSITIVE `contains`, so at that
+    /// composition root every field named no key at all and was skipped in silence: crossing the
+    /// two env keys on the money-path Order-birth route left the whole suite green (round-2
+    /// review B1). Whole runs rather than `contains` closes the neighbouring hole in the same
+    /// breath — a future `ROUTE_X` must not be satisfied by a value naming `ROUTE_X_ALSO`.
+    fn key_idents(value: &str) -> std::collections::BTreeSet<String> {
+        value
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_ascii_lowercase())
+            .collect()
+    }
+
+    /// How many of `src`'s `RouteGates` literals feed at least one field from a DECLARED route's
+    /// configuration key — i.e. how many are COMPOSITION ROOTS rather than test fixtures pinning
+    /// booleans. This is the population the guard can actually say anything about.
+    fn key_fed_literals(src: &str) -> usize {
+        let expected = field_to_config_ident();
+        route_gates_literals(src)
+            .iter()
+            .filter(|lit| {
+                lit.fields.iter().any(|(_, value)| {
+                    let idents = key_idents(value);
+                    expected.values().any(|k| idents.contains(k.as_str()))
+                })
+            })
+            .count()
+    }
+
+    /// The offenders in one source text: a field fed from another route's key, or a `..rest`.
+    fn offenders(rel: &str, src: &str) -> Vec<String> {
+        let expected = field_to_config_ident();
+        let all_idents: Vec<&String> = expected.values().collect();
+        let mut out = Vec::new();
+        for lit in route_gates_literals(src) {
+            if lit.has_rest {
+                out.push(format!(
+                    "{rel}: a `RouteGates {{ .. }}` literal uses functional-update syntax -- \
+                     a newly declared route would inherit a value silently instead of failing to \
+                     compile. Name every field."
+                ));
+            }
+            for (field, value) in &lit.fields {
+                let Some(mine) = expected.get(field) else { continue };
+                let idents = key_idents(value);
+                let named: Vec<&String> =
+                    all_idents.iter().copied().filter(|k| idents.contains(k.as_str())).collect();
+                if !named.is_empty() && !named.iter().any(|k| k.as_str() == mine) {
+                    out.push(format!(
+                        "{rel}: `RouteGates.{field}` is fed from {named:?} but its OWN key is \
+                         `{mine}` -- two routes sharing one key is exactly the fused gate #797 \
+                         removed: rolling one route back would roll the other back with it."
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    /// The COMPOSITION ROOTS: every file that feeds a `RouteGates` field from a declared route's
+    /// configuration key, with how many such literals it carries.
+    ///
+    /// Non-vacuity has to be PER FILE (round-2 review N2). The first version asserted
+    /// `literals > 0` tree-wide, and the six GENERATED `crates/bins/pm-*/src/main.rs` literals
+    /// satisfy that on their own — so deleting BOTH hand-written composition roots, the two
+    /// places a human can actually fuse two routes, left the guard green. Same remedy, and the
+    /// same argument, as the `laned` allowlist in
+    /// [`trigger_envelope_laned_call_sites_are_audited`]: file, expected count, and
+    /// the sentence naming which process that file wires. Exact in three directions — a root that
+    /// stops resolving from configuration fails as miscounted, a root that grows a second literal
+    /// fails on the count, and a NEW root fails as unaudited, which is correct: a new place that
+    /// decides a route's rollback lever is a design event, not a lint.
+    const KEY_FED_ROOTS: &[(&str, usize, &str)] = &[
+        (
+            "crates/infrastructure/src/mailbox/standalone.rs",
+            1,
+            "standalone_deps -- the standalone adapter and the per-actor bin fleet. The one root \
+             with NO generated `Config`: it reads each key by its canonical UPPERCASE name through \
+             `env_flag`, which is the spelling the case-sensitive first version of this guard could \
+             not see.",
+        ),
+        (
+            "crates/server/src/lib.rs",
+            2,
+            "the monolith: the saga runner's `with_route_gates` and the mailbox worker fleet's \
+             `CommandDeps`, both from the generated `Config`.",
+        ),
+        ("crates/bins/pm-cart-binding/src/main.rs", 1, "GENERATED per-actor bin (#385)."),
+        ("crates/bins/pm-delivery-dispatch/src/main.rs", 1, "GENERATED per-actor bin (#385)."),
+        ("crates/bins/pm-payment-settlement/src/main.rs", 1, "GENERATED per-actor bin (#385)."),
+        ("crates/bins/pm-place-order/src/main.rs", 1, "GENERATED per-actor bin (#385)."),
+        ("crates/bins/pm-reclamation/src/main.rs", 1, "GENERATED per-actor bin (#385)."),
+        ("crates/bins/pm-refund/src/main.rs", 1, "GENERATED per-actor bin (#385)."),
+    ];
+
+    #[test]
+    fn route_gates_are_not_fused() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repo root resolves");
+        let mut found = Vec::new();
+        let mut key_fed: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for f in rust_files(&root) {
+            let rel = f.strip_prefix(&root).unwrap_or(&f).to_string_lossy().replace('\\', "/");
+            let src = std::fs::read_to_string(&f).unwrap_or_else(|e| {
+                panic!("cannot read {rel} ({e}) -- a partially-scanned tree is a silent no-op")
+            });
+            if !src.contains("RouteGates") {
+                continue;
+            }
+            let n = key_fed_literals(&src);
+            if n > 0 {
+                key_fed.insert(rel.clone(), n);
+            }
+            found.extend(offenders(&rel, &src));
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+
+        // Non-vacuous PER COMPOSITION ROOT: each listed file must still hand this guard exactly
+        // the literals it was audited for, and no unlisted file may resolve a route gate.
+        let unaudited: Vec<&String> = key_fed
+            .keys()
+            .filter(|f| !KEY_FED_ROOTS.iter().any(|(p, _, _)| *p == f.as_str()))
+            .collect();
+        let miscounted: Vec<String> = KEY_FED_ROOTS
+            .iter()
+            .filter_map(|(path, expected, _)| {
+                let actual = key_fed.get(*path).copied().unwrap_or(0);
+                (actual != *expected)
+                    .then(|| format!("  {path}: expected {expected}, found {actual}"))
+            })
+            .collect();
+        assert!(
+            unaudited.is_empty() && miscounted.is_empty(),
+            "the `RouteGates` composition roots this guard reads have changed.\n\
+             unresolved files feeding a route gate but not on the list: {:?}\n\
+             wrong number of key-fed literals in a listed file:\n{}\n\
+             all key-fed literals found: {:?}\n\n\
+             A file with ZERO where the list says one is the vacuity this check exists for: the \
+             guard reads whatever is there and passes, so a deleted or de-configured root is \
+             indistinguishable from a clean tree. If the change is deliberate, edit \
+             KEY_FED_ROOTS and say in its third field which process the file wires.",
+            unaudited,
+            miscounted.join("\n"),
+            key_fed
+        );
+    }
+
+    /// RED for the gate above: feed one route's field from the OTHER route's key.
+    #[test]
+    fn red_a_field_fed_from_another_routes_key_is_refused() {
+        let fields: Vec<String> = field_to_config_ident().keys().cloned().collect();
+        assert!(
+            fields.len() >= 2,
+            "the planted-red needs two declared routes to cross the wires between"
+        );
+        let expected = field_to_config_ident();
+        let wrong = expected.get(&fields[1]).expect("second route's key");
+        let planted = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: config.{}, {}: false }}; }}",
+            fields[0], wrong, fields[1]
+        );
+        assert_eq!(
+            offenders("planted.rs", &planted).len(),
+            1,
+            "crossing two routes' keys must be caught: {planted}"
+        );
+        // …and the CORRECT wiring must stay green, or the gate is just rejecting everything.
+        let right = expected.get(&fields[0]).expect("first route's key");
+        let ok = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: config.{}, {}: false }}; }}",
+            fields[0], right, fields[1]
+        );
+        assert!(offenders("planted.rs", &ok).is_empty(), "the correct wiring must pass: {ok}");
+    }
+
+    /// RED for the gate above in the UPPERCASE `env_flag("KEY", ..)` spelling.
+    ///
+    /// The other planted red uses the snake_case `config.<key>` form, which is the ONE spelling
+    /// the first version of this guard could see — so it read as convincing evidence while the
+    /// standalone/per-actor-bin composition root (`env_flag("ROUTE_ORDER_BIRTH_THROUGH_LANE",
+    /// true)`) was being skipped in silence. Crossing the two env keys there, on the money-path
+    /// Order-birth route, left `cargo test route_gate_fusion` at `ok. 3 passed; 0 failed`
+    /// (round-2 review B1). Both spellings now carry a verified-red plant, because "the guard
+    /// asserts the PROPERTY, not a spelling" is a claim about the spellings that exist in the
+    /// tree — and this one did.
+    #[test]
+    fn red_an_uppercase_env_flag_fed_from_another_routes_key_is_refused() {
+        let keys = field_to_config_key();
+        let fields: Vec<String> = keys.keys().cloned().collect();
+        assert!(
+            fields.len() >= 2,
+            "the planted-red needs two declared routes to cross the wires between"
+        );
+        let right = keys.get(&fields[0]).expect("first route's key");
+        let wrong = keys.get(&fields[1]).expect("second route's key");
+        // The plant must actually EXERCISE the case-insensitive path: if the declared keys ever
+        // stop being UPPERCASE this test silently becomes a duplicate of the snake_case one.
+        assert!(
+            right.chars().any(|c| c.is_ascii_uppercase())
+                && wrong.chars().any(|c| c.is_ascii_uppercase()),
+            "declared keys are not UPPERCASE ({right}, {wrong}) -- this plant no longer covers the \
+             spelling it was written for"
+        );
+        let planted = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: env_flag(\"{}\", true), {}: false }}; }}",
+            fields[0], wrong, fields[1]
+        );
+        assert_eq!(
+            offenders("planted.rs", &planted).len(),
+            1,
+            "crossing two routes' keys in the `env_flag(\"KEY\", ..)` spelling must be caught: \
+             {planted}"
+        );
+        // …and the CORRECT wiring in the same spelling must stay green.
+        let ok = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: env_flag(\"{}\", true), {}: false }}; }}",
+            fields[0], right, fields[1]
+        );
+        assert!(offenders("planted.rs", &ok).is_empty(), "the correct wiring must pass: {ok}");
+    }
+
+    /// RED for the `..rest` half.
+    #[test]
+    fn red_a_functional_update_route_gates_literal_is_refused() {
+        let fields: Vec<String> = field_to_config_ident().keys().cloned().collect();
+        let planted = format!(
+            "fn f() {{ let _ = RouteGates {{ {}: true, ..RouteGates::NONE }}; }}",
+            fields[0]
+        );
+        assert!(
+            offenders("planted.rs", &planted).iter().any(|o| o.contains("functional-update")),
+            "`..rest` in a RouteGates literal must be caught: {planted}"
+        );
+    }
+}
+
+// ─── #797 `pm-route-gate`: a routed `sends:` declares BOTH halves, or neither ────────────────────
+
+/// The validator half of #797 (round-2 review B2).
+///
+/// `emit::pm_orchestrators::route_decls` reads the both-present `(to, route_gate)` pair, so a
+/// half-declared `sends:` is not a route — and until this rule existed, nothing said so. Removing
+/// `route_gate:` while keeping `to:` left `make validate` at 0 errors and made `make generate`
+/// emit `ROUTED_LANES` **without** that row: the lane silently leaves the declared population
+/// #783's dead-man's-switch watches, and its `Route` variant is never generated. The emitter's own
+/// doc comments named `pm-route-gate` as the thing that refuses this shape while no such rule was
+/// in the tree — a false claim at exactly the line a reader checks, which is the defect class this
+/// branch exists to remove.
+#[cfg(test)]
+mod pm_route_gate_rule {
+    use super::*;
+
+    /// The real model with the reclamation seam's `sends[0]` mutated by `edit`.
+    fn model_with_send_mutated(edit: &dyn Fn(&mut serde_yaml::Mapping)) -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let send = model
+            .defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut("ReclamationProcess"))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|s| s.first_mut())
+            .and_then(|v| v.get_mut("sends"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|s| s.first_mut())
+            .and_then(|v| v.as_mapping_mut())
+            .expect("ReclamationProcess's first leg declares a wrapper-seam `sends:` entry");
+        assert!(
+            send.contains_key(Value::from("to")) && send.contains_key(Value::from("route_gate")),
+            "the fixture assumes a fully ROUTED sends: entry to mutate -- it is no longer one"
+        );
+        edit(send);
+        model
+    }
+
+    fn route_gate_issues(model: &Model) -> Vec<String> {
+        validate(model)
+            .issues
+            .iter()
+            .filter(|i| i.rule == "pm-route-gate")
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// Control: the tree as committed declares no half-route.
+    #[test]
+    fn the_committed_specs_declare_no_half_route() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        assert!(
+            route_gate_issues(&model).is_empty(),
+            "`pm-route-gate` must be silent on the committed specs: {:?}",
+            route_gate_issues(&model)
+        );
+    }
+
+    /// RED, and the CONSEQUENCE that earns the rule: `to:` with no `route_gate:` is not merely
+    /// under-declared — the route disappears from `route_decls`, which is what `ROUTED_LANES` and
+    /// the `Route` enum are emitted from.
+    #[test]
+    fn red_a_target_with_no_gate_is_refused_and_would_have_dropped_the_route() {
+        let model = model_with_send_mutated(&|s| {
+            s.remove(Value::from("route_gate"));
+        });
+        let issues = route_gate_issues(&model);
+        assert_eq!(issues.len(), 1, "a `to:` with no `route_gate:` must be one error: {issues:?}");
+        assert!(
+            issues[0].contains("ROUTED_LANES"),
+            "the message must name the consequence, not just the shape: {issues:?}"
+        );
+        // The consequence itself, so the sentence above is verified rather than asserted.
+        let routes = crate::emit::pm_orchestrators::route_decls(&model);
+        assert!(
+            !routes.iter().any(|r| r.message_type == "PlaceReplacementOrder"),
+            "the fixture must actually drop the route, or this rule is guarding nothing: {:?}",
+            routes.iter().map(|r| r.variant()).collect::<Vec<_>>()
+        );
+    }
+
+    /// RED: `route_gate:` with no `to:` — a rollback lever wired to nothing.
+    #[test]
+    fn red_a_gate_with_no_target_is_refused() {
+        let model = model_with_send_mutated(&|s| {
+            s.remove(Value::from("to"));
+        });
+        let issues = route_gate_issues(&model);
+        assert_eq!(issues.len(), 1, "a `route_gate:` with no `to:` must be one error: {issues:?}");
+    }
+
+    /// The plain declaration — NEITHER half — stays legal: `sends:` predates routing (#595) and
+    /// its first job is to make a hand-written send a `$ref` the walker can see.
+    #[test]
+    fn a_sends_entry_with_neither_half_is_a_plain_declaration_and_stays_legal() {
+        let model = model_with_send_mutated(&|s| {
+            s.remove(Value::from("to"));
+            s.remove(Value::from("route_gate"));
+        });
+        assert!(
+            route_gate_issues(&model).is_empty(),
+            "an unrouted `sends:` declaration must stay legal: {:?}",
+            route_gate_issues(&model)
+        );
     }
 }

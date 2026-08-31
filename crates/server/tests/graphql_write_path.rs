@@ -154,7 +154,10 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         // #588: the Order-lane birth routing at its spec default (ON = the routed birth since
         // ADR-20260830-012200's founder flip), so this suite exercises the DEFAULT path — its
         // pre-flip OFF pin was recorded in PR #761's body and would now contradict reality.
-        route_order_birth_through_lane: true,
+        route_gates: application::generated::process_managers::RouteGates {
+            order_placed_to_order: true,
+            place_replacement_order_to_order: false,
+        },
     };
     let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));
     let observer = Arc::new(infrastructure::mailbox::StatusBusObserver::new(bus));
