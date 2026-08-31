@@ -32,6 +32,46 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > `Agent` settings entry deleted, the resolver stubbed to accept anything) were each observed RED
 > before the suite was trusted.
 
+> **2026-08-31 — three operational learnings from tonight's runs, and the argued decision to gate
+> NONE of them** (records only; no `specs/**`, no code, no new hook).
+> **(1) `git rev-parse HEAD == origin/main` does not mean you are ON `main`.** An executor passed
+> its base-SHA precondition cleanly and still committed onto a sibling executor's branch, which had
+> been cut from main's tip and was the checked-out HEAD — cost: a cherry-pick, a journal-conflict
+> resolution and a `git branch -f` to lift the commit off a PR it did not belong to. Left as
+> **prose, argued against ADR-20260803-234035**: `git worktree add <path> main` is *already* the
+> gate and fails closed (exit **128**, `fatal: 'main' is already used by worktree at …`, verified
+> both for `main` and for the sibling branch), so the mistake is made *unreachable* rather than
+> *detectable*, with no new code. A `PreToolUse` guard on `git commit` was rejected on its merits —
+> the payload carries no dispatch card, so the same observed state is correct for a docs dispatch
+> and catastrophic for a code one, and the gate cannot tell them apart.
+> **(2) The worktree rule was already recorded and the collision happened anyway**, because the
+> dispatch card named a weaker mitigation (*"stage only your paths"*) — **staging protects the
+> INDEX, not the BRANCH**. New coordinator-binding rule: **a card may not name a mitigation weaker
+> than the recorded rule**, since the executor reads the card, not the topic file. The disk
+> objection that produced earlier "no worktree" cards is priced and scoped: a docs worktree is
+> **36 MB** (no `target/`) against the shared checkout's **23 GB**, of which `target/` is **22 GB**
+> — so a docs/spec run in an occupied tree takes a worktree unconditionally.
+> **(3) A record pinning a fact to "in flight" acquires an expiry nothing detects.**
+> `ADR-20260815-030206`'s *"not on `main`"* was false from **2026-08-16** (PR #566) and produced a
+> **false negative in a register check** on 2026-08-31 — the register discipline's own failure mode.
+> **Deliberately not scanned**, on measured grounds: `in flight`/`in-flight` occurs **63** times in
+> `docs/adr/` + `docs/proposals/` and is dominated by *domain* usage, leaving a checkable set of
+> **3** merge-state assertions plus **6** `until #NNN lands` lines; `gh` is **not installed** in the
+> container and the clone is **shallow** (205 commits, oldest **2026-08-17**), so no local check can
+> resolve a 2026-08-16 merge; and the failure rode a docs-direct-to-`main` push that no PR-triggered
+> CI check sees in time. The fix is in the **writing**: date the claim (*"as of 2026-08-15, on
+> branch `564-…`"*) so it is never false, only old.
+> **No ADR and no proposal** — three sharpenings of existing rules with no option space
+> (CLAUDE.md proportionality). All three land in
+> [`docs/claude/sessions/workflow.md`](../claude/sessions/workflow.md), sharpening the sections that
+> already existed rather than appending near-duplicates (ADR-20260730-034635).
+> **Card defects found**: the dispatch cited an ADR id and a `register-check.sh` "Lane D" as having
+> landed tonight — both exist only on the **unmerged** `814-…` branch, not on `main` (the card
+> reproduced item 3's own failure mode); and it pointed at `environment.md` for the worktree rule,
+> which actually lives in `workflow.md`. The validator caught the id itself: quoting it here tripped
+> **`record-citation-unresolved`** at `docs/status/journal-2026-W36.md:39`, which is the *existence*
+> half of item 3 already gated — the *tense* half is what remains uncovered.
+
 > **2026-08-31 — two founder calls on the back of the `read:` retirement: BUILD the priced quote
 > token, KEEP the two-hop ask (records only).** Both were put to him with options, trade-offs and a
 > recommendation; both are closed, and neither moves a stored shape.
