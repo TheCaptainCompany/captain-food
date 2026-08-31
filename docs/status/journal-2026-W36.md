@@ -13,7 +13,8 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > [#819 "Six founder-invoked slash commands"](https://github.com/TheCaptainCompany/captain-food/issues/819)
 > / [#820](https://github.com/TheCaptainCompany/captain-food/pull/820).
 > **The rule the set exists to protect**: `/direct-question` skips the **mob**, never the **register
-> check** — five of the coordinator's nine catalogued failures were answer-shaped, and the
+> check** — only one of the coordinator's nine catalogued failures was caught at the dispatch
+> gate, the rest being answer- or question-shaped, and the
 > `PreToolUse` hook gates `AskUserQuestion` and `Agent`, never a prose answer, so a direct answer is
 > where the check is least enforced and most needed. Both question commands carry an **escalation
 > duty** in the skill text: a controlling record the question appears to contradict, or a `HOLD:

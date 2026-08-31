@@ -504,7 +504,8 @@ trusting it** — a frontmatter key that silently does nothing is this repo's mo
 
 > **`/direct-question` skips the MOB. It never skips the REGISTER CHECK.**
 
-Five of the coordinator's nine catalogued failures were **answer-shaped**, and the `PreToolUse` hook
+Of the coordinator's nine catalogued failures, **only #9 was caught at the dispatch gate**; the
+rest were answer- or question-shaped. The `PreToolUse` hook
 gates `AskUserQuestion` and `Agent` — never a prose answer. So a direct answer is the surface where
 the check is least enforced and most needed, and dropping the mob removes the other reader who might
 have caught it. Both cannot go. The trail rides the answer in the canonical format defined below.

@@ -21,8 +21,9 @@ answers**, never a licence about **what the answer is built from**.
 > **`/direct-question` skips the mob. It never skips the register check.**
 
 This is the whole point of the command having a written procedure. The coordinator's catalogued
-failures split into dispatch-shaped and answer-shaped ones, and **five of the nine were
-answer-shaped** — a wrong claim composed as prose to the founder
+failures split into dispatch-shaped and answer-shaped ones, and **only one of the nine was
+caught at the dispatch gate** (#9). The rest were answer- or question-shaped — a wrong claim
+composed as prose to the founder
 ([`coordinator-register-check`](../coordinator-register-check/SKILL.md), the table of nine). The
 `PreToolUse` hook cannot see a prose answer: it gates `AskUserQuestion` and `Agent` tool calls, and
 an answer is neither. So a direct answer is the surface where the check is **least enforced and most
