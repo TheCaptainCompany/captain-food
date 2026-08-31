@@ -17582,3 +17582,131 @@ mod pm_route_gate_rule {
         );
     }
 }
+
+// ─── #807 `pm-route-gate` over `send:` STEPS ─────────────────────────────────────────────────────
+
+/// The step half of the rule (#807).
+///
+/// A `send:` step already writes `to:` — `pm-send` validates it — and the emitter then DROPS it:
+/// `PmStepDef::Send` had no `to`/`route_gate` field, so `route_decls` could never see a step, and
+/// four sends appended to streams their process manager does not own with no route, no gate and
+/// no row in `ROUTED_LANES`. The `sends:` module above proves the identical property for the
+/// wrapper seam; this one proves it for the STEP, because the two are parsed by different code.
+#[cfg(test)]
+mod pm_route_gate_send_step_rule {
+    use super::*;
+
+    /// The real model with `CartBindingProcess`'s `send:` step mutated by `edit`.
+    fn model_with_send_step_mutated(edit: &dyn Fn(&mut serde_yaml::Mapping)) -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let step = model
+            .defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut("CartBindingProcess"))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|s| s.first_mut())
+            .and_then(|v| v.get_mut("steps"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|s| s.iter_mut().find(|st| st.get("send").is_some()))
+            .and_then(|v| v.get_mut("send"))
+            .and_then(|v| v.as_mapping_mut())
+            .expect("CartBindingProcess's first leg declares a `send:` step");
+        assert!(
+            step.contains_key(Value::from("to")) && step.contains_key(Value::from("route_gate")),
+            "the fixture assumes a fully ROUTED send: step to mutate -- it is no longer one"
+        );
+        edit(step);
+        model
+    }
+
+    fn route_gate_issues(model: &Model) -> Vec<String> {
+        validate(model)
+            .issues
+            .iter()
+            .filter(|i| i.rule == "pm-route-gate")
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// Control: the tree as committed declares no half-route among its `send:` steps.
+    #[test]
+    fn the_committed_specs_declare_no_half_routed_send_step() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        assert!(
+            route_gate_issues(&model).is_empty(),
+            "`pm-route-gate` must be silent on the committed specs: {:?}",
+            route_gate_issues(&model)
+        );
+    }
+
+    /// RED, and the CONSEQUENCE that earns the rule: a `send:` step with `to:` and no
+    /// `route_gate:` is not merely under-declared — the route disappears from `route_decls`,
+    /// which is what `ROUTED_LANES` and the `Route` enum are emitted from.
+    #[test]
+    fn red_a_send_step_target_with_no_gate_is_refused_and_would_have_dropped_the_route() {
+        let model = model_with_send_step_mutated(&|s| {
+            s.remove(Value::from("route_gate"));
+        });
+        let issues = route_gate_issues(&model);
+        assert_eq!(issues.len(), 1, "a send: `to:` with no `route_gate:` must be one error: {issues:?}");
+        assert!(
+            issues[0].contains("ROUTED_LANES"),
+            "the message must name the consequence, not just the shape: {issues:?}"
+        );
+        // The consequence itself, so the sentence above is verified rather than asserted.
+        let routes = crate::emit::pm_orchestrators::route_decls(&model);
+        assert!(
+            !routes.iter().any(|r| r.message_type == "BindCartToCustomer"),
+            "the fixture must actually drop the route, or this rule is guarding nothing: {:?}",
+            routes.iter().map(|r| r.variant()).collect::<Vec<_>>()
+        );
+    }
+
+    /// RED: `route_gate:` with no `to:` on a step — a rollback lever wired to nothing.
+    #[test]
+    fn red_a_send_step_gate_with_no_target_is_refused() {
+        let model = model_with_send_step_mutated(&|s| {
+            s.remove(Value::from("to"));
+        });
+        let issues = route_gate_issues(&model);
+        assert!(
+            issues.iter().any(|i| i.contains("route_gate")),
+            "a `route_gate:` with no `to:` must be a pm-route-gate error: {issues:?}"
+        );
+    }
+
+    /// Every `send:` step in the committed tree is ROUTED — derived from the MODEL, never a
+    /// literal. A `send:` makes the saga write a stream it does not own, so an UNROUTED one is
+    /// the defect #807 exists to remove; the count is read off the specs so the pin cannot go
+    /// vacuous if a send is added or removed.
+    #[test]
+    fn every_committed_send_step_declares_its_route() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let mut sends: Vec<String> = Vec::new();
+        let mut routed: Vec<String> = Vec::new();
+        for (pm, node) in model.defs.get("processmanager.yaml").and_then(|v| v.as_mapping()).into_iter().flatten() {
+            let pm = pm.as_str().unwrap_or("?").to_string();
+            for leg in node.get("receives").and_then(|x| x.as_sequence()).into_iter().flatten() {
+                for st in leg.get("steps").and_then(|x| x.as_sequence()).into_iter().flatten() {
+                    let Some(send) = st.get("send") else { continue };
+                    let cmd = send
+                        .get("command")
+                        .and_then(|x| x.get("$ref"))
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    sends.push(format!("{pm}:{cmd}"));
+                    if send.get("to").is_some() && send.get("route_gate").is_some() {
+                        routed.push(format!("{pm}:{cmd}"));
+                    }
+                }
+            }
+        }
+        assert!(!sends.is_empty(), "the scanner matched no `send:` step at all -- a vacuous pin");
+        assert_eq!(sends, routed, "every `send:` step must declare `to:` AND `route_gate:`");
+    }
+}
