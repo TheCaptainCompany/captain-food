@@ -1,0 +1,71 @@
+key: "PMW-4"
+status: "open"
+question: "Now that `read:` is retired, how are the two surviving projection reads SPELLED -- evans's TWO narrow kinds (`index:`/`by:` and `authority:`), or vernon's ONE differently-named kind carrying a mandatory exemption `$ref`?"
+owner: "team"
+opened: "2026-08-31"
+reconsiders: "PMW-1"
+register: "docs/proposals/DECISIONS.md §42"
+note: >
+  TEAM-DECIDABLE because the founder has directed the OUTCOME and only the mechanism is open (the
+  §43 RSO-1/RSO-2 pattern). What is DECIDED and not reopenable here: `read:` is retired; a GENERIC
+  escape hatch is not acceptable; "exemption" is rejected as the noun for either survivor. Record:
+  ADR-20260831-121957.
+
+  UNTOUCHED BY THIS ROW: PMW-3 (actor queries over a transport) stays OPEN and explicitly NOT
+  adopted -- the founder removed the transport key himself (PROP-20260815-142349 D6, "the worry was
+  vindicated") and wrote "I don't think we should involve inbound messages table for queries to
+  actors". The mechanism question is settled structurally, not by picking a transport: the wall
+  separates MODELS, not processes -- `domain_events` is the write model's storage, so a fold
+  through the aggregate's own fold function IS the write side (young). PMW-2 (residency) is not
+  ridden either.
+
+  SIZE, with antecedents (ADR-20260817-105845): the deliverable is NINE LEGS, not a keyword. 11
+  PROJECTION steps minus the 2 survivors; eight of the nine are on the money path
+  (specs/payments/processmanager.yaml:53,70,86,101 settlement and :132,161,189,219 refund, all on
+  OrderTracking) and the ninth is specs/delivery/processmanager.yaml:36. Counts from
+  `grep -rn '^\s*- read:' specs/*/processmanager.yaml` (15) and
+  `grep -rn 'source: ' specs/*/processmanager.yaml` (4 EVENT_STREAM / 11 PROJECTION) at 6b74739b.
+  Done-when for the build: `grep -rn 'from_read' specs/` returns zero (ten matches today). The
+  build is HOLD: human -- a behaviour change on the money path (a leg that silently skipped now
+  retries and alerts), NOT a migration: no `read:` step is emitted into data, written to a PM state
+  column, or carried in any event payload, and `source:` is consumed by no emitter
+  (`grep -rn 'READ_SOURCE\|EVENT_STREAM' tools/codegen-rs/src/emit/` -> zero).
+evidence: >
+  OPEN -- the residue of the retirement. Two survivors, and they are TWO CLASSES, not one (evans,
+  the load-bearing correction). specs/ordering/processmanager.yaml:163-169 (a session's open carts)
+  IS a genuine carve-out: set-shaped, and its key SessionId belongs to no aggregate
+  (`grep -rn 'Session' specs/*/actors.yaml` returns nothing). specs/ordering/processmanager.yaml:63-68
+  (the live-catalog price authority) is NOT a carve-out at all -- an addressable Catalog aggregate
+  exists (specs/catalog/actors.yaml:8) and the shared read is the CORRECT design: the cart screen and
+  the checkout leg go through the same price_cart seam (crates/server/src/graphql/cart_read.rs:14
+  imports application::pricing), and that coherence carries a legal display guarantee
+  (specs/ordering/rules.yaml#/ServerPriceAuthority :61-65, Code de la consommation L112-1/L221-5).
+  Calling it an exemption is false AND dangerous: it tells the next reader the ideal is to ask the
+  aggregate and this is a lapse to clean up -- and cleaning it up would charge a price the customer
+  never saw, on the money path, at peak.
+
+  THE DIVERGENCE, RECORDED NOT BLENDED. (a) evans, RECOMMENDED -- TWO kinds, each $ref-ing a
+  different domain artifact and no "exemption" noun anywhere: `index:` with `by:` -> the unowned key
+  scalar (the SessionId shape), and `authority:` -> the rule declaring who is authoritative (the
+  ServerPriceAuthority shape). Pros: each kind names the reason it exists, and the reason is a $ref
+  the refs walker can see; the two survivors stay two classes in the grammar as they are in the
+  domain. Cons: two new node kinds -- walker, emitter and validator surface. (b) vernon, the
+  considered DISSENT -- ONE differently-named kind carrying a mandatory exemption $ref. Pros: one
+  fewer node kind. Cons: reintroduces the rejected noun, and collapses two genuinely different
+  classes into one grammar shape. (c) Leave `read:` standing with carve-outs -- REFUSED by the
+  founder's directive and by young's decisive argument, verbatim: "retirement is the level-4 form
+  only if there is no residual escape hatch; two carve-outs riding a surviving `read:`, or a generic
+  exemption $ref, is `source:` again wearing a new name."
+
+  ALSO OWED, whichever spelling wins, as a validator rule and not prose (young): a locally-served
+  `ask:` must fold the answering aggregate's OWN stream and nothing else, every reply property
+  resolving to that actor's declared `state:`. A "local ask" that folds two streams or joins a
+  projection is an undeclared projection living on the write side with none of a projection's
+  licences -- no disposability, no projector, no checkpoint.
+
+  THIS ROW DOES NOT CLOSE THE #544 SILENT-EXPIRY CLASS and the retirement must not be credited with
+  it: folding Payment's stream before the webhook lands still observes not-AUTHORIZED, and
+  `skip: true` still says nothing. That is closed by the exhaustive branch (PROP-20260815-142349 §9
+  over the six PaymentStatus members, `absent: RETRY`, the deadline, and the SettlementOverdue
+  reminder §11). What the fold DOES buy: under PROJECTION, "not yet projected" and "not authorized"
+  are the SAME observation -- an ambiguous absence becomes an authoritative absence.

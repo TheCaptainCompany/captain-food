@@ -5,7 +5,12 @@
 [Correction (2026-08-15)](#correction-2026-08-15--reading-i-is-a-different-destination-not-an-intermediate-step)
 before relying on the (i)/(ii) section** · **SCOPE CLARIFIED the same day —
 [`place_order` is a command handler, not a PM leg](#scope-clarification-2026-08-15--place_order-is-a-command-handler-not-a-pm-leg);
-the rule is unchanged, its reach was being overstated** · **Date**: 2026-08-15 ·
+the rule is unchanged, its reach was being overstated** · **CORRECTED 2026-08-31 — two sections that
+were true on 2026-08-15 are false at HEAD; see the corrections in [Enforced by](#enforced-by) and
+[One thing found while writing that sharpens PMW-1](#one-thing-found-while-writing-that-sharpens-pmw-1).
+**The rule itself is unchanged**; its enforceable form moved to the retirement of `read:`
+([ADR-20260831-121957](ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md))** ·
+**Date**: 2026-08-15 ·
 **Decider**: the founder / Tech CEO, verbatim below ·
 **Register**: [DECISIONS](../proposals/DECISIONS.md) §42 (**PMW-1**, **PMW-2**, **PMW-3**) and the
 **STO-9** annotation in §32 ·
@@ -16,9 +21,29 @@ the rule is unchanged, its reach was being overstated** · **Date**: 2026-08-15 
 No `rules.yaml` entry, and that is deliberate rather than an omission: this ADR states a **structural**
 guarantee about which side of the system a component reads from, not a business behaviour a customer or
 a restaurant can observe, so it has no `Given/When/Then` to pin in `specs/tests.yaml`. Its enforceable
-form is a **validator rule** over the PM step DSL — register row **PMW-1** — which does not exist yet
-because there is currently no way to *spell* "fold the aggregate's stream" in a `read:` step. Until
-PMW-1 lands, this record is prose, and prose is exactly as reliable as CLAUDE.md says prose is. The
+form is a **validator rule** over the PM step DSL — register row **PMW-1**.
+
+> **CORRECTION (2026-08-31).** The two sentences that stood here were true on 2026-08-15 and are false
+> at HEAD; one of them produced a **false negative in a register check on 2026-08-31**, which is the
+> concrete cost that earned this note. They read: *"which does not exist yet because there is currently
+> no way to* spell *'fold the aggregate's stream' in a `read:` step"* and *"Until PMW-1 lands, this
+> record is prose, and prose is exactly as reliable as CLAUDE.md says prose is."*
+> **PMW-1 landed.** [PR #566](https://github.com/TheCaptainCompany/captain-food/pull/566) merged
+> **2026-08-16** as `b0fd7fdf`; the gate `pm-read-source` is live at
+> `tools/codegen-rs/src/validate/process_managers.rs:456`, over the closed `READ_SOURCES` at `:49`.
+> So this record has not been prose since 2026-08-16.
+> **And the enforcement answer has since been REVERSED** — the founder retired `read:` entirely on
+> 2026-08-31 ([ADR-20260831-121957](ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md),
+> challenge row **PMW-4**). **The rule below is UNCHANGED**; what moved is its enforceable form, from
+> *a validator rule over `read:`* to *there is no `read:`* — the level-4 (unrepresentable-state) form
+> of this same directive (ADR-20260803-234035), not a change of rule. The retirement needs no new gate:
+> the step matcher is already closed, so deleting the `"read"` arm (`:423`) makes the kind unspellable
+> by the catch-all that already refuses unknown kinds (`:854`).
+> **Nine of the steps this record judges are still standing violations** — eight on the money path
+> (`specs/payments/processmanager.yaml:53,70,86,101` settlement, `:132,161,189,219` refund, all on
+> `OrderTracking`) and one on dispatch (`specs/delivery/processmanager.yaml:36`).
+
+The
 money-path consequences it documents are pinned by existing rules
 (`rules.yaml#/PaymentCapturedOnFulfilment` and its CRITICAL-1 regression test,
 `crates/infrastructure/tests/main/order_projection.rs:474`).
@@ -301,7 +326,11 @@ process manager. A rule that is cited outside its scope is as expensive as a rul
   `OrderReadRepository` is a port declared in `application` (`crates/application/src/queries.rs:356`)
   and the process managers live in `application` too. Outer→inner is satisfied at every site. That is
   exactly how thirteen declared `read:` steps accumulated with the compiler silent — and why the rule
-  needs a gate of its own rather than a stricter reading of the existing one.
+  needs a gate of its own rather than a stricter reading of the existing one. *(Thirteen was the
+  2026-08-15 count; **fifteen** at `6b74739b` —
+  `grep -rn '^\s*- read:' specs/*/processmanager.yaml`. The two lens lines in **Consulted** that also
+  say "thirteen" are kept verbatim as said on 2026-08-15. Corrected 2026-08-31,
+  ADR-20260817-105845.)*
 
 ## The evidence that it already cost money
 
@@ -460,12 +489,30 @@ ask Payment → status* — two by-key folds on terminating streams, both inside
 
 ### One thing found while writing that sharpens PMW-1
 
-The `source: PROJECTION | EVENT_STREAM` enumeration is **not on `main`**; it exists on the in-flight
+**As written on 2026-08-15** (kept verbatim, because it is what this record claimed at the time):
+*"The `source: PROJECTION | EVENT_STREAM` enumeration is **not on `main`**; it exists on the in-flight
 `564-mechanical-reader-derivation` branch, where `specs/ordering/processmanager.yaml:32,43` already
 carry `source: EVENT_STREAM` on exactly the two `PlaceOrderProcess` steps this ADR names as drifted.
 So the drift is real on `main` and its correction is already in flight — PMW-1 is therefore a question
 of what the **final** grammar is, on top of an enumeration that is landing, not a green field. That
-branch is owned by another session and is untouched by this record.
+branch is owned by another session and is untouched by this record."*
+
+> **CORRECTION (2026-08-31).** *"Not on `main`"* has been false since **2026-08-16**, when
+> [PR #566](https://github.com/TheCaptainCompany/captain-food/pull/566) merged as `b0fd7fdf` — sixteen
+> days before this note. **That sentence produced a false negative in a register check on 2026-08-31**:
+> read literally at HEAD it says the enumeration is not shipped, so a search for what `main` enforces
+> comes back empty from the very record that was supposed to answer it. That is the cost that earned
+> this correction, and the general shape of it is worth keeping: **a record that pins a fact to
+> "in flight" acquires an expiry date the moment it is written, and nothing detects the expiry.**
+> **What is true at HEAD**: the enumeration is on `main`; `specs/ordering/processmanager.yaml:32,43`
+> carry `source: EVENT_STREAM`, and so do `:73` and `specs/delivery/processmanager.yaml:46` — **four**
+> `EVENT_STREAM` steps against **eleven** `PROJECTION`, over **fifteen** `read:` steps in total
+> (`grep -rn '^\s*- read:' specs/*/processmanager.yaml` and
+> `grep -rn 'source: ' specs/*/processmanager.yaml` at `6b74739b`).
+> **And PMW-1's answer has since been reversed**: `read:` is retired
+> ([ADR-20260831-121957](ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md),
+> challenge row **PMW-4**), so the "final grammar" question this section framed is now a question
+> about *what replaces* `read:`, not about what qualifies it.
 
 ## Consulted (ADR-20260812-143619 — one line per lens)
 

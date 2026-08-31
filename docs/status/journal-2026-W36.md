@@ -3,6 +3,60 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the PM `read:` step is retired: `source:` fixed the physics and left the ownership
+> (records only, no `specs/**` edit).** The founder struck the first conjunct of PMW-1's closure,
+> verbatim: *"`read:` stays, exactly as PR #566 lands it with `source: PROJECTION | EVENT_STREAM`
+> **<=== must be retired from the process manager**"*. **This is not a change of rule.** A `read:`
+> step, in either source mode, has the process manager naming another aggregate's table and picking
+> columns out of it — the fold is written on the PM's side of the boundary. `EVENT_STREAM` moved the
+> *storage* and left the *ownership*. Retirement is the **level-4 (unrepresentable-state)** form of
+> the founder's own 2026-08-15 rule (ADR-20260803-234035), moving it from *declared* to
+> *unspellable*; `read:` was the last place the wrong thing was still sayable.
+> **The deliverable is nine legs, not a keyword** — 11 `PROJECTION` steps minus 2 survivors, eight of
+> the nine on the money path (`specs/payments/processmanager.yaml:53,70,86,101` settlement,
+> `:132,161,189,219` refund, all on `OrderTracking`) and one on dispatch
+> (`specs/delivery/processmanager.yaml:36`). So **ADR-20260815-030206 is today a rule with nine
+> standing violations**, and sequencing this as a rename would understate it by an order of magnitude.
+> Counts re-derived, with antecedents (ADR-20260817-105845): **15** `read:` steps and a **4/11**
+> split, from `grep -rn '^\s*- read:' specs/*/processmanager.yaml` and
+> `grep -rn 'source: ' specs/*/processmanager.yaml` at `6b74739b` — PMW-1's row said thirteen and
+> three, and both are corrected in place.
+> **The two survivors are TWO classes, and "exemption" is rejected as the noun for either.**
+> `ordering:163-169` (a session's open carts) IS a genuine carve-out — set-shaped, and `SessionId`
+> belongs to no aggregate. `ordering:63-68` (the live-catalog price authority) is **not a carve-out at
+> all**: an addressable `Catalog` aggregate exists, and the shared read is the CORRECT design because
+> the cart screen and the checkout leg go through the same `price_cart` seam, and that coherence
+> carries a legal display guarantee (`rules.yaml#/ServerPriceAuthority`, *Code de la consommation*
+> L112-1/L221-5). Calling it an exemption is false and dangerous — it tells the next reader to "clean
+> it up", which would charge a price the customer never saw, on the money path, at peak.
+> **What is OPEN is only the spelling** (row **PMW-4**, `reconsiders: PMW-1`): two narrow kinds
+> (`index:`/`by:` → the unowned key scalar; `authority:` → the authoritative rule) **recommended**,
+> one differently-named kind with a mandatory exemption `$ref` recorded as the **dissent** with its
+> cost. A *generic* hatch is refused — *"two carve-outs riding a surviving `read:`, or a generic
+> exemption `$ref`, is `source:` again wearing a new name."*
+> **PMW-3 (the transport) is untouched and stays parked.** The mechanism question is settled
+> structurally rather than by picking a transport: the wall separates MODELS, not processes —
+> `domain_events` is the write model's storage, so a fold through the aggregate's own fold function
+> IS the write side. The objection was never to a PM holding an `EventStore` port; it is to a PM
+> holding an `OrderReadRepository` (live at `payment_settlement.rs:54`, `delivery_dispatch.rs:83`).
+> **No migration is owed, and the record says so instead of borrowing the vocabulary**: `read:` emits
+> hook signatures and call sites (`emit/pm_orchestrators.rs:710,2112`), never data; PM state rows come
+> from a different emitter; no `read:` is in any event payload; and `source:` is consumed by **no**
+> emitter, so the retirement deletes zero generated query code. It is still **`HOLD: human`** — a
+> behaviour change on the money path (a leg that silently skipped now retries and alerts).
+> **The record does NOT claim this closes the #544 silent-expiry class**; that is the exhaustive
+> branch. What the fold buys is narrower and real: under `PROJECTION`, *"not yet projected"* and
+> *"not authorized"* are the **same observation** — an ambiguous absence becomes an authoritative one.
+> **Two false sections of ADR-20260815-030206 were corrected** (dated notes, not silent rewrites): it
+> still said the `source:` enumeration was *"not on `main`"* and that *"until PMW-1 lands, this record
+> is prose"* — #566 merged sixteen days earlier, and **that sentence produced a false negative in a
+> register check tonight**. General shape worth keeping: **a record that pins a fact to "in flight"
+> acquires an expiry date the moment it is written, and nothing detects the expiry.**
+> Also: PMW-1 migrated out of `docs/decisions/_legacy.yaml` (a `reconsiders` target must be declared),
+> and PROP-20260815-142349 §18 + D2 rewritten in place — both were framed entirely on #566 being open.
+> Records: [ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md),
+> DECISIONS §42 (PMW-1, PMW-4).
+
 > **2026-08-31 — the `send:` route grammar: four unlaned command sends declared, gated and
 > dedup-keyed (#807).**
 > `PmStepDef::Send` carried no `to` and no `route_gate` while all four committed `send:` steps
