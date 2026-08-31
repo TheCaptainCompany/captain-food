@@ -64,20 +64,37 @@
 #   drops it, with no list to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE
 #   TRAIL THAT LICENSES IT.
 #
-#   It FAILS CLOSED in all three unknowns: no `subagent_type`, no agent file (`general-purpose` is
+#   It FAILS CLOSED whenever the target's tool set cannot be READ, which is a larger set than the
+#   three cases this comment first named: no `subagent_type`; no agent file (`general-purpose` is
 #   the live case -- environment.md documents pasting a charter into it as the standard workaround
-#   for an unregistered agent, and it holds the full tool set), or an agent file with no `tools:`
-#   line (no declaration means the inherited set, which can write).
+#   for an unregistered agent, and it holds the full tool set); no `tools:` key; a `tools:` key with
+#   no inline value (YAML list form, or the value on a following line); a wildcard value; and an
+#   inline value ending in a comma, i.e. the first fragment of a continued list. Four of those six
+#   used to fail OPEN -- see the parse block below for the mechanism and the measurement.
+#
+#   NAMED RESIDUAL, because "no list to drift" is only true of AGENT NAMES: the WRITE-TOOL token set
+#   below ({Write, Edit, MultiEdit, NotebookEdit}) is a closed list, and a future write-granting tool
+#   under another name would not be recognised until it is added. That is a real maintenance edge,
+#   stated rather than implied away. `Bash` is deliberately NOT in the set even though it can write
+#   files: every advisory lens in this roster declares it, so counting it would gate the entire
+#   roster and destroy the discriminator. The gate therefore tracks DECLARED AUTHORING INTENT, not
+#   raw capability.
 #
 #   THE ESCAPE HATCH IS THE FAILURE MODE. A gate satisfiable by pasting a literal
 #   `Register check: none` is theatre. So Lane D checks the trail's SHAPE in a way a bare marker
 #   cannot satisfy: a POSITIVE trail must name a record id that RESOLVES TO A FILE ON DISK
 #   (docs/adr/, docs/proposals/, docs/legal/, docs/status/), and a NEGATIVE trail must be the
 #   explicit no-controlling-record form AND name the `terms:` searched. `Register check: none`
-#   is neither and is refused; an invented `ADR-20260101-000000` is refused because it resolves
-#   to nothing. That is strictly stronger than the ask surface's Lane 2, which accepts any
-#   id-SHAPED token -- deliberately not back-ported here, because tightening the ask gate is a
-#   separate change with its own blast radius.
+#   is neither and is refused; an id in the right shape naming a record that was never written is
+#   refused because it resolves to nothing.
+#
+#   IT IS NOT "STRICTLY STRONGER" THAN THE ASK SURFACE'S LANE 2, and an earlier version of this
+#   paragraph said so. The two grammars merely DIFFER, in both directions: `Register check:
+#   DECISIONS` passes Lane D (the file exists) and fails Lane 2 (whose `DECISIONS[^"]{0,24}[0-9]+`
+#   wants a section number), while `ADR-0032 (2026, open)` passes Lane 2 on shape alone. A bare
+#   `journal-<current ISO week>` also resolves by construction, so it is the cheapest Lane D
+#   citation that proves nothing. Lane D is stronger on the axis it was built for -- resolution --
+#   and that is the honest claim. Reconciling the two grammars is tracked, not done here.
 #
 #   WHAT LANE D DELIBERATELY DOES NOT DO: it does not run the envelope lane and does not run the
 #   passive key check. On a founder QUESTION, naming a decided row means asking something already
@@ -133,8 +150,13 @@ AGENTS_DIR="${REGISTER_CHECK_AGENTS:-$ROOT/.claude/agents}"
 DOCS_DIR="${REGISTER_CHECK_DOCS:-$ROOT/docs}"
 # Lane D's id grammar adds BRIEF- (docs/legal/, docs/proposals/) to the ask surface's set: failure 4
 # of the nine was composed without reading BRIEF-20260819 §4.2, so a brief must be citable as the
-# record that governs. Every alternative here RESOLVES to a real path below -- an id shape that
-# cannot resolve would be a hole in the anti-theatre check, not a convenience.
+# record that governs. Every alternative here resolves to a real path in `resolve_record` -- an id
+# shape that cannot resolve is a hole in the anti-theatre check, not a convenience.
+# THAT SENTENCE WAS FALSE WHEN FIRST WRITTEN, in the same commit that wrote it: `ADR-00[0-9]{2}` was
+# in this grammar while the resolver globbed only `ADR-<id>*`, so no legacy id could ever resolve.
+# It is true now because `resolve_record` covers all three eras, not because the claim was checked.
+# (Review round 1, F1 -- a completeness claim shipped before it was executed, the exact shape
+# ADR-20260817-105845 governs.) Do not restate it anywhere else; check it against the resolver.
 DISPATCH_RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|BRIEF-[0-9]{8}|journal-[0-9]{4}-W[0-9]{2}|DECISIONS'
 
 payload="$(cat 2>/dev/null || true)"
@@ -182,9 +204,34 @@ fi
 # of Lane D: it makes the trail's SHAPE checkable without pretending to check its TRUTH. An
 # invented id resolves to nothing and is refused; a real id that is the WRONG record resolves and
 # passes, and catching that stays with review, like every other honesty claim in this gate.
+#
+# THREE FILENAME ERAS, and missing two of them is not a near-miss -- it is a gate that REWARDS the
+# defect. docs/adr/ holds 164 `ADR-<stamp>-*.md`, 47 legacy `NNNN-*.md` and 54 prefixless middle-era
+# `<stamp>-*.md`: a resolver that globs `ADR-<id>*` alone refuses 101 of 265 real ADRs (38%),
+# including ADR-0032, ADR-0014 and ADR-20260720-233000 -- the claim-protocol ADR CLAUDE.md itself
+# cites for this very dispatch flow. A coordinator who does the check CORRECTLY, finds one of those
+# and writes a truthful trail would be refused, and offered exactly two exits: substitute an
+# `ADR-`-prefixed id that happens to resolve (a FABRICATED citation -- failure #5 of the nine this
+# gate exists to stop), or claim `no controlling record` about a record that exists and controls.
+# Both are the behaviour the gate was built to prevent. (Review round 1, F1.)
+#
+# THIS MIRRORS `record_resolves` in tools/codegen-rs/src/validate/decisions.rs -- deliberately, so
+# the two are findable from each other; that one is pinned by tests.rs and is the reference
+# semantics. Keep them in step: the hyphen in the legacy glob is load-bearing there and here (a bare
+# digit prefix would let a truncated `ADR-2026` match the 54 prefixless files, which all start
+# `2026...`), and the stamp era must try BOTH the prefixed and the prefixless filename.
 resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id
   case "$1" in
-    ADR-*)     set -- "$DOCS_DIR/adr/$1"*.md ;;
+    ADR-*)
+      _rest="${1#ADR-}"
+      case "$_rest" in
+        [0-9][0-9][0-9][0-9])
+          # legacy `ADR-00NN` -> `NNNN-*.md`; the trailing hyphen is the guard described above.
+          set -- "$DOCS_DIR/adr/$_rest"-*.md ;;
+        *)
+          # stamp era -> `ADR-<stamp>-*.md` (current) OR `<stamp>-*.md` (prefixless middle era).
+          set -- "$DOCS_DIR/adr/$1"*.md "$DOCS_DIR/adr/$_rest"*.md ;;
+      esac ;;
     PROP-*)    set -- "$DOCS_DIR/proposals/$1"*.md ;;
     BRIEF-*)   set -- "$DOCS_DIR/legal/$1"*.md "$DOCS_DIR/proposals/$1"*.md ;;
     journal-*) set -- "$DOCS_DIR/status/$1"*.md ;;
@@ -212,13 +259,39 @@ if [ -n "$payload" ] && [ "$TOOL_NAME" = "Agent" ]; then
   elif [ ! -f "$agent_file" ]; then
     why="no \`.claude/agents/$sub.md\` declares this agent, so its tool set cannot be read (an undeclared agent — \`general-purpose\` is the live case — holds the full set, including Write/Edit)"
   else
-    tools_line="$(awk '/^---$/{c++; next} c==1 && /^tools:/{print; exit}' "$agent_file")"
-    if [ -z "$tools_line" ]; then
+    # THE PARSE MUST FAIL CLOSED, AND THE OBVIOUS SPELLING FAILS OPEN. `awk /^tools:/{print}`
+    # returns the literal string `tools:` for a YAML LIST form, so `[ -z "$tools_line" ]` is FALSE,
+    # the fail-closed branch never runs, and a write-capable agent is declared advisory: measured
+    # exit 0, ungated, on a trail-less card for `tools:\n  - Write`, for a continuation line, for
+    # `tools: "*"` and for a bare `tools:` key. A PARSE FAILURE WAS BEING REPORTED AS A READ
+    # DECLARATION OF READ-ONLY. So presence of the KEY and presence of an inline VALUE are read
+    # separately, and four shapes fail closed. (Review round 1, F2 -- which named three of them;
+    # the trailing-comma continuation below is a fourth found while fixing it, and `tools: "*"`
+    # fails open by a DIFFERENT mechanism than the other three: its value is non-empty and simply
+    # contains no write token, so an emptiness check alone does not reach it.)
+    has_tools="$(awk '/^---[[:space:]]*$/{c++; next} c==1 && /^tools:/{print "yes"; exit}' "$agent_file")"
+    tools_val="$(awk '/^---[[:space:]]*$/{c++; next} c==1 && /^tools:/{sub(/^tools:[[:space:]]*/,""); sub(/[[:space:]]+$/,""); print; exit}' "$agent_file")"
+    # Strip only quoting/flow punctuation, never the separators the token scan needs.
+    tools_norm="$(printf '%s' "$tools_val" | tr -d '"'"'"'[]' | tr ',' ' ')"
+    if [ "$has_tools" != yes ]; then
       why="\`$sub.md\` declares no \`tools:\` line, so it inherits the full tool set"
-    elif printf '%s' "$tools_line" | grep -qE 'Write|Edit'; then
-      why="\`$sub\` is write-capable (\`$tools_line\`) — this call can produce a diff"
+    elif [ -z "$tools_val" ]; then
+      why="\`$sub.md\` has a \`tools:\` key with no inline value (YAML list form, or a value on the following line) — the tool set cannot be read from it, and an unreadable declaration is never evidence of read-only"
+    elif case "$tools_val" in *"*"*) true ;; *) false ;; esac; then
+      why="\`$sub.md\` declares \`tools: $tools_val\` — a wildcard grants every tool, Write and Edit included"
+    elif case "$tools_val" in *,) true ;; *) false ;; esac; then
+      why="\`$sub.md\` declares \`tools: $tools_val\`, which ends in a comma — the list continues on the next line and this is only its first fragment"
     else
-      gated=no
+      # A CLOSED TOKEN SET, not a substring. `Write|Edit` as a substring also matches `TodoWrite`,
+      # which grants no filesystem write at all (latent today: no agent declares it).
+      for _t in $tools_norm; do
+        case "$_t" in
+          Write|Edit|MultiEdit|NotebookEdit)
+            why="\`$sub\` is write-capable (\`tools: $tools_val\`, grants \`$_t\`) — this call can produce a diff"
+            break ;;
+        esac
+      done
+      [ -z "$why" ] && gated=no
     fi
   fi
 

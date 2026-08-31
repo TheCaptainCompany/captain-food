@@ -97,7 +97,7 @@ were caught by the founder or a lens** — that is the price paid for not runnin
 | 2 | Told the founder C4 was a "load-only port" | His ruling: the PM must not load **either** | **Founder** |
 | 3 | Asked *"Want me to have that specified and dispatched?"* | `ADR-20260810-011500` forbids "shall I proceed?" — sessions start by themselves | — |
 | 4 | Proposed a new counsel posture | `BRIEF-20260819` §4.2 already records the two carve-outs (authorisation questions, fiscal receipts) that may not be self-answered at any labelling | **Legal lens** |
-| 5 | Cited `pm_orchestrators.rs:844-852` as the `state.by` gate | It is `:964-972`; the cited range is `pm_adapt`'s `FromRead` arm and **reads as confirming the claim while showing the opposite** | **Executor** |
+| 5 | Cited `pm_orchestrators.rs:844-852` as the `state.by` gate | A range that **reads as confirming the claim while showing the opposite**. The gate is the symbol `PmLegGen::emit_state`. The first *correction* was itself a bare range (`:964-972`) and was also wrong — the file had moved | **Executor**, then review round 1 |
 | 6 | Stated "four config keys" | The model admits **three** | **Executor** |
 | 7 | Asserted the PM should call the typed actor clients | `crates/actor_client/Cargo.toml` declares `application` as a dependency — a dependency-rule inversion, never buildable | **Lens** |
 | 8 | Presented the PM `read:` step as a contradiction needing a decision | **while quoting `ADR-20260815-030206`, which decides it** | — |
@@ -113,6 +113,10 @@ because the wrong range *looks* like it confirms the claim. That is what
 governs: **a dispatch card may not state a derived number without naming its antecedents, and any
 bare number it does state is marked `UNVERIFIED input`.** Re-read a cited record — and re-open a
 cited line range — *at the moment it licenses an action*.
+
+**Prefer a symbol to a range.** Failure 5 was corrected twice and was wrong both times, because a
+line range silently decays every time the file moves. `PmLegGen::emit_state` survives the refactor
+that `:964-972` did not. If a range is unavoidable, name the commit it was read at.
 
 ## Before asserting "already decided"
 

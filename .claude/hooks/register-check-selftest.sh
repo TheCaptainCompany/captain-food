@@ -311,6 +311,61 @@ description: declares no `tools:` line, so it inherits the full set -- including
 ---
 EOF
 : > "$FIX/docs/adr/ADR-20260821-095957-fixture-record.md"
+# THE OTHER TWO FILENAME ERAS. docs/adr/ holds 164 `ADR-<stamp>-*`, 47 legacy `NNNN-*` and 54
+# PREFIXLESS `<stamp>-*` files; the first resolver globbed only the first shape and so refused 101
+# of 265 real ADRs, offering a correct trail no exit but a fabricated id or a false negative
+# (review round 1, F1). One fixture per era, so a regression to the single-glob form reds here.
+: > "$FIX/docs/adr/0032-fixture-legacy-era.md"
+: > "$FIX/docs/adr/20260720-233000-fixture-prefixless-era.md"
+# Agent fixtures for the shapes that used to fail OPEN (review round 1, F2). Each one is a
+# `tools:` declaration the old `awk /^tools:/{print}` reduced to the literal `tools:` -- non-empty,
+# so the fail-closed branch never ran and a write-capable agent was declared advisory.
+cat > "$FIX/agents/listform.md" <<'EOF'
+---
+name: listform
+tools:
+  - Read
+  - Write
+---
+EOF
+cat > "$FIX/agents/continuation.md" <<'EOF'
+---
+name: continuation
+tools:
+  Read, Bash, Write
+---
+EOF
+cat > "$FIX/agents/trailcomma.md" <<'EOF'
+---
+name: trailcomma
+tools: Read, Grep,
+  Bash, Write
+---
+EOF
+cat > "$FIX/agents/wildcard.md" <<'EOF'
+---
+name: wildcard
+tools: "*"
+---
+EOF
+cat > "$FIX/agents/emptykey.md" <<'EOF'
+---
+name: emptykey
+tools:
+---
+EOF
+cat > "$FIX/agents/editonly.md" <<'EOF'
+---
+name: editonly
+tools: Read, Grep, Glob, Bash, Edit
+---
+EOF
+cat > "$FIX/agents/todowrite.md" <<'EOF'
+---
+name: todowrite
+tools: Read, Grep, Glob, Bash, TodoWrite
+---
+EOF
 
 fail=0
 expect() { # expect <case> <want-exit> <decisions-dir> <payload> [want-reason]
@@ -467,6 +522,40 @@ expect_d D11-ask-surface-intact 2 '{"tool_name":"AskUserQuestion","questions":[{
 #    `trail-answered` rule. On a CARD, citing a decided record is the behaviour being enforced;
 #    D2's trail says `open` and D12's says `decided`, and both are judged solely on resolution.
 expect_d D12-decided-cite-ok 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260821-095957 (2026-08-21, decided) -- controlling, and cited as such"}}' dispatch-trail-ok
+
+# ── F1 regression: the resolver must cover all THREE docs/adr filename eras ─────────────────────
+# D13/D14 ALLOW: a legacy `ADR-00NN` and a PREFIXLESS middle-era stamp both resolve. Before the fix
+#    these were exit 2 -- and the refusal told a coordinator who had done the check CORRECTLY to
+#    "fix the id, or state the explicit negative", i.e. to fabricate or to lie.
+expect_d D13-legacy-era-resolves 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-0032 (2026-07-20, open) -- covers completeness, silent on X"}}' dispatch-trail-ok
+expect_d D14-prefixless-era-resolves 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-20260720-233000 (2026-07-20, open) -- covers the claim protocol, silent on X"}}' dispatch-trail-ok
+# D15 BLOCK: a well-formed LEGACY id that names no file still refuses -- widening the resolver to
+#    three eras must not widen it to "anything ADR-shaped". (This case first asserted the reason on
+#    `ADR-2026`, testing the trailing-hyphen guard that stops a truncated stamp borrowing a
+#    prefixless file's name. That was wrong and the red-first run caught it: `ADR-2026` matches
+#    NEITHER alternative of DISPATCH_RECORD_ID, so no id is ever extracted and the verdict is
+#    `dispatch-trail-hollow` -- the guard is real but unreachable through the grammar, kept only to
+#    mirror decisions.rs. A case that reds for a reason it does not name is the shape E5 already
+#    cost this suite once.)
+expect_d D15-legacy-id-unknown 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"writer","prompt":"DISPATCH. Register check: ADR-0099 (2026, open) -- covers X"}}' dispatch-trail-unresolved
+
+# ── F2 regression: every `tools:` shape that cannot be READ must fail CLOSED ────────────────────
+# A parse failure was being reported as a read declaration of read-only, so each of these was
+# exit 0 -- ungated -- on a card with no trail at all.
+expect_d D16-tools-list-form 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"listform","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+expect_d D17-tools-continuation 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"continuation","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D18: the fourth shape, found while fixing the three the review named -- an inline value that is
+#    only the FIRST FRAGMENT of a list continued on the next line.
+expect_d D18-tools-trailing-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"trailcomma","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D19: `tools: "*"` fails open by a DIFFERENT mechanism -- a non-empty value with no write token --
+#    so an emptiness check alone never reaches it.
+expect_d D19-tools-wildcard 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"wildcard","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+expect_d D20-tools-empty-key 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"emptykey","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D21 BLOCK: `Edit` alone is write capability -- the discriminator is not Write-only.
+expect_d D21-edit-only-agent 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"editonly","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D22 ALLOW: the token set is CLOSED, so `TodoWrite` -- which grants no filesystem write -- does not
+#    drag a lens into the gate the way a `Write|Edit` substring did.
+expect_d D22-todowrite-not-write 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"todowrite","prompt":"lens consult"}}' agent-advisory
 
 # LD LIVE wiring: the fixture cases above would all pass with the LIVE paths mis-wired, so two
 # anchors on the real roster -- `executor` is write-capable and `reviewer` is read-only, and

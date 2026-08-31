@@ -39,9 +39,15 @@ instead of from the register:
 4. Proposed a new counsel posture without reading BRIEF-20260819 §4.2, which already records the two
    carve-outs (authorisation questions, fiscal receipts) that may not be self-answered at any
    labelling. **The legal lens corrected it.**
-5. Cited `tools/codegen-rs/src/emit/pm_orchestrators.rs:844-852` as the `state.by` gate. It is
-   `:964-972`; the cited range is `pm_adapt`'s `FromRead` arm and **reads as confirming the claim
-   while showing the opposite**. **An executor caught it.**
+5. Cited `tools/codegen-rs/src/emit/pm_orchestrators.rs:844-852` as the `state.by` gate, a range
+   that **reads as confirming the claim while showing the opposite**. **An executor caught it.**
+   The gate is `PmLegGen::emit_state` in `tools/codegen-rs/src/emit/pm_orchestrators.rs` — **cited
+   by symbol on purpose**. The correction first recorded here was itself a bare range (`:964-972`),
+   which at `13e7f4b4` is the `with`-property emitter, not `state.by`: the file had moved under
+   `ac1cab3d`/`58399c1f`. A record whose subject is fabricated line-range citations cannot ship
+   carrying one, and the second attempt reproduced the defect at the third try — which is the
+   argument for ADR-20260817-105845's rule in its strongest form: **anchor to a symbol, or name the
+   commit; a bare range is a claim with a shelf life.**
 6. Stated "four config keys" where the model admits three. **An executor caught it.**
 7. Asserted the PM should call the typed actor clients. `crates/actor_client/Cargo.toml` declares
    `application` as a dependency — a dependency-rule inversion, never buildable. **A lens caught it.**
@@ -85,9 +91,24 @@ extra steps. So the remedy cannot be another paragraph asking the coordinator to
    shape this repo has retired twice, and it is the shape that goes stale silently. The rule reads:
    **a call that can produce a diff carries the trail that licenses it.**
 
-   It **fails closed** on all three unknowns — no `subagent_type`, no agent file (`general-purpose`
-   is the live case: `docs/claude/sessions/environment.md` documents pasting a charter into it as
-   the standard workaround, and it holds the full tool set), or a file with no `tools:` line.
+   It **fails closed whenever the tool set cannot be READ** — no `subagent_type`; no agent file
+   (`general-purpose` is the live case: `docs/claude/sessions/environment.md` documents pasting a
+   charter into it as the standard workaround, and it holds the full tool set); no `tools:` key; a
+   `tools:` key whose inline value is absent (YAML list form, or the value on a following line); a
+   wildcard value; or a value ending in a comma, i.e. the first fragment of a continued list.
+
+   **An earlier version of this ADR said "all three unknowns", and four more shapes failed OPEN**
+   (review round 1, F2): the first parse took `awk /^tools:/{print}`, which returns the literal
+   `tools:` for a list form — non-empty, so the fail-closed branch never ran and **a parse failure
+   was reported as a read declaration of read-only**. Measured: `tools:\n  - Write` gave exit 0,
+   ungated, on a card with no trail. The lesson generalises past this hook: *an unreadable
+   declaration is never evidence of the permissive answer.*
+
+   **Named residual**, because "no list to drift" is true only of AGENT NAMES: the write-tool token
+   set (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) is a closed list, and a future write-granting
+   tool under a new name goes unrecognised until added. `Bash` is deliberately excluded although it
+   can write files — every advisory lens declares it, so including it would gate the whole roster
+   and destroy the discriminator. The gate tracks **declared authoring intent, not raw capability**.
 
 4. **The escape hatch is shut by making the trail's SHAPE checkable.** A gate satisfiable by pasting
    a literal `Register check: none` is theatre. So a **positive** trail must name a record id that
@@ -97,10 +118,26 @@ extra steps. So the remedy cannot be another paragraph asking the coordinator to
    never written resolves to nothing and is refused too. (This ADR cannot spell that example out:
    the validator's own §23 `record-citation-unresolved` rule refuses a dangling ADR-shaped id
    anywhere under `docs/**` — it caught the illustration while this record was being written, which
-   is the same principle one corpus over.) This is strictly stronger than the ask surface's Lane 2,
-   which accepts any id-*shaped*
-   token — **deliberately not back-ported**, because tightening the ask gate has its own blast
-   radius and belongs in its own change.
+   is the same principle one corpus over.)
+
+   **Resolution must cover all three `docs/adr/` filename eras**, and the first implementation
+   covered one. `docs/adr/` holds 164 `ADR-<stamp>-*.md`, 47 legacy `NNNN-*.md` and 54 prefixless
+   middle-era `<stamp>-*.md` files, so globbing `ADR-<id>*` alone refused **101 of 265 real ADRs**,
+   `ADR-0032`, `ADR-0014` and `ADR-20260720-233000` among them — the last being the claim-protocol
+   ADR CLAUDE.md cites for this very dispatch flow. That is not a near-miss but an **inversion**: a
+   coordinator who ran the check correctly and wrote a truthful trail was refused and offered two
+   exits, substitute an id that happens to resolve (a fabricated citation, failure #5 above) or
+   claim no controlling record about a record that controls. **A gate that rewards the defect it
+   exists to stop is worse than no gate.** The resolver now mirrors `record_resolves` in
+   `tools/codegen-rs/src/validate/decisions.rs`, which already had the semantics and is pinned by
+   `tests.rs`; the two carry comments pointing at each other. (Review round 1, F1.)
+
+   This is **not "strictly stronger" than the ask surface's Lane 2**, as an earlier version of this
+   ADR claimed. The grammars differ in both directions — `Register check: DECISIONS` passes Lane D
+   and fails Lane 2; `ADR-0032 (2026, open)` passes Lane 2 on shape alone — and a bare
+   `journal-<current ISO week>` resolves by construction, so it is the cheapest Lane D citation that
+   proves nothing. Lane D is stronger **on the axis it was built for, resolution**; reconciling the
+   two grammars is tracked separately and deliberately not done here.
 
 5. **Lane D deliberately does NOT run the envelope lane or the passive key check.** On a founder
    *question*, naming a decided row means asking something already answered. On a dispatch *card*,
@@ -123,6 +160,13 @@ that prose does not self-execute.
 That is an argument, not a resignation: it is a positive reason to **route more coordinator→founder
 questions through `AskUserQuestion`**, where the gate already bites, instead of composing them as
 prose in the transcript.
+
+**Lane D gates DELEGATION, not AUTHORSHIP.** It fires on the `Agent` tool, so a coordinator that
+edits a file itself never meets it: its own `Write`/`Edit` and its allow-listed `Bash(git commit:*)`
+/ `Bash(git push:*)` are ungated. And it is **unverified** whether `PreToolUse` fires for a *nested*
+subagent's `Agent` call — `architect` declares `Agent` in its own `tools:`, so an architect-issued
+dispatch may or may not be gated; nothing here establishes which, and it is stated as unknown rather
+than assumed either way. Neither is a defect this change introduces; both bound what it claims.
 
 Nor does Lane D prove the trail is the *right* record, that it was read, or that the card's claims
 follow from it — it proves a **resolvable citation was produced**. Failures 5 and 6 are the residual
@@ -156,6 +200,12 @@ not by this gate. Same honesty limit the rest of the script already states about
   list, the shape retired twice here, and stale the moment the roster changes.
 - **Skill only, no hook.** Rejected by the evidence: the existing skill was invoked zero times in
   the session that produced nine failures.
+
+**On compiler-first (ADR-20260803-234035).** A type cannot make an untrailed dispatch card
+unspellable: the card is a string in a tool payload and the binding is YAML-to-hook. That is not a
+shortfall against the ladder — **PROP-20260802-130500 §1 already rules that a YAML/hook binding sits
+off the ladder, with level 3 as its ceiling rather than a compromise**, so a checked gate is the
+correct instrument here and not a fallback chosen for convenience.
 
 ## Consulted
 
