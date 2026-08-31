@@ -233,6 +233,11 @@ DeliveryDispatchProcess:
         - send:
             command: { $ref: 'commands.yaml#/MarkOrderDelivered' }
             to: { $ref: 'actors.yaml#/Order' }
+            route_gate: { $ref: 'configuration.yaml#/keys/ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE' }
+            # An order is delivered once, so the ORDER is the dedup axis -- and keying the door on
+            # it is what collapses a partner's DELIVERED report racing an independent rider's
+            # completion into one closure instead of two competing appends.
+            dedup_by: { $ref: 'commands.yaml#/MarkOrderDelivered/properties/orderId' }
             with:
               orderId: { from_state: order_id }
               restaurantId: { from_state: restaurant_id }
@@ -252,6 +257,11 @@ DeliveryDispatchProcess:
         - send:
             command: { $ref: 'commands.yaml#/MarkOrderDelivered' }
             to: { $ref: 'actors.yaml#/Order' }
+            route_gate: { $ref: 'configuration.yaml#/keys/ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE' }
+            # An order is delivered once, so the ORDER is the dedup axis -- and keying the door on
+            # it is what collapses a partner's DELIVERED report racing an independent rider's
+            # completion into one closure instead of two competing appends.
+            dedup_by: { $ref: 'commands.yaml#/MarkOrderDelivered/properties/orderId' }
             with:
               orderId: { from_state: order_id }
               restaurantId: { from_state: restaurant_id }

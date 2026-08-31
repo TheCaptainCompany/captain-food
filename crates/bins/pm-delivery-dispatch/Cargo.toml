@@ -29,6 +29,7 @@ publish = false
 description = "Captain.Food `pm-delivery-dispatch` deployable: mailbox worker realizing the `DeliveryDispatchProcess` process manager -- a DECLARED cross-scope bridge; its domain-crate links are its spec refs (ADR-20260807-183024)."
 
 [dependencies]
+domain-common = { path = "../../domains/common" }
 domain-delivery = { path = "../../domains/delivery" }
 domain-ordering = { path = "../../domains/ordering" }
 # The business runtime (#385): the shared composition kit -- probe server, telemetry,

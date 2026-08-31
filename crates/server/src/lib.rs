@@ -827,6 +827,12 @@ pub async fn router() -> Router {
                             order_placed_to_order: config.route_order_birth_through_lane,
                             place_replacement_order_to_order: config
                                 .route_replacement_birth_through_lane,
+                            // #807: the three routed `send:` steps, each from its OWN key.
+                            bind_cart_to_customer_to_cart: config.route_cart_bind_through_lane,
+                            grant_customer_credit_to_customer_credit: config
+                                .route_credit_grant_through_lane,
+                            mark_order_delivered_to_order: config
+                                .route_order_delivery_completion_through_lane,
                         });
                     saga_status = Some(runner.status());
                     // The backfill runs INSIDE the runner's task, before its first tick — the
@@ -935,6 +941,12 @@ pub async fn router() -> Router {
                             order_placed_to_order: config.route_order_birth_through_lane,
                             place_replacement_order_to_order: config
                                 .route_replacement_birth_through_lane,
+                            // #807: the three routed `send:` steps, each from its OWN key.
+                            bind_cart_to_customer_to_cart: config.route_cart_bind_through_lane,
+                            grant_customer_credit_to_customer_credit: config
+                                .route_credit_grant_through_lane,
+                            mark_order_delivered_to_order: config
+                                .route_order_delivery_completion_through_lane,
                         },
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its

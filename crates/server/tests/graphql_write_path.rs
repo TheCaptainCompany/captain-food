@@ -157,6 +157,10 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         route_gates: application::generated::process_managers::RouteGates {
             order_placed_to_order: true,
             place_replacement_order_to_order: false,
+            // #807: routed `send:` steps -- OFF, this fixture exercises the order birth route.
+            bind_cart_to_customer_to_cart: false,
+            grant_customer_credit_to_customer_credit: false,
+            mark_order_delivered_to_order: false,
         },
     };
     let handler = Arc::new(infrastructure::mailbox::MailboxCommandHandler::new(deps));

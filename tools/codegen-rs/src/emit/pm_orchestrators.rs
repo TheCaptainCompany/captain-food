@@ -76,7 +76,29 @@ pub(crate) enum PmStepDef {
     /// separate routed-set list to keep in step, and a route whose key does not resolve is a
     /// dangling `$ref` — a `make validate` error (#797).
     Deliver { event: String, to: String, with: Vec<(String, PmVal)>, note: Option<String>, route_gate: Option<String> },
-    Send { command: String, with: Vec<(String, PmVal)>, for_each: Option<String>, note: Option<String> },
+    /// A `send:` is a REQUEST the target may reject, and it addresses a stream the process
+    /// manager does not own — so `to` names the target whose lane runs the command and
+    /// `route_gate` names the key that route is gated on (#807). Both are `Option` for the same
+    /// reason `PmSendDecl`'s are: `pm-route-gate` reports the half-declared forms, and the
+    /// emitter treats them as unrouted so a validate error stays a validate error rather than
+    /// becoming a codegen panic. `route_decls` reads the both-present PAIR.
+    Send {
+        command: String,
+        to: Option<String>,
+        with: Vec<(String, PmVal)>,
+        for_each: Option<String>,
+        note: Option<String>,
+        route_gate: Option<String>,
+        /// The command PROPERTY whose value is the routed door's dedup axis (`external_id`), i.e.
+        /// the key the TARGET HANDLER is idempotent on. Mandatory on a routed send, with NO
+        /// default, because every available default is silently wrong somewhere: keying the door
+        /// on the target aggregate's id is right for `MarkOrderDelivered` (an order is delivered
+        /// once) and catastrophic for `GrantCustomerCredit`, whose ledger is keyed by CUSTOMER
+        /// while the handler dedups per `reclamationId` — one customer legitimately receives many
+        /// grants, and a customer-keyed door would swallow every one after the first. Money owed
+        /// and never paid, with no error anywhere.
+        dedup_by: Option<String>,
+    },
     StateStep { by: Vec<(String, PmVal)>, expect: Vec<(String, String)>, set: Vec<(String, PmVal)>, note: Option<String> },
 }
 
@@ -184,6 +206,21 @@ pub(crate) fn route_decls(model: &Model) -> Vec<RouteDecl> {
                         is_fact: true,
                     });
                 }
+                // A routed `send:` STEP (#807). The wrapper-seam arm below reads the same
+                // both-present pair off a `sends:` DECLARATION; a step is parsed by different
+                // code, so it needs its own arm or its `to:` is read, validated by `pm-send` and
+                // then dropped -- which is exactly what happened to all four committed sends.
+                // `is_fact: false`: a send is a REQUEST the target may refuse, so it takes the
+                // COMMAND door, not the EVENT one.
+                if let PmStepDef::Send { command, to: Some(to), route_gate: Some(key), .. } = step {
+                    out.push(RouteDecl {
+                        actor_type: to.clone(),
+                        message_type: command.clone(),
+                        source: format!("pm:{}:{}", pm.name, command),
+                        config_key: key.clone(),
+                        is_fact: false,
+                    });
+                }
             }
             for send in &leg.sends {
                 match (&send.to, &send.route_gate) {
@@ -217,6 +254,28 @@ pub(crate) fn pm_aggregate_key(aggregate: &str) -> String {
     } else {
         format!("{}Id", camel(aggregate))
     }
+}
+
+/// The DECLARED identity property of an aggregate — `actors.yaml#/<Actor>/identity`, whose `$ref`
+/// last segment names the state field the stream is keyed by.
+///
+/// This is what [`pm_aggregate_key`]'s `<camel(agg)>Id` convention only APPROXIMATES, and the
+/// approximation is wrong wherever an aggregate is keyed by something other than its own name:
+/// `CustomerCredit` is keyed by `customerId` (one ledger per customer, stream
+/// `CustomerCredit-{customerId}`), which the convention would call `customerCreditId` -- a property
+/// no command carries. `Payment` needed a hard-coded special case for the same reason. Routed
+/// `send:` steps (#807) read the DECLARATION instead, so a new aggregate never needs a new arm here.
+pub(crate) fn pm_actor_identity_prop(model: &Model, actor: &str) -> String {
+    model
+        .defs
+        .get("actors.yaml")
+        .and_then(|f| f.get(actor))
+        .and_then(|n| n.get("identity"))
+        .and_then(|i| i.get("$ref"))
+        .and_then(|r| r.as_str())
+        .and_then(|r| r.rsplit('/').next())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| pm_aggregate_key(actor))
 }
 
 /// Read a `{ $ref: 'configuration.yaml#/keys/<KEY>' }` node into the bare KEY name (#797).
@@ -408,9 +467,25 @@ pub(crate) fn parse_pm_orchestrators(model: &Model) -> Vec<PmOrchDef> {
                             .and_then(|r| r.as_str())
                             .and_then(ref_name)
                             .unwrap_or_else(|| panic!("{}: send without command $ref", sloc)),
+                        // NOT `unwrap_or_else(panic)` like `deliver.to`: a `send:` with a missing
+                        // or malformed target is reported by `pm-send`/`pm-route-gate`, and a
+                        // validator that has to survive a mutated model in order to REPORT on it
+                        // cannot have the parser abort underneath it (#807).
+                        to: body
+                            .get("to")
+                            .and_then(|x| x.get("$ref"))
+                            .and_then(|r| r.as_str())
+                            .and_then(ref_name),
                         with: pm_val_entries(body.get("with"), &sloc),
                         for_each: body.get("for_each").and_then(|f| f.as_str()).map(|s| s.to_string()),
                         note,
+                        route_gate: config_key_ref(body.get("route_gate"), &sloc),
+                        dedup_by: body
+                            .get("dedup_by")
+                            .and_then(|x| x.get("$ref"))
+                            .and_then(|r| r.as_str())
+                            .and_then(|r| r.rsplit('/').next())
+                            .map(|s| s.to_string()),
                     },
                     "state" => {
                         let mut expect = Vec::new();
@@ -1316,7 +1391,7 @@ impl<'a> PmLegGen<'a> {
         );
     }
 
-    pub(crate) fn emit_send(&mut self, command: &str, with: &[(String, PmVal)], for_each: &Option<String>, note: &Option<String>, ind: usize) {
+    pub(crate) fn emit_send(&mut self, command: &str, to: &Option<String>, with: &[(String, PmVal)], for_each: &Option<String>, note: &Option<String>, route_gate: &Option<String>, dedup_by: &Option<String>, ind: usize) {
         assert!(!self.is_cmd, "send steps on command legs are not generated");
         if self.admission_pending {
             self.emit_admission(ind);
@@ -1350,16 +1425,88 @@ impl<'a> PmLegGen<'a> {
             &format!("processmanager.yaml#/{}/{}", self.pm.name, command),
         );
         self.body.push_str(&lit);
-        self.push(body_ind, &format!("match crate::commands::{}(store, sent, &actor).await {{", cmd_snake));
-        self.push(body_ind + 4, "Ok(()) => {}");
-        self.push(body_ind + 4, "Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),");
-        self.push(body_ind + 4, "Err(domain::shared::errors::DomainError::Repository(e)) => {");
-        self.push(body_ind + 8, "return Err(domain::shared::errors::DomainError::Repository(e))");
-        self.push(body_ind + 4, "}");
-        self.push(body_ind + 4, "Err(rejection) => {");
+        // The ROUTED arm (#807). A `send:` addresses a stream this saga does not own; routed, the
+        // TARGET's own lane worker runs the command inside its fenced transaction, past the
+        // target's serialization point, and a rejection lands a REJECTED verdict on a supervisable
+        // row instead of the `tracing::warn!` below that no operator reads. `env.lane_sink_for(..)`
+        // is `Some` only on a route built with `TriggerEnvelope::laned` AND with THIS route's own
+        // gate ON -- the route is NAMED, never inferred from sink presence, so two routes hosted by
+        // the same runner cannot flip together (#797). `None` takes the legacy in-process call
+        // below, byte for byte: rollback is a config flip, not a redeploy.
+        let routed = to.is_some() && route_gate.is_some();
+        let (send_ind, legacy_ind) = if routed { (body_ind + 4, body_ind + 4) } else { (body_ind, body_ind) };
+        if routed {
+            let to = to.as_deref().expect("routed send has a target");
+            let key_prop = pm_actor_identity_prop(self.ctx.model, to);
+            let key_field = rust_ident(&snake_field(&key_prop));
+            assert!(
+                self.ctx
+                    .model
+                    .defs
+                    .get("commands.yaml")
+                    .and_then(|f| f.get(command))
+                    .and_then(|n| n.get("properties"))
+                    .map(|p| p.get(key_prop.as_str()).is_some())
+                    .unwrap_or(false),
+                "processmanager.yaml#/{}: routed send {} -> {} cannot address the lane: the command \
+                 does not carry '{}', the identity actors.yaml declares for {}. A routed send is \
+                 partitioned onto the TARGET aggregate's id, so that id must be in the command.",
+                self.pm.name, command, to, key_prop, to
+            );
+            self.push(
+                body_ind,
+                &format!(
+                    "if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::{}To{}) {{",
+                    command, to
+                ),
+            );
+            self.push(send_ind, "lanes.stage(crate::lanes::LaneEnqueue {");
+            // A `send:` is a REQUEST the target may refuse, so it takes the COMMAND door.
+            self.push(send_ind + 4, "kind: crate::lanes::LaneMessageKind::Command,");
+            self.push(send_ind + 4, &format!("actor_type: \"{}\",", to));
+            self.push(send_ind + 4, &format!("actor_id: sent.{}.0,", key_field));
+            self.push(send_ind + 4, &format!("message_type: \"{}\",", command));
+            // The BARE command payload: `dispatch_command` deserializes this column straight into
+            // the generated command struct, with no `eventType` wrapper (the EVENT door differs).
+            self.push(
+                send_ind + 4,
+                &format!(
+                    "payload: serde_json::to_value(&sent).map_err(|e| domain::shared::errors::DomainError::Repository(format!(\"{} lane enqueue payload: {{e}}\")))?,",
+                    command
+                ),
+            );
+            // FROZEN door identity: the ROUTE (so two routed steps addressing the same aggregate
+            // cannot collide) plus the DECLARED DEDUP AXIS -- never the trigger's message id, which
+            // changes on every redelivery, and never the target aggregate's id by default. The axis
+            // is the key the TARGET HANDLER is idempotent on, and it is declared per send because
+            // it does not follow from the target: `MarkOrderDelivered` dedups on the ORDER (an
+            // order is delivered once) while `GrantCustomerCredit` dedups on the RECLAMATION, on a
+            // ledger keyed by CUSTOMER -- keying that door on the ledger's own id would silently
+            // swallow every goodwill credit after a customer's first.
+            let dedup_prop = dedup_by
+                .as_deref()
+                .unwrap_or_else(|| panic!(
+                    "processmanager.yaml#/{}: routed send {} declares no `dedup_by:` — the door's \
+                     dedup axis must name the command property the TARGET HANDLER is idempotent on \
+                     (`pm-send-dedup` reports this; there is deliberately no default)",
+                    self.pm.name, command
+                ));
+            let dedup_field = rust_ident(&snake_field(dedup_prop));
+            self.push(send_ind + 4, &format!("source: \"pm:{}:{}\".to_string(),", self.pm.name, command));
+            self.push(send_ind + 4, &format!("external_id: sent.{}.0.to_string(),", dedup_field));
+            self.push(send_ind, "});");
+            self.push(body_ind, "} else {");
+        }
+        self.push(legacy_ind, &format!("match crate::commands::{}(store, sent, &actor).await {{", cmd_snake));
+        self.push(legacy_ind + 4, "Ok(()) => {}");
+        self.push(legacy_ind + 4, "Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),");
+        self.push(legacy_ind + 4, "Err(domain::shared::errors::DomainError::Repository(e)) => {");
+        self.push(legacy_ind + 8, "return Err(domain::shared::errors::DomainError::Repository(e))");
+        self.push(legacy_ind + 4, "}");
+        self.push(legacy_ind + 4, "Err(rejection) => {");
         if for_each.is_some() {
             self.push(
-                body_ind + 8,
+                legacy_ind + 8,
                 &format!(
                     "tracing::warn!(saga = \"{}\", command = \"{}\", %rejection, \"command rejected -- leg skipped, the target aggregate's own invariants stand\");",
                     self.pm.name, command
@@ -1367,17 +1514,20 @@ impl<'a> PmLegGen<'a> {
             );
         } else {
             self.push(
-                body_ind + 8,
+                legacy_ind + 8,
                 &format!(
                     "let reason = format!(\"{} rejected: {{rejection}} — the target aggregate's own invariants stand; skipped\");",
                     command
                 ),
             );
-            self.push(body_ind + 8, &format!("tracing::warn!(saga = \"{}\", %reason, \"leg skipped\");", self.pm.name));
-            self.push(body_ind + 8, "leg_outcome = Outcome::Skipped(reason);");
+            self.push(legacy_ind + 8, &format!("tracing::warn!(saga = \"{}\", %reason, \"leg skipped\");", self.pm.name));
+            self.push(legacy_ind + 8, "leg_outcome = Outcome::Skipped(reason);");
         }
-        self.push(body_ind + 4, "}");
-        self.push(body_ind, "}");
+        self.push(legacy_ind + 4, "}");
+        self.push(legacy_ind, "}");
+        if routed {
+            self.push(body_ind, "}");
+        }
         if for_each.is_some() {
             self.push(ind, "}");
         }
@@ -1652,7 +1802,7 @@ pub(crate) fn emit_pm_leg(ctx: &PmEmit, pm: &PmOrchDef, leg: &PmLegDef) -> (Stri
         }
         PmStepDef::Call { port, operation, note } => gen.emit_call(port, operation, note, ind),
         PmStepDef::Deliver { event, to, with, note, route_gate } => gen.emit_deliver(event, to, with, note, route_gate, ind),
-        PmStepDef::Send { command, with, for_each, note } => gen.emit_send(command, with, for_each, note, ind),
+        PmStepDef::Send { command, to, with, for_each, note, route_gate, dedup_by } => gen.emit_send(command, to, with, for_each, note, route_gate, dedup_by, ind),
         PmStepDef::StateStep { by, expect, set, note } => gen.emit_state(i, by, expect, set, note, consumed, ind),
     };
 

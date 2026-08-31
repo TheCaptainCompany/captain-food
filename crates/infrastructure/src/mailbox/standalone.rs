@@ -181,6 +181,21 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
                 "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
                 false,
             ),
+            // #807: the three routed `send:` steps. Same rule as the replacement gate above —
+            // read from their OWN keys here, never pinned to a literal, even though a standalone
+            // worker fleet hosts none of these sagas today. A route whose value is decided by
+            // which composition root happens to construct it is a route with no single rollback
+            // lever. `RouteGates` has no `Default`, so adding a route makes THIS site a compile
+            // error naming exactly the decision nobody made — which is how this one was found.
+            bind_cart_to_customer_to_cart: env_flag("ROUTE_CART_BIND_THROUGH_LANE", false),
+            grant_customer_credit_to_customer_credit: env_flag(
+                "ROUTE_CREDIT_GRANT_THROUGH_LANE",
+                false,
+            ),
+            mark_order_delivered_to_order: env_flag(
+                "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
+                false,
+            ),
         },
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every

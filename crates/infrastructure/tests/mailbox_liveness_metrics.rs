@@ -84,9 +84,15 @@ const LANES: &[(&str, &str)] = &[
     ("Order", "OrderExpired"),
 ];
 
-/// The ROUTED-BIRTH lanes the Order-lane watch must report on (#598) — same literal-not-derived
-/// discipline as [`LANES`], pinned by [`routed_lanes_are_still_the_ones_asserted`].
-const ROUTED: &[&str] = &["Order"];
+/// The ROUTED lanes the watch must report on (#598) — same literal-not-derived discipline as
+/// [`LANES`], pinned by [`routed_lanes_are_still_the_ones_asserted`].
+///
+/// Widened by #807 from the routed BIRTHS alone to every routed lane: routing the four `send:`
+/// steps added `Cart` (the customer bind) and `CustomerCredit` (the goodwill-credit money path),
+/// and `Order` now carries the delivery completion as well as the two births. The credit lane is
+/// the one whose silence is least tolerable — a grant that never lands is money owed to a customer
+/// with nobody on either side aware of it.
+const ROUTED: &[&str] = &["Cart", "CustomerCredit", "Order"];
 
 /// One expected attribute set.
 fn attrs<const N: usize>(kvs: [(&str, &str); N]) -> BTreeMap<String, String> {
@@ -178,8 +184,8 @@ fn routed_lanes_are_still_the_ones_asserted() {
     assert_eq!(
         declared,
         ROUTED.to_vec(),
-        "a routed `deliver:` lane was added or removed in specs/** (see \
-         tools/codegen-rs PM_LANE_ROUTED_DELIVERS): add it to ROUTED here, so the liveness \
+        "a routed lane (`deliver:` or `send:`) was added or removed in specs/** (see \
+         tools/codegen-rs `route_decls`): add it to ROUTED here, so the liveness \
          assertions below keep covering EVERY declared lane — that coverage IS the contract, and \
          a lane nobody widened the watch to is a lane whose silence means nothing"
     );
@@ -397,9 +403,15 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
         .expect("one order-lane watch tick over a drained lane");
     let drained = spy.drain();
 
+    // EVERY declared lane heartbeats at 1.0 -- derived from ROUTED, not listed, so widening the
+    // routed set (as #807 did) cannot leave a lane silently out of the expectation. Written as a
+    // literal `[("Order", 1.0)]` this read as "one tick on the Order lane" while it actually meant
+    // "every lane, because Order is the only one"; the two only came apart once a second lane
+    // existed.
+    let all_lanes_beat: Vec<(&str, f64)> = ROUTED.iter().map(|l| (*l, 1.0)).collect();
     assert_eq!(
         drained.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
-        expected_lane_points(ROUTED, &[("Order", 1.0)]),
+        expected_lane_points(ROUTED, &all_lanes_beat),
         "every DECLARED routed lane heartbeats on every tick, drained or not -- this counter is \
          the only thing that tells 'nobody ordered' from 'the Order lane worker is dead', and \
          order_birth_lag_ms is silent by design while ROUTE_ORDER_BIRTH_THROUGH_LANE is OFF"
@@ -412,7 +424,7 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     );
     assert_eq!(
         drained.records(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
-        vec![(attrs([("lane", "Order")]), 1)],
+        ROUTED.iter().map(|l| (attrs([("lane", *l)]), 1)).collect::<Vec<_>>(),
         "exactly ONE heartbeat point per lane per tick: the alarm is the ABSENCE of an increment, \
          so a tick that emits twice inflates the very rate the alarm reads"
     );
@@ -426,7 +438,7 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     let drained_again = spy.drain();
     assert_eq!(
         drained_again.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
-        expected_lane_points(ROUTED, &[("Order", 1.0)]),
+        expected_lane_points(ROUTED, &all_lanes_beat),
         "the heartbeat must INCREMENT on the second tick -- a monotonic counter that never \
          increments is a dead watcher wearing a live series"
     );
@@ -447,17 +459,34 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
     let backlogged = spy.drain();
 
     let ages = backlogged.points(metric::ORDER_LANE_OLDEST_PENDING_AGE_MS);
-    assert_eq!(ages.len(), ROUTED.len(), "one age point per declared lane, always: {ages:?}");
-    assert_eq!(ages[0].0, attrs([("lane", "Order")]), "the age is keyed by lane alone");
+    // MEMBERSHIP, not a count: `ages.len() == ROUTED.len()` is satisfied by two Cart points and
+    // no CustomerCredit one, which is precisely a lane going unwatched while the total looks
+    // right. Same shape as the `records` assertion on the drained tick above.
+    assert_eq!(
+        ages.iter().map(|(a, _)| a.clone()).collect::<Vec<_>>(),
+        expected_lane_points(ROUTED, &[]).into_iter().map(|(a, _)| a).collect::<Vec<_>>(),
+        "one age point per DECLARED lane, by lane and not by count: {ages:?}"
+    );
+    // Found BY LANE, not by index: the points are sorted by attribute set, so `ages[0]` stopped
+    // being the Order lane the moment #807 widened ROUTED past a single entry. An index into a
+    // sorted set is a silent coupling to the set's membership.
+    let order_age = ages
+        .iter()
+        .find(|(a, _)| a == &attrs([("lane", "Order")]))
+        .expect("the Order lane reports an age point");
     assert!(
-        ages[0].1 >= 60_000.0,
+        order_age.1 >= 60_000.0,
         "a birth parked 90s on the lane must show as ~90000ms, not {}ms -- the VALUE is the \
          alarm, and a watcher that always reports 0 reads exactly like a lane that is keeping up",
-        ages[0].1
+        order_age.1
     );
+    // The lanes with nothing parked must still report, at 0 -- absence is the failure mode.
+    for (attr, value) in ages.iter().filter(|(a, _)| a != &attrs([("lane", "Order")])) {
+        assert_eq!(*value, 0.0, "a drained lane reports 0, it does not go absent: {attr:?}");
+    }
     assert_eq!(
         backlogged.points(metric::ORDER_LANE_WATCH_HEARTBEAT_TOTAL),
-        expected_lane_points(ROUTED, &[("Order", 1.0)]),
+        expected_lane_points(ROUTED, &all_lanes_beat),
         "the heartbeat is independent of the backlog: it ticks whether or not anything is waiting"
     );
 

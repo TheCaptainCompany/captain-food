@@ -3881,6 +3881,7 @@ name = "pm-cart-binding"
 version = "0.1.0"
 dependencies = [
  "bin_runtime",
+ "domain-common",
  "domain-customer",
  "domain-ordering",
  "regex",
@@ -3897,6 +3898,7 @@ dependencies = [
  "avelo37-adapter",
  "bin_runtime",
  "coopcycle-adapter",
+ "domain-common",
  "domain-delivery",
  "domain-ordering",
  "infrastructure",

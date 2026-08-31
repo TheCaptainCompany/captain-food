@@ -169,6 +169,10 @@ fn order_deps(pool: &PgPool) -> CommandDeps {
         route_gates: application::generated::process_managers::RouteGates {
             order_placed_to_order: true,
             place_replacement_order_to_order: false,
+            // #807: routed `send:` steps -- OFF, this fixture exercises the birth routes.
+            bind_cart_to_customer_to_cart: false,
+            grant_customer_credit_to_customer_credit: false,
+            mark_order_delivered_to_order: false,
         },
     }
 }
@@ -209,6 +213,10 @@ fn runner(pool: &PgPool, laned: bool) -> ProcessManagerRunner {
         application::generated::process_managers::RouteGates {
             order_placed_to_order: false,
             place_replacement_order_to_order: laned,
+            // #807: routed `send:` steps -- OFF, this fixture isolates the replacement birth route.
+            bind_cart_to_customer_to_cart: false,
+            grant_customer_credit_to_customer_credit: false,
+            mark_order_delivered_to_order: false,
         },
     )
 }

@@ -3,6 +3,50 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the `send:` route grammar: four unlaned command sends declared, gated and
+> dedup-keyed (#807).**
+> `PmStepDef::Send` carried no `to` and no `route_gate` while all four committed `send:` steps
+> already WROTE `to:` in the DSL — `pm-send` validated the target and the emitter then discarded
+> it, so a `send:` could never reach `ROUTED_LANES` or the `Route` enum. Now it can: three routes
+> (the two `MarkOrderDelivered` legs are two triggers for one route), three `specs/common/`
+> configuration keys all `default: false`, legacy arms preserved byte-for-byte behind each gate —
+> `git diff -w` on the regenerated `process_managers.rs` shows **zero deletions**, the whole diff
+> is additive. `pm-route-gate` now covers `send:` steps, and because `to:` is mandatory on a send,
+> **every send must declare its route**.
+> The find that justified generating before believing: the money path. Keying the routed door on
+> the TARGET's identity — the obvious default — would have keyed the credit door on `customerId`
+> while `grant_customer_credit` is idempotent per `reclamationId`. One customer receives many
+> goodwill credits, so that door would have swallowed every grant after the first: money owed,
+> never paid, no error anywhere. A new rule `pm-send-dedup` makes the axis a mandatory declaration
+> with **no default**, since the safe axis does not follow from the target.
+> Records: [ADR-20260831-093000](../adr/ADR-20260831-093000-the-enumeration-is-deliver-and-send-not-deliver-alone.md)
+> corrects ADR-20260829-230418's enumeration (`deliver:` → `deliver:` ∪ `send:` ∪ wrapper-seam
+> `sends:`); the property in `specs/common/processmanager.yaml` already covered sends, so this
+> executes the recorded decision rather than amending it.
+> **Round 2**, after the independent reviewer returned FAIL on two blocking findings. (1) The
+> `LaneEnqueue` type's own doc still stated as FROZEN the very rule this branch proves
+> catastrophic — *"`external_id` is the TARGET AGGREGATE's id"* — which the generated credit
+> route falsifies on the same branch. Both sites now say the axis is DECLARED (`dedup_by:`), and
+> that it means **the same request**, not *the key the target handler is idempotent on*:
+> `MarkOrderDelivered` REJECTS a repeat rather than absorbing it, so on that route the door is
+> the only thing collapsing a partner report racing a rider completion. Its corollary — a door
+> minted by a REJECTED first attempt stays minted, closing the route to a later legitimate
+> attempt — is a property of `main`'s already-merged C2 door, filed as
+> [#811 "A routed COMMAND door is minted at ENQUEUE, so a REJECTED first attempt permanently closes it"](https://github.com/TheCaptainCompany/captain-food/issues/811) and a precondition on both
+> flips. (2) `ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE`'s consequence list gained **(e)**: a
+> successful COMMAND-door delivery arms the declared `schedules:`, and `MarkOrderDelivered`
+> declares the `OrderExpired` retention clock. Today the saga's in-process arm creates no mailbox
+> row, so a completion reported by a PARTNER or by an INDEPENDENT RIDER arms **no** retention
+> clock while the same order closed through the `markOrderDelivered` mutation does — a legal
+> surface, now named in the text the flip decision is made from.
+> Posture `HOLD: human` — PR stays draft. Four non-blocking findings were filed rather than
+> fixed here:
+> [#810 "`pm-send-dedup` proves a routed send's axis EXISTS, never that it is the RIGHT one — declare the handler's same-request key in the DSL"](https://github.com/TheCaptainCompany/captain-food/issues/810),
+> [#811 "A routed COMMAND door is minted at ENQUEUE, so a REJECTED first attempt permanently closes it (blocks the delivery-completion and replacement-birth flips)"](https://github.com/TheCaptainCompany/captain-food/issues/811),
+> [#812 "No `pm-deliver-lane` equivalent for routed `send:` steps — a routed send to a mailbox-less aggregate passes validate and fails inside the leg transaction"](https://github.com/TheCaptainCompany/captain-food/issues/812)
+> and
+> [#813 "`order.lane.enqueue`'s `business.aggregate_id` is bound from `external_id` — on a routed send whose dedup axis is not the aggregate it carries the wrong id"](https://github.com/TheCaptainCompany/captain-food/issues/813).
+
 > **2026-08-31 — four decision rows declared: the three residues #764's ruling left open, plus the
 > erasure PM's resume correlation, which cannot be built as approved.**
 > Records-only change, straight to `main`. `CREDIT-AT-ERASURE` closed D1-D3 on 2026-08-31

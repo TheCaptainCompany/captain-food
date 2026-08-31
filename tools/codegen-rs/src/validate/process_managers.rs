@@ -659,6 +659,112 @@ pub(crate) fn validate_process_managers(model: &Model, issues: &mut Vec<Issue>) 
                             issues.push(err(rule, format!("{}.{}", sw, mkey), format!("{}.{} must reference {}, got '{}'.", kind, mkey, target_file, mref)));
                         }
                         let mname = ref_name(mref).unwrap_or_default();
+                        // `pm-route-gate` over `send:` STEPS (#807). Identical contract to the
+                        // wrapper-seam `sends:` block above, and it has to be written twice
+                        // because the two shapes are parsed by different code: a step's `to:` was
+                        // read here, validated, and then DROPPED by the emitter, because
+                        // `PmStepDef::Send` carried no `to`/`route_gate` at all and `route_decls`
+                        // had no arm for a step. Four committed sends therefore appended to
+                        // streams their process manager does not own with no route, no gate and
+                        // no row in `ROUTED_LANES`.
+                        //
+                        // A `send:` differs from a `deliver:` in one way that matters here: `to:`
+                        // is MANDATORY on a send (the check below refuses its absence outright),
+                        // so "target present, gate absent" is not an unrouted step the way an
+                        // unrouted `deliver:` is -- it is the defect. Every `send:` is therefore
+                        // required to declare its route, which is the property #807 installs:
+                        // a saga writing a stream it does not own is never the default.
+                        //
+                        // Presence is tested on the KEY, not on a readable `$ref` inside it: a
+                        // malformed `route_gate:` is reported by §1's `ref-dangling` /
+                        // `ref-site-undeclared`, and treating it as absent here would answer a
+                        // shape error with the wrong sentence.
+                        if kind == "send" {
+                            let has_to = body.get("to").is_some();
+                            let has_gate = body.get("route_gate").is_some();
+                            let s_dedup_prop = body
+                                .get("dedup_by")
+                                .and_then(|x| x.get("$ref"))
+                                .and_then(|x| x.as_str())
+                                .and_then(|r| r.rsplit('/').next())
+                                .map(|s| s.to_string());
+                            if has_to && !has_gate {
+                                issues.push(err(
+                                    "pm-route-gate",
+                                    format!("{}.route_gate", sw),
+                                    format!(
+                                        "send '{}' declares `to:` with no `route_gate:` — a target with no gate is an \
+                                         UNGATEABLE route, and it is not even a route: the emitter reads the both-present \
+                                         pair, so this send is silently left out of ROUTED_LANES (its lane leaves the \
+                                         dead-man's-switch population), no `Route` variant is generated for it, and the \
+                                         saga goes on appending to a stream it does not own from its own thread. Declare \
+                                         the configuration key this route is rolled back with.",
+                                        mname
+                                    ),
+                                ));
+                            }
+                            // `pm-send-dedup` (#807). A routed send's door is keyed on
+                            // (route, external_id), and `external_id` must be the value the TARGET
+                            // HANDLER dedups on -- otherwise the door either swallows legitimate
+                            // repeats or lets duplicates through, both silently. There is
+                            // deliberately NO default: the safe axis does not follow from the
+                            // target. `MarkOrderDelivered` dedups on the ORDER (an order is
+                            // delivered once, so the order's own id is right and usefully collapses
+                            // a partner report racing a rider completion). `GrantCustomerCredit`
+                            // dedups on the RECLAMATION while its ledger is keyed by CUSTOMER -- a
+                            // customer legitimately receives many goodwill credits, so a
+                            // customer-keyed door would drop every one after the first: money owed,
+                            // never paid, no error raised anywhere. Inheriting the target's identity
+                            // would have made exactly that the default.
+                            if has_to && has_gate {
+                                match s_dedup_prop {
+                                    None => issues.push(err(
+                                        "pm-send-dedup",
+                                        format!("{}.dedup_by", sw),
+                                        format!(
+                                            "routed send '{}' declares no `dedup_by:` — name the command property the \
+                                             TARGET HANDLER is idempotent on, as a $ref to that property. It is the \
+                                             routed door's `external_id`, and there is no default because the safe axis \
+                                             does not follow from the target: an order is delivered once (order id), a \
+                                             customer is credited many times on a ledger keyed by customer (reclamation \
+                                             id). Guessing it drops money or duplicates it, in silence.",
+                                            mname
+                                        ),
+                                    )),
+                                    Some(prop) => {
+                                        let has_prop = resolve_ref(model, mref, CTX)
+                                            .map(|d| props_info(model, d, CTX))
+                                            .unwrap_or_default()
+                                            .iter()
+                                            .any(|p| *p.0 == *prop);
+                                        if !has_prop {
+                                            issues.push(err(
+                                                "pm-send-dedup",
+                                                format!("{}.dedup_by", sw),
+                                                format!(
+                                                    "routed send '{}' keys its door on '{}', which is not a property of \
+                                                     that command — the generated `external_id` would not compile, and \
+                                                     a dedup axis that is not IN the payload cannot be one.",
+                                                    mname, prop
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            if has_gate && !has_to {
+                                issues.push(err(
+                                    "pm-route-gate",
+                                    format!("{}.to", sw),
+                                    format!(
+                                        "send '{}' declares `route_gate:` with no `to:` — a gate on nothing. The key reads \
+                                         as an operable rollback lever (it resolves, it is in the boot report) while no \
+                                         route consults it. Name the target actor whose lane receives the command.",
+                                        mname
+                                    ),
+                                ));
+                            }
+                        }
                         let to = body.get("to").and_then(|x| x.get("$ref")).and_then(|x| x.as_str()).unwrap_or("");
                         if ref_target_file(to, CTX).as_deref() != Some("actors.yaml") {
                             issues.push(err(rule, format!("{}.to", sw), format!("{}.to must reference an actors.yaml aggregate, got '{}'.", kind, to)));

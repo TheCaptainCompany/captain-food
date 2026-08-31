@@ -540,6 +540,15 @@ pub(crate) const REF_CONTRACT: &[(&str, &str, &[Kind])] = &[
     ("processmanager.yaml", "*.receives[*].steps[*].deliver.with.*.from", &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].send.command",      &[Kind::Command]),
     ("processmanager.yaml", "*.receives[*].steps[*].send.to",           &[Kind::Aggregate]),
+    // The per-ROUTE lane gate on a `send:` STEP (#807). Same contract as the `deliver:` and
+    // wrapper-seam rows above: the gate is a `$ref` rather than a key NAME so a route whose key
+    // does not exist is a `make validate` error, never a lookup that silently resolves to `false`
+    // in production.
+    ("processmanager.yaml", "*.receives[*].steps[*].send.route_gate", &[Kind::ConfigKey]),
+    // The routed door's DEDUP AXIS (#807): the property of the command being sent that the TARGET
+    // HANDLER is idempotent on. A `$ref` rather than a bare property name so the walker can see it
+    // and `pm-send-dedup` can hold it to a real property of that command.
+    ("processmanager.yaml", "*.receives[*].steps[*].send.dedup_by", &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].send.with.*.from",  &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].state.by.*.from",   &[Kind::MessageProperty]),
     ("processmanager.yaml", "*.receives[*].steps[*].state.expect.*.from", &[Kind::MessageProperty]),

@@ -264,6 +264,12 @@ pub struct Config {
     pub surface_gateway_url: String,
     /// Short git SHA baked into the image at build time (ADR-20260721-175411) and reported by /health and the X-VERSION header. Unset, `build_version()` substitutes `dev-<crate version>` for local and uncontainerized runs, so a build that forgot it is identifiable AS unidentified. Deliberately declares NO `default`: the fallback is COMPUTED (it interpolates the crate version), and a spec default of plain `dev` would state a value the runtime never produces — a false declaration is worse than an absent one.
     pub captain_build_version: Option<String>,
+    /// DEFAULT `false`. The customer-bind routing (#807, ADR-20260829-230418 as corrected by ADR-20260831-093000). ON, CartBindingProcess stops CALLING the BindCartToCustomer handler in-process, once per open cart on its own thread, and instead stages one COMMAND lane enqueue per cart that the runner's fenced leg transaction turns into an inbound_messages row; each Cart's own lane worker then runs the command and appends CartBoundToCustomer. OFF is today's behaviour byte for byte: the saga writes Cart-{id} itself, for every cart the read returned, with no transaction and no lane. What flipping it CHANGES: (a) each bind gains one lane hop of latency after the identification is recorded; (b) the ENVELOPE changes -- user_id/user_type and cause_id come from the mailbox row rather than the saga's system actor, and stored rows are NEVER backfilled; (c) the fan-out stops being serial work on one saga thread and becomes N independent lane messages, so one slow or conflicted cart no longer delays the rest; (d) a rejection lands a REJECTED verdict on a supervisable row instead of a `tracing::warn!` nobody routes -- which matters more here than anywhere else in this group, because the for_each arm's rejection path does not even set an Outcome, so a failed bind is invisible today. ROLLBACK IS A FLIP, NOT A REDEPLOY: set it OFF and the next identification takes the legacy in-process calls; already-routed binds stay as they are. Both the monolith and any standalone worker fleet MUST read the same value. Flipping the default is a SEPARATE recorded decision, after smoke; the legacy arm is deleted in a SEPARATE change again, with golden payload equality as its precondition.
+    pub route_cart_bind_through_lane: bool,
+    /// DEFAULT `false`. The goodwill-credit routing (#807, ADR-20260829-230418 as corrected by ADR-20260831-093000). THE MONEY PATH: ON, ReclamationProcess's GOODWILL_CREDIT arm stops CALLING the GrantCustomerCredit handler in-process and instead stages a COMMAND lane enqueue that the runner's fenced leg transaction turns into an inbound_messages row; the CustomerCredit ledger's own lane worker then runs the command and appends CustomerCreditGranted. OFF is today's behaviour byte for byte: the saga writes CustomerCredit-{customerId} itself, from outside the ledger's serialization point, with no transaction and no lane. The saga that declares this route is in ordering and the TARGET ledger is in payments -- a process manager is a declared cross-scope bridge -- while the KEY is kernel, because every PM bin's composition root constructs the whole RouteGates struct (see the block header above). What flipping it CHANGES: (a) the grant gains one lane hop of latency after the resolution is recorded -- the claimant's balance moves a beat later, and nothing shows the credit before it lands; (b) the ENVELOPE changes -- user_id/ user_type and cause_id come from the mailbox row rather than the saga's system actor, and stored rows are NEVER backfilled; (c) the writer to CustomerCredit-{customerId} becomes SERIALIZED by the ledger's own lane instead of racing on an optimistic version conflict -- which is the property that stops mattering hypothetically the moment a second writer exists; (d) a rejection lands a REJECTED verdict on a supervisable row instead of a Skipped outcome. DOUBLE-GRANT SAFETY DOES NOT DEPEND ON THIS FLIP, in either position: the handler is idempotent per reclamationId (at most one grant per resolved claim) and the routed door is keyed on the ROUTE plus the RECLAMATION (`dedup_by:`), so a re-delivered ReclamationResolved is absorbed on both arms. The door is deliberately NOT keyed on the ledger's own id: the ledger is per CUSTOMER and a customer legitimately receives many goodwill credits, so a customer-keyed door would swallow every grant after the first -- money owed, never paid, no error raised anywhere. ROLLBACK IS A FLIP, NOT A REDEPLOY. Flipping the default is a SEPARATE recorded decision, after smoke; the legacy arm is deleted in a SEPARATE change again, with golden payload equality as its precondition.
+    pub route_credit_grant_through_lane: bool,
+    /// DEFAULT `false`. The delivery-completion routing (#807, ADR-20260829-230418 as corrected by ADR-20260831-093000). ON, DeliveryDispatchProcess stops CALLING the MarkOrderDelivered handler in-process and instead stages a COMMAND lane enqueue that the runner's fenced leg transaction turns into an inbound_messages row; the Order's own lane worker then runs the command and appends OrderDelivered. OFF is today's behaviour byte for byte: the saga writes Order-{id} itself, from the delivery scope, with no transaction and no lane. ONE key for BOTH completion legs, and that is not a fused flag. DeliveryStatusUpdated (a partner's terminal DELIVERED report) and DeliveryCompleted (an independent rider's completion) are two TRIGGERS for the SAME route: the same command to the same aggregate from the same process manager. A route's identity is the (message, target) pair -- it is one `Route::MarkOrderDeliveredToOrder` variant and one ROUTED_LANES row -- so two keys here could not be honoured by anything, and the per-route independence ADR-20260829-230418 C3 protects is independence between UNRELATED routes, which these two legs are not. What flipping it CHANGES: (a) the closure gains one lane hop of latency after the completion is reported, so the order shows DELIVERED a beat later; (b) the ENVELOPE changes -- user_id/ user_type and cause_id come from the mailbox row rather than the saga's system actor, and stored rows are NEVER backfilled; (c) the Order's writer is serialized by its own lane, so a completion racing any other Order write no longer resolves by optimistic version conflict; (d) a rejection -- notably the terminal-status rejection that stops a cancelled order being resurrected -- lands a REJECTED verdict on a supervisable row instead of a Skipped outcome. DOUBLE-CLOSE SAFETY IMPROVES: the routed door is keyed on the ROUTE plus the ORDER's id, so if both a partner report and a rider completion arrive for one order the second is absorbed at the door, where today it reaches the aggregate and is refused by the status invariant. (e) A LEGAL-SURFACE CONSEQUENCE, and the reason this key is not a pure plumbing flip: a successful COMMAND-door delivery ARMS THE DECLARED `schedules:`. `actors.yaml` declares MarkOrderDelivered -> OrderExpired, the ORDER RETENTION CLOCK (`ORDER_RETENTION_WINDOW_DAYS`, `reschedule: in-place`, set against FRENCH_COMMERCIAL_BOOKS_10Y), and the delivery glue applies a delivered message's schedules inside the completion transaction for COMMAND rows exactly as for recorded facts. Today the saga's in-process arm creates no mailbox row at all, so it arms nothing: a delivery completed by a PARTNER's DELIVERED report or by an INDEPENDENT RIDER's completion starts NO retention clock, while the same order closed through the `markOrderDelivered` mutation does -- the two paths to the same business fact have different retention behaviour, and only the operator-driven one is covered. Flipping this key ON puts both saga legs on the same footing as the mutation. That is a GDPR-relevant improvement rather than a regression, and it is named here because the flip decision is made from this text: an order whose retention clock was never armed is an order nothing will ever expire. ROLLBACK IS A FLIP, NOT A REDEPLOY. Flipping the default is a SEPARATE recorded decision, after smoke; the legacy arm is deleted in a SEPARATE change again, with golden payload equality as its precondition.
+    pub route_order_delivery_completion_through_lane: bool,
     /// JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a federation registry rather than one endpoint, which is why it is a JSON document and not a set of scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop a whole delivery channel.
     pub coopcycle_instances: Option<String>,
 }
@@ -397,6 +403,18 @@ impl Config {
         let surface_gateway_url = raw("SURFACE_GATEWAY_URL");
         let surface_gateway_url = surface_gateway_url.unwrap_or_else(|| "".to_string());
         let captain_build_version = raw("CAPTAIN_BUILD_VERSION");
+        let route_cart_bind_through_lane = raw("ROUTE_CART_BIND_THROUGH_LANE")
+            .or_else(|| baked("ROUTE_CART_BIND_THROUGH_LANE", profile).map(str::to_string))
+            .map(|v| parse_bool("ROUTE_CART_BIND_THROUGH_LANE", &v, false))
+            .unwrap_or(false);
+        let route_credit_grant_through_lane = raw("ROUTE_CREDIT_GRANT_THROUGH_LANE")
+            .or_else(|| baked("ROUTE_CREDIT_GRANT_THROUGH_LANE", profile).map(str::to_string))
+            .map(|v| parse_bool("ROUTE_CREDIT_GRANT_THROUGH_LANE", &v, false))
+            .unwrap_or(false);
+        let route_order_delivery_completion_through_lane = raw("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE")
+            .or_else(|| baked("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", profile).map(str::to_string))
+            .map(|v| parse_bool("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", &v, false))
+            .unwrap_or(false);
         let coopcycle_instances = raw("COOPCYCLE_INSTANCES");
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -482,6 +500,9 @@ impl Config {
                 gateway_subgraph_urls,
                 surface_gateway_url,
                 captain_build_version,
+                route_cart_bind_through_lane,
+                route_credit_grant_through_lane,
+                route_order_delivery_completion_through_lane,
                 coopcycle_instances,
             },
             problems,
@@ -545,13 +566,16 @@ impl Config {
         out.push_str(&format!("  GATEWAY_SUBGRAPH_URLS      = {}\n", self.gateway_subgraph_urls));
         out.push_str(&format!("  SURFACE_GATEWAY_URL        = {}\n", self.surface_gateway_url));
         out.push_str(&format!("  CAPTAIN_BUILD_VERSION      = {}\n", self.captain_build_version.as_deref().unwrap_or("unset")));
+        out.push_str(&format!("  ROUTE_CART_BIND_THROUGH_LANE = {}\n", self.route_cart_bind_through_lane));
+        out.push_str(&format!("  ROUTE_CREDIT_GRANT_THROUGH_LANE = {}\n", self.route_credit_grant_through_lane));
+        out.push_str(&format!("  ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE = {}\n", self.route_order_delivery_completion_through_lane));
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 42;
+pub const KEY_COUNT: usize = 45;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -597,6 +621,9 @@ pub const DECLARED_KEYS: &[&str] = &[
     "GATEWAY_SUBGRAPH_URLS",
     "SURFACE_GATEWAY_URL",
     "CAPTAIN_BUILD_VERSION",
+    "ROUTE_CART_BIND_THROUGH_LANE",
+    "ROUTE_CREDIT_GRANT_THROUGH_LANE",
+    "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
     "COOPCYCLE_INSTANCES",
 ];
 
