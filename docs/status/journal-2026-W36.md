@@ -3,6 +3,32 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the founder's six invoked commands are built, user-invoked only** (`.claude/skills/**`
+> plus one workflow section; no `specs/**`, no code, no SPEC-LOG sentence).
+> Founder directive 2026-08-31, choosing a **user-invoked** approach *"to avoid any risk"*: he named
+> `/direct-question`, `/mob-question` and `/work`, then approved `/decision`, `/status` and
+> `/correct` — renaming `/decide` → `/decision` because *decide* reads as an instruction to the
+> coordinator while *decision* names **the artifact he is recording**. Six skills under
+> `.claude/skills/<name>/SKILL.md`, each carrying its procedure and its limits, in
+> [#819 "Six founder-invoked slash commands"](https://github.com/TheCaptainCompany/captain-food/issues/819)
+> / [#820](https://github.com/TheCaptainCompany/captain-food/pull/820).
+> **The rule the set exists to protect**: `/direct-question` skips the **mob**, never the **register
+> check** — five of the coordinator's nine catalogued failures were answer-shaped, and the
+> `PreToolUse` hook gates `AskUserQuestion` and `Agent`, never a prose answer, so a direct answer is
+> where the check is least enforced and most needed. Both question commands carry an **escalation
+> duty** in the skill text: a controlling record the question appears to contradict, or a `HOLD:
+> human`-axis subject, means say so and fan out anyway.
+> **`disable-model-invocation` was verified before being relied on**, not assumed: it is parsed by
+> the `SKILL.md` loader beside `allowed-tools`/`user-invocable` and enforced at the Skill-tool gate
+> (`errorCode 4`) in Claude Code 2.1.251. Shipping frontmatter that silently does nothing is the
+> repo's most-repeated defect, so the check is now written into the workflow section next to the key.
+> Two card citations that did **not** check out and are corrected here: the pre-`ADR-` ADRs are
+> filed **without** the prefix (`docs/adr/20260720-233000-…`, `…/20260721-042018-…`), so a link built
+> as `ADR-20260720-233000-*` resolves to nothing; and `.claude/skills/coordinator-register-check/`
+> exists only from `875e5ab2`, which a stale checkout does not have.
+> Reversibility class **reversible**; `HOLD: human` all the same, because this is the coordinator's
+> own routing surface.
+
 > **2026-08-31 — the priced quote token is DESIGNED, and the reversal it carries is now flagged in
 > both records** (docs-only: one proposal, two record edits, two register-row notes, no `specs/**`,
 > no code).

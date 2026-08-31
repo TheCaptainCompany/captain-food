@@ -475,6 +475,49 @@ next to an `HTTP=201`. **A 201 is not evidence the body is right.** Same fix, on
 body with a **quoted** heredoc (`<<'PYEOF'`), never `-c "…"`, and for a comment that already went out
 wrong, `PATCH /repos/{o}/{r}/issues/comments/{id}` repairs it in place.
 
+## The founder's six invoked commands — routing in, and the one rule that must survive (2026-08-31)
+
+The reverse direction of the section below: that one is how a question goes **out** to the founder,
+this is how his instruction comes **in**. Founder directive 2026-08-31, choosing a **user-invoked**
+approach *"to avoid any risk"* — he named `/direct-question`, `/mob-question` and `/work`, then
+approved `/decision`, `/status` and `/correct`, renaming `/decide` → `/decision` because *decide*
+reads as an instruction to the coordinator while *decision* names **the artifact he is recording**.
+Each is a skill in `.claude/skills/<name>/SKILL.md` carrying its own procedure and limits:
+
+| Command | What he is doing | The handling that distinguishes it |
+|---|---|---|
+| [`/direct-question`](../../../.claude/skills/direct-question/SKILL.md) | Asking you, without spending the roster | Skips the mob, **never** the register check; escalation duty below |
+| [`/mob-question`](../../../.claude/skills/mob-question/SKILL.md) | Asking the mob | Reversibility class sizes the roster; divergences are **reported, never averaged** |
+| [`/work`](../../../.claude/skills/work/SKILL.md) | Telling you to start | The existing pipeline unchanged; the tag decides only chunk, dispatchability, merge posture |
+| [`/decision`](../../../.claude/skills/decision/SKILL.md) | Recording a decision he has made | **Step one is the reversal check**; `Consulted:` block, one line per lens |
+| [`/status`](../../../.claude/skills/status/SKILL.md) | Asking where things stand | Read-only — no check, no record, no fan-out, and it **never becomes work** |
+| [`/correct`](../../../.claude/skills/correct/SKILL.md) | Telling you something is wrong | Authoritative; the work is **propagation** to everything downstream, then the record |
+
+All six set **`disable-model-invocation: true`**, which is a real and enforced `SKILL.md` frontmatter
+key (verified in the Claude Code bundle, 2.1.251: the skill loader parses it beside `allowed-tools`
+and `user-invocable`, and the Skill tool refuses a call with `errorCode 4`). The founder chose
+user-invoked *to avoid risk*; a command that could also auto-fire would blur exactly the distinction
+he is buying, so the key is load-bearing and not decoration. **Verify it still exists before
+trusting it** — a frontmatter key that silently does nothing is this repo's most-repeated defect.
+
+**The one rule that must survive contact:**
+
+> **`/direct-question` skips the MOB. It never skips the REGISTER CHECK.**
+
+Five of the coordinator's nine catalogued failures were **answer-shaped**, and the `PreToolUse` hook
+gates `AskUserQuestion` and `Agent` — never a prose answer. So a direct answer is the surface where
+the check is least enforced and most needed, and dropping the mob removes the other reader who might
+have caught it. Both cannot go. The trail rides the answer in the canonical format defined below.
+
+**Both question commands carry an escalation duty**, in the skill text and not only in a dispatch
+card: if the register surfaces a controlling record the question appears to contradict, or the
+subject sits on the `HOLD: human` axis (money movement, stored event shapes, legal surfaces, anything
+Tours-facing), the coordinator **says so and fans out anyway**. The tag is a routing convenience, not
+a bypass — and the mob rule is the founder's own
+([ADR-20260812-143619](../../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md),
+whose two carve-outs — an external-clock fact relayed verbatim, and executing an already-recorded
+rollback path — are the model for how `/direct-question` may legitimately answer in-turn).
+
 ## Asking the founder a decision — use the form template
 
 **Founder directive 2026-08-18**: *"Make this format of questions as a template for the next times."*
