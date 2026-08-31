@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1999,
+  "recordedAt": "2026-08-31T12:42:31.170Z",
+  "branch": "814-coordinator-register-check-gate",
+  "note": "#814 unbilled remainder: a concurrent session in this shared checkout closed the timer I inherited at 12:05:26Z and reopened one at ~12:38:45Z, so my gate runs (validate, rust-test, test-crates 1525/200) between them billed to nobody"
+}
