@@ -3,6 +3,37 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the oversell hole on the money path is CLOSED: checkout re-derives orderability
+> instead of trusting cart-edit time**
+> ([#823](https://github.com/TheCaptainCompany/captain-food/issues/823) / PR
+> [#824](https://github.com/TheCaptainCompany/captain-food/pull/824), slice 1 of
+> [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md) §11 — the one
+> slice that is not `HOLD: human`).
+> `require_orderable_line` — the availability-and-stock guard — existed, was correct, and was called
+> from the two cart-edit handlers **only**. It was never called at checkout. A dish added at 19:50,
+> 86'd by the kitchen at 20:20 and paid for at 20:40 **was accepted**: pricing fails closed only on
+> a line that LEFT the catalog, so an offer merely flagged `UNAVAILABLE` — or stock-tracked and now
+> below the line quantity — still resolved a price and sailed through to a real Stripe intent. This
+> is the failure shape [#780](https://github.com/TheCaptainCompany/captain-food/issues/780) already
+> named (a mechanism written and never connected), on the money path, at peak.
+> **The two reds were proved before the fix**, and their panic message is the finding stated by the
+> test runner itself: *"the spec expects a typed rejection: PaymentRequestOutput { payment_intent_id:
+> PaymentIntentId(\"pi_123\") … }"* — i.e. the checkout did not merely accept, it minted the intent.
+> **The third test is the false-positive floor and is GREEN on both sides by construction**: an
+> offer that tracks no stock must never block, because untracked is not zero and treating it as zero
+> would refuse every order for every restaurant that does not count portions. A card asking for all
+> three to be RED on `main` is asking the impossible of that one — an acceptance assertion cannot
+> fail where nothing blocks — and that is worth recording, because the same shape will recur every
+> time a guard ships with its floor.
+> **Position is the whole safety argument** and is documented at the call site: AFTER `price_cart`,
+> so a line with no live price keeps its own `PriceUnresolvable` code rather than degrading to
+> `OfferNotFound`; and BEFORE the Stripe call and the store-credit spend, so a refusal can never
+> strand a real PaymentIntent or consume goodwill. No new error was declared — `OfferUnavailable`
+> and `InsufficientStock` already existed with en/fr messages and are already surfaced by the
+> checkout screen's error toast.
+> **`OutsideDeliveryArea` stays a `TODO(invariant)`**: it needs a delivery-area policy port that
+> does not exist in any read model, so only the half actually discharged was retired.
+
 > **2026-08-31 — the repricing obligation map is IN THE REPO, and the lens return that never landed
 > is the finding** (docs-only: one new legal brief, the standing counsel list extended, one proposal
 > `Concerns` entry discharged; no `specs/**`, no code, no SPEC-LOG sentence owed).

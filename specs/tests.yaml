@@ -225,6 +225,22 @@ fixtures:
         taxRate: { delivery: 10.0 }
         offers:
           - { id: "off-1", productId: "prod-1", name: "Default", price: { amountCents: 1180, currency: "EUR" }, availability: "AVAILABLE" }
+  # The kitchen 86's the dish: the offer stays IN the catalog (so it still PRICES) and only its
+  # manual availability flag flips. That is exactly the shape a fail-closed pricer cannot see —
+  # `offer_by_id` still returns Some — so it is the fixture the checkout orderability re-check needs.
+  productUpdatedOfferUnavailable:
+    type: { $ref: 'events.yaml#/ProductUpdated' }
+    data:
+      catalogId: "cat-1"
+      restaurantId: "resto-1"
+      product:
+        id: "prod-1"
+        catalogId: "cat-1"
+        restaurantId: "resto-1"
+        name: "Margherita"
+        taxRate: { delivery: 10.0 }
+        offers:
+          - { id: "off-1", productId: "prod-1", name: "Default", price: { amountCents: 980, currency: "EUR" }, availability: "UNAVAILABLE" }
   productRemoved:
     type: { $ref: 'events.yaml#/ProductRemoved' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", productId: "prod-1" }
@@ -261,6 +277,13 @@ fixtures:
   offerStockSyncedLow:
     type: { $ref: 'events.yaml#/OfferStockUpdated' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", offerId: "off-1", stock: { quantity: 3, status: "LOW_STOCK" } }
+  # Stock falls BELOW the quantity already sitting in the cart (cartLineAdded is 2): tracked, still
+  # in stock for a smaller order, not enough for this one. Distinct from offerStockSyncedLow (3),
+  # which still covers the line — the pair is what keeps the checkout guard a QUANTITY comparison
+  # and not a "is the status LOW_STOCK" spelling check.
+  offerStockDroppedBelowCartLine:
+    type: { $ref: 'events.yaml#/OfferStockUpdated' }
+    data: { catalogId: "cat-1", restaurantId: "resto-1", offerId: "off-1", stock: { quantity: 1, status: "LOW_STOCK" } }
   catalogImported:
     type: { $ref: 'events.yaml#/CatalogImported' }
     data: { catalogId: "cat-1", restaurantId: "resto-1", source: "HUBRISE", categories: [], products: [], optionLists: [] }
@@ -2468,6 +2491,90 @@ tests:
         paymentMethodId: "pm_123"
     thrown:
       - { $ref: 'errors.yaml#/PriceUnresolvable' }
+
+  # --- Checkout orderability re-check (oversell at peak) --------------------------------------
+  # The three cases below are one property in three directions: orderability is DERIVED AT
+  # CHECKOUT from the live catalog, never inherited from the moment the line was added. The two
+  # rejections are the oversell hole; the acceptance is the false-positive floor that keeps the
+  # guard from breaking every restaurant that does not track stock.
+  TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded:
+    name: "An offer 86'd AFTER the cart line was added rejects the checkout: it still prices (it never left the catalog), so only a re-derived availability check can catch it"
+    rules: [{ $ref: 'rules.yaml#/CheckoutPricesCartCreatesPaymentIntent' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      # AVAILABLE when the line was added...
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+      # ...UNAVAILABLE by the time the customer pays.
+      - { $ref: '#/fixtures/productUpdatedOfferUnavailable' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    thrown:
+      - { $ref: 'errors.yaml#/OfferUnavailable' }
+
+  TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity:
+    name: "A stock-TRACKED offer whose stock fell below the cart line's quantity after the line was added rejects the checkout — the oversell case, caught at checkout and not only at cart-edit time"
+    rules: [{ $ref: 'rules.yaml#/CheckoutPricesCartCreatesPaymentIntent' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      # Two in the cart...
+      - { $ref: '#/fixtures/cartLineAdded' }
+      # ...one left on the pass.
+      - { $ref: '#/fixtures/offerStockDroppedBelowCartLine' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    thrown:
+      - { $ref: 'errors.yaml#/InsufficientStock' }
+
+  TestPlaceOrderAcceptsAnOfferThatTracksNoStock:
+    name: "An offer that tracks no stock never blocks the checkout: untracked is not zero — the false-positive floor of the orderability re-check, for every restaurant that does not count portions"
+    rules: [{ $ref: 'rules.yaml#/CheckoutPricesCartCreatesPaymentIntent' }]
+    actor: { $ref: 'processmanager.yaml#/PlaceOrderProcess' }
+    given:
+      - { $ref: '#/fixtures/restaurantRegistered' }
+      - { $ref: '#/fixtures/restaurantActivated' }
+      - { $ref: '#/fixtures/catalogCreated' }
+      # No OfferStockUpdated anywhere: stock_quantity stays null = UNTRACKED, never a zero.
+      - { $ref: '#/fixtures/productAdded' }
+      - { $ref: '#/fixtures/cartStarted' }
+      - { $ref: '#/fixtures/cartLineAdded' }
+    when:
+      type: { $ref: 'commands.yaml#/PlaceOrder' }
+      data:
+        orderId: "order-1"
+        restaurantId: "resto-1"
+        cartId: "cart-1"
+        customerId: "cust-1"
+        customerContact: { displayName: "Johnny", phone: "+33612345678" }
+        serviceType: "COLLECTION"
+        paymentMethodId: "pm_123"
+    then:
+      - { $ref: '#/fixtures/paymentIntentCreatedCollection' }
 
   TestPlaceOrderIsRejected:
     name: "Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined"

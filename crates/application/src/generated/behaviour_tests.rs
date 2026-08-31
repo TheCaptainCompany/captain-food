@@ -267,6 +267,11 @@ fn fx_product_updated() -> DomainEvent {
     DomainEvent::ProductUpdated(evs::ProductUpdated { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), product: ent::Product { id: sc::ProductId(support::uid("prod-1")), r#ref: None, catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), category_ref: None, name: sc::ProductName("Margherita (large)".into()), description: None, tags: Vec::new(), image_ids: Vec::new(), tax_rate: ent::TaxRate { delivery: sc::TaxRatePercent(10.0), collection: None, eat_in: None }, offers: vec![ent::Offer { id: sc::OfferId(support::uid("off-1")), r#ref: None, product_id: sc::ProductId(support::uid("prod-1")), name: sc::OfferName("Default".into()), price: ent::Money { amount_cents: sc::MoneyCents(1180), currency: sc::CurrencyCode("EUR".into()) }, availability: sc::CatalogItemAvailability::AVAILABLE, stock: None, option_list_ids: Vec::new() }] } })
 }
 
+/// tests.yaml#/fixtures/productUpdatedOfferUnavailable — events.yaml#/ProductUpdated
+fn fx_product_updated_offer_unavailable() -> DomainEvent {
+    DomainEvent::ProductUpdated(evs::ProductUpdated { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), product: ent::Product { id: sc::ProductId(support::uid("prod-1")), r#ref: None, catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), category_ref: None, name: sc::ProductName("Margherita".into()), description: None, tags: Vec::new(), image_ids: Vec::new(), tax_rate: ent::TaxRate { delivery: sc::TaxRatePercent(10.0), collection: None, eat_in: None }, offers: vec![ent::Offer { id: sc::OfferId(support::uid("off-1")), r#ref: None, product_id: sc::ProductId(support::uid("prod-1")), name: sc::OfferName("Default".into()), price: ent::Money { amount_cents: sc::MoneyCents(980), currency: sc::CurrencyCode("EUR".into()) }, availability: sc::CatalogItemAvailability::UNAVAILABLE, stock: None, option_list_ids: Vec::new() }] } })
+}
+
 /// tests.yaml#/fixtures/productRemoved — events.yaml#/ProductRemoved
 fn fx_product_removed() -> DomainEvent {
     DomainEvent::ProductRemoved(evs::ProductRemoved { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), product_id: sc::ProductId(support::uid("prod-1")) })
@@ -295,6 +300,11 @@ fn fx_offer_stock_updated() -> DomainEvent {
 /// tests.yaml#/fixtures/offerStockSyncedLow — events.yaml#/OfferStockUpdated
 fn fx_offer_stock_synced_low() -> DomainEvent {
     DomainEvent::OfferStockUpdated(evs::OfferStockUpdated { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), offer_id: sc::OfferId(support::uid("off-1")), stock: ent::Stock { quantity: sc::Quantity(3.0), low_stock_threshold: None, status: sc::StockStatus::LOW_STOCK, expires_at: None } })
+}
+
+/// tests.yaml#/fixtures/offerStockDroppedBelowCartLine — events.yaml#/OfferStockUpdated
+fn fx_offer_stock_dropped_below_cart_line() -> DomainEvent {
+    DomainEvent::OfferStockUpdated(evs::OfferStockUpdated { catalog_id: sc::CatalogId(support::uid("cat-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), offer_id: sc::OfferId(support::uid("off-1")), stock: ent::Stock { quantity: sc::Quantity(1.0), low_stock_threshold: None, status: sc::StockStatus::LOW_STOCK, expires_at: None } })
 }
 
 /// tests.yaml#/fixtures/catalogImported — events.yaml#/CatalogImported
@@ -2880,6 +2890,66 @@ async fn test_place_order_rejects_unresolvable_price() {
     let err = result.expect_err("TestPlaceOrderRejectsUnresolvablePrice: the spec expects a typed rejection");
     support::assert_thrown("TestPlaceOrderRejectsUnresolvablePrice", &err, &["PriceUnresolvable"]);
     bed.assert_appended("TestPlaceOrderRejectsUnresolvablePrice", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded — "An offer 86'd AFTER the cart line was added rejects the checkout: it still prices (it never left the catalog), so only a re-derived availability check can catch it"
+/// rules: CheckoutPricesCartCreatesPaymentIntent
+#[tokio::test]
+async fn test_place_order_rejects_offer_unavailable_since_the_line_was_added() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
+    bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_product_updated_offer_unavailable()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let enforce_service_hours_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let err = result.expect_err("TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded: the spec expects a typed rejection");
+    support::assert_thrown("TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded", &err, &["OfferUnavailable"]);
+    bed.assert_appended("TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity — "A stock-TRACKED offer whose stock fell below the cart line's quantity after the line was added rejects the checkout — the oversell case, caught at checkout and not only at cart-edit time"
+/// rules: CheckoutPricesCartCreatesPaymentIntent
+#[tokio::test]
+async fn test_place_order_rejects_stock_fallen_below_the_cart_line_quantity() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
+    bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_offer_stock_dropped_below_cart_line()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let enforce_service_hours_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let err = result.expect_err("TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity: the spec expects a typed rejection");
+    support::assert_thrown("TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity", &err, &["InsufficientStock"]);
+    bed.assert_appended("TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestPlaceOrderAcceptsAnOfferThatTracksNoStock — "An offer that tracks no stock never blocks the checkout: untracked is not zero — the false-positive floor of the orderability re-check, for every restaurant that does not count portions"
+/// rules: CheckoutPricesCartCreatesPaymentIntent
+#[tokio::test]
+async fn test_place_order_accepts_an_offer_that_tracks_no_stock() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Restaurant-{}", support::uid("resto-1")), vec![fx_restaurant_registered(), fx_restaurant_activated()]).await;
+    bed.seed(&format!("Catalog-{}", support::uid("cat-1")), vec![fx_catalog_created(), fx_product_added()]).await;
+    bed.seed(&format!("Cart-{}", support::uid("cart-1")), vec![fx_cart_started(), fx_cart_line_added()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::PlaceOrder { mode: None, order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), cart_id: sc::CartId(support::uid("cart-1")), customer_id: sc::CustomerId(support::uid("cust-1")), customer_contact: ent::CustomerContact { display_name: sc::CustomerDisplayName("Johnny".into()), email: None, phone: sc::PhoneNumber("+33612345678".into()) }, service_type: sc::ServiceType::COLLECTION, delivery_address: None, note: None, payment_method_id: "pm_123".to_string(), expected_total: None };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let enforce_service_hours_guard: bool = false;
+    let result = crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await;
+    let _ = result.expect("TestPlaceOrderAcceptsAnOfferThatTracksNoStock: the spec expects acceptance");
+    bed.assert_appended("TestPlaceOrderAcceptsAnOfferThatTracksNoStock", &before, &[
+        ("Payment-pi_123".to_string(), fx_payment_intent_created_collection()),
+    ]);
 }
 
 /// tests.yaml#/tests/TestPlaceOrderIsRejected — "Rejects checkout when the restaurant is paused, the cart is empty, the delivery address is missing or out of area, or the payment is declined"
