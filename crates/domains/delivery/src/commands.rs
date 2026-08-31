@@ -119,7 +119,7 @@ pub struct RevokeDeliveryPartnerAvailability {
 #[serde(rename_all = "camelCase")]
 pub struct RegisterRider {
     pub rider_id: RiderId,
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub display_name: String,
     pub phone: PhoneNumber,
 }

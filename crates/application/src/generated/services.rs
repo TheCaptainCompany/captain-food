@@ -146,7 +146,7 @@ pub struct IdentityVerifyPhoneOtpInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdentityVerifyPhoneOtpOutput {
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub expires_in: Option<i64>,
@@ -172,7 +172,7 @@ pub struct IdentityRefreshSessionOutput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdentityStampCustomerClaimInput {
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub customer_id: CustomerId,
 }
 
@@ -195,7 +195,7 @@ pub struct IdentityVerifyEmailTokenInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdentityVerifyEmailTokenOutput {
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub email: EmailAddress,
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,

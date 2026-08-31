@@ -1375,6 +1375,80 @@ impl From<UserType> for ds::UserType {
     }
 }
 
+/// The identity provider's subject (`sub`) for ONE credential -- the Supabase Auth user id, as carried by `authRef` on CustomerRegistered / CustomerIdentified / RiderRegistered. Example: 'a3f1c8de-0b2e-4f77-9a11-0c4d2e8b7f10'.
+/// NOT `ExternalReference`, which this replaces at those sites: that scalar is declared as the HubRise `ref` with examples 'MARGHERITA' and 'CAT-PIZZAS', so typing a person's credential with it made a catalog import key and a human identity the same type -- interchangeable at every boundary, in the kernel, against CLAUDE.md's `one name = one dedicated scalar`. Structurally the same string (`type: string`, so the same TEXT column and the same JSON), which is precisely why the compiler could not see the confusion until the names were separated.
+/// It is an AUTHENTICATION fact and never an authorization one: `ScopeMembership.member_id` holds the DOMAIN id, never this, because the sub->domain bridge happens once per request at the edge (ADR-20260818-004646). A subject that reaches the authorization index has crossed a boundary that exists to be crossed exactly once.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AuthSubject(pub String);
+async_graphql::scalar!(AuthSubject, "AuthSubject", "The identity provider's subject (`sub`) for ONE credential -- the Supabase Auth user id, as carried by `authRef` on CustomerRegistered / CustomerIdentified / RiderRegistered. Example: 'a3f1c8de-0b2e-4f77-9a11-0c4d2e8b7f10'. NOT `ExternalReference`, which this replaces at those sites: that scalar is declared as the HubRise `ref` with examples 'MARGHERITA' and 'CAT-PIZZAS', so typing a person's credential with it made a catalog import key and a human identity the same type -- interchangeable at every boundary, in the kernel, against CLAUDE.md's `one name = one dedicated scalar`. Structurally the same string (`type: string`, so the same TEXT column and the same JSON), which is precisely why the compiler could not see the confusion until the names were separated. It is an AUTHENTICATION fact and never an authorization one: `ScopeMembership.member_id` holds the DOMAIN id, never this, because the sub->domain bridge happens once per request at the edge (ADR-20260818-004646). A subject that reaches the authorization index has crossed a boundary that exists to be crossed exactly once.");
+impl From<ds::AuthSubject> for AuthSubject {
+    fn from(v: ds::AuthSubject) -> Self {
+        Self(v.0)
+    }
+}
+impl From<AuthSubject> for ds::AuthSubject {
+    fn from(v: AuthSubject) -> Self {
+        Self(v.0)
+    }
+}
+
+/// A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C).
+/// Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo.
+/// Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MemberId(pub uuid::Uuid);
+async_graphql::scalar!(MemberId, "MemberId", "A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.");
+impl From<ds::MemberId> for MemberId {
+    fn from(v: ds::MemberId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MemberId> for ds::MemberId {
+    fn from(v: MemberId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// WHAT KIND OF PRINCIPAL acts -- the vocabulary `ScopeMembership.member_type` is really typed by, and the first half of the rider sign-in reservation key `(principal_kind, auth_ref)`. One member per entry in `actors.yaml`'s `principals` map, plus `MEMBER`.
+/// A NEW scalar with NO stored history: nothing has ever been written with this type, so `MEMBER` costs no upcaster, no re-attribution of past events, and no migration. That is the whole reason the vocabulary is added here rather than onto `UserType` (see the note above).
+/// `PUBLIC`, `ADMIN` and `EXTERNAL` are absent on purpose, exactly as they are absent from `principals`: they have no resolved domain identity, so they can never be a member of anything and can never satisfy an `acting` entry other than the explicit `any` keyword.
+/// NOT `ScopeType`, which is untouched by this change: `ScopeType` names the kind of protected INSTANCE one belongs to (`ORDER`, `RESTAURANT`), whereas this names the kind of party doing the belonging. A member is not a thing others are members of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum PrincipalKind {
+    #[graphql(name = "CUSTOMER")]
+    CUSTOMER,
+    #[graphql(name = "RESTAURANT")]
+    RESTAURANT,
+    #[graphql(name = "RESTAURANT_ACCOUNT")]
+    RESTAURANT_ACCOUNT,
+    #[graphql(name = "RIDER")]
+    RIDER,
+    #[graphql(name = "MEMBER")]
+    MEMBER,
+}
+impl From<ds::PrincipalKind> for PrincipalKind {
+    fn from(v: ds::PrincipalKind) -> Self {
+        match v {
+            ds::PrincipalKind::CUSTOMER => Self::CUSTOMER,
+            ds::PrincipalKind::RESTAURANT => Self::RESTAURANT,
+            ds::PrincipalKind::RESTAURANT_ACCOUNT => Self::RESTAURANT_ACCOUNT,
+            ds::PrincipalKind::RIDER => Self::RIDER,
+            ds::PrincipalKind::MEMBER => Self::MEMBER,
+        }
+    }
+}
+impl From<PrincipalKind> for ds::PrincipalKind {
+    fn from(v: PrincipalKind) -> Self {
+        match v {
+            PrincipalKind::CUSTOMER => Self::CUSTOMER,
+            PrincipalKind::RESTAURANT => Self::RESTAURANT,
+            PrincipalKind::RESTAURANT_ACCOUNT => Self::RESTAURANT_ACCOUNT,
+            PrincipalKind::RIDER => Self::RIDER,
+            PrincipalKind::MEMBER => Self::MEMBER,
+        }
+    }
+}
+
 /// Opaque reference to a framework-managed attachment on a conversation message. Storage, moderation and GDPR retention are handled generically by the framework, not by this aggregate (#129).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentRef(pub String);

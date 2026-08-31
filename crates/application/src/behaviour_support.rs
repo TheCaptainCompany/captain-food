@@ -905,7 +905,18 @@ impl CustomerReadRepository for SpecCustomers {
         &self,
         auth_ref: ExternalReference,
     ) -> Result<Option<crate::queries::CustomerRow>, DomainError> {
-        Ok(self.rows.lock().unwrap().iter().find(|r| r.auth_ref.as_ref() == Some(&auth_ref)).cloned())
+        // The stored column is an `AuthSubject` (#639 part C step 1) while this PORT still takes
+        // an `ExternalReference`: its two remaining callers mint one in code this step does not
+        // own -- the emitted `me` resolver (server_graphql.rs) and the mailbox handler. Comparing
+        // the strings keeps the fake honest and keeps the mismatch VISIBLE; it disappears when the
+        // port is retyped (step 1b).
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r.auth_ref.as_ref().map(|a| &a.0) == Some(&auth_ref.0))
+            .cloned())
     }
 }
 
@@ -1172,7 +1183,7 @@ impl IdentityService for FakeIdentity {
             return Err(DomainError::rejected("InvalidVerificationCode", serde_json::json!({})));
         }
         Ok(IdentityVerifyPhoneOtpOutput {
-            auth_ref: ExternalReference("auth-supabase-1".into()),
+            auth_ref: AuthSubject("auth-supabase-1".into()),
             // The provider session (#112) — a fake token trio; the handler parks it.
             access_token: Some("fake.access.jwt".into()),
             refresh_token: Some("fake.refresh".into()),
@@ -1231,7 +1242,7 @@ impl IdentityService for FakeIdentity {
             return Err(DomainError::rejected("InvalidVerificationToken", serde_json::json!({})));
         }
         Ok(IdentityVerifyEmailTokenOutput {
-            auth_ref: ExternalReference("auth-supabase-1".into()),
+            auth_ref: AuthSubject("auth-supabase-1".into()),
             email: EmailAddress("johnny@example.com".into()),
             access_token: Some("fake.access.jwt".into()),
             refresh_token: Some("fake.refresh".into()),

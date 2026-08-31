@@ -63,7 +63,7 @@ pub struct ProspectionPipelineRow {
 pub struct CustomerRow {
     pub customer_id: CustomerId,
     pub phone: PhoneNumber,
-    pub auth_ref: Option<ExternalReference>,
+    pub auth_ref: Option<AuthSubject>,
     pub display_name: Option<CustomerDisplayName>,
     pub email: Option<EmailAddress>,
     pub email_verified: bool,
@@ -82,7 +82,7 @@ pub struct CustomerRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RiderRow {
     pub rider_id: RiderId,
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub display_name: String,
     pub phone: PhoneNumber,
     pub status: RiderStatus,

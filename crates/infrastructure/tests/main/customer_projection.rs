@@ -17,7 +17,8 @@ use application::queries::CustomerReadRepository;
 use async_trait::async_trait;
 use domain::generated::commands::VerifyPhone;
 use domain::generated::scalars::{
-    CustomerId, DialingCode, ExternalReference, Locale, NationalPhoneNumber, OtpCode, PhoneNumber,
+    AuthSubject, CustomerId, DialingCode, ExternalReference, Locale, NationalPhoneNumber, OtpCode,
+    PhoneNumber,
     SessionId,
 };
 use domain::shared::errors::DomainError;
@@ -43,7 +44,7 @@ impl IdentityService for AlwaysVerifiedAuth {
         _meta: &ServiceCallMeta,
     ) -> Result<IdentityVerifyPhoneOtpOutput, DomainError> {
         Ok(IdentityVerifyPhoneOtpOutput {
-            auth_ref: ExternalReference("auth-supabase-1".into()),
+            auth_ref: AuthSubject("auth-supabase-1".into()),
             access_token: None,
             refresh_token: None,
             expires_in: None,
@@ -135,12 +136,14 @@ async fn registered_customer_is_folded_and_served_by_the_read_repository() {
         .expect("by_phone")
         .expect("projected customer row");
     assert_eq!(row.customer_id, CustomerId(customer_id));
-    assert_eq!(row.auth_ref, Some(ExternalReference("auth-supabase-1".into())));
+    assert_eq!(row.auth_ref, Some(AuthSubject("auth-supabase-1".into())));
     assert!(!row.email_verified);
     assert_eq!(row.favorite_restaurant_ids, serde_json::json!([]));
 
     // 3) The other lookups serve the same row: by auth ref (the `me` query) and by id.
     let by_ref = repo
+        // Both scalars in one call, deliberately visible: the ROW holds an `AuthSubject`, while the
+        // read PORT still takes an `ExternalReference` until step 1b retypes it (#639 part C).
         .by_auth_ref(ExternalReference("auth-supabase-1".into()))
         .await
         .expect("by_auth_ref")

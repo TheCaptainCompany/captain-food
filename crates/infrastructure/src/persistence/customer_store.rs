@@ -8,7 +8,7 @@
 
 use application::queries::CustomerRow;
 use domain::generated::scalars::{
-    CustomerDisplayName, CustomerId, EmailAddress, ExternalReference, Locale, PaymentMethodId,
+    AuthSubject, CustomerDisplayName, CustomerId, EmailAddress, Locale, PaymentMethodId,
     PhoneNumber, TimeZone,
 };
 use domain::shared::errors::DomainError;
@@ -35,7 +35,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<CustomerRow, DomainError> {
         auth_ref: row
             .try_get::<Option<String>, _>("auth_ref")
             .map_err(db_err)?
-            .map(ExternalReference),
+            .map(AuthSubject),
         display_name: row
             .try_get::<Option<String>, _>("display_name")
             .map_err(db_err)?
