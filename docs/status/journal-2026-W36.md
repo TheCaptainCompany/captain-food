@@ -28,9 +28,20 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > session that produced the nine, which is why this one is a hook and not a paragraph, and why the
 > right move is routing more coordinator→founder questions through `AskUserQuestion`.
 > Records: [ADR-20260831-141500](../adr/ADR-20260831-141500-the-coordinator-gets-the-register-check-gate-on-its-committing-surface.md).
-> Proven by selftest cases D1-D12 / LD1-LD3 / W4-W7; three planted mutants (Lane D disarmed, the
-> `Agent` settings entry deleted, the resolver stubbed to accept anything) were each observed RED
-> before the suite was trusted.
+> Proven by selftest cases D1-D27 / LD1-LD3 / W4-W7 and by
+> `tools/codegen-rs/src/tests.rs :: every_record_in_the_corpus_is_citable_through_lane_d`, which
+> drives the real hook over 417 records; every case was observed RED before the suite was trusted.
+> **It took three review rounds, and the shape of the misses is the lesson.** Round 1: the resolver
+> globbed one `docs/adr/` filename shape and refused 101 of 266 real ADRs. Round 2: with a fixture
+> per era in place it still mis-handled all 80 `docs/decisions/` rows (53 refused, 27 silently
+> resolving to the parent proposal), and the `tools:` parse read only the first physical line, so
+> four continuation shapes still failed open. Each round fixed the instances and re-asserted a
+> universal — *"fails closed whenever the tool set cannot be read"* — that the next round falsified.
+> Two rules came out of it, both now executable: **a gate that classifies members of a corpus is
+> tested against the CORPUS, not against fixtures** (`docs/claude/sessions/workflow.md`, bound by
+> selftest case CC), and **a universal claim backed by an enumeration is that same defect one level
+> up** — so the shipped claims are scoped to what the gate DETECTS, with the line-based parse named
+> as a residual rather than implied away.
 
 > **2026-08-31 — three operational learnings from tonight's runs, and the argued decision to gate
 > NONE of them** (records only; no `specs/**`, no code, no new hook).

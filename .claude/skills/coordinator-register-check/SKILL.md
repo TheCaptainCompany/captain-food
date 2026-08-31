@@ -73,8 +73,24 @@ dispatch to a **write-capable** agent must carry a trail whose record id **resol
 
 The discriminator is the **target agent's own `tools:` frontmatter** — write-capable (`architect`,
 `executor`, `generator` today) is gated, read-only is not. So lens consults and the `reviewer` pass
-never see this gate, and there is no exemption list to drift: granting an agent a write tool pulls
-it into the gate in the same commit.
+never see this gate, and there is no exemption list of agent **names** to drift: granting an agent a
+write tool pulls it into the gate in the same commit.
+
+Three qualifications, because this document carries the *ungateable* half of the procedure and must
+not overstate the gated half:
+
+- **The write-tool token set (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) IS a maintained list.**
+  A future write-granting tool under a new name goes unrecognised until someone adds it.
+- **`Bash` is deliberately excluded**, although it can obviously write files: every advisory lens in
+  the roster declares it, so counting it would gate all thirteen and destroy the discriminator. The
+  gate therefore tracks **declared authoring intent, not raw capability** — and the gap is real, not
+  theoretical (`permissions.allow` carries `Bash(make:*)`, and `make generate` writes files).
+- **The `tools:` parse is line-based, not a YAML parser.** It fails closed on every unreadable shape
+  it can *detect*; that is not the same as every unreadable shape. Two review rounds asserted the
+  universal version of that sentence and were falsified both times.
+
+**None of this weakens the rule for you**: the gate is a floor under the dispatch half, never a
+substitute for running the procedure above. Everything it cannot see is yours.
 
 **NOT enforced, and this is the honest limit: a hook gates a TOOL CALL.** The coordinator's **prose
 answers to the founder are not tool calls** and cannot be blocked the way `AskUserQuestion` is. Of
@@ -133,5 +149,5 @@ question. Say what disagrees and point at the newer record.
   `Decision row: <KEY>` envelope for founder-facing **decision** questions.
 - [`.claude/skills/decision-lookup/`](../decision-lookup/SKILL.md) — advisory retrieval, step 1.
 - [`.claude/hooks/register-check.sh`](../../hooks/register-check.sh) — both surfaces; Lane D is the
-  dispatch gate. Proven by `.claude/hooks/register-check-selftest.sh` (cases D1–D12, LD1–LD3),
+  dispatch gate. Proven by `.claude/hooks/register-check-selftest.sh` (cases D1–D27, LD1–LD3),
   which runs in CI's `gate-scripts` job and from the Stop hook every turn.

@@ -366,6 +366,45 @@ name: todowrite
 tools: Read, Grep, Glob, Bash, TodoWrite
 ---
 EOF
+# Round 2, F-A: FOUR MORE shapes that failed open, because value continuation is not decidable
+# from the first physical line. Each of these grants Write; each read `agent-advisory` until the
+# parse started reading the WHOLE value. `wrapped-readonly` is the false-positive floor beside
+# them -- it must stay advisory, and the round-2 trailing-comma heuristic had gated it.
+cat > "$FIX/agents/flowbreak-after.md" <<'EOF'
+---
+name: flowbreak-after
+tools: [Read, Grep, Glob, Bash
+  , Write]
+---
+EOF
+cat > "$FIX/agents/flowbreak-before.md" <<'EOF'
+---
+name: flowbreak-before
+tools: [Read, Grep, Glob
+  , Bash, Write]
+---
+EOF
+cat > "$FIX/agents/plainbreak.md" <<'EOF'
+---
+name: plainbreak
+tools: Read, Grep, Glob, Bash
+  , Write, Edit
+---
+EOF
+cat > "$FIX/agents/folded.md" <<'EOF'
+---
+name: folded
+tools: >
+  Read, Write
+---
+EOF
+cat > "$FIX/agents/wrapped-readonly.md" <<'EOF'
+---
+name: wrapped-readonly
+tools: Read, Grep,
+  Glob, Bash
+---
+EOF
 
 fail=0
 expect() { # expect <case> <want-exit> <decisions-dir> <payload> [want-reason]
@@ -557,14 +596,34 @@ expect_d D21-edit-only-agent 2 '{"tool_name":"Agent","tool_input":{"subagent_typ
 #    drag a lens into the gate the way a `Write|Edit` substring did.
 expect_d D22-todowrite-not-write 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"todowrite","prompt":"lens consult"}}' agent-advisory
 
+# ── Round 2, F-A: continuation shapes the first-line parse could not see ────────────────────────
+# All four grant Write and all four read `agent-advisory` before the whole-value parse. The first
+# two carry an UNBALANCED `[`, which `tr -d "[]"` used to discard before the token scan -- a louder
+# "this value is incomplete" signal than the trailing comma round 2 did handle.
+expect_d D23-flow-break-after-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"flowbreak-after","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D24 is the mirror of D18: the line breaks BEFORE the comma, so no trailing-comma test can see it.
+expect_d D24-flow-break-before-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"flowbreak-before","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+expect_d D25-plain-break-before-comma 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"plainbreak","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D26: a folded scalar carries NO punctuation at all -- nothing on the first line hints at more.
+expect_d D26-folded-scalar 2 '{"tool_name":"Agent","tool_input":{"subagent_type":"folded","prompt":"DISPATCH, no trail."}}' dispatch-trail-missing
+# D27 ALLOW: THE FALSE-POSITIVE FLOOR. A genuinely read-only list wrapped across two lines must
+# stay advisory -- the round-2 trailing-comma heuristic gated it, and a gate that fires on ordinary
+# formatting is one that gets worked around.
+expect_d D27-wrapped-readonly-advisory 0 '{"tool_name":"Agent","tool_input":{"subagent_type":"wrapped-readonly","prompt":"lens consult"}}' agent-advisory
+
 # LD LIVE wiring: the fixture cases above would all pass with the LIVE paths mis-wired, so two
 # anchors on the real roster -- `executor` is write-capable and `reviewer` is read-only, and
 # either changing is a roster decision that should red this case and be looked at.
-printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"executor","prompt":"DISPATCH with no trail whatsoever."}}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
-if [ $? -ne 2 ]; then
-  echo "register-check selftest: case LD1 FAILED -- the LIVE .claude/agents roster did not gate a trail-less dispatch to write-capable 'executor'" >&2
-  fail=1
-fi
+# LD1 covers ALL THREE live write-capable agents, not just `executor`: the F-A failure scenario is
+# a formatter reflowing a `tools:` list across two lines, and that reaches `architect` and
+# `generator` exactly as easily (review round 2, F-A).
+for _wa in architect executor generator; do
+  printf '%s' "{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"$_wa\",\"prompt\":\"DISPATCH with no trail whatsoever.\"}}" | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
+  if [ $? -ne 2 ]; then
+    echo "register-check selftest: case LD1 FAILED -- the LIVE .claude/agents roster did not gate a trail-less dispatch to write-capable '$_wa' (a reflowed or reformatted \`tools:\` list reads advisory)" >&2
+    fail=1
+  fi
+done
 printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"reviewer","prompt":"Review the full branch diff."}}' | REGISTER_CHECK_LOG=/dev/null bash "$HOOK" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
   echo "register-check selftest: case LD2 FAILED -- the LIVE roster gated a read-only 'reviewer' consult; Lane D must never fire on an advisory call" >&2
@@ -687,6 +746,20 @@ done
 # C CANON: the canonical rule the blocks and the hook cite still exists where they point.
 if ! grep -q 'check the register before you ask' "$ROOT/docs/claude/sessions/workflow.md"; then
   echo "register-check selftest: case C FAILED -- docs/claude/sessions/workflow.md no longer carries the canonical register-check rule the blocks cite" >&2
+  fail=1
+fi
+
+# CC CORPUS RULE: the generalisation Lane D cost two rounds to learn is prose, and prose can be
+# deleted silently. The hook's own completeness comment cites it by name, so this case makes the
+# pairing non-deletable: the rule must exist, and the test that makes it executable must still be
+# named in the suite that enforces it (ADR-20260831-141500; workflow.md, "a gate that classifies
+# members of a corpus is tested against the CORPUS, not against fixtures").
+if ! grep -q 'only the corpus proves the classification' "$ROOT/docs/claude/sessions/workflow.md"; then
+  echo "register-check selftest: case CC FAILED -- docs/claude/sessions/workflow.md no longer carries the corpus-vs-fixtures rule that .claude/hooks/register-check.sh cites for its completeness claim" >&2
+  fail=1
+fi
+if ! grep -q 'every_record_in_the_corpus_is_citable_through_lane_d' "$ROOT/tools/codegen-rs/src/tests.rs"; then
+  echo "register-check selftest: case CC FAILED -- the corpus-completeness test every_record_in_the_corpus_is_citable_through_lane_d is gone from tools/codegen-rs/src/tests.rs; Lane D's completeness claim would be prose again" >&2
   fail=1
 fi
 

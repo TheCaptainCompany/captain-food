@@ -5,7 +5,7 @@
 **Prompted by**: nine register-check failures by the coordinator in one session ·
 **Realizes**: [#814 "The coordinator has no register-check gate: dispatch cards and direct answers are composed from the conversation, not from the register"](https://github.com/TheCaptainCompany/captain-food/issues/814) ·
 **Enforced by**: `.claude/hooks/register-check.sh` Lane D (`PreToolUse` on the `Agent` tool), wired
-in `.claude/settings.json`, proven by `.claude/hooks/register-check-selftest.sh` cases D1–D12 /
+in `.claude/settings.json`, proven by `.claude/hooks/register-check-selftest.sh` cases D1–D27 /
 LD1–LD3 / W4–W7 in CI's `gate-scripts` job ·
 **Session**: https://claude.ai/code/session_01Dbhq2Y7U5NcnqhByscaB4v
 
@@ -91,18 +91,31 @@ extra steps. So the remedy cannot be another paragraph asking the coordinator to
    shape this repo has retired twice, and it is the shape that goes stale silently. The rule reads:
    **a call that can produce a diff carries the trail that licenses it.**
 
-   It **fails closed whenever the tool set cannot be READ** — no `subagent_type`; no agent file
+   It **fails closed on every unreadable shape it can DETECT** — no `subagent_type`; no agent file
    (`general-purpose` is the live case: `docs/claude/sessions/environment.md` documents pasting a
    charter into it as the standard workaround, and it holds the full tool set); no `tools:` key; a
-   `tools:` key whose inline value is absent (YAML list form, or the value on a following line); a
-   wildcard value; or a value ending in a comma, i.e. the first fragment of a continued list.
+   `tools:` key whose value is empty across its whole indented block; an unbalanced flow list; or a
+   wildcard.
 
-   **An earlier version of this ADR said "all three unknowns", and four more shapes failed OPEN**
-   (review round 1, F2): the first parse took `awk /^tools:/{print}`, which returns the literal
-   `tools:` for a list form — non-empty, so the fail-closed branch never ran and **a parse failure
-   was reported as a read declaration of read-only**. Measured: `tools:\n  - Write` gave exit 0,
-   ungated, on a card with no trail. The lesson generalises past this hook: *an unreadable
-   declaration is never evidence of the permissive answer.*
+   **That sentence is deliberately not universal, because its universal form was asserted three
+   times and falsified three times.** Round 1 said "all three unknowns" and four shapes failed open:
+   `awk /^tools:/{print}` returns the literal `tools:` for a list form — non-empty, so the
+   fail-closed branch never ran and **a parse failure was reported as a read declaration of
+   read-only**. Round 2 said "whenever the tool set cannot be READ" while reading only the FIRST
+   PHYSICAL LINE and guessing at continuation; four more shapes failed open, because **value
+   continuation is not decidable from the first line** — a flow list broken before the comma, one
+   broken after it, a plain list broken before the comma, and a folded scalar carrying no
+   punctuation at all. Two of those carried an unbalanced `[`, and `tr -d '[]'` discarded exactly
+   that evidence before the token scan.
+
+   The fix is smaller than what it replaced: **read the whole value** — the `tools:` line plus every
+   more-indented line, to the next key or the closing `---` — and run one token scan over it. That
+   **deletes** the trailing-comma special case instead of joining it, and it removed a false
+   POSITIVE the heuristic had introduced: a genuinely read-only wrapped list was being gated.
+   **Named residual**: this is a line-based reader, not a YAML parser; a value form outside its
+   grammar could still be mis-read, and no enumeration proves otherwise. The lesson generalises past
+   this hook twice over: *an unreadable declaration is never evidence of the permissive answer*, and
+   *a universal claim backed by an enumeration is the corpus defect one level up.*
 
    **Named residual**, because "no list to drift" is true only of AGENT NAMES: the write-tool token
    set (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) is a closed list, and a future write-granting
@@ -131,6 +144,29 @@ extra steps. So the remedy cannot be another paragraph asking the coordinator to
    exists to stop is worse than no gate.** The resolver now mirrors `record_resolves` in
    `tools/codegen-rs/src/validate/decisions.rs`, which already had the semantics and is pinned by
    `tests.rs`; the two carry comments pointing at each other. (Review round 1, F1.)
+
+   **And covering the three ADR eras was still not covering the corpus.** With one fixture per era
+   in place, the gate mis-handled **all 80 `docs/decisions/*.yaml` register rows**: 53 refused
+   outright, and 27 — the `PROP-<stamp>--D1..D7` namespaced keys — *silently resolving to the parent
+   proposal instead of the cited row*, which is a false pass, not a refusal. `REG-2` (the row the ask
+   surface's own Lane 1 reads) and `QUOTE-TOKEN` were among the refused. A coordinator following
+   step 3 of the skill — *"resolve the exact row, `docs/decisions/<KEY>.yaml`"* — and citing the row
+   was told it had produced **no citation at all**. `resolve_record` now carries a universal
+   `docs/decisions/<KEY>.yaml` candidate, and `DISPATCH_RECORD_ID` carries the register's **own** v2
+   key grammar (`[A-Z][A-Z0-9-]{2,63}`, from `docs/decisions/README.md`, verified against all 80 live
+   keys rather than invented). Leftmost-longest matching means the full namespaced key is extracted,
+   so a *fabricated* `PROP-20260809-003000--D99` is still refused even though its parent proposal
+   exists.
+
+   **The lesson is the deliverable, not the fix** (recorded in `docs/claude/sessions/workflow.md`):
+   **a gate that classifies members of a corpus is tested against the CORPUS, not against fixtures —
+   fixtures prove the branches; only the corpus proves the classification.** The independent review
+   caught era 1 and the fixtures that followed it could not catch the rows, because the fixture
+   population was drawn from the same model of the corpus that produced the bug. *Independence bought
+   one round, not correctness: the author's model of the corpus WAS the defect, and a second reader
+   of the code inherits it.* The executable form is
+   `tools/codegen-rs/src/tests.rs :: every_record_in_the_corpus_is_citable_through_lane_d`, which
+   walks the real record directories and drives the real hook end to end over **417** records.
 
    This is **not "strictly stronger" than the ask surface's Lane 2**, as an earlier version of this
    ADR claimed. The grammars differ in both directions — `Register check: DECISIONS` passes Lane D
@@ -215,7 +251,11 @@ with the work), so the lines below are **recorded positions read from the regist
 opinions — writing invented lens quotes into a record about not inventing citations would be the
 failure this ADR exists to stop.
 
-- **beck** — recorded position applied: *"a gate never seen to fire is an unverified claim"*
+- **beck** — **consulted in review round 1 and its finding is in this diff**: it measured the shipped
+  `resolve_record` against the live corpus rather than against the code, which is how the 80 refused
+  register rows were found after both the author and the independent reviewer had passed over the
+  branches. The corpus-completeness test and the workflow.md rule are its design. Earlier recorded
+  position also applied: *"a gate never seen to fire is an unverified claim"*
   (`register-check-selftest.sh` header, #292). Honoured: three mutants were planted and each was
   observed red (Lane D disarmed → D1/D4/D5 red; the `Agent` settings entry deleted → W red; the
   resolver stubbed to accept anything → D7 red) before the suite was trusted.
@@ -240,7 +280,7 @@ failure this ADR exists to stop.
 
 - `.claude/hooks/register-check.sh` — Lane D, dispatched on `tool_name == Agent`.
 - `.claude/settings.json` — the `PreToolUse` / `Agent` entry (the ask entry stays at index 0).
-- `.claude/hooks/register-check-selftest.sh` — cases **D1–D12** (fixture corpus), **LD1–LD3** (live
+- `.claude/hooks/register-check-selftest.sh` — cases **D1–D27** (fixture corpus), **LD1–LD3** (live
   roster and live `docs/` resolution), **W4–W7** (the `Agent` entry's disarming mutants: fuzzed
   matcher, re-pointed command, deleted entry, moved event). Runs from `stop-gate.sh` every turn and
   in CI's always-run `gate-scripts` job.

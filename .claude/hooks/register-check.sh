@@ -64,13 +64,17 @@
 #   drops it, with no list to update. The rule reads: A CALL THAT CAN PRODUCE A DIFF CARRIES THE
 #   TRAIL THAT LICENSES IT.
 #
-#   It FAILS CLOSED whenever the target's tool set cannot be READ, which is a larger set than the
-#   three cases this comment first named: no `subagent_type`; no agent file (`general-purpose` is
-#   the live case -- environment.md documents pasting a charter into it as the standard workaround
-#   for an unregistered agent, and it holds the full tool set); no `tools:` key; a `tools:` key with
-#   no inline value (YAML list form, or the value on a following line); a wildcard value; and an
-#   inline value ending in a comma, i.e. the first fragment of a continued list. Four of those six
-#   used to fail OPEN -- see the parse block below for the mechanism and the measurement.
+#   IT FAILS CLOSED ON EVERY UNREADABLE SHAPE IT CAN DETECT -- and that sentence is deliberately not
+#   the universal "whenever the tool set cannot be read" it replaced, which was asserted three times
+#   on the back of an enumeration and falsified three times. What it detects: no `subagent_type`; no
+#   agent file (`general-purpose` is the live case -- environment.md documents pasting a charter into
+#   it as the standard workaround, and it holds the full tool set); no `tools:` key; a `tools:` key
+#   whose value is empty across its whole indented block; an UNBALANCED flow list; and a wildcard.
+#   The parse reads the WHOLE value, so continuation shapes are read rather than guessed at.
+#   NAMED RESIDUAL: this is a line-based reader, NOT a YAML parser. A value form outside its grammar
+#   could still be mis-read, and no enumeration here may be taken as proof that none exists -- the
+#   only honest evidence would be a corpus test over real agent files, which is why the claim is
+#   scoped to what it DETECTS rather than to what it cannot.
 #
 #   NAMED RESIDUAL, because "no list to drift" is only true of AGENT NAMES: the WRITE-TOOL token set
 #   below ({Write, Edit, MultiEdit, NotebookEdit}) is a closed list, and a future write-granting tool
@@ -152,12 +156,25 @@ DOCS_DIR="${REGISTER_CHECK_DOCS:-$ROOT/docs}"
 # of the nine was composed without reading BRIEF-20260819 §4.2, so a brief must be citable as the
 # record that governs. Every alternative here resolves to a real path in `resolve_record` -- an id
 # shape that cannot resolve is a hole in the anti-theatre check, not a convenience.
-# THAT SENTENCE WAS FALSE WHEN FIRST WRITTEN, in the same commit that wrote it: `ADR-00[0-9]{2}` was
-# in this grammar while the resolver globbed only `ADR-<id>*`, so no legacy id could ever resolve.
-# It is true now because `resolve_record` covers all three eras, not because the claim was checked.
-# (Review round 1, F1 -- a completeness claim shipped before it was executed, the exact shape
-# ADR-20260817-105845 governs.) Do not restate it anywhere else; check it against the resolver.
-DISPATCH_RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|BRIEF-[0-9]{8}|journal-[0-9]{4}-W[0-9]{2}|DECISIONS'
+# THAT SENTENCE HAS NOW BEEN FALSE TWICE, and the second time it was false in the very comment that
+# confessed the first. Round 1: `ADR-00[0-9]{2}` sat in this grammar while the resolver globbed only
+# `ADR-<id>*`, so no legacy id could resolve. The confession then read "it is true now because
+# resolve_record covers all three eras, NOT because the claim was checked" -- and it was still not
+# true: all 80 `docs/decisions/*.yaml` rows were mis-handled (53 refused, 27 resolving to the parent
+# proposal instead of the cited row), REG-2 and QUOTE-TOKEN among them.
+#
+# It is true now BECAUSE IT IS CHECKED, which is the only reason a completeness claim may ever be
+# written down: `tools/codegen-rs/src/tests.rs :: every_record_in_the_corpus_is_citable_through_lane_d`
+# walks the real record directories and drives THIS script end to end over every one of them. If the
+# sentence stops being true, that test reds -- nobody has to notice. The rule it earned is recorded
+# in docs/claude/sessions/workflow.md ("a gate that classifies members of a corpus is tested against
+# the CORPUS, not against fixtures"). Do not restate the claim anywhere else, and never re-assert it
+# from reading the code: the last two readings of this code both concluded it was true.
+# `[A-Z][A-Z0-9-]{2,63}` is the register's OWN v2 key grammar (docs/decisions/README.md), not a
+# shape invented here: all 80 live keys match it, verified against `ls docs/decisions/`. It also
+# matches every other alternative's ids (`ADR-...` is `[A-Z]` then `[A-Z0-9-]`), which is harmless
+# -- the alternatives extract the SAME span, and `resolve_record`'s case order decides the kind.
+DISPATCH_RECORD_ID='ADR-[0-9]{8}-[0-9]{6}|ADR-00[0-9]{2}|PROP-[0-9]{8}-[0-9]{6}|BRIEF-[0-9]{8}|journal-[0-9]{4}-W[0-9]{2}|DECISIONS|[A-Z][A-Z0-9-]{2,63}'
 
 payload="$(cat 2>/dev/null || true)"
 session="$(printf '%s' "$payload" | grep -o '"session_id":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')"
@@ -217,28 +234,43 @@ fi
 #
 # THIS MIRRORS `record_resolves` in tools/codegen-rs/src/validate/decisions.rs -- deliberately, so
 # the two are findable from each other; that one is pinned by tests.rs and is the reference
-# semantics. Keep them in step: the hyphen in the legacy glob is load-bearing there and here (a bare
-# digit prefix would let a truncated `ADR-2026` match the 54 prefixless files, which all start
-# `2026...`), and the stamp era must try BOTH the prefixed and the prefixless filename.
+# semantics. The mirroring is of REACHABLE BEHAVIOUR, not of structure: the Rust side gates the stamp
+# era on `is_stamp`, which has no equivalent here, so in isolation this arm is a prefix glob. Over
+# the inputs `DISPATCH_RECORD_ID` can actually produce, the two agree -- which is the property the
+# corpus test checks and the only one claimed. Likewise the hyphen in the legacy glob: it guards
+# `ADR-2026` from matching the 54 prefixless files, a token the grammar cannot produce, so it is
+# defence in depth kept for parity with the Rust side rather than a live guard. The stamp era must
+# try BOTH the prefixed and the prefixless filename; that part is load-bearing.
 resolve_record() { # resolve_record <id> -> 0 iff a record file on disk carries that id
-  case "$1" in
+  _id="$1"
+  case "$_id" in
     ADR-*)
-      _rest="${1#ADR-}"
+      _rest="${_id#ADR-}"
       case "$_rest" in
         [0-9][0-9][0-9][0-9])
           # legacy `ADR-00NN` -> `NNNN-*.md`; the trailing hyphen is the guard described above.
           set -- "$DOCS_DIR/adr/$_rest"-*.md ;;
         *)
           # stamp era -> `ADR-<stamp>-*.md` (current) OR `<stamp>-*.md` (prefixless middle era).
-          set -- "$DOCS_DIR/adr/$1"*.md "$DOCS_DIR/adr/$_rest"*.md ;;
+          set -- "$DOCS_DIR/adr/$_id"*.md "$DOCS_DIR/adr/$_rest"*.md ;;
       esac ;;
-    PROP-*)    set -- "$DOCS_DIR/proposals/$1"*.md ;;
-    BRIEF-*)   set -- "$DOCS_DIR/legal/$1"*.md "$DOCS_DIR/proposals/$1"*.md ;;
-    journal-*) set -- "$DOCS_DIR/status/$1"*.md ;;
+    PROP-*)    set -- "$DOCS_DIR/proposals/$_id"*.md ;;
+    BRIEF-*)   set -- "$DOCS_DIR/legal/$_id"*.md "$DOCS_DIR/proposals/$_id"*.md ;;
+    journal-*) set -- "$DOCS_DIR/status/$_id"*.md ;;
+    # `DECISIONS` stays AHEAD of the register-key arm: it names the generated index in
+    # docs/proposals/, not a row file, and the key grammar below would otherwise swallow it.
     DECISIONS) set -- "$DOCS_DIR/proposals/DECISIONS.md" ;;
+    # A REGISTER ROW KEY (docs/decisions/<KEY>.yaml) -- no kind-specific path of its own; the
+    # universal candidate below is the whole resolution.
+    [A-Z]*)    set -- ;;
     *) return 1 ;;
   esac
-  for _p in "$@"; do [ -e "$_p" ] && return 0; done
+  # EVERY id may ALSO name a register row, which is why this candidate is universal rather than
+  # living in the `[A-Z]*` arm. Two live shapes need it: the per-proposal keys
+  # `PROP-20260809-003000--D1..D7`, which enter through the `PROP-*` arm, glob no proposal FILE
+  # (the `--D1` suffix is not part of any filename) and would otherwise be refused; and any future
+  # row whose key begins with another kind's prefix.
+  for _p in "$@" "$DOCS_DIR/decisions/$_id.yaml"; do [ -e "$_p" ] && return 0; done
   return 1
 }
 
@@ -259,28 +291,48 @@ if [ -n "$payload" ] && [ "$TOOL_NAME" = "Agent" ]; then
   elif [ ! -f "$agent_file" ]; then
     why="no \`.claude/agents/$sub.md\` declares this agent, so its tool set cannot be read (an undeclared agent — \`general-purpose\` is the live case — holds the full set, including Write/Edit)"
   else
-    # THE PARSE MUST FAIL CLOSED, AND THE OBVIOUS SPELLING FAILS OPEN. `awk /^tools:/{print}`
-    # returns the literal string `tools:` for a YAML LIST form, so `[ -z "$tools_line" ]` is FALSE,
-    # the fail-closed branch never runs, and a write-capable agent is declared advisory: measured
-    # exit 0, ungated, on a trail-less card for `tools:\n  - Write`, for a continuation line, for
-    # `tools: "*"` and for a bare `tools:` key. A PARSE FAILURE WAS BEING REPORTED AS A READ
-    # DECLARATION OF READ-ONLY. So presence of the KEY and presence of an inline VALUE are read
-    # separately, and four shapes fail closed. (Review round 1, F2 -- which named three of them;
-    # the trailing-comma continuation below is a fourth found while fixing it, and `tools: "*"`
-    # fails open by a DIFFERENT mechanism than the other three: its value is non-empty and simply
-    # contains no write token, so an emptiness check alone does not reach it.)
+    # THE PARSE MUST FAIL CLOSED, AND THE OBVIOUS SPELLINGS FAIL OPEN. This took three review
+    # rounds, and the first two fixes were both "one more special case" -- which is why this one
+    # reads the WHOLE VALUE instead. `awk /^tools:/{print}` returns the literal `tools:` for a YAML
+    # list form (non-empty, so an emptiness test passes and a write-capable agent is declared
+    # advisory: A PARSE FAILURE REPORTED AS A READ DECLARATION OF READ-ONLY). Round 2 read only the
+    # FIRST PHYSICAL LINE and then guessed whether the value continued, via an emptiness test and a
+    # trailing comma; four more shapes still failed open, because VALUE CONTINUATION IS NOT
+    # DECIDABLE FROM THE FIRST LINE:
+    #     tools: [Read, Grep, Glob, Bash        tools: Read, Grep, Glob, Bash        tools: >
+    #       , Write]                              , Write, Edit                        Read, Write
+    # the break falling BEFORE the comma rather than after it, and the folded scalar carrying no
+    # punctuation at all. So: take the `tools:` line plus every following MORE-INDENTED line, up to
+    # the next key or the closing `---`, and run one token scan over the result. That DELETES the
+    # trailing-comma special case rather than joining it, and it removes a false POSITIVE the
+    # heuristic had introduced -- a genuinely read-only wrapped list (`Read, Grep,` / `  Glob,
+    # Bash`) was being gated and now reads advisory again.
     has_tools="$(awk '/^---[[:space:]]*$/{c++; next} c==1 && /^tools:/{print "yes"; exit}' "$agent_file")"
-    tools_val="$(awk '/^---[[:space:]]*$/{c++; next} c==1 && /^tools:/{sub(/^tools:[[:space:]]*/,""); sub(/[[:space:]]+$/,""); print; exit}' "$agent_file")"
-    # Strip only quoting/flow punctuation, never the separators the token scan needs.
+    tools_val="$(awk '
+      /^---[[:space:]]*$/ { c++; if (c >= 2) exit; next }
+      c == 1 {
+        if (collecting) {
+          # A continuation is an indented, non-blank line. Anything at column 0 is the next key.
+          if ($0 ~ /^[[:space:]]/ && $0 !~ /^[[:space:]]*$/) { val = val " " $0; next }
+          exit
+        }
+        if ($0 ~ /^tools:/) { sub(/^tools:[[:space:]]*/, ""); val = $0; collecting = 1 }
+      }
+      END { print val }' "$agent_file")"
+    tools_val="$(printf '%s' "$tools_val" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    # Strip quoting/flow punctuation only AFTER the balance check below -- `tr -d "[]"` destroys
+    # exactly the evidence that a flow list was truncated (review round 2, F-A).
     tools_norm="$(printf '%s' "$tools_val" | tr -d '"'"'"'[]' | tr ',' ' ')"
+    _open="$(printf '%s' "$tools_val" | tr -cd '[' | wc -c)"
+    _close="$(printf '%s' "$tools_val" | tr -cd ']' | wc -c)"
     if [ "$has_tools" != yes ]; then
       why="\`$sub.md\` declares no \`tools:\` line, so it inherits the full tool set"
     elif [ -z "$tools_val" ]; then
-      why="\`$sub.md\` has a \`tools:\` key with no inline value (YAML list form, or a value on the following line) — the tool set cannot be read from it, and an unreadable declaration is never evidence of read-only"
+      why="\`$sub.md\` has a \`tools:\` key with no value on it or on any indented line beneath it — the tool set cannot be read, and an unreadable declaration is never evidence of read-only"
+    elif [ "$_open" != "$_close" ]; then
+      why="\`$sub.md\` declares \`tools: $tools_val\`, whose flow list is unbalanced ($_open \`[\` vs $_close \`]\`) — the value is truncated and cannot be read"
     elif case "$tools_val" in *"*"*) true ;; *) false ;; esac; then
       why="\`$sub.md\` declares \`tools: $tools_val\` — a wildcard grants every tool, Write and Edit included"
-    elif case "$tools_val" in *,) true ;; *) false ;; esac; then
-      why="\`$sub.md\` declares \`tools: $tools_val\`, which ends in a comma — the list continues on the next line and this is only its first fragment"
     else
       # A CLOSED TOKEN SET, not a substring. `Write|Edit` as a substring also matches `TodoWrite`,
       # which grants no filesystem write at all (latent today: no agent declares it).
