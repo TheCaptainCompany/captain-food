@@ -51,6 +51,26 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > deleted: a permission is a conditional, not a claim that the binary exists, and the PowerShell half
 > says a Windows host uses this repo where `gh` is the normal way in. The fact is recorded in a
 > `_comment_gh` key instead.
+>
+> **The review then found the same defect one level up, in this very change.** The first pass fixed
+> the two files it was already editing, wrote *"both binding sites … were corrected"*, and recorded
+> "no follow-up required" — while **four more binding sites** sat uncorrected, findable in one
+> `git grep`: `docs/STATUS.md` (loads every run, second only to CLAUDE.md), `docs/BACKLOG.md` (the
+> binding method), two in `evidence.md` — one defining the executor's DONE as *"PR armed and
+> reported"*, i.e. the impossible operation — and a **second section of `workflow.md`**, ~200 lines
+> below the first. **An author sweeps the files they are already editing and calls it complete**, so
+> the count in a completeness claim is the thing to distrust; the ADR now carries the grep instead of
+> the word "both", and keeps the false claim on the record rather than deleting it.
+>
+> **And the quiet filter was deleting the new evidence.** `QUIET_KEEP` dropped `DB PRE-FLIGHT OK`,
+> `UNAVAILABLE` and both follow-on lines; `FAILED` and `SKIPPED` survived only by accident of
+> alternates meant for other tools, and the 50-line tail cannot recover the rest. So on
+> `make test-quiet` / `make rust-quiet` — which CLAUDE.md names as how token-bound sessions run gates
+> — a container without `postgresql-client` would show no pre-flight line and no skip receipt, and a
+> reader would write "empty receipt + exit 0 ⇒ DB suites ran": **the exact over-read this change
+> closed, restored on the recommended path**, with a DECLARED degraded mode turned silent. Fixed with
+> `^test-crates:|PRE-FLIGHT` and pinned. The axis to watch here is the **false negative** on the
+> positive line, not the false positive the brief anticipated.
 
 > **2026-08-31 — #639 part C has a proposal, and writing it corrected the design's headline claim:
 > the membership key `vernon` proposed is not the derivation `ScopeMembership` already uses, and

@@ -254,8 +254,21 @@ executor to do it**, and a charter is loaded on every run while a topic file is 
 something suggests it. Nothing suggested it, because step 7 read as an ordinary executable
 instruction right up to the moment it 403'd. That is the general rule to take away — *when an
 operational note contradicts a binding instruction, the note loses, silently, every time*; fix the
-instruction, or expect to write the note again. Both binding sites (executor.md step 7 and CLAUDE.md's
-issue-workflow bullet) were corrected under #830.
+instruction, or expect to write the note again.
+
+**And there were SIX binding sites, not two** — which is the second half of the lesson. #830's first
+pass corrected `executor.md` step 7 and `CLAUDE.md`, wrote *"both binding sites … were corrected"*
+here, and recorded "no follow-up required" in the ADR. Its review found four more in one
+`git grep`: `docs/STATUS.md` (which loads every run, second only to CLAUDE.md), `docs/BACKLOG.md`
+(the binding method), two sites in [evidence.md](evidence.md) — one of which defined the executor's
+DONE as *"PR armed and reported"*, the impossible operation — and a **second section of this very
+file**, ~200 lines below. All six are corrected now. The generalisation: **an author sweeps the
+files they are already editing and calls it complete**, so the count is the thing to distrust. Run
+the grep CLAUDE.md already requires, and put its output in the record rather than the word "both":
+
+```sh
+git grep -n "ready + auto-merge\|enable auto-merge\|mark the PR ready"
+```
 
 ### The worktree is SHARED — "already on `main`" has a shelf life of one tool call
 
