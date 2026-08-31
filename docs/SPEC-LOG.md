@@ -118,6 +118,19 @@ the product owner offered. A structural change with no option space (a file move
 | 2026-08-11 | **`current` is now the cart AT THIS STOREFRONT.** A customer with open carts at two restaurants is served — and priced for — the one belonging to the restaurant whose address they are on; the tenant comes from the web address, never from anything the client can assert, and a page that names no restaurant (the marketplace, an unknown address) shows no cart rather than the most recent one from somewhere else. Carts at other restaurants remain readable through `carts`, which is what that query is for. | 0 | [#469](https://github.com/TheCaptainCompany/captain-food/issues/469) — `specs/ordering/api.yaml` `current`: description now states the Host-derived tenant bound on both legs | 0 errors |
 | 2026-08-11 | A customer who is signed in on a restaurant's storefront is now recognised there — the anonymous web path READS the credential the browser already sends, so their cart is theirs rather than a stranger's empty one; when that credential cannot be honoured (expired cookie, identity provider down, or a staff token, which stays anonymous on purpose) they are served the anonymous view rather than an error, and **we now count every one of those silent degrades** — so "identified customers are being served anonymous" can no longer look like "customers stopped having carts". | 0 | [#469](https://github.com/TheCaptainCompany/captain-food/issues/469) — `specs/observability.yaml` read-authorization: `public_credential_degraded_total{reason}` | 0 errors |
 
+- **2026-08-31 — every `send:` step now declares its route, its gate and its dedup axis (#807).**
+  The four `send:` steps that made a process manager write a stream it does not own — the customer
+  bind, the goodwill-credit grant, and the two delivery completions — are now ROUTED declarations:
+  each names the target lane (`to:`), the configuration key its route is rolled back with
+  (`route_gate:`, all three keys `default: false` in `specs/common/`) and the property its lane door
+  dedups on (`dedup_by:`). What the product promises differently: nothing yet in behaviour, because
+  every gate ships OFF and the legacy in-process arms are preserved byte-for-byte — but the SPEC now
+  promises that a saga writing another aggregate's stream is a declared, individually reversible
+  route rather than an undeclared in-process call, and that the goodwill-credit door is keyed per
+  RECLAMATION rather than per customer, so a customer's second credit can never be swallowed as a
+  duplicate. `pm-route-gate` and the new `pm-send-dedup` make both mandatory
+  ([ADR-20260831-093000](adr/ADR-20260831-093000-the-enumeration-is-deliver-and-send-not-deliver-alone.md)).
+
 ---
 
 ## Status of the gate

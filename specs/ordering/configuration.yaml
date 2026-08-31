@@ -84,6 +84,8 @@ keys:
       recorded decision, and the legacy arm is deleted in a SEPARATE change again, with golden
       payload equality as its precondition (beck).
 
+
+
   ORDER_ACCEPTANCE_TIMEOUT_SECONDS:
     type: int
     unit: seconds     # typed duration unit (#167) — the emitters branch on THIS, never on the name

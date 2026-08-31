@@ -171,6 +171,8 @@ CartBindingProcess:
         - send:
             command: { $ref: 'commands.yaml#/BindCartToCustomer' }
             to: { $ref: 'actors.yaml#/Cart' }
+            route_gate: { $ref: 'configuration.yaml#/keys/ROUTE_CART_BIND_THROUGH_LANE' }
+            dedup_by: { $ref: 'commands.yaml#/BindCartToCustomer/properties/cartId' }
             for_each: open_carts
             with:
               cartId: { from_read: open_carts.cart_id }
@@ -259,6 +261,11 @@ ReclamationProcess:
         - send:
             command: { $ref: 'commands.yaml#/GrantCustomerCredit' }
             to: { $ref: 'actors.yaml#/CustomerCredit' }
+            route_gate: { $ref: 'configuration.yaml#/keys/ROUTE_CREDIT_GRANT_THROUGH_LANE' }
+            # The door's dedup axis is the RECLAMATION, never the ledger's own id: the handler is
+            # idempotent per reclamationId and a customer legitimately receives many goodwill
+            # credits, so a customer-keyed door would swallow every grant after the first.
+            dedup_by: { $ref: 'commands.yaml#/GrantCustomerCredit/properties/reclamationId' }
             with:
               customerId: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/customerId' } }
               amount: { from: { $ref: 'events.yaml#/ReclamationResolved/properties/refundAmount' } }

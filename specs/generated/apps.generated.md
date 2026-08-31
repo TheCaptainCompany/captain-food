@@ -94,8 +94,8 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
-| `pm-cart-binding` | customer | saga `CartBindingProcess` | customer + ordering | **all 8** | **fat +6** | `bin_runtime` | 11 | -- |
-| `pm-delivery-dispatch` | delivery | saga `DeliveryDispatchProcess`; ports delivery | delivery + ordering | **all 8** | **fat +6** | `application`, `avelo37-adapter`, `bin_runtime`, `coopcycle-adapter`, `infrastructure`, `uber-direct-adapter` | 15 | -- |
+| `pm-cart-binding` | customer | saga `CartBindingProcess` | common + customer + ordering | **all 8** | **fat +5** | `bin_runtime` | 11 | -- |
+| `pm-delivery-dispatch` | delivery | saga `DeliveryDispatchProcess`; ports delivery | common + delivery + ordering | **all 8** | **fat +5** | `application`, `avelo37-adapter`, `bin_runtime`, `coopcycle-adapter`, `infrastructure`, `uber-direct-adapter` | 15 | -- |
 | `pm-payment-settlement` | order | saga `PaymentSettlementProcess`; ports payment | ordering + payments | **all 8** | **fat +6** | `bin_runtime`, `stripe-adapter` | 13 | -- |
 | `pm-place-order` | order | saga `PlaceOrderProcess`; own mailbox lane; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 13 | -- |
 | `pm-reclamation` | order | saga `ReclamationProcess`; ports payment | common + ordering + payments | **all 8** | **fat +5** | `bin_runtime`, `stripe-adapter` | 13 | -- |

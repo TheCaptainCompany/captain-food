@@ -17709,4 +17709,82 @@ mod pm_route_gate_send_step_rule {
         assert!(!sends.is_empty(), "the scanner matched no `send:` step at all -- a vacuous pin");
         assert_eq!(sends, routed, "every `send:` step must declare `to:` AND `route_gate:`");
     }
+
+    /// `pm-send-dedup` (#807): a routed send must NAME the axis its door dedups on.
+    ///
+    /// The rule exists because every available default is silently wrong somewhere, and the
+    /// money-path one is the expensive direction: `GrantCustomerCredit` runs on a ledger keyed by
+    /// CUSTOMER while its handler is idempotent per `reclamationId`, so a door inheriting the
+    /// target's identity would swallow every goodwill credit after a customer's first — money
+    /// owed, never paid, and no error raised anywhere.
+    #[test]
+    fn red_a_routed_send_with_no_dedup_axis_is_refused() {
+        let model = model_with_send_step_mutated(&|s| {
+            s.remove(Value::from("dedup_by"));
+        });
+        let issues: Vec<String> = validate(&model)
+            .issues
+            .iter()
+            .filter(|i| i.rule == "pm-send-dedup")
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect();
+        assert_eq!(issues.len(), 1, "a routed send with no `dedup_by:` must be one error: {issues:?}");
+    }
+
+    /// A `dedup_by:` naming something the command does not carry cannot be a dedup axis — and
+    /// would not compile once emitted into `external_id`.
+    #[test]
+    fn red_a_dedup_axis_absent_from_the_command_is_refused() {
+        let model = model_with_send_step_mutated(&|s| {
+            s.insert(
+                Value::from("dedup_by"),
+                serde_yaml::from_str("{ $ref: 'commands.yaml#/BindCartToCustomer/properties/nope' }").unwrap(),
+            );
+        });
+        let issues: Vec<String> = validate(&model)
+            .issues
+            .iter()
+            .filter(|i| i.rule == "pm-send-dedup")
+            .map(|i| i.message.clone())
+            .collect();
+        assert!(!issues.is_empty(), "a dedup axis absent from the command must be refused");
+    }
+
+    /// The money path, pinned by NAME rather than by position: the credit door must dedup on the
+    /// RECLAMATION, never on the ledger's own id. Derived from the specs, so it fails if anyone
+    /// later "simplifies" the axis to the target identity.
+    #[test]
+    fn the_credit_route_dedups_on_the_reclamation_not_the_ledger() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let send = model
+            .defs
+            .get("processmanager.yaml")
+            .and_then(|v| v.get("ReclamationProcess"))
+            .and_then(|v| v.get("receives"))
+            .and_then(|v| v.as_sequence())
+            .and_then(|s| {
+                s.iter().find_map(|leg| {
+                    leg.get("steps").and_then(|x| x.as_sequence()).and_then(|steps| {
+                        steps.iter().find_map(|st| {
+                            let send = st.get("send")?;
+                            let c = send.get("command")?.get("$ref")?.as_str()?;
+                            (c.ends_with("/GrantCustomerCredit")).then_some(send)
+                        })
+                    })
+                })
+            })
+            .expect("ReclamationProcess sends GrantCustomerCredit");
+        let axis = send
+            .get("dedup_by")
+            .and_then(|x| x.get("$ref"))
+            .and_then(|x| x.as_str())
+            .expect("the credit send declares a dedup axis");
+        assert!(
+            axis.ends_with("/reclamationId"),
+            "the credit door must dedup per reclamation -- the handler is idempotent per \
+             reclamationId and one customer receives many grants, so any customer-keyed axis \
+             silently drops every credit after the first. Got: {axis}"
+        );
+    }
 }

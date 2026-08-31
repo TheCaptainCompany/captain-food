@@ -7,6 +7,7 @@ description: >
 keys:
 
 
+
   DELIVERY_OFFER_MAX_TTL_SECONDS:
     type: int
     default: 900

@@ -362,6 +362,7 @@
       "actor": "CartBindingProcess",
       "kind": "process-manager",
       "domain_crates": [
+        "domain-common",
         "domain-customer",
         "domain-ordering"
       ],
@@ -371,6 +372,7 @@
       "actor": "DeliveryDispatchProcess",
       "kind": "process-manager",
       "domain_crates": [
+        "domain-common",
         "domain-delivery",
         "domain-ordering"
       ],

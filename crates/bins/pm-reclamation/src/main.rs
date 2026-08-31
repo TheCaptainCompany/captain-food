@@ -85,6 +85,9 @@ async fn main() {
             // the monolith, one per DECLARED route. A route missing from this bin's scoped Config
             // is a compile error naming exactly the decision nobody made.
             route_gates: bin_runtime::RouteGates {
+                bind_cart_to_customer_to_cart: config.route_cart_bind_through_lane,
+                grant_customer_credit_to_customer_credit: config.route_credit_grant_through_lane,
+                mark_order_delivered_to_order: config.route_order_delivery_completion_through_lane,
                 order_placed_to_order: config.route_order_birth_through_lane,
                 place_replacement_order_to_order: config.route_replacement_birth_through_lane,
             },

@@ -32,6 +32,9 @@ pub struct RoutedLane {
 /// each route's own gate says: a lane that only reports when something was routed is a
 /// lane whose silence is ambiguous.
 pub const ROUTED_LANES: &[RoutedLane] = &[
+    RoutedLane { actor_type: "Cart", event_type: "BindCartToCustomer", source: "pm:CartBindingProcess:BindCartToCustomer" },
+    RoutedLane { actor_type: "CustomerCredit", event_type: "GrantCustomerCredit", source: "pm:ReclamationProcess:GrantCustomerCredit" },
+    RoutedLane { actor_type: "Order", event_type: "MarkOrderDelivered", source: "pm:DeliveryDispatchProcess:MarkOrderDelivered" },
     RoutedLane { actor_type: "Order", event_type: "OrderPlaced", source: "pm:PlaceOrderProcess:OrderPlaced" },
     RoutedLane { actor_type: "Order", event_type: "PlaceReplacementOrder", source: "pm:ReclamationProcess:PlaceReplacementOrder" },
 ];
@@ -46,6 +49,12 @@ pub const ROUTED_LANES: &[RoutedLane] = &[
 /// intend to change is not a rollback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Route {
+    /// Routed `sends:` of the COMMAND `BindCartToCustomer` → the `Cart` lane, gated on `configuration.yaml#/keys/ROUTE_CART_BIND_THROUGH_LANE`.
+    BindCartToCustomerToCart,
+    /// Routed `sends:` of the COMMAND `GrantCustomerCredit` → the `CustomerCredit` lane, gated on `configuration.yaml#/keys/ROUTE_CREDIT_GRANT_THROUGH_LANE`.
+    GrantCustomerCreditToCustomerCredit,
+    /// Routed `sends:` of the COMMAND `MarkOrderDelivered` → the `Order` lane, gated on `configuration.yaml#/keys/ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE`.
+    MarkOrderDeliveredToOrder,
     /// Routed `deliver:` of the FACT `OrderPlaced` → the `Order` lane, gated on `configuration.yaml#/keys/ROUTE_ORDER_BIRTH_THROUGH_LANE`.
     OrderPlacedToOrder,
     /// Routed `sends:` of the COMMAND `PlaceReplacementOrder` → the `Order` lane, gated on `configuration.yaml#/keys/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`.
@@ -55,6 +64,9 @@ pub enum Route {
 impl Route {
     /// Every declared route, sorted — the population a gate or a report iterates.
     pub const ALL: &'static [Route] = &[
+        Route::BindCartToCustomerToCart,
+        Route::GrantCustomerCreditToCustomerCredit,
+        Route::MarkOrderDeliveredToOrder,
         Route::OrderPlacedToOrder,
         Route::PlaceReplacementOrderToOrder,
     ];
@@ -64,6 +76,9 @@ impl Route {
     /// error, never a silently-`false` lookup at runtime.
     pub fn config_key(self) -> &'static str {
         match self {
+            Route::BindCartToCustomerToCart => "ROUTE_CART_BIND_THROUGH_LANE",
+            Route::GrantCustomerCreditToCustomerCredit => "ROUTE_CREDIT_GRANT_THROUGH_LANE",
+            Route::MarkOrderDeliveredToOrder => "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
             Route::OrderPlacedToOrder => "ROUTE_ORDER_BIRTH_THROUGH_LANE",
             Route::PlaceReplacementOrderToOrder => "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
         }
@@ -72,6 +87,9 @@ impl Route {
     /// `actors.yaml` key of the target whose lane receives the message.
     pub fn actor_type(self) -> &'static str {
         match self {
+            Route::BindCartToCustomerToCart => "Cart",
+            Route::GrantCustomerCreditToCustomerCredit => "CustomerCredit",
+            Route::MarkOrderDeliveredToOrder => "Order",
             Route::OrderPlacedToOrder => "Order",
             Route::PlaceReplacementOrderToOrder => "Order",
         }
@@ -80,6 +98,9 @@ impl Route {
     /// The message handed over — an `events.yaml` key for a FACT route, a `commands.yaml` key for a COMMAND route.
     pub fn message_type(self) -> &'static str {
         match self {
+            Route::BindCartToCustomerToCart => "BindCartToCustomer",
+            Route::GrantCustomerCreditToCustomerCredit => "GrantCustomerCredit",
+            Route::MarkOrderDeliveredToOrder => "MarkOrderDelivered",
             Route::OrderPlacedToOrder => "OrderPlaced",
             Route::PlaceReplacementOrderToOrder => "PlaceReplacementOrder",
         }
@@ -97,6 +118,12 @@ impl Route {
 /// feeding one route's field from ANOTHER route's configuration value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RouteGates {
+    /// [`Route::BindCartToCustomerToCart`] — `configuration.yaml#/keys/ROUTE_CART_BIND_THROUGH_LANE`.
+    pub bind_cart_to_customer_to_cart: bool,
+    /// [`Route::GrantCustomerCreditToCustomerCredit`] — `configuration.yaml#/keys/ROUTE_CREDIT_GRANT_THROUGH_LANE`.
+    pub grant_customer_credit_to_customer_credit: bool,
+    /// [`Route::MarkOrderDeliveredToOrder`] — `configuration.yaml#/keys/ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE`.
+    pub mark_order_delivered_to_order: bool,
     /// [`Route::OrderPlacedToOrder`] — `configuration.yaml#/keys/ROUTE_ORDER_BIRTH_THROUGH_LANE`.
     pub order_placed_to_order: bool,
     /// [`Route::PlaceReplacementOrderToOrder`] — `configuration.yaml#/keys/ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE`.
@@ -109,6 +136,9 @@ impl RouteGates {
     /// new route slip past a construction site unnoticed, which is the whole failure
     /// this type exists to make impossible.
     pub const NONE: Self = Self {
+        bind_cart_to_customer_to_cart: false,
+        grant_customer_credit_to_customer_credit: false,
+        mark_order_delivered_to_order: false,
         order_placed_to_order: false,
         place_replacement_order_to_order: false,
     };
@@ -116,6 +146,9 @@ impl RouteGates {
     /// Is THIS route's gate on?
     pub fn enabled(&self, route: Route) -> bool {
         match route {
+            Route::BindCartToCustomerToCart => self.bind_cart_to_customer_to_cart,
+            Route::GrantCustomerCreditToCustomerCredit => self.grant_customer_credit_to_customer_credit,
+            Route::MarkOrderDeliveredToOrder => self.mark_order_delivered_to_order,
             Route::OrderPlacedToOrder => self.order_placed_to_order,
             Route::PlaceReplacementOrderToOrder => self.place_replacement_order_to_order,
         }
@@ -642,16 +675,28 @@ pub mod delivery_dispatch_process {
             order_id: row.order_id,
             restaurant_id: row.restaurant_id,
         };
-        match crate::commands::mark_order_delivered(store, sent, &actor).await {
-            Ok(()) => {}
-            Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
-            Err(domain::shared::errors::DomainError::Repository(e)) => {
-                return Err(domain::shared::errors::DomainError::Repository(e))
-            }
-            Err(rejection) => {
-                let reason = format!("MarkOrderDelivered rejected: {rejection} — the target aggregate's own invariants stand; skipped");
-                tracing::warn!(saga = "DeliveryDispatchProcess", %reason, "leg skipped");
-                leg_outcome = Outcome::Skipped(reason);
+        if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::MarkOrderDeliveredToOrder) {
+            lanes.stage(crate::lanes::LaneEnqueue {
+                kind: crate::lanes::LaneMessageKind::Command,
+                actor_type: "Order",
+                actor_id: sent.order_id.0,
+                message_type: "MarkOrderDelivered",
+                payload: serde_json::to_value(&sent).map_err(|e| domain::shared::errors::DomainError::Repository(format!("MarkOrderDelivered lane enqueue payload: {e}")))?,
+                source: "pm:DeliveryDispatchProcess:MarkOrderDelivered".to_string(),
+                external_id: sent.order_id.0.to_string(),
+            });
+        } else {
+            match crate::commands::mark_order_delivered(store, sent, &actor).await {
+                Ok(()) => {}
+                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
+                Err(domain::shared::errors::DomainError::Repository(e)) => {
+                    return Err(domain::shared::errors::DomainError::Repository(e))
+                }
+                Err(rejection) => {
+                    let reason = format!("MarkOrderDelivered rejected: {rejection} — the target aggregate's own invariants stand; skipped");
+                    tracing::warn!(saga = "DeliveryDispatchProcess", %reason, "leg skipped");
+                    leg_outcome = Outcome::Skipped(reason);
+                }
             }
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
@@ -694,16 +739,28 @@ pub mod delivery_dispatch_process {
             order_id: row.order_id,
             restaurant_id: row.restaurant_id,
         };
-        match crate::commands::mark_order_delivered(store, sent, &actor).await {
-            Ok(()) => {}
-            Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
-            Err(domain::shared::errors::DomainError::Repository(e)) => {
-                return Err(domain::shared::errors::DomainError::Repository(e))
-            }
-            Err(rejection) => {
-                let reason = format!("MarkOrderDelivered rejected: {rejection} — the target aggregate's own invariants stand; skipped");
-                tracing::warn!(saga = "DeliveryDispatchProcess", %reason, "leg skipped");
-                leg_outcome = Outcome::Skipped(reason);
+        if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::MarkOrderDeliveredToOrder) {
+            lanes.stage(crate::lanes::LaneEnqueue {
+                kind: crate::lanes::LaneMessageKind::Command,
+                actor_type: "Order",
+                actor_id: sent.order_id.0,
+                message_type: "MarkOrderDelivered",
+                payload: serde_json::to_value(&sent).map_err(|e| domain::shared::errors::DomainError::Repository(format!("MarkOrderDelivered lane enqueue payload: {e}")))?,
+                source: "pm:DeliveryDispatchProcess:MarkOrderDelivered".to_string(),
+                external_id: sent.order_id.0.to_string(),
+            });
+        } else {
+            match crate::commands::mark_order_delivered(store, sent, &actor).await {
+                Ok(()) => {}
+                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
+                Err(domain::shared::errors::DomainError::Repository(e)) => {
+                    return Err(domain::shared::errors::DomainError::Repository(e))
+                }
+                Err(rejection) => {
+                    let reason = format!("MarkOrderDelivered rejected: {rejection} — the target aggregate's own invariants stand; skipped");
+                    tracing::warn!(saga = "DeliveryDispatchProcess", %reason, "leg skipped");
+                    leg_outcome = Outcome::Skipped(reason);
+                }
             }
         }
         // state.set — upsert the run row (envelope stamps last_update_utc).
@@ -902,14 +959,26 @@ pub mod cart_binding_process {
                 cart_id: item.cart_id,
                 customer_id: event.customer_id,
             };
-            match crate::commands::bind_cart_to_customer(store, sent, &actor).await {
-                Ok(()) => {}
-                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
-                Err(domain::shared::errors::DomainError::Repository(e)) => {
-                    return Err(domain::shared::errors::DomainError::Repository(e))
-                }
-                Err(rejection) => {
-                    tracing::warn!(saga = "CartBindingProcess", command = "BindCartToCustomer", %rejection, "command rejected -- leg skipped, the target aggregate's own invariants stand");
+            if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::BindCartToCustomerToCart) {
+                lanes.stage(crate::lanes::LaneEnqueue {
+                    kind: crate::lanes::LaneMessageKind::Command,
+                    actor_type: "Cart",
+                    actor_id: sent.cart_id.0,
+                    message_type: "BindCartToCustomer",
+                    payload: serde_json::to_value(&sent).map_err(|e| domain::shared::errors::DomainError::Repository(format!("BindCartToCustomer lane enqueue payload: {e}")))?,
+                    source: "pm:CartBindingProcess:BindCartToCustomer".to_string(),
+                    external_id: sent.cart_id.0.to_string(),
+                });
+            } else {
+                match crate::commands::bind_cart_to_customer(store, sent, &actor).await {
+                    Ok(()) => {}
+                    Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
+                    Err(domain::shared::errors::DomainError::Repository(e)) => {
+                        return Err(domain::shared::errors::DomainError::Repository(e))
+                    }
+                    Err(rejection) => {
+                        tracing::warn!(saga = "CartBindingProcess", command = "BindCartToCustomer", %rejection, "command rejected -- leg skipped, the target aggregate's own invariants stand");
+                    }
                 }
             }
         }
@@ -960,16 +1029,28 @@ pub mod reclamation_process {
                 amount: event.refund_amount.clone().expect("saga value guaranteed present by the leg's branch guard"),
                 reclamation_id: event.reclamation_id,
             };
-            match crate::commands::grant_customer_credit(store, sent, &actor).await {
-                Ok(()) => {}
-                Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
-                Err(domain::shared::errors::DomainError::Repository(e)) => {
-                    return Err(domain::shared::errors::DomainError::Repository(e))
-                }
-                Err(rejection) => {
-                    let reason = format!("GrantCustomerCredit rejected: {rejection} — the target aggregate's own invariants stand; skipped");
-                    tracing::warn!(saga = "ReclamationProcess", %reason, "leg skipped");
-                    leg_outcome = Outcome::Skipped(reason);
+            if let Some(lanes) = env.lane_sink_for(crate::generated::process_managers::Route::GrantCustomerCreditToCustomerCredit) {
+                lanes.stage(crate::lanes::LaneEnqueue {
+                    kind: crate::lanes::LaneMessageKind::Command,
+                    actor_type: "CustomerCredit",
+                    actor_id: sent.customer_id.0,
+                    message_type: "GrantCustomerCredit",
+                    payload: serde_json::to_value(&sent).map_err(|e| domain::shared::errors::DomainError::Repository(format!("GrantCustomerCredit lane enqueue payload: {e}")))?,
+                    source: "pm:ReclamationProcess:GrantCustomerCredit".to_string(),
+                    external_id: sent.reclamation_id.0.to_string(),
+                });
+            } else {
+                match crate::commands::grant_customer_credit(store, sent, &actor).await {
+                    Ok(()) => {}
+                    Err(e) if crate::ports::is_version_conflict(&e) => return Err(e),
+                    Err(domain::shared::errors::DomainError::Repository(e)) => {
+                        return Err(domain::shared::errors::DomainError::Repository(e))
+                    }
+                    Err(rejection) => {
+                        let reason = format!("GrantCustomerCredit rejected: {rejection} — the target aggregate's own invariants stand; skipped");
+                        tracing::warn!(saga = "ReclamationProcess", %reason, "leg skipped");
+                        leg_outcome = Outcome::Skipped(reason);
+                    }
                 }
             }
             return Ok(Outcome::Completed);
