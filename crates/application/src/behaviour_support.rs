@@ -211,6 +211,16 @@ impl TestBed {
                     );
                 }
             }
+            // `*Updated` carries the FULL entity (replace semantics), and the real `Catalog`
+            // projection is fed by it (projection_tables.yaml#/Catalog `fedBy`), rebuilding the
+            // offer tree — so an offer's availability/price move here exactly as they do in
+            // production. This is how a kitchen 86's a dish: the offer stays in the catalog and
+            // only its availability flag flips.
+            DomainEvent::ProductUpdated(e) => {
+                for offer in &e.product.offers {
+                    self.catalogs.add_offer(e.restaurant_id, offer_view(&e.product.name.0, offer));
+                }
+            }
             DomainEvent::CatalogImported(e) => {
                 for product in &e.products {
                     for offer in &product.offers {

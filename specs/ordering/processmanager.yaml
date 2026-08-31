@@ -67,6 +67,29 @@ PlaceOrderProcess:
             where: { restaurant_id: { from: { $ref: 'commands.yaml#/PlaceOrder/properties/restaurantId' } } }
             note: "The LIVE-CATALOG PRICE AUTHORITY (rules.yaml#/ServerPriceAuthority): every cart line is repriced from this row's offer/option tree, and that recomputed total IS the PaymentIntent amount -- a leg that cannot reach this table cannot price a checkout at all. SELECTed from the `catalog` projection, and that is DELIBERATE and customer-visible, not an asymmetry to clean up: the cart screen prices from this same projection at read time (specs/screens/restaurant_frontoffice.yaml `cart` resolver), so what is DISPLAYED and what is CHARGED cannot disagree. Folding the catalog stream here would make them disagree under projector lag and surface PriceMismatch AFTER the customer has decided and is looking at the Stripe element."
         - guard: { throws: { $ref: 'errors.yaml#/PriceUnresolvable' }, note: "Fail-closed pricing: every cart line's price resolves from the live catalog; otherwise reject — never fall back to a client amount." }
+        - guard:
+            throws: { $ref: 'errors.yaml#/OfferUnavailable' }
+            note: >
+              ORDERABILITY RE-DERIVED AT CHECKOUT, not inherited from cart-edit time: the offer's
+              manual availability flag is read from the LIVE catalog again here. Pricing above
+              fails closed only on a line that LEFT the catalog; an offer the kitchen 86'd is
+              still present and still prices, so without this guard it is bought and the ticket
+              lands on a pass that has none. Positioned after the pricing guards (a line with no
+              live price is still PriceUnresolvable first) and strictly BEFORE the payment call,
+              so a refusal can never strand a Stripe hold.
+        - guard:
+            throws: { $ref: 'errors.yaml#/InsufficientStock' }
+            note: >
+              The oversell guard, on the money path: a stock-TRACKED offer must still cover the
+              quantity sitting in the cart. Untracked (no stock quantity) never blocks — untracked
+              is not zero, and treating it as zero would refuse every restaurant that does not
+              count portions.
+        - guard:
+            throws: { $ref: 'errors.yaml#/InvalidOptionSelection' }
+            note: >
+              The same re-derivation for the line's selected options: they must still belong to
+              the offer's option lists, within their selection bounds, in the catalog as it stands
+              now — an option list edited since the line was added is the same staleness class.
         - guard: { throws: { $ref: 'errors.yaml#/PriceMismatch' }, note: "If the client sent expectedTotal (confirmation only), it must equal the server-recomputed total — the server is the only price authority." }
         - read:
             model: { $ref: 'database/tables/projection_tables.yaml#/CustomerCreditBalance' }

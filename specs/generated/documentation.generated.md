@@ -3745,6 +3745,9 @@ sequenceDiagram
   PM--xIN: throws OutsideDeliveryArea
   PM->>RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws PriceUnresolvable
+  PM--xIN: throws OfferUnavailable
+  PM--xIN: throws InsufficientStock
+  PM--xIN: throws InvalidOptionSelection
   PM--xIN: throws PriceMismatch
   PM->>RM_CustomerCreditBalance: read as customer_credit [customer_id=PlaceOrder.customerId]
   PM->>PT_payment: request
@@ -3896,7 +3899,7 @@ _⚙️ process manager_ — The checkout saga. On PlaceOrder: reads the OPEN ca
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
+| [📩 `PlaceOrder`](#command-placeorder) | [⚡ `PaymentIntentCreated`](#event-paymentintentcreated) | [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `OfferUnavailable`](#error-offerunavailable), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined) |
 | [⚡ `PaymentAuthorized`](#event-paymentauthorized) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 | [⚡ `PaymentFailed`](#event-paymentfailed) | _Payment failed: resolve the run; no order is placed and the cart stays OPEN._ | [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned) |
 
@@ -3930,6 +3933,9 @@ sequenceDiagram
   PM--xIN: throws OutsideDeliveryArea
   PM->>RM_Catalog: read as catalog [restaurant_id=PlaceOrder.restaurantId]
   PM--xIN: throws PriceUnresolvable
+  PM--xIN: throws OfferUnavailable
+  PM--xIN: throws InsufficientStock
+  PM--xIN: throws InvalidOptionSelection
   PM--xIN: throws PriceMismatch
   PM->>RM_CustomerCreditBalance: read as customer_credit [customer_id=PlaceOrder.customerId]
   PM->>PT_payment: request
@@ -4451,7 +4457,7 @@ SAGA (checkout). Reads the OPEN cart referenced by cartId, re-validates it again
 
 - **Dispatched by**: [✏️ `placeOrder`](#mutation-placeorder) · **handled by** [🎭 `PlaceOrderProcess`](#actor-placeorderprocess)
 - **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **Throws**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined)
+- **Throws**: [⛔ `CartNotFound`](#error-cartnotfound), [⛔ `CartNotOpen`](#error-cartnotopen), [⛔ `CartEmpty`](#error-cartempty), [⛔ `RestaurantPaused`](#error-restaurantpaused), [⛔ `CannotOrderTestRestaurant`](#error-cannotordertestrestaurant), [⛔ `OutsideServiceHours`](#error-outsideservicehours), [⛔ `DeliveryAddressRequired`](#error-deliveryaddressrequired), [⛔ `OutsideDeliveryArea`](#error-outsidedeliveryarea), [⛔ `PriceUnresolvable`](#error-priceunresolvable), [⛔ `OfferUnavailable`](#error-offerunavailable), [⛔ `InsufficientStock`](#error-insufficientstock), [⛔ `InvalidOptionSelection`](#error-invalidoptionselection), [⛔ `PriceMismatch`](#error-pricemismatch), [⛔ `PaymentDeclined`](#error-paymentdeclined)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -5773,10 +5779,10 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="error-mutereasonrequired"></a>⛔ `MuteReasonRequired` | A participant was muted without a justification reason; a mute must record why (rules.yaml#/MuteRequiresAReason) (#129).  | 🇬🇧 A reason is required to mute a participant. | 🇫🇷 Un motif est requis pour rendre un participant muet. | [📩 `MuteParticipant`](#command-muteparticipant) |
 | <a id="error-participantnotmuted"></a>⛔ `ParticipantNotMuted` | An unmute targeted a role that is not currently muted in the order's conversation (rules.yaml#/OnlyMutedParticipantsCanBeUnmuted) (#129).  | 🇬🇧 This participant is not currently muted. | 🇫🇷 Ce participant n'est pas actuellement muet. | [📩 `UnmuteParticipant`](#command-unmuteparticipant) |
 | <a id="error-restaurantpaused"></a>⛔ `RestaurantPaused` | Restaurant acceptance mode is PAUSED; it cannot take orders. | 🇬🇧 '{restaurantName}' is not taking orders right now. | 🇫🇷 '{restaurantName}' ne prend pas de commandes pour le moment. | [📩 `PlaceOrder`](#command-placeorder) |
-| <a id="error-offerunavailable"></a>⛔ `OfferUnavailable` | Offer availability is UNAVAILABLE (manual flag). | 🇬🇧 '{productName}' ({offerName}) is currently unavailable. | 🇫🇷 '{productName}' ({offerName}) est actuellement indisponible. | [📩 `AddCartLine`](#command-addcartline) |
-| <a id="error-insufficientstock"></a>⛔ `InsufficientStock` | Requested quantity exceeds available stock. | 🇬🇧 Only {available} left of '{productName}' ({offerName}), but {requested} were requested. | 🇫🇷 Il ne reste que {available} de '{productName}' ({offerName}), mais {requested} ont été demandés. | [📩 `AddCartLine`](#command-addcartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) |
+| <a id="error-offerunavailable"></a>⛔ `OfferUnavailable` | Offer availability is UNAVAILABLE (manual flag). | 🇬🇧 '{productName}' ({offerName}) is currently unavailable. | 🇫🇷 '{productName}' ({offerName}) est actuellement indisponible. | [📩 `AddCartLine`](#command-addcartline), [📩 `PlaceOrder`](#command-placeorder) |
+| <a id="error-insufficientstock"></a>⛔ `InsufficientStock` | Requested quantity exceeds available stock. | 🇬🇧 Only {available} left of '{productName}' ({offerName}), but {requested} were requested. | 🇫🇷 Il ne reste que {available} de '{productName}' ({offerName}), mais {requested} ont été demandés. | [📩 `AddCartLine`](#command-addcartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-quantityexceedslimit"></a>⛔ `QuantityExceedsLimit` | Requested quantity exceeds the per-line maximum. | 🇬🇧 You can't order that many of '{productName}'. | 🇫🇷 Vous ne pouvez pas commander autant de '{productName}'. | [📩 `AddCartLine`](#command-addcartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity) |
-| <a id="error-invalidoptionselection"></a>⛔ `InvalidOptionSelection` | A selected option does not belong to the offer, or violates the option list's min/max. | 🇬🇧 Invalid option selection for '{productName}'. | 🇫🇷 Sélection d'options invalide pour '{productName}'. | [📩 `AddCartLine`](#command-addcartline) |
+| <a id="error-invalidoptionselection"></a>⛔ `InvalidOptionSelection` | A selected option does not belong to the offer, or violates the option list's min/max. | 🇬🇧 Invalid option selection for '{productName}'. | 🇫🇷 Sélection d'options invalide pour '{productName}'. | [📩 `AddCartLine`](#command-addcartline), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-cartnotfound"></a>⛔ `CartNotFound` | No cart with this id. | 🇬🇧 Cart not found. | 🇫🇷 Panier introuvable. | [📩 `AddCartLine`](#command-addcartline), [📩 `RemoveCartLine`](#command-removecartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity), [📩 `BindCartToCustomer`](#command-bindcarttocustomer), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-cartnotopen"></a>⛔ `CartNotOpen` | Cart is not OPEN (already checked out). | 🇬🇧 This cart can no longer be modified. | 🇫🇷 Ce panier ne peut plus être modifié. | [📩 `AddCartLine`](#command-addcartline), [📩 `RemoveCartLine`](#command-removecartline), [📩 `ChangeCartLineQuantity`](#command-changecartlinequantity), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-cartrestaurantmismatch"></a>⛔ `CartRestaurantMismatch` | Line/checkout restaurant differs from the cart's restaurant (no mixing). | 🇬🇧 Your cart already has items from another restaurant, not '{restaurantName}'. | 🇫🇷 Votre panier contient déjà des articles d'un autre restaurant que '{restaurantName}'. | [📩 `AddCartLine`](#command-addcartline) |
@@ -6019,9 +6025,9 @@ _The server is the only price authority on the write path: order line totals, th
 <a id="rule-checkoutpricescartcreatespaymentintent"></a>
 #### 📐 Rule: `CheckoutPricesCartCreatesPaymentIntent`
 
-_Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment._
+_Checkout reads the open cart's money-free lines, prices them from the live catalog (price_cart), and creates a Stripe PaymentIntent; it is rejected on paused restaurant / empty cart / missing or out-of-area address / declined payment. ORDERABILITY IS RE-DERIVED AT CHECKOUT, never inherited from the moment the line was added: every cart line is re-validated against the LIVE catalog for availability (OfferUnavailable), tracked stock covering its quantity (InsufficientStock) and a still-valid option selection (InvalidOptionSelection), strictly BEFORE the payment call so a refusal can never strand a Stripe hold. Pricing alone is not this check — it fails closed only on a line that LEFT the catalog, while an offer the kitchen 86'd between adding and paying still resolves a price; without the re-check that order is accepted and the ticket lands on a pass that has none. Untracked stock (no quantity) never blocks — untracked is not zero (availability ≠ stock; orderable = AVAILABLE and stock > 0)._
 
-- **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
+- **Verified by**: [🧪 `TestPlaceOrderCreatesPaymentIntent`](#test-testplaceordercreatespaymentintent), [🧪 `TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded`](#test-testplaceorderrejectsofferunavailablesincethelinewasadded), [🧪 `TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity`](#test-testplaceorderrejectsstockfallenbelowthecartlinequantity), [🧪 `TestPlaceOrderAcceptsAnOfferThatTracksNoStock`](#test-testplaceorderacceptsanofferthattracksnostock), [🧪 `TestPlaceOrderIsRejected`](#test-testplaceorderisrejected)
 
 <a id="rule-checkoutrefusesonlyoutsideservicehours"></a>
 #### 📐 Rule: `CheckoutRefusesOnlyOutsideServiceHours`
@@ -6960,6 +6966,36 @@ _A cart line whose price cannot be resolved from the live catalog rejects the ch
 - **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
 - **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
 
+<a id="test-testplaceorderrejectsofferunavailablesincethelinewasadded"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded`
+
+_An offer 86'd AFTER the cart line was added rejects the checkout: it still prices (it never left the catalog), so only a re-derived availability check can catch it_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `ProductUpdated`](#event-productupdated)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `OfferUnavailable`](#error-offerunavailable)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderrejectsstockfallenbelowthecartlinequantity"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity`
+
+_A stock-TRACKED offer whose stock fell below the cart line's quantity after the line was added rejects the checkout — the oversell case, caught at checkout and not only at cart-edit time_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `OfferStockUpdated`](#event-offerstockupdated)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `InsufficientStock`](#error-insufficientstock)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderacceptsanofferthattracksnostock"></a>
+#### 🧪 Test: `TestPlaceOrderAcceptsAnOfferThatTracksNoStock`
+
+_An offer that tracks no stock never blocks the checkout: untracked is not zero — the false-positive floor of the orderability re-check, for every restaurant that does not count portions_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
 <a id="test-testplaceorderisrejected"></a>
 #### 🧪 Test: `TestPlaceOrderIsRejected`
 
@@ -7327,6 +7363,36 @@ _A cart line whose price cannot be resolved from the live catalog rejects the ch
 - **When**: [📩 `PlaceOrder`](#command-placeorder)
 - **Thrown**: [⛔ `PriceUnresolvable`](#error-priceunresolvable)
 - **Verifies**: [📐 `ServerPriceAuthority`](#rule-serverpriceauthority)
+
+<a id="test-testplaceorderrejectsofferunavailablesincethelinewasadded"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsOfferUnavailableSinceTheLineWasAdded`
+
+_An offer 86'd AFTER the cart line was added rejects the checkout: it still prices (it never left the catalog), so only a re-derived availability check can catch it_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `ProductUpdated`](#event-productupdated)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `OfferUnavailable`](#error-offerunavailable)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderrejectsstockfallenbelowthecartlinequantity"></a>
+#### 🧪 Test: `TestPlaceOrderRejectsStockFallenBelowTheCartLineQuantity`
+
+_A stock-TRACKED offer whose stock fell below the cart line's quantity after the line was added rejects the checkout — the oversell case, caught at checkout and not only at cart-edit time_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `OfferStockUpdated`](#event-offerstockupdated)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Thrown**: [⛔ `InsufficientStock`](#error-insufficientstock)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
+
+<a id="test-testplaceorderacceptsanofferthattracksnostock"></a>
+#### 🧪 Test: `TestPlaceOrderAcceptsAnOfferThatTracksNoStock`
+
+_An offer that tracks no stock never blocks the checkout: untracked is not zero — the false-positive floor of the orderability re-check, for every restaurant that does not count portions_
+
+- **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantActivated`](#event-restaurantactivated), [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded), [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
+- **When**: [📩 `PlaceOrder`](#command-placeorder)
+- **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
+- **Verifies**: [📐 `CheckoutPricesCartCreatesPaymentIntent`](#rule-checkoutpricescartcreatespaymentintent)
 
 <a id="test-testplaceorderisrejected"></a>
 #### 🧪 Test: `TestPlaceOrderIsRejected`
