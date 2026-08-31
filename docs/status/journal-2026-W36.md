@@ -3,6 +3,44 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the priced quote token is DESIGNED, and the reversal it carries is now flagged in
+> both records** (docs-only: one proposal, two record edits, two register-row notes, no `specs/**`,
+> no code).
+> [PROP-20260831-134539 "The priced quote token: display and charge agree by construction"](../proposals/PROP-20260831-134539-priced-quote-token.md)
+> lands the design that
+> [ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md)
+> §4d deferred, tracking
+> [#816 "Display/charge divergence is undetected: the expectedTotal equality check never runs in production"](https://github.com/TheCaptainCompany/captain-food/issues/816).
+> Recommendation: the **signed coordinate** — the token carries `(catalogId, catalogVersion)` plus
+> the total, **never the per-line prices**, so the catalog stays the price authority
+> (`specs/ordering/rules.yaml#/ServerPriceAuthority`) and the token is a pointer into the log rather
+> than a client-carried price. `PlaceOrder.quote` is **required** (precedent: `customerId` under
+> [#144](https://github.com/TheCaptainCompany/captain-food/issues/144)) and `expectedTotal` retires
+> with it.
+> **The finding that changed the design, verified in code**: the oversell guard
+> `require_orderable_line` (`crates/application/src/commands.rs:793`) is called **only** at `:921`
+> and `:950` — `AddCartLine` and `ChangeCartLineQuantity` — and **never at checkout**
+> (`TODO(invariant)` at `:2604-2606`). So the pricer's `offer_by_id` lookup
+> (`crates/application/src/pricing.rs:57-59`) is the checkout path's **only** catalog reality check,
+> and an as-of fold that covered existence would move it off the money path with no diff to notice.
+> Hence the fence: **the as-of fold is price-and-tax only**, enforced by a capability type with no
+> availability accessor rather than by a rule (ADR-20260803-234035 level 4).
+> **The unflagged reversal is fixed.** `ADR-20260831-121957` and `docs/decisions/QUOTE-TOKEN.yaml`
+> now cite [ADR-20260810-112836 "Cart priced LIVE on read"](../adr/ADR-20260810-112836-cart-priced-live-on-read.md)
+> and say plainly that **both** reversed clauses — the *"frozen at commitment"* freeze locus and the
+> *"carried by the `expectedTotal` equality check"* enforcement clause — are in that record's **§2**;
+> the earlier attribution of the second to §4 was wrong (its §4 is the `cart(id)` IDOR retirement).
+> `ADR-20260810-112836` gains a §2-superseded-in-part header so a reader arriving there first is not
+> told a dead check is the enforcement. Before this change `grep -c '20260810-112836'` returned
+> **0** on both deciding records.
+> **Register**: `QUOTE-STALENESS` stays **open** and is now **priced** (N = 30 min as a backstop
+> only, sized from the cart-to-pay p99 with SCA/3DS; M dropped because `OfferStockUpdated`
+> (`specs/catalog/events.yaml:198`) makes any small M a 100%-fire timer) — a pricing is not a
+> decision. `CAPTAINNET-ZERO` is named as the blocker of the absorb *alternative* only: the
+> recommended band needs no funding decision at V0, because `restaurant_payout` **is** the total and
+> `captain_net` is zero in code (`crates/application/src/pricing.rs:105-114`). **No new register row
+> was opened.**
+
 > **2026-08-31 — the coordinator gets the register-check gate on its committing surface (#814).**
 > Every *agent* has been gated on the ask since 2026-08-21; the **coordinator had no gate on any
 > surface**, and in one session produced **nine** failures of exactly the class the gate prevents —

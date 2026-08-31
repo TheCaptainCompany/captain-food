@@ -190,6 +190,14 @@ being cleaned up would get both halves wrong.
 Put to the founder with options, trade-offs and a recommendation; **he chose (B), build the token.**
 So young's finding is **adopted**, not merely recorded.
 
+**THIS DECISION REVERSES [ADR-20260810-112836 "Cart priced LIVE on read"](ADR-20260810-112836-cart-priced-live-on-read.md) IN PART, and the first version of this record did not say so** (`grep -c '20260810-112836'` returned **0** on both this file and `docs/decisions/QUOTE-TOKEN.yaml` until 2026-08-31). Stated plainly, because an unflagged reversal is how a superseded rule keeps being cited as current:
+
+- **Its §2 FREEZE LOCUS is reversed.** ADR-20260810-112836 §2 is titled *"Live upstream, frozen at commitment"* and places the one authoritative freeze at `PlaceOrder -> price_cart -> CheckoutSnapshot`. The quote token moves the freeze to **quote time** — materially that record's Alternative **A**, which it considered and rejected.
+- **Its §2 ENFORCEMENT CLAUSE is reversed.** The same section says the legal display guarantee (C. conso. L112-1 / L221-5) *"is carried by the `expectedTotal` equality check"*. That check never runs in production ([#816](https://github.com/TheCaptainCompany/captain-food/issues/816), `crates/application/src/commands.rs:2615`), and this decision replaces it outright. **Both clauses are in §2** — a reading that put the enforcement clause in §4 is wrong; §4 of that record is the `cart(id)` IDOR retirement.
+- **What is NOT reversed**: §1 (the Cart projection is a pure, money-free fold), §3, §5 and §6 all stand, and so does the one-pricer property that makes this change small.
+
+ADR-20260810-112836's §2 objection to Alternative A — that it *"freezes a price the customer has not committed to"* — is answered rather than ignored: A froze prices **into cart events at add-time** (an event-versioning story, reversing ADR-20260720-002217), whereas the token freezes a **coordinate on a command**, which is why nothing in `domain_events` moves. The design, the option space and the bound on that freeze are [PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md).
+
 **The shape.** The priced cart returns an **opaque token carrying the catalog stream version it was
 computed at**. `PlaceOrder` carries the token. **The write side prices from the catalog as of that
 version.** Display and charge then agree **by construction**, and keep agreeing if the projection is
@@ -204,7 +212,16 @@ could ship with **zero users**. Recorded as a consequence, not as a re-decision 
 
 **NOT built here, and not designed here.** It is a separate work item with a real option space —
 where the token lives, opaque vs structured, and the staleness policy — so a **proposal + tracking
-issue follow**. This record does not touch `specs/**`.
+issue follow**. This record does not touch `specs/**`. **The proposal landed 2026-08-31**:
+[PROP-20260831-134539 "The priced quote token: display and charge agree by construction"](../proposals/PROP-20260831-134539-priced-quote-token.md),
+tracking issue
+[#816 "Display/charge divergence is undetected: the expectedTotal equality check never runs in production"](https://github.com/TheCaptainCompany/captain-food/issues/816).
+It recommends the **signed coordinate** (the token carries `(catalogId, catalogVersion)` and the
+total, never the per-line prices — the catalog stays the price authority), and it fences the as-of
+fold to **price and tax only**: existence, availability, stock, restaurant state and service hours
+resolve at HEAD, because the pricer's `offer_by_id` lookup is the checkout path's ONLY catalog
+reality check today (the oversell guard `require_orderable_line` is never called there —
+`crates/application/src/commands.rs:793`, callers `:921`/`:950`, `TODO(invariant)` at `:2604-2606`).
 
 **OPEN sub-decision — the staleness policy.** *Accept a quote within N minutes / M catalog
 versions?* The founder named neither N nor M; it is being **priced rather than re-asked**. Register

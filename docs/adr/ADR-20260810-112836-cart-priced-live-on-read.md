@@ -2,6 +2,21 @@
 
 ## Status
 
+**§2 SUPERSEDED IN PART, 2026-08-31, by
+[ADR-20260831-121957](ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md)
+§4d (register row `QUOTE-TOKEN`, founder decision).** Read §2 below with this in front of it: (1) the
+**freeze locus** moves from *commitment* to *quote time* — materially the Alternative **A** this
+record rejected, with its objection answered in the deciding record; and (2) the **enforcement
+clause** — *"the legal display guarantee … is carried by the `expectedTotal` equality check"* — is
+**false today and is being replaced**: that check never runs in production
+(`crates/application/src/commands.rs:2615` is gated on an `expectedTotal` nothing populates —
+[#816 "Display/charge divergence is undetected: the expectedTotal equality check never runs in
+production"](https://github.com/TheCaptainCompany/captain-food/issues/816)). Design:
+[PROP-20260831-134539](../proposals/PROP-20260831-134539-priced-quote-token.md).
+**§§1, 3, 4, 5 and 6 stand unchanged** — the pure money-free Cart fold, `cart.current`, the IDOR
+retirement, the ADR-0028 §5 correction and the `cart-price` contract are all still current, and so
+is the one-pricer property that makes the replacement small. The original text below is untouched.
+
 Accepted (product-owner decision 2026-08-10, recorded in
 [PROP-20260810-231500 "cart.current: the authenticated customer's PRICED cart"](../proposals/PROP-20260810-231500-cart-current-priced.md)
 and DECISIONS.md §1 row G). Realizes Option B / LIVE for

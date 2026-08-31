@@ -23,6 +23,23 @@ note: >
 
   NO MIGRATION (CLAUDE.md question 2): a token on a COMMAND and on a read response is not a stored
   event shape. Nothing in `domain_events` moves.
+
+  REVERSES ADR-20260810-112836 "Cart priced LIVE on read" IN PART -- unflagged until 2026-08-31,
+  when `grep -c '20260810-112836'` returned 0 on this file AND on ADR-20260831-121957. Both
+  reversed clauses are in that record's SECTION 2 (a reading that puts the second one in section 4
+  is wrong -- its section 4 is the cart(id) IDOR retirement): (1) the FREEZE LOCUS, "Live upstream,
+  frozen at commitment", moves from commitment to quote time -- materially that record's rejected
+  Alternative A; and (2) the ENFORCEMENT CLAUSE, "the legal display guarantee is carried by the
+  expectedTotal equality check", is replaced outright, since that check never runs in production
+  (#816, crates/application/src/commands.rs:2615). NOT reversed: its sections 1, 3, 5 and 6 stand,
+  including the pure money-free Cart fold and the one-pricer property.
+
+  DESIGN: PROP-20260831-134539 (2026-08-31), tracking issue #816. Recommends the SIGNED COORDINATE
+  (token carries catalogId + catalogVersion + total, never per-line prices, so the catalog stays the
+  price authority) and fences the as-of fold to PRICE AND TAX ONLY -- existence, availability,
+  stock, restaurant state and service hours resolve at HEAD. That fence is load-bearing: the
+  pricer's offer_by_id lookup is the checkout path's only catalog reality check today, because
+  require_orderable_line (commands.rs:793) is called only at :921 and :950 and never at checkout.
 evidence: >
   Founder decision 2026-08-31, put to him with options, trade-offs and a recommendation: he chose
   (B), BUILD THE PRICED QUOTE TOKEN. The priced cart returns an opaque token carrying the catalog
