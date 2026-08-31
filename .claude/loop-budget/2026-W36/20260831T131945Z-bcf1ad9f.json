@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1620,
+  "recordedAt": "2026-08-31T13:19:45.176Z",
+  "branch": "main",
+  "note": "#814 review round 1: F1 resolver (three ADR filename eras), F2 discriminator fail-closed, F3 symbol anchor, cases D13-D22 red-first"
+}
