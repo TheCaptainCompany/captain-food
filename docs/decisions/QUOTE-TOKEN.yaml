@@ -1,0 +1,54 @@
+key: "QUOTE-TOKEN"
+status: "decided"
+question: "How is the display/charge coherence at checkout enforced -- by the cart screen and the checkout leg happening to read the same catalog projection, or by a priced quote token carrying the catalog version it was computed at?"
+owner: "founder"
+opened: "2026-08-31"
+decided: "2026-08-31"
+decided_by: "ADR-20260831-121957"
+capacity: "founder"
+register: "docs/proposals/DECISIONS.md §42"
+note: >
+  THE BUILD IS A SEPARATE WORK ITEM and is NOT designed by this row or its record: a real option
+  space remains (where the token lives, opaque vs structured) so a proposal + tracking issue follow.
+  The staleness policy is its own open row, QUOTE-STALENESS.
+
+  COUPLING (young): the as-of fold is the SAME primitive SNAP-1 (§43) needs -- one mechanism, and
+  building it twice is the waste.
+
+  CONSEQUENCE FOR PMW-4: once the token lands the checkout leg asks for an as-of price instead of
+  reading a projection, so specs/ordering/processmanager.yaml:63-68 STOPS being a survivor of the
+  read: retirement, leaving only the session-carts leg (:163-169). evans's proposed `authority:`
+  kind could therefore ship with ZERO users. Recorded as an input PMW-4's decider must weigh, not
+  as a re-decision.
+
+  NO MIGRATION (CLAUDE.md question 2): a token on a COMMAND and on a read response is not a stored
+  event shape. Nothing in `domain_events` moves.
+evidence: >
+  Founder decision 2026-08-31, put to him with options, trade-offs and a recommendation: he chose
+  (B), BUILD THE PRICED QUOTE TOKEN. The priced cart returns an opaque token carrying the catalog
+  stream version it was computed at; PlaceOrder carries the token; the write side prices from the
+  catalog as of that version. Display and charge agree BY CONSTRUCTION and keep agreeing if the
+  projection is dropped, rebuilt or lagging. Repricing becomes explicit and happens AT THE CART
+  STEP, BEFORE THE STRIPE ELEMENT -- never after.
+
+  WHAT IT REPLACES, and the honest account of the interim (young, adopted rather than merely
+  recorded): "display/charge coherence currently rests on a rebuildable artifact and on two reads at
+  different times; it does not survive a catalog rebuild and does not survive a slow customer."
+  Today the guarantee is enforced by two call sites happening to read the same catalog projection
+  (crates/server/src/graphql/cart_read.rs:14 and the PlaceOrder leg), under a LEGAL display
+  guarantee (specs/ordering/rules.yaml#/ServerPriceAuthority :61-65, Code de la consommation
+  L112-1/L221-5).
+
+  WHAT DOES NOT CHANGE (evans): specs/ordering/processmanager.yaml:63-68 is a Published Language
+  with a Shared Kernel implementation and is NOT an exemption -- this decision replaces the
+  MECHANISM that enforces it, never its STATUS. It must not be filed as a tolerated lapse now being
+  cleaned up.
+
+  THE TENSION, NAMED RATHER THAN GLOSSED. PROP-20260815-142349:142 refuses a version field in an ask
+  REPLY payload, verbatim: "The served version rides the ENVELOPE, never the payload -- no
+  asOf/version/streamPosition field in any reply -- same rule, same reason as the
+  event-payload/envelope split in CLAUDE.md. One rule, both speech acts." A quote token on a COMMAND
+  is ADJACENT BUT NOT THE SAME SPEECH ACT: a reply is a snapshot whose authority expires at send,
+  whereas a price quote the customer was shown is BUSINESS DATA, like an ExternalReference -- a fact
+  about what happened in the world, not envelope metadata about how a message was served. That is
+  the reading put to the founder and the one he accepted, with the tension named.

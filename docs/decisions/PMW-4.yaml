@@ -44,6 +44,17 @@ evidence: >
   aggregate and this is a lapse to clean up -- and cleaning it up would charge a price the customer
   never saw, on the money path, at peak.
 
+  BUT 4b IS DECIDED TO BE REPLACED, and this row's input narrows because of it (founder decision
+  2026-08-31, row QUOTE-TOKEN): the priced cart will return an opaque token carrying the catalog
+  stream version it was computed at, and the write side will price as of that version, so the
+  checkout leg ASKS for an as-of price instead of reading a projection. 4b then stops being a
+  survivor and only 4a remains -- which means evans's `authority:` kind could ship with ZERO USERS,
+  and this row's decider must weigh that. What does NOT change (evans): 4b is a Published Language,
+  never an exemption; the MECHANISM is replaced, the STATUS is not. young's honest account of the
+  interim, so the paragraph above is not read as a defence: "display/charge coherence currently
+  rests on a rebuildable artifact and on two reads at different times; it does not survive a catalog
+  rebuild and does not survive a slow customer."
+
   THE DIVERGENCE, RECORDED NOT BLENDED. (a) evans, RECOMMENDED -- TWO kinds, each $ref-ing a
   different domain artifact and no "exemption" noun anywhere: `index:` with `by:` -> the unowned key
   scalar (the SessionId shape), and `authority:` -> the rule declaring who is authoritative (the

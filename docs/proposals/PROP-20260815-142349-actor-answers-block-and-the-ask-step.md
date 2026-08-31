@@ -832,9 +832,26 @@ unowned key scalar; `authority:` → the authoritative rule) and a single differ
 recorded as the dissent. A *generic* escape hatch is refused: *"two carve-outs riding a surviving
 `read:`, or a generic exemption `$ref`, is `source:` again wearing a new name."*
 
+**§9 STANDS UNAMENDED — founder decision 2026-08-31, row `SETTLE-PAYMENT-REF`.** The settlement leg
+**keeps the two-hop ask**; `paymentIntentId` is **not** added to the Order's facts and no event shape
+changes. The challenge (event-carry it, on the precedent of PROP-20260808-142532 D2) was **considered
+and rejected**, and is recorded intact in
+[ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md)
+§4e so it is not re-litigated. The accepted cost is **two stream folds per settlement decision, on the
+money path, at Friday peak, with no residency** (`crates/infrastructure/src/mailbox/activation.rs:237`,
+foreign-stream bypass at `:238-240`) — which is what raises PMW-2's value.
+
+**One adjacent founder decision worth knowing while reading §9 and the `:142` payload rule** (row
+`QUOTE-TOKEN`, ADR-20260831-121957 §4d): the priced cart will return an **opaque quote token carrying
+the catalog stream version it was computed at**, and `PlaceOrder` will carry it. That is **not** a
+breach of this proposal's *"no version field in any payload — the served version rides the ENVELOPE"*
+rule at `:142`: that rule governs an **ask reply**, whose authority expires at send, whereas **a price
+quote the customer was shown is business data** on a **command**, like an `ExternalReference`. Adjacent
+speech act, not the same one — the tension was named when the decision was taken, not discovered after.
+
 **Unchanged.** PMW-3 (a transport) stays parked and not adopted — D6 below. **PMW-2 deliberately not
-ridden**: the local ask's fold hits Postgres per ask until residency lands — an accepted cost, not
-reopened.
+ridden** by this proposal: the local ask's fold hits Postgres per ask until residency lands — an
+accepted cost, not reopened, and now an explicitly **priced** one.
 
 ## 19. Slice 1 — the build list, with its ADR-0032 obligations
 

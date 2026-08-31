@@ -1,0 +1,20 @@
+key: "QUOTE-STALENESS"
+status: "open"
+question: "What is the staleness policy for a priced quote token -- accept within N minutes, within M catalog versions, or both?"
+owner: "team"
+opened: "2026-08-31"
+register: "docs/proposals/DECISIONS.md §42"
+note: >
+  Sub-decision of QUOTE-TOKEN (decided 2026-08-31). The founder named neither N nor M; rather than
+  re-ask, the team is PRICING it. Not dispatchable as part of the retirement work -- it rides the
+  quote-token proposal.
+
+  IT IS A PRODUCT DECISION WEARING A NUMBER, and both directions cost something real: too tight and
+  a slow customer is repriced at the cart step for no business reason (a conversion cost on the ETA
+  path); too loose and the token authorises a price the catalog no longer offers, which is the
+  guarantee it exists to protect. Whatever is chosen must be observable -- a quote rejected for
+  staleness is a customer-visible event at the cart step, before the Stripe element.
+evidence: >
+  Recorded open by ADR-20260831-121957 §4d: "OPEN sub-decision -- the staleness policy. Accept a
+  quote within N minutes / M catalog versions? The founder named neither N nor M; it is being priced
+  rather than re-asked."

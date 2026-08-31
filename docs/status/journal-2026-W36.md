@@ -3,6 +3,54 @@
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — two founder calls on the back of the `read:` retirement: BUILD the priced quote
+> token, KEEP the two-hop ask (records only).** Both were put to him with options, trade-offs and a
+> recommendation; both are closed, and neither moves a stored shape.
+> **`QUOTE-TOKEN` — he chose (B), build it.** The priced cart returns an **opaque token carrying the
+> catalog stream version it was computed at**; `PlaceOrder` carries it; the write side prices **as of
+> that version**. Display and charge then agree **by construction** and keep agreeing if the
+> projection is dropped, rebuilt or lagging, and **repricing becomes explicit at the cart step,
+> before the Stripe element — never after**. So `young`'s finding is **adopted**, not merely
+> recorded, and the honest account of today's interim goes in the record rather than reading as a
+> defence: *"display/charge coherence currently rests on a rebuildable artifact and on two reads at
+> different times; it does not survive a catalog rebuild and does not survive a slow customer."*
+> **What does NOT change is `evans`'s ruling**: `specs/ordering/processmanager.yaml:63-68` is a
+> **Published Language, not an exemption** — the *mechanism* that enforces it is replaced, its
+> *status* is not, and filing it as a lapse being cleaned up would get both halves wrong.
+> **It narrows PMW-4**: once the token lands the checkout leg asks for an as-of price, so `:63-68`
+> stops being a survivor and only the session-carts leg remains — meaning `evans`'s proposed
+> `authority:` kind could ship with **zero users**, which PMW-4's decider now has to weigh.
+> `young`'s coupling is recorded too: the as-of fold is the **same primitive SNAP-1 needs**.
+> The **staleness policy is open** (`QUOTE-STALENESS`) — he named neither N nor M, and it is being
+> priced rather than re-asked. The build itself is a **separate work item**; a proposal + tracking
+> issue follow.
+> **The tension is named rather than glossed**: PROP-20260815-142349`:142` refuses a version field in
+> an ask **reply payload** (*"the served version rides the ENVELOPE, never the payload … one rule,
+> both speech acts"*). A token on a **command** is adjacent but **not the same speech act** — a
+> reply's authority expires at send, whereas **a price quote the customer was shown is business
+> data**, like an `ExternalReference`. Recorded so the next reader knows the rule was weighed.
+> **`SETTLE-PAYMENT-REF` — he chose (A), keep the two-hop ask.** PROP-20260815-142349 **§9 stands
+> unamended**; `paymentIntentId` is **not** added to the Order's facts. `young`'s challenge is
+> recorded as **considered and rejected, with its argument intact** — *"'forced by typing' is only
+> true because of an event shape we own"*, on the exact precedent of PROP-20260808-142532 **D2**
+> (Approved 2026-08-08), which decided the identical cross-aggregate-field pattern **event-carried**.
+> A rejected argument kept with its reasoning is what stops it being re-litigated every quarter.
+> **The accepted cost is stated, not buried**: **two stream folds per settlement decision, on the
+> money path, at Friday peak, with no residency** — re-verified, `load` at
+> `crates/infrastructure/src/mailbox/activation.rs:237` returns early for any foreign stream at
+> `:238-240`, so every cross-stream load goes straight past the cache, and **PMW-2 has not moved
+> since 2026-08-15**. That makes **PMW-2 materially more valuable than its AMBER suggests** — it
+> stops being an efficiency item and becomes what pays for a decision already taken on the money
+> path — and the row now says so instead of leaving the reader to connect it.
+> **CLAUDE.md question (2) is answered NO for all three** — the retirement, the token and the
+> reference. Keeping the ask is precisely the choice that leaves `OrderPlaced` untouched; the
+> rejected alternative is the one that would have opened a stored-shape question.
+> Unchanged by all of it: the retirement, the nine-standing-violations framing, PMW-3 parked, the
+> two-survivors-are-two-classes correction, the rejection of "exemption", the four-line discipline,
+> and that the retirement does **not** close the #544 silent-expiry class.
+> Records: [ADR-20260831-121957](../adr/ADR-20260831-121957-the-pm-read-step-is-retired-source-fixed-the-physics-and-left-the-ownership.md)
+> §4d/§4e, DECISIONS §42 (QUOTE-TOKEN, QUOTE-STALENESS, SETTLE-PAYMENT-REF).
+
 > **2026-08-31 — the PM `read:` step is retired: `source:` fixed the physics and left the ownership
 > (records only, no `specs/**` edit).** The founder struck the first conjunct of PMW-1's closure,
 > verbatim: *"`read:` stays, exactly as PR #566 lands it with `source: PROJECTION | EVENT_STREAM`
