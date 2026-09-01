@@ -8,13 +8,22 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > in-session; the second half —
 > [#843](https://github.com/TheCaptainCompany/captain-food/issues/843) — made it the skill's
 > default, so the next session produces it unasked. `.claude/skills/whatsup/SKILL.md` now carries
-> the rendering as a **content contract, not a checked-in template**: the three sections unchanged
+> the rendering as a content contract whose split is **data versus renderer** — the data rebuilt per
+> run from the state just read, the renderer being the repo's existing
+> `docs/templates/decision-form.html`, copied to a scratchpad and never edited in place (round-1
+> review: the first draft steered away from that template on the false ground that a stored template
+> carries last week's rows, when the file's whole design is that its questions array is replaced per
+> use). The properties: the three sections unchanged
 > (the page is a rendering of the existing report, not a new one), a form restricted to `status:
 > open` **and** `owner: founder` rows read from `docs/decisions/*.yaml` rather than the prose in
 > `DECISIONS.md`, answered rows shown answered, quick-fills taken only from a row's own enumerated
-> options, copy-back in the register's `Decision row:` / `Q:` / `A:` envelope prefixed `/decision`
-> with a select-the-text fallback, `localStorage` drafts in `try`/`catch`, and every figure carrying
-> its antecedent (ADR-20260817-105845). **The terminal report does not go away** — the same turn
+> options — plus, on every row whatever its option space, the *"neither exactly"* escape and a
+> comment box, which `workflow.md` records as where his most valuable answers have all arrived —
+> copy-back in the register's `Decision row:` / `Q:` / `A:` envelope prefixed `/decision`
+> with a select-the-text fallback, `localStorage` drafts in `try`/`catch`, every figure carrying
+> its antecedent (ADR-20260817-105845), and a Running · Blocked · Awaiting-you status band whose
+> *"awaiting you"* count must equal the rows the form renders, both being the same filter.
+> **The terminal report does not go away** — the same turn
 > carries a prose summary *and* the link, because a link with nothing said around it answers a
 > different question than the one he asked.
 >

@@ -77,9 +77,29 @@ because it now has a layout, and nothing is dropped because it did not fit.
 
 ### What the page must do
 
-These seven are what make it useful rather than decorative. They are a contract, not a template:
-build the page fresh from the state you just read, because a stored template carries last week's
-rows and this command's whole value is that it does not.
+These eight are what make it useful rather than decorative. The distinction that matters is not
+contract-versus-template but **data versus renderer**: the **data** is built fresh from the state you
+just read — that is this command's whole value — while the **renderer** is the one the repo already
+has, [`docs/templates/decision-form.html`](../../../docs/templates/decision-form.html). That file
+exists on a founder directive (2026-08-18) and is built on exactly this separation; its own header
+says *"Edit **ONLY** the FORM object below … Everything under 'DO NOT EDIT BELOW' renders from that
+data"*, so it **cannot** carry last week's rows — the questions array is replaced per use. Authority:
+[`workflow.md` §"Asking the founder a decision — use the form
+template"](../../../docs/claude/sessions/workflow.md#asking-the-founder-a-decision--use-the-form-template).
+
+**Copy it to your scratchpad and edit the copy** — its header says so, and there is a second reason
+here: generated HTML written into the worktree makes the repo dirty on a command whose *No record
+written* limit says it changes nothing. Never edit the template in place.
+
+**What carries across, proven by use** — the `Decision row: <KEY>` anchor, per-question assembly
+carrying that row key, copy-all, the select-the-text fallback, and a comment box on **every**
+question. Carry them by name rather than re-deriving them. **What the page adds on top**, because the
+template does not have it: the `/decision` prefix on the assembled block (5), per-row copy beside its
+copy-all (5), `localStorage` drafts (6), and `/whatsup`'s own frame — the three sections (1) and the
+status band (8).
+
+This list is prose, and nothing executes it; item 7 inherits the acknowledged prose-only enforcement
+of ADR-20260817-105845. That is a known limit of the rule, not a licence to skip it.
 
 1. **The three sections, unchanged** — what is running · what is blocked and on what · what is open
    awaiting him.
@@ -95,8 +115,17 @@ rows and this command's whole value is that it does not.
    from you here" is a complete cell.
 4. **Quick-fill buttons come from the row's own enumerated options** — the option space its
    `question:` or `evidence:` field actually states, verbatim. Never invented, never a paraphrase,
-   never the team's recommendation dressed up as one of the choices. A row with no enumerated option
-   space gets a free-text box and nothing else.
+   never the team's recommendation dressed up as one of the choices. **Every enumerated option space
+   also offers the "neither exactly" escape, and every row carries a comment box** — whatever its
+   option space, and including a row that has none. Not a nicety, and not my reasoning:
+   [`workflow.md` §"Asking the founder a decision — use the form
+   template"](../../../docs/claude/sessions/workflow.md#asking-the-founder-a-decision--use-the-form-template)
+   records that *"the form's most valuable answers have all arrived through the comment box and
+   through the 'neither exactly' option, so always offer that option and always leave a comment
+   box"* — on the evidence of the invoice-chain question, answered *"neither exactly"* with a comment
+   that supplied a third shape (**rider invoices the restaurant**) that no drafted option contained
+   and no lens had proposed. A pick-only page is the shape that loses his best answers, and this page
+   is now the **default** place he answers.
 5. **Copy-back uses the register's own envelope**: `Decision row: <KEY>` / `Q:` / `A:`, with the
    assembled block prefixed `/decision`, so a paste lands with its trail already attached and he
    never restates what he is answering. Per-row copy **and** copy-all. The clipboard API is not
@@ -108,6 +137,12 @@ rows and this command's whole value is that it does not.
 7. **Every figure carries its antecedent** (ADR-20260817-105845). A number on a page is consumed by
    its reader as established fact, and a page has more room to state a number than a paragraph
    does — which makes the discipline tighter here, not looser. Mark a bare input `UNVERIFIED input`.
+8. **A status band across the top: Running · Blocked · Awaiting you, as counts** — and 7 applies to
+   all three, explicitly. Sections 1 and 2 declare no source filter, so each of those counts names
+   **the section it counts** as its antecedent. **"Awaiting you" must equal the number of rows the
+   form renders**, because both derive from the same `status: open` ∧ `owner: founder` filter of 2 —
+   so set it *from the rows*, never count the same population twice. A band and a form disagreeing
+   on the same page is worse than no band.
 
 ### Why publishing a page is not "work"
 

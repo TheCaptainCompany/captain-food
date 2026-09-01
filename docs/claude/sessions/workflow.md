@@ -530,7 +530,7 @@ built-in `/status` — see the collision note below — and renamed once more to
 | [`/mob-question`](../../../.claude/skills/mob-question/SKILL.md) | Asking the mob | Reversibility class sizes the roster; divergences are **reported, never averaged** |
 | [`/work`](../../../.claude/skills/work/SKILL.md) | Telling you to start | The existing pipeline unchanged; the tag decides only chunk, dispatchability, merge posture |
 | [`/decision`](../../../.claude/skills/decision/SKILL.md) | Recording a decision he has made | **Step one is the reversal check**; `Consulted:` block, one line per lens |
-| [`/whatsup`](../../../.claude/skills/whatsup/SKILL.md) | Asking where things stand | Read-only — no check, no record, no fan-out, and it **never becomes work** |
+| [`/whatsup`](../../../.claude/skills/whatsup/SKILL.md) | Asking where things stand | **Publishes a status page carrying the answer form, by default**; read-only — no check, no record, no fan-out, and it **never becomes work** |
 | [`/correct`](../../../.claude/skills/correct/SKILL.md) | Telling you something is wrong | Authoritative; the work is **propagation** to everything downstream, then the record |
 
 All six set **`disable-model-invocation: true`**, a real and **enforced** `SKILL.md` frontmatter key:
@@ -599,6 +599,11 @@ rollback path — are the model for how `/direct-question` may legitimately answ
 file. Copy it to your scratchpad, edit **only** that object, publish the copy as an Artifact, and give
 him the link. He picks, comments, presses Copy, and pastes a plain-text block back. **Do not edit the
 template in place.**
+
+**[`/whatsup`](../../../.claude/skills/whatsup/SKILL.md) publishes one by default** (founder
+directive 2026-09-01): its section 3 renders this form over the open founder-owned register rows, so
+this file is that page's **renderer** and the rules below are the rules it inherits — the data is
+rebuilt per run, the renderer is not re-derived.
 
 Prefer it over `AskUserQuestion` when there is more than one decision, when an option needs its
 trade-off spelled out at more than a phrase, or when his answer is likely to be a comment rather than
