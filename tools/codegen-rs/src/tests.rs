@@ -15793,6 +15793,78 @@ mod docs_only_ci_and_legacy_visibility {
         );
     }
 
+    /// NEITHER generated documentation artifact may contain a dead in-page link -- markdown AND
+    /// HTML, asserted together, over the committed output.
+    ///
+    /// THE ASYMMETRY IS THE BUG THIS EXISTS FOR. `emit/docs.rs` carries two near-identical link
+    /// builders, `any_link` and `h_any_link`, and #837's first cut fixed the saga-as-entity kind
+    /// in one of them; `delink_dangling_anchors` was likewise applied to the markdown emitter
+    /// only. The markdown artifact went to zero dead links and the HTML artifact kept 27 (10
+    /// distinct), and NOTHING could have noticed: `tools/link-check.py` scans markdown only, so
+    /// the HTML half has no external checker and never will. Review round 1 found it by hand.
+    ///
+    /// Prose cannot hold this -- ADR-20260901-010206 asserted the invariant for "the generated
+    /// documentation" while it was true of one artifact of two. So the claim is executable, and
+    /// it is stated over BOTH files from one list, because a check written for one of a pair is
+    /// how the pair diverged in the first place.
+    ///
+    /// It reds on a dead link REGARDLESS of cause -- a missing match arm, a de-link pass not
+    /// applied, a renamed anchor emitter -- which is what makes it a class guard rather than a
+    /// regression test for the two kinds that happened to be wrong.
+    #[test]
+    fn neither_generated_documentation_artifact_has_a_dead_in_page_link() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+
+        // (file, how an id is DEFINED, how an in-page link is SPELLED)
+        let cases: [(&str, &str, &str); 2] = [
+            ("specs/generated/documentation.generated.md", "<a id=\"", "](#"),
+            ("specs/generated/documentation.generated.html", " id=\"", "href=\"#"),
+        ];
+        for (rel, id_open, link_open) in cases {
+            let body = fs::read_to_string(root.join(rel))
+                .unwrap_or_else(|e| panic!("{} must exist and be readable: {}", rel, e));
+
+            let ids: std::collections::HashSet<&str> = body
+                .match_indices(id_open)
+                .filter_map(|(i, _)| {
+                    let rest = &body[i + id_open.len()..];
+                    rest.find('"').map(|e| &rest[..e])
+                })
+                .collect();
+
+            let mut links = 0usize;
+            let mut dead: Vec<&str> = Vec::new();
+            for (i, _) in body.match_indices(link_open) {
+                let rest = &body[i + link_open.len()..];
+                let end = if link_open == "](#" { rest.find(')') } else { rest.find('"') };
+                let Some(end) = end else { continue };
+                let anchor = &rest[..end];
+                if anchor.is_empty() {
+                    continue;
+                }
+                links += 1;
+                if !ids.contains(anchor) && !dead.contains(&anchor) {
+                    dead.push(anchor);
+                }
+            }
+
+            // VACUITY, the same guard the checker itself carries: a scan that matches nothing
+            // passes. If the emitter's anchor or link SPELLING changes, both counts collapse to
+            // zero and this test goes quietly green over an artifact it no longer parses.
+            assert!(
+                ids.len() > 100 && links > 100,
+                "{}: parsed {} ids and {} in-page links -- far too few for this artifact, so the spelling this test scans for (`{}` / `{}`) no longer matches what the emitter writes. Fix the scan; a green here would mean nothing",
+                rel, ids.len(), links, id_open, link_open
+            );
+
+            assert!(
+                dead.is_empty(),
+                "{} contains in-page links to {} anchor(s) it never defines: {:?}. Both artifacts are built by `emit/docs.rs` from near-identical link builders (`any_link` / `h_any_link`) -- a kind fixed in one and not the other is how this last happened (#837). Fix the EMITTER and regenerate; never hand-edit generated output",
+                rel, dead.len(), dead
+            );
+        }
+    }
+
     #[test]
     fn the_index_tail_states_the_legacy_boundary_and_triggers() {
         let owned = vec![("docs/decisions/ROW-A.yaml".to_string(),

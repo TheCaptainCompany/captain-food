@@ -1005,11 +1005,19 @@ pub(crate) fn h_sec(id: &str, emoji: &str, title: &str, body: &str) -> String {
 pub(crate) fn h_subsec(emoji: &str, title: &str, count: usize, body: &str) -> String {
     format!("<details class=\"subsec\" data-crumb=\"{} {}\" open><summary>{} {} <span class=\"muted\">({})</span></summary><div class=\"body\">{}</div></details>", emoji, h_esc(title), emoji, h_esc(title), count, body)
 }
+/// `$ref` -> an HTML documentation link, with the KIND taken from the ref's FILE.
+///
+/// THE HTML TWIN OF `any_link`, and it must be kept in step with it. Both were byte-identical
+/// except that the markdown one gained `processmanager.yaml => actor` and this one did not, so
+/// the fix for the saga-as-entity bug landed in ONE of the two artifacts (#837 review round 1).
+/// The consequence is worse here than there: `tools/link-check.py` scans MARKDOWN ONLY, so the
+/// markdown half is now gated at zero while this half has no checker that can ever reach it --
+/// the asymmetry is exactly why 20 of this file's 27 dead `href`s survived the first fix.
 pub(crate) fn h_any_link(rf: &str) -> String {
     let mut it = rf.splitn(2, "#/");
     let file = it.next().unwrap_or("");
     let name = it.next().unwrap_or("");
-    let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "database/projection_views.yaml" => "view", "database/tables/projection_tables.yaml" => "view", "database/tables/referential.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
+    let kind = match file { "commands.yaml" => "command", "events.yaml" => "event", "actors.yaml" => "actor", "processmanager.yaml" => "actor", "database/projection_views.yaml" => "view", "database/tables/projection_tables.yaml" => "view", "database/tables/referential.yaml" => "view", "scalars.yaml" => "scalar", _ => "entity" };
     h_link(kind, name)
 }
 pub(crate) fn h_ref_links(v: Option<&Value>) -> String {
@@ -1513,6 +1521,57 @@ pub(crate) fn emit_documentation_html(model: &Model) -> String {
     out.push_str(NAV_JS);
     out.push('\n');
     out.push_str(MERMAID_JS);
+    delink_dangling_hrefs(out)
+}
+
+/// The HTML counterpart of `delink_dangling_anchors`: unwrap `<a href="#x">…</a>` to its inner
+/// content wherever this document defines no element with `id="x"`.
+///
+/// Same invariant, second artifact. ADR-20260901-010206 states that the generated documentation
+/// cannot contain a dead in-page link; that was true of the markdown and false of the HTML,
+/// which shipped 27 dead `href`s (10 distinct) while the markdown figure was 0. `link-check.py`
+/// scans markdown only, so nothing external can ever notice this file -- the invariant has to be
+/// established at the emitter or not at all.
+///
+/// Ids here are not all `<a id=…>` as they are in the markdown: they sit on `<details>`,
+/// `<span>` and section wrappers, so the scan is over ` id="` generally. `<a>` elements are
+/// never nested in this emitter, so a flat scan is sufficient; a link whose `href` does not
+/// start with `#` (there are none today, but a future external link would) is left untouched.
+fn delink_dangling_hrefs(html: String) -> String {
+    let defined: std::collections::HashSet<&str> = html
+        .match_indices(" id=\"")
+        .filter_map(|(i, _)| {
+            let rest = &html[i + 5..];
+            rest.find('"').map(|e| &rest[..e])
+        })
+        .collect();
+
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html.as_str();
+    while let Some(open) = rest.find("<a ") {
+        out.push_str(&rest[..open]);
+        rest = &rest[open..];
+        let parsed = rest.find('>').and_then(|gt| {
+            let tag = &rest[..gt];
+            let href = tag.find("href=\"#")?;
+            let anchor_start = href + 7;
+            let anchor_len = tag[anchor_start..].find('"')?;
+            let anchor = &tag[anchor_start..anchor_start + anchor_len];
+            let close = rest[gt + 1..].find("</a>")?;
+            Some((anchor, &rest[gt + 1..gt + 1 + close], gt + 1 + close + 4))
+        });
+        match parsed {
+            Some((anchor, inner, consumed)) if !defined.contains(anchor) => {
+                out.push_str(inner);
+                rest = &rest[consumed..];
+            }
+            _ => {
+                out.push_str("<a ");
+                rest = &rest[3..];
+            }
+        }
+    }
+    out.push_str(rest);
     out
 }
 

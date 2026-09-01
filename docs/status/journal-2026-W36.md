@@ -13,16 +13,18 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > with nothing able to see them.
 >
 > **The number, with its method, because a link count is meaningless without one** (ADR-20260817-105845).
-> The card carried `~25` as `UNVERIFIED input`; re-derived, the tree held **8,045 relative links
-> across 451 tracked markdown files, of which 130 were broken**. Method: relative link *targets*
-> (inline `[t](p)`, images, link reference definitions) in the files `git ls-files -- '*.md'`
-> reports, resolved against the tree, with fragments checked against GitHub's heading-slug algorithm
-> plus explicit `<a id>` anchors; external URLs, footnote definitions, and links inside fenced or
-> indented code blocks are not links for this purpose. The `~25` was the right order for the half
-> anyone had looked at — **28** dangling paths in hand-authored docs — and missed the other
-> **102**, which were dead in-page anchors in `specs/generated/documentation.generated.md`.
+> The card carried `~25` as `UNVERIFIED input`. Measured with the shipped checker against the merge
+> base **`43317168`**, in a clean checkout: **8,060 relative links across 451 markdown files, of
+> which 124 were broken — 28 dangling paths and 96 dead fragments** (95 in
+> `specs/generated/documentation.generated.md`, 1 in `specs/integrations/hubrise.md`). Method:
+> relative link TARGETS (inline `[t](p)`, images, and link reference definitions) in the markdown `git ls-files --cached --others --exclude-standard -- '*.md' '*.markdown'` reports, resolved against the tree; fragments checked against github-slugger's algorithm plus explicit `<a id>` anchors. External URLs, footnote definitions and links inside fenced or indented code are NOT links for this purpose. **The corpus includes UNTRACKED files** (`--others`), so scratch markdown present at measurement time moves the figure -- which is why the number is quoted against a NAMED COMMIT measured in a CLEAN checkout.
 >
-> **Those 102 were an emitter defect, and finding them was the checker's first real catch.** A
+> The first version of this entry said 8,045 / 130 / 102, and review round 1 refuted it: those were
+> taken mid-change with scratch files present, not from one run against a named commit. Quoting a
+> method that refutes your own figure is a sharper failure than quoting none, because the method
+> invites the check.
+>
+> **The 95 + 27 were an emitter defect, and finding them was the checker's first real catch.** A
 > test's `when:` is not always a command — 59 of this repo's tests are driven by an inbound
 > integration event, which is the whole point of ADR-0004 — and a saga is documented as an `actor`,
 > not an `entity`. Both were hardcoded kinds in `emit/docs.rs`, so the document linked to anchors it
@@ -62,7 +64,11 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > measured finding was the instrument); an indented code block in `docs/STATUS.md` showing a template
 > destined for `docs/status/`; a list continuation that must *not* be swallowed by the fix for that;
 > and an intraword `_` stripped as emphasis, which slugged `` `place_order` `` to `placeorder` and
-> reported a correct ADR link broken. They are `T10`–`T13` of the selftest.
+> reported a correct ADR link broken. They are `T11`–`T13` and `T17`–`T18` of the selftest
+> (`T10`, fenced code, is a fifth class; an earlier version of this sentence said `T10`–`T13`, which
+> both miscounted and claimed coverage that did not exist — review round 1 showed the suite stayed
+> green under a mutant for two of the four, because T12's fixture indented two spaces and only one
+> intraword-underscore link exists in the whole tree. `T17`/`T18` are the cases that close them).
 
 
 > **2026-09-01 — The founder's read-only command is renamed a second time: `/where` → `/whatsup`.**

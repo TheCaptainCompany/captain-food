@@ -13,8 +13,17 @@ file it links to; every ADR cites its neighbours; the register-check discipline 
 being able to *follow* a citation. **A broken link is a citation that silently resolves to nothing** —
 GitHub renders it dead with no error, so nothing in this repository would ever have told us.
 
-Nothing did. Re-derived on a stated method, the tree carried **8,045 relative links across 451
-tracked markdown files, of which 130 were broken**.
+Nothing did. Measured with the shipped checker against the merge base **`43317168`**, in a clean
+checkout: **8,060 relative links across 451 markdown files, of which 124 were broken — 28 dangling
+paths and 96 dead fragments** (95 in `specs/generated/documentation.generated.md`, 1 in
+`specs/integrations/hubrise.md`).
+
+Method: relative link TARGETS (inline `[t](p)`, images, and link reference definitions) in the markdown `git ls-files --cached --others --exclude-standard -- '*.md' '*.markdown'` reports, resolved against the tree; fragments checked against github-slugger's algorithm plus explicit `<a id>` anchors. External URLs, footnote definitions and links inside fenced or indented code are NOT links for this purpose. **The corpus includes UNTRACKED files** (`--others`), so scratch markdown present at measurement time moves the figure -- which is why the number is quoted against a NAMED COMMIT measured in a CLEAN checkout.
+
+An earlier draft of this ADR said 8,045 / 130 / 102. Those were taken mid-change with scratch files
+present rather than from one run against a named commit, and review round 1 refuted them — the
+sharper failure, because the sentence carrying them invoked ADR-20260817-105845 by name and so
+invited the reader to check.
 
 ## Decision
 
@@ -34,7 +43,7 @@ CI's always-run `gate-scripts` job. Five choices, recorded because each was a re
    file at the wrong heading is the same silent nothing. This is what found the emitter defect below.
 
 3. **Fix-all, gated at ZERO. No baseline file.** A baseline is a second thing to keep honest and this
-   repo has been bitten by exactly that. All 130 were fixed in the landing change.
+   repo has been bitten by exactly that. All 124 were fixed in the landing change.
 
 4. **It lives in `tools/`, not `.claude/hooks/`.** Not a preference: the `gate-scripts` job's own pin
    forbids a non-gate step from mentioning `.claude` anywhere in its definition
@@ -59,9 +68,19 @@ resolves to **level 3 is correct here, not lazy**, exactly as it did for the `re
 ([ADR-20260812-214500](ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)).
 It is also the case ADR-20260803-234035 names in its own carve-out: non-Rust artifacts.
 
-**Where a stronger instrument was available it was taken.** `specs/generated/documentation.generated.md`
-can no longer contain a dead in-page link *at all*: the emitter de-links any anchor it does not
-define, so the class is unrepresentable in the artifact rather than merely detected in it.
+**But the ceiling is level 3 for HAND-AUTHORED PROSE ONLY, and stating it over the whole subject
+was wrong.** For a GENERATED artifact level 4 is reachable and therefore mandatory: the emitter can
+refuse to emit a dead link at all. Both documentation artifacts now do — `emit_documentation` and
+`emit_documentation_html` each end by de-linking any in-page anchor the document does not define, so
+the class is unrepresentable rather than merely detected.
+
+The first cut took that step for the markdown artifact and not the HTML one, which is precisely the
+gap the corrected framing predicts: `h_any_link` was byte-identical to `any_link` minus the
+`processmanager.yaml` arm, and the HTML file shipped **27 dead `href`s (10 distinct)** while the
+markdown figure was 0. `tools/link-check.py` scans markdown only, so **no external checker can ever
+reach that artifact** — which is why the invariant is now asserted for both files by
+`neither_generated_documentation_artifact_has_a_dead_in_page_link`, a test that carries its own
+vacuity guard and has been seen red against the exact missing arm.
 
 ## Consequences
 
@@ -70,9 +89,11 @@ define, so the class is unrepresentable in the artifact rather than merely detec
 - **A generated-documentation defect was found by it, not by review**: a test's `when:` is not always
   a command (59 tests are driven by an inbound integration event —
   [ADR-0004](0004-commands-derived-from-use-cases.md)), and a saga is documented as an `actor`, not an
-  `entity`. Both were hardcoded kinds in `emit/docs.rs`, producing 102 anchors no `<a id>` defined.
-- **Known residue, not hidden**: `CartLine` and the referential tables (`PricingPolicy`,
-  `UberEstimationPolicy`, `UberSplitPolicy`) have **no section at all** in the generated
-  documentation. That is a content gap, not a link bug, and closing it means deciding what sections
-  that document should grow — a separate question. Today those labels render as plain text.
+  `entity`. Both were hardcoded kinds in `emit/docs.rs`, producing 95 dead anchors in the markdown
+  artifact and 27 dead `href`s in the HTML one.
+- **Known residue, not hidden, and it is a CONTENT gap in BOTH artifacts**: `CartLine` and the
+  referential tables (`PricingPolicy`, `UberEstimationPolicy`, `UberSplitPolicy`) have **no section
+  at all** in the generated documentation, markdown or HTML. That is not a link bug, and closing it
+  means deciding what sections that document should grow — a separate question, filed rather than
+  answered here. Today those labels render as plain text in both files.
 - A contributor who renames an ADR now learns immediately that three files cited it.

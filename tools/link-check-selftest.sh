@@ -26,7 +26,7 @@ pass=0; fail=0
 # COMPLETENESS, the same property the repo's other gate suites assert: every declared case must
 # reach a verdict. A case that stops running at all is the failure this number exists to catch --
 # a suite that silently drops half its cases still prints "all passed".
-EXPECTED_CASES=13
+EXPECTED_CASES=19
 
 ok()   { pass=$((pass+1)); printf '  PASS  %s\n' "$1"; }
 bad()  { fail=$((fail+1)); printf '  FAIL  %s\n     -> %s\n' "$1" "$2"; }
@@ -186,6 +186,82 @@ Prose with a footnote.[^1] And a real link: [self](a.md)
 [^1]: 20260627-ADR-019 Some Document Title.md
 EOF
 expect_rc "T13 a footnote definition is not read as a link" 0 "$D"
+
+# ── T14-T16: THE SLUG MUST BE github-slugger's, NOT AN APPROXIMATION OF IT. Round-1 review
+# installed the real npm package and compared it against `slugify()` over every heading in the
+# tree: 1200 of 5882 diverged (20.4%). The first cut kept characters GitHub strips -- symbols
+# (`\p{S}`: arrows, emoji, the Latin-1 symbol range), `§` and the rest of Latin-1 punctuation, and
+# C0 controls -- and those are pervasive in this repo's headings. It was LATENT (0 false-green and
+# 0 false-red across all 8,000+ links at the time), which is exactly why it needed a test: the
+# failure it produces is a merge-blocking red on a CORRECT citation, whose only invited "fix" is
+# editing a live link into a dead one. The mirror case is worse and silent -- a dead link that
+# passes. Three live classes, one case each.
+D="$TMP/t14"; mk "$D/a.md" <<'EOF'
+Jump to [emoji](b.md#-source-of-truth).
+EOF
+mk "$D/b.md" <<'EOF'
+## ✅ Source of truth
+EOF
+expect_rc "T14 an emoji heading slugs as GitHub does (symbol dropped)" 0 "$D"
+
+D="$TMP/t15"; mk "$D/a.md" <<'EOF'
+Jump to [arrow](b.md#2-hubrise--captainfood-domain-mapping).
+EOF
+mk "$D/b.md" <<'EOF'
+## 2. HubRise → Captain.Food domain mapping
+EOF
+expect_rc "T15 an arrow heading slugs as GitHub does (double hyphen)" 0 "$D"
+
+D="$TMP/t16"; mk "$D/a.md" <<'EOF'
+Jump to [section-sign](b.md#the-ci-surface-10).
+EOF
+mk "$D/b.md" <<'EOF'
+## The CI surface §10
+EOF
+expect_rc "T16 a section-sign heading slugs as GitHub does" 0 "$D"
+
+# ── T17: THE INTRAWORD UNDERSCORE, ACROSS FILES. Round-1 review found this class claimed as
+# covered and not covered: the suite stayed 13/13 green under `re.sub(r"_", "", text)`, and the
+# only thing catching it was the accident that exactly one such link exists in the whole tree
+# (`ADR-20260815-030206:7`). An accident is not coverage.
+D="$TMP/t17"; mk "$D/a.md" <<'EOF'
+See [the clarification](b.md#place_order-is-a-command-handler).
+EOF
+mk "$D/b.md" <<'EOF'
+## `place_order` is a COMMAND HANDLER
+EOF
+expect_rc "T17 an intraword underscore survives slugging" 0 "$D"
+
+# ── T18: THE LIST-AWARE INDENT RULE, ACTUALLY EXERCISED. Same round-1 finding: the suite stayed
+# 13/13 green with the rule replaced by a bare `indent >= 4`, because T12's fixture indents TWO
+# spaces -- below both thresholds. So `list_indent` was inert AND untested. This fixture puts a
+# continuation at FOUR spaces under a NESTED item, where the naive rule swallows a live link and
+# the list-aware one does not. It must RED.
+D="$TMP/t18"; mk "$D/a.md" <<'EOF'
+A real link: [self](a.md)
+
+- Outer item.
+  - Nested item.
+
+    A continuation paragraph under the nested item, linking to [nothing](does-not-exist.md).
+EOF
+expect_says "T18 a 4-space continuation under a nested list is still checked" 1 "does-not-exist.md" "$D"
+
+# ── T19: THE VARIATION SELECTOR IS KEPT, which is the counter-intuitive half and the one the
+# first fix got backwards. U+FE0F is category Mn, so the category rule keeps it, and
+# github-slugger keeps it too -- a heading beginning with an emoji anchors as
+# `#<U+FE0F>-...`, an invisible leading character. Reasoning said "GitHub obviously strips emoji
+# presentation"; the oracle said otherwise, and 131 headings (2.2%) diverged until the
+# special-case was removed. The anchor below contains a literal U+FE0F after the `#`. If this
+# case ever reds, re-run the comparison against the real npm `github-slugger` before touching
+# `_slug_keep` -- do not restore the special case from first principles.
+D="$TMP/t19"; mk "$D/a.md" <<'EOF'
+Jump to [warned](b.md#️-edge-case).
+EOF
+mk "$D/b.md" <<'EOF'
+## ⚠️ Edge case
+EOF
+expect_rc "T19 an emoji variation selector is KEPT in the slug (matches github-slugger)" 0 "$D"
 
 echo
 total=$((pass+fail))

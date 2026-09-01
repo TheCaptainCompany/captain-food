@@ -22,6 +22,11 @@ WHAT IS CHECKED, AND WHAT IS DELIBERATELY NOT.
     explicit HTML anchors. A citation that lands in the right file at the wrong heading is the
     same silent-nothing this gate exists to stop, and the slug algorithm is deterministic and
     published -- there is no network and no flake in it.
+  * OUT, AND DECLARED HERE RATHER THAN LEFT IMPLIED: RAW-HTML link forms -- `<a href=...>` and
+    `<img src=...>`. Markdown files may embed HTML and this repo does (0 `<a href>`, 4 `<img src>`
+    at the time of writing), so those targets are NOT checked. The carve-out is stated because an
+    undeclared blind spot in a gate is the same defect class as a dead link: something a reader
+    reasonably assumes is covered and is not.
   * OUT, ON PURPOSE: external URL LIVENESS (`http:`, `https:`, `mailto:`, any scheme). A
     blocking gate whose verdict depends on a third party's uptime and rate limiter reds on
     honest work, and this repository has retracted that instrument five times over in
@@ -32,8 +37,8 @@ WHAT IS CHECKED, AND WHAT IS DELIBERATELY NOT.
 THE TRAP THIS WAS WRITTEN FOR. ADRs filed before ~2026-07-22 have NO `ADR-` prefix
 (`docs/adr/20260720-233000-...`), while CLAUDE.md and dispatch cards cite them WITH it. A link
 built from the citation style resolves to nothing and GitHub renders it dead with no error.
-Plain existence checking catches that class; `--suggest` output names the near-miss file so the
-reader is not left guessing which of the two spellings is real.
+Plain existence checking catches that class, and the report names the near-miss file (always -- it
+is not behind a flag) so the reader is not left guessing which of the two spellings is real.
 
 VACUITY IS A FAILURE MODE, NOT A PASS. A scanner that matches nothing passes, confidently and
 meaninglessly -- it has happened twice in one session in this repo, once inside a coordinator's
@@ -54,15 +59,47 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
-# github-slugger's removal set, transcribed: punctuation and the general-punctuation /
-# supplemental-punctuation blocks. Letters (including accented ones), digits, `-` and `_`
-# survive; spaces become hyphens. Kept as one literal class so it can be diffed against the
-# upstream source rather than re-derived.
-_SLUG_STRIP = re.compile(
-    r"[ -⁯⸀-⹿\\'!\"#$%&()*+,./:;<=>?@\[\]^`{|}~ ]"
-)
+# github-slugger's removal rule, as a CATEGORY rule rather than a transcribed character class.
+#
+# The first cut WAS a transcribed class -- the general-punctuation and supplemental-punctuation
+# blocks plus ASCII punctuation -- and round-1 review installed the real npm `github-slugger` and
+# compared the two over every heading in the tree: 1200 of 5882 diverged (20.4%). The class kept
+# everything GitHub strips that it had not thought to list: the arrow and the rest of \p{S},
+# emoji (So, plus their U+FE0F variation selector), the section sign, the Latin-1 symbol and
+# punctuation range, and the C0 controls. Those are pervasive in this repo's headings.
+#
+# ENUMERATION IS THE DEFECT, not the particular characters missed -- the lesson
+# `tools/codegen-rs/src/tests.rs` records for its own guards, where a hand-listed set was walked
+# past three times. So the rule is stated POSITIVELY over Unicode general categories, which is
+# what github-slugger's generated class encodes: KEEP letters, numbers, marks, `-`, `_` and
+# space; drop everything else. Spaces then become hyphens.
+#
+# It was LATENT when review found it -- 0 false-green and 0 false-red across the whole corpus --
+# and blocking anyway, because the instrument's fidelity is the deliverable. The failure it
+# produces is a merge-blocking red on a CORRECT citation, whose only invited "fix" is editing a
+# live link into a dead one; the mirror case is a dead link that passes, silently.
+#
+# MARKS ARE KEPT, AND THAT INCLUDES THE VARIATION SELECTORS -- which is not what it looks like.
+# A decomposed accented letter is L + Mn, so dropping Mn would mangle every French heading. The
+# subtle half is U+FE0F, the emoji variation selector: it is also Mn, and github-slugger KEEPS
+# it. So `## WARNING-SIGN Edge 1` anchors as `#<U+FE0F>-edge-1` -- a slug with an invisible
+# leading character.
+#
+# This cut BOTH ways and the first attempt got it backwards: reasoning that "GitHub obviously
+# strips emoji presentation", U+FE00..U+FE0F was excluded, which looked right and was measured
+# WRONG -- 131 headings (2.2%) still diverged, every one of them this class, in the direction of
+# producing an anchor GitHub does not generate. The oracle settled it, not the reasoning: the
+# real npm `github-slugger` run over all 5882 headings in the tree. 0 divergent with the plain
+# category rule. Do not "fix" this by special-casing U+FE0F again without re-running that
+# comparison -- the note above the corpus derivation applies here too.
+_SLUG_KEEP_EXTRA = frozenset({"-", "_", " "})
+
+
+def _slug_keep(ch: str) -> bool:
+    return ch in _SLUG_KEEP_EXTRA or unicodedata.category(ch)[0] in ("L", "N", "M")
 
 # A scheme (`https:`, `mailto:`, `tel:`) or a protocol-relative `//host`. Anything matching is
 # external and is skipped -- see the module docstring for why liveness is out of scope.
@@ -108,7 +145,7 @@ def slugify(text: str) -> str:
     text = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"\1", text)           # _italic_, word-bounded
     text = _CUSTOM_ID.sub("", text)
     text = text.strip().lower()
-    text = _SLUG_STRIP.sub("", text)
+    text = "".join(ch for ch in text if _slug_keep(ch))
     return text.replace(" ", "-")
 
 

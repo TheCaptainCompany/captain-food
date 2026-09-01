@@ -86,8 +86,14 @@ rust-build:
 	$(CARGO) build --manifest-path $(CODEGEN_RS)/Cargo.toml
 rust-test:
 	$(CARGO) test --manifest-path $(CODEGEN_RS)/Cargo.toml
-rust: rust-build rust-test validate check-drift
-	@echo "rust: build + test + validate + generate(+diff) OK"
+# `link-check` IS A PREREQUISITE OF `rust`, and that is the founder's directive's local half
+# actually landing. Without it the target existed and nothing invoked it -- not `rust`, `gate`,
+# `review`, `night-loop` or the stop hook -- while CLAUDE.md tells anyone doing docs work to run
+# `make rust` before pushing. And docs-only changes push STRAIGHT TO `main` with no PR, so the
+# first consequence of a broken citation would have been a red `main`, not a red PR: the one lane
+# where the gate is most needed was the one lane nothing local covered (#837 review round 1).
+rust: rust-build rust-test validate check-drift link-check
+	@echo "rust: build + test + validate + generate(+diff) + link-check OK"
 	@echo "rust: NOTE -- this gate does NOT run crates/** tests. For a code change run 'make test-crates'."
 
 # --- The workspace test gate (#474). ---
