@@ -5,8 +5,8 @@
 - **Amends**: [ADR-20260807-002705](ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md) — **only
   D2's node condition**. Everything else stands: MKS, CNPG, GitOps-only, generated manifests,
   `Recreate`, start clean, NS → OVH DNS.
-- **Sizing detail**: [docs/runbooks/mks-bootstrap.md §2](../runbooks/mks-bootstrap.md) (real catalog
-  prices) · [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
+- **Sizing detail**: `docs/runbooks/mks-bootstrap.md` §2 (real catalog prices — runbook not
+  written) · [#358](https://github.com/TheCaptainCompany/captain-food/issues/358)
 
 ## Decision
 

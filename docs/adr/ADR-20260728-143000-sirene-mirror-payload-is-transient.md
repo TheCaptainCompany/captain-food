@@ -4,7 +4,7 @@
 - **Date**: 2026-07-28
 - **Issue**: [#231 "The SIRENE mirror stores verbatim INSEE payloads (~1.8 kB/row) to read 5 fields — it is 77% of the database and blocks national coverage"](https://github.com/TheCaptainCompany/captain-food/issues/231)
 - **Proposal**: [PROP-20260728-120931](../proposals/PROP-20260728-120931-sirene-mirror-payload-is-transient.md)
-- **Refines**: [ADR-0045](0045-sirene-staging-table-and-split-sync.md) (staging-table retention), [ADR-20260728-011344](ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) (`payload_hash`)
+- **Refines**: [ADR-0045](0045-sirene-sync-staging-table-and-worker.md) (staging-table retention), [ADR-20260728-011344](ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md) (`payload_hash`)
 
 ## Context
 

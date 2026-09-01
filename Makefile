@@ -26,7 +26,7 @@ else
   CARGO ?= cargo
 endif
 
-.PHONY: hooks-test stub-tests typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
+.PHONY: hooks-test stub-tests link-check typecheck validate-schema test-behaviour test-observability c4-validate validate warning-baseline generate check-drift review gate night-loop budget-check budgeted-loop docs c4-export c4-render help rust rust-build rust-test test-crates test-quiet rust-quiet smoke-prod
 
 help:
 	@echo "targets: validate generate typecheck test-crates review gate night-loop budgeted-loop budget-check docs"
@@ -39,6 +39,8 @@ help:
 	@echo "         (progress dropped, verdicts never; full log in target/quiet-gate.log)"
 	@echo "         budgeted-loop runs the night loop under a 30-min/week budget (.claude/loop-budget.json)"
 	@echo "         codegen = tools/codegen-rs (Rust, ADR-0034); needs cargo. 'rust' = build+test alias."
+	@echo "         link-check = every relative link in tracked markdown must resolve (#837);"
+	@echo "         runs its own selftest first. External URLs are deliberately not checked."
 	@echo "         hooks-test / stub-tests = the two gate-script suites, run with their"
 	@echo "         self-verification opt-out so an edit-and-re-run loop works. CI runs both"
 	@echo "         WITHOUT the opt-out, so a local green here excludes the gate-set comparison."
@@ -220,6 +222,23 @@ hooks-test:
 # `FATAL: ... differs from the committed blob` and zero cases run (review #13).
 stub-tests:
 	env DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
+
+# Relative links in every tracked markdown file must resolve (#837). Founder directive,
+# 2026-09-01: "put in place this url checker that must be executed locally and enforced in the CI
+# too" -- BOTH halves. This is the local half; the CI half is two steps in ci.yml's `gate-scripts`
+# job, pinned by codegen tests so neither can be disarmed.
+#
+# `docs/**` IS the operating model here: CLAUDE.md is an index whose authority is the topic file
+# it links to, every ADR cites its neighbours, and the register-check discipline turns on a reader
+# being able to FOLLOW a citation. A broken link is a citation that silently resolves to nothing.
+#
+# Runs the SELFTEST FIRST, on purpose. The checker's verdict is only worth reading if its three
+# vacuity guards still work -- a scanner that matches nothing passes, and this repo has shipped
+# that exact green twice. External URLs are NOT checked; `tools/link-check.py`'s docstring argues
+# why a third party's rate limiter must not be able to red a merge.
+link-check:
+	bash tools/link-check-selftest.sh
+	python3 tools/link-check.py
 
 # Night loop: validate the frozen DSL, regenerate, re-validate. NEVER edits specs/**.
 night-loop: validate generate

@@ -13745,6 +13745,13 @@ mod docs_only_ci_and_legacy_visibility {
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
             "node .github/scripts/stale-claim-reaper-decide.test.js",
+            // The link gate (#837), both halves. Neither names `.claude`, `GITHUB_ENV` nor
+            // `GITHUB_PATH`, so neither NEEDS the needle-scan exemption today -- they are listed
+            // for the reason the reaper entry gives: a future needle must not false-red a step
+            // that is itself a gate. Their key sets are locked to `{name, run}` by
+            // `the_link_check_runs_in_the_always_run_gate_job`, so the exemption buys no room.
+            "bash tools/link-check-selftest.sh",
+            "python3 tools/link-check.py",
         ];
         // ─── THE TWO ALWAYS-RUN JOBS, GUARDED AS A CLASS ─────────────────────────────────────
         //
@@ -15722,6 +15729,67 @@ mod docs_only_ci_and_legacy_visibility {
             &ci,
             "node .github/scripts/stale-claim-reaper-decide.test.js",
             "the stale-claim reaper's hermetic stub suite -- required by a scheduled workflow that never runs in CI on a push or PR, so a regression here (e.g. re-widening liveness to a bare mention, or losing the recency bound) would otherwise ship silently until the next hourly run misbehaved for days",
+        );
+    }
+
+    /// Pins BOTH halves of the link gate into the always-run `gate-scripts` job (#837).
+    ///
+    /// The founder's directive names two halves -- "executed locally and enforced in the CI too"
+    /// -- and only one of them is a file anyone runs by habit. `make link-check` is the local
+    /// half and needs no pin: a contributor who stops typing it notices nothing, which is exactly
+    /// why the CI half has to be the one that cannot be disarmed.
+    ///
+    /// TWO STEPS, TWO PINS, and the selftest's is the load-bearing one. The checker fails OPEN in
+    /// the only way that matters: a scanner that matches nothing reports zero broken links over
+    /// zero links and exits 0. Its three vacuity guards are what make a green mean something, and
+    /// a guard nobody watches fail is an unverified claim -- so the suite that proves them RED
+    /// runs in CI, not just on the author's machine. Dropping the selftest step while keeping the
+    /// scan would leave a gate that is green whether or not it works.
+    ///
+    /// `assert_pinned_in_gate_job` locks each step's key set to exactly `{name, run}` with `run`
+    /// matched over PARSED YAML, so `|| true`, `; exit 0`, a trailing pipe, a step-level `if:` in
+    /// any spelling (including hoisted onto the `- ` item line), `shell:`, `env:` and
+    /// `working-directory:` all red -- and the same helper bounds the job itself (no `if`,
+    /// `continue-on-error`, `needs`, `container`, `services`, no self-hosted runner, a
+    /// `timeout-minutes` in 5..=30, and no execution-altering `env` at workflow, job or step
+    /// scope).
+    #[test]
+    fn the_link_check_runs_in_the_always_run_gate_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        assert_pinned_in_gate_job(
+            &ci,
+            "bash tools/link-check-selftest.sh",
+            "the link checker's own selftest -- it proves the three vacuity guards still red, and without it the scan below is green whether or not it works: a scanner that matches nothing reports zero broken links over zero links and exits 0",
+        );
+        assert_pinned_in_gate_job(
+            &ci,
+            "python3 tools/link-check.py",
+            "the broken-relative-link gate over every tracked markdown file -- `docs/**` IS the operating model here (CLAUDE.md is an index whose authority is the topic file it links to, every ADR cites its neighbours), and a docs-only change reaches `main` as a push with NO PR, skipping every Rust job",
+        );
+    }
+
+    /// The link gate's two scripts must EXIST and stay executable-by-`run:`.
+    ///
+    /// The pin above asserts the workflow SAYS the right thing. It cannot notice that the file it
+    /// names was deleted or renamed: `run: python3 tools/link-check.py` against a missing file
+    /// exits non-zero in CI, which is loud -- but `bash tools/link-check-selftest.sh` against a
+    /// missing file is ALSO the shape a reviewer skims past, and the two together are the whole
+    /// gate. Cheap, and it fails with a sentence rather than a shell error.
+    #[test]
+    fn the_link_check_scripts_exist() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        for f in ["tools/link-check.py", "tools/link-check-selftest.sh"] {
+            assert!(
+                root.join(f).is_file(),
+                "`{}` is missing, but `.github/workflows/ci.yml` and the `link-check` Makefile target both invoke it (#837). If it moved, move both callers and this list in the same change",
+                f
+            );
+        }
+        let mk = fs::read_to_string(root.join("Makefile")).expect("Makefile");
+        assert!(
+            mk.contains("\nlink-check:\n\tbash tools/link-check-selftest.sh\n\tpython3 tools/link-check.py\n"),
+            "the `link-check` Makefile target must run the selftest and then the checker. The founder's directive (2026-09-01) names BOTH halves -- \"executed locally and enforced in the CI too\" -- and this is the local one"
         );
     }
 

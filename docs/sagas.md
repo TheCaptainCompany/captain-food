@@ -1,6 +1,6 @@
 # 🔗 Sagas / Process Managers
 
-> **Behaviour source of truth = [`specs/processmanager.yaml`](../specs/processmanager.yaml)** — the
+> **Behaviour source of truth = `processmanager.yaml`** — the
 > TYPED step DSL (ADR-20260719-172821): each process manager declares its state table
 > (`specs/database/tables/process_managers.yaml`), its outbound ports, and per-message ordered
 > `read`/`guard`/`call`/`deliver`/`send`/`state` steps. The **sequence diagrams are GENERATED from

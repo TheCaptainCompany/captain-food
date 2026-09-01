@@ -1760,7 +1760,7 @@ _Rejects a storefront address held by another restaurant, or released by one_
 _A registry report of a restaurant we already hold, unchanged, emits nothing_
 
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
-- **When**: [📩 `RestaurantRegistered`](#command-restaurantregistered)
+- **When**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `RegistryReportAppliesOnlyRealChanges`](#rule-registryreportappliesonlyrealchanges)
 
@@ -1770,7 +1770,7 @@ _A registry report of a restaurant we already hold, unchanged, emits nothing_
 _A registry report that renames an établissement reaches the domain as an update_
 
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
-- **When**: [📩 `RestaurantRegistered`](#command-restaurantregistered)
+- **When**: [⚡ `RestaurantRegistered`](#event-restaurantregistered)
 - **Then**: [⚡ `RestaurantUpdated`](#event-restaurantupdated)
 - **Verifies**: [📐 `RegistryReportAppliesOnlyRealChanges`](#rule-registryreportappliesonlyrealchanges)
 
@@ -3119,7 +3119,7 @@ _Rejects setting stock for a missing or non-stock-tracked offer_
 _Records an inbound HubRise inventory sync (event reaction, no command)_
 
 - **Given**: [⚡ `CatalogCreated`](#event-catalogcreated), [⚡ `ProductAdded`](#event-productadded)
-- **When**: [📩 `OfferStockUpdated`](#command-offerstockupdated)
+- **When**: [⚡ `OfferStockUpdated`](#event-offerstockupdated)
 - **Then**: [⚡ `OfferStockUpdated`](#event-offerstockupdated)
 - **Verifies**: [📐 `OfferStockManualOrSynced`](#rule-offerstockmanualorsynced)
 
@@ -4416,7 +4416,7 @@ Visitor adds a line to a cart, validated against the live catalog. The client ge
 | --- | --- | --- | --- |
 | <a id="command-addcartline--cartid"></a>`cartId` | [🔤 `CartId`](#scalar-cartid) | ✅ | Client-generated cart id; the first add for it creates the cart (session-owned). |
 | <a id="command-addcartline--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="command-addcartline--line"></a>`line` | [📦 `CartLine`](#entity-cartline) | ✅ |  |
+| <a id="command-addcartline--line"></a>`line` | 📦 `CartLine` | ✅ |  |
 | <a id="command-addcartline--sessionid"></a>`sessionId` | [🔤 `SessionId`](#scalar-sessionid) | ✅ | Optional session id (ADR-0038) to bind the cart to a session for test-mode carts. |
 
 <a id="command-removecartline"></a>
@@ -6476,7 +6476,7 @@ _A guest cart is bound to the identified customer (one-time bind)_
 _The Cart records the checkout fact delivered by PlaceOrderProcess and closes (idempotent)_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded)
-- **When**: [📩 `CartCheckedOut`](#command-cartcheckedout)
+- **When**: [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Then**: [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -6568,7 +6568,7 @@ _Restaurant cancels an order it had accepted_
 _The delivered retention reminder records the expiry fact (record semantics, never rejected)_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderDelivered`](#event-orderdelivered)
-- **When**: [📩 `OrderExpired`](#command-orderexpired)
+- **When**: [⚡ `OrderExpired`](#event-orderexpired)
 - **Then**: [⚡ `OrderExpired`](#event-orderexpired)
 - **Verifies**: [📐 `OrderExpiryIsRecordedNeverRejected`](#rule-orderexpiryisrecordedneverrejected)
 
@@ -6578,7 +6578,7 @@ _The delivered retention reminder records the expiry fact (record semantics, nev
 _A due acceptance deadline on a still-PLACED order records the timeout (gate ON): PLACED → CANCELLED_BY_TIMEOUT_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
-- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **When**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
 - **Then**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
 - **Verifies**: [📐 `UnacceptedOrderIsCancelledByTimeoutAndNeverCharged`](#rule-unacceptedorderiscancelledbytimeoutandnevercharged)
 
@@ -6588,7 +6588,7 @@ _A due acceptance deadline on a still-PLACED order records the timeout (gate ON)
 _Gate OFF (the default) is shadow mode: the full still-PLACED guard runs, the append is inert_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
-- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **When**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `UnacceptedOrderIsCancelledByTimeoutAndNeverCharged`](#rule-unacceptedorderiscancelledbytimeoutandnevercharged)
 
@@ -6598,7 +6598,7 @@ _Gate OFF (the default) is shadow mode: the full still-PLACED guard runs, the ap
 _Acceptance won the race: the due deadline on an ACCEPTED order is a benign no-op_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant)
-- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **When**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`](#rule-acceptancetimeoutonlycancelsastillplacedorder)
 
@@ -6608,7 +6608,7 @@ _Acceptance won the race: the due deadline on an ACCEPTED order is a benign no-o
 _A terminal order absorbs the deadline: no double-cancel on a customer-cancelled order_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer)
-- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **When**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`](#rule-acceptancetimeoutonlycancelsastillplacedorder)
 
@@ -6618,7 +6618,7 @@ _A terminal order absorbs the deadline: no double-cancel on a customer-cancelled
 _A redelivered acceptance deadline is a benign no-op — the order already timed out_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
-- **When**: [📩 `OrderAcceptanceTimedOut`](#command-orderacceptancetimedout)
+- **When**: [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `AcceptanceTimeoutOnlyCancelsAStillPlacedOrder`](#rule-acceptancetimeoutonlycancelsastillplacedorder)
 
@@ -6628,7 +6628,7 @@ _A redelivered acceptance deadline is a benign no-op — the order already timed
 _A redelivered expiry reminder is a benign no-op — the order is already expired_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderExpired`](#event-orderexpired)
-- **When**: [📩 `OrderExpired`](#command-orderexpired)
+- **When**: [⚡ `OrderExpired`](#event-orderexpired)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `OrderExpiryIsRecordedNeverRejected`](#rule-orderexpiryisrecordedneverrejected)
 
@@ -6758,7 +6758,7 @@ _Customer requests a refund for a delivered order_
 _The Order is born by recording the OrderPlaced fact delivered by PlaceOrderProcess (idempotent)_
 
 - **Given**: _(none)_
-- **When**: [📩 `OrderPlaced`](#command-orderplaced)
+- **When**: [⚡ `OrderPlaced`](#event-orderplaced)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -7022,7 +7022,7 @@ _A production (LIVE) order against a TEST restaurant is rejected (test-mode isol
 _On payment authorization (funds held, not captured) the saga materializes the order and closes the cart_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -7072,7 +7072,7 @@ _A checkout inside the declared window (Friday 20:00 Paris, window 19:00–23:00
 _A payment authorization for a snapshot frozen BEFORE the verdict evidence existed (no verdict/window keys at all) still materializes the order — the evidence fields are optional in fact, so old paid checkouts can never be orphaned by the new shape_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -7082,7 +7082,7 @@ _A payment authorization for a snapshot frozen BEFORE the verdict evidence exist
 _On payment failure the saga aborts and places no order (cart stays open)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
+- **When**: [⚡ `PaymentFailed`](#event-paymentfailed)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
 
@@ -7092,7 +7092,7 @@ _On payment failure the saga aborts and places no order (cart stays open)_
 _An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
 - **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
 
@@ -7104,7 +7104,7 @@ _An authorization matching no checkout run aborts the saga with a typed error (n
 _The Payment is born by recording PaymentIntentCreated with the frozen checkout snapshot_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentIntentCreated`](#command-paymentintentcreated)
+- **When**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **Then**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
 - **Verifies**: [📐 `CheckoutSnapshotFrozenAtIntent`](#rule-checkoutsnapshotfrozenatintent)
 
@@ -7114,7 +7114,7 @@ _The Payment is born by recording PaymentIntentCreated with the frozen checkout 
 _The Payment records the inbound Stripe authorization fact (funds held; delivered via the ACL, idempotent)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Then**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -7124,7 +7124,7 @@ _The Payment records the inbound Stripe authorization fact (funds held; delivere
 _The Payment records the inbound Stripe capture fact — the money moved on fulfilment (idempotent)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentAuthorized`](#event-paymentauthorized)
-- **When**: [📩 `PaymentCaptured`](#command-paymentcaptured)
+- **When**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **Then**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
 - **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)
 
@@ -7134,7 +7134,7 @@ _The Payment records the inbound Stripe capture fact — the money moved on fulf
 _The Payment records the capture failure delivered by PaymentSettlementProcess (typed reason; status stays AUTHORIZED)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentAuthorized`](#event-paymentauthorized)
-- **When**: [📩 `PaymentCaptureFailed`](#command-paymentcapturefailed)
+- **When**: [⚡ `PaymentCaptureFailed`](#event-paymentcapturefailed)
 - **Then**: [⚡ `PaymentCaptureFailed`](#event-paymentcapturefailed)
 - **Verifies**: [📐 `CaptureFailureIsRecordedAndPaged`](#rule-capturefailureisrecordedandpaged)
 
@@ -7144,7 +7144,7 @@ _The Payment records the capture failure delivered by PaymentSettlementProcess (
 _The Payment records the inbound Stripe release fact — the uncaptured hold is gone, no money moved (idempotent)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentAuthorized`](#event-paymentauthorized)
-- **When**: [📩 `PaymentReleased`](#command-paymentreleased)
+- **When**: [⚡ `PaymentReleased`](#event-paymentreleased)
 - **Then**: [⚡ `PaymentReleased`](#event-paymentreleased)
 - **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
 
@@ -7154,7 +7154,7 @@ _The Payment records the inbound Stripe release fact — the uncaptured hold is 
 _The Payment records the inbound Stripe failure fact (cart stays open downstream)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
+- **When**: [⚡ `PaymentFailed`](#event-paymentfailed)
 - **Then**: [⚡ `PaymentFailed`](#event-paymentfailed)
 - **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
 
@@ -7164,7 +7164,7 @@ _The Payment records the inbound Stripe failure fact (cart stays open downstream
 _The Payment records the settled refund fact reported by Stripe (idempotent)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
+- **When**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
 - **Then**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
 - **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
 
@@ -7174,7 +7174,7 @@ _The Payment records the settled refund fact reported by Stripe (idempotent)_
 _The Payment records the opened refund (RefundOpened, idempotent) so the refund queue folds it as REQUESTED until decided_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundOpened`](#command-refundopened)
+- **When**: [⚡ `RefundOpened`](#event-refundopened)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `PendingRefundVisibleUntilDecided`](#rule-pendingrefundvisibleuntildecided)
 
@@ -7184,7 +7184,7 @@ _The Payment records the opened refund (RefundOpened, idempotent) so the refund 
 _The Payment records the refund approval (restaurant or admin) delivered by RefundProcess_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundApproved`](#command-refundapproved)
+- **When**: [⚡ `RefundApproved`](#event-refundapproved)
 - **Then**: [⚡ `RefundApproved`](#event-refundapproved)
 - **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
 
@@ -7194,7 +7194,7 @@ _The Payment records the refund approval (restaurant or admin) delivered by Refu
 _The Payment records the refund denial (restaurant or admin) delivered by RefundProcess_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundDenied`](#command-refunddenied)
+- **When**: [⚡ `RefundDenied`](#event-refunddenied)
 - **Then**: [⚡ `RefundDenied`](#event-refunddenied)
 - **Verifies**: [📐 `RefundRequiresApproval`](#rule-refundrequiresapproval)
 
@@ -7248,7 +7248,7 @@ _Consuming store credit again for the same order is a benign no-op (exactly-once
 _Requests a Stripe refund when an order is rejected by the restaurant AFTER capture_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
+- **When**: [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7258,7 +7258,7 @@ _Requests a Stripe refund when an order is rejected by the restaurant AFTER capt
 _Requests a Stripe refund when the customer cancels the order_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
+- **When**: [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7268,7 +7268,7 @@ _Requests a Stripe refund when the customer cancels the order_
 _Requests a Stripe refund when the restaurant cancels the order_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
+- **When**: [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7278,7 +7278,7 @@ _Requests a Stripe refund when the restaurant cancels the order_
 _Validates eligibility and requests a Stripe refund on a customer refund request_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundRequested`](#command-refundrequested)
+- **When**: [⚡ `RefundRequested`](#event-refundrequested)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7288,7 +7288,7 @@ _Validates eligibility and requests a Stripe refund on a customer refund request
 _Records the settled refund fact reported back by Stripe_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
+- **When**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
 
@@ -7420,7 +7420,7 @@ _A production (LIVE) order against a TEST restaurant is rejected (test-mode isol
 _On payment authorization (funds held, not captured) the saga materializes the order and closes the cart_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -7470,7 +7470,7 @@ _A checkout inside the declared window (Friday 20:00 Paris, window 19:00–23:00
 _A payment authorization for a snapshot frozen BEFORE the verdict evidence existed (no verdict/window keys at all) still materializes the order — the evidence fields are optional in fact, so old paid checkouts can never be orphaned by the new shape_
 
 - **Given**: [⚡ `CartStarted`](#event-cartstarted), [⚡ `CartLineAdded`](#event-cartlineadded), [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Then**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout)
 - **Verifies**: [📐 `OrderMaterializedOnPaymentAuthorization`](#rule-ordermaterializedonpaymentauthorization)
 
@@ -7480,7 +7480,7 @@ _A payment authorization for a snapshot frozen BEFORE the verdict evidence exist
 _On payment failure the saga aborts and places no order (cart stays open)_
 
 - **Given**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated)
-- **When**: [📩 `PaymentFailed`](#command-paymentfailed)
+- **When**: [⚡ `PaymentFailed`](#event-paymentfailed)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CheckoutAbortsOnPaymentFailure`](#rule-checkoutabortsonpaymentfailure)
 
@@ -7490,7 +7490,7 @@ _On payment failure the saga aborts and places no order (cart stays open)_
 _An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentAuthorized`](#command-paymentauthorized)
+- **When**: [⚡ `PaymentAuthorized`](#event-paymentauthorized)
 - **Thrown**: [⛔ `PaymentEventOrphaned`](#error-paymenteventorphaned)
 - **Verifies**: [📐 `OrphanPaymentEventFlagged`](#rule-orphanpaymenteventflagged)
 
@@ -7502,7 +7502,7 @@ _An authorization matching no checkout run aborts the saga with a typed error (n
 _Grants store credit when a claim is resolved as GOODWILL_CREDIT_
 
 - **Given**: _(none)_
-- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **When**: [⚡ `ReclamationResolved`](#event-reclamationresolved)
 - **Then**: [⚡ `CustomerCreditGranted`](#event-customercreditgranted)
 - **Verifies**: [📐 `GoodwillCreditGrantedOnResolution`](#rule-goodwillcreditgrantedonresolution)
 
@@ -7512,7 +7512,7 @@ _Grants store credit when a claim is resolved as GOODWILL_CREDIT_
 _Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolution IS the approval)_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **When**: [⚡ `ReclamationResolved`](#event-reclamationresolved)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved)
 - **Verifies**: [📐 `RefundSettledOnResolution`](#rule-refundsettledonresolution)
 
@@ -7522,7 +7522,7 @@ _Settles a full Stripe refund when a claim is resolved as FULL_REFUND (resolutio
 _Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **When**: [⚡ `ReclamationResolved`](#event-reclamationresolved)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened), [⚡ `RefundApproved`](#event-refundapproved)
 - **Verifies**: [📐 `RefundSettledOnResolution`](#rule-refundsettledonresolution)
 
@@ -7532,7 +7532,7 @@ _Settles a partial Stripe refund when a claim is resolved as PARTIAL_REFUND_
 _Rejects a partial refund resolution that exceeds the order's captured total_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `ReclamationResolved`](#command-reclamationresolved)
+- **When**: [⚡ `ReclamationResolved`](#event-reclamationresolved)
 - **Thrown**: [⛔ `RefundExceedsCaptured`](#error-refundexceedscaptured)
 - **Verifies**: [📐 `RefundResolutionCappedAtCaptured`](#rule-refundresolutioncappedatcaptured)
 
@@ -7544,7 +7544,7 @@ _Rejects a partial refund resolution that exceeds the order's captured total_
 _Requests the Stripe capture when an AUTHORIZED order is delivered / picked up_
 
 - **Given**: _(none)_
-- **When**: [📩 `OrderDelivered`](#command-orderdelivered)
+- **When**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)
 
@@ -7554,7 +7554,7 @@ _Requests the Stripe capture when an AUTHORIZED order is delivered / picked up_
 _Delivery alone never captures: an order with no Captain authorization (no payment intent) is structurally skipped_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced)
-- **When**: [📩 `OrderDelivered`](#command-orderdelivered)
+- **When**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `PaymentCapturedOnFulfilment`](#rule-paymentcapturedonfulfilment)
 
@@ -7564,7 +7564,7 @@ _Delivery alone never captures: an order with no Captain authorization (no payme
 _Releases the uncaptured hold when the restaurant rejects an AUTHORIZED order (no refund — no capture)_
 
 - **Given**: _(none)_
-- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
+- **When**: [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
 
@@ -7574,7 +7574,7 @@ _Releases the uncaptured hold when the restaurant rejects an AUTHORIZED order (n
 _Releases the uncaptured hold when the customer cancels an AUTHORIZED order_
 
 - **Given**: _(none)_
-- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
+- **When**: [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
 
@@ -7584,7 +7584,7 @@ _Releases the uncaptured hold when the customer cancels an AUTHORIZED order_
 _Releases the uncaptured hold when the restaurant cancels an AUTHORIZED order after acceptance_
 
 - **Given**: _(none)_
-- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
+- **When**: [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `AuthorizationReleasedWithoutCapture`](#rule-authorizationreleasedwithoutcapture)
 
@@ -7596,7 +7596,7 @@ _Releases the uncaptured hold when the restaurant cancels an AUTHORIZED order af
 _Requests a Stripe refund when an order is rejected by the restaurant AFTER capture_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `OrderRejectedByRestaurant`](#command-orderrejectedbyrestaurant)
+- **When**: [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7606,7 +7606,7 @@ _Requests a Stripe refund when an order is rejected by the restaurant AFTER capt
 _Requests a Stripe refund when the customer cancels the order_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `OrderCancelledByCustomer`](#command-ordercancelledbycustomer)
+- **When**: [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7616,7 +7616,7 @@ _Requests a Stripe refund when the customer cancels the order_
 _Requests a Stripe refund when the restaurant cancels the order_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `OrderCancelledByRestaurant`](#command-ordercancelledbyrestaurant)
+- **When**: [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7626,7 +7626,7 @@ _Requests a Stripe refund when the restaurant cancels the order_
 _Validates eligibility and requests a Stripe refund on a customer refund request_
 
 - **Given**: [⚡ `PaymentCaptured`](#event-paymentcaptured)
-- **When**: [📩 `RefundRequested`](#command-refundrequested)
+- **When**: [⚡ `RefundRequested`](#event-refundrequested)
 - **Then**: [⚡ `RefundOpened`](#event-refundopened)
 - **Verifies**: [📐 `RefundOnRejectionOrCancellation`](#rule-refundonrejectionorcancellation)
 
@@ -7636,7 +7636,7 @@ _Validates eligibility and requests a Stripe refund on a customer refund request
 _Records the settled refund fact reported back by Stripe_
 
 - **Given**: _(none)_
-- **When**: [📩 `PaymentRefunded`](#command-paymentrefunded)
+- **When**: [⚡ `PaymentRefunded`](#event-paymentrefunded)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `RefundSettledFactRecorded`](#rule-refundsettledfactrecorded)
 
@@ -7677,7 +7677,7 @@ _A refund decision on an order with no refund pending approval is rejected_
 
 _criticality: **high**_
 
-- **Workflow**: saga [📦 `PlaceOrderProcess`](#entity-placeorderprocess) · command [📩 `PlaceOrder`](#command-placeorder)
+- **Workflow**: saga [🎭 `PlaceOrderProcess`](#actor-placeorderprocess) · command [📩 `PlaceOrder`](#command-placeorder)
 - **Emits**: [⚡ `PaymentIntentCreated`](#event-paymentintentcreated), [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `CartCheckedOut`](#event-cartcheckedout) · **Inbound**: [⚡ `PaymentAuthorized`](#event-paymentauthorized), [⚡ `PaymentFailed`](#event-paymentfailed)
 
 **Run identity**
@@ -7714,7 +7714,7 @@ _criticality: **high**_
 
 _criticality: **high**_
 
-- **Workflow**: saga [📦 `RefundProcess`](#entity-refundprocess)
+- **Workflow**: saga [🎭 `RefundProcess`](#actor-refundprocess)
 - **Emits**: — · **Inbound**: [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `RefundRequested`](#event-refundrequested), [⚡ `PaymentRefunded`](#event-paymentrefunded)
 
 **Run identity**
@@ -7742,7 +7742,7 @@ _criticality: **high**_
 
 _criticality: **high**_
 
-- **Workflow**: saga [📦 `PaymentSettlementProcess`](#entity-paymentsettlementprocess)
+- **Workflow**: saga [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess)
 - **Emits**: — · **Inbound**: [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant)
 
 **Run identity**
@@ -9188,7 +9188,7 @@ _A cancel is answered about the ACCOUNT, never about our engine -- a customer mu
 _The grace window elapsing is RECORDED as a fact, not left to an internal timer_
 
 - **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed)
-- **When**: [📩 `CustomerErasureDue`](#command-customererasuredue)
+- **When**: [⚡ `CustomerErasureDue`](#event-customererasuredue)
 - **Then**: [⚡ `CustomerErasureDue`](#event-customererasuredue)
 - **Verifies**: [📐 `ErasureIsCancellableByTheSubjectWithinTheWindow`](#rule-erasureiscancellablebythesubjectwithinthewindow)
 
@@ -9198,7 +9198,7 @@ _The grace window elapsing is RECORDED as a fact, not left to an internal timer_
 _Records the auth provider's confirmation that the identity was deleted at its end (inbound fact, no command)_
 
 - **Given**: [⚡ `CustomerRegistered`](#event-customerregistered), [⚡ `CustomerErasureConfirmed`](#event-customererasureconfirmed)
-- **When**: [📩 `CustomerIdentityUnlinked`](#command-customeridentityunlinked)
+- **When**: [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked)
 - **Then**: [⚡ `CustomerIdentityUnlinked`](#event-customeridentityunlinked)
 - **Verifies**: [📐 `ErasureUnlinkingIsRecordedWithoutACommand`](#rule-erasureunlinkingisrecordedwithoutacommand)
 
@@ -9210,7 +9210,7 @@ _Records the auth provider's confirmation that the identity was deleted at its e
 _Binds a returning visitor's open guest carts when they are identified_
 
 - **Given**: _(none)_
-- **When**: [📩 `CustomerIdentified`](#command-customeridentified)
+- **When**: [⚡ `CustomerIdentified`](#event-customeridentified)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `GuestCartsBoundOnIdentification`](#rule-guestcartsboundonidentification)
 
@@ -10509,7 +10509,7 @@ _Rejects cancelling a missing or already-delivered job_
 _The DeliveryJob is born by recording the DeliveryRequested fact delivered by DeliveryDispatchProcess (idempotent)_
 
 - **Given**: _(none)_
-- **When**: [📩 `DeliveryRequested`](#command-deliveryrequested)
+- **When**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **Then**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **Verifies**: [📐 `ReadyDeliveryOrderTriggersDispatch`](#rule-readydeliveryordertriggersdispatch)
 
@@ -10519,7 +10519,7 @@ _The DeliveryJob is born by recording the DeliveryRequested fact delivered by De
 _The DeliveryJob records the inbound partner acceptance with its courier (idempotent by partnerRef)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryAcceptedByPartner`](#command-deliveryacceptedbypartner)
+- **When**: [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
 - **Then**: [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
 - **Verifies**: [📐 `PartnerAcceptanceRecordsCourier`](#rule-partneracceptancerecordscourier)
 
@@ -10529,7 +10529,7 @@ _The DeliveryJob records the inbound partner acceptance with its courier (idempo
 _The DeliveryJob records the inbound partner rejection (the dispatcher re-offers, bounded)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
+- **When**: [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **Then**: [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers)
 
@@ -10539,7 +10539,7 @@ _The DeliveryJob records the inbound partner rejection (the dispatcher re-offers
 _The DeliveryJob records the terminal dispatch failure delivered by DeliveryDispatchProcess (job → FAILED)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryDispatchFailed`](#command-deliverydispatchfailed)
+- **When**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 - **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 - **Verifies**: [📐 `DispatchExhaustionFailsClosed`](#rule-dispatchexhaustionfailsclosed)
 
@@ -10559,7 +10559,7 @@ _An operator escalates an outstanding offer: the DeliveryJob emits DeliveryEscal
 _The DeliveryJob records the offer-timeout fact (the dispatcher advances the ranked walk)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryOfferTimedOut`](#command-deliveryoffertimedout)
+- **When**: [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout)
 - **Then**: [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout)
 - **Verifies**: [📐 `TimeoutEscalatesToNextChannel`](#rule-timeoutescalatestonextchannel)
 
@@ -10569,7 +10569,7 @@ _The DeliveryJob records the offer-timeout fact (the dispatcher advances the ran
 _The DeliveryJob records the inbound partner status report as a valid transition (avelo37 inbox, issue #28)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
-- **When**: [📩 `DeliveryStatusUpdated`](#command-deliverystatusupdated)
+- **When**: [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated)
 - **Then**: [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated)
 - **Verifies**: [📐 `DeliveryPartnerAssignmentLifecycle`](#rule-deliverypartnerassignmentlifecycle)
 
@@ -10693,7 +10693,7 @@ _An OFFLINE rider cannot jump straight to ON_DELIVERY (invalid transition)_
 _A ready DELIVERY order triggers creation of a delivery job_
 
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `OrderPlaced`](#event-orderplaced)
-- **When**: [📩 `OrderMarkedReady`](#command-ordermarkedready)
+- **When**: [⚡ `OrderMarkedReady`](#event-ordermarkedready)
 - **Then**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **Verifies**: [📐 `ReadyDeliveryOrderTriggersDispatch`](#rule-readydeliveryordertriggersdispatch)
 
@@ -10703,7 +10703,7 @@ _A ready DELIVERY order triggers creation of a delivery job_
 _Records the assigned courier when the partner accepts (inbound)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryAcceptedByPartner`](#command-deliveryacceptedbypartner)
+- **When**: [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `PartnerAcceptanceRecordsCourier`](#rule-partneracceptancerecordscourier)
 
@@ -10713,7 +10713,7 @@ _Records the assigned courier when the partner accepts (inbound)_
 _Advances the ranked channel walk to the next channel on a partner decline (inbound)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
+- **When**: [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `PartnerRejectionReoffers`](#rule-partnerrejectionreoffers), [📐 `CityRankingWalkedInOrder`](#rule-cityrankingwalkedinorder)
 
@@ -10723,7 +10723,7 @@ _Advances the ranked channel walk to the next channel on a partner decline (inbo
 _A channel accepts a re-offered job after the walk advanced: the run reaches ACCEPTED_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
-- **When**: [📩 `DeliveryAcceptedByPartner`](#command-deliveryacceptedbypartner)
+- **When**: [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `CityRankingWalkedInOrder`](#rule-cityrankingwalkedinorder), [📐 `PartnerAcceptanceRecordsCourier`](#rule-partneracceptancerecordscourier)
 
@@ -10733,7 +10733,7 @@ _A channel accepts a re-offered job after the walk advanced: the run reaches ACC
 _Exhausting the ranked channel walk fails the dispatch closed (DeliveryDispatchFailed, run FAILED)_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
-- **When**: [📩 `DeliveryRejectedByPartner`](#command-deliveryrejectedbypartner)
+- **When**: [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner)
 - **Then**: [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
 - **Verifies**: [📐 `DispatchExhaustionFailsClosed`](#rule-dispatchexhaustionfailsclosed)
 
@@ -10743,7 +10743,7 @@ _Exhausting the ranked channel walk fails the dispatch closed (DeliveryDispatchF
 _A RESTAURANT-dispatch order is not offered to a channel: the run self-dispatches (Captain tracks only)_
 
 - **Given**: [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `OrderPlaced`](#event-orderplaced)
-- **When**: [📩 `OrderMarkedReady`](#command-ordermarkedready)
+- **When**: [⚡ `OrderMarkedReady`](#event-ordermarkedready)
 - **Then**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
 - **Verifies**: [📐 `RestaurantDispatchBypassesRouting`](#rule-restaurantdispatchbypassesrouting)
 
@@ -10753,7 +10753,7 @@ _A RESTAURANT-dispatch order is not offered to a channel: the run self-dispatche
 _A manual operator escalate skips the current channel and advances the ranked walk_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryEscalationRequested`](#command-deliveryescalationrequested)
+- **When**: [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `ManualEscalateSkipsChannel`](#rule-manualescalateskipschannel)
 
@@ -10763,7 +10763,7 @@ _A manual operator escalate skips the current channel and advances the ranked wa
 _An expired offer advances the ranked walk to the next channel_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryOfferTimedOut`](#command-deliveryoffertimedout)
+- **When**: [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout)
 - **Then**: ∅ _no event (idempotent no-op)_
 - **Verifies**: [📐 `TimeoutEscalatesToNextChannel`](#rule-timeoutescalatestonextchannel)
 
@@ -10773,7 +10773,7 @@ _An expired offer advances the ranked walk to the next channel_
 _Closes the order when the partner reports DELIVERED (inbound)_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `DeliveryRequested`](#event-deliveryrequested)
-- **When**: [📩 `DeliveryStatusUpdated`](#command-deliverystatusupdated)
+- **When**: [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated)
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Verifies**: [📐 `OrderClosedOnDeliveryCompletion`](#rule-orderclosedondeliverycompletion)
 
@@ -10783,7 +10783,7 @@ _Closes the order when the partner reports DELIVERED (inbound)_
 _Closes the order when an independent rider completes the delivery_
 
 - **Given**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
-- **When**: [📩 `DeliveryCompleted`](#command-deliverycompleted)
+- **When**: [⚡ `DeliveryCompleted`](#event-deliverycompleted)
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Verifies**: [📐 `OrderClosedOnDeliveryCompletion`](#rule-orderclosedondeliverycompletion)
 
@@ -10794,7 +10794,7 @@ _Closes the order when an independent rider completes the delivery_
 
 _criticality: **high**_
 
-- **Workflow**: saga [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess)
+- **Workflow**: saga [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)
 - **Emits**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) · **Inbound**: [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested), [⚡ `DeliveryOfferTimedOut`](#event-deliveryoffertimedout)
 
 **Run identity**
@@ -10863,7 +10863,7 @@ Poll a journaled command's status by its messageId acceptance handle (the pull c
 The active Captain service-fee policy (admin; calibration/transparency).
 
 - **Input**: _(none)_
-- **Returns**: [🧩 `PricingPolicy`](#type-pricingpolicy) (list) · **reads** [🗄️ `PricingPolicy`](#view-pricingpolicy)
+- **Returns**: [🧩 `PricingPolicy`](#type-pricingpolicy) (list) · **reads** 🗄️ `PricingPolicy`
 - **Roles**: ADMIN · **slice** V1
 
 <a id="query-uberestimationpolicy"></a>
@@ -10872,7 +10872,7 @@ The active Captain service-fee policy (admin; calibration/transparency).
 The active per-cuisine Uber Eats mark-up coefficients (admin; calibration/transparency).
 
 - **Input**: _(none)_
-- **Returns**: [🧩 `UberEstimationPolicy`](#type-uberestimationpolicy) (list) · **reads** [🗄️ `UberEstimationPolicy`](#view-uberestimationpolicy)
+- **Returns**: [🧩 `UberEstimationPolicy`](#type-uberestimationpolicy) (list) · **reads** 🗄️ `UberEstimationPolicy`
 - **Roles**: ADMIN · **slice** V1
 
 <a id="query-ubersplitpolicy"></a>
@@ -10881,7 +10881,7 @@ The active per-cuisine Uber Eats mark-up coefficients (admin; calibration/transp
 The active Uber Eats split/fee assumptions for the estimated comparison (admin; calibration/transparency).
 
 - **Input**: _(none)_
-- **Returns**: [🧩 `UberSplitPolicy`](#type-ubersplitpolicy) (list) · **reads** [🗄️ `UberSplitPolicy`](#view-ubersplitpolicy)
+- **Returns**: [🧩 `UberSplitPolicy`](#type-ubersplitpolicy) (list) · **reads** 🗄️ `UberSplitPolicy`
 - **Roles**: ADMIN · **slice** V1
 
 <a id="subscription-operationstatuschanged"></a>
@@ -11077,7 +11077,7 @@ Checkout payment state for one order (ADR-20260720-015500): the read-side home o
 
 The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency.
 
-- **Read model**: [🗄️ `PricingPolicy`](#view-pricingpolicy)
+- **Read model**: 🗄️ `PricingPolicy`
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -11093,7 +11093,7 @@ The calibratable Captain service-fee policy (ADR-0016/0017); admin/transparency.
 
 Calibratable per-cuisine Uber Eats mark-up coefficient (ADR-0024/0030); admin/transparency.
 
-- **Read model**: [🗄️ `UberEstimationPolicy`](#view-uberestimationpolicy)
+- **Read model**: 🗄️ `UberEstimationPolicy`
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -11106,7 +11106,7 @@ Calibratable per-cuisine Uber Eats mark-up coefficient (ADR-0024/0030); admin/tr
 
 Calibratable Uber Eats split/fee assumptions for the estimated comparison (ADR-0024/0025/0030); admin/transparency.
 
-- **Read model**: [🗄️ `UberSplitPolicy`](#view-ubersplitpolicy)
+- **Read model**: 🗄️ `UberSplitPolicy`
 
 | Field | Type | Required |
 | --- | --- | --- |
@@ -12651,10 +12651,10 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | --- | --- | --- |
 | 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
-| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `PaymentSettlementProcess`](#entity-paymentsettlementprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `ReclamationProcess`](#entity-reclamationprocess) |
+| 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess) |
 | 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
-| 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
-| 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
+| 🔲 `customer` | Customer-facing consumer domain: discovery/browse, identity (phone-keyed), favorites, profile, address book, cart & ordering use-cases; cart binding. | [🎭 `Customer`](#actor-customer) · [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
+| 🔲 `delivery` | Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031). | [🎭 `DeliveryJob`](#actor-deliveryjob), [🎭 `Rider`](#actor-rider), [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration) · [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess) |
 
 ### 🧱 L2 — Containers
 
@@ -12708,12 +12708,12 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `actor-reclamation` | Rust — mailbox worker bin | Drains Reclamation lanes; appends its domain events.<br>realizes: [🎭 `Reclamation`](#actor-reclamation) |
 | 🧱 `actor-customer-credit` | Rust — mailbox worker bin | Drains CustomerCredit lanes (goodwill-credit ledger); appends its domain events.<br>realizes: [🎭 `CustomerCredit`](#actor-customercredit) |
 | 🧱 `actor-mailbox-supervision` | Rust — mailbox worker bin | Drains MailboxSupervision lanes (operator interventions recorded as facts, #315).<br>realizes: [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
-| 🧱 `pm-place-order` | Rust — mailbox worker bin | The checkout saga (acceptance-first): PlaceOrder → PaymentIntent → OrderPlaced on the captured fact.<br>realizes: [📦 `PlaceOrderProcess`](#entity-placeorderprocess) |
-| 🧱 `pm-payment-settlement` | Rust — mailbox worker bin | The settlement saga (ADR-20260808-195315 §1.2/§1.3): capture the authorized payment on fulfilment, release the hold on rejection/cancellation.<br>realizes: [📦 `PaymentSettlementProcess`](#entity-paymentsettlementprocess) |
-| 🧱 `pm-refund` | Rust — mailbox worker bin | The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded.<br>realizes: [📦 `RefundProcess`](#entity-refundprocess) |
-| 🧱 `pm-cart-binding` | Rust — mailbox worker bin | Binds anonymous carts to identified customers.<br>realizes: [📦 `CartBindingProcess`](#entity-cartbindingprocess) |
-| 🧱 `pm-delivery-dispatch` | Rust — mailbox worker bin | Dispatches ready DELIVERY orders to partners/riders (ADR-0031).<br>realizes: [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess) |
-| 🧱 `pm-reclamation` | Rust — mailbox worker bin | Drives reclamations to a resolution (refund / replacement / goodwill credit arms).<br>realizes: [📦 `ReclamationProcess`](#entity-reclamationprocess) |
+| 🧱 `pm-place-order` | Rust — mailbox worker bin | The checkout saga (acceptance-first): PlaceOrder → PaymentIntent → OrderPlaced on the captured fact.<br>realizes: [🎭 `PlaceOrderProcess`](#actor-placeorderprocess) |
+| 🧱 `pm-payment-settlement` | Rust — mailbox worker bin | The settlement saga (ADR-20260808-195315 §1.2/§1.3): capture the authorized payment on fulfilment, release the hold on rejection/cancellation.<br>realizes: [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess) |
+| 🧱 `pm-refund` | Rust — mailbox worker bin | The refund saga: decision facts → outbound Stripe refund → settled on PaymentRefunded.<br>realizes: [🎭 `RefundProcess`](#actor-refundprocess) |
+| 🧱 `pm-cart-binding` | Rust — mailbox worker bin | Binds anonymous carts to identified customers.<br>realizes: [🎭 `CartBindingProcess`](#actor-cartbindingprocess) |
+| 🧱 `pm-delivery-dispatch` | Rust — mailbox worker bin | Dispatches ready DELIVERY orders to partners/riders (ADR-0031).<br>realizes: [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess) |
+| 🧱 `pm-reclamation` | Rust — mailbox worker bin | Drives reclamations to a resolution (refund / replacement / goodwill credit arms).<br>realizes: [🎭 `ReclamationProcess`](#actor-reclamationprocess) |
 | 🧱 `projector-ordering` | Rust — projection worker bin | Projects ordering-scope events into the ordering views schema; own checkpoint. |
 | 🧱 `projector-catalog` | Rust — projection worker bin | Projects catalog-scope events into the catalog views schema; own checkpoint. |
 | 🧱 `projector-network` | Rust — projection worker bin | Projects network-scope events into the network views schema; own checkpoint. |
@@ -12844,7 +12844,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | ⚙️ `command-bus` | 📡 yes | Dispatches commands to handlers; span 'command.receive'/'command.validate'/'command.handle'. | — |
 | ⚙️ `actor-client` | — no | The compiler-enforced mailbox door (crates/actor_client — #290 phase 1, PROP-20260802-130500 D1/D4): one GENERATED typed client per actor with a SPEC-GATED surface (send/record/schedule/cancel_scheduling exist only where actors.yaml declares a use, ADR-20260802-170059) plus the generic ActorClient operation-status read door. The only place a mailbox row can be constructed (MailboxEntry fields private); graphql-gateway and the ACLs enqueue through it, and PgMailbox (infrastructure) is the SQL adapter behind its Mailbox port. Port-level assembly, pure — NOT instrumented. | — |
 | ⚙️ `command-handlers` | — no | One handler per aggregate; validates invariants then appends events. Pure domain — NOT instrumented. | handles [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `Catalog`](#actor-catalog), [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Customer`](#actor-customer), [🎭 `DeliveryJob`](#actor-deliveryjob)<br>reads [🗄️ `Restaurant`](#view-restaurant), [🗄️ `Catalog`](#view-catalog), [🗄️ `Customer`](#view-customer), [🗄️ `ProspectionPipeline`](#view-prospectionpipeline) |
-| ⚙️ `process-managers` | 📡 yes | Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch). | handles [📦 `PlaceOrderProcess`](#entity-placeorderprocess), [📦 `RefundProcess`](#entity-refundprocess), [📦 `CartBindingProcess`](#entity-cartbindingprocess), [📦 `DeliveryDispatchProcess`](#entity-deliverydispatchprocess)<br>reads [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking) |
+| ⚙️ `process-managers` | 📡 yes | Sagas coordinating aggregates + externals (checkout, refund, cart binding, delivery dispatch). | handles [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `CartBindingProcess`](#actor-cartbindingprocess), [🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)<br>reads [🗄️ `Cart`](#view-cart), [🗄️ `OrderTracking`](#view-ordertracking) |
 | ⚙️ `event-store-adapter` | 📡 yes | Appends to domain_events; span 'event.store.append' with business.event_type/stream_id. | — |
 | ⚙️ `event-publisher` | 📡 yes | Publishes appended events to the bus; span 'event.publish' (PRODUCER). | — |
 | ⚙️ `message-consumers` | 📡 yes | Consume domain + inbound integration events; span 'event.consume.*' (CONSUMER). | — |

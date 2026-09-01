@@ -2,6 +2,69 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-01 — A link checker exists, and a broken citation can no longer ship silently.**
+> Founder directive, 2026-09-01, verbatim: *"excellent point put in place this url checker that must
+> be executed locally and enforced in the CI too"* — both halves, and both landed: `make link-check`
+> locally, two pinned steps in CI's always-run `gate-scripts` job
+> ([#837](https://github.com/TheCaptainCompany/captain-food/issues/837)). There was **no link
+> checker anywhere** before this: nothing in the Makefile or any workflow validated a link, so
+> `docs/**` — which *is* the operating model, since CLAUDE.md is an index whose authority is the
+> topic file it links to and every ADR cites its neighbours — had been accumulating dead citations
+> with nothing able to see them.
+>
+> **The number, with its method, because a link count is meaningless without one** (ADR-20260817-105845).
+> The card carried `~25` as `UNVERIFIED input`; re-derived, the tree held **8,045 relative links
+> across 451 tracked markdown files, of which 130 were broken**. Method: relative link *targets*
+> (inline `[t](p)`, images, link reference definitions) in the files `git ls-files -- '*.md'`
+> reports, resolved against the tree, with fragments checked against GitHub's heading-slug algorithm
+> plus explicit `<a id>` anchors; external URLs, footnote definitions, and links inside fenced or
+> indented code blocks are not links for this purpose. The `~25` was the right order for the half
+> anyone had looked at — **28** dangling paths in hand-authored docs — and missed the other
+> **102**, which were dead in-page anchors in `specs/generated/documentation.generated.md`.
+>
+> **Those 102 were an emitter defect, and finding them was the checker's first real catch.** A
+> test's `when:` is not always a command — 59 of this repo's tests are driven by an inbound
+> integration event, which is the whole point of ADR-0004 — and a saga is documented as an `actor`,
+> not an `entity`. Both were hardcoded kinds in `emit/docs.rs`, so the document linked to anchors it
+> never defined. Fixed at the emitter and regenerated, never in the output; the HTML sibling carried
+> the same bug and no checker would ever have seen it, since the scan is markdown-only.
+>
+> **Gated at ZERO, with no baseline file** — a baseline is a second thing to keep honest, and this
+> repo has been bitten by exactly that. Two scope decisions are stated rather than implied:
+> **external URL liveness is OUT** (a blocking gate whose verdict depends on a third party's uptime
+> and rate limiter reds on honest work, which is the "trains readers to discount reds" instrument
+> `tools/codegen-rs/src/tests.rs` has retracted five times over), and **anchors are IN** (the slug
+> algorithm is deterministic and published; a citation landing in the right file at the wrong heading
+> is the same silent nothing).
+>
+> **Compiler-first lands at level 3, and the argument is the one already recorded for `specs/**`
+> YAML.** PROP-20260802-130500 §1's hierarchy ranks ways to stop *Rust code* naming something it
+> should not, and it has no rung for a target written in prose: no newtype or sealed trait can make
+> `[x](gone.md)` unspellable, because the compiler never sees the markdown. So "start at level 4"
+> resolves to *level 3 is the ceiling here*, exactly as it did for the `reads:` wall
+> ([ADR-20260812-214500](../adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)),
+> and it is the case [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)
+> names in its own carve-out: non-Rust artifacts. Where a stronger instrument *was* available it was
+> taken — the generated document now cannot contain a dead in-page link at all, because the emitter
+> de-links any anchor it does not define.
+>
+> **Three vacuity guards, because a scanner that matches nothing passes** — a green over an empty
+> corpus is clean, confident and meaningless, and that shipped twice in one session here. The corpus
+> is derived from `git ls-files`, never a literal list, and an empty corpus, a corpus not containing
+> `CLAUDE.md`, and a corpus yielding zero extracted links each exit 2 with their own message. All
+> three were **observed red**, as were a planted broken link, the `ADR-` prefix trap (pre-2026-07-22
+> ADRs have no prefix while every citation uses one — `ADR-0004-...` resolving to nothing is one of
+> the 28), a `|| true` disarm of the CI step, and the selftest's own completeness counter.
+>
+> **Four false-positive classes were found while writing it, and every one had exactly one "fix"
+> available to a reader who did not know better: damage a correct document.** Footnote definitions
+> read as link reference definitions (20 false reds in one research dump — the majority of the first
+> measured finding was the instrument); an indented code block in `docs/STATUS.md` showing a template
+> destined for `docs/status/`; a list continuation that must *not* be swallowed by the fix for that;
+> and an intraword `_` stripped as emphasis, which slugged `` `place_order` `` to `placeorder` and
+> reported a correct ADR link broken. They are `T10`–`T13` of the selftest.
+
+
 > **2026-09-01 — The founder's read-only command is renamed a second time: `/where` → `/whatsup`.**
 > Founder verbatim, 2026-09-01: *"Instead of /where use /whatsup"*. A **preference, not a
 > collision** — the reason `/status` was abandoned (Claude Code ships a built-in `/status`; skills
