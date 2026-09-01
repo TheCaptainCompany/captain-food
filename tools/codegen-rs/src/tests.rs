@@ -12181,6 +12181,18 @@ mod decision_ask_and_citations {
             "could not read the extension allowlist out of `claude_citation_corpus` -- the half of this test that closes review #63 is then vacuous. Got {:?}",
             extensions
         );
+        // THE PIN STAYS ON THE HISTORICAL ROW, DELIBERATELY (RETRIEVAL-QMD-ROWS, 2026-09-01).
+        // RETRIEVAL-QMD-CI is `superseded` as of that change, and this test still reads it -- which
+        // is correct rather than stale: what this pin measures is that whichever record DESCRIBES
+        // `claude_citation_corpus` keeps tracking the code, and that description is
+        // RETRIEVAL-QMD-CI's clause (d) plus its ADR. The successor deliberately does NOT restate
+        // the citation corpus (it is the predecessor's rider, not the successor's subject), so
+        // re-pointing this pin at the chain head would force clause (d)'s pathspec enumeration to
+        // be copied forward -- the exact carry-forward drift that row has already suffered four
+        // times. Named here because `tools/**` is outside `claude_citation_corpus`, so NOTHING
+        // reds if this call is never made: silence would ship a green gate measuring a dead
+        // record. If a future decision moves the corpus DESCRIPTION to a new row, move this
+        // pin with it, in the same change.
         for (label, rel) in [
             ("the authorizing row", "docs/decisions/RETRIEVAL-QMD-CI.yaml"),
             ("the ADR", "docs/adr/ADR-20260824-205911-the-decision-lookup-stub-suite-runs-in-ci.md"),
@@ -12444,6 +12456,14 @@ mod decision_ask_and_citations {
     #[test]
     fn the_ride_along_count_matches_the_clauses_named() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        // THE PIN STAYS ON THE HISTORICAL ROW, DELIBERATELY (RETRIEVAL-QMD-ROWS, 2026-09-01).
+        // RETRIEVAL-QMD-CI is `superseded`, and this test still reads it BY PATH, which is the
+        // correct call rather than an oversight: the six ride-alongs this counts are THAT row's,
+        // they landed under it, and its successor neither carries them nor acquires any of its
+        // own. Moving the pin to the chain head would either count nothing or force the rider
+        // narration to be copied forward -- the drift this assertion exists to stop. Named
+        // because `tools/**` is outside `claude_citation_corpus`, so nothing reds if the call is
+        // never made. A future row that itself carries ride-alongs needs its OWN assertion.
         let row = fs::read_to_string(root.join("docs/decisions/RETRIEVAL-QMD-CI.yaml"))
             .expect("RETRIEVAL-QMD-CI.yaml");
         // BOUND THE WINDOW FIRST, THEN READ BOTH THE NUMBER AND THE CLAUSES OUT OF IT.
@@ -15700,7 +15720,7 @@ mod docs_only_ci_and_legacy_visibility {
         // where the same two-token edit would move both. Lowering it is a decision a diff has to
         // argue with, in another language and another file, with this message attached. Raising it
         // when cases are added is ordinary. (Review #47 of PR #679.)
-        const MINIMUM_CASES: u32 = 54;
+        const MINIMUM_CASES: u32 = 59;
         let expected_n: u32 = expected.parse().expect("EXPECTED_CASES is an integer");
         assert!(
             expected_n >= MINIMUM_CASES,

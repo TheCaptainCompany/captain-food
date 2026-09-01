@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# decision-lookup — advisory BM25 candidate retrieval (row RETRIEVAL-QMD-CI, the chain head; decided_by
-# ADR-20260824-205911, founder 2026-08-24; the decision adopts the DESIGN — the first controlled
-# `--install` run is a required activation test). ADVISORY ONLY: candidates, never evidence or
+# decision-lookup — advisory BM25 candidate retrieval (row RETRIEVAL-QMD-ROWS, the chain head;
+# decided_by ADR-20260901-025538, founder 2026-09-01; it carries forward the superseded
+# RETRIEVAL-QMD-CI / RETRIEVAL-QMD and widens the corpus to docs/decisions/*.yaml). ADVISORY ONLY: candidates, never evidence or
 # authority. Decision YAML + direct source reading is the authority path; rg + aliases is the
 # baseline and the fallback. This wrapper NEVER installs anything on its own during a task:
 # installation happens only via the explicit documented command `decision-lookup.sh --install`,
@@ -18,7 +18,8 @@
 #   .qmd/tool/    the pinned package: package.json (trustedDependencies: []), bunfig.toml
 #                 (ignoreScripts), bun.lock, node_modules/ — created only by `--install`.
 #   .qmd/corpus/  the `git archive` export (of the one resolved HEAD SHA) of committed governing
-#                 Markdown + `.sha` (the revision stamp, the same resolved SHA) + the
+#                 Markdown AND the decision-register row files (`docs/decisions/*.yaml`, row
+#                 RETRIEVAL-QMD-ROWS) + `.sha` (the revision stamp, the same resolved SHA) + the
 #                 project-local index dir `qmd init` creates inside it.
 #   .qmd/index/   QMD's HOME-side state: with HOME pointed here, qmd writes its config under
 #                 .qmd/index/.config/qmd/. The index DATABASE is project-local (observed at
@@ -37,10 +38,21 @@ CORPUS="$QDIR/corpus"
 QHOME="$QDIR/index"
 QMD="$TOOL/node_modules/.bin/qmd"
 K=3
+# The TOOL's own collection glob. qmd 2.8.3 defaults it to `**/*.md` (see qmd_pattern_widen).
+QMD_PATTERN='**/*.{md,yaml}'
+# The row-ingestion canary's nonce. It is a NONCE, not register content, on purpose: a guard
+# coupled to a real row's key or wording would go red on ordinary register growth -- someone
+# opening, rewording or superseding a decision row would fire a repository-wide gate, which is a
+# worse failure than the one being guarded. A hit on this token is explicable ONLY by the canary
+# FILE having been indexed, and that file sits in docs/decisions/ with a .yaml extension: the
+# exact pathspec arm and extension arm the real rows travel.
+CANARY_KEY='QMD-INGESTION-CANARY'
+CANARY_TOKEN='qmdrowingestioncanaryf3a91c7d'
 
-DISCLAIMER='ADVISORY ONLY — candidates, not evidence. READ the candidate directly, then resolve the
-exact row: docs/decisions/<KEY>.yaml. Baseline and fallback: rg + aliases (workflow.md alias
-table). No result is NOT evidence of "undecided".'
+DISCLAIMER='ADVISORY ONLY — candidates, not evidence. READ every candidate directly at HEAD, and
+resolve docs/decisions/<KEY>.yaml itself: the index is a disposable fold of ONE commit, and a
+projection is never authority — including when the candidate IS a row file. Baseline and fallback:
+rg + aliases (workflow.md alias table). No result is NOT evidence of "undecided".'
 
 fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but exit 0
   echo "$DISCLAIMER"
@@ -52,7 +64,7 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
   # forms that other shells do not guarantee to parse identically.
   printf '  rg --fixed-strings -i -l -- %q docs/ CLAUDE.md\n' "$2"
   echo "  aliases: docs/claude/sessions/workflow.md (contribution/tip, delivery/rider, founder/product owner/customer, register/decision queue)"
-  echo "  then resolve the row: docs/decisions/<KEY>.yaml and READ the controlling record"
+  echo "  then resolve the row: docs/decisions/<KEY>.yaml at HEAD and READ the controlling record"
   exit 0
 }
 
@@ -66,13 +78,24 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 # exactly once, so the archive source and the stamp can never diverge (no re-resolve race). The
 # WORKING TREE is never indexed. If the rebuild fails, the caches stay wiped and the caller gets
 # the rg + aliases fallback — never stale QMD output. The stamp is written only after the index
-# database is verified present and non-empty: a successful update that writes no index at the
-# expected location is a rebuild failure, never a stamped cache. Exclusions (decided): DECISIONS.md
+# database is verified present and non-empty AND the row-ingestion canary has passed: a successful
+# update that writes no index at the expected location, or one that indexes no `.yaml` at all, is a
+# rebuild failure, never a stamped cache. INCLUDED (row RETRIEVAL-QMD-ROWS, founder 2026-09-01):
+# `docs/decisions/*.yaml`, the register's declaration site — ALL of them, superseded and withdrawn
+# rows included, because `superseded_by:` is what makes a hit on a retired row resolvable to its
+# chain head; truncating to live rows would destroy the DAG that makes the register answerable.
+# Exclusions (decided): DECISIONS.md
 # (generated region), the QMD proposal (recorded contamination), docs/status/** (the journals
 # narrate this tool's own verification queries and answers — indexing them lets a lookup match
 # the account of itself, the recorded self-contamination/false-authority shape; rg + aliases
-# still searches status records directly), and all non-Markdown (row-YAML indexing is out of
-# scope by decision).
+# still searches status records directly), `docs/decisions/_legacy.yaml` and
+# `docs/decisions/_exempt.yaml` (CONTROL FILES, not rows: they carry no `status`/`owner`/`capacity`
+# to disambiguate a hit, and `_legacy.yaml` is one document naming 100 prose-only keys, so it ranks
+# for any register query while answering none — and a hit on it points at a key with NO row file,
+# the one case the mandatory-resolution contract cannot discharge), `docs/decisions/README.md`
+# (never exported: the pathspec is `docs/decisions/*.yaml`, so the register's schema/semantics doc
+# is excluded BY CONSTRUCTION rather than by a second mask — it is a term sponge for register
+# vocabulary that answers no decision question), and all other non-Markdown.
 index_openable() { # bounded openability probe (delete-wholesale on failure — no repair path).
   # IMMUTABLE (implies read-only) on purpose — the probe must be a ZERO-WRITE observer: a
   # default rw connect silently runs SQLite WAL recovery on a pending -wal (a WRITE into the
@@ -131,7 +154,46 @@ except Exception as e:
     sys.exit(1 if isinstance(E, type) and issubclass(E, BaseException) and isinstance(e, E) else 2)' "$1" >/dev/null 2>&1
 }
 
-build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
+# MASK #3 — THE TOOL'S OWN, and the one that is easy to miss. The wrapper has two masks of its
+# own (the `git archive` pathspec and the `find` extension sweep below), but qmd keeps a THIRD:
+# `qmd init` + `qmd collection add` write `pattern: "**/*.md"` into $CORPUS/.qmd/index.yml, and
+# that glob decides what `qmd update` actually ingests. Widening only the wrapper's two masks
+# exports the rows, keeps them on disk, builds an index and writes the stamp — and indexes ZERO
+# rows, silently, forever. There is NO CLI route: `qmd collection add . '<glob>'` accepts the
+# argument and IGNORES it (verified against the pinned 2.8.3 — `collection show` still reported
+# `**/*.md`), so the pattern is set in the config file qmd itself just created, inside the
+# gitignored disposable cache. Corpus composition only: `models:` and every other key are left
+# untouched, which is why this is a targeted scalar rewrite and not a config rewrite.
+# EXACTLY ONE `pattern:` scalar must match. Zero (a future qmd changing the config shape) or more
+# than one (a second collection) FAILS the rebuild into the named fallback rather than guessing —
+# the whole hazard here is a silent no-op, so an unrecognised config is never written to.
+# The config is read and rewritten with `errors="surrogateescape"` because it is NOT guaranteed
+# to be valid UTF-8: qmd writes the collection's absolute PATH into it verbatim, so on a cache
+# path carrying a non-UTF-8 byte a plain utf-8 read raises and the rebuild would fail for an
+# encoding reason that says nothing about the config. surrogateescape round-trips those bytes
+# unchanged, so the rewrite touches the one scalar and nothing else. (Found by T15g, the
+# non-UTF-8 cache-path case, which regressed the moment this helper was added.)
+qmd_pattern_widen() { # $1 = index.yml path, $2 = the wanted glob
+  python3 -c '
+import re, sys
+path, want = sys.argv[1], sys.argv[2]
+try:
+    src = open(path, encoding="utf-8", errors="surrogateescape").read()
+except Exception:
+    sys.exit(1)
+out, n = re.subn(
+    r"(?m)^(?P<indent>[ \t]+)pattern:[ \t]*(?P<q>[\"\x27])(?P=q)?.*?(?P=q)[ \t]*$",
+    lambda m: m.group("indent") + "pattern: \"" + want + "\"",
+    src)
+if n != 1:
+    sys.exit(1)
+try:
+    open(path, "w", encoding="utf-8", errors="surrogateescape").write(out)
+except Exception:
+    sys.exit(1)' "$1" "$2" 2>/dev/null
+}
+
+build_corpus() { # 0 = cache ready; 1 = rebuild failed (caches wiped); 2 = row-ingestion canary failed
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
   if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
     && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
@@ -147,16 +209,45 @@ build_corpus() { # returns 0 = cache ready; 1 = rebuild failed (caches wiped)
     esac
   fi
   rm -rf "$CORPUS" "$QHOME" && mkdir -p "$CORPUS" "$QHOME"
+  # MASK #1 — the export. `docs/decisions/*.yaml` is scoped to the ROW FILES: the register's
+  # README.md is never exported, so it needs no second mask.
   git -C "$REPO" archive "$head" -- docs/adr docs/proposals docs/claude docs/STATUS.md CLAUDE.md \
+      'docs/decisions/*.yaml' \
     | tar -x -C "$CORPUS" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
   rm -f "$CORPUS/docs/proposals/DECISIONS.md" "$CORPUS"/docs/proposals/PROP-20260822-171212-*
-  find "$CORPUS" -type f ! -name '*.md' -delete
+  rm -f "$CORPUS/docs/decisions/_legacy.yaml" "$CORPUS/docs/decisions/_exempt.yaml"
+  # MASK #2 — keep Markdown everywhere, plus `.yaml` UNDER docs/decisions/ ONLY. Scoped BY PATH,
+  # never by relaxing the extension filter globally: zero non-`.md` files are tracked under
+  # docs/adr, docs/proposals or docs/claude today, so a blanket `*.yaml` relaxation would be
+  # silently correct now and silently wrong the day one lands there.
+  find "$CORPUS" -type f ! -name '*.md' \
+    ! \( -path "$CORPUS/docs/decisions/*" -name '*.yaml' \) -delete
+  # The canary file is planted BEFORE `update` so it is ingested with everything else, and its
+  # non-vacuity is ASSERTED rather than assumed: if the nonce occurs in any Markdown that is also
+  # indexed, a hit no longer testifies about the `.yaml` arm and the guard proves nothing.
+  if grep -rlF --include='*.md' -e "$CANARY_TOKEN" "$CORPUS" >/dev/null 2>&1; then
+    rm -rf "$CORPUS" "$QHOME"; return 1
+  fi
+  printf 'key: "%s"\ncanary: "%s"\n' "$CANARY_KEY" "$CANARY_TOKEN" \
+    > "$CORPUS/docs/decisions/$CANARY_KEY.yaml" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
   ( cd "$CORPUS" && env HOME="$QHOME" "$QMD" init >/dev/null 2>&1 \
-    && env HOME="$QHOME" "$QMD" collection add . >/dev/null 2>&1 \
-    && env HOME="$QHOME" "$QMD" update >/dev/null 2>&1 ) || { rm -rf "$CORPUS" "$QHOME"; return 1; }
+    && env HOME="$QHOME" "$QMD" collection add . >/dev/null 2>&1 ) \
+    || { rm -rf "$CORPUS" "$QHOME"; return 1; }
+  qmd_pattern_widen "$CORPUS/.qmd/index.yml" "$QMD_PATTERN" \
+    || { rm -rf "$CORPUS" "$QHOME"; return 1; }
+  ( cd "$CORPUS" && env HOME="$QHOME" "$QMD" update >/dev/null 2>&1 ) \
+    || { rm -rf "$CORPUS" "$QHOME"; return 1; }
   # A "successful" update that left no index at the checked location is a rebuild failure:
   # never stamp it (a stamped index-less corpus would rebuild forever, silently).
   [ -s "$CORPUS/.qmd/index.sqlite" ] || { rm -rf "$CORPUS" "$QHOME"; return 1; }
+  # ROW-INGESTION CANARY. Corpus PRESENCE is not INGESTION: all three masks can be correct on
+  # disk while a future qmd, a changed config shape or a re-narrowed glob drops every `.yaml`,
+  # and the index would still build, still stamp and still answer — never returning a row again,
+  # silently. So the `.yaml` arm is proven END TO END at rebuild time, and a failure is fail-CLOSED:
+  # caches wiped, corpus NEVER stamped, its own named fallback. This runs before the stamp write
+  # for exactly that reason.
+  printf '%s' "$(cd "$CORPUS" && env HOME="$QHOME" "$QMD" search "$CANARY_TOKEN" --json 2>/dev/null)" \
+    | grep -qF "$CANARY_KEY" || { rm -rf "$CORPUS" "$QHOME"; return 2; }
   # A failed stamp write wipes the derived caches like every other failure arm, so the caller's
   # "caches wiped" fallback wording stays exactly true and no partial state survives.
   printf '%s' "$head" > "$CORPUS/.sha" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
@@ -169,8 +260,10 @@ activation_fail() { # $1 = what failed — the activation test is loud AND non-z
   # PROTOCOL governs, and it used to say RETRIEVAL-QMD -- now superseded, so a session doing exactly
   # what this line said wrote `reconsiders: RETRIEVAL-QMD` against that superseded row, and hit the
   # validator's "challenge the HEAD of its supersession chain" -- a gate error on the one path
-  # where the operator is already dealing with something broken. Review of PR #679.
-  echo "Per row RETRIEVAL-QMD-CI (the chain head): record this failure and open a new/reversal decision before any change to package, version, permissions, or dependency shape. The baseline (rg + aliases + direct row resolution) is the system."
+  # where the operator is already dealing with something broken. Review of PR #679. It is now
+  # RETRIEVAL-QMD-ROWS, moved 2026-09-01 in the same commit that superseded RETRIEVAL-QMD-CI --
+  # this line is the SECOND supersession it has had to survive, which is why it is called out.
+  echo "Per row RETRIEVAL-QMD-ROWS (the chain head): record this failure and open a new/reversal decision before any change to package, version, permissions, dependency shape, or CORPUS COMPOSITION (what is exported, what is masked, and the collection glob -- a fifth protected dimension since 2026-09-01). The baseline (rg + aliases + direct row resolution) is the system."
   exit 1
 }
 
@@ -261,7 +354,12 @@ command -v bun >/dev/null 2>&1 || fallback "bun runtime not present" "$Q"
 python3 -c 'import json' >/dev/null 2>&1 \
   || fallback "python3 not usable — required for the openability probe and the strict results parser" "$Q"
 [ -x "$QMD" ] || fallback "not installed — to install deliberately: .claude/skills/decision-lookup/scripts/decision-lookup.sh --install" "$Q"
-build_corpus || fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q"
+build_corpus
+case $? in
+  0) : ;;
+  2) fallback "row-ingestion canary FAILED — the corpus' docs/decisions/*.yaml arm did not enter the index, so every register lookup would silently miss every row (caches wiped, corpus never stamped)" "$Q" ;;
+  *) fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q" ;;
+esac
 
 # Machine-readable output only: qmd's --json mode, parsed with the python3 standard library
 # against a PINNED, STRICT top-level schema. PROVENANCE NOTE (honest): the completed sandbox spike
@@ -297,7 +395,7 @@ SEARCH_RC=$?
 # breaking every query, so the class is documented instead: rephrase the query without the
 # leading hyphen).
 [ "$SEARCH_RC" -ne 0 ] && { rm -rf "$CORPUS" "$QHOME"; fallback "qmd search failed (exit $SEARCH_RC) — a tool failure, not an empty result; derived caches wiped (delete-wholesale, never repair); no retry" "$Q"; }
-[ -z "$OUT" ] && fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q"
+[ -z "$OUT" ] && fallback "no result — the index is a corpus-masked projection of ONE commit and never the working tree; absence decides nothing" "$Q"
 
 CANDIDATES="$(printf '%s' "$OUT" | python3 -c '
 import json, sys
@@ -331,6 +429,17 @@ for r in results:
     if p in seen:
         continue
     seen.add(p)
+    # THE PATH IS THE PAYLOAD FOR A ROW; THE EXCERPT IS DECORATIVE. No field subset of a
+    # decision row is safe to quote: PMW-1 is `status: "decided"` with an evidence field that
+    # reads as firm founder approval, while its own `note` records that the premise is gone and
+    # the live challenge is the open row PMW-4. Excerpting `status` beside it would manufacture a
+    # MORE convincing false answer than printing nothing, so a row candidate renders as a
+    # RESOLVE-INSTRUCTION and never as a quotable snippet.
+    if p.startswith("docs/decisions/") and p.endswith(".yaml"):
+        rows.append((p, None))
+        if len(rows) == K:
+            break
+        continue
     ex = next((r[k] for k in ("snippet", "excerpt", "text", "title") if isinstance(r.get(k), str)), "")
     rows.append((p, " ".join(ex.split())[:200]))
     if len(rows) == K:
@@ -339,11 +448,14 @@ if not rows:
     sys.exit(4)
 for i, (p, ex) in enumerate(rows, 1):
     print(f"candidate {i}: {p}")
-    if ex:
+    if ex is None:
+        print(f"  decision row — resolve {p} at HEAD. Not excerpted on purpose: status,")
+        print("  reconsiders/superseded_by and note only mean anything read together.")
+    elif ex:
         print(f"  {ex}")
 ')" || case $? in
   3) fallback "QMD output contract unavailable (top-level shape is neither pinned form); if this is the activation lookup, activation is FAILED/INCONCLUSIVE pending a new decision — do not modify the parser; use rg + aliases" "$Q" ;;
-  4) fallback "no result — the index is Markdown-only and corpus-masked; absence decides nothing" "$Q" ;;
+  4) fallback "no result — the index is a corpus-masked projection of ONE commit and never the working tree; absence decides nothing" "$Q" ;;
   *) fallback "QMD output contract unavailable; use rg + aliases" "$Q" ;;
 esac
 [ -z "$CANDIDATES" ] && fallback "QMD output contract unavailable; use rg + aliases" "$Q"
@@ -373,8 +485,13 @@ fi
 
 echo "$DISCLAIMER"
 echo
+# STALENESS IS STATED ON EVERY LOOKUP, not reasoned about per candidate. The index is a fold of
+# the one SHA on the stamp; the working tree is never indexed. That is now load-bearing in a new
+# way: rows are WRITTEN in the same sessions that run register checks, so a lookup miss on a row
+# is NOT a negative trail and `rg` over the working tree stays mandatory.
+echo "corpus: $(cat "$CORPUS/.sha" 2>/dev/null || echo unknown) (working tree not indexed)"
 echo "$SCHEMA_LINE"
 printf '%s\n' "$CANDIDATES"
 echo
-echo "next: READ the candidate(s) above, then resolve docs/decisions/<KEY>.yaml before any decision assertion or founder question."
+echo "next: READ the candidate(s) above at HEAD, and resolve docs/decisions/<KEY>.yaml directly — including when a candidate IS a row file — before any decision assertion or founder question."
 exit 0

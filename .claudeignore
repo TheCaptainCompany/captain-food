@@ -61,12 +61,15 @@ wt*/
 # this file deliberately with an offset when a verdict needs its surrounding context.
 target/quiet-gate.log
 
-# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD-CI).
-# Deliberately NOT mirrored in settings.json permissions.deny: `RETRIEVAL-QMD-CI` (the chain head)
-# carries that non-authorization forward from the superseded `RETRIEVAL-QMD`, recorded on #671.
-# The rename sweep that pointed this line at the head made the PROVENANCE false -- RETRIEVAL-QMD-CI
-# was opened AND decided 2026-08-24 on #679, so it cannot have been recorded on #671 -- and the
-# constraint was right while the pointer sent a reader to a row about wiring a suite into CI. The
-# citation rule ships a clause-scoped escape precisely so a sentence ABOUT a superseded row can stay
-# accurate; s/OLD/NEW/ was merely the shortest green.
+# QMD advisory retrieval cache — derived, never agent context (row RETRIEVAL-QMD-ROWS).
+# Deliberately NOT mirrored in settings.json permissions.deny: `RETRIEVAL-QMD-ROWS` (the chain head)
+# carries that non-authorization forward, as its predecessors did before it. THE PROVENANCE IS THE
+# CHAIN, NOT THE HEAD: the constraint was first recorded on #671 under the now-superseded
+# `RETRIEVAL-QMD`; it was NOT recorded on #679, where `RETRIEVAL-QMD-CI` was opened and decided the
+# same day (2026-08-24); and it is carried forward again here (#840, 2026-09-01) without being
+# re-decided. That distinction is the whole lesson of this comment: an earlier sweep did s/OLD/NEW/
+# on the row name and thereby attributed the constraint to a row about wiring a suite into CI --
+# the shortest green, and false. The citation rule ships a clause-scoped escape precisely so a
+# sentence ABOUT a superseded row can stay accurate, so cite the HEAD for the live constraint and
+# name the older rows as history, which is what the sentences above now do.
 .qmd/

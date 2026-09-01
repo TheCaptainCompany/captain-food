@@ -20,7 +20,7 @@ wt*/
 # Register-check hook firing log (runtime artifact, ADR-20260821-010543)
 .claude/register-check.log
 
-# QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD-CI)
+# QMD advisory retrieval cache — derived, disposable, never authoritative (row RETRIEVAL-QMD-ROWS)
 .qmd/
 
 # Python bytecode caches — a .pyc with no source in this tree was committed once by an over-broad

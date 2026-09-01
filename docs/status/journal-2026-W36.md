@@ -2,6 +2,67 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-01 — The decision register is now retrievable, and the mask that hid it had a third
+> hiding place.**
+> Founder directive, 2026-09-01 via `/decision`, verbatim: *"integrate yaml decision row indexing in
+> retrieval qmd ci"*. `docs/decisions/*.yaml` — the register's declaration site, the artifact every
+> `Register check:` trail is required to resolve — is in the advisory retrieval corpus. Chain head
+> `RETRIEVAL-QMD-ROWS`, [ADR-20260901-025538](../adr/ADR-20260901-025538-yaml-decision-rows-enter-the-qmd-retrieval-corpus.md),
+> superseding `RETRIEVAL-QMD-CI`, closing
+> [#840 "Index YAML decision rows in the decision-lookup (QMD) retrieval corpus"](https://github.com/TheCaptainCompany/captain-food/issues/840).
+>
+> **The finding that changed the work, established before anything was designed.** The card's
+> Phase 0 asked one question — *does qmd 2.8.3 ingest `.yaml` at all?* — and the answer is yes, but
+> only through a mask the wrapper does not own. **The mask exists in THREE places**: the
+> `git archive` pathspec, the `find … ! -name '*.md'` sweep, **and qmd's own collection glob**
+> (`pattern:` in the corpus-local `.qmd/index.yml`, which `qmd init` defaults to `**/*.md`). There
+> is no CLI route to it — `qmd collection add . '**/*.{md,yaml}'` accepts the argument and
+> **silently ignores it**, verified against the pinned 2.8.3 with `collection show` still reporting
+> `**/*.md`. Widening the two masks the dispatch named would have exported the rows, kept them on
+> disk, built an index, written the stamp — and indexed **zero rows, silently, forever**. It is the
+> same silent-no-op the dispatch identified in the `find` sweep, one layer deeper.
+>
+> **Measured, with antecedents** (ADR-20260817-105845; every figure produced this session on an
+> activated checkout at base `7d47355`, none carried from the card): 355 Markdown documents + 81 rows
+> + 1 canary = **437**; `qmd update` over that corpus **0.46 s** (previously **UNMEASURED**), cold
+> wipe-to-answer **2.8 s**; row keys retrieve their own row at rank 1 — `CREDIT-DRAIN-ORDER` sole
+> result at 0.92, `QUOTE-TOKEN` 1-of-7 at 0.88, `KEY-NAMESPACE` 1-of-7 at 0.89. Row sizes: min
+> 326 B, **median 961 B**, mean 2168 B, max 19674 B. **36 of 81 keys carry zero topical words** (the
+> card said 22; re-derived as 27 `PROP-…--D<n>` plus 9 short opaque keys), and that is a limit to
+> record, never to "fix" — a key rename breaks every chain edge and every citation.
+>
+> **The guard the change needed.** Corpus *presence* is not *ingestion*, so the wrapper now plants a
+> nonce-bearing `docs/decisions/*.yaml` file before `qmd update` and searches for the nonce after;
+> zero hits wipes the caches and **never stamps the corpus**. A **nonce, not register content**: a
+> guard coupled to a real row would go red whenever anyone opened or superseded an unrelated
+> decision — a repository-wide merge block fired by ordinary register growth, worse than the failure
+> it guards. Proven both ways this session: the real path returned `CREDIT-DRAIN-ORDER.yaml` as
+> candidate 1, and a mutant with the glob re-narrowed to `**/*.md` produced the named canary
+> fallback with the caches wiped and no stamp.
+>
+> **Two operational costs the next session should not re-pay.** (1) The five stub cases asserting
+> the old empty-result string are **negative** assertions (`! grep -q`), so rewording the wrapper's
+> string without moving them would have left them passing **vacuously** — a guard that can no longer
+> fail, which is strictly worse than the red the card predicted. (2) `decision-superseded-authority`'s
+> clause-scoped `superseded` exemption is **line-scoped** while its error message joins lines: a
+> citation whose exempting word sat on the *previous* wrapped line redded anyway. Reflowing so
+> `superseded` and the key share a physical line cleared it. Neither is derivable from reading the
+> code.
+>
+> **Also recorded**: rows are written in the same sessions that run register checks and the working
+> tree is never indexed, so **a lookup miss on a row is not a negative trail**; zero of
+> `_legacy.yaml`'s 100 prose-only keys are indexed; row candidates are rendered as
+> `resolve … at HEAD` and never excerpted (`PMW-1` is `status: "decided"` beside a note recording
+> that its premise is gone — excerpting `status` would manufacture a more convincing false answer
+> than printing nothing); BM25 length normalization gives the ~900 B stubs slot occupancy over the
+> 16.7 KB and 19.7 KB chain-head rows, accepted and not mitigated, with **no ranking claim made
+> anywhere**; and `docs/decisions/**` is deliberately **not** added to `claude_citation_corpus`,
+> because rows cite superseded rows by construction. **CI diff: zero lines.** The successor also
+> corrects four statements rather than copying them — the predecessor named the `changes` job, a pin
+> test that does not exist, the wrong job for rider (f)'s cap, and called an `err(...)` rule "WARNS".
+> The root cause (the row schema has no field for a fence, so it is all prose) is split off as the
+> team-owned row `REGISTER-ROW-FENCE`.
+
 > **2026-09-01 — A link checker exists, and a broken citation can no longer ship silently.**
 > Founder directive, 2026-09-01, verbatim: *"excellent point put in place this url checker that must
 > be executed locally and enforced in the CI too"* — both halves, and both landed: `make link-check`
