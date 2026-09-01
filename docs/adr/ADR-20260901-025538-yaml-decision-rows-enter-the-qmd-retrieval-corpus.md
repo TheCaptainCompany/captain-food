@@ -43,10 +43,20 @@ session; nothing is carried from the dispatch card unverified):
 | Where is the mask? | **Three places, not two** | `git archive` pathspec; `find … ! -name '*.md' -delete`; **and qmd's own `pattern:`** |
 | Is there a CLI route to the glob? | **No** | `qmd collection add . '**/*.{md,yaml}'` accepts the argument and *ignores* it — `collection show` still reported `**/*.md` |
 | Do row keys retrieve? | **Yes, rank 1** | `CREDIT-DRAIN-ORDER` → its own row, sole result, 0.92; `QUOTE-TOKEN` → 1 of 7, 0.88; `KEY-NAMESPACE` → 1 of 7, 0.89 |
-| Index rebuild duration | **0.46 s** over 437 documents | previously **UNMEASURED**; cold wipe-to-answer lookup 2.8 s |
-| Corpus size | 355 Markdown + 81 rows + 1 canary | 83 `.yaml` under `docs/decisions/` minus 2 control files |
-| Row sizes | min 326 B, **median 961 B**, mean 2168 B, max 19674 B | `find -printf '%s'` over the 81 rows |
-| Keys with zero topical words | **36 of 81** | 27 `PROP-…--D<n>` plus `CONFLICTS-20260819`, `LOSS-1`, `PMW-1`, `PMW-4`, `REG-1`…`REG-4`, `REV-1` |
+| Index rebuild duration | **0.46 s** | one stamped build, 2026-09-01; cold wipe-to-answer lookup 2.8 s |
+| Corpus size | *not stated as a count* — see the correction below | the exported side is `find $CORPUS/docs/decisions -name '*.yaml'`, the indexed side is `select count(*) from documents where active = 1 and path like 'docs/decisions/%.yaml'`; both are re-derived at every rebuild, and neither is quoted in a record |
+| Row sizes (a **disk** measurement, labelled as one) | min 326 B, **median 961 B**, mean 2168 B, max 19674 B | `find docs/decisions -name '*.yaml' -printf '%s\n'`, 2026-09-01 |
+| Keys with zero topical words (**disk**) | **36**, 2026-09-01 | 27 `PROP-…--D<n>` plus `CONFLICTS-20260819`, `LOSS-1`, `PMW-1`, `PMW-4`, `REG-1`…`REG-4`, `REV-1` |
+
+**Correction, PR #841 review round 1 — an antecedent defect in this table's first version.** It
+read "355 Markdown + 81 rows + 1 canary = 437 documents" and "81 rows indexed". Those numbers came
+from `find`/`ls` over `docs/decisions/` **on disk** and were presented as **index** counts — the
+exact conflation this ADR's own thesis names (*corpus presence is not ingestion*), and a derived
+number stated without its antecedent (ADR-20260817-105845). They are replaced by a **property**
+re-derived at every rebuild rather than a count restated in prose: *the index holds at least as
+many row documents as the build exported, or the build fails closed and nothing is stamped.*
+Measuring that property immediately found a live defect the counts had hidden — see
+[`RETRIEVAL-QMD-INGEST-LOSS`](../decisions/RETRIEVAL-QMD-INGEST-LOSS.yaml).
 
 **The third mask is the finding that changed the work.** `qmd init` + `qmd collection add` write
 `pattern: "**/*.md"` into the corpus-local `.qmd/index.yml`, and *that* glob decides what `qmd
@@ -143,8 +153,9 @@ the riders it counts are that row's.
 - **New false-negative class**: rows are written in the same sessions that run register checks, and
   the working tree is never indexed. **A lookup miss on a row is not a negative trail**; `rg` over
   the working tree stays mandatory.
-- **Coverage bound**: 81 rows indexed, **zero** of the 100 `_legacy.yaml` keys, because their prose
-  home `DECISIONS.md` is an excluded corpus file. A null result over the register is a null result
+- **Coverage bound**: every exported row file is indexed *or the build fails closed* (the property
+  above, checked at every rebuild — not a count quoted here), and **zero** of the 100
+  `_legacy.yaml` keys are, because their prose home `DECISIONS.md` is an excluded corpus file. A null result over the register is a null result
   over roughly half of it.
 
 ## The canary, and the honest bound on the stub suite
@@ -166,6 +177,28 @@ running in real use. Both halves were exercised this session: the real path retu
 `CREDIT-DRAIN-ORDER.yaml` as candidate 1, and a mutant with the glob re-narrowed to `**/*.md`
 produced the named canary fallback with the caches wiped and no stamp.
 
+### Correction (PR #841 review round 1): the canary does not detect *partial* ingestion
+
+This ADR's decision row originally listed silent partial ingestion as a failure-protocol trigger
+"which is what the canary detects". **It is not.** The canary is one nonce checked with
+`grep -qF`, so it detects an **empty** arm; a single ingested row satisfies it while every other
+row is missing. A second, complementary rebuild-time check now covers the partial case — **indexed
+`docs/decisions/*.yaml` documents ≥ the count that build exported**, both sides derived at build
+time, fail-closed and unstamped like the canary, with a planted-red stub case (`T10g`) and a
+non-vacuity case asserting both sides are populated (`T10h`). Neither guard subsumes the other:
+the canary proves the arm is alive *through the search path*, the completeness check proves no
+document was dropped.
+
+The correction was not academic. The new check went red against the **real** pinned
+`@tobilu/qmd@2.8.3` on its first run: 15 of 15 clean rebuilds indexed only **64–72 of 84** exported
+rows, a different subset each time, while `qmd update` exited 0 and printed "All collections
+updated", and re-running `update` never recovered a dropped document. Because the guard is
+fail-closed, **the tool now returns the `rg` + aliases baseline for every lookup** until that is
+resolved — the safe state, since an index missing an unknown subset of rows answers a register
+check with a false negative. The failure protocol fired as written: recorded, and opened as
+[`RETRIEVAL-QMD-INGEST-LOSS`](../decisions/RETRIEVAL-QMD-INGEST-LOSS.yaml) on the chain head,
+before any change to package, version, permissions, dependency shape or corpus composition.
+
 ## Legal posture — unchanged, restated because discoverability changed
 
 A hit on a counsel-owned row **licenses only the external action, never the answer**. Three rows
@@ -182,8 +215,11 @@ would re-open.
 - `.claudeignore` and `.gitignore` were **checked and need no change** — `.qmd/` is already ignored
   by both and the corpus lives only inside it. Stated because "the ignore lists were checked" is
   otherwise indistinguishable from "nobody looked".
-- **The CI diff is zero lines.** The one authorized step already runs the stub suite; the suite
-  gained cases, not a step. No new job, step or permission.
+- **The CI diff is zero *executable* lines** — the only change to `.github/workflows/ci.yml` is the
+  authorizing-row comment, moved off the superseded chain head onto `RETRIEVAL-QMD-ROWS`. The one
+  authorized step already runs the stub suite; the suite gained cases, not a step. No new job, step
+  or permission. (First written as "zero lines", which was false — and false *on a changed line of
+  that very file*. Corrected in PR #841 review round 1.)
 - `specs/**` is untouched, so **`docs/SPEC-LOG.md` gets no sentence**.
 - Residue split off at close time per `docs/decisions/README.md`: the row schema has no field for a
   fence, tracked as the team-owned open row

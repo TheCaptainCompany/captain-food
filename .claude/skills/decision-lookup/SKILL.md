@@ -61,9 +61,11 @@ would manufacture a more convincing false answer than printing nothing.
    A negative claim requires the `rg + aliases` search plus direct `docs/decisions/` resolution at
    HEAD. **Two bounds make this sharper than it used to be, not softer:** (a) rows are *written*
    in the same sessions that run register checks, and the working tree is never indexed — so **a
-   lookup miss on a row is not a negative trail**; (b) 81 row files are indexed and **zero** of the
-   100 `_legacy.yaml` keys are, because their prose home `DECISIONS.md` is an excluded corpus file,
-   so a null result over the register is a null result over roughly half of it.
+   lookup miss on a row is not a negative trail**; (b) every exported row file is indexed *or the
+   build fails closed and nothing is stamped* — a property checked at every rebuild, never a count
+   quoted here (see "what the guards actually guard" below) — while **zero** of the 100
+   `_legacy.yaml` keys are indexed, because their prose home `DECISIONS.md` is an excluded corpus
+   file, so a null result over the register is a null result over roughly half of it.
 4. **Fallback is the system, not a degraded mode**: if QMD is unavailable, the index is stale, or
    the result is empty, use `rg --fixed-strings -i` with the question's words AND the alias table
    of `docs/claude/sessions/workflow.md`, then resolve the row.
@@ -106,18 +108,41 @@ wipes the caches, **never stamps the corpus**, and takes a named fallback. The s
 rather than a real row on purpose — a guard coupled to register *content* would go red whenever
 someone opens or supersedes an unrelated decision row.
 
+**What the two guards actually guard — they are complementary, and neither subsumes the other.**
+The canary is *one* nonce checked with `grep -qF`: it proves the `.yaml` arm is alive **end to end
+through the search path**, and it is structurally **blind to a PARTIAL arm**, because a single
+ingested row satisfies it while every other row is missing. So a second rebuild-time check covers
+that case: **indexed `docs/decisions/*.yaml` documents ≥ the count this build exported**, both
+sides derived *at build time* from the corpus itself — the indexed side read out of the index
+(`select count(*) from documents where active = 1 and path like 'docs/decisions/%.yaml'`), never
+off the disk and never from `qmd collection list`, which reports the *scan* count and would compare
+a number to itself. Never a literal: a hard-coded count would go stale on the next row anyone opens
+and would turn ordinary register growth into a repository-wide failure. Fail-closed exactly like
+the canary — caches wiped, corpus never stamped, its own named fallback.
+
+> **Live defect, and the reason the tool is currently fallback-only.** That check went red against
+> the real pinned `@tobilu/qmd@2.8.3` on its first run and stays red: 15 of 15 clean rebuilds
+> indexed only 64–72 of 84 exported rows, a *different* subset each time, while `qmd update` exited
+> 0 and printed "All collections updated" — and re-running `update` never recovered a dropped row.
+> Open row **`RETRIEVAL-QMD-INGEST-LOSS`** owns the choice (stay on the baseline / change the pin /
+> bounded rebuild-and-verify / narrow the corpus). Until it is decided, **every lookup returns the
+> `rg` + aliases fallback**. That is the safe state, not a breakage: the baseline is the system,
+> and an index missing an unknown subset of rows answers a register check with a *false negative*.
+
 **`docs/decisions/**` is NOT in `claude_citation_corpus`, and must not be added to it.** Rows cite
 superseded rows *by construction* (`reconsiders:`, `superseded_by:`), so wiring them in would make
 `decision-superseded-authority` — an **error** — fire across the register itself. The retrieval
 corpus and the citation corpus are unrelated and stay unrelated.
 
 **Accepted behaviour, measured and not mitigated** (`RETRIEVAL-QMD-ROWS`): BM25 length
-normalization favours short documents, and the median row is 961 B (81 rows: min 326 B, mean
-2168 B, max 19674 B) against 355 Markdown documents. The boost is *inversely correlated with
+normalization favours short documents, and the median row is 961 B against a few hundred Markdown
+documents (antecedent, and these are *disk* measurements labelled as such rather than index counts:
+`find docs/decisions -name '*.yaml' -printf '%s\n'` on 2026-09-01 — min 326 B, median 961 B, mean
+2168 B, max 19674 B). The boost is *inversely correlated with
 content* — the ~900 B stubs win slots, the two largest rows lose them — and with `K=3` that is slot
 occupancy: three thin rows can evict a deciding ADR, and dedup is path-only, so all three slots can
 be one decision family. **No ranking claim is made anywhere**; rows are *discoverable*, and that is
-the only property asserted. Known limit, not to be "fixed": **36 of the 81 keys carry zero topical
+the only property asserted. Known limit, not to be "fixed": as of 2026-09-01 **36 keys carry zero topical
 words**, so they get no key signal — renaming keys is not the remedy, because a rename breaks every
 chain edge and every citation.
 
@@ -290,12 +315,17 @@ suite this skill is about: a maintainer editing the wrapper ran the bare command
 `FATAL: … differs from the committed blob` with zero cases run, and had to have read this section
 to know why. Use the target while editing; CI runs the bare command, default-on, on purpose.
 
-**59 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**61 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
 network touch and with no install dir; absent and broken lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
+2 ingestion-completeness cases (a partial arm — rows exported and on disk, canary nonce
+indexed, one row document missing from the index — fails into the completeness check's own
+named fallback, wiped and unstamped, which the single-nonce canary is structurally blind to;
+and its non-vacuity guard, asserting an undropped build stamps AND that both sides of
+`indexed >= exported` are populated, so the comparison cannot pass on 0 >= 0),
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
 9 corrupt-index/probe cases (garbage index rebuilt, and rebuilt too under interpreter stdout
 noise — the verdict is dispatched on the exit status, never on captured output; a planted `-wal`
@@ -405,5 +435,6 @@ first authorized 2026-08-24 by the superseded `RETRIEVAL-QMD-CI`/`ADR-20260824-2
 `bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step in the job pinned by
 `the_stub_suite_runs_in_the_always_run_gate_job`, plus that codegen test. It tests the **wrapper** — it
 runs no QMD, installs nothing, and never touches a live `.qmd/` cache. Anything else in CI still
-needs a new row. **The row-indexing decision's CI diff is zero lines**: the suite gained cases, not
-a step.
+needs a new row. **The row-indexing decision's CI diff is zero *executable* lines** — the only
+change to `ci.yml` is the authorizing-row comment, moved off the superseded chain head onto
+`RETRIEVAL-QMD-ROWS`; the suite gained cases, not a step.

@@ -30,6 +30,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `ERASURE-PM-RESUME` | open | 2026-08-31 | How does the erasure process manager name its erasure subject when it resumes from PARKED on an order terminal fact -- a `from_read` lookup through a projection (A), `customerId` added to the four order terminal facts (B), or a PM-owned order-to-customer index in the process row (C)? | founder |
 | `PMW-4` | open | 2026-08-31 | Now that `read:` is retired, how are the two surviving projection reads SPELLED -- evans's TWO narrow kinds (`index:`/`by:` and `authority:`), or vernon's ONE differently-named kind carrying a mandatory exemption `$ref`? | team |
 | `REGISTER-ROW-FENCE` | open | 2026-09-01 | Should a decision row's authorized/not-authorized fence be a STRUCTURED, machine-checkable field pair (`authorizes:` / `not_authorized:`) instead of prose inside `evidence:`? | team |
+| `RETRIEVAL-QMD-INGEST-LOSS` | open | 2026-09-01 | The pinned qmd 2.8.3 silently drops a varying subset of documents on every clean rebuild while reporting success, so the retrieval index is now fail-closed and the tool returns only the baseline fallback. Do we stay on the baseline, change the pin, add a bounded rebuild-and-verify loop, or narrow the corpus? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `AGGREGATES-OWN-THE-FACTS` | decided | 2026-08-29 | Does the foreign-stream-append isolation subject (twelve deliver: steps still appended by process managers, plus the #595 unlaned reclamation birth) get resolved FIRST, before any new development builds on the pre-isolation shape? -> ADR-20260829-230418 | founder |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
@@ -97,7 +98,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 83 — 17 open · 60 decided · 2 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 84 — 18 open · 60 decided · 2 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 100** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

@@ -190,8 +190,10 @@ jobs:
       # (ADR-20260901-025538), the chain head - that row authorizes THIS STEP AND ITS PIN AND
       # NOTHING ELSE in CI, carried forward unchanged from the superseded RETRIEVAL-QMD-CI
       # (ADR-20260824-205911), which first authorized the step. The 2026-09-01 row-indexing
-      # decision changed the CORPUS, not this file: its CI diff is zero lines, and the suite gained
-      # cases rather than a step. The step's LOCUS (which job carries it) was the `changes` job
+      # decision changed the CORPUS, not this file: its CI diff is zero EXECUTABLE lines - the only
+      # change here is this authorizing-row comment itself, and the suite gained cases rather than
+      # a step. (Stated precisely because the first wording said "zero lines" - on a changed line
+      # of this very file. PR #841 review round 1.) The step's LOCUS (which job carries it) was the `changes` job
       # until GATE-STEP-LOCUS decided option (a) (founder 2026-08-27), which moved it here without
       # touching the step - which is why the head names the locus by the PIN TEST below and never
       # by a job name.

@@ -15720,7 +15720,7 @@ mod docs_only_ci_and_legacy_visibility {
         // where the same two-token edit would move both. Lowering it is a decision a diff has to
         // argue with, in another language and another file, with this message attached. Raising it
         // when cases are added is ordinary. (Review #47 of PR #679.)
-        const MINIMUM_CASES: u32 = 59;
+        const MINIMUM_CASES: u32 = 61;
         let expected_n: u32 = expected.parse().expect("EXPECTED_CASES is an integer");
         assert!(
             expected_n >= MINIMUM_CASES,

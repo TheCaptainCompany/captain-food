@@ -2,6 +2,73 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-01 — The completeness check we added to satisfy a review finding went red against the
+> real tool on its first run, and the retrieval index has been silently partial all along.**
+> PR #841 review round 1 (three blocking findings) on
+> [#840 "Index YAML decision rows in the decision-lookup (QMD) retrieval corpus"](https://github.com/TheCaptainCompany/captain-food/issues/840).
+> The reviewer measured 72 indexed rows against 82 exported; the executor then measured 82 of 82 on
+> the same cache file, and the two readings looked irreconcilable. **Both were correct.** The
+> property is NON-DETERMINISM, and against a non-deterministic build a single complete observation
+> refutes nothing. Fifteen clean rebuilds at HEAD settled it: the index held **64, 67, 70, 70, 67,
+> 70, 70, 67, 67, 72, 70, 67, 67, 70, 64** of **84** exported `.yaml` — short every time, short by a
+> different amount each time, on an identical corpus at an identical SHA. One run reproduced the
+> reviewer's 72 exactly.
+>
+> **Four properties make it dangerous rather than merely wrong.** `qmd update` exits 0 and prints
+> "All collections updated" on every short run. It also prints "440 unique hashes need vectors"
+> while its `documents` table holds 420 — the tool's own SCAN count disagrees with what it
+> persisted, so any check reading `qmd collection list` ("Files: 440") compares a number to itself
+> and can never go red. Re-running `update` recovers nothing: four consecutive updates left the
+> count at exactly 420, and it was still 420 at +60 s with no qmd process alive, so this is not a
+> slow indexer finishing later. And the corpus was **stamped on every one of the fifteen runs**, so
+> every later lookup at that SHA served the partial index as a hit. The dropped set on one sampled
+> run included `LOSS-1` (open, founder-owed, money), `MONEY-LINE-LEGAL` (counsel-owned) and
+> `ERASURE-LAUNCH-GATE` — precisely the rows a register check most needs, where a miss reads as a
+> clean negative trail.
+>
+> **The guard that was supposed to catch this could not, and the record said it did.** The canary is
+> one nonce checked with `grep -qF`: it proves the `.yaml` arm is alive end to end *through the
+> search path*, and it is structurally blind to a PARTIAL arm, because one ingested row satisfies it
+> while every other row is missing. `RETRIEVAL-QMD-ROWS` claimed silent partial ingestion "is what
+> the canary detects". That sentence is struck. A companion **ingestion-completeness check** now
+> covers the partial case — indexed `docs/decisions/*.yaml` documents ≥ the count that build
+> exported, **both sides derived at build time**, never a literal (a hard-coded count would go stale
+> on the next row anyone opens and would turn ordinary register growth into a repository-wide
+> failure). Fail-closed like the canary: caches wiped, corpus never stamped, its own named fallback.
+> Planted red as `T10g`, with `T10h` asserting both sides of the comparison are populated so the
+> `>=` cannot pass on 0 ≥ 0.
+>
+> **The verdict is an exit code, not a printed number** — the wrapper's own `T15i` lesson, one layer
+> down. The first version printed the count and parsed it through a command substitution; under a
+> `sitecustomize.py` that writes to stdout on interpreter start, "sitecustomize noise" prepends
+> itself to the number and every rebuild fails on that host. The comparison now happens inside
+> python and nothing is printed. A second regression from the same helper: `quote()` raises on a
+> cache path carrying non-UTF-8 bytes, so "could not look" is separated from the verdict exactly as
+> `index_openable` separates them — only exit 1 is the verdict, everything else is best-effort.
+> Both were caught by cases already in the suite (`T15i`, `T15g`), which is the argument for keeping
+> them.
+>
+> **Consequence, stated plainly: the tool is fallback-only right now.** With the defect live the
+> check is red on every real rebuild, so `decision-lookup.sh` returns the `rg` + aliases baseline
+> for every lookup. That is the safe state — the baseline is the system, and an index missing an
+> unknown subset of rows answers a register check with a *false negative*, which is worse than
+> answering nothing, because the fallback tells the operator to run `rg` and a partial index does
+> not. The failure protocol fired as written: recorded, and opened on the chain head as
+> [`RETRIEVAL-QMD-INGEST-LOSS`](../decisions/RETRIEVAL-QMD-INGEST-LOSS.yaml) (stay on the baseline /
+> change the pin / bounded rebuild-and-verify / narrow the corpus) **before** any change to package,
+> version, permissions, dependency shape or corpus composition.
+>
+> **The antecedent defect that made it invisible.** "81 rows indexed" — in the row, `SKILL.md`,
+> `STATUS.md`, the ADR and this journal — was derived from `find`/`ls` on **disk** and presented as
+> an **index** count: the exact conflation this change's own thesis names, *corpus presence is not
+> ingestion*, and a derived number stated without its antecedent (ADR-20260817-105845). Had the
+> figure ever been re-derived from `select count(*) from documents …`, the shortfall was one query
+> away the whole time. Every such figure is now either replaced by the **property** (re-derived at
+> every rebuild, never restated in prose) or labelled as the disk measurement it is. Also corrected
+> across four sites: "the CI diff is zero lines" — false as written, and asserted **on a changed
+> line of `ci.yml` itself** — now "zero *executable* lines; the only change is the authorizing-row
+> comment".
+
 > **2026-09-01 — The decision register is now retrievable, and the mask that hid it had a third
 > hiding place.**
 > Founder directive, 2026-09-01 via `/decision`, verbatim: *"integrate yaml decision row indexing in
@@ -23,11 +90,11 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > same silent-no-op the dispatch identified in the `find` sweep, one layer deeper.
 >
 > **Measured, with antecedents** (ADR-20260817-105845; every figure produced this session on an
-> activated checkout at base `7d47355`, none carried from the card): 355 Markdown documents + 81 rows
-> + 1 canary = **437**; `qmd update` over that corpus **0.46 s** (previously **UNMEASURED**), cold
-> wipe-to-answer **2.8 s**; row keys retrieve their own row at rank 1 — `CREDIT-DRAIN-ORDER` sole
+> activated checkout at base `7d47355`, none carried from the card): a stamped `qmd update` **0.46 s**
+> (previously **UNMEASURED**), cold wipe-to-answer **2.8 s**; row keys retrieve their own row at rank 1 — `CREDIT-DRAIN-ORDER` sole
 > result at 0.92, `QUOTE-TOKEN` 1-of-7 at 0.88, `KEY-NAMESPACE` 1-of-7 at 0.89. Row sizes: min
-> 326 B, **median 961 B**, mean 2168 B, max 19674 B. **36 of 81 keys carry zero topical words** (the
+> 326 B, **median 961 B**, mean 2168 B, max 19674 B (a DISK measurement, `find -printf '%s'`, labelled
+> as one). **36 keys carry zero topical words** (the
 > card said 22; re-derived as 27 `PROP-…--D<n>` plus 9 short opaque keys), and that is a limit to
 > record, never to "fix" — a key rename breaks every chain edge and every citation.
 >
@@ -57,7 +124,7 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > than printing nothing); BM25 length normalization gives the ~900 B stubs slot occupancy over the
 > 16.7 KB and 19.7 KB chain-head rows, accepted and not mitigated, with **no ranking claim made
 > anywhere**; and `docs/decisions/**` is deliberately **not** added to `claude_citation_corpus`,
-> because rows cite superseded rows by construction. **CI diff: zero lines.** The successor also
+> because rows cite superseded rows by construction. **CI diff: zero *executable* lines** (the only `ci.yml` change is the authorizing-row comment). The successor also
 > corrects four statements rather than copying them — the predecessor named the `changes` job, a pin
 > test that does not exist, the wrong job for rider (f)'s cap, and called an `err(...)` rule "WARNS".
 > The root cause (the row schema has no field for a fence, so it is all prose) is split off as the

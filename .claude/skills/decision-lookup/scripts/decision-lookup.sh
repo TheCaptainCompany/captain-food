@@ -78,9 +78,12 @@ fallback() { # $1 = reason, $2 = query — lookup-path degradation is loud but e
 # exactly once, so the archive source and the stamp can never diverge (no re-resolve race). The
 # WORKING TREE is never indexed. If the rebuild fails, the caches stay wiped and the caller gets
 # the rg + aliases fallback — never stale QMD output. The stamp is written only after the index
-# database is verified present and non-empty AND the row-ingestion canary has passed: a successful
-# update that writes no index at the expected location, or one that indexes no `.yaml` at all, is a
-# rebuild failure, never a stamped cache. INCLUDED (row RETRIEVAL-QMD-ROWS, founder 2026-09-01):
+# database is verified present and non-empty AND the row-ingestion canary has passed AND the index
+# holds at least as many `docs/decisions/*.yaml` documents as this build exported: a successful
+# update that writes no index at the expected location, one that indexes no `.yaml` at all, or one
+# that indexes only SOME of them, is a rebuild failure, never a stamped cache. (The third arm is
+# not defensive: the pinned qmd 2.8.3 does exactly that, non-deterministically — open row
+# RETRIEVAL-QMD-INGEST-LOSS.) INCLUDED (row RETRIEVAL-QMD-ROWS, founder 2026-09-01):
 # `docs/decisions/*.yaml`, the register's declaration site — ALL of them, superseded and withdrawn
 # rows included, because `superseded_by:` is what makes a hit on a retired row resolvable to its
 # chain head; truncating to live rows would destroy the DAG that makes the register answerable.
@@ -173,6 +176,60 @@ except Exception as e:
 # encoding reason that says nothing about the config. surrogateescape round-trips those bytes
 # unchanged, so the rewrite touches the one scalar and nothing else. (Found by T15g, the
 # non-UTF-8 cache-path case, which regressed the moment this helper was added.)
+# INGESTION-COMPLETENESS PROBE — reads the indexed side out of the INDEX, never off the disk.
+# The distinction it enforces is the one this whole change is about: corpus PRESENCE is not
+# INGESTION, so a check whose "indexed" number comes from `find`, `ls`, or the tool's own
+# `qmd collection list` compares a number to itself and can never go red. (`collection list`
+# reported "Files: 440" against a database holding 420 — it is the SCAN count, not the persisted
+# one.) The only witness that a document is retrievable is a row in `documents`.
+#
+# THE VERDICT IS THE EXIT CODE, and the comparison happens INSIDE python — deliberately, and for
+# the reason T15i already pinned one layer up: a helper that printed the count would be read
+# through a command substitution, and an interpreter that writes to stdout on start (a
+# sitecustomize.py in PYTHONPATH) would prepend noise to the number. A wrapper that then parsed
+# "sitecustomize noise\n84" would take the malformed-count arm and fail every rebuild on such a
+# host. Nothing is printed; nothing is parsed.
+#   0 = complete (indexed >= exported)
+#   1 = the DELIBERATE INCOMPLETE verdict — the database answered and the answer is short, OR the
+#       pinned query itself failed (no `documents` table, renamed columns: qmd changed the schema
+#       this check is pinned to). Both fail CLOSED, because both mean the wrapper cannot vouch
+#       for the index it is about to stamp, and an unrecognised shape is never assumed benign
+#       (same call as the collection-config widen, T10d).
+#   ANY OTHER exit = COULD NOT LOOK, never the verdict: the sqlite3 module is a compile-time
+#       optional of python3; `quote()` raises UnicodeEncodeError on a cache path carrying
+#       non-UTF-8 bytes (T15g); a python3 whose connect() lacks uri=/timeout= raises TypeError;
+#       126/127/signal deaths land here too. The caller proceeds — BEST-EFFORT, exactly as
+#       index_openable is and for the same reason: refusing would disable an advisory tool on
+#       such a host for zero gained safety, while the canary (which needs no host sqlite3) still
+#       runs. The hole is named rather than hidden: on a host that cannot look, a partial index
+#       is stamped and the row canary alone guards the arm.
+# Read-only + immutable + timeout=0: a zero-write observer on a derived cache, like the probe.
+index_rows_complete() { # $1 = index.sqlite path, $2 = the exported row count to meet
+  python3 -c '
+import sys
+try:
+    import sqlite3
+    from urllib.parse import quote
+    con = sqlite3.connect("file:" + quote(sys.argv[1]) + "?immutable=1", uri=True, timeout=0)
+except Exception:
+    sys.exit(2)
+try:
+    # Bound parameter, not an inlined literal: this whole helper lives inside a
+    # single-quoted `python3 -c` argument, so a SQL string literal would need a quote
+    # character the shell cannot carry through.
+    n = con.execute(
+        "select count(*) from documents where active = 1 and path like ?",
+        ("docs/decisions/%.yaml",)).fetchone()[0]
+except Exception:
+    sys.exit(1)
+finally:
+    try:
+        con.close()
+    except Exception:
+        pass
+sys.exit(0 if int(n) >= int(sys.argv[2]) else 1)' "$1" "$2"
+}
+
 qmd_pattern_widen() { # $1 = index.yml path, $2 = the wanted glob
   python3 -c '
 import re, sys
@@ -193,7 +250,7 @@ except Exception:
     sys.exit(1)' "$1" "$2" 2>/dev/null
 }
 
-build_corpus() { # 0 = cache ready; 1 = rebuild failed (caches wiped); 2 = row-ingestion canary failed
+build_corpus() { # 0 = cache ready; 1 = rebuild failed (wiped); 2 = canary failed; 3 = ingestion incomplete
   local head; head="$(git -C "$REPO" rev-parse HEAD)"
   if [ -f "$CORPUS/.sha" ] && [ "$(cat "$CORPUS/.sha")" = "$head" ] \
     && [ -s "$CORPUS/.qmd/index.sqlite" ]; then
@@ -248,6 +305,30 @@ build_corpus() { # 0 = cache ready; 1 = rebuild failed (caches wiped); 2 = row-i
   # for exactly that reason.
   printf '%s' "$(cd "$CORPUS" && env HOME="$QHOME" "$QMD" search "$CANARY_TOKEN" --json 2>/dev/null)" \
     | grep -qF "$CANARY_KEY" || { rm -rf "$CORPUS" "$QHOME"; return 2; }
+  # INGESTION-COMPLETENESS CHECK — the canary's companion, and NOT a duplicate of it. The canary
+  # proves the `.yaml` ARM is alive end to end (pathspec + extension sweep + collection glob +
+  # search path, one nonce). It cannot see a PARTIAL arm: one ingested row satisfies it while
+  # every other row is missing. That is not a hypothetical — PR #841 review round 1 measured
+  # exactly it against the pinned qmd 2.8.3 (row RETRIEVAL-QMD-INGEST-LOSS): 15 of 15 clean
+  # rebuilds landed short and NON-DETERMINISTICALLY short (64, 67, 70 and 72 of 84 expected
+  # `.yaml`), `qmd update` printed "All collections updated" every time, re-running it never
+  # recovered a single dropped row, and the stamp was written on every one of them. So the guard
+  # is a COMPARISON, and both sides are derived at build time from this corpus — never a literal
+  # and never a count copied from a record, because a literal goes stale on the next row anyone
+  # opens and would turn ordinary register growth into a repository-wide failure.
+  #   exported = the `.yaml` files this build actually placed under $CORPUS/docs/decisions/
+  #              (the canary file included: it is planted before `update` and must ingest too)
+  #   indexed  = rows in `documents` for that same path prefix
+  # `>=` rather than `=` deliberately: fewer indexed than exported is the defect, more is not a
+  # loss of rows and must not fail a lookup. Fail-CLOSED like the canary — caches wiped, corpus
+  # NEVER stamped, its own named fallback — and for the same reason: an index missing an unknown
+  # subset of rows answers register checks with false negatives, which is worse than answering
+  # nothing, because the fallback tells the operator to use `rg` and a partial index does not.
+  exported_rows="$(find "$CORPUS/docs/decisions" -type f -name '*.yaml' 2>/dev/null | wc -l)"
+  index_rows_complete "$CORPUS/.qmd/index.sqlite" "$exported_rows"
+  # Dispatch on $? DIRECTLY — never on a captured "$(...; echo $?)", which is what lets
+  # interpreter stdout noise reach a pattern match (T15i). Only 1 is the verdict.
+  [ $? -eq 1 ] && { rm -rf "$CORPUS" "$QHOME"; return 3; }
   # A failed stamp write wipes the derived caches like every other failure arm, so the caller's
   # "caches wiped" fallback wording stays exactly true and no partial state survives.
   printf '%s' "$head" > "$CORPUS/.sha" || { rm -rf "$CORPUS" "$QHOME"; return 1; }
@@ -358,6 +439,7 @@ build_corpus
 case $? in
   0) : ;;
   2) fallback "row-ingestion canary FAILED — the corpus' docs/decisions/*.yaml arm did not enter the index, so every register lookup would silently miss every row (caches wiped, corpus never stamped)" "$Q" ;;
+  3) fallback "row-ingestion INCOMPLETE — the index holds fewer docs/decisions/*.yaml documents than this build exported, so an unknown subset of rows is silently missing and a lookup miss over the register would be a FALSE NEGATIVE (caches wiped, corpus never stamped; open row RETRIEVAL-QMD-INGEST-LOSS)" "$Q" ;;
   *) fallback "corpus/index rebuild failed (caches wiped — no stale output is ever served)" "$Q" ;;
 esac
 
