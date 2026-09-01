@@ -31,10 +31,12 @@ message exists verbatim in the repo.
 
 ## Decision 1 — the six commands, and the naming ground
 
-The approved set is **six**: `/direct-question`, `/mob-question`, `/work`, `/decision`, `/where`,
+The approved set is **six**: `/direct-question`, `/mob-question`, `/work`, `/decision`, `/whatsup`,
 `/correct`. He named the first three; the last three were proposed and he approved them as
-`/decision`, `/status` and `/correct` — and `/status` was **renamed `/where`** later the same day by
-a second founder decision, on the collision described below.
+`/decision`, `/status` and `/correct` — and that fifth command was renamed **twice**, each time by
+him: `/status` → `/where` later the same day, on the collision described below, then `/where` →
+**`/whatsup`** on 2026-09-01 on preference (Decision 4's postscript). Two deliberate namings, not
+one confused one.
 
 `/decide` became **`/decision`** on his stated ground: *decide* reads as an instruction to the
 coordinator to go and decide something, while *decision* names **the artifact he is recording**.
@@ -111,6 +113,14 @@ Names seen on this bundle include `status`, `review`, `security-review`, `stats`
 `/work`, `/decision`, `/correct`, `/where`. Verify against the artifact `readlink -f "$(which
 claude)"` resolves to — see the verification note below, because that is not the artifact it looks
 like.
+
+**Postscript, 2026-09-01 — `/where` is renamed `/whatsup`.** Founder verbatim: *"Instead of /where
+use /whatsup"*. This is a **preference, not a collision**, and nothing above changes: `/status` was and
+remains unusable for the reason Decision 4 gives, and that reasoning is the durable part of this
+record. `/whatsup` was re-verified free against the running binary before the rename — the literal
+string appears **nowhere** in the artifact `readlink -f "$(which claude)"` resolves to, and since a
+built-in's name is stored there as a plain string, a name absent from the binary cannot be one. The
+name was his to choose (ADR-20260810-011500), so this executed rather than opened an option space.
 
 ## Consequences
 

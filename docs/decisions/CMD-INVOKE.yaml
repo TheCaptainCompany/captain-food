@@ -9,7 +9,7 @@ capacity: "founder"
 register: "docs/proposals/DECISIONS.md §49"
 evidence: "So to avoid any risk I will choose user invoked approach for now with these 3 types: /direct-question: ask direct question(s) to you don't need the mob - /mob-question: ask the question(s) to the mob - /work: tell you to launch the work on something. Do you see other types of invocation? ... /decision instead of decide, decide could mean that you have to decide and I here I want you record decisions. Ok for /status and /correct"
 note: >
-  DECIDED: six user-invoked commands -- /direct-question, /mob-question, /work, /decision, /where,
+  DECIDED: six user-invoked commands -- /direct-question, /mob-question, /work, /decision, /whatsup,
   /correct -- each a skill under .claude/skills/ carrying `disable-model-invocation: true`, so the
   founder can fire them and the model cannot. Founder verbatim: "So to avoid any risk I will choose
   user invoked approach for now". /decide was renamed /decision on his stated ground that "decide"
@@ -53,3 +53,11 @@ note: >
 
   RULE EARNED: check a proposed command name against the built-ins BEFORE writing the skill. Seen on
   this bundle: status, review, security-review, stats, skills, agents, todos.
+
+  RENAMED AGAIN /where -> /whatsup on 2026-09-01, founder verbatim "Instead of /where use /whatsup".
+  A PREFERENCE, not a collision: the /status reasoning above is unchanged and stays the durable part.
+  /whatsup was re-verified free against the RUNNING binary first -- the literal string appears
+  nowhere in the artifact `readlink -f "$(which claude)"` resolves to, and a built-in's name is
+  stored there as a plain string, so a name absent from the binary cannot be one. The name was his
+  (ADR-20260810-011500), so this was executed, not put back to him as an option space. Two
+  deliberate namings, not one confused one.

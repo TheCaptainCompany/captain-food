@@ -1,36 +1,41 @@
 ---
-name: where
+name: whatsup
 description: >
   The founder wants to know where things stand. READ-ONLY: report what is running, what is blocked
-  and on what, and what is open awaiting him. Invoked ONLY by the founder as `/where` -- never
-  selected by the model. Named `/where`, not `/status`, because Claude Code ships a built-in
-  `/status` and a colliding skill shadows it silently. No register check, no record written, no
-  fan-out, no dispatch. A `/where` never becomes work.
+  and on what, and what is open awaiting him. Invoked ONLY by the founder as `/whatsup` -- never
+  selected by the model. Named `/whatsup` by the founder; never `/status`, because Claude Code ships
+  a built-in `/status` and a colliding skill shadows it silently. No register check, no record
+  written, no fan-out, no dispatch. A `/whatsup` never becomes work.
 disable-model-invocation: true
 ---
 
-# `/where` — read-only, and it stays read-only
+# `/whatsup` — read-only, and it stays read-only
 
 **What the founder is doing.** Asking where things stand. Nothing else.
 
-**Why `/where` and not `/status`.** Claude Code ships a **built-in `/status`** — the panel you reach
-for when something looks wrong with the session itself (version, model, account, API connectivity,
-tool stats). Skills resolve **before** built-ins on a first-match-wins scan, and dedup is by **file
-path, never by name**, so a skill called `status` would shadow that panel **silently**: no collision
-detection, no warning, and the outcome resting on array order inside a vendor bundle that can
-reorder on upgrade. Losing the built-in inside this repo is worse than picking another name, and
-this command's job is *"where are we"* — so `/where`, which is free. Founder decision, 2026-08-31.
+**Why `/whatsup` and not `/status`.** Claude Code ships a **built-in `/status`** — the panel you
+reach for when something looks wrong with the session itself (version, model, account, API
+connectivity, tool stats). Skills resolve **before** built-ins on a first-match-wins scan, and dedup
+is by **file path, never by name**, so a skill called `status` would shadow that panel **silently**:
+no collision detection, no warning, and the outcome resting on array order inside a vendor bundle
+that can reorder on upgrade. Losing the built-in inside this repo is worse than picking another
+name, and this command's job is *"where are we"* — so it is not `/status`. Founder decision,
+2026-08-31, which first landed the name **`/where`**; the founder then chose **`/whatsup`** on
+2026-09-01 (*"Instead of /where use /whatsup"*). Both names were verified free against the running
+binary — `readlink -f "$(which claude)"`, then the built-in names in that artifact — and that check
+is the reusable part: **check a proposed command name against the built-ins before writing the
+skill**, re-deriving it rather than trusting a version or a list written down earlier.
 
 ## The one rule
 
-> **Never turn a `/where` into work.**
+> **Never turn a `/whatsup` into work.**
 
 Not "I noticed X was broken so I fixed it". Not "while checking I re-ran the gates". Not a claim,
 not a branch, not a push, not a re-ranking. If the report surfaces something that needs doing, the
 report **says so** and stops. He has `/work` and he will use it.
 
-The reason is that `/where` is the one command with no confirmation step. Every other command in
-this set ends in something he can see and correct — an answer, a record, a PR. A `/where` that
+The reason is that `/whatsup` is the one command with no confirmation step. Every other command in
+this set ends in something he can see and correct — an answer, a record, a PR. A `/whatsup` that
 quietly did something leaves him with a report that is **not a description of the state he asked
 about**, because the act of reporting changed it.
 
@@ -66,7 +71,7 @@ shipped is exactly the projection that goes stale.
 YAML. A status built from the prose rows will report a row as founder-owed that the YAML records as
 `decided` — the exact failure of telling him he owes an answer he already gave.
 
-Two cheap accuracy rules, because a wrong `/where` is worse than a slow one:
+Two cheap accuracy rules, because a wrong `/whatsup` is worse than a slow one:
 
 - **A record that pins a fact to "in flight" expires and nothing detects it.** Date the claim, or
   re-read it.
@@ -78,7 +83,7 @@ Two cheap accuracy rules, because a wrong `/where` is worse than a slow one:
 - **No register check** — this command asserts nothing about what was decided. If the report needs
   to say *"X is decided"*, that is an assertion and it needs a citation like any other; prefer
   pointing at the record.
-- **No record written.** No journal entry, no `STATUS.md` edit, no ADR. `/where` reads state; it
+- **No record written.** No journal entry, no `STATUS.md` edit, no ADR. `/whatsup` reads state; it
   does not create it.
 - **No fan-out.** No lens is consulted to describe what is running.
 - **Uncertainty is reported, not resolved.** *"#820's checks were green 40 minutes ago; I have not

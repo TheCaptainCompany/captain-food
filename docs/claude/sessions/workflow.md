@@ -519,7 +519,9 @@ approach *"to avoid any risk"* — he named `/direct-question`, `/mob-question` 
 approved `/decision`, `/status` and `/correct`, renaming `/decide` → `/decision` because *decide*
 reads as an instruction to the coordinator while *decision* names **the artifact he is recording**.
 `/status` was then renamed **`/where`** (founder decision, same day) because Claude Code ships a
-built-in `/status` — see the collision note below. Each is a skill in
+built-in `/status` — see the collision note below — and renamed once more to **`/whatsup`** on
+2026-09-01, founder verbatim *"Instead of /where use /whatsup"*: a preference, not a collision, and
+`/whatsup` was re-verified free by the same method. Each is a skill in
 `.claude/skills/<name>/SKILL.md` carrying its own procedure and limits:
 
 | Command | What he is doing | The handling that distinguishes it |
@@ -528,7 +530,7 @@ built-in `/status` — see the collision note below. Each is a skill in
 | [`/mob-question`](../../../.claude/skills/mob-question/SKILL.md) | Asking the mob | Reversibility class sizes the roster; divergences are **reported, never averaged** |
 | [`/work`](../../../.claude/skills/work/SKILL.md) | Telling you to start | The existing pipeline unchanged; the tag decides only chunk, dispatchability, merge posture |
 | [`/decision`](../../../.claude/skills/decision/SKILL.md) | Recording a decision he has made | **Step one is the reversal check**; `Consulted:` block, one line per lens |
-| [`/where`](../../../.claude/skills/where/SKILL.md) | Asking where things stand | Read-only — no check, no record, no fan-out, and it **never becomes work** |
+| [`/whatsup`](../../../.claude/skills/whatsup/SKILL.md) | Asking where things stand | Read-only — no check, no record, no fan-out, and it **never becomes work** |
 | [`/correct`](../../../.claude/skills/correct/SKILL.md) | Telling you something is wrong | Authoritative; the work is **propagation** to everything downstream, then the record |
 
 All six set **`disable-model-invocation: true`**, a real and **enforced** `SKILL.md` frontmatter key:
@@ -560,11 +562,14 @@ preferring a symbol to a line range, one layer out.
 (version, model, account, API connectivity, tool stats). Skills resolve **before** built-ins on a
 first-match-wins scan and dedup is by **file path, never by name**, so the collision is **silent** —
 no detection, no warning — and the built-in simply disappears inside this repo, with the outcome
-resting on array order in a vendor bundle that can reorder on upgrade. That is why ours is `/where`.
+resting on array order in a vendor bundle that can reorder on upgrade. That is why ours is not
+`/status` (it was `/where`, and is now `/whatsup`).
 **Check a proposed command name against the built-ins before writing the skill**; the ones seen on
 this bundle include `status`, `review`, `security-review`, `stats`, `skills`, `agents`, `todos`.
-Verified free at the time of writing: `/direct-question`, `/mob-question`, `/work`, `/decision`,
-`/correct`, `/where`.
+Re-derive it: `strings` the artifact `readlink -f "$(which claude)"` resolves to and look for the
+literal name — a built-in's name is stored as a plain string, so a name that appears **nowhere** in
+that binary cannot be one. Free on the binary checked 2026-09-01: `/direct-question`,
+`/mob-question`, `/work`, `/decision`, `/correct`, `/where`, `/whatsup`.
 
 **The one rule that must survive contact:**
 

@@ -2,6 +2,40 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-01 — The founder's read-only command is renamed a second time: `/where` → `/whatsup`.**
+> Founder verbatim, 2026-09-01: *"Instead of /where use /whatsup"*. A **preference, not a
+> collision** — the reason `/status` was abandoned (Claude Code ships a built-in `/status`; skills
+> resolve first-match-wins ahead of built-ins and dedup by file path, so a colliding skill shadows
+> it **silently**) is untouched and stays the durable part of
+> [ADR-20260831-204546](../adr/ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md),
+> which gains a postscript so the history reads as **two deliberate namings rather than one confused
+> one**. The name is his (ADR-20260810-011500), so this was executed, not put back to him as an
+> option space.
+>
+> **What moved**: `.claude/skills/where/` → `.claude/skills/whatsup/` (the skill name IS the
+> directory name), its `name:` frontmatter, description and every self-reference; the six-command
+> section of [workflow.md](../claude/sessions/workflow.md); ADR-20260831-204546;
+> [`docs/decisions/CMD-INVOKE.yaml`](../decisions/CMD-INVOKE.yaml);
+> [DECISIONS.md §49](../proposals/DECISIONS.md). The other five skills carried **no** cross-reference
+> to the old name — checked, not assumed.
+>
+> **What deliberately did NOT move**: the loop-budget ledger entry whose `note` records the earlier
+> `/status -> /where` run, and every record quoting the founder's own earlier words. **A rename must
+> never overwrite a verbatim quote** — and the naive form of this sweep bit once in this very run: a
+> blanket replace of `` `/where` `` clobbered the historical name inside the sentence that had just
+> been written to preserve it, in the same file, seconds later. Write the history sentence, then
+> re-read it after the sweep.
+>
+> **Collision check, re-derived rather than trusted** (the recorded method, not a pinned value):
+> `readlink -f "$(which claude)"` → `/opt/claude-code/bin/claude`, an ELF binary — *not* the
+> `node_modules` JS bundle, which does not execute. The sharper form of the check earned here: a
+> built-in's name is stored in that binary as a **plain string**, so a name that appears **nowhere**
+> in it cannot be one. `whatsup` has **zero** occurrences, case-insensitive, substring or exact ⇒
+> free. Contrast `status`, `stats`, `skills`, `agents`, `todos`, `review`, `security-review`, all
+> present. Note the trap this sharpens: an *exact-token* hit is **not** evidence of a built-in —
+> common words are interned and shared, and all four `status` hits sit in unrelated data. The
+> negative is the reliable direction.
+
 > **2026-08-31 — The checkout button now states the OBLIGATION TO PAY rather than an amount, and
 > the pre-order total recap is no longer declared collapsible
 > ([#817](https://github.com/TheCaptainCompany/captain-food/issues/817), PR
