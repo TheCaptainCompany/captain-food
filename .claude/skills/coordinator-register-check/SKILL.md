@@ -36,7 +36,12 @@ below matters rather than being a caveat.
 ```
 
 At most three candidates. **A candidate is never evidence.** An empty result is *not* "undecided" —
-the index is Markdown-only, corpus-masked and possibly stale.
+the index is corpus-masked and is a projection of **one commit**, never the working tree. Since
+`RETRIEVAL-QMD-ROWS` (2026-09-01) the row files `docs/decisions/*.yaml` **are** indexed, which adds
+a false-negative class rather than removing one: **rows are written in the same sessions that run
+register checks**, so a miss on a row you or a concurrent session just wrote proves nothing. `rg`
+over the working tree stays mandatory. `_legacy.yaml`'s 100 prose-only keys are **not** indexed at
+all.
 
 **2. Read the candidate directly.** Open the record and read *around* the hit, not the matching
 line. A grep hit inside a rejected alternative, a quoted question or a struck clause reads as an
@@ -44,8 +49,14 @@ answer out of context. Check for a later word: an `Amendment`/`Superseded` banne
 `reconsiders:` row pointing at a later decision.
 
 **3. Resolve the exact row.** `docs/decisions/<KEY>.yaml` at HEAD is authoritative for **current
-status**; the prose row in `DECISIONS.md` is its *history*. The retrieval index cannot see row
-files, so this step is never skippable "because the tool already found it".
+status**; the prose row in `DECISIONS.md` is its *history*. **This step is never skippable, and
+least of all when the retrieval candidate IS the row file.** The reason is not that the index is
+blind to rows — it no longer is — but that **the index is a disposable fold of one head SHA, and a
+projection is never authority**: the retrieved copy is stale, and `status` is exactly the field
+that changes after a row is written. Retrieval prints a row candidate as a *resolve-instruction*
+with no excerpt for the same reason: no field subset of a row is safe to quote out of context
+(`PMW-1` is `status: "decided"` beside a `note` recording that its premise is gone). Follow
+`superseded_by:` to the chain head before citing anything.
 
 **4. State the trail** — one line, in exactly one of the two shapes defined in
 [`docs/claude/sessions/workflow.md`](../../../docs/claude/sessions/workflow.md), which is the only

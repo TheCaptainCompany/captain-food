@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic stub tests for decision-lookup.sh (row RETRIEVAL-QMD-CI, the chain head).
+# Hermetic stub tests for decision-lookup.sh (row RETRIEVAL-QMD-ROWS, the chain head).
 # NEVER installs QMD, never calls the live package, never creates or modifies the real repo
 # .qmd/ cache, and does not depend on it: every case runs against a temporary
 # DECISION_LOOKUP_HOME with fake `qmd` executables; a fingerprint of the repo .qmd/ (if any)
@@ -334,18 +334,72 @@ mkfake() { # $1 = QDIR, $2 = payload file for `search`
   # `update` mirrors real qmd 2.8.3: on success it leaves a VALID sqlite index database inside
   # the collection dir (cwd) at .qmd/index.sqlite — so the wrapper's index-presence AND
   # openability cache checks are exercised for real in these tests.
+  # `init`/`collection add` also write the project-local .qmd/index.yml, mirroring real qmd
+  # 2.8.3 -- the file the wrapper's MASK #3 widen targets. Without it the widen would fail and
+  # every cache-building case would take the rebuild-failure arm, so the stub carries it for the
+  # same reason it already carries a real sqlite index: a stub that omits the artifact under test
+  # tests nothing. FAKE_NO_INDEX_YML omits it deliberately, for the case that pins the widen's
+  # fail-closed arm.
+  # `search` answers the CANARY query (the wrapper's rebuild-time row-ingestion probe) with a
+  # canary-shaped result, because a real indexer would: the corpus file exists and carries the
+  # nonce. FAKE_NO_CANARY suppresses it -- the negative control that proves the wrapper fails
+  # CLOSED when the docs/decisions/*.yaml arm does not reach the index.
+  # `update` ALSO populates a real `documents` table, one row per corpus file, because the
+  # wrapper's ingestion-COMPLETENESS check reads its indexed-side count out of exactly that table
+  # (it cannot read it off the disk or off `qmd collection list` without comparing a number to
+  # itself). A stub whose index carried only `CREATE TABLE t(x)` would make the count unreadable,
+  # every cache-building case would take the incomplete-ingestion arm, and the suite would be
+  # measuring the stub instead of the wrapper. FAKE_DROP_ROWS=<n> omits the last n row documents
+  # while leaving the FILES on disk -- the planted red for a PARTIAL arm, the state the single
+  # canary nonce is structurally blind to and the pinned qmd 2.8.3 actually produces.
   cat > "$1/tool/node_modules/.bin/qmd" <<EOF
 #!/usr/bin/env bash
+CANARY_TOKEN='qmdrowingestioncanaryf3a91c7d'
 case "\$1" in
-  init|collection) exit 0 ;;
+  init|collection)
+          [ -z "\${FAKE_NO_INDEX_YML:-}" ] && { mkdir -p .qmd; printf 'collections:\n  corpus:\n    path: %s\n    pattern: "**/*.md"\nmodels:\n  embed: hf:example/model.gguf\n' "\$PWD" > .qmd/index.yml; }
+          exit 0 ;;
   update) rc=\${FAKE_UPDATE_EXIT:-0}
-          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; python3 -c 'import sqlite3; c = sqlite3.connect(".qmd/index.sqlite"); c.execute("CREATE TABLE IF NOT EXISTS t(x)"); c.commit(); c.close()'; }
+          [ "\$rc" -eq 0 ] && [ -z "\${FAKE_UPDATE_NO_INDEX:-}" ] && { mkdir -p .qmd; python3 "\$(dirname "\$0")/fake-index.py"; }
           [ -n "\${FAKE_UPDATE_STAMP_BLOCK:-}" ] && mkdir -p .sha   # a DIRECTORY at the stamp path makes the stamp write fail deterministically
           exit "\$rc" ;;
-  search) cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
+  search) if [ "\$2" = "\$CANARY_TOKEN" ]; then
+            [ -n "\${FAKE_NO_CANARY:-}" ] && { printf '[]'; exit 0; }
+            printf '[{"file":"docs/decisions/QMD-INGESTION-CANARY.yaml"}]'; exit 0
+          fi
+          cat "$2"; exit \${FAKE_SEARCH_EXIT:-0} ;;
 esac
 EOF
   chmod +x "$1/tool/node_modules/.bin/qmd"
+  # The fake indexer lives in its own file rather than inside the stub's heredoc so its SQL and
+  # its string quoting are readable; it mirrors qmd 2.8.3's real `documents` schema (verified
+  # against the activated index) closely enough for the wrapper's count query to run unchanged.
+  cat > "$1/tool/node_modules/.bin/fake-index.py" <<'PY'
+import os, sqlite3
+drop = int(os.environ.get("FAKE_DROP_ROWS", "0") or "0")
+docs = []
+for root, dirs, files in os.walk("."):
+    dirs[:] = [d for d in dirs if d != ".qmd"]
+    for f in files:
+        if f.endswith((".md", ".yaml")):
+            docs.append(os.path.relpath(os.path.join(root, f), ".").replace(os.sep, "/"))
+docs.sort()
+if drop:
+    rows = [p for p in docs if p.startswith("docs/decisions/") and p.endswith(".yaml")]
+    for p in rows[len(rows) - drop:]:
+        docs.remove(p)
+os.makedirs(".qmd", exist_ok=True)
+c = sqlite3.connect(".qmd/index.sqlite")
+c.execute("CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+          "collection TEXT NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, hash TEXT NOT NULL, "
+          "created_at TEXT NOT NULL, modified_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, "
+          "UNIQUE(collection, path))")
+c.executemany("INSERT OR IGNORE INTO documents (collection, path, title, hash, created_at, "
+              "modified_at) VALUES (?, ?, ?, ?, ?, ?)",
+              [("corpus", p, p, p, "t", "t") for p in docs])
+c.commit()
+c.close()
+PY
 }
 
 # T1 syntax
@@ -540,7 +594,7 @@ out="$(FAKE_SEARCH_EXIT=7 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "qmd search failed (exit 7)" \
   && echo "$out" | grep -q "a tool failure, not an empty result" \
   && echo "$out" | grep -q "derived caches wiped" \
-  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && ! echo "$out" | grep -q "no result — the index is a corpus-masked projection" \
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && verdict ok "T8 search failure -> tool-failure fallback, caches wiped, exit 0" || verdict bad "T8 (rc=$rc)"
 
@@ -590,6 +644,127 @@ out="$(DECISION_LOOKUP_HOME="$Q" "$W" "activation verification" 2>&1)"; rc=$?
   && [ -d "$Q/corpus/docs/adr" ] && [ -f "$Q/corpus/CLAUDE.md" ] && [ -f "$Q/corpus/docs/STATUS.md" ] \
   && verdict ok "T10 corpus excludes docs/status/**, keeps governed sources" || verdict bad "T10 corpus mask (rc=$rc)"
 
+# T10b POSITIVE VACUITY GUARD for the row arm (row RETRIEVAL-QMD-ROWS). Deliberately NOT
+# `ls docs/decisions | wc -l >= 1`, which passes on one accidental file: it names a row file that
+# must be present. The name is a STRUCTURAL invariant, not register population -- RETRIEVAL-QMD-ROWS
+# is this integration's OWN chain-head row, the one that decided this corpus arm exists, so it
+# cannot be deleted without this suite being rewritten anyway, and asserting it does NOT couple the
+# suite to how many rows the register has or to what any of them say. (`farley`: a case that asserts a row COUNT, or that
+# names an arbitrary business row, goes red the day someone opens or closes an unrelated decision
+# -- a repository-wide merge block fired by ordinary register growth, and on the
+# docs-straight-to-main lane it inverts into "landed with codegen red".)
+# The three negatives are the decided exclusions: the two CONTROL files and the register README.
+[ -f "$Q/corpus/docs/decisions/RETRIEVAL-QMD-ROWS.yaml" ] \
+  && [ ! -e "$Q/corpus/docs/decisions/_legacy.yaml" ] \
+  && [ ! -e "$Q/corpus/docs/decisions/_exempt.yaml" ] \
+  && [ ! -e "$Q/corpus/docs/decisions/README.md" ] \
+  && verdict ok "T10b corpus carries row files, excludes the control files and the register README" \
+  || verdict bad "T10b row arm of the corpus mask"
+
+# T10c MASK #3 -- the TOOL's own collection glob, the one that is not the wrapper's. Presence of
+# the rows on disk (T10b) is NOT ingestion: if this glob still said `**/*.md` the corpus would
+# build, stamp and answer while indexing zero rows, silently and forever. Asserted on the config
+# file the wrapper widened, and asserted to have left the rest of the config alone.
+grep -q 'pattern: "\*\*/\*.{md,yaml}"' "$Q/corpus/.qmd/index.yml" \
+  && grep -q 'embed: hf:' "$Q/corpus/.qmd/index.yml" \
+  && verdict ok "T10c collection glob widened to **/*.{md,yaml}, rest of the config untouched" \
+  || verdict bad "T10c collection glob not widened"
+
+# T10d NEGATIVE CONTROL for the widen: no index.yml to widen -> the rebuild FAILS CLOSED rather
+# than proceeding with the tool's Markdown-only default. This is the arm that would otherwise be
+# a silent no-op, so it is planted red on purpose: caches wiped, nothing stamped, named fallback.
+QX="$S/t10d"; mkfake "$QX" "$S/p5a.json"
+out="$(FAKE_NO_INDEX_YML=1 DECISION_LOOKUP_HOME="$QX" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q "rebuild failed" \
+  && ! echo "$out" | grep -q '^candidate ' \
+  && [ ! -d "$QX/corpus" ] && [ ! -d "$QX/index" ] \
+  && verdict ok "T10d unrecognised collection config -> fail closed, wiped, unstamped" \
+  || verdict bad "T10d (rc=$rc)"
+
+# T10e ROW-INGESTION CANARY, the negative control the dispatch calls for: the rows are exported
+# and kept, the index builds and `qmd update` succeeds, but NOTHING from the docs/decisions/*.yaml
+# arm reached the index. The build must FAIL and reach the canary's own named fallback -- never
+# the generic rebuild wording, never candidates, and never a stamp. This is the whole hazard of
+# this change in one case: without it, a corpus that silently stopped indexing rows would keep
+# answering, forever, and every register lookup would miss every row.
+# HONEST BOUND (stated, not worked around): the suite fakes `qmd`, so this proves the WRAPPER's
+# control flow around the canary. It structurally cannot prove that a real qmd ingested a real
+# row -- that half is the empirical verification recorded in ADR-20260901-025538 and the canary
+# running against the real tool.
+QX="$S/t10e"; mkfake "$QX" "$S/p5a.json"
+out="$(FAKE_NO_CANARY=1 DECISION_LOOKUP_HOME="$QX" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q "row-ingestion canary FAILED" \
+  && echo "$out" | grep -q "corpus never stamped" \
+  && ! echo "$out" | grep -q '^candidate ' \
+  && ! echo "$out" | grep -q "rebuild failed" \
+  && [ ! -d "$QX/corpus" ] && [ ! -d "$QX/index" ] \
+  && [ -z "$(find "$QX" -name '.sha' 2>/dev/null)" ] \
+  && verdict ok "T10e canary failure -> named fallback, wiped, unstamped, no candidates" \
+  || verdict bad "T10e (rc=$rc)"
+
+# T10f ROW RENDERING -- the path is the payload, the excerpt is decorative (row
+# RETRIEVAL-QMD-ROWS). A docs/decisions/*.yaml candidate prints as a RESOLVE-INSTRUCTION and is
+# never excerpted, because no field subset of a row is safe to quote out of context (PMW-1 is
+# `status: "decided"` beside a note recording that the premise is gone). The payload plants an
+# excerpt on the row result specifically: if the renderer ever quoted it, this case reds.
+QX="$S/t10f"
+printf '%s' '[{"file":"docs/decisions/PMW-1.yaml","snippet":"status decided founder approved"},{"file":"docs/adr/ADR-x.md","snippet":"an ordinary prose excerpt"}]' > "$S/t10f.json"
+mkfake "$QX" "$S/t10f.json"
+out="$(DECISION_LOOKUP_HOME="$QX" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q '^candidate 1: docs/decisions/PMW-1.yaml' \
+  && echo "$out" | grep -q 'decision row — resolve docs/decisions/PMW-1.yaml at HEAD' \
+  && ! echo "$out" | grep -q 'status decided founder approved' \
+  && echo "$out" | grep -q 'an ordinary prose excerpt' \
+  && echo "$out" | grep -q "^corpus: .* (working tree not indexed)" \
+  && verdict ok "T10f row renders as resolve-instruction, never excerpted; prose still excerpted" \
+  || verdict bad "T10f (rc=$rc)"
+
+# T10g INGESTION COMPLETENESS, planted red -- the case the single canary nonce is structurally
+# BLIND to. `update` succeeds, the rows are exported and still on disk, the canary nonce IS
+# indexed (so the `.yaml` arm is provably alive), and yet one row document is missing from the
+# index. T10e cannot see this: one ingested row satisfies a one-nonce probe while every other row
+# is gone. This is not a hypothetical shape -- the pinned qmd 2.8.3 produces it, non-
+# deterministically (row RETRIEVAL-QMD-INGEST-LOSS: 15 of 15 clean rebuilds landed 64-72 of 84,
+# "All collections updated" every time, and every one of them stamped). The build must fail into
+# the completeness check's OWN named fallback -- never the canary's wording, never the generic
+# rebuild wording, never a stamp, never a candidate -- because an index missing an unknown subset
+# of rows answers a register check with a FALSE NEGATIVE, which is worse than answering nothing:
+# the fallback tells the operator to run `rg`, and a partial index does not.
+QX="$S/t10g"; mkfake "$QX" "$S/p5a.json"
+out="$(FAKE_DROP_ROWS=1 DECISION_LOOKUP_HOME="$QX" "$W" "x" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && echo "$out" | grep -q "row-ingestion INCOMPLETE" \
+  && echo "$out" | grep -q "corpus never stamped" \
+  && ! echo "$out" | grep -q "canary FAILED" \
+  && ! echo "$out" | grep -q "rebuild failed" \
+  && ! echo "$out" | grep -q '^candidate ' \
+  && [ ! -d "$QX/corpus" ] && [ ! -d "$QX/index" ] \
+  && [ -z "$(find "$QX" -name '.sha' 2>/dev/null)" ] \
+  && verdict ok "T10g partial row ingestion -> named fallback, wiped, unstamped, no candidates" \
+  || verdict bad "T10g (rc=$rc)"
+
+# T10h NON-VACUITY of that comparison, asserted rather than assumed. `indexed >= exported` is
+# trivially true when BOTH sides are zero, and a corpus that exported no rows at all would sail
+# through T10g's guard while T10g itself still went red for its own reason. So the passing arm is
+# measured: an undropped build must stamp, AND the index must actually hold at least the exported
+# row count, AND that count must be greater than one -- a real population on both sides. Read out
+# of the INDEX with the same query the wrapper uses, never off the disk, which is the entire
+# distinction the check exists to enforce.
+QX="$S/t10h"; mkfake "$QX" "$S/p5a.json"
+out="$(DECISION_LOOKUP_HOME="$QX" "$W" "x" 2>&1)"; rc=$?
+exported="$(find "$QX/corpus/docs/decisions" -type f -name '*.yaml' 2>/dev/null | wc -l)"
+indexed="$(python3 -c 'import sqlite3,sys
+try:
+    c = sqlite3.connect(sys.argv[1])
+    print(c.execute("select count(*) from documents where active = 1 and path like ?",
+                    ("docs/decisions/%.yaml",)).fetchone()[0])
+except Exception:
+    print(-1)' "$QX/corpus/.qmd/index.sqlite" 2>/dev/null)"
+[ $rc -eq 0 ] && [ -f "$QX/corpus/.sha" ] \
+  && [ "$exported" -gt 1 ] && [ "$indexed" -ge "$exported" ] \
+  && echo "$out" | grep -q '^candidate ' \
+  && verdict ok "T10h complete ingestion stamps, and both sides of the comparison are populated ($indexed indexed >= $exported exported)" \
+  || verdict bad "T10h (rc=$rc, exported=$exported, indexed=$indexed)"
+
 # T11 stamp/archive same-SHA: the stamp equals `git rev-parse HEAD` (the one resolved SHA), and
 # the wrapper source archives "$head" — never a re-resolved symbolic HEAD.
 [ "$(cat "$Q/corpus/.sha")" = "$(git -C "$(dirname "$W")/../../../.." rev-parse HEAD)" ] \
@@ -605,13 +780,13 @@ rm -f "$Q/corpus/.qmd/index.sqlite"
 out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
   && [ -s "$Q/corpus/.qmd/index.sqlite" ] \
-  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && ! echo "$out" | grep -q "no result — the index is a corpus-masked projection" \
   && verdict ok "T12a missing index + matching stamp -> rebuilt, candidates, no empty-result" || verdict bad "T12a (rc=$rc)"
 rm -f "$Q/corpus/.qmd/index.sqlite"
 out="$(FAKE_UPDATE_EXIT=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "rebuild failed" \
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
-  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && ! echo "$out" | grep -q "no result — the index is a corpus-masked projection" \
   && verdict ok "T12b missing index + rebuild failure -> named fallback, caches wiped" || verdict bad "T12b (rc=$rc)"
 
 # T13 post-update index assertion: the stamp is written only when the index verifiably landed.
@@ -628,7 +803,7 @@ Q="$S/t13b"; mkfake "$Q" "$S/p5a.json"
 out="$(FAKE_UPDATE_NO_INDEX=1 DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && echo "$out" | grep -q "rebuild failed" \
   && ! echo "$out" | grep -q '^candidate ' \
-  && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+  && ! echo "$out" | grep -q "no result — the index is a corpus-masked projection" \
   && [ ! -d "$Q/corpus" ] && [ ! -d "$Q/index" ] \
   && [ -z "$(find "$Q" -name '.sha' 2>/dev/null)" ] \
   && verdict ok "T13b index-less successful update -> wiped, unstamped, named fallback" || verdict bad "T13b (rc=$rc)"
@@ -646,7 +821,7 @@ else
   out="$(DECISION_LOOKUP_HOME="$Q" "$W" "x" 2>&1)"; rc=$?
   [ $rc -eq 0 ] && [ "$(echo "$out" | grep -c '^candidate ')" -eq 3 ] \
     && ! echo "$out" | grep -q "qmd search failed" \
-    && ! echo "$out" | grep -q "no result — the index is Markdown-only" \
+    && ! echo "$out" | grep -q "no result — the index is a corpus-masked projection" \
     && index_ok="$(python3 -c 'import sqlite3,sys
 try:
     sqlite3.connect(sys.argv[1]).execute("PRAGMA schema_version"); print("ok")
@@ -1058,11 +1233,11 @@ fi
 # THE COMPLETENESS ARITHMETIC IS COMPUTED BEFORE THE HEADLINE, because the headline is the line
 # everything quotes. `RESULT:` used to print above the check, so an incomplete run emitted
 # `RESULT: 30 passed, 0 failed` and only then `INCOMPLETE: 30 of 54` -- and the PR body, the ADR and
-# RETRIEVAL-QMD-CI's evidence all cite THE `RESULT:` LINE as the measurement. A summary line that
+# RETRIEVAL-QMD-CI's evidence (now superseded, and cited here as history) all cite THE `RESULT:` LINE as the measurement. A summary line that
 # can say "0 failed" over a run where two dozen cases never executed is this suite's own thesis
 # turned on itself. It now carries `<accounted>/<EXPECTED_CASES>`, so no quotable line is green on
 # an incomplete run. (Review #17 of PR #679.)
-EXPECTED_CASES=54
+EXPECTED_CASES=61
 if [ "$skip" -gt 0 ]; then
   echo "RESULT: $pass passed, $fail failed, $skip skipped (host capability) -- $accounted/$EXPECTED_CASES cases accounted for -- $hermetic"
 else

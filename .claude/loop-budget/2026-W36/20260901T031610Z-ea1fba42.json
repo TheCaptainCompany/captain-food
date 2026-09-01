@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1832,
+  "recordedAt": "2026-09-01T03:16:10.417Z",
+  "branch": "claude/adr-proposals-yaml-r2oowa",
+  "note": "start on 'claude/adr-proposals-yaml-r2oowa', stop on '840-qmd-index-decision-rows'"
+}

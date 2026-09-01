@@ -1,20 +1,22 @@
 ---
 name: decision-lookup
 description: >
-  Advisory BM25 candidate retrieval over the committed governing Markdown (ADRs, proposals,
-  session docs, STATUS.md, CLAUDE.md — status journals excluded) to speed up finding the record
+  Advisory BM25 candidate retrieval over the committed governing records (ADRs, proposals,
+  session docs, STATUS.md, CLAUDE.md and the decision-register row files `docs/decisions/*.yaml`
+  — status journals excluded) to speed up finding the record
   that answers a question. Use
   when searching for a controlling decision record, a prior ruling, or "have we decided X" — BEFORE
   formulating a register-check trail or a founder question. ADVISORY ONLY: candidates, never
   evidence or authority. Every use ends with direct reading of the candidate and exact
-  docs/decisions/<KEY>.yaml resolution; rg + aliases stays the authoritative fallback and is the
-  tool when QMD is unavailable, stale, or empty. Never a substitute for the register-check
+  docs/decisions/<KEY>.yaml resolution AT HEAD — including when the candidate IS a row file, because
+  the index is a fold of one commit and never the working tree; rg + aliases stays the authoritative
+  fallback and is the tool when QMD is unavailable, stale, or empty. Never a substitute for the register-check
   discipline or the AskUserQuestion gate.
 ---
 
-# decision-lookup — advisory retrieval over committed governing Markdown
+# decision-lookup — advisory retrieval over the committed governing records
 
-Decided by row `RETRIEVAL-QMD-CI` (`decided_by: ADR-20260824-205911`, founder 2026-08-24) — the CHAIN HEAD, which carries `RETRIEVAL-QMD`'s controlling content forward in full. Name the head, never the superseded row: a `reconsiders:` pointing at a superseded row is rejected by the validator. QMD is an
+Decided by row `RETRIEVAL-QMD-ROWS` (`decided_by: ADR-20260901-025538`, founder 2026-09-01) — the CHAIN HEAD, which carries the controlling content of `RETRIEVAL-QMD-CI` (and, through it, `RETRIEVAL-QMD`) forward. Name the head, never a superseded row: a `reconsiders:` pointing at a superseded row is rejected by the validator. QMD is an
 **advisory read path**; **decision YAML plus direct source reading is the authority path** — that
 sentence is the whole architecture.
 
@@ -27,9 +29,21 @@ sentence is the whole architecture.
 Output: at most **three** candidate records — repo-relative path + short excerpt — preceded by this
 fixed disclaimer, printed on every invocation and never suppressed:
 
-> ADVISORY ONLY — candidates, not evidence. READ the candidate directly, then resolve the exact
-> row: `docs/decisions/<KEY>.yaml`. Baseline and fallback: `rg + aliases` (workflow.md alias
-> table). No result is NOT evidence of "undecided".
+> ADVISORY ONLY — candidates, not evidence. READ every candidate directly at HEAD, and resolve
+> `docs/decisions/<KEY>.yaml` itself: the index is a disposable fold of ONE commit, and a
+> projection is never authority — including when the candidate IS a row file. Baseline and
+> fallback: `rg + aliases` (workflow.md alias table). No result is NOT evidence of "undecided".
+
+…followed by a **staleness header on every lookup** — `corpus: <sha> (working tree not indexed)` —
+so the one SHA the index folds is stated for *every* candidate rather than reasoned about per
+candidate.
+
+**A decision-row candidate is rendered as a resolve-instruction, never as an excerpt**
+(`RETRIEVAL-QMD-ROWS`): `docs/decisions/<KEY>.yaml` prints with *"resolve … at HEAD"* and no
+snippet. No field subset of a row is safe to quote out of context — `PMW-1` is `status: "decided"`
+with an evidence field reading as firm founder approval, while its own `note` records that the
+premise is gone and the live challenge is the open row `PMW-4`. Excerpting `status` beside that row
+would manufacture a more convincing false answer than printing nothing.
 
 ## The contract (binding on every consumer)
 
@@ -37,11 +51,21 @@ fixed disclaimer, printed on every invocation and never suppressed:
    never "evidence". A record id may enter a `Register check:` trail only after you have READ that
    record directly.
 2. **Row resolution is mandatory** before any decision assertion or founder question: resolve the
-   exact `docs/decisions/<KEY>.yaml` at HEAD. The index cannot see row files (Markdown-only mask,
-   by design), so this step can never be skipped "because the tool already found it".
+   exact `docs/decisions/<KEY>.yaml` at HEAD — **including when the retrieved candidate IS that
+   row file**. The reason is not that the index is blind (it no longer is): **the index is a
+   disposable fold of ONE head SHA, and a projection is never authority.** The retrieved copy is
+   **stale**, and `status` is precisely the field that changes after a row is written. Stated this
+   way the rule survives every future corpus widening; "it cannot see rows" survived none.
 3. **No result decides nothing.** An empty result is not "undecided" and not "no controlling
-   record": the index is Markdown-only, corpus-masked, and possibly stale. A negative claim
-   requires the `rg + aliases` search plus direct `docs/decisions/` resolution at HEAD.
+   record": the index is corpus-masked and is a projection of ONE commit, never the working tree.
+   A negative claim requires the `rg + aliases` search plus direct `docs/decisions/` resolution at
+   HEAD. **Two bounds make this sharper than it used to be, not softer:** (a) rows are *written*
+   in the same sessions that run register checks, and the working tree is never indexed — so **a
+   lookup miss on a row is not a negative trail**; (b) every exported row file is indexed *or the
+   build fails closed and nothing is stamped* — a property checked at every rebuild, never a count
+   quoted here (see "what the guards actually guard" below) — while **zero** of the 100
+   `_legacy.yaml` keys are indexed, because their prose home `DECISIONS.md` is an excluded corpus
+   file, so a null result over the register is a null result over roughly half of it.
 4. **Fallback is the system, not a degraded mode**: if QMD is unavailable, the index is stale, or
    the result is empty, use `rg --fixed-strings -i` with the question's words AND the alias table
    of `docs/claude/sessions/workflow.md`, then resolve the row.
@@ -50,18 +74,77 @@ fixed disclaimer, printed on every invocation and never suppressed:
 
 ## Corpus policy (include/exclude — the wrapper enforces it)
 
-- **Included** (committed Markdown only, exported via `git archive` of the one resolved HEAD SHA,
+- **Included** (committed sources only, exported via `git archive` of the one resolved HEAD SHA,
   never the working tree): `docs/adr/**`, `docs/proposals/**`, `docs/claude/**`, `docs/STATUS.md`,
-  `CLAUDE.md`.
+  `CLAUDE.md`, and — since `RETRIEVAL-QMD-ROWS` (founder 2026-09-01) — the decision-register row
+  files `docs/decisions/*.yaml`. **All** rows, including `superseded` and `withdrawn` ones:
+  `superseded_by:` is what makes a hit on a retired row resolvable to its chain head, so the
+  reduction rule is *follow the edge*, and truncating the corpus to live rows would destroy the
+  DAG that makes the register answerable.
 - **Excluded**: `docs/status/**` (**the status journals narrate this tool's own activation and
   verification — queries and answers verbatim — so indexing them lets a lookup match the account
   of itself, the recorded self-contamination/false-authority shape; `rg + aliases` still searches
   status records directly whenever they are actually the target**), `docs/proposals/DECISIONS.md`
   (carries a GENERATED region duplicating row data — the duplicate/authority-confusion shape this
   decision forbids), `docs/proposals/PROP-20260822-171212-*` and any QMD experiment artifacts
-  (the recorded contamination source), `specs/generated/**` and all generated files, and
-  everything that is not Markdown — **including `docs/decisions/*.yaml`: row indexing is
-  explicitly out of scope pending separate evidence**. (`specs/**` was never included.)
+  (the recorded contamination source), `specs/generated/**` and all generated files,
+  `docs/decisions/_legacy.yaml` and `docs/decisions/_exempt.yaml` (**control files, not rows**:
+  no `status`/`owner`/`capacity` to disambiguate a hit, and `_legacy.yaml` is one document naming
+  100 prose-only keys, so it ranks for any register query while answering none — and a hit on it
+  points at a key with **no row file to resolve**, the one case the mandatory-resolution contract
+  cannot discharge), `docs/decisions/README.md` (excluded **by construction**: the pathspec is
+  `docs/decisions/*.yaml`), and everything else that is not Markdown. (`specs/**` and
+  `docs/legal/**` were never included, and `docs/legal/**` stays out deliberately.)
+
+**The mask exists in THREE places, and all three must agree** — this is the change's primary silent
+failure mode, so it is stated on the authority surface rather than only in the code: the `git
+archive` pathspec, the `find … ! -name '*.md'` sweep, **and qmd's own collection glob** (`pattern:`
+in the corpus-local `.qmd/index.yml`, which the tool defaults to `**/*.md` and which
+`qmd collection add . '<glob>'` silently refuses to set). Widen two of the three and the corpus
+exports the rows, keeps them, indexes an empty `.yaml` arm, stamps, and answers **forever without
+ever returning a row**. A **rebuild-time ingestion canary** now closes that: a nonce-bearing
+`docs/decisions/*.yaml` file is planted before `qmd update` and searched for after it; zero hits
+wipes the caches, **never stamps the corpus**, and takes a named fallback. The sentinel is a nonce
+rather than a real row on purpose — a guard coupled to register *content* would go red whenever
+someone opens or supersedes an unrelated decision row.
+
+**What the two guards actually guard — they are complementary, and neither subsumes the other.**
+The canary is *one* nonce checked with `grep -qF`: it proves the `.yaml` arm is alive **end to end
+through the search path**, and it is structurally **blind to a PARTIAL arm**, because a single
+ingested row satisfies it while every other row is missing. So a second rebuild-time check covers
+that case: **indexed `docs/decisions/*.yaml` documents ≥ the count this build exported**, both
+sides derived *at build time* from the corpus itself — the indexed side read out of the index
+(`select count(*) from documents where active = 1 and path like 'docs/decisions/%.yaml'`), never
+off the disk and never from `qmd collection list`, which reports the *scan* count and would compare
+a number to itself. Never a literal: a hard-coded count would go stale on the next row anyone opens
+and would turn ordinary register growth into a repository-wide failure. Fail-closed exactly like
+the canary — caches wiped, corpus never stamped, its own named fallback.
+
+> **Live defect, and the reason the tool is currently fallback-only.** That check went red against
+> the real pinned `@tobilu/qmd@2.8.3` on its first run and stays red: 15 of 15 clean rebuilds
+> indexed only 64–72 of 84 exported rows, a *different* subset each time, while `qmd update` exited
+> 0 and printed "All collections updated" — and re-running `update` never recovered a dropped row.
+> Open row **`RETRIEVAL-QMD-INGEST-LOSS`** owns the choice (stay on the baseline / change the pin /
+> bounded rebuild-and-verify / narrow the corpus). Until it is decided, **every lookup returns the
+> `rg` + aliases fallback**. That is the safe state, not a breakage: the baseline is the system,
+> and an index missing an unknown subset of rows answers a register check with a *false negative*.
+
+**`docs/decisions/**` is NOT in `claude_citation_corpus`, and must not be added to it.** Rows cite
+superseded rows *by construction* (`reconsiders:`, `superseded_by:`), so wiring them in would make
+`decision-superseded-authority` — an **error** — fire across the register itself. The retrieval
+corpus and the citation corpus are unrelated and stay unrelated.
+
+**Accepted behaviour, measured and not mitigated** (`RETRIEVAL-QMD-ROWS`): BM25 length
+normalization favours short documents, and the median row is 961 B against a few hundred Markdown
+documents (antecedent, and these are *disk* measurements labelled as such rather than index counts:
+`find docs/decisions -name '*.yaml' -printf '%s\n'` on 2026-09-01 — min 326 B, median 961 B, mean
+2168 B, max 19674 B). The boost is *inversely correlated with
+content* — the ~900 B stubs win slots, the two largest rows lose them — and with `K=3` that is slot
+occupancy: three thin rows can evict a deciding ADR, and dedup is path-only, so all three slots can
+be one decision family. **No ranking claim is made anywhere**; rows are *discoverable*, and that is
+the only property asserted. Known limit, not to be "fixed": as of 2026-09-01 **36 keys carry zero topical
+words**, so they get no key signal — renaming keys is not the remedy, because a rename breaks every
+chain edge and every citation.
 
 ## Verification cases (run manually after any wrapper or corpus-mask change)
 
@@ -69,14 +152,24 @@ The six recorded cases — the five smoke-test questions plus the known citation
 behavior, not scores: the disclaimer prints; ≤3 candidates; and the mandatory resolution step
 reaches the controlling record even where retrieval alone missed it.
 
-| Question | The controlling record the RESOLUTION step must reach |
-|---|---|
-| who bears the refund cost | `docs/decisions/REFUND-BEARER.yaml` (candidates led to its deciding ADR in the spike) |
-| is a tip/contribution pre-filled by default | `docs/decisions/CONTRIB-DEFAULT.yaml` |
-| what is the free-delivery threshold | `docs/decisions/DELIV-THRESHOLD.yaml` |
-| what does the docs-only CI citation rule require | `docs/adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md` — **the recorded miss case: both QMD and rg missed it in the spike; it verifies the fallback + direct-read discipline, not the retriever** |
-| what is the order of the rider/delivery work | the delivery proposals surfaced ranked in the spike; resolution lands on the current row/record |
-| (fallback case) any query with the tool cache deleted | the exact fallback text prints; **exit 0**; no install occurs; `rg + aliases` answers |
+**These cases no longer distinguish "retrieval found it" from "resolution found it"** for five of
+the six, because the row files they name are now IN the corpus (`RETRIEVAL-QMD-ROWS`). The column
+is therefore what the RESOLUTION step must reach, unchanged — and the re-run column records what
+retrieval actually did on 2026-09-01, at corpus SHA `3afd0fe`.
+
+| Question | The controlling record the RESOLUTION step must reach | Re-run 2026-09-01 |
+|---|---|---|
+| who bears the refund cost | `docs/decisions/REFUND-BEARER.yaml` | 3 ADR candidates, **no row** in the top 3 (`ADR-20260819-103112` first) — resolution still does the work |
+| is a tip/contribution pre-filled by default | `docs/decisions/CONTRIB-DEFAULT.yaml` | **empty result**, fallback printed, exit 0, cache intact. **Query-shape effect, not a corpus effect**: the same question without the `/` (*"is a tip contribution pre-filled by default"*) returns 3 candidates. A `/` in a query is a second known empty-result shape beside the leading hyphen |
+| what is the free-delivery threshold | `docs/decisions/DELIV-THRESHOLD.yaml` | 3 candidates, none of them the row; `PROP-20260819-110442` (which quotes the row) ranks 2 |
+| what does the docs-only CI citation rule require | `docs/adr/ADR-20260821-103403-decision-ask-unregistered-and-the-citation-ratchet.md` — **the recorded miss case** | **The most informative case, and it gained information.** The originally-named ADR is still not in the top 3, so the *miss on that record stands*; but candidate 2 is now `docs/decisions/CITATION-RULE-LEVEL.yaml` and candidate 3 the superseded `docs/decisions/RETRIEVAL-QMD-CI.yaml`, so the ROW that answers the question is retrieved and the answer is reachable in one resolution hop. Candidate 3 is also a live demonstration of the DAG rule: a superseded row retrieves, and resolving it means following `superseded_by:` to the head |
+| what is the order of the rider/delivery work | the delivery proposals; resolution lands on the current row/record | **empty result** — the same `/` shape as the tip case |
+| (fallback case) any query with the tool cache deleted | the exact fallback text prints; **exit 0**; no install occurs; `rg + aliases` answers | unchanged |
+
+Two things the re-run establishes that a passing suite cannot: an **empty result keeps the cache**
+(it is not a tool failure, so nothing is wiped), and **a row ranking below a prose record is normal**
+— no ranking claim is made anywhere, and the value of row indexing is *discoverability plus a
+one-hop resolution*, not displacing the ADRs.
 
 ## Exit semantics and activation
 
@@ -166,7 +259,7 @@ reaches the controlling record even where retrieval alone missed it.
   verdict), or lifecycle-script
   enforcement (`trustedDependencies: []` + `ignoreScripts = true`) not establishable on disk — and
   prints: *activation failed; remove `.qmd/` before any future approved retry*, plus the
-  reversal-decision instruction (row `RETRIEVAL-QMD-CI`, the chain head). A failed install may leave a partial
+  reversal-decision instruction (row `RETRIEVAL-QMD-ROWS`, the chain head). A failed install may leave a partial
   `.qmd/tool/`; it never claims "nothing changed".
 - **Post-update index assertion**: the corpus stamp is written only after the index database is
   verified present and non-empty; a successful `qmd update` that leaves no index at the expected
@@ -190,8 +283,10 @@ reaches the controlling record even where retrieval alone missed it.
 The committed suite is the authority for this wrapper, and it is **executable in CI**: one step of
 `.github/workflows/ci.yml`'s always-run `gate-scripts` job runs it on every PR and on every push
 to `main` (GATE-STEP-LOCUS option (a), 2026-08-27 -- it lived in `changes` before), pinned by the
-`the_stub_suite_runs_in_the_always_run_gate_job` codegen test (decided 2026-08-24,
-`RETRIEVAL-QMD-CI`). Re-run it locally after any wrapper change:
+`the_stub_suite_runs_in_the_always_run_gate_job` codegen test — carried forward unchanged by the
+chain head `RETRIEVAL-QMD-ROWS`, and first authorized 2026-08-24 by the superseded `RETRIEVAL-QMD-CI`.
+**Name the locus by that pin test, never by a job name** — the job name has already drifted once and
+the record that named it went stale in three places. Re-run it locally after any wrapper change:
 
 ```
 DECISION_LOOKUP_ALLOW_DIRTY=1 bash .claude/skills/decision-lookup/scripts/stub-tests.sh
@@ -220,12 +315,17 @@ suite this skill is about: a maintainer editing the wrapper ran the bare command
 `FATAL: … differs from the committed blob` with zero cases run, and had to have read this section
 to know why. Use the target while editing; CI runs the bare command, default-on, on purpose.
 
-**54 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
+**61 cases** — the 19 existing behavioral cases retained (with limited harness adaptations for
 repository-relative execution, cache-invariance verification, and a controlled-PATH rework of the
 bun-absent install case), plus 1 search-failure case (now also asserting the cache wipe),
 5 quoting cases, 4 python3-preflight cases (absent and broken installs non-zero before any
 network touch and with no install dir; absent and broken lookups fall back cache-untouched),
 1 corpus-mask case, 1 stamp/archive-SHA case,
+2 ingestion-completeness cases (a partial arm — rows exported and on disk, canary nonce
+indexed, one row document missing from the index — fails into the completeness check's own
+named fallback, wiped and unstamped, which the single-nonce canary is structurally blind to;
+and its non-vacuity guard, asserting an undropped build stamps AND that both sides of
+`indexed >= exported` are populated, so the comparison cannot pass on 0 >= 0),
 2 broken-cache cases, 2 post-update index-assertion cases, 1 stamp-write-failure case,
 9 corrupt-index/probe cases (garbage index rebuilt, and rebuilt too under interpreter stdout
 noise — the verdict is dispatched on the exit status, never on captured output; a planted `-wal`
@@ -318,16 +418,23 @@ the ONLY skip the suite allows; every other precondition stays a loud failure. C
 
 ## What this skill must never grow without a NEW decision row
 
-Vector/semantic search, embeddings, model downloads, reranking, query expansion, MCP or any server
-process, hosted services, credentials, hooks, **any other CI or workflow change that references or serves this
+GraphRAG, vector/semantic search, embeddings, model downloads, reranking, query expansion, hybrid
+modes, **MCP or any server**, **hosted services**, **credentials**, incremental index maintenance,
+hooks, **any other CI or workflow change that references or serves this
 integration** (this clause governs the QMD surface, not unrelated CI work), validator or
-agent-contract changes, YAML decision-row indexing, or any
-mandatory-workflow rule.
+agent-contract changes, `settings.json` changes, decision-register **semantic** changes, generated-spec
+changes, production code, any mandatory-workflow rule, and any widening of package, version,
+permissions or dependency shape.
 
-**The one CI change that IS authorized** (`RETRIEVAL-QMD-CI`, decided 2026-08-24 by
-`ADR-20260824-205911`): the single `bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step
-in the always-run `gate-scripts` job (its locus since `GATE-STEP-LOCUS` was decided,
-ADR-20260827-081500; the row named `changes` and the step moved without changing),
-plus the codegen test pinning it. It tests the **wrapper** — it
+**The retrieval surface is a LOCAL CLI over a gitignored, disposable cache.** No server, no daemon,
+no network path on the lookup path — and nothing in the 2026-09-01 row-indexing decision creates
+one. Row indexing widened the **corpus**, and only the corpus.
+
+**The one CI change that IS authorized** (`RETRIEVAL-QMD-ROWS`, the chain head, `ADR-20260901-025538`;
+first authorized 2026-08-24 by the superseded `RETRIEVAL-QMD-CI`/`ADR-20260824-205911`): the single
+`bash .claude/skills/decision-lookup/scripts/stub-tests.sh` step in the job pinned by
+`the_stub_suite_runs_in_the_always_run_gate_job`, plus that codegen test. It tests the **wrapper** — it
 runs no QMD, installs nothing, and never touches a live `.qmd/` cache. Anything else in CI still
-needs a new row.
+needs a new row. **The row-indexing decision's CI diff is zero *executable* lines** — the only
+change to `ci.yml` is the authorizing-row comment, moved off the superseded chain head onto
+`RETRIEVAL-QMD-ROWS`; the suite gained cases, not a step.
