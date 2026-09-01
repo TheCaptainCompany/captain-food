@@ -126,12 +126,15 @@ of ADR-20260817-105845. That is a known limit of the rule, not a licence to skip
    that supplied a third shape (**rider invoices the restaurant**) that no drafted option contained
    and no lens had proposed. A pick-only page is the shape that loses his best answers, and this page
    is now the **default** place he answers.
-5. **Copy-back uses the register's own envelope**: `Decision row: <KEY>` / `Q:` / `A:`, with the
-   assembled block prefixed `/decision`, so a paste lands with its trail already attached and he
-   never restates what he is answering. Per-row copy **and** copy-all. The clipboard API is not
-   always available in a sandboxed frame, so always ship the select-the-text fallback — a copy
-   button that silently does nothing is CLAUDE.md's *"a control that renders but does nothing"*, on
-   the one surface whose entire job is getting his answer back out.
+5. **Copy-back uses the envelope the template actually emits**: per answered row, `[<KEY>] <title>` /
+   `→ <value>` / `comment: …`, with the assembled block prefixed `/decision`, so a paste lands with
+   its trail already attached and he never restates what he is answering. The `Decision row: <KEY>`
+   line binds the QUESTION you ask (ADR-20260821-103403 §1, hook-enforced), never his answer; §4 asks
+   only that the row key reach the pasted block, which `[<KEY>]` does — so do not rewrite `build()`
+   to add one. Per-row copy **and** copy-all. The clipboard API is not always available in a
+   sandboxed frame, so always ship the select-the-text fallback — a copy button that silently does
+   nothing is CLAUDE.md's *"a control that renders but does nothing"*, on the one surface whose
+   entire job is getting his answer back out.
 6. **Drafts persist in `localStorage`**, every access wrapped in `try`/`catch`, and the page renders
    correctly with nothing stored. He will close the tab mid-answer, and storage can be blocked.
 7. **Every figure carries its antecedent** (ADR-20260817-105845). A number on a page is consumed by
