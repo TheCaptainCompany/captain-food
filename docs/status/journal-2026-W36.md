@@ -192,12 +192,14 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > **`disable-model-invocation` was verified before being relied on**, not assumed: parsed by the
 > `SKILL.md` loader beside `allowed-tools`/`user-invocable` and enforced at the Skill-tool gate
 > (`errorCode 4`, guarded by `disableModelInvocation && !userTypedThisTurn`). **The verification
-> itself carried a trap worth more than the result**: the container has TWO installs, and the first
-> pass read the JS bundle at `/opt/node22/lib/node_modules/@anthropic-ai/claude-code` (**2.1.42**)
-> while the running runtime is the native binary `/opt/claude-code/bin/claude` (**2.1.251**), the
-> symlink having changed mid-session. Both carry the key, so the conclusion held by luck. Rule now in
-> `workflow.md`: verify against `readlink -f "$(which claude)"` at the moment of use and cite that
-> path.
+> itself carried a trap worth more than the result**: the container has TWO installs — a JS bundle at
+> `/opt/node22/lib/node_modules/@anthropic-ai/claude-code` (**2.1.42**) and the **native binary**
+> `/opt/claude-code/bin/claude` that `which claude` actually resolves to. The JS bundle does not run,
+> so three separate version citations this session were about the wrong artifact. And the runtime is a
+> **moving target**: within this one session the symlink was repointed and the binary rebuilt under it,
+> `claude --version` going **2.1.251 → 2.1.252**. Rule now in `workflow.md`: **do not pin the version
+> in prose** — record the method (`readlink -f "$(which claude)"`, then `strings` on that artifact)
+> and re-derive at the moment of use.
 > Two card citations that did **not** check out and are corrected here: the pre-`ADR-` ADRs are
 > filed **without** the prefix (`docs/adr/20260720-233000-…`, `…/20260721-042018-…`), so a link built
 > as `ADR-20260720-233000-*` resolves to nothing; and `.claude/skills/coordinator-register-check/`
@@ -220,6 +222,14 @@ Current state: [`../STATUS.md`](../STATUS.md).
 > than on the decision the artifact carried (amending a founder rule), so **no lens read it**;
 > ADR-20260831-204546's `Consulted:` block records the roster as NOT ASKED rather than inventing
 > lines, and the second-order question stays open as a `/mob-question`.
+> **Second founder decision the same day: `/status` → `/where`.** Claude Code ships a built-in
+> `/status`, skills resolve **before** built-ins on a first-match-wins scan, and dedup is by **file
+> path, never by name** — so a colliding skill shadows the built-in **silently**, with no detection
+> and no warning, and even ours winning rests on array order in a vendor bundle that can reorder on
+> upgrade. Losing the panel you reach for when the session itself looks wrong is the worse trade.
+> `/status` was the **only** collision among the six; `/where` verified free on the running binary.
+> **Rule earned: check a command name against the built-ins before writing the skill** (`status`,
+> `review`, `security-review`, `stats`, `skills`, `agents`, `todos`).
 > Reversibility class as dispatched **reversible**; `HOLD: human` all the same, because this is the
 > coordinator's own routing surface.
 > **2026-08-31 — the oversell hole on the money path is CLOSED: checkout re-derives orderability

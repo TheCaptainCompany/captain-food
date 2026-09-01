@@ -31,8 +31,10 @@ message exists verbatim in the repo.
 
 ## Decision 1 — the six commands, and the naming ground
 
-The approved set is **six**: `/direct-question`, `/mob-question`, `/work`, `/decision`, `/status`,
-`/correct`. He named the first three; the last three were proposed and he approved them.
+The approved set is **six**: `/direct-question`, `/mob-question`, `/work`, `/decision`, `/where`,
+`/correct`. He named the first three; the last three were proposed and he approved them as
+`/decision`, `/status` and `/correct` — and `/status` was **renamed `/where`** later the same day by
+a second founder decision, on the collision described below.
 
 `/decide` became **`/decision`** on his stated ground: *decide* reads as an instruction to the
 coordinator to go and decide something, while *decision* names **the artifact he is recording**.
@@ -81,11 +83,34 @@ averaging destroys the information the fan-out was paid for.
 - **It does not weaken the register check anywhere.** `/direct-question` skips the mob only.
 - **It does not create a route around ADR-20260810-011500.** These are him asking; none of the six
   is the coordinator asking *"shall I proceed?"*.
-- **It does not settle the `/status` name.** The skill collides with a Claude Code built-in
-  `/status`; resolution is first-match-wins with skills ahead of built-ins, so ours shadows it on
-  this bundle, and that ordering lives in a vendor binary that may reorder on upgrade. *"Ok for
-  /status"* is his verbatim, so the name is his call — an **open** decision-queue row, not a
-  coordinator fix.
+- **It does not create a route around ADR-20260810-011500 in the other direction either**: the
+  `/status` → `/where` rename below was put to the founder as a decision-queue row with options and
+  a recommendation, not fixed by the coordinator, precisely because *"Ok for /status"* was his
+  verbatim and the name was therefore his.
+
+## Decision 4 — `/status` is renamed `/where`, because a colliding skill shadows a built-in silently
+
+Claude Code ships a **built-in `/status`**: the panel for the session itself — version, model,
+account, API connectivity, tool stats. Our skill would have taken that name, and the mechanics make
+that worse than it sounds:
+
+- resolution is **first-match-wins over a flat array**, with **skills ahead of built-ins**;
+- skill dedup is **by file path, never by name**;
+- so there is **no collision detection and no warning**. The built-in does not error, it simply
+  **disappears** inside this repo — and the guarantee that ours wins at all rests on **array order
+  inside a vendor bundle that can reorder on any upgrade**. The failure is silent in both
+  directions.
+
+Losing the panel you reach for when the session itself looks wrong is a worse trade than picking
+another name, and this command's job is *"where are we"*. **Founder decision, 2026-08-31: rename
+ours.** `/where` was verified free; `/status` was the **only** collision among the six.
+
+**The reusable rule: check a proposed command name against the built-ins before writing the skill.**
+Names seen on this bundle include `status`, `review`, `security-review`, `stats`, `skills`,
+`agents`, `todos`. Verified free at the time of writing: `/direct-question`, `/mob-question`,
+`/work`, `/decision`, `/correct`, `/where`. Verify against the artifact `readlink -f "$(which
+claude)"` resolves to — see the verification note below, because that is not the artifact it looks
+like.
 
 ## Consequences
 
@@ -134,12 +159,19 @@ if (e.disableModelInvocation && !userTypedThisTurn)
 `user-invocable` defaults to true when absent, so the six stay founder-invocable while excluded from
 the model-visible list.
 
-**The trap**: this container has **two** installs. `/opt/node22/lib/node_modules/@anthropic-ai/claude-code`
-is a JS bundle at **2.1.42**; the symlink `/opt/node22/bin/claude` resolves to the **native binary**
-at **2.1.251**, and the symlink target changed mid-session. Verifying against `package.json` in the
-node_modules tree describes a bundle that is **not executing**. Both versions carry the key, so the
-conclusion held — but only by luck. **Verify against the artifact `readlink -f $(which claude)`
-resolves to, re-checked at the moment of use, and cite that path.**
+**The trap, which cost three wrong citations in one session**: this container has **two** installs.
+`/opt/node22/lib/node_modules/@anthropic-ai/claude-code` is a JS bundle whose `package.json` and
+embedded `VERSION` both read **2.1.42**; `/opt/node22/bin/claude` is a **symlink** to the **native
+ELF binary** `/opt/claude-code/bin/claude`, which is what actually runs. They are different
+programs, and the JS bundle is not one of them.
+
+**The runtime is also a moving target.** Within this single session the symlink was repointed and
+the binary rebuilt under it, `claude --version` going **2.1.251 → 2.1.252**. So no version number
+belongs in prose: it is stale before the next reader arrives. **Record the method, not the value** —
+`readlink -f "$(which claude)"` for the artifact, `claude --version` for its version, `strings` on
+the binary rather than `grep` on a `cli.js` that may not be the running code — and re-derive at the
+moment the fact licenses an action. Both installs carry the key and both agree that `/status` is a
+built-in, so neither conclusion here turned on the confusion; that is luck, not method.
 
 ## Consulted
 

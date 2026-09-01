@@ -9,7 +9,7 @@ capacity: "founder"
 register: "docs/proposals/DECISIONS.md §49"
 evidence: "So to avoid any risk I will choose user invoked approach for now with these 3 types: /direct-question: ask direct question(s) to you don't need the mob - /mob-question: ask the question(s) to the mob - /work: tell you to launch the work on something. Do you see other types of invocation? ... /decision instead of decide, decide could mean that you have to decide and I here I want you record decisions. Ok for /status and /correct"
 note: >
-  DECIDED: six user-invoked commands -- /direct-question, /mob-question, /work, /decision, /status,
+  DECIDED: six user-invoked commands -- /direct-question, /mob-question, /work, /decision, /where,
   /correct -- each a skill under .claude/skills/ carrying `disable-model-invocation: true`, so the
   founder can fire them and the model cannot. Founder verbatim: "So to avoid any risk I will choose
   user invoked approach for now". /decide was renamed /decision on his stated ground that "decide"
@@ -41,8 +41,15 @@ note: >
   founder message, carve-out). Rule earned: a register check searches the SUBSTANCE THE CHANGE
   AMENDS, not the MECHANISM IT IS BUILT FROM.
 
-  NOT SETTLED BY THIS ROW, and being put to the founder separately by the coordinator: /status
-  collides with a Claude Code built-in /status.
-  Resolution is first-match-wins with skills ahead of built-ins, so ours shadows it on this bundle,
-  and that ordering lives in a vendor binary that can reorder on upgrade. "Ok for /status" is his
-  verbatim, so the name is FOUNDER-OWNED and is not a coordinator fix.
+  RENAMED /status -> /where by a SECOND founder decision the same day. Claude Code ships a built-in
+  /status (session version, model, account, API connectivity, tool stats). Skills resolve BEFORE
+  built-ins on a first-match-wins scan and dedup is by FILE PATH, never by name, so a colliding
+  skill shadows the built-in SILENTLY -- no detection, no warning -- and even our winning rests on
+  array order in a vendor bundle that can reorder on upgrade. Losing that panel inside this repo is
+  the worse trade, and this command's job is "where are we". /status was the ONLY collision among
+  the six; /where verified free. "Ok for /status" was his verbatim, so the name was FOUNDER-OWNED
+  and went to him as a decision-queue row with options and a recommendation rather than being fixed
+  by the coordinator.
+
+  RULE EARNED: check a proposed command name against the built-ins BEFORE writing the skill. Seen on
+  this bundle: status, review, security-review, stats, skills, agents, todos.
