@@ -172,6 +172,66 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the founder's six invoked commands are built, user-invoked only** (`.claude/skills/**`
+> plus one workflow section; no `specs/**`, no code, no SPEC-LOG sentence).
+> Founder directive 2026-08-31, choosing a **user-invoked** approach *"to avoid any risk"*: he named
+> `/direct-question`, `/mob-question` and `/work`, then approved `/decision`, `/status` and
+> `/correct` — renaming `/decide` → `/decision` because *decide* reads as an instruction to the
+> coordinator while *decision* names **the artifact he is recording**. Six skills under
+> `.claude/skills/<name>/SKILL.md`, each carrying its procedure and its limits, in
+> [#819 "Six founder-invoked slash commands"](https://github.com/TheCaptainCompany/captain-food/issues/819)
+> / [#820](https://github.com/TheCaptainCompany/captain-food/pull/820).
+> **The rule the set exists to protect**: `/direct-question` skips the **mob**, never the **register
+> check** — the hook caught **none** of the coordinator's nine catalogued failures (#9 was caught
+> by the check itself, the procedure being run rather than the gate firing), the rest being answer-
+> or question-shaped, and the
+> `PreToolUse` hook gates `AskUserQuestion` and `Agent`, never a prose answer, so a direct answer is
+> where the check is least enforced and most needed. Both question commands carry an **escalation
+> duty** in the skill text: a controlling record the question appears to contradict, or a `HOLD:
+> human`-axis subject, means say so and fan out anyway.
+> **`disable-model-invocation` was verified before being relied on**, not assumed: parsed by the
+> `SKILL.md` loader beside `allowed-tools`/`user-invocable` and enforced at the Skill-tool gate
+> (`errorCode 4`, guarded by `disableModelInvocation && !userTypedThisTurn`). **The verification
+> itself carried a trap worth more than the result**: the container has TWO installs — a JS bundle at
+> `/opt/node22/lib/node_modules/@anthropic-ai/claude-code` (**2.1.42**) and the **native binary**
+> `/opt/claude-code/bin/claude` that `which claude` actually resolves to. The JS bundle does not run,
+> so three separate version citations this session were about the wrong artifact. And the runtime is a
+> **moving target**: within this one session the symlink was repointed and the binary rebuilt under it,
+> `claude --version` going **2.1.251 → 2.1.252**. Rule now in `workflow.md`: **do not pin the version
+> in prose** — record the method (`readlink -f "$(which claude)"`, then `strings` on that artifact)
+> and re-derive at the moment of use.
+> Two card citations that did **not** check out and are corrected here: the pre-`ADR-` ADRs are
+> filed **without** the prefix (`docs/adr/20260720-233000-…`, `…/20260721-042018-…`), so a link built
+> as `ADR-20260720-233000-*` resolves to nothing; and `.claude/skills/coordinator-register-check/`
+> exists only from `875e5ab2`, which a stale checkout does not have.
+> **The blocking finding of review round 1, and the rule it earned**: `/direct-question` is a
+> **fourth carve-out** to
+> [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)
+> — and a different KIND from the three there, which are class-based and each lens-asked, whereas
+> this one is **founder-elected per message**. The branch shipped it with no ADR and no register row,
+> i.e. the PR that wrote `.claude/skills/decision/SKILL.md`'s reversal check **reproduced the defect
+> that skill exists to stop**. Now recorded as
+> [ADR-20260831-204546](../adr/ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md)
+> + row `CMD-INVOKE` + [DECISIONS §49](../proposals/DECISIONS.md), with the forward banner on the
+> amended ADR and CLAUDE.md's `Carve-outs:` bullet updated from three to four. **Rule earned: a
+> register check searches the SUBSTANCE THE CHANGE AMENDS, not the MECHANISM IT IS BUILT FROM** —
+> #819's trail searched `slash command`, `user-invoked`, `disable-model-invocation` and correctly
+> found nothing, because every term was an implementation noun and none was *mob*, *fan-out* or
+> *carve-out*. A negative trail is never self-certifying.
+> **Roster note**: the class was assessed on the artifact (prose skill files ⇒ reversible) rather
+> than on the decision the artifact carried (amending a founder rule), so **no lens read it**;
+> ADR-20260831-204546's `Consulted:` block records the roster as NOT ASKED rather than inventing
+> lines, and the second-order question stays open as a `/mob-question`.
+> **Second founder decision the same day: `/status` → `/where`.** Claude Code ships a built-in
+> `/status`, skills resolve **before** built-ins on a first-match-wins scan, and dedup is by **file
+> path, never by name** — so a colliding skill shadows the built-in **silently**, with no detection
+> and no warning, and even ours winning rests on array order in a vendor bundle that can reorder on
+> upgrade. Losing the panel you reach for when the session itself looks wrong is the worse trade.
+> `/status` was the **only** collision among the six; `/where` verified free on the running binary.
+> **Rule earned: check a command name against the built-ins before writing the skill** (`status`,
+> `review`, `security-review`, `stats`, `skills`, `agents`, `todos`).
+> Reversibility class as dispatched **reversible**; `HOLD: human` all the same, because this is the
+> coordinator's own routing surface.
 > **2026-08-31 — the oversell hole on the money path is CLOSED: checkout re-derives orderability
 > instead of trusting cart-edit time**
 > ([#823](https://github.com/TheCaptainCompany/captain-food/issues/823) / PR

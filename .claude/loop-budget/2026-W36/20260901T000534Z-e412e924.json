@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1500,
+  "recordedAt": "2026-09-01T00:05:34.279Z",
+  "branch": "819-founder-invoked-slash-commands",
+  "note": "#819 review round 2b: /status -> /where rename + full sweep, ADR Decision 4 collision record, version-method correction"
+}

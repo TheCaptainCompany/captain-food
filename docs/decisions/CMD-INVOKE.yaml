@@ -1,0 +1,55 @@
+key: "CMD-INVOKE"
+status: "decided"
+question: "How does the founder route an incoming message to the coordinator -- by the coordinator inferring intent, or by an explicit user-invoked command whose tag selects the handling?"
+owner: "founder"
+opened: "2026-08-31"
+decided: "2026-08-31"
+decided_by: "ADR-20260831-204546"
+capacity: "founder"
+register: "docs/proposals/DECISIONS.md §49"
+evidence: "So to avoid any risk I will choose user invoked approach for now with these 3 types: /direct-question: ask direct question(s) to you don't need the mob - /mob-question: ask the question(s) to the mob - /work: tell you to launch the work on something. Do you see other types of invocation? ... /decision instead of decide, decide could mean that you have to decide and I here I want you record decisions. Ok for /status and /correct"
+note: >
+  DECIDED: six user-invoked commands -- /direct-question, /mob-question, /work, /decision, /where,
+  /correct -- each a skill under .claude/skills/ carrying `disable-model-invocation: true`, so the
+  founder can fire them and the model cannot. Founder verbatim: "So to avoid any risk I will choose
+  user invoked approach for now". /decide was renamed /decision on his stated ground that "decide"
+  reads as an instruction to the coordinator while "decision" names the artifact he is recording.
+
+  AMENDS ADR-20260812-143619 (every founder message goes to the whole team). Its carve-out list goes
+  from THREE to FOUR, and the fourth is a different KIND: the three existing ones are class-based and
+  each was asked for by a lens (external-clock relay / recorded rollback path / legal-clearance
+  limit), while /direct-question is founder-elected PER MESSAGE and predicted by no class. The
+  amendment banner is on that record and CLAUDE.md's Carve-outs bullet is updated in the same change.
+
+  WHAT IS NOT WEAKENED: /direct-question skips the MOB, never the REGISTER CHECK. The coordinator's
+  catalogued failures were overwhelmingly answer-shaped and the PreToolUse hook gates AskUserQuestion
+  and the Agent tool, never a prose answer -- so a direct answer is where the check is least enforced.
+  The skill carries a written escalation duty (controlling record contradicted / HOLD: human axis /
+  "I do not know and one lens would" -> say so and fan out anyway).
+
+  NO MOB READ ON THE SECOND-ORDER QUESTION. The dispatch classed the work reversible (prose skill
+  files) and set the roster at "card plus independent review". That prices WRITING SIX SKILL FILES
+  correctly and prices AMENDING A FOUNDER RULE wrongly -- the class was assessed on the artifact, not
+  on the decision the artifact carried. ADR-20260831-204546's Consulted: block records the roster as
+  NOT ASKED rather than inventing lines. Whether a founder-elected per-message opt-out should sit
+  beside three class-based carve-outs remains available as a /mob-question on that record.
+
+  HOW IT WAS CAUGHT: the independent review round 1 on PR #820, from the absence of any docs/adr/**
+  or docs/decisions/** file in a diff whose own text described a standing exception to a recorded
+  rule. Issue #819's trail read "no controlling record" over terms that were ALL mechanism terms
+  (slash command, user-invoked, disable-model-invocation) and no substance term (mob, fan-out,
+  founder message, carve-out). Rule earned: a register check searches the SUBSTANCE THE CHANGE
+  AMENDS, not the MECHANISM IT IS BUILT FROM.
+
+  RENAMED /status -> /where by a SECOND founder decision the same day. Claude Code ships a built-in
+  /status (session version, model, account, API connectivity, tool stats). Skills resolve BEFORE
+  built-ins on a first-match-wins scan and dedup is by FILE PATH, never by name, so a colliding
+  skill shadows the built-in SILENTLY -- no detection, no warning -- and even our winning rests on
+  array order in a vendor bundle that can reorder on upgrade. Losing that panel inside this repo is
+  the worse trade, and this command's job is "where are we". /status was the ONLY collision among
+  the six; /where verified free. "Ok for /status" was his verbatim, so the name was FOUNDER-OWNED
+  and went to him as a decision-queue row with options and a recommendation rather than being fixed
+  by the coordinator.
+
+  RULE EARNED: check a proposed command name against the built-ins BEFORE writing the skill. Seen on
+  this bundle: status, review, security-review, stats, skills, agents, todos.
