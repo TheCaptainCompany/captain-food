@@ -54,6 +54,8 @@ scalar Quantity
 scalar CustomerDisplayName
 scalar OrderNote
 scalar MailboxActorType
+scalar AuthSubject
+scalar MemberId
 scalar AttachmentRef
 scalar ReclamationId
 scalar ReclamationReason
@@ -260,6 +262,14 @@ enum UserType {
   RIDER
   ADMIN
   EXTERNAL
+}
+
+enum PrincipalKind {
+  CUSTOMER
+  RESTAURANT
+  RESTAURANT_ACCOUNT
+  RIDER
+  MEMBER
 }
 
 enum ReclamationCategory {

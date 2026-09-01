@@ -21,7 +21,6 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `DELIV-THRESHOLD` | open | 2026-08-19 | The free-delivery threshold: which field, computed where, and the ninth money term — design team-owned, commercial parameters founder-owned (suggest, never cap). | team |
 | `OC-LEDGER` | open | 2026-08-19 | Open Collective: which host option, and is the cagnotte ingested through an ACL or declared outside the system and never folded? | team |
 | `REVIEW-MARKER-BIAS` | open | 2026-08-25 | Does the `claude-review` marker matcher keep its FAIL-OPEN bias (count an ambiguous marker) — and does its differential harness stay out of CI? | team |
-| `PRINCIPALS-MEMBER` | open | 2026-08-30 | Part C needs a restaurant MEMBER principal that does not exist. What is the change to actors.yaml principals, ScopeType, UserType and requires.acting, and what is the versioning story for it? | team |
 | `PUBLISH-PRECONDITIONS` | open | 2026-08-30 | What must exist before the first crawled listing is shown publicly, now that PUBLISH-SCOPE is national? Specifically: does Art. 6(1)(f) carry national publication of SIRENE-derived listings including sole traders' name and often-domicile address, is an Art. 35 DPIA mandatory and does it trigger Art. 36 prior consultation, and is Art. 14 satisfied individually or under the 14(5)(b) derogation? | counsel |
 | `REVOKED-COLLEAGUE-NOTICE` | open | 2026-08-30 | When a restaurant owner revokes a colleague's access, must the colleague be notified, by whom, and with what content? | counsel |
 | `CREDIT-DRAIN-ORDER` | open | 2026-08-31 | When a customer spends store credit, which provenance drains first -- purely promotional credit, or credit traceable to a captured payment? | founder |
@@ -45,6 +44,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `MARGIN-MECHANISM` | decided | 2026-08-19 | What replaces the margin-proportional fee mechanism? -> ADR-20260819-103112 | founder |
 | `PATH-ADDRESSED-STOREFRONT` | decided | 2026-08-29 | Does the storefront keep its path-addressed form (/r/{slug}) beside the tenant host, or is the host the one address? -> ADR-20260829-082615 | founder |
 | `PMW-1` | decided | 2026-08-15 | What is the final `read:`-step grammar for `specs/*/processmanager.yaml` -- how do you SPELL 'fold the aggregate's stream'? -> PROP-20260815-142349 | founder |
+| `PRINCIPALS-MEMBER` | decided | 2026-08-31 | Part C needs a restaurant MEMBER principal that does not exist. What is the change to actors.yaml principals, ScopeType, UserType and requires.acting, and what is the versioning story for it? -> ADR-20260831-220559 | team |
 | `PRODUCT-SPEC-WEB-CLIENT-RETIRED` | decided | 2026-08-29 | Is specs/PRODUCT_SPEC_WEB_CLIENT.md retired (delete after migrating its unique content), subordinated to the DSL, or kept under a drift ratchet? -> ADR-20260829-092233 | founder |
 | `PROP-20260809-003000--D1` | decided | 2026-08-09 | The branching construct's shape -> ADR-20260809-050000 | founder |
 | `PROP-20260809-003000--D2` | decided | 2026-08-09 | Is a `default:`/catch-all arm allowed? -> ADR-20260809-050000 | founder |
@@ -95,7 +95,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 81 — 16 open · 60 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 81 — 15 open · 61 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 100** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

@@ -8265,7 +8265,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- |
 | `customer_id` | [🔤 `CustomerId`](#scalar-customerid) _(derived)_ | [⚡ `CustomerRegistered`.`customerId`](#event-customerregistered--customerid) | PK |  |
 | `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `CustomerRegistered`.`phone`](#event-customerregistered--phone), [⚡ `CustomerPhoneChanged`.`phone`](#event-customerphonechanged--phone) | unique |  |
-| `auth_ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `CustomerRegistered`.`authRef`](#event-customerregistered--authref) | index, nullable | Auth provider user id (Supabase Auth) → Customer. |
+| `auth_ref` | [🔤 `AuthSubject`](#scalar-authsubject) _(derived)_ | [⚡ `CustomerRegistered`.`authRef`](#event-customerregistered--authref) | index, nullable | Auth provider user id (Supabase Auth) → Customer. |
 | `display_name` | [🔤 `CustomerDisplayName`](#scalar-customerdisplayname) _(derived)_ | [⚡ `CustomerRegistered`.`displayName`](#event-customerregistered--displayname), [⚡ `CustomerInfoUpdated`.`displayName`](#event-customerinfoupdated--displayname) | nullable |  |
 | `email` | [🔤 `EmailAddress`](#scalar-emailaddress) _(derived)_ | [⚡ `CustomerRegistered`.`email`](#event-customerregistered--email), [⚡ `CustomerEmailVerified`.`email`](#event-customeremailverified--email) | nullable |  |
 | `email_verified` | `boolean` | [⚡ `CustomerEmailVerified`](#event-customeremailverified) | — | True once an email magic link has been confirmed (CustomerEmailVerified). |
@@ -8549,7 +8549,7 @@ A customer account was created on first phone verification (passwordless OTP, id
 | --- | --- | --- | --- |
 | <a id="event-customerregistered--mode"></a>`mode` | [🔤 `Mode`](#scalar-mode) | ⬜ |  |
 | <a id="event-customerregistered--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
-| <a id="event-customerregistered--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ⬜ | Auth provider user id (e.g. Supabase Auth), linking identity to this Customer. |
+| <a id="event-customerregistered--authref"></a>`authRef` | [🔤 `AuthSubject`](#scalar-authsubject) | ⬜ | Auth provider user id (e.g. Supabase Auth), linking identity to this Customer. |
 | <a id="event-customerregistered--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |  |
 | <a id="event-customerregistered--displayname"></a>`displayName` | [🔤 `CustomerDisplayName`](#scalar-customerdisplayname) | ⬜ |  |
 | <a id="event-customerregistered--email"></a>`email` | [🔤 `EmailAddress`](#scalar-emailaddress) | ⬜ | Optional, e.g. captured later for receipts. |
@@ -8568,7 +8568,7 @@ A returning visitor signed in and was resolved to an existing Customer (authRef 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-customeridentified--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
-| <a id="event-customeridentified--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ | Auth provider user id that was matched to this Customer (via Customer.auth_ref). |
+| <a id="event-customeridentified--authref"></a>`authRef` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ | Auth provider user id that was matched to this Customer (via Customer.auth_ref). |
 | <a id="event-customeridentified--sessionid"></a>`sessionId` | [🔤 `SessionId`](#scalar-sessionid) | ✅ | Session id (ADR-0041) for the sign-in event; not required for cart binding. |
 
 <a id="event-restaurantfavorited"></a>
@@ -9643,7 +9643,7 @@ sequenceDiagram
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `rider_id` | [🔤 `RiderId`](#scalar-riderid) _(derived)_ | [⚡ `RiderRegistered`.`riderId`](#event-riderregistered--riderid) | PK |  |
-| `auth_ref` | [🔤 `ExternalReference`](#scalar-externalreference) _(derived)_ | [⚡ `RiderRegistered`.`authRef`](#event-riderregistered--authref) | unique | Auth provider user id (Supabase Auth) -> Rider. The lookup key of the identity bridge; see the `auth_ref` rule above for why the constraint is UNIQUE and what it does and does not guarantee. |
+| `auth_ref` | [🔤 `AuthSubject`](#scalar-authsubject) _(derived)_ | [⚡ `RiderRegistered`.`authRef`](#event-riderregistered--authref) | unique | Auth provider user id (Supabase Auth) -> Rider. The lookup key of the identity bridge; see the `auth_ref` rule above for why the constraint is UNIQUE and what it does and does not guarantee. |
 | `display_name` | `text` _(derived)_ | [⚡ `RiderRegistered`.`displayName`](#event-riderregistered--displayname), [⚡ `RiderInfoUpdated`.`displayName`](#event-riderinfoupdated--displayname) | — | Rider's display name; RiderInfoUpdated overwrites it only when it carries one. |
 | `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RiderRegistered`.`phone`](#event-riderregistered--phone), [⚡ `RiderInfoUpdated`.`phone`](#event-riderinfoupdated--phone) | — | Contact number, a profile attribute and never a lookup key -- see the `phone` rule above. NOT NULL for the same partial-update reason as display_name. |
 | `status` | [🔤 `RiderStatus`](#scalar-riderstatus) _(derived)_ | [⚡ `RiderRegistered`.`status`](#event-riderregistered--status), [⚡ `RiderStatusChanged`.`status`](#event-riderstatuschanged--status) | — | Availability/lifecycle status, straight off the payload of whichever event wrote last. |
@@ -9850,7 +9850,7 @@ Register as an independent Captain rider (linked to the auth provider user).
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="command-registerrider--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
-| <a id="command-registerrider--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ |  |
+| <a id="command-registerrider--authref"></a>`authRef` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
 | <a id="command-registerrider--displayname"></a>`displayName` | `string` | ✅ |  |
 | <a id="command-registerrider--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |  |
 
@@ -10177,7 +10177,7 @@ An independent Captain rider registered (linked to the auth provider user).
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-riderregistered--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
-| <a id="event-riderregistered--authref"></a>`authRef` | [🔤 `ExternalReference`](#scalar-externalreference) | ✅ | Auth-provider user reference (Supabase), like the Customer's authRef. |
+| <a id="event-riderregistered--authref"></a>`authRef` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ | Auth-provider user reference (Supabase), like the Customer's authRef. |
 | <a id="event-riderregistered--displayname"></a>`displayName` | `string` | ✅ |  |
 | <a id="event-riderregistered--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |  |
 | <a id="event-riderregistered--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
@@ -11200,7 +11200,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(56)_
+### 🔤 Scalars _(59)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -11243,6 +11243,9 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-restaurantdispatchmode"></a>🔤 `RestaurantDispatchMode` | enum (CAPTAIN \| RESTAURANT) | Who is responsible for fulfilling a restaurant's deliveries (restaurant-scoped config, resolved at runtime; #60). Default CAPTAIN keeps today's behaviour. |
 | <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
+| <a id="scalar-authsubject"></a>🔤 `AuthSubject` | string | The identity provider's subject (`sub`) for ONE credential -- the Supabase Auth user id, as carried by `authRef` on CustomerRegistered / CustomerIdentified / RiderRegistered. Example: 'a3f1c8de-0b2e-4f77-9a11-0c4d2e8b7f10'. NOT `ExternalReference`, which this replaces at those sites: that scalar is declared as the HubRise `ref` with examples 'MARGHERITA' and 'CAT-PIZZAS', so typing a person's credential with it made a catalog import key and a human identity the same type -- interchangeable at every boundary, in the kernel, against CLAUDE.md's `one name = one dedicated scalar`. Structurally the same string (`type: string`, so the same TEXT column and the same JSON), which is precisely why the compiler could not see the confusion until the names were separated. It is an AUTHENTICATION fact and never an authorization one: `ScopeMembership.member_id` holds the DOMAIN id, never this, because the sub->domain bridge happens once per request at the edge (ADR-20260818-004646). A subject that reaches the authorization index has crossed a boundary that exists to be crossed exactly once.  |
+| <a id="scalar-memberid"></a>🔤 `MemberId` | string _uuid_ | A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.  |
+| <a id="scalar-principalkind"></a>🔤 `PrincipalKind` | enum (CUSTOMER \| RESTAURANT \| RESTAURANT_ACCOUNT \| RIDER \| MEMBER) | WHAT KIND OF PRINCIPAL acts -- the vocabulary `ScopeMembership.member_type` is really typed by, and the first half of the rider sign-in reservation key `(principal_kind, auth_ref)`. One member per entry in `actors.yaml`'s `principals` map, plus `MEMBER`. A NEW scalar with NO stored history: nothing has ever been written with this type, so `MEMBER` costs no upcaster, no re-attribution of past events, and no migration. That is the whole reason the vocabulary is added here rather than onto `UserType` (see the note above). `PUBLIC`, `ADMIN` and `EXTERNAL` are absent on purpose, exactly as they are absent from `principals`: they have no resolved domain identity, so they can never be a member of anything and can never satisfy an `acting` entry other than the explicit `any` keyword. NOT `ScopeType`, which is untouched by this change: `ScopeType` names the kind of protected INSTANCE one belongs to (`ORDER`, `RESTAURANT`), whereas this names the kind of party doing the belonging. A member is not a thing others are members of.  |
 | <a id="scalar-configboolean"></a>🔤 `ConfigBoolean` | string `^(?i)(true|yes|1|on|false|no|0|off)$` | A boolean configuration value. Accepts true/yes/1/on and false/no/0/off, CASE-INSENSITIVE, with surrounding whitespace and wrapping quotes trimmed before matching (ADR-20260728-224500). Deliberately generous, because the failure it prevents was real: `RUN_SIRENE_WORKER=TRUE` silently meant PAUSED under an exact `== "true"` gate, and 6,649 rows sat unprocessed for four hours. Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.  |
 | <a id="scalar-stripesecretkey"></a>🔤 `StripeSecretKey` | string `^sk_(test|live)_[A-Za-z0-9]+$` | A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup guarantee instead of a thing someone remembers to check.  |
 | <a id="scalar-stripesecretkeytest"></a>🔤 `StripeSecretKeyTest` | string `^sk_test_[A-Za-z0-9]+$` | A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).  |

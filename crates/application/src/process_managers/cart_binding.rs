@@ -139,7 +139,7 @@ mod tests {
     fn identified() -> CustomerIdentified {
         CustomerIdentified {
             customer_id: customer_id(),
-            auth_ref: ExternalReference("auth-supabase-1".into()),
+            auth_ref: AuthSubject("auth-supabase-1".into()),
             session_id: session_id(),
         }
     }

@@ -14,12 +14,12 @@ use crate::behaviour_support::{self as support, TestBed};
 
 /// tests.yaml#/fixtures/customerRegistered — events.yaml#/CustomerRegistered
 fn fx_customer_registered() -> DomainEvent {
-    DomainEvent::CustomerRegistered(evs::CustomerRegistered { mode: None, customer_id: sc::CustomerId(support::uid("cust-1")), auth_ref: Some(sc::ExternalReference("auth-supabase-1".into())), phone: sc::PhoneNumber("+33612345678".into()), display_name: Some(sc::CustomerDisplayName("Johnny".into())), email: None, locale: Some(sc::Locale("fr-FR".into())), timezone: Some(sc::TimeZone("Europe/Paris".into())) })
+    DomainEvent::CustomerRegistered(evs::CustomerRegistered { mode: None, customer_id: sc::CustomerId(support::uid("cust-1")), auth_ref: Some(sc::AuthSubject("auth-supabase-1".into())), phone: sc::PhoneNumber("+33612345678".into()), display_name: Some(sc::CustomerDisplayName("Johnny".into())), email: None, locale: Some(sc::Locale("fr-FR".into())), timezone: Some(sc::TimeZone("Europe/Paris".into())) })
 }
 
 /// tests.yaml#/fixtures/customerIdentified — events.yaml#/CustomerIdentified
 fn fx_customer_identified() -> DomainEvent {
-    DomainEvent::CustomerIdentified(evs::CustomerIdentified { customer_id: sc::CustomerId(support::uid("cust-1")), auth_ref: sc::ExternalReference("auth-supabase-1".into()), session_id: sc::SessionId(support::uid("sess-1")) })
+    DomainEvent::CustomerIdentified(evs::CustomerIdentified { customer_id: sc::CustomerId(support::uid("cust-1")), auth_ref: sc::AuthSubject("auth-supabase-1".into()), session_id: sc::SessionId(support::uid("sess-1")) })
 }
 
 /// tests.yaml#/fixtures/customerInfoUpdated — events.yaml#/CustomerInfoUpdated
@@ -634,7 +634,7 @@ fn fx_delivery_partner_availability_revoked() -> DomainEvent {
 
 /// tests.yaml#/fixtures/riderRegistered — events.yaml#/RiderRegistered
 fn fx_rider_registered() -> DomainEvent {
-    DomainEvent::RiderRegistered(evs::RiderRegistered { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::ExternalReference("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()), status: sc::RiderStatus::OFFLINE })
+    DomainEvent::RiderRegistered(evs::RiderRegistered { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::AuthSubject("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()), status: sc::RiderStatus::OFFLINE })
 }
 
 /// tests.yaml#/fixtures/riderInfoUpdated — events.yaml#/RiderInfoUpdated
@@ -3267,7 +3267,7 @@ async fn test_cart_binding_on_customer_identified() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let ev = evs::CustomerIdentified { customer_id: sc::CustomerId(support::uid("cust-1")), auth_ref: sc::ExternalReference("auth-supabase-1".into()), session_id: sc::SessionId(support::uid("sess-1")) };
+    let ev = evs::CustomerIdentified { customer_id: sc::CustomerId(support::uid("cust-1")), auth_ref: sc::AuthSubject("auth-supabase-1".into()), session_id: sc::SessionId(support::uid("sess-1")) };
     let result = crate::process_managers::cart_binding::on_customer_identified(&bed.store, &bed.cart_pm, &bed.carts, &ev, &support::envelope()).await;
     let _ = result.expect("TestCartBindingOnCustomerIdentified: the spec expects acceptance");
     bed.assert_appended("TestCartBindingOnCustomerIdentified", &before, &[]);
@@ -4099,7 +4099,7 @@ async fn test_rider_registered() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::ExternalReference("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()) };
+    let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::AuthSubject("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()) };
     let result = crate::commands::register_rider(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestRiderRegistered: the spec expects acceptance");
     bed.assert_appended("TestRiderRegistered", &before, &[
@@ -4115,7 +4115,7 @@ async fn test_rider_register_again_is_rejected() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::ExternalReference("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()) };
+    let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::AuthSubject("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()) };
     let result = crate::commands::register_rider(&bed.store, cmd, &support::actor()).await;
     let err = result.expect_err("TestRiderRegisterAgainIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderRegisterAgainIsRejected", &err, &["RiderAlreadyRegistered"]);

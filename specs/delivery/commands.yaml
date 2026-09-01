@@ -193,7 +193,7 @@ RegisterRider:
   type: object
   properties:
     riderId: { $ref: 'scalars.yaml#/RiderId' }
-    authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+    authRef: { $ref: 'scalars.yaml#/AuthSubject' }
     displayName:
       type: string
       maxLength: 200

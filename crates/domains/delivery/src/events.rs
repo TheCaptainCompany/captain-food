@@ -184,7 +184,7 @@ pub struct DeliveryPartnerAvailabilityRevoked {
 #[serde(rename_all = "camelCase")]
 pub struct RiderRegistered {
     pub rider_id: RiderId,
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub display_name: String,
     pub phone: PhoneNumber,
     pub status: RiderStatus,

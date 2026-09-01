@@ -29,11 +29,11 @@
   [ADR-20260818-004646](../adr/ADR-20260818-004646-no-business-identifier-lives-in-the-identity-provider.md) ·
   [ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md)
   (parts A and B) ·
-  [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) (**open, team — a declared dependency of this proposal, not closed by it**) ·
+  [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) (**decided 2026-08-31** by [ADR-20260831-220559](../adr/ADR-20260831-220559-the-person-is-a-principalkind-not-an-eighth-usertype.md) — a declared dependency of this proposal, closed by step 1's [PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835), not by this proposal) ·
   [SUPPORT-CONTACT](../decisions/SUPPORT-CONTACT.yaml) (decided 2026-08-31)
 - **Concerns** (a proposal cannot move to `Approved` while one is unchecked):
   - [ ] **public-graph-limits**: `limit_depth` / `limit_complexity` occur **nowhere** in `specs/**` or `crates/**`. Part C adds unauthenticated write entry points to `/public/graphql`. Either the limits land in the same slice, or the decision to ship without them is recorded with its reason.
-  - [ ] **kernel-change**: [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) is OPEN. §3 and §2 depend on its answer (`principals`, `ScopeType`, `UserType`, `requires.acting`). This proposal states what it needs; the row is what decides it.
+  - [ ] **kernel-change**: [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) is **decided** (2026-08-31, [ADR-20260831-220559](../adr/ADR-20260831-220559-the-person-is-a-principalkind-not-an-eighth-usertype.md), landed in [PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835)), and §3/§2 have their answer for three of its four parts: the person is a `PrincipalKind`, `UserType` does **not** widen (an eighth value would mint an eighth `/{path}/graphql` surface), `ScopeType` is untouched. **The box stays unchecked** — checking it is a separate act, and the fourth part is not built: `requires.acting`'s membership semantics are stated but consumed by nothing (zero `requires:` blocks exist in any `specs/*/api.yaml`; [#636](https://github.com/TheCaptainCompany/captain-food/issues/636) owns the emitter), so §5's membership predicate still has no compiler to compile to.
   - [ ] **revocation-grounds**: the closed `RevocationGround` vocabulary is the highest-value item in the rider slice and it is a legal surface. [REVOKED-COLLEAGUE-NOTICE](../decisions/REVOKED-COLLEAGUE-NOTICE.yaml) is counsel-owned and open. The enum's contents are reviewed before they are stored, not after.
   - [ ] **custody-door**: `DeclineDelivery`, `ReportDeliveryIssue` and `ResolveDeliveryIssue` have **no API operation**. Until they do, a revoked rider holding paid, cooked food has no way to hand it back — and the test that would prove otherwise cannot be written.
 
@@ -148,7 +148,7 @@ concept, and two axes on the membership — **scope** and **authority**.
 
 | Name | Where | What it is | Why not the near-miss |
 |---|---|---|---|
-| `AuthSubject` | `specs/common/` (kernel) | The identity provider's subject for one credential. | Today these four sites are typed `ExternalReference`, which the kernel declares as **the HubRise `ref`**, with examples `'MARGHERITA'` and `'CAT-PIZZAS'`: `customer/events.yaml:24`, `customer/events.yaml:60`, `delivery/events.yaml:343`, `delivery/commands.yaml:196`. One name = one dedicated scalar. Same string format, so **no stored JSON changes** — a spec-level retype, not a data migration. |
+| `AuthSubject` | `specs/common/` (kernel) | The identity provider's subject for one credential. | **Minted, and the retype LANDED** (step 1, [PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835)). It was **seven** sites, not the four enumerated here: `customer/events.yaml` ×2, `delivery/events.yaml`, `delivery/commands.yaml`, **and `services.yaml` ×3** — `verify_phone_otp`'s output, `verify_email_token`'s output and `stamp_customer_claim`'s input, which this proposal missed and without which the retype does not compile (the identity service's output flows straight into the retyped event fields). All seven were `ExternalReference`, which the kernel declares as **the HubRise `ref`**, with examples `'MARGHERITA'` and `'CAT-PIZZAS'`. One name = one dedicated scalar. Same string format, so **no stored JSON changed** — a spec-level retype, not a data migration, with a zero-byte SQL diff. |
 | `MemberId` | `specs/common/` (kernel) | A natural person who may act within some scope. Minted by us, bridged from an `AuthSubject` in our Postgres. | Not the `AuthSubject` (the column note forbids it in `member_id`). Not `RestaurantMemberId` — the person is not restaurant-shaped; **scope is an axis on the membership**, and naming the person for one width bakes the collapse back in. |
 | `PrincipalKind` | `specs/common/` (kernel) | What `member_type` is **really** typed by: `CUSTOMER \| RESTAURANT \| RESTAURANT_ACCOUNT \| RIDER \| MEMBER`. | `UserType` is the **role**, and a role is a URL path (`/{role}/graphql`). Typing `member_type` as `UserType` means every new kind of member manufactures a GraphQL role path. `young`'s reservation key is already spelled `(principal_kind, auth_ref)` — the word exists in the finding before it exists in the DSL. |
 | `RestaurantMembershipId` | `specs/network/` | The relationship: one person's grant on one scope. `UUIDv5(scopeType\|scopeId\|principalKind\|memberId)`. | Membership belongs in `network`, not `customer` (`evans`): the scope is a restaurant. |
@@ -966,7 +966,7 @@ worked around.
 
 | # | Step | Depends on | Class |
 |---|---|---|---|
-| 1 | **Vocabulary + kernel change**: `AuthSubject`, `MemberId`, `PrincipalKind`; retype the four `authRef` sites. | [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) **answered** | HOLD: human (kernel, stored shapes) |
+| 1 | ✅ **LANDED** ([PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835), [ADR-20260831-220559](../adr/ADR-20260831-220559-the-person-is-a-principalkind-not-an-eighth-usertype.md)) — **Vocabulary + kernel change**: `AuthSubject`, `MemberId`, `PrincipalKind` minted in `specs/common/`; **seven** `authRef` sites retyped (not four — see §2.1). `UserType` does not widen. **Step 1b is NOT done and is the remainder**: retype the `CustomerReadRepository::by_auth_ref` read port from `ExternalReference` to `AuthSubject` — **ten** edit sites, because Rust requires an exact signature match on every `impl` and every hand-written caller mints the value: the trait decl (`application/src/queries.rs`), **five** impls (`infrastructure/src/persistence/customer.rs`, `application/src/behaviour_support.rs`, and three `server/tests/` fakes), the `me` resolver **emitter** (`tools/codegen-rs/src/emit/server_graphql.rs`, whose output regenerates), and **three** hand-written callers — `infrastructure/src/mailbox/handler.rs` (fenced at step 1), `infrastructure/tests/main/customer_projection.rs`, and `server/src/auth.rs`, the gated `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` resolver that is neither fenced nor generated. Tracked by [#836 "#639 part C step 1b: retype the by_auth_ref read port to AuthSubject (ten sites, incl. the gated auth.rs resolver)"](https://github.com/TheCaptainCompany/captain-food/issues/836). | [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) **decided** 2026-08-31 | HOLD: human (kernel, stored shapes) |
 | 2 | **Rider sign-in door**: the `auth_ref → rider_id` resolver at the request seam, the §10 pair, and the `(principal_kind, auth_subject)` reservation table (#794 copy job). | 1 for the scalar; nothing else — part A already landed the table | HOLD: human (identity surface) |
 | 3 | **The custody doors**: `api.yaml` operations for `ReportDeliveryIssue` and the job handback, with the rider screen. | 2 | GREEN once the operations are additive |
 | 4 | **Rider restriction**: `RiderRestricted` / `RiderReinstated`, `RevocationGround` closed set, the restriction as a **term in the derivation**, the per-operation carve-out, `SUSPENDED` unspellable at the door. | 2, 3 (the carve-out has nothing to carve out without 3) + the **revocation-grounds** Concern | HOLD: human (stored shapes, legal surface) |
@@ -1033,9 +1033,11 @@ absorb them.
    `scanned >= 8`. A test moved into a subdirectory is invisible to the gate **while it stays
    green** — the exact failure class the gate's own doc-comment warns about one layer up ("a gate
    that scans nothing passes forever"). It needs a recursive walk, not a bigger threshold.
-2. **`authRef` is typed `ExternalReference`** at four sites, a kernel scalar declared as the HubRise
-   `ref` with examples `'MARGHERITA'` and `'CAT-PIZZAS'`. One name, one scalar. §2.1 proposes the
-   mint; the retype is mechanical and touches no stored JSON.
+2. **`authRef` was typed `ExternalReference`** — a kernel scalar declared as the HubRise `ref` with
+   examples `'MARGHERITA'` and `'CAT-PIZZAS'`. One name, one scalar. **Now closed** at the spec
+   layer by step 1 ([PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835)), which found **seven** such sites
+   rather than the four counted here and retyped them all to `AuthSubject`; no stored JSON changed.
+   What remains is the `by_auth_ref` read PORT, still `ExternalReference` — step 1b, [#836 "#639 part C step 1b: retype the by_auth_ref read port to AuthSubject (ten sites, incl. the gated auth.rs resolver)"](https://github.com/TheCaptainCompany/captain-food/issues/836).
 3. **`ScopeMembership.member_id` semantics** and any `UserType` widening are non-additive and
    separate from the grant path.
 4. **`DbFaultPolicy::Skip` is the default**, so a projector `UNIQUE` violation advances the
@@ -1066,8 +1068,9 @@ finding dropped.
   (§1).
 - **evans** — `RestaurantMembershipId`, never `RestaurantMemberId`; `RESTAURANT` /
   `RESTAURANT_ACCOUNT` as two scope widths rather than two kinds of person; do not rename the stored
-  token, add vocabulary alongside; the provenance test that disqualifies `OWNER`; the four
-  `ExternalReference` sites and the `AuthSubject` mint; membership belongs in `network`; and that
+  token, add vocabulary alongside; the provenance test that disqualifies `OWNER`; the
+  `ExternalReference` sites and the `AuthSubject` mint (**seven** sites, not the four this document
+  enumerated — corrected and landed at step 1, [PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835)); membership belongs in `network`; and that
   staff auth is a **supporting** subdomain, so the modelling effort goes into the closed vocabularies
   rather than a rich invitation state machine. **Extended** in §2.1: the person concept must not be
   named for one scope width either, which is why it is `MemberId`.

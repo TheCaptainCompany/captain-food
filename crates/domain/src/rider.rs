@@ -68,12 +68,12 @@ mod tests {
     use super::*;
     use crate::aggregate::Aggregate;
     use crate::generated::events::{RiderInfoUpdated, RiderRegistered, RiderStatusChanged};
-    use crate::generated::scalars::{ExternalReference, RiderId};
+    use crate::generated::scalars::{AuthSubject, RiderId};
 
     fn registered(status: RiderStatus) -> DomainEvent {
         DomainEvent::RiderRegistered(RiderRegistered {
             rider_id: RiderId(uuid::Uuid::nil()),
-            auth_ref: ExternalReference("auth_1".into()),
+            auth_ref: AuthSubject("auth_1".into()),
             display_name: "Sam".into(),
             phone: PhoneNumber("+33600000000".into()),
             status,

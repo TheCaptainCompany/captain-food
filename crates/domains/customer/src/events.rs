@@ -13,7 +13,7 @@ use domain_common::scalars::*;
 pub struct CustomerRegistered {
     pub mode: Option<Mode>,
     pub customer_id: CustomerId,
-    pub auth_ref: Option<ExternalReference>,
+    pub auth_ref: Option<AuthSubject>,
     pub phone: PhoneNumber,
     pub display_name: Option<CustomerDisplayName>,
     pub email: Option<EmailAddress>,
@@ -26,7 +26,7 @@ pub struct CustomerRegistered {
 #[serde(rename_all = "camelCase")]
 pub struct CustomerIdentified {
     pub customer_id: CustomerId,
-    pub auth_ref: ExternalReference,
+    pub auth_ref: AuthSubject,
     pub session_id: SessionId,
 }
 

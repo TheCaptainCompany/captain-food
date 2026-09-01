@@ -323,7 +323,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | --- | --- | --- | --- | --- |
 | `customer_id` | `CustomerId` | `UUID` | PK |  |
 | `phone` | `PhoneNumber` | `TEXT` | unique |  |
-| `auth_ref` | `ExternalReference` | `TEXT` | index, nullable | Auth provider user id (Supabase Auth) → Customer. |
+| `auth_ref` | `AuthSubject` | `TEXT` | index, nullable | Auth provider user id (Supabase Auth) → Customer. |
 | `display_name` | `CustomerDisplayName` | `TEXT` | nullable |  |
 | `email` | `EmailAddress` | `TEXT` | nullable |  |
 | `email_verified` | `boolean` | `BOOLEAN` | — | True once an email magic link has been confirmed (CustomerEmailVerified). |
@@ -348,7 +348,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | Column | Type | SQL | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `rider_id` | `RiderId` | `UUID` | PK |  |
-| `auth_ref` | `ExternalReference` | `TEXT` | unique | Auth provider user id (Supabase Auth) -> Rider. The lookup key of the identity bridge; see the `auth_ref` rule above for why the constraint is UNIQUE and what it does and does not guarantee. |
+| `auth_ref` | `AuthSubject` | `TEXT` | unique | Auth provider user id (Supabase Auth) -> Rider. The lookup key of the identity bridge; see the `auth_ref` rule above for why the constraint is UNIQUE and what it does and does not guarantee. |
 | `display_name` | `text` | `TEXT` | — | Rider's display name; RiderInfoUpdated overwrites it only when it carries one. |
 | `phone` | `PhoneNumber` | `TEXT` | — | Contact number, a profile attribute and never a lookup key -- see the `phone` rule above. NOT NULL for the same partial-update reason as display_name. |
 | `status` | `RiderStatus` | `TEXT` | — | Availability/lifecycle status, straight off the payload of whichever event wrote last. |

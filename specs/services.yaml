@@ -166,7 +166,7 @@ identity:
         nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
         code: { $ref: 'scalars.yaml#/OtpCode' }
       output:
-        authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+        authRef: { $ref: 'scalars.yaml#/AuthSubject' }
         # The provider session (PROP-20260724-150500): parked encrypted by the handler, delivered as
         # an httpOnly cookie by POST /auth/session — NEVER in GraphQL, the event log, or the journal.
         # Nullable: a provider/mock without sessions degrades to verification-only.
@@ -204,7 +204,7 @@ identity:
         entirely (an unstamped token is never parked; recovery is a fresh OTP + idempotent
         re-stamp).
       input:
-        authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+        authRef: { $ref: 'scalars.yaml#/AuthSubject' }
         customerId: { $ref: 'scalars.yaml#/CustomerId' }
       errors: []
     send_email_magic_link:
@@ -218,7 +218,7 @@ identity:
       input:
         token: { $ref: 'scalars.yaml#/EmailVerificationToken' }
       output:
-        authRef: { $ref: 'scalars.yaml#/ExternalReference' }
+        authRef: { $ref: 'scalars.yaml#/AuthSubject' }
         email: { $ref: 'scalars.yaml#/EmailAddress', description: "The address the token PROVES — the linked email is recorded from this, never from client input." }
         # Same provider-session trio as verify_phone_otp (#112) — the staff magic-link login rides it.
         accessToken:  { type: string, maxLength: 4096, nullable: true, description: "Provider JWT for the verified user (Supabase access_token)." }

@@ -341,7 +341,7 @@ RiderRegistered:
   properties:
     riderId: { $ref: 'scalars.yaml#/RiderId' }
     authRef:
-      $ref: 'scalars.yaml#/ExternalReference'
+      $ref: 'scalars.yaml#/AuthSubject'
       description: "Auth-provider user reference (Supabase), like the Customer's authRef."
     displayName:
       type: string

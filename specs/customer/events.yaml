@@ -22,7 +22,7 @@ CustomerRegistered:
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
     authRef:
-      $ref: 'scalars.yaml#/ExternalReference'
+      $ref: 'scalars.yaml#/AuthSubject'
       nullable: true
       description: "Auth provider user id (e.g. Supabase Auth), linking identity to this Customer."
     phone:
@@ -58,7 +58,7 @@ CustomerIdentified:
     customerId:
       $ref: 'scalars.yaml#/CustomerId'
     authRef:
-      $ref: 'scalars.yaml#/ExternalReference'
+      $ref: 'scalars.yaml#/AuthSubject'
       description: "Auth provider user id that was matched to this Customer (via Customer.auth_ref)."
     sessionId:
       $ref: 'scalars.yaml#/SessionId'

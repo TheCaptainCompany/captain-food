@@ -16,7 +16,7 @@
 //! written without one.
 
 use application::queries::RiderRow;
-use domain::generated::scalars::{ExternalReference, PhoneNumber, RiderId};
+use domain::generated::scalars::{AuthSubject, PhoneNumber, RiderId};
 use domain::shared::errors::DomainError;
 use sqlx::postgres::PgRow;
 use sqlx::Row;
@@ -31,7 +31,7 @@ pub(crate) const COLUMNS: &str =
 pub(crate) fn decode(row: &PgRow) -> Result<RiderRow, DomainError> {
     Ok(RiderRow {
         rider_id: RiderId(row.try_get::<uuid::Uuid, _>("rider_id").map_err(db_err)?),
-        auth_ref: ExternalReference(row.try_get::<String, _>("auth_ref").map_err(db_err)?),
+        auth_ref: AuthSubject(row.try_get::<String, _>("auth_ref").map_err(db_err)?),
         display_name: row.try_get::<String, _>("display_name").map_err(db_err)?,
         phone: PhoneNumber(row.try_get::<String, _>("phone").map_err(db_err)?),
         status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,

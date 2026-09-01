@@ -1,26 +1,34 @@
 key: PRINCIPALS-MEMBER
-status: open
+status: decided
 question: Part C needs a restaurant MEMBER principal that does not exist. What is the change to actors.yaml
   principals, ScopeType, UserType and requires.acting, and what is the versioning story for it?
 owner: team
 opened: '2026-08-30'
+decided: '2026-08-31'
+decided_by: ADR-20260831-220559
 capacity: team
-register: docs/adr/ADR-20260830-213135-the-staff-auth-answers-captain-binds-the-first-person-and-the-owner-invites-the-rest.md
-evidence: '**The kernel change** to `principals` / `ScopeType` / `UserType` — a register row.'
-note: 'Residue 5 of ADR-20260830-213135, which already committed to a register row rather than an inline
-  edit. owner: team because the specs freeze is lifted (ADR-20260810-221840) -- but this is CLAUDE.md
-  question 2, a MIGRATION: UserType is stored on every domain_events row (ADR-0041) and ScopeType is stored
-  in ScopeMembership, so the versioning story is recorded BEFORE it lands, stored events are immutable,
-  and upcasting is never mutation. The row''s answer IS that story. SCOPE CORRECTED 2026-08-31 (vernon):
-  the row named principals/ScopeType/UserType and MISSED requires.acting, which is where the type-checking
-  actually bites -- principals maps each role to the scalar that requires.acting compares actor.id against,
-  so once the PERSON is the principal, RESTAURANT can no longer be a scalar equality: a member acts WITHIN
-  a scope, making acting a membership question rather than an id comparison. Verified: zero `requires:`
-  blocks exist in any specs/*/api.yaml today (one comment hit in common/api.yaml:52), so principals has
-  exactly one consumer and it is a comment -- the kernel change is CHEAPER than this row implied and its
-  semantics are fully open. COST WINDOW (evans): the sole claim writer hardcodes role CUSTOMER, so no
-  domain_events row was ever authored by a RESTAURANT principal -- the rename is a spec edit plus a projection
-  replay TODAY, and becomes permanent at the first restaurant credential part C issues. Confirm with SELECT
-  user_type, count(*) FROM domain_events GROUP BY 1 before relying on it; UNVERIFIED input until run.
-  Do NOT rename the stored token: RESTAURANT stays a legal UserType value forever (ADR-0041, immutable
-  log); the correct vocabulary is added ALONGSIDE and RESTAURANT becomes a value no new event carries.'
+register: docs/adr/ADR-20260831-220559-the-person-is-a-principalkind-not-an-eighth-usertype.md
+evidence: '**MEMBER goes on a NEW `PrincipalKind` scalar; `UserType` does not widen; `ScopeType` is untouched;
+  `requires.acting` becomes a membership question.** The versioning story is that there is nothing to
+  version: `PrincipalKind` is a new scalar with NO stored history, so `MEMBER` costs no upcaster, no
+  re-attribution and no migration. `RESTAURANT` stays a legal `UserType` value forever (ADR-0041, immutable
+  log) -- correct vocabulary is added ALONGSIDE and is never a rename.'
+note: 'Residue 5 of ADR-20260830-213135. Closed together with step 1 of PROP-20260831-180622, which
+  it gated, because the row''s answer IS that step''s design. THE ANSWER RESTS ON TWO VERIFICATIONS, not
+  on the assembled reading: (1) `UserType` is a URL PATH mechanically -- `tools/codegen-rs/src/emit/bins.rs`
+  `user_type_roles` reads this very enum and emits one gateway bin and one `/{path}/graphql` route per
+  member, matched by the seven-arm `RequestRole` table in `crates/server/src/graphql/acl.rs`, so widening
+  it would mint an eighth role path as a side effect of naming a person; (2) `principals` has exactly
+  ONE consumer and it is a comment -- zero `requires:` blocks exist in any `specs/*/api.yaml` (the sole
+  hit, common/api.yaml:52, is prose about the unrelated `@auth(requires: [...])` directive), so `requires.acting`''s
+  semantics are fully open and the emitter belongs to #636. Neither verification contradicted the assembled
+  answer; both narrowed it. THE COST WINDOW IS MOOT RATHER THAN EXPLOITED: the row noted that no `domain_events`
+  row was ever authored by a RESTAURANT principal (the sole claim writer hardcodes CUSTOMER), which would
+  have made a rename cheap TODAY -- flagged `UNVERIFIED input` pending `SELECT user_type, count(*) FROM
+  domain_events GROUP BY 1`. That query was NOT run and is no longer needed: the decision declines the
+  rename on principle, so nothing here depends on the figure. SCOPE CORRECTION CARRIED FORWARD (vernon,
+  2026-08-31): the row as opened named principals/ScopeType/UserType and missed `requires.acting`, which
+  is where the type-checking actually bites. A SECOND scope correction was found while implementing: the
+  `authRef` retype covers SEVEN sites, not the four PROP-20260831-180622 §2.1 enumerates -- `specs/services.yaml`
+  holds three more (verify_phone_otp output, verify_email_token output, stamp_customer_claim input) whose
+  values flow straight into the retyped event fields, so the four-site version does not compile.'

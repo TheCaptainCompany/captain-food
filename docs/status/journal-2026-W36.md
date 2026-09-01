@@ -105,6 +105,80 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > common words are interned and shared, and all four `status` hits sit in unrelated data. The
 > negative is the reliable direction.
 
+> **2026-08-31 — The person gets a name: `PrincipalKind`, `MemberId` and `AuthSubject` land in the
+> kernel, and `UserType` deliberately does NOT widen ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639)
+> part C **step 1 of seven**, PR [#835](https://github.com/TheCaptainCompany/captain-food/pull/835),
+> `HOLD: human`, [ADR-20260831-220559](../adr/ADR-20260831-220559-the-person-is-a-principalkind-not-an-eighth-usertype.md)).**
+> Closes the [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) register row, which gated this
+> step — the row's answer *is* the step's design, so they closed together.
+>
+> **The answer was verified, not adopted.** The assembled reading came into the run as four claims and
+> two of them carried the weight, so both were checked against the corpus:
+> (1) *`UserType` must not widen* — confirmed **mechanically**, and this is the whole load-bearing
+> finding: `tools/codegen-rs/src/emit/bins.rs`'s `user_type_roles` reads that enum and emits one
+> gateway bin plus one `/{path}/graphql` route **per member**, matched by the seven-arm `RequestRole`
+> table in `crates/server/src/graphql/acl.rs`. Adding `MEMBER` there would have conjured an eighth URL
+> surface and an eighth gateway as a side effect of naming a person. `PrincipalKind` is a NEW scalar
+> with no stored history, so `MEMBER` costs no upcaster and no re-attribution.
+> (2) *`requires.acting` has one consumer and it is a comment* — confirmed: **zero** `requires:` blocks
+> exist in any `specs/*/api.yaml` (the single grep hit, `specs/common/api.yaml:52`, is prose about the
+> unrelated `@auth(requires: […])` directive). So the semantics are stated and no emitter is built;
+> #636 owns that. Neither verification contradicted the assembled answer — both narrowed it.
+>
+> **The `RESTAURANT` cost window was declined, not spent.** The row noted that no `domain_events` row
+> was ever authored by a `RESTAURANT` principal (the sole claim writer hardcodes `CUSTOMER`), which
+> would have made renaming the stored token cheap *today* — marked `UNVERIFIED input` pending a
+> production `SELECT user_type, count(*)`. That query was never run and is no longer needed: the
+> decision declines the rename on principle (ADR-0041, immutable log), so nothing rests on the figure.
+> A number that licenses nothing does not need verifying.
+>
+> **The card's "four `authRef` sites" was three short, and the missing three are load-bearing.**
+> `specs/services.yaml` holds three more (`verify_phone_otp` output, `verify_email_token` output,
+> `stamp_customer_claim` input), and the identity service's output flows straight into the retyped
+> event fields at `crates/application/src/commands.rs:3432-3518` — so retyping the four without the
+> three does not compile. Seven sites moved `ExternalReference` -> `AuthSubject`. The old typing had a
+> customer's login credential and a HubRise menu-import key (`'MARGHERITA'`, `'CAT-PIZZAS'`) as one
+> type in the shared kernel; they are now distinct newtypes and `rustc` refuses the substitution —
+> compiler-first, with no gate written.
+>
+> **Nothing stored moved, and that is proven rather than asserted**: regenerating gave a **zero-byte
+> diff** in `schema.generated.sql`, `views.generated.sql`, `security*.generated.sql` and
+> `databases.generated.json` (`type: string` emits `TEXT` irrespective of the scalar's name), and the
+> GraphQL diff is purely additive — two scalars and one enum **declared**, not one field retyped,
+> because no API field binds `authRef`. No migration, no backfill, no replay.
+>
+> **One thing deliberately left undone, and named so it is not mistaken for finished**: the
+> `by_auth_ref` read port still takes an `ExternalReference`, so the identity bridge is the one place
+> the old confusion survives. Retyping it reaches the codegen emitter
+> (`tools/codegen-rs/src/emit/server_graphql.rs:703` hardcodes the scalar in the emitted `me`
+> resolver) and `crates/infrastructure/src/mailbox/handler.rs:400`, which was **fenced to a concurrent
+> session** by the dispatch. It is now *visible* instead of invisible — the fake repository and the
+> projection test each name both scalars with a comment saying why — and is written up as step 1b.
+> `PROP-20260831-180622`'s four Concerns remain unchecked; this step discharges none of them.
+>
+> **The independent reviewer pass found no code defect and two false statements in the records** —
+> both of the class that outlives the PR, so both were corrected in the same PR rather than filed.
+> (1) `PROP-20260831-180622` is a LIVING document (ADR-20260801-020000) that this step falsified in
+> **six** places, not the five the re-presentation card listed: the `Related` block still called
+> [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) *"open ... not closed by it"*, the
+> `kernel-change` Concern still said the row *"is OPEN"*, and four sites still said *"four `authRef`
+> sites"*. All rewritten to cite the closure and the seven; **the Concern's box stays `- [ ]`** —
+> closing the row it depended on is not discharging it, and `requires.acting` is still built by
+> nothing. (2) The ADR's own follow-up said step 1b was *"Three edits"*. It is **ten**: retyping a
+> trait parameter forces every `impl` signature (Rust requires an exact match) plus every
+> hand-written caller — one trait decl, five impls, the `me` emitter, and three callers. The omitted
+> one that matters is `crates/server/src/auth.rs:2181`, the gated
+> `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` sub->domain resolver: the bridge-at-the-edge the new
+> `AuthSubject` docstring cites ADR-20260818-004646 for, neither fenced nor generated. A derived
+> number stated without its antecedents is exactly the defect
+> [ADR-20260817-105845](../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md)
+> names, and this is the second time in one chunk a "four"/"three" count reached a record unverified.
+> Step 1b, plus three findings the pass raised about the bridge (no step-1b marker on the trait decl;
+> the `.0`-against-`.0` comparison that is the one place a confusion could still pass silently; and
+> `MemberId`/`PrincipalKind` unreferenced with **no `scalar-unused` validator rule**, so the ADR's own
+> Negative is enforced by nothing), are filed as
+> [#836](https://github.com/TheCaptainCompany/captain-food/issues/836).
+
 > **2026-08-31 — The checkout button now states the OBLIGATION TO PAY rather than an amount, and
 > the pre-order total recap is no longer declared collapsible
 > ([#817](https://github.com/TheCaptainCompany/captain-food/issues/817), PR

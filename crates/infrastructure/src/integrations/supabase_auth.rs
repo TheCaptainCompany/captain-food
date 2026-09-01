@@ -20,7 +20,7 @@ use application::generated::services::{
     IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
-use domain::generated::scalars::{CustomerId, EmailAddress, ExternalReference};
+use domain::generated::scalars::{AuthSubject, CustomerId, EmailAddress};
 use domain::shared::errors::DomainError;
 use serde_json::{json, Value};
 use tracing::Instrument as _;
@@ -308,11 +308,11 @@ fn classify_verify_error(body: &Value, is_email: bool) -> &'static str {
 }
 
 /// The Supabase `user.id` proving the identity — the domain `authRef`.
-fn auth_ref_of(v: &Value) -> Result<ExternalReference, DomainError> {
+fn auth_ref_of(v: &Value) -> Result<AuthSubject, DomainError> {
     v.get("user")
         .and_then(|u| u.get("id"))
         .and_then(Value::as_str)
-        .map(|s| ExternalReference(s.to_string()))
+        .map(|s| AuthSubject(s.to_string()))
         .ok_or_else(|| DomainError::Repository("supabase verify: response has no user.id".into()))
 }
 
