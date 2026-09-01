@@ -2,6 +2,28 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-01 — `/whatsup` now renders a status page with an answer form, by default.**
+> Founder directive, 2026-09-01, verbatim: *"Show me a status page with form to answer your
+> questions and copy/paste them<== make the /whatsup do that by default"*. The page was published
+> in-session; the second half —
+> [#843](https://github.com/TheCaptainCompany/captain-food/issues/843) — made it the skill's
+> default, so the next session produces it unasked. `.claude/skills/whatsup/SKILL.md` now carries
+> the rendering as a **content contract, not a checked-in template**: the three sections unchanged
+> (the page is a rendering of the existing report, not a new one), a form restricted to `status:
+> open` **and** `owner: founder` rows read from `docs/decisions/*.yaml` rather than the prose in
+> `DECISIONS.md`, answered rows shown answered, quick-fills taken only from a row's own enumerated
+> options, copy-back in the register's `Decision row:` / `Q:` / `A:` envelope prefixed `/decision`
+> with a select-the-text fallback, `localStorage` drafts in `try`/`catch`, and every figure carrying
+> its antecedent (ADR-20260817-105845). **The terminal report does not go away** — the same turn
+> carries a prose summary *and* the link, because a link with nothing said around it answers a
+> different question than the one he asked.
+>
+> **The one rule is unweakened and the file now says why.** *Never turn a `/whatsup` into work* and
+> *no record written* both stand: publishing an artifact writes no repo record, mutates no branch,
+> claims no issue and pushes nothing, so it breaches neither — and the reasoning is stated in the
+> skill because the next reader will and should ask. Fixing what the page surfaced is still work,
+> and still stops at being reported.
+
 > **2026-09-01 — A link checker exists, and a broken citation can no longer ship silently.**
 > Founder directive, 2026-09-01, verbatim: *"excellent point put in place this url checker that must
 > be executed locally and enforced in the CI too"* — both halves, and both landed: `make link-check`
