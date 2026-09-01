@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 2989,
+  "recordedAt": "2026-09-01T02:03:08.140Z",
+  "branch": "837-link-checker",
+  "note": "#837 review round 1: slug fidelity (F1), the HTML artifact (F2), one reproducible number (F3), link-check wired into make rust (F5)"
+}

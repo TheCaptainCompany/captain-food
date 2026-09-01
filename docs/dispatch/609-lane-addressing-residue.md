@@ -26,7 +26,7 @@ Minor: "the generated table across the client crates" — `mailbox_address` is e
 
 ## Why this chunk exists
 
-#596 established the finding that matters: **disagreeing copies of the routing constant break one-writer at the addressing function, upstream of any fence.** [ADR-20260816-165714](../adr/ADR-20260816-165714-lane-width-comes-from-the-declaration.md) made `actor_client::declared_lane(actor_type, actor_id)` the single lane accessor and removed the `width` parameter from every routing site.
+#596 established the finding that matters: **disagreeing copies of the routing constant break one-writer at the addressing function, upstream of any fence.** [ADR-20260816-165714](../adr/ADR-20260816-165714-lane-addressing-is-declared-not-observed-and-an-unseeded-lane-must-wait.md) made `actor_client::declared_lane(actor_type, actor_id)` the single lane accessor and removed the `width` parameter from every routing site.
 
 What is left are two places the constant can still be **reached**. Neither is reachable by accident today. Both are places a future change could reintroduce a second opinion about the width — and the whole point of #596 was that a second opinion about the width is not a bug you find in review, it is a silent misroute.
 

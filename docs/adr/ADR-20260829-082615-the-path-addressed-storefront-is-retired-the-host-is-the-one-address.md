@@ -31,7 +31,7 @@ which `specs/PRODUCT_SPEC_WEB_CLIENT.md` promised as `https://captain.food/r/{sl
 2. **Old links 301, never 404** (architect + ux): `/r/{slug}` was handed out (printed menus, QR
    codes, search results), so the server fallback (`hosts::path_addressed_redirect`) answers
    `301 → https://{slug}.captain.food/` on every host — the
-   [ADR-20260728-011344](ADR-20260728-011344-two-worlds-one-storefront-slug-uniqueness-and-renames.md)
+   [ADR-20260728-011344](ADR-20260728-011344-slug-lifecycle-and-sirene-inbound-events.md)
    precedent (a superseded storefront address redirects to the current one). Only a well-formed
    slug label (`[a-z0-9-]`, no leading/trailing `-`, no deeper path) redirects — the Location
    header is built from the path segment, so anything else 404s rather than being reflected.

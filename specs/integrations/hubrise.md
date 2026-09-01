@@ -2,7 +2,7 @@
 
 HubRise is the **interoperability standard** chosen for Captain.Food (order aggregation, POS,
 delivery platforms). The Captain.Food domain model is aligned with the HubRise structure, but
-**more strongly typed** where it helps (see [Refinements](#refinements-vs-hubrise)).
+**more strongly typed** where it helps (see [Refinements](#3-refinements-vs-hubrise)).
 
 > 🛡️ **Anti-Corruption Layer (ACL)**: HubRise → domain translation happens at the integration
 > boundary. HubRise-only concepts (`SKU`, `option_list`, `"9.80 EUR"` string prices) must **never**
@@ -39,7 +39,7 @@ Continuous sync is possible via **Callbacks** (webhooks) — not only a one-shot
 
 ## 2. HubRise → Captain.Food domain mapping
 
-| HubRise | Domain ([entities.yaml](../entities.yaml) / [scalars.yaml](../scalars.yaml)) | Note |
+| HubRise | Domain (`entities.yaml` / `scalars.yaml`) | Note |
 |---|---|---|
 | Location `name` | `Restaurant.displayName` | direct |
 | Location `address/postal_code/city/country` | `Restaurant.address` (`Address`) | direct |

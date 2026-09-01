@@ -9,7 +9,7 @@
   BND-7 · §32 JRN-1 (the one founder-owed leg) · and the new §35 rows INV-1, CUT-1, DB-HA, SIR-1,
   Q-L1, Q-L3, KEY-1
 - **Relates**: [ADR-20260807-114122](ADR-20260807-114122-mks-starts-at-one-node.md) (the €26.60 entry
-  rung and the €67.80 trio) · [ADR-20260807-002705](ADR-20260807-002705-self-hosted-postgres-on-ovh-mks.md)
+  rung and the €67.80 trio) · [ADR-20260807-002705](ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)
   (CloudNativePG on MKS) · [ADR-20260809-050000](ADR-20260809-050000-morning-brief-eight-decisions.md)
   (#429's target is the production deployment) · `ADR-20260812-000000` *the PM-mailbox flip rides the
   journal retirement* — the flip this sheet confirms; it lands with

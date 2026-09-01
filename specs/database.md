@@ -28,7 +28,7 @@ unique), `stream_name` (`<Category>-<id>`, e.g. `Catalog-12345`; category = pref
 | Stream `$maxAge` / `$maxCount` | `domain_stream(stream_name, max_age, max_count)` policy + `expired_at`; a trigger enforces `$maxCount`, a scheduled sweep enforces `$maxAge` |
 
 - The category prefix is one of `Restaurant | Catalog | Customer | Cart | Order | DeliveryJob`
-  (matches the aggregates in [actors.yaml](actors.yaml)); the `<id>` suffix is the instance id.
+  (matches the aggregates in `actors.yaml`); the `<id>` suffix is the instance id.
 - `metadata`: optional. `correlation_id` / `cause_id` / user are kept as columns for query convenience
   (an EventStore-faithful alternative would fold them into `metadata` as `$correlationId` / `$causationId`).
 
@@ -110,9 +110,9 @@ from the log) — to avoid any confusion with a real/normalized table, every one
 
 The read models below are the **source of truth in [projection_views.yaml](database/projection_views.yaml)** and the per-view detail
 is GENERATED from it (run `make generate`). Each view declares only what is
-intrinsic to the read model: its **source aggregate + events** ([events.yaml](events.yaml) /
-[actors.yaml](actors.yaml)), its **business filters/rules**, and its **columns**. The consumer mapping
-— which GraphQL query reads it — is declared in [api.yaml](api.yaml) via `@reads`
+intrinsic to the read model: its **source aggregate + events** (`events.yaml` /
+`actors.yaml`), its **business filters/rules**, and its **columns**. The consumer mapping
+— which GraphQL query reads it — is declared in `api.yaml` via `@reads`
 (rendered in the generated documentation). Money is stored as integer minor units (`*_cents`
 + `currency`), matching `Money`; `JSONB` is used where a whole sub-tree is fetched at once. The SQL
 DDL for these tables is generated to `specs/generated/views.generated.sql`.

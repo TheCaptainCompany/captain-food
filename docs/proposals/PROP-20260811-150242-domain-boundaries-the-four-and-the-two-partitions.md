@@ -1608,7 +1608,7 @@ nothing-gated slice behind the superseding ADR this proposal still owes.
   a Friday, and **sharpening two things that are easy to get wrong about it**:
 
   1. **Boundary size is a CODE blast radius, not a POD blast radius, and the distinction is the whole
-     mitigation.** Since [ADR-20260807-002705](../adr/ADR-20260807-002705-cloudnativepg-on-ovh-mks.md)
+     mitigation.** Since [ADR-20260807-002705](../adr/ADR-20260807-002705-hosting-ovh-mks-cnpg-gitops.md)
      / PROP-20260806-223656 §D5 this system deploys **per-surface binaries and per-actor workers**.
      `actor-order`, `actor-payment` and `pm-place-order` are separate Deployments with separate
      mailbox lanes whether or not they share a boundary, so **merging scopes does not merge deploy

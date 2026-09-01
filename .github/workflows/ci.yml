@@ -264,6 +264,32 @@ jobs:
       # Node, no network, seconds. Pinned by `the_reaper_stub_suite_runs_in_the_always_run_gate_job`.
       - name: Stale-claim reaper hermetic stub suite (liveness must stay a commit, not a mention)
         run: node .github/scripts/stale-claim-reaper-decide.test.js
+      # THE LINK GATE (#837). Founder directive, 2026-09-01: "put in place this url checker that
+      # must be executed locally and enforced in the CI too" -- this is the CI half, `make
+      # link-check` the local one. It belongs in THIS job for the same reason the suites above do:
+      # `docs/**` is the operating model, and a docs-only change reaches `main` as a PUSH WITH NO
+      # PR, skipping every Rust job. A gate on broken citations that skipped the docs-only lane
+      # would miss the changes most likely to break a citation.
+      #
+      # THE SELFTEST RUNS FIRST AND SEPARATELY, and the order is the point: the checker's verdict
+      # is worth nothing unless its three vacuity guards still work. A scanner that matches
+      # nothing passes -- it reports zero broken links over zero links and exits 0 -- so an empty
+      # corpus, a corpus that is not this repository, and a corpus yielding no links are all
+      # asserted RED by `tools/link-check-selftest.sh` before the real scan is believed. As two
+      # steps, not `a && b`: a broken selftest and a broken corpus are different diagnoses and
+      # GitHub should name which one failed.
+      #
+      # Pure python3, no network, no install. External URLs are deliberately NOT checked, so this
+      # step cannot red on a third party's uptime or rate limiter -- the argument is in
+      # `tools/link-check.py`'s docstring. Both steps are pinned by
+      # `the_link_check_runs_in_the_always_run_gate_job`, which locks each step's key set to
+      # {name, run}: `|| true`, `; exit 0`, a step-level `if:` in any spelling, `shell:` or `env:`
+      # all red it. NOTE for anyone adding a step here: this job's non-gate steps may not mention
+      # `.claude`, which is why this checker lives in `tools/` and not in `.claude/hooks/`.
+      - name: Link-checker selftest (the vacuity guards must stay proven)
+        run: bash tools/link-check-selftest.sh
+      - name: Broken relative links in tracked markdown (a dead citation resolves to nothing)
+        run: python3 tools/link-check.py
 
   lint:
     # D6 lint floor (PROP-20260802-130500, #302): an unused dependency is an unheld capability

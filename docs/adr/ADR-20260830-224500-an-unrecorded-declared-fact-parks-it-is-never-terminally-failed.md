@@ -7,12 +7,12 @@
 - **Relates**:
   [ADR-20260830-183000](ADR-20260830-183000-the-actor-inbox-is-a-generated-enum-and-the-match-is-human-owned.md)
   (the typed inbox this extends to the fact half) ·
-  [ADR-0004](ADR-0004-commands-are-derived-from-use-cases.md) (a command may be REJECTED; an
+  [ADR-0004](0004-commands-derived-from-use-cases.md) (a command may be REJECTED; an
   external fact that already happened may not) ·
-  [ADR-20260803-143216](ADR-20260803-143216-only-cap-poisoned-mailbox-rows-are-requeueable.md)
+  [ADR-20260803-143216](20260803-143216-admin-requeue-rides-the-mailbox.md)
   (a handler FAILED is a recorded business decision, so it is not requeueable) ·
   [ADR-20260803-234035](ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md) ·
-  [ADR-20260815-030206](ADR-20260815-030206-the-write-side-never-reads-a-projection.md) (dedupe
+  [ADR-20260815-030206](ADR-20260815-030206-a-process-manager-is-a-write-side-component-and-never-reads-the-read-side.md) (dedupe
   folds the aggregate's own stream, never a `View_*`) ·
   `specs/common/rules.yaml#/OnlyCapPoisonedMailboxRowsAreRequeueable`
 - **Realized by**: [#780 "The typed-inbox guarantee stops at the fact-record route"](https://github.com/TheCaptainCompany/captain-food/issues/780) /

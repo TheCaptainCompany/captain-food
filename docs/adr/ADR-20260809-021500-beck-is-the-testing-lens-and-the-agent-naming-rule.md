@@ -2,7 +2,7 @@
 
 **Status**: Accepted · **Date**: 2026-08-09 · **Decider**: the customer (product owner), in
 session, after noticing that Kent Beck anchored a review-only agent and that the roster's naming was
-inconsistent. Amends [ADR-20260808-154005](ADR-20260808-154005-advisory-agents-channel-named-experts.md)
+inconsistent. Amends [ADR-20260808-154005](ADR-20260808-154005-agents-channel-named-experts-published-work.md)
 (named-expert channeling) and composes with
 [ADR-20260809-013142](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md) (mob
 programming).
