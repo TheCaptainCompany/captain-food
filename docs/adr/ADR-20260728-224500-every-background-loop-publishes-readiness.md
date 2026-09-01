@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-07-28
 - **Issue**: [#244 "The SIRENE sync worker is the one background loop with no status endpoint — and a strict env gate that fails silently"](https://github.com/TheCaptainCompany/captain-food/issues/244)
-- **Refines**: [ADR-0045](0045-sirene-staging-table-and-split-sync.md) (the split sync's on-app half), [ADR-0043](0043-schema-version-gate-and-out-of-band-migrations.md) (`/health` as the readiness contract)
+- **Refines**: [ADR-0045](0045-sirene-sync-staging-table-and-worker.md) (the split sync's on-app half), [ADR-0043](0043-db-migration-release-strategy.md) (`/health` as the readiness contract)
 
 ## Context
 

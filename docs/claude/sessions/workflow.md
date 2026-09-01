@@ -511,6 +511,86 @@ next to an `HTTP=201`. **A 201 is not evidence the body is right.** Same fix, on
 body with a **quoted** heredoc (`<<'PYEOF'`), never `-c "…"`, and for a comment that already went out
 wrong, `PATCH /repos/{o}/{r}/issues/comments/{id}` repairs it in place.
 
+## The founder's six invoked commands — routing in, and the one rule that must survive (2026-08-31)
+
+The reverse direction of the section below: that one is how a question goes **out** to the founder,
+this is how his instruction comes **in**. Founder directive 2026-08-31, choosing a **user-invoked**
+approach *"to avoid any risk"* — he named `/direct-question`, `/mob-question` and `/work`, then
+approved `/decision`, `/status` and `/correct`, renaming `/decide` → `/decision` because *decide*
+reads as an instruction to the coordinator while *decision* names **the artifact he is recording**.
+`/status` was then renamed **`/where`** (founder decision, same day) because Claude Code ships a
+built-in `/status` — see the collision note below — and renamed once more to **`/whatsup`** on
+2026-09-01, founder verbatim *"Instead of /where use /whatsup"*: a preference, not a collision, and
+`/whatsup` was re-verified free by the same method. Each is a skill in
+`.claude/skills/<name>/SKILL.md` carrying its own procedure and limits:
+
+| Command | What he is doing | The handling that distinguishes it |
+|---|---|---|
+| [`/direct-question`](../../../.claude/skills/direct-question/SKILL.md) | Asking you, without spending the roster | Skips the mob, **never** the register check; escalation duty below |
+| [`/mob-question`](../../../.claude/skills/mob-question/SKILL.md) | Asking the mob | Reversibility class sizes the roster; divergences are **reported, never averaged** |
+| [`/work`](../../../.claude/skills/work/SKILL.md) | Telling you to start | The existing pipeline unchanged; the tag decides only chunk, dispatchability, merge posture |
+| [`/decision`](../../../.claude/skills/decision/SKILL.md) | Recording a decision he has made | **Step one is the reversal check**; `Consulted:` block, one line per lens |
+| [`/whatsup`](../../../.claude/skills/whatsup/SKILL.md) | Asking where things stand | Read-only — no check, no record, no fan-out, and it **never becomes work** |
+| [`/correct`](../../../.claude/skills/correct/SKILL.md) | Telling you something is wrong | Authoritative; the work is **propagation** to everything downstream, then the record |
+
+All six set **`disable-model-invocation: true`**, a real and **enforced** `SKILL.md` frontmatter key:
+the loader parses it beside `allowed-tools` and `user-invocable`, and the Skill tool refuses the call
+with `errorCode 4` unless the user typed the command that turn (`disableModelInvocation &&
+!userTypedThisTurn`). `user-invocable` defaults to true when absent, so the six stay founder-invocable
+while excluded from the model-visible list. The founder chose user-invoked *to avoid risk*; a command
+that could also auto-fire would blur exactly the distinction he is buying, so the key is load-bearing
+and not decoration.
+
+**Verify it against the artifact that actually RUNS, and re-check which one that is** — a frontmatter
+key that silently does nothing is this repo's most-repeated defect, and the version question here has
+a trap that cost three wrong citations in one session. This container carries **two** installs:
+`/opt/node22/lib/node_modules/@anthropic-ai/claude-code` is a JS bundle whose `package.json` and
+embedded `VERSION` both say **2.1.42**, while `/opt/node22/bin/claude` is a **symlink** resolving to
+a **native ELF binary** `/opt/claude-code/bin/claude`. They are different programs, and the JS
+bundle is **not executing** — so reading `package.json` under `node_modules` describes something
+that does not run.
+
+**Do not pin the runtime version in prose at all.** Within one session that symlink was repointed and
+the binary rebuilt under it, and `claude --version` went **2.1.251 → 2.1.252**; a number written into
+a doc is stale before the next reader arrives. Record the **method**, not the value:
+`readlink -f "$(which claude)"` to find the artifact, `claude --version` for its version, and
+`strings` on the binary (a `cli.js` under `node_modules` may not be the running code). Every claim
+about runtime behaviour gets re-derived at the moment it licenses an action — the same rule as
+preferring a symbol to a line range, one layer out.
+
+**Never name a skill after a built-in.** `/status` collided with Claude Code's own `/status` panel
+(version, model, account, API connectivity, tool stats). Skills resolve **before** built-ins on a
+first-match-wins scan and dedup is by **file path, never by name**, so the collision is **silent** —
+no detection, no warning — and the built-in simply disappears inside this repo, with the outcome
+resting on array order in a vendor bundle that can reorder on upgrade. That is why ours is not
+`/status` (it was `/where`, and is now `/whatsup`).
+**Check a proposed command name against the built-ins before writing the skill**; the ones seen on
+this bundle include `status`, `review`, `security-review`, `stats`, `skills`, `agents`, `todos`.
+Re-derive it: `strings` the artifact `readlink -f "$(which claude)"` resolves to and look for the
+literal name — a built-in's name is stored as a plain string, so a name that appears **nowhere** in
+that binary cannot be one. Free on the binary checked 2026-09-01: `/direct-question`,
+`/mob-question`, `/work`, `/decision`, `/correct`, `/where`, `/whatsup`.
+
+**The one rule that must survive contact:**
+
+> **`/direct-question` skips the MOB. It never skips the REGISTER CHECK.**
+
+Of the coordinator's nine catalogued failures the hook caught **none** — #9, the only one stopped
+before it did damage, was caught by *the check itself*, the procedure being run rather than the gate
+firing; the rest were answer- or question-shaped. The `PreToolUse` hook
+gates `AskUserQuestion` and `Agent` — never a prose answer. So a direct answer is the surface where
+the check is least enforced and most needed, and dropping the mob removes the other reader who might
+have caught it. Both cannot go. The trail rides the answer in the canonical format defined below.
+
+**Both question commands carry an escalation duty**, in the skill text and not only in a dispatch
+card: if the register surfaces a controlling record the question appears to contradict, or the
+subject sits on the `HOLD: human` axis (money movement, stored event shapes, legal surfaces, anything
+Tours-facing), the coordinator **says so and fans out anyway**. The tag is a routing convenience, not
+a bypass — and the mob rule is the founder's own
+([ADR-20260812-143619](../../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md),
+whose two carve-outs — an external-clock fact relayed verbatim, and executing an already-recorded
+rollback path — are the model for how `/direct-question` may legitimately answer in-turn).
+
 ## Asking the founder a decision — use the form template
 
 **Founder directive 2026-08-18**: *"Make this format of questions as a template for the next times."*

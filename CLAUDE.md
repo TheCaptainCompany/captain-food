@@ -208,8 +208,15 @@ re-enables it**. Auth, keys, query discipline:
   an **external-clock fact** (billing suspension, token expiry, partner deadline, opposition window)
   is relayed in the same turn, verbatim from the register, the mob's opinion following; **executing
   an already-recorded rollback/abort path** needs no consult, while going FORWARD through an incident
-  is a new decision and does get the mob (*am I executing a recorded path, or inventing one?*); and
-  **no lens output, and no aggregation of lenses, is legal advice or clearance**. **Records created
+  is a new decision and does get the mob (*am I executing a recorded path, or inventing one?*);
+  **no lens output, and no aggregation of lenses, is legal advice or clearance**; and — a FOURTH,
+  added 2026-08-31 by
+  [ADR-20260831-204546](docs/adr/ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md)
+  (row `CMD-INVOKE`) — **the founder tagging a message `/direct-question`**, which is him electing
+  PER MESSAGE not to spend the fan-out. Unlike the other three it is asked for by no lens and
+  predicted by no class, so the skill carries an **escalation duty**: a controlling record the
+  question appears to contradict, a `HOLD: human`-axis subject, or *"I do not know and one lens
+  would"* means say so and **fan out anyway**. **It skips the MOB, never the REGISTER CHECK.** **Records created
   from a founder directive carry a `Consulted:` block, one line per lens** — a lens never asked is
   indistinguishable from a lens with nothing to say. Historical records keep their vocabulary and
   verbatim quotes stay verbatim. **External artifacts** (mentions légales, partner onboarding,

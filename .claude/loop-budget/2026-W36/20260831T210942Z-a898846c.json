@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1717,
+  "recordedAt": "2026-08-31T21:09:42.536Z",
+  "branch": "819-founder-invoked-slash-commands",
+  "note": "#819 review round 2: F1 carve-out ADR-20260831-204546 + CMD-INVOKE row + DECISIONS 49 + CLAUDE.md bullet, 5 text corrections, origin/main merge; timer closed in round 1 so elapsed is measured 20:41-21:09Z"
+}

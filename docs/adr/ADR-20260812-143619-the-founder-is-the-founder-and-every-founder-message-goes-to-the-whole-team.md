@@ -1,6 +1,12 @@
 # ADR-20260812-143619 — The founder is the founder, and every founder message goes to the whole team before any answer
 
-- **Status**: Accepted (founder directive, 2026-08-12)
+- **Status**: Accepted (founder directive, 2026-08-12). **AMENDED 2026-08-31 by
+  [ADR-20260831-204546](ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md)
+  (register row `CMD-INVOKE`): the carve-out list below is now **FOUR**, not three. The fourth,
+  `/direct-question`, is the founder electing **per message** not to spend the fan-out — a different
+  KIND from the three below, which are class-based and lens-asked. Read "The carve-outs" section
+  with that in front of it. Everything else in this record, including Decision 3's `Consulted:`
+  block requirement, stands unchanged.**
 - **Date**: 2026-08-12
 - **Extends**: [ADR-20260809-013142](ADR-20260809-013142-mob-programming-every-agent-is-in-the-dev.md)
   (mob programming — from dispatches to founder messages) ·
@@ -79,6 +85,16 @@ plaintext one). Neither is a hard finding; both are one question to the right le
   (legal lens). Agreement between lenses never upgrades a hedged finding to a settled one; ten lenses
   concurring on a GDPR or payment-agent question produce ten opinions, not counsel. Where an answer
   needs professional clearance, the output is *"this needs counsel"*, presented as such.
+
+- **A founder-elected, per-message opt-out: `/direct-question`** (added 2026-08-31 by
+  [ADR-20260831-204546](ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md);
+  **not** asked for by a lens). The founder tags a message and the fan-out is skipped for that
+  message. Unlike the three above it is predicted by no class, so nothing but coordinator discipline
+  bounds it — which is why the skill carries a written **escalation duty**: a controlling record the
+  question appears to contradict, a `HOLD: human`-axis subject (money movement, stored event shapes,
+  legal surfaces, anything Tours-facing), or an honest *"I do not know and one lens would"* means
+  the coordinator says so and **fans out anyway**. **The register check is never skipped, only the
+  mob** — direct answers are the surface the `PreToolUse` hook cannot see.
 
 ## Decision 3 — a record created from a founder directive names which lenses answered
 

@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 465,
+  "recordedAt": "2026-09-01T00:24:54.625Z",
+  "branch": "819-founder-invoked-slash-commands",
+  "note": "rename /where -> /whatsup: skill dir + frontmatter, workflow.md, ADR-20260831-204546 postscript, CMD-INVOKE.yaml, DECISIONS.md 49, journal; full sweep + collision re-derivation"
+}

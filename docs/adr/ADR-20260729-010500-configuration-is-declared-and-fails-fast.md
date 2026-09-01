@@ -4,7 +4,7 @@
 - **Date**: 2026-07-29
 - **Issue**: [#246 "Declare the app's configuration in specs/, validate it at startup, and refuse to boot when a required key is missing"](https://github.com/TheCaptainCompany/captain-food/issues/246)
 - **Proposal**: [PROP-20260729-004500](../proposals/PROP-20260729-004500-configuration-is-declared-and-validated-at-startup.md) (approved in-session, product owner: *"Fail-fast: approved"*)
-- **Refines**: [ADR-0043](0043-schema-version-gate-and-out-of-band-migrations.md) (readiness posture), [ADR-20260728-224500](ADR-20260728-224500-every-background-loop-publishes-readiness.md) (lenient `RUN_*` parsing, now generated)
+- **Refines**: [ADR-0043](0043-db-migration-release-strategy.md) (readiness posture), [ADR-20260728-224500](ADR-20260728-224500-every-background-loop-publishes-readiness.md) (lenient `RUN_*` parsing, now generated)
 
 ## Context
 

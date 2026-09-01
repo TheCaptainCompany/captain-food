@@ -13745,6 +13745,13 @@ mod docs_only_ci_and_legacy_visibility {
             "bash .claude/skills/decision-lookup/scripts/stub-tests.sh",
             "bash .claude/hooks/register-check-selftest.sh",
             "node .github/scripts/stale-claim-reaper-decide.test.js",
+            // The link gate (#837), both halves. Neither names `.claude`, `GITHUB_ENV` nor
+            // `GITHUB_PATH`, so neither NEEDS the needle-scan exemption today -- they are listed
+            // for the reason the reaper entry gives: a future needle must not false-red a step
+            // that is itself a gate. Their key sets are locked to `{name, run}` by
+            // `the_link_check_runs_in_the_always_run_gate_job`, so the exemption buys no room.
+            "bash tools/link-check-selftest.sh",
+            "python3 tools/link-check.py",
         ];
         // ─── THE TWO ALWAYS-RUN JOBS, GUARDED AS A CLASS ─────────────────────────────────────
         //
@@ -15723,6 +15730,139 @@ mod docs_only_ci_and_legacy_visibility {
             "node .github/scripts/stale-claim-reaper-decide.test.js",
             "the stale-claim reaper's hermetic stub suite -- required by a scheduled workflow that never runs in CI on a push or PR, so a regression here (e.g. re-widening liveness to a bare mention, or losing the recency bound) would otherwise ship silently until the next hourly run misbehaved for days",
         );
+    }
+
+    /// Pins BOTH halves of the link gate into the always-run `gate-scripts` job (#837).
+    ///
+    /// The founder's directive names two halves -- "executed locally and enforced in the CI too"
+    /// -- and only one of them is a file anyone runs by habit. `make link-check` is the local
+    /// half and needs no pin: a contributor who stops typing it notices nothing, which is exactly
+    /// why the CI half has to be the one that cannot be disarmed.
+    ///
+    /// TWO STEPS, TWO PINS, and the selftest's is the load-bearing one. The checker fails OPEN in
+    /// the only way that matters: a scanner that matches nothing reports zero broken links over
+    /// zero links and exits 0. Its three vacuity guards are what make a green mean something, and
+    /// a guard nobody watches fail is an unverified claim -- so the suite that proves them RED
+    /// runs in CI, not just on the author's machine. Dropping the selftest step while keeping the
+    /// scan would leave a gate that is green whether or not it works.
+    ///
+    /// `assert_pinned_in_gate_job` locks each step's key set to exactly `{name, run}` with `run`
+    /// matched over PARSED YAML, so `|| true`, `; exit 0`, a trailing pipe, a step-level `if:` in
+    /// any spelling (including hoisted onto the `- ` item line), `shell:`, `env:` and
+    /// `working-directory:` all red -- and the same helper bounds the job itself (no `if`,
+    /// `continue-on-error`, `needs`, `container`, `services`, no self-hosted runner, a
+    /// `timeout-minutes` in 5..=30, and no execution-altering `env` at workflow, job or step
+    /// scope).
+    #[test]
+    fn the_link_check_runs_in_the_always_run_gate_job() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+        assert_pinned_in_gate_job(
+            &ci,
+            "bash tools/link-check-selftest.sh",
+            "the link checker's own selftest -- it proves the three vacuity guards still red, and without it the scan below is green whether or not it works: a scanner that matches nothing reports zero broken links over zero links and exits 0",
+        );
+        assert_pinned_in_gate_job(
+            &ci,
+            "python3 tools/link-check.py",
+            "the broken-relative-link gate over every tracked markdown file -- `docs/**` IS the operating model here (CLAUDE.md is an index whose authority is the topic file it links to, every ADR cites its neighbours), and a docs-only change reaches `main` as a push with NO PR, skipping every Rust job",
+        );
+    }
+
+    /// The link gate's two scripts must EXIST and stay executable-by-`run:`.
+    ///
+    /// The pin above asserts the workflow SAYS the right thing. It cannot notice that the file it
+    /// names was deleted or renamed: `run: python3 tools/link-check.py` against a missing file
+    /// exits non-zero in CI, which is loud -- but `bash tools/link-check-selftest.sh` against a
+    /// missing file is ALSO the shape a reviewer skims past, and the two together are the whole
+    /// gate. Cheap, and it fails with a sentence rather than a shell error.
+    #[test]
+    fn the_link_check_scripts_exist() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        for f in ["tools/link-check.py", "tools/link-check-selftest.sh"] {
+            assert!(
+                root.join(f).is_file(),
+                "`{}` is missing, but `.github/workflows/ci.yml` and the `link-check` Makefile target both invoke it (#837). If it moved, move both callers and this list in the same change",
+                f
+            );
+        }
+        let mk = fs::read_to_string(root.join("Makefile")).expect("Makefile");
+        assert!(
+            mk.contains("\nlink-check:\n\tbash tools/link-check-selftest.sh\n\tpython3 tools/link-check.py\n"),
+            "the `link-check` Makefile target must run the selftest and then the checker. The founder's directive (2026-09-01) names BOTH halves -- \"executed locally and enforced in the CI too\" -- and this is the local one"
+        );
+    }
+
+    /// NEITHER generated documentation artifact may contain a dead in-page link -- markdown AND
+    /// HTML, asserted together, over the committed output.
+    ///
+    /// THE ASYMMETRY IS THE BUG THIS EXISTS FOR. `emit/docs.rs` carries two near-identical link
+    /// builders, `any_link` and `h_any_link`, and #837's first cut fixed the saga-as-entity kind
+    /// in one of them; `delink_dangling_anchors` was likewise applied to the markdown emitter
+    /// only. The markdown artifact went to zero dead links and the HTML artifact kept 27 (10
+    /// distinct), and NOTHING could have noticed: `tools/link-check.py` scans markdown only, so
+    /// the HTML half has no external checker and never will. Review round 1 found it by hand.
+    ///
+    /// Prose cannot hold this -- ADR-20260901-010206 asserted the invariant for "the generated
+    /// documentation" while it was true of one artifact of two. So the claim is executable, and
+    /// it is stated over BOTH files from one list, because a check written for one of a pair is
+    /// how the pair diverged in the first place.
+    ///
+    /// It reds on a dead link REGARDLESS of cause -- a missing match arm, a de-link pass not
+    /// applied, a renamed anchor emitter -- which is what makes it a class guard rather than a
+    /// regression test for the two kinds that happened to be wrong.
+    #[test]
+    fn neither_generated_documentation_artifact_has_a_dead_in_page_link() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+
+        // (file, how an id is DEFINED, how an in-page link is SPELLED)
+        let cases: [(&str, &str, &str); 2] = [
+            ("specs/generated/documentation.generated.md", "<a id=\"", "](#"),
+            ("specs/generated/documentation.generated.html", " id=\"", "href=\"#"),
+        ];
+        for (rel, id_open, link_open) in cases {
+            let body = fs::read_to_string(root.join(rel))
+                .unwrap_or_else(|e| panic!("{} must exist and be readable: {}", rel, e));
+
+            let ids: std::collections::HashSet<&str> = body
+                .match_indices(id_open)
+                .filter_map(|(i, _)| {
+                    let rest = &body[i + id_open.len()..];
+                    rest.find('"').map(|e| &rest[..e])
+                })
+                .collect();
+
+            let mut links = 0usize;
+            let mut dead: Vec<&str> = Vec::new();
+            for (i, _) in body.match_indices(link_open) {
+                let rest = &body[i + link_open.len()..];
+                let end = if link_open == "](#" { rest.find(')') } else { rest.find('"') };
+                let Some(end) = end else { continue };
+                let anchor = &rest[..end];
+                if anchor.is_empty() {
+                    continue;
+                }
+                links += 1;
+                if !ids.contains(anchor) && !dead.contains(&anchor) {
+                    dead.push(anchor);
+                }
+            }
+
+            // VACUITY, the same guard the checker itself carries: a scan that matches nothing
+            // passes. If the emitter's anchor or link SPELLING changes, both counts collapse to
+            // zero and this test goes quietly green over an artifact it no longer parses.
+            assert!(
+                ids.len() > 100 && links > 100,
+                "{}: parsed {} ids and {} in-page links -- far too few for this artifact, so the spelling this test scans for (`{}` / `{}`) no longer matches what the emitter writes. Fix the scan; a green here would mean nothing",
+                rel, ids.len(), links, id_open, link_open
+            );
+
+            assert!(
+                dead.is_empty(),
+                "{} contains in-page links to {} anchor(s) it never defines: {:?}. Both artifacts are built by `emit/docs.rs` from near-identical link builders (`any_link` / `h_any_link`) -- a kind fixed in one and not the other is how this last happened (#837). Fix the EMITTER and regenerate; never hand-edit generated output",
+                rel, dead.len(), dead
+            );
+        }
     }
 
     #[test]

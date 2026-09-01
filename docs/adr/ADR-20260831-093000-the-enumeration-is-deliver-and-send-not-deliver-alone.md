@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-08-31
 - **Decider**: the team, executing
-  [ADR-20260829-230418](ADR-20260829-230418-aggregates-own-the-facts-the-isolation-subject-is-resolved-first.md)
+  [ADR-20260829-230418](ADR-20260829-230418-aggregates-own-the-facts-isolation-first.md)
   — this record corrects that ADR's ENUMERATION, not its property.
 - **Relates**:
   [ADR-20260816-040239](ADR-20260816-040239-deliver-is-a-lane-enqueue-not-a-foreign-stream-append.md) ·

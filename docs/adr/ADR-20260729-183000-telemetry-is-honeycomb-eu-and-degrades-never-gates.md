@@ -5,7 +5,7 @@
 - **Issue**: [#191 "Observability contracts are 100% unimplemented: no OpenTelemetry dependency, no tracing subscriber, 69 println! calls"](https://github.com/TheCaptainCompany/captain-food/issues/191)
 - **Proposal**: [PROP-20260726-170500 — Runtime observability and scale readiness](../proposals/PROP-20260726-170500-runtime-observability-and-scale.md) (**D1** and **D2** answered here)
 - **Completes**: [#16 "Observability: `surface: graphql` binding kind + generic command-acceptance contract"](https://github.com/TheCaptainCompany/captain-food/issues/16), which closed honestly deferring emission
-- **Refines**: [ADR-0042](0042-hosting-and-region.md) (Frankfurt for compute *and* data), [ADR-0035](0035-project-structure-clean-architecture.md) (the crate layout this adds a leaf to)
+- **Refines**: [ADR-0042](0042-hosting-render-supabase-frankfurt.md) (Frankfurt for compute *and* data), [ADR-0035](0035-project-structure-clean-architecture.md) (the crate layout this adds a leaf to)
 
 ## Context
 

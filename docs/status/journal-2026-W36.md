@@ -2,6 +2,109 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-01 — A link checker exists, and a broken citation can no longer ship silently.**
+> Founder directive, 2026-09-01, verbatim: *"excellent point put in place this url checker that must
+> be executed locally and enforced in the CI too"* — both halves, and both landed: `make link-check`
+> locally, two pinned steps in CI's always-run `gate-scripts` job
+> ([#837](https://github.com/TheCaptainCompany/captain-food/issues/837)). There was **no link
+> checker anywhere** before this: nothing in the Makefile or any workflow validated a link, so
+> `docs/**` — which *is* the operating model, since CLAUDE.md is an index whose authority is the
+> topic file it links to and every ADR cites its neighbours — had been accumulating dead citations
+> with nothing able to see them.
+>
+> **The number, with its method, because a link count is meaningless without one** (ADR-20260817-105845).
+> The card carried `~25` as `UNVERIFIED input`. Measured with the shipped checker against the merge
+> base **`43317168`**, in a clean checkout: **8,060 relative links across 451 markdown files, of
+> which 124 were broken — 28 dangling paths and 96 dead fragments** (95 in
+> `specs/generated/documentation.generated.md`, 1 in `specs/integrations/hubrise.md`). Method:
+> relative link TARGETS (inline `[t](p)`, images, and link reference definitions) in the markdown `git ls-files --cached --others --exclude-standard -- '*.md' '*.markdown'` reports, resolved against the tree; fragments checked against github-slugger's algorithm plus explicit `<a id>` anchors. External URLs, footnote definitions and links inside fenced or indented code are NOT links for this purpose. **The corpus includes UNTRACKED files** (`--others`), so scratch markdown present at measurement time moves the figure -- which is why the number is quoted against a NAMED COMMIT measured in a CLEAN checkout.
+>
+> The first version of this entry said 8,045 / 130 / 102, and review round 1 refuted it: those were
+> taken mid-change with scratch files present, not from one run against a named commit. Quoting a
+> method that refutes your own figure is a sharper failure than quoting none, because the method
+> invites the check.
+>
+> **The 95 + 27 were an emitter defect, and finding them was the checker's first real catch.** A
+> test's `when:` is not always a command — 59 of this repo's tests are driven by an inbound
+> integration event, which is the whole point of ADR-0004 — and a saga is documented as an `actor`,
+> not an `entity`. Both were hardcoded kinds in `emit/docs.rs`, so the document linked to anchors it
+> never defined. Fixed at the emitter and regenerated, never in the output; the HTML sibling carried
+> the same bug and no checker would ever have seen it, since the scan is markdown-only.
+>
+> **Gated at ZERO, with no baseline file** — a baseline is a second thing to keep honest, and this
+> repo has been bitten by exactly that. Two scope decisions are stated rather than implied:
+> **external URL liveness is OUT** (a blocking gate whose verdict depends on a third party's uptime
+> and rate limiter reds on honest work, which is the "trains readers to discount reds" instrument
+> `tools/codegen-rs/src/tests.rs` has retracted five times over), and **anchors are IN** (the slug
+> algorithm is deterministic and published; a citation landing in the right file at the wrong heading
+> is the same silent nothing).
+>
+> **Compiler-first lands at level 3, and the argument is the one already recorded for `specs/**`
+> YAML.** PROP-20260802-130500 §1's hierarchy ranks ways to stop *Rust code* naming something it
+> should not, and it has no rung for a target written in prose: no newtype or sealed trait can make
+> `[x](gone.md)` unspellable, because the compiler never sees the markdown. So "start at level 4"
+> resolves to *level 3 is the ceiling here*, exactly as it did for the `reads:` wall
+> ([ADR-20260812-214500](../adr/ADR-20260812-214500-a-read-target-is-declared-not-inferred-the-reads-ownership-wall.md)),
+> and it is the case [ADR-20260803-234035](../adr/ADR-20260803-234035-compiler-first-a-check-is-the-fallback.md)
+> names in its own carve-out: non-Rust artifacts. Where a stronger instrument *was* available it was
+> taken — the generated document now cannot contain a dead in-page link at all, because the emitter
+> de-links any anchor it does not define.
+>
+> **Three vacuity guards, because a scanner that matches nothing passes** — a green over an empty
+> corpus is clean, confident and meaningless, and that shipped twice in one session here. The corpus
+> is derived from `git ls-files`, never a literal list, and an empty corpus, a corpus not containing
+> `CLAUDE.md`, and a corpus yielding zero extracted links each exit 2 with their own message. All
+> three were **observed red**, as were a planted broken link, the `ADR-` prefix trap (pre-2026-07-22
+> ADRs have no prefix while every citation uses one — `ADR-0004-...` resolving to nothing is one of
+> the 28), a `|| true` disarm of the CI step, and the selftest's own completeness counter.
+>
+> **Four false-positive classes were found while writing it, and every one had exactly one "fix"
+> available to a reader who did not know better: damage a correct document.** Footnote definitions
+> read as link reference definitions (20 false reds in one research dump — the majority of the first
+> measured finding was the instrument); an indented code block in `docs/STATUS.md` showing a template
+> destined for `docs/status/`; a list continuation that must *not* be swallowed by the fix for that;
+> and an intraword `_` stripped as emphasis, which slugged `` `place_order` `` to `placeorder` and
+> reported a correct ADR link broken. They are `T11`–`T13` and `T17`–`T18` of the selftest
+> (`T10`, fenced code, is a fifth class; an earlier version of this sentence said `T10`–`T13`, which
+> both miscounted and claimed coverage that did not exist — review round 1 showed the suite stayed
+> green under a mutant for two of the four, because T12's fixture indented two spaces and only one
+> intraword-underscore link exists in the whole tree. `T17`/`T18` are the cases that close them).
+
+
+> **2026-09-01 — The founder's read-only command is renamed a second time: `/where` → `/whatsup`.**
+> Founder verbatim, 2026-09-01: *"Instead of /where use /whatsup"*. A **preference, not a
+> collision** — the reason `/status` was abandoned (Claude Code ships a built-in `/status`; skills
+> resolve first-match-wins ahead of built-ins and dedup by file path, so a colliding skill shadows
+> it **silently**) is untouched and stays the durable part of
+> [ADR-20260831-204546](../adr/ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md),
+> which gains a postscript so the history reads as **two deliberate namings rather than one confused
+> one**. The name is his (ADR-20260810-011500), so this was executed, not put back to him as an
+> option space.
+>
+> **What moved**: `.claude/skills/where/` → `.claude/skills/whatsup/` (the skill name IS the
+> directory name), its `name:` frontmatter, description and every self-reference; the six-command
+> section of [workflow.md](../claude/sessions/workflow.md); ADR-20260831-204546;
+> [`docs/decisions/CMD-INVOKE.yaml`](../decisions/CMD-INVOKE.yaml);
+> [DECISIONS.md §49](../proposals/DECISIONS.md). The other five skills carried **no** cross-reference
+> to the old name — checked, not assumed.
+>
+> **What deliberately did NOT move**: the loop-budget ledger entry whose `note` records the earlier
+> `/status -> /where` run, and every record quoting the founder's own earlier words. **A rename must
+> never overwrite a verbatim quote** — and the naive form of this sweep bit once in this very run: a
+> blanket replace of `` `/where` `` clobbered the historical name inside the sentence that had just
+> been written to preserve it, in the same file, seconds later. Write the history sentence, then
+> re-read it after the sweep.
+>
+> **Collision check, re-derived rather than trusted** (the recorded method, not a pinned value):
+> `readlink -f "$(which claude)"` → `/opt/claude-code/bin/claude`, an ELF binary — *not* the
+> `node_modules` JS bundle, which does not execute. The sharper form of the check earned here: a
+> built-in's name is stored in that binary as a **plain string**, so a name that appears **nowhere**
+> in it cannot be one. `whatsup` has **zero** occurrences, case-insensitive, substring or exact ⇒
+> free. Contrast `status`, `stats`, `skills`, `agents`, `todos`, `review`, `security-review`, all
+> present. Note the trap this sharpens: an *exact-token* hit is **not** evidence of a built-in —
+> common words are interned and shared, and all four `status` hits sit in unrelated data. The
+> negative is the reliable direction.
+
 > **2026-08-31 — The person gets a name: `PrincipalKind`, `MemberId` and `AuthSubject` land in the
 > kernel, and `UserType` deliberately does NOT widen ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639)
 > part C **step 1 of seven**, PR [#835](https://github.com/TheCaptainCompany/captain-food/pull/835),
@@ -246,6 +349,66 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 
 Current state: [`../STATUS.md`](../STATUS.md).
 
+> **2026-08-31 — the founder's six invoked commands are built, user-invoked only** (`.claude/skills/**`
+> plus one workflow section; no `specs/**`, no code, no SPEC-LOG sentence).
+> Founder directive 2026-08-31, choosing a **user-invoked** approach *"to avoid any risk"*: he named
+> `/direct-question`, `/mob-question` and `/work`, then approved `/decision`, `/status` and
+> `/correct` — renaming `/decide` → `/decision` because *decide* reads as an instruction to the
+> coordinator while *decision* names **the artifact he is recording**. Six skills under
+> `.claude/skills/<name>/SKILL.md`, each carrying its procedure and its limits, in
+> [#819 "Six founder-invoked slash commands"](https://github.com/TheCaptainCompany/captain-food/issues/819)
+> / [#820](https://github.com/TheCaptainCompany/captain-food/pull/820).
+> **The rule the set exists to protect**: `/direct-question` skips the **mob**, never the **register
+> check** — the hook caught **none** of the coordinator's nine catalogued failures (#9 was caught
+> by the check itself, the procedure being run rather than the gate firing), the rest being answer-
+> or question-shaped, and the
+> `PreToolUse` hook gates `AskUserQuestion` and `Agent`, never a prose answer, so a direct answer is
+> where the check is least enforced and most needed. Both question commands carry an **escalation
+> duty** in the skill text: a controlling record the question appears to contradict, or a `HOLD:
+> human`-axis subject, means say so and fan out anyway.
+> **`disable-model-invocation` was verified before being relied on**, not assumed: parsed by the
+> `SKILL.md` loader beside `allowed-tools`/`user-invocable` and enforced at the Skill-tool gate
+> (`errorCode 4`, guarded by `disableModelInvocation && !userTypedThisTurn`). **The verification
+> itself carried a trap worth more than the result**: the container has TWO installs — a JS bundle at
+> `/opt/node22/lib/node_modules/@anthropic-ai/claude-code` (**2.1.42**) and the **native binary**
+> `/opt/claude-code/bin/claude` that `which claude` actually resolves to. The JS bundle does not run,
+> so three separate version citations this session were about the wrong artifact. And the runtime is a
+> **moving target**: within this one session the symlink was repointed and the binary rebuilt under it,
+> `claude --version` going **2.1.251 → 2.1.252**. Rule now in `workflow.md`: **do not pin the version
+> in prose** — record the method (`readlink -f "$(which claude)"`, then `strings` on that artifact)
+> and re-derive at the moment of use.
+> Two card citations that did **not** check out and are corrected here: the pre-`ADR-` ADRs are
+> filed **without** the prefix (`docs/adr/20260720-233000-…`, `…/20260721-042018-…`), so a link built
+> as `ADR-20260720-233000-*` resolves to nothing; and `.claude/skills/coordinator-register-check/`
+> exists only from `875e5ab2`, which a stale checkout does not have.
+> **The blocking finding of review round 1, and the rule it earned**: `/direct-question` is a
+> **fourth carve-out** to
+> [ADR-20260812-143619](../adr/ADR-20260812-143619-the-founder-is-the-founder-and-every-founder-message-goes-to-the-whole-team.md)
+> — and a different KIND from the three there, which are class-based and each lens-asked, whereas
+> this one is **founder-elected per message**. The branch shipped it with no ADR and no register row,
+> i.e. the PR that wrote `.claude/skills/decision/SKILL.md`'s reversal check **reproduced the defect
+> that skill exists to stop**. Now recorded as
+> [ADR-20260831-204546](../adr/ADR-20260831-204546-the-founder-elects-user-invoked-commands-and-direct-question-is-a-fourth-carve-out.md)
+> + row `CMD-INVOKE` + [DECISIONS §49](../proposals/DECISIONS.md), with the forward banner on the
+> amended ADR and CLAUDE.md's `Carve-outs:` bullet updated from three to four. **Rule earned: a
+> register check searches the SUBSTANCE THE CHANGE AMENDS, not the MECHANISM IT IS BUILT FROM** —
+> #819's trail searched `slash command`, `user-invoked`, `disable-model-invocation` and correctly
+> found nothing, because every term was an implementation noun and none was *mob*, *fan-out* or
+> *carve-out*. A negative trail is never self-certifying.
+> **Roster note**: the class was assessed on the artifact (prose skill files ⇒ reversible) rather
+> than on the decision the artifact carried (amending a founder rule), so **no lens read it**;
+> ADR-20260831-204546's `Consulted:` block records the roster as NOT ASKED rather than inventing
+> lines, and the second-order question stays open as a `/mob-question`.
+> **Second founder decision the same day: `/status` → `/where`.** Claude Code ships a built-in
+> `/status`, skills resolve **before** built-ins on a first-match-wins scan, and dedup is by **file
+> path, never by name** — so a colliding skill shadows the built-in **silently**, with no detection
+> and no warning, and even ours winning rests on array order in a vendor bundle that can reorder on
+> upgrade. Losing the panel you reach for when the session itself looks wrong is the worse trade.
+> `/status` was the **only** collision among the six; `/where` verified free on the running binary.
+> **Rule earned: check a command name against the built-ins before writing the skill** (`status`,
+> `review`, `security-review`, `stats`, `skills`, `agents`, `todos`).
+> Reversibility class as dispatched **reversible**; `HOLD: human` all the same, because this is the
+> coordinator's own routing surface.
 > **2026-08-31 — the oversell hole on the money path is CLOSED: checkout re-derives orderability
 > instead of trusting cart-edit time**
 > ([#823](https://github.com/TheCaptainCompany/captain-food/issues/823) / PR

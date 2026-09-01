@@ -4,7 +4,7 @@
 - **Date**: 2026-07-29
 - **Issue**: [#248 "CI owns the Render service configuration"](https://github.com/TheCaptainCompany/captain-food/issues/248)
 - **Proposal**: [PROP-20260729-014500](../proposals/PROP-20260729-014500-ci-owns-the-render-service-configuration.md) — **all five decisions approved** in-session, 2026-07-29 (*"Yes to all recommendations, implement it"*)
-- **Refines**: [ADR-20260729-010500](ADR-20260729-010500-configuration-is-declared-and-fails-fast.md) (the declaration this makes authoritative), [ADR-0042](0042-render-hosting.md) (hosting), [ADR-20260721-175411](20260721-175411-prebuilt-image-and-digest-pinned-deploys.md) (digest-pinned deploys)
+- **Refines**: [ADR-20260729-010500](ADR-20260729-010500-configuration-is-declared-and-fails-fast.md) (the declaration this makes authoritative), [ADR-0042](0042-hosting-render-supabase-frankfurt.md) (hosting), [ADR-20260721-175411](20260721-175411-ci-built-image-render-pulls.md) (digest-pinned deploys)
 
 ## Context
 
