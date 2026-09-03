@@ -106,6 +106,7 @@ pub struct TestBed {
     pub dispatch_pm: MemDeliveryDispatchState,
     pub restaurants: SpecRestaurants,
     pub slugs: SpecSlugReservations,
+    pub auth_subjects: SpecAuthSubjectReservations,
     pub mailbox_requeue: SpecMailboxRequeue,
     pub catalogs: SpecCatalogs,
     pub carts: SpecCarts,
@@ -561,6 +562,47 @@ impl Default for SpecSlugReservations {
         let mut held = std::collections::HashMap::new();
         held.insert("already-held".to_string(), RestaurantId(uuid::Uuid::from_u128(0xA11EAD)));
         Self { held: std::sync::Mutex::new(held) }
+    }
+}
+
+/// In-memory `AuthSubjectReservationRepository` (#639 part C step 2a, #794), sentinel-seeded like
+/// [`SpecSlugReservations`]: `(RIDER, "already-bound")` is held by a FOREIGN rider id, which is what
+/// makes `TestRiderAuthSubjectAlreadyBoundIsRejected` a real assertion -- rider-2 has no aggregate,
+/// so without the seeded holder the fold alone would accept. There is no release method to fake:
+/// the port has none.
+pub struct SpecAuthSubjectReservations {
+    /// (principal_kind, subject) -> the principal id holding it. Never removed.
+    held: std::sync::Mutex<std::collections::HashMap<(PrincipalKind, String), uuid::Uuid>>,
+}
+
+impl Default for SpecAuthSubjectReservations {
+    fn default() -> Self {
+        let mut held = std::collections::HashMap::new();
+        held.insert(
+            (PrincipalKind::RIDER, "already-bound".to_string()),
+            uuid::Uuid::from_u128(0xB0B),
+        );
+        Self { held: std::sync::Mutex::new(held) }
+    }
+}
+
+#[async_trait]
+impl crate::queries::AuthSubjectReservationRepository for SpecAuthSubjectReservations {
+    async fn reserve(
+        &self,
+        subject: AuthSubject,
+        principal: crate::queries::BoundPrincipal,
+    ) -> Result<bool, DomainError> {
+        let mut held = self.held.lock().unwrap();
+        match held.get(&(principal.kind(), subject.0.clone())) {
+            // Already ours: an idempotent replay, not a conflict.
+            Some(holder) if *holder == principal.id() => Ok(true),
+            Some(_) => Ok(false),
+            None => {
+                held.insert((principal.kind(), subject.0), principal.id());
+                Ok(true)
+            }
+        }
     }
 }
 

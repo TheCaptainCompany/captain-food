@@ -194,6 +194,7 @@ Rider:
       emits: [{ $ref: 'events.yaml#/RiderRegistered' }]
       throws:
         - { $ref: 'errors.yaml#/RiderAlreadyRegistered' }
+        - { $ref: 'errors.yaml#/RiderAuthSubjectAlreadyBound' }
     - message: { $ref: 'commands.yaml#/UpdateRiderInfo' }
       emits: [{ $ref: 'events.yaml#/RiderInfoUpdated' }]
       throws:

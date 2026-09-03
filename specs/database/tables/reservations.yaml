@@ -47,3 +47,41 @@ slug_reservations:
       NONE, deliberately. A released label must stay un-claimable for as long as anything might still
       resolve it -- old menus, QR codes and search results have no expiry we control. Sweeping these
       rows would re-open the redirect-hijack hole this table exists to close.
+
+auth_subject_reservations:
+  description: >
+    One row per (kind of principal, login credential) ever bound. The composite `UNIQUE` primary key
+    IS the invariant (`RiderAuthSubjectBoundOnce`, the first population; PROP-20260831-180622 build
+    order row 2, #794): `register_rider` inserts BEFORE appending `RiderRegistered`, and an insert that
+    loses maps to `errors.yaml#/RiderAuthSubjectAlreadyBound` -- a rejection, not a stuck projection.
+    Uniqueness over a POPULATION is not an aggregate's to enforce: the `Rider` read model's
+    `auth_ref UNIQUE` turns a duplicate into a visible denial AFTER the fact was recorded; this table
+    is what prevents the fact.
+
+    THE KEY IS THE PAIR, NEVER THE SUBJECT ALONE. A rider who is also a customer holds two bindings
+    (`RIDER`, `CUSTOMER`) on one credential; a subject-only key would permanently bar a rider from
+    ever becoming a restaurant member. `principal_id` is typed by `principal_kind` exactly as
+    `ScopeMembership.member_id` is typed by `member_type` -- a RiderId under `RIDER`, a CustomerId
+    under `CUSTOMER` -- and is what makes a replay idempotent: losing to a row that is already OURS
+    is a re-submission, not a conflict.
+
+    NO RELEASE PATH -- stronger than `slug_reservations`' "released is not free". There is no
+    `released_at` column and the port has no `release` method: revoking a rider must NOT free the
+    binding, because a later registration would then bind the same human to a NEW rider id and
+    orphan their delivery history, their memberships and their attribution in the log. A re-grant
+    resolves the SAME principal id through this row.
+
+    Ordering note, as for the sibling: the reservation is written BEFORE the event. A reservation
+    with no event is a harmless orphan (the same rider re-submits with the same id, and the row is
+    already theirs); an event with no reservation would mean two riders believing they own one
+    credential.
+  columns:
+    principal_kind: { type: { $ref: 'scalars.yaml#/PrincipalKind' }, pk: true } # WHAT KIND of principal -- half the key
+    auth_subject:   { type: { $ref: 'scalars.yaml#/AuthSubject' }, pk: true }   # the credential -- the other half
+    principal_id:   { type: uuid, index: true, note: "The domain id bound to the credential, typed by `principal_kind` (a RiderId under RIDER). Never the auth subject itself (ADR-20260818-004646)." }
+    reserved_at:    { type: timestamptz }
+  retention:
+    policy: >
+      NONE, deliberately, and stronger than the sibling's: there is no release column to sweep on.
+      A binding must outlive the principal it names -- an erased rider's credential must never
+      resolve to a second rider id, and a suspended rider's must resolve to the same one.

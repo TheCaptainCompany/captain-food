@@ -76,6 +76,21 @@ RiderAlreadyRegistered:
     fr: "Vous êtes déjà inscrit en tant que livreur."
 
 
+RiderAuthSubjectAlreadyBound:
+  description: >
+    The login credential (`authRef`) is already bound to ANOTHER rider id: the write-side
+    reservation `(RIDER, authRef)` in `database/tables/reservations.yaml#/auth_subject_reservations`
+    lost its insert to a row held by a different principal (#639 part C, #794). Named for THIS
+    population and distinct from `RiderAlreadyRegistered` (same rider id twice) and from
+    `RefAlreadyUsed` (a HubRise import key): the human already has a rider account, and the remedy
+    is to sign in to it, never to register a second one -- the binding is never released.
+  context:
+    authRef: { $ref: 'scalars.yaml#/AuthSubject' }
+  messages:
+    en: "This login is already linked to a rider account. Sign in to that account instead."
+    fr: "Cette identité de connexion est déjà liée à un compte livreur. Connectez-vous à ce compte."
+
+
 RiderNotFound:
   description: "No rider with this id."
   context:

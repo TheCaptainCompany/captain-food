@@ -4100,7 +4100,7 @@ async fn test_rider_registered() {
     spec_baseline(&bed).await;
     let before = bed.snapshot();
     let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::AuthSubject("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()) };
-    let result = crate::commands::register_rider(&bed.store, cmd, &support::actor()).await;
+    let result = crate::commands::register_rider(&bed.store, &bed.auth_subjects, cmd, &support::actor()).await;
     let _ = result.expect("TestRiderRegistered: the spec expects acceptance");
     bed.assert_appended("TestRiderRegistered", &before, &[
         (format!("Rider-{}", support::uid("rider-1")), fx_rider_registered()),
@@ -4116,10 +4116,24 @@ async fn test_rider_register_again_is_rejected() {
     bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
     let before = bed.snapshot();
     let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::AuthSubject("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()) };
-    let result = crate::commands::register_rider(&bed.store, cmd, &support::actor()).await;
+    let result = crate::commands::register_rider(&bed.store, &bed.auth_subjects, cmd, &support::actor()).await;
     let err = result.expect_err("TestRiderRegisterAgainIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderRegisterAgainIsRejected", &err, &["RiderAlreadyRegistered"]);
     bed.assert_appended("TestRiderRegisterAgainIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderAuthSubjectAlreadyBoundIsRejected — "Registering a NEW rider id with a login already bound to another rider is rejected"
+/// rules: RiderAuthSubjectBoundOnce
+#[tokio::test]
+async fn test_rider_auth_subject_already_bound_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RegisterRider { rider_id: sc::RiderId(support::uid("rider-2")), auth_ref: sc::AuthSubject("already-bound".into()), display_name: "Nadia".to_string(), phone: sc::PhoneNumber("+33699887766".into()) };
+    let result = crate::commands::register_rider(&bed.store, &bed.auth_subjects, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRiderAuthSubjectAlreadyBoundIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderAuthSubjectAlreadyBoundIsRejected", &err, &["RiderAuthSubjectAlreadyBound"]);
+    bed.assert_appended("TestRiderAuthSubjectAlreadyBoundIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestRiderInfoUpdated — "A rider updates editable profile fields"

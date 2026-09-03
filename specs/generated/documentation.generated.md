@@ -9467,7 +9467,7 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `RegisterRider`](#command-registerrider) | [⚡ `RiderRegistered`](#event-riderregistered) | [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered) |
+| [📩 `RegisterRider`](#command-registerrider) | [⚡ `RiderRegistered`](#event-riderregistered) | [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered), [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound) |
 | [📩 `UpdateRiderInfo`](#command-updateriderinfo) | [⚡ `RiderInfoUpdated`](#event-riderinfoupdated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
 | [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition) |
 
@@ -9845,7 +9845,7 @@ Register as an independent Captain rider (linked to the auth provider user).
 
 - **Dispatched by**: — · **handled by** [🎭 `Rider`](#actor-rider)
 - **Emits**: [⚡ `RiderRegistered`](#event-riderregistered)
-- **Throws**: [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered)
+- **Throws**: [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered), [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10225,7 +10225,7 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
 | <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(9)_
+### ⛔ Errors _(10)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10236,10 +10236,11 @@ A rider's availability/lifecycle status changed.
 | <a id="error-deliverypartneravailabilitynotfound"></a>⛔ `DeliveryPartnerAvailabilityNotFound` | No delivery-partner availability registration with this id. | 🇬🇧 Availability registration not found. | 🇫🇷 Demande de disponibilité introuvable. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability), [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) |
 | <a id="error-deliverypartneravailabilitynotpending"></a>⛔ `DeliveryPartnerAvailabilityNotPending` | The availability registration is not PENDING, so it cannot be approved. | 🇬🇧 This availability registration is not awaiting review. | 🇫🇷 Cette demande de disponibilité n'est pas en attente de validation. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) |
 | <a id="error-rideralreadyregistered"></a>⛔ `RiderAlreadyRegistered` | A rider is already registered for this identity (authRef/id). | 🇬🇧 You are already registered as a rider. | 🇫🇷 Vous êtes déjà inscrit en tant que livreur. | [📩 `RegisterRider`](#command-registerrider) |
+| <a id="error-riderauthsubjectalreadybound"></a>⛔ `RiderAuthSubjectAlreadyBound` | The login credential (`authRef`) is already bound to ANOTHER rider id: the write-side reservation `(RIDER, authRef)` in `database/tables/reservations.yaml#/auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C, #794). Named for THIS population and distinct from `RiderAlreadyRegistered` (same rider id twice) and from `RefAlreadyUsed` (a HubRise import key): the human already has a rider account, and the remedy is to sign in to it, never to register a second one -- the binding is never released.  | 🇬🇧 This login is already linked to a rider account. Sign in to that account instead. | 🇫🇷 Cette identité de connexion est déjà liée à un compte livreur. Connectez-vous à ce compte. | [📩 `RegisterRider`](#command-registerrider) |
 | <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 
-### 📐 Business rules _(18)_
+### 📐 Business rules _(19)_
 
 <a id="rule-readydeliveryordertriggersdispatch"></a>
 #### 📐 Rule: `ReadyDeliveryOrderTriggersDispatch`
@@ -10359,6 +10360,13 @@ _A self-registered city availability becomes APPROVED (eligible for the city's d
 _A rider registers once (per auth user), may update editable profile fields, and changes availability status only through valid transitions._
 
 - **Verified by**: [🧪 `TestRiderRegistered`](#test-testriderregistered), [🧪 `TestRiderRegisterAgainIsRejected`](#test-testriderregisteragainisrejected), [🧪 `TestRiderInfoUpdated`](#test-testriderinfoupdated), [🧪 `TestRiderUpdateIsRejectedWhenNotFound`](#test-testriderupdateisrejectedwhennotfound), [🧪 `TestRiderStatusChanged`](#test-testriderstatuschanged), [🧪 `TestRiderStatusChangeIsRejected`](#test-testriderstatuschangeisrejected)
+
+<a id="rule-riderauthsubjectboundonce"></a>
+#### 📐 Rule: `RiderAuthSubjectBoundOnce`
+
+_One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and revoking or suspending a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)._
+
+- **Verified by**: [🧪 `TestRiderAuthSubjectAlreadyBoundIsRejected`](#test-testriderauthsubjectalreadyboundisrejected)
 
 <a id="rule-restaurantdispatchbypassesrouting"></a>
 #### 📐 Rule: `RestaurantDispatchBypassesRouting`
@@ -10644,6 +10652,16 @@ _Registering the same rider twice is rejected_
 - **When**: [📩 `RegisterRider`](#command-registerrider)
 - **Thrown**: [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered)
 - **Verifies**: [📐 `RiderLifecycle`](#rule-riderlifecycle)
+
+<a id="test-testriderauthsubjectalreadyboundisrejected"></a>
+#### 🧪 Test: `TestRiderAuthSubjectAlreadyBoundIsRejected`
+
+_Registering a NEW rider id with a login already bound to another rider is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `RegisterRider`](#command-registerrider)
+- **Thrown**: [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound)
+- **Verifies**: [📐 `RiderAuthSubjectBoundOnce`](#rule-riderauthsubjectboundonce)
 
 <a id="test-testriderinfoupdated"></a>
 #### 🧪 Test: `TestRiderInfoUpdated`

@@ -187,12 +187,13 @@ CREATE INDEX ON inbound_messages (actor_id, position);
 CREATE INDEX ON inbound_messages (scheduled_at);
 
 CREATE TABLE mailbox_partitions (
-  actor_type TEXT PRIMARY KEY,
-  partition SMALLINT PRIMARY KEY,
+  actor_type TEXT NOT NULL,
+  partition SMALLINT NOT NULL,
   ownership_version BIGINT NOT NULL,
   claimed_by TEXT NULL,
   lease_until TIMESTAMPTZ NULL,
-  checkpoint BIGINT NOT NULL
+  checkpoint BIGINT NOT NULL,
+  PRIMARY KEY (actor_type, partition)
 );
 
 CREATE TABLE payment_process_manager (
@@ -306,6 +307,15 @@ CREATE TABLE slug_reservations (
   released_at TIMESTAMPTZ NULL
 );
 CREATE INDEX ON slug_reservations (restaurant_id);
+
+CREATE TABLE auth_subject_reservations (
+  principal_kind TEXT NOT NULL,
+  auth_subject TEXT NOT NULL,
+  principal_id UUID NOT NULL,
+  reserved_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (principal_kind, auth_subject)
+);
+CREATE INDEX ON auth_subject_reservations (principal_id);
 
 CREATE TABLE Restaurant (
   restaurant_id UUID PRIMARY KEY,

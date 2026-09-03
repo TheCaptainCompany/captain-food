@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 4406,
+  "recordedAt": "2026-09-03T05:38:14.589Z",
+  "branch": "main",
+  "note": "#639 part C step 2 third attempt: executor pushed the claim (4ae5c1d) then was killed by container restart; billed start-to-fourth-attempt-start"
+}

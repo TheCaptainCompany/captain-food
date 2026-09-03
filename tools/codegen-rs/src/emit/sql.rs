@@ -661,6 +661,17 @@ pub(crate) fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String 
                 None => continue,
             };
             let mut lines: Vec<String> = Vec::new();
+            // More than one `pk: true` column is a COMPOSITE key (`auth_subject_reservations`'s
+            // `(principal_kind, auth_subject)`, #794): each such column is `NOT NULL` and the key is
+            // emitted as one table-level `PRIMARY KEY (a, b)` after the columns. Inline
+            // `PRIMARY KEY` on two columns is not SQL, so a single-column key keeps today's inline
+            // form and only the composite case takes the table-level one.
+            let pk_cols: Vec<&str> = cols
+                .iter()
+                .filter(|(_, cv)| cv.get("pk").and_then(|x| x.as_bool()) == Some(true))
+                .filter_map(|(ck, _)| ck.as_str())
+                .collect();
+            let composite_pk = pk_cols.len() > 1;
             for (ck, cv) in cols {
                 let cname = match ck.as_str() {
                     Some(s) => s,
@@ -686,8 +697,10 @@ pub(crate) fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String 
                 if flag("identity") {
                     line.push_str(" GENERATED ALWAYS AS IDENTITY");
                 }
-                if flag("pk") {
+                if flag("pk") && !composite_pk {
                     line.push_str(" PRIMARY KEY");
+                } else if flag("pk") {
+                    line.push_str(" NOT NULL");
                 } else {
                     line.push_str(if flag("nullable") { " NULL" } else { " NOT NULL" });
                     if flag("unique") {
@@ -695,6 +708,9 @@ pub(crate) fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String 
                     }
                 }
                 lines.push(line);
+            }
+            if composite_pk {
+                lines.push(format!("  PRIMARY KEY ({})", pk_cols.join(", ")));
             }
             if let Some(cs) = node.get("constraints").and_then(|c| c.as_sequence()) {
                 for c in cs {
