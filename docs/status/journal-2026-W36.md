@@ -24,7 +24,12 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > for: its mutex would pass a read-then-write implementation too. Migration `20260903060000`
 > mirrors the generated DDL byte-for-byte; `REQUIRED_SCHEMA_VERSION` moves with it. The SQL emitter
 > learned a composite key (two `pk: true` columns → one table-level `PRIMARY KEY (a, b)`; single-key
-> tables are byte-identical). The port takes a `BoundPrincipal` witness enum (one `Rider` arm today)
+> tables are byte-identical). **That change also rewrote a second table**: the old artifact declared
+> `mailbox_partitions` with `actor_type TEXT PRIMARY KEY` AND `partition SMALLINT PRIMARY KEY` — two
+> inline primary keys, DDL Postgres refuses (*multiple primary keys for table*) — while the deployed
+> `migrations/20260731063000_actor_mailbox_tables.sql:93` has always carried
+> `PRIMARY KEY (actor_type, partition)`. The emitter change repairs that latent generator bug and
+> re-aligns the artifact with the deployed DDL; **no migration is owed** for it. The port takes a `BoundPrincipal` witness enum (one `Rider` arm today)
 > so the `(kind, id)` pair can never disagree — compiler first. **Fence report**: `CommandDeps`
 > lives in `crates/infrastructure/src/inbox.rs` and `standalone.rs` constructs it, both fenced by
 > the card; the minimum taken is one field, one match arm and one wiring line. **Build-order row 2
