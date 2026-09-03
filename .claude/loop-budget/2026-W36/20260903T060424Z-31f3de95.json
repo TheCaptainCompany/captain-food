@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 1570,
+  "recordedAt": "2026-09-03T06:04:24.717Z",
+  "branch": "639-staff-auth-rider-door",
+  "note": "#639 part C step 2a (#794): auth_subject_reservations -- specs, emitter composite PK, port, store, migration, DB race test; three gates green; PR #846 draft"
+}
