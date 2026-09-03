@@ -17,6 +17,7 @@ use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
     IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityStampCustomerClaimInput,
+    IdentityStampRiderClaimInput,
     IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
@@ -85,6 +86,16 @@ impl IdentityService for FailClosedIdentityService {
         // Fail CLOSED (services.yaml identity.stamp_customer_claim, #437): never pretend to have
         // stamped — the caller must then skip session rotation/parking entirely.
         Err(not_configured("customer claim stamp"))
+    }
+
+    async fn stamp_rider_claim(
+        &self,
+        _input: IdentityStampRiderClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // Fail CLOSED like the customer stamp (services.yaml identity.stamp_rider_claim, #639 part
+        // C step 2c-i): never pretend to have stamped -- the caller then parks nothing.
+        Err(not_configured("rider claim stamp"))
     }
 
     async fn send_email_magic_link(
@@ -432,6 +443,157 @@ pub fn stamp_put_body(customer_id: &CustomerId) -> Value {
     })
 }
 
+// ─── The rider claim stamp (#639 part C step 2c-i, services.yaml identity.stamp_rider_claim) ─────
+
+/// The rider admin PUT body — PURE and `pub` for the same reason as [`stamp_put_body`]: it is the
+/// WIRE SHAPE, and `server::auth`'s verifier reads it in
+/// `the_verifier_reads_what_the_rider_stamp_writes`. The whole `captain_food` object is
+/// `{ "role": "RIDER" }` and NOTHING else — no `rider_id`, no id of any kind
+/// (ADR-20260830-234532, ADR-20260818-004646): the rider's binding resolves on every request from
+/// our Postgres (`Rider.auth_ref -> rider_id`, the 2b seam), and a stamped id would be a cache the
+/// platform cannot invalidate. A DISTINCT function from [`stamp_put_body`], never a parameter on
+/// it (ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time — the
+/// customer path cannot spell this body and vice versa).
+pub fn stamp_rider_put_body() -> Value {
+    json!({
+        "app_metadata": {
+            PRODUCT_CLAIM_KEY: {
+                "role": "RIDER",
+            }
+        }
+    })
+}
+
+/// What [`SupabaseIdentityService::stamp_rider_inner`] does after reading the auth user's current
+/// `app_metadata` — the PURE decision, unit-tested with constructed metadata. Its OWN type rather
+/// than a role arm on [`StampDecision`]: the two stampers share no branch (the customer's compares
+/// an id; this one has no id to compare), which is the compile-time selection the ADR asks for.
+#[derive(Debug, PartialEq, Eq)]
+enum RiderStampDecision {
+    /// Already exactly `{ role: RIDER }` → idempotent no-op (a redelivered ConfirmRiderSignIn must
+    /// not re-write).
+    Noop,
+    /// Write [`stamp_rider_put_body`] — a fresh user (no `captain_food` object, or an empty one),
+    /// or one carrying only the pre-#519 flat keys, which are another era's metadata, not a stamp.
+    Put,
+    /// The subject already holds a `captain_food` object that is NOT the one this stamper writes —
+    /// a customer's `customer_id`, a restaurant's `restaurant_id`, a non-RIDER `role`, anything.
+    /// The provider replaces the object WHOLESALE, so a PUT would ERASE it: refused, never an
+    /// overwrite, until PROP-20260831-180622's `one-subject-one-role` Concern is decided. Strict
+    /// on purpose — the only thing this stamper ever overwrites is nothing.
+    HoldsOtherClaims,
+}
+
+/// The idempotence/refusal decision on the CURRENT provider metadata, before any write. Reads ONLY
+/// inside [`PRODUCT_CLAIM_KEY`] (the flat pre-#519 keys beside it are inert, as for the customer).
+fn stamp_rider_decision(metadata: &Value) -> RiderStampDecision {
+    let Some(ours) = metadata.get(PRODUCT_CLAIM_KEY).and_then(Value::as_object) else {
+        return RiderStampDecision::Put;
+    };
+    if ours.is_empty() {
+        return RiderStampDecision::Put;
+    }
+    let exactly_the_rider_role =
+        ours.len() == 1 && ours.get("role").and_then(Value::as_str) == Some("RIDER");
+    if exactly_the_rider_role {
+        RiderStampDecision::Noop
+    } else {
+        RiderStampDecision::HoldsOtherClaims
+    }
+}
+
+/// Why a rider claim stamp failed — each variant is one bounded `reason` label of
+/// `rider_claim_stamp_failed_total` (contract `rider-identity`).
+#[derive(Debug)]
+enum RiderStampFailure {
+    /// `SUPABASE_SECRET_KEY` absent: fail CLOSED, never pretend to have stamped.
+    NotConfigured,
+    /// The subject already holds another claim object — the one-subject-one-role refusal. A TYPED
+    /// rejection (`AuthSubjectHoldsAnotherRole`): the rider is told, and nothing is retried.
+    ClaimConflict { auth_ref: String },
+    /// Transport failure, non-2xx admin response, or a malformed provider payload.
+    Provider(String),
+}
+
+impl RiderStampFailure {
+    fn reason(&self) -> &'static str {
+        match self {
+            RiderStampFailure::NotConfigured => "not_configured",
+            RiderStampFailure::ClaimConflict { .. } => "claim_conflict",
+            RiderStampFailure::Provider(_) => "provider_error",
+        }
+    }
+
+    fn into_domain_error(self) -> DomainError {
+        match self {
+            RiderStampFailure::NotConfigured => not_configured("rider claim stamp"),
+            RiderStampFailure::ClaimConflict { auth_ref } => {
+                DomainError::rejected("AuthSubjectHoldsAnotherRole", json!({ "authRef": auth_ref }))
+            }
+            RiderStampFailure::Provider(detail) => {
+                DomainError::Repository(format!("supabase rider claim stamp: {detail}"))
+            }
+        }
+    }
+}
+
+impl SupabaseIdentityService {
+    /// The rider stamp core (#639 part C step 2c-i): GET the auth user's current `app_metadata`
+    /// (the decision PRECEDES any write, as for the customer), then PUT [`stamp_rider_put_body`].
+    /// Redelivery-idempotent (already `{ role: RIDER }` → no-op); any OTHER claim object present →
+    /// [`RiderStampFailure::ClaimConflict`], never an overwrite.
+    async fn stamp_rider_inner(
+        &self,
+        input: &IdentityStampRiderClaimInput,
+    ) -> Result<(), RiderStampFailure> {
+        let Some(admin_key) = self.admin_key.as_deref() else {
+            return Err(RiderStampFailure::NotConfigured);
+        };
+        let url = format!("{}/auth/v1/admin/users/{}", self.base_url, input.auth_ref.0);
+
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .send()
+            .await
+            .map_err(|e| RiderStampFailure::Provider(format!("admin get transport: {e}")))?;
+        let status = resp.status();
+        let user: Value = resp.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(RiderStampFailure::Provider(format!("admin get {}: {user}", status.as_u16())));
+        }
+
+        let metadata = user.get("app_metadata").cloned().unwrap_or_else(|| json!({}));
+        match stamp_rider_decision(&metadata) {
+            RiderStampDecision::HoldsOtherClaims => {
+                return Err(RiderStampFailure::ClaimConflict { auth_ref: input.auth_ref.0.clone() });
+            }
+            RiderStampDecision::Noop => return Ok(()),
+            RiderStampDecision::Put => {}
+        }
+
+        let resp = self
+            .http
+            .put(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .json(&stamp_rider_put_body())
+            .send()
+            .await
+            .map_err(|e| RiderStampFailure::Provider(format!("admin put transport: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            return Err(RiderStampFailure::Provider(format!("admin put {}: {body}", status.as_u16())));
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl IdentityService for SupabaseIdentityService {
     async fn send_phone_otp(
@@ -524,6 +686,23 @@ impl IdentityService for SupabaseIdentityService {
         telemetry::spans::record_claims_stamp_result(&span, result.is_ok());
         result.map_err(|failure| {
             telemetry::meters::customer_identification::claim_stamp_failed(failure.reason());
+            failure.into_domain_error()
+        })
+    }
+
+    async fn stamp_rider_claim(
+        &self,
+        input: IdentityStampRiderClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The same `claims.stamp` CLIENT span as the customer stamp (it is the identity ACL's
+        // admin GET+PUT, whichever role it writes); the DEFECT counter is the rider-identity
+        // contract's own, never the customer's population.
+        let span = telemetry::spans::claims_stamp();
+        let result = self.stamp_rider_inner(&input).instrument(span.clone()).await;
+        telemetry::spans::record_claims_stamp_result(&span, result.is_ok());
+        result.map_err(|failure| {
+            telemetry::meters::rider_identity::claim_stamp_failed(failure.reason());
             failure.into_domain_error()
         })
     }
@@ -692,6 +871,51 @@ mod tests {
             stamp_decision(&flat_other, target),
             StampDecision::Put,
             "and a flat id for someone else is not a conflict -- nothing reads it"
+        );
+    }
+
+    /// The rider stamp (#639 part C step 2c-i): the whole `captain_food` object is the role and
+    /// NOTHING else -- no `rider_id`, no id of any kind. The ABSENCE is the assertion: a stamped id
+    /// would be a cache the platform cannot invalidate (ADR-20260830-234532), and the verifier
+    /// parses no rider field to receive one in.
+    #[test]
+    fn stamp_rider_put_body_is_the_role_and_nothing_else() {
+        let body = stamp_rider_put_body();
+        let md = body["app_metadata"].as_object().expect("app_metadata object");
+        assert_eq!(md.len(), 1, "exactly ONE top-level key (#519)");
+        let ours = md[PRODUCT_CLAIM_KEY].as_object().expect("the captain_food object");
+        assert_eq!(ours["role"], json!("RIDER"));
+        assert_eq!(ours.len(), 1, "the role and NOTHING else -- no rider_id, no id of any kind");
+    }
+
+    /// The rider stamp never overwrites: exactly `{ role: RIDER }` is a no-op, nothing of ours is a
+    /// PUT, and ANY other claim object -- a customer's, a restaurant's, a rider role travelling with
+    /// an id -- is refused (the one-subject-one-role collision, PROP-20260831-180622 Concern).
+    #[test]
+    fn stamp_rider_decision_refuses_any_other_claim_object() {
+        let meta = |claims: Value| json!({ PRODUCT_CLAIM_KEY: claims });
+        assert_eq!(stamp_rider_decision(&meta(json!({ "role": "RIDER" }))), RiderStampDecision::Noop);
+        assert_eq!(stamp_rider_decision(&json!({})), RiderStampDecision::Put);
+        assert_eq!(stamp_rider_decision(&meta(json!({}))), RiderStampDecision::Put);
+        // The pre-nesting flat keys are another era's metadata, not a stamp (#519).
+        assert_eq!(
+            stamp_rider_decision(&json!({ "captain_role": "CUSTOMER", "captain_customer_id": "x" })),
+            RiderStampDecision::Put
+        );
+        let customer = meta(json!({ "role": "CUSTOMER", "customer_id": "00000000-0000-0000-0000-000000000437" }));
+        assert_eq!(
+            stamp_rider_decision(&customer),
+            RiderStampDecision::HoldsOtherClaims,
+            "a rider who also orders dinner is unrepresentable today: refuse, never erase the customer claim"
+        );
+        assert_eq!(
+            stamp_rider_decision(&meta(json!({ "role": "RESTAURANT", "restaurant_id": "r" }))),
+            RiderStampDecision::HoldsOtherClaims
+        );
+        assert_eq!(
+            stamp_rider_decision(&meta(json!({ "role": "RIDER", "rider_id": "r" }))),
+            RiderStampDecision::HoldsOtherClaims,
+            "a RIDER role travelling with an id is not the shape this stamper writes -- refused, not repaired"
         );
     }
 

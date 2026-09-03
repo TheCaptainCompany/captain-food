@@ -646,6 +646,12 @@ rider-identity:
     # `db` is one real Postgres round trip; `request_reuse` is declared for the same reason as on
     # customer-identity (an in-request reuse must never hide an outage) and is not reachable yet.
     - { name: "rider_identity_lookup_source_total", type: counter, attributes: ["source"] }
+    # The rider CLAIM STAMP (#639 part C step 2c-i, `identity.stamp_rider_claim`): a DEFECT counter,
+    # the customer_claim_stamp_failed_total pattern under THIS contract's own name -- never ordinary
+    # user error, each one a rider whose verified sign-in issued no credential. `reason` is bounded:
+    # not_configured | claim_conflict | provider_error (`claim_conflict` is the one-subject-one-role
+    # refusal, PROP-20260831-180622 Concern -- fail closed, never an overwrite).
+    - { name: "rider_claim_stamp_failed_total", type: counter, attributes: ["reason"] }
 
   status_rules:
     success:

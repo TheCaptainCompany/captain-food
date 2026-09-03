@@ -31,7 +31,9 @@ mod sealed {
 }
 
 impl sealed::Sealed for domain::generated::commands::ChangeRiderStatus {}
+impl sealed::Sealed for domain::generated::commands::ConfirmRiderSignIn {}
 impl sealed::Sealed for domain::generated::commands::RegisterRider {}
+impl sealed::Sealed for domain::generated::commands::RequestRiderSignInCode {}
 impl sealed::Sealed for domain::generated::commands::UpdateRiderInfo {}
 
 /// GENERATED from actors.yaml `Rider.receives`: marker for every COMMAND the `Rider` actor
@@ -46,8 +48,16 @@ impl RiderCommand for domain::generated::commands::ChangeRiderStatus {
     const MESSAGE_TYPE: &'static str = "ChangeRiderStatus";
 }
 
+impl RiderCommand for domain::generated::commands::ConfirmRiderSignIn {
+    const MESSAGE_TYPE: &'static str = "ConfirmRiderSignIn";
+}
+
 impl RiderCommand for domain::generated::commands::RegisterRider {
     const MESSAGE_TYPE: &'static str = "RegisterRider";
+}
+
+impl RiderCommand for domain::generated::commands::RequestRiderSignInCode {
+    const MESSAGE_TYPE: &'static str = "RequestRiderSignInCode";
 }
 
 impl RiderCommand for domain::generated::commands::UpdateRiderInfo {

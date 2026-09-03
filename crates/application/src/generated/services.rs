@@ -176,6 +176,13 @@ pub struct IdentityStampCustomerClaimInput {
     pub customer_id: CustomerId,
 }
 
+/// Input of `identity.stamp_rider_claim`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityStampRiderClaimInput {
+    pub auth_ref: AuthSubject,
+}
+
 /// Input of `identity.send_email_magic_link`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -217,6 +224,9 @@ pub trait IdentityService: Send + Sync {
     /// Write the customer domain claims onto the provider-side auth user identified by `authRef` (#437 — the paying customer's session must carry the claim): sets `app_metadata.captain_food` = `{ role: CUSTOMER, customer_id }`, both keys together. Every claim of ours lives INSIDE that one product-owned object (#519), because the provider merges claim metadata SHALLOWLY: one owned key means a sibling product sharing the identity project cannot touch our claims, and — the reason it matters — the object's ABSENCE is what proves a token was not minted for this product, once `iss` and `aud` are identical across the group. The merge therefore REPLACES our object wholesale, so callers always send it complete in one write — a single-key write silently drops the sibling claim. Idempotent on redelivery: a no-op when the stamped id already equals the target; a DIFFERENT already-stamped customer id is a hard error, never an overwrite. FAIL-CLOSED on the credential: without the admin secret (SUPABASE_SECRET_KEY) the operation errors — it never pretends to have stamped, and callers must then skip session rotation/parking entirely (an unstamped token is never parked; recovery is a fresh OTP + idempotent re-stamp).
     /// Anticipated rejections: none declared.
     async fn stamp_customer_claim(&self, input: IdentityStampCustomerClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
+    /// Write the RIDER role claim onto the provider-side auth user identified by `authRef` (#639 part C step 2c-i, the rider sign-in door): sets `app_metadata.captain_food` = `{ role: RIDER }` -- the role and NOTHING else. No `rider_id`, no id of any kind (ADR-20260830-234532, ADR-20260818-004646): the rider's binding resolves on every request from OUR Postgres (`Rider.auth_ref -> rider_id`, step 2b), and a stamped id would be a cache the platform cannot invalidate. A SECOND stamper beside `stamp_customer_claim`, not a parameter on it (ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time -- the customer path cannot call this one and vice versa). The provider REPLACES the `captain_food` object wholesale (the shallow-merge rule above), so stamping RIDER on a subject that already carries another role's claim would ERASE that claim: until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, a subject holding a non-RIDER claim is REFUSED with `AuthSubjectHoldsAnotherRole` -- fail closed, never an overwrite. Idempotent on redelivery (already exactly `{ role: RIDER }` -> no-op). FAIL-CLOSED on the credential like the customer stamp: without SUPABASE_SECRET_KEY it errors, and the caller then parks nothing (an unstamped token is never parked).
+    /// Anticipated rejections: `errors.yaml#/AuthSubjectHoldsAnotherRole`.
+    async fn stamp_rider_claim(&self, input: IdentityStampRiderClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;
     /// Email a magic link to verify/link this address, localized by the stored locale.
     /// Anticipated rejections: none declared.
     async fn send_email_magic_link(&self, input: IdentitySendEmailMagicLinkInput, meta: &ServiceCallMeta) -> Result<(), DomainError>;

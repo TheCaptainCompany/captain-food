@@ -871,3 +871,28 @@ GatewayStatusCode:
     on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 =
     our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry
     a provider's prose. The provider's message goes to the log; this goes to the journal row.
+
+# --- Phone-OTP sign-in vocabulary (promoted from specs/customer/ by #639 part C step 2c-i) --------
+# Consumed by the customer's OTP commands AND the rider's sign-in commands (and by the kernel error
+# PhoneCountryNotServed's context), so the triple is a cross-scope contract: kernel purity forbids
+# a common/ item from referencing a customer/ scalar, and one name = one dedicated scalar forbids
+# a second spelling. Unchanged in shape; a kind-logical `scalars.yaml#/...` ref never noticed the move.
+
+DialingCode:
+  type: string
+  pattern: "^\\+[0-9]{1,4}$"
+  description: >
+    Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker
+    emits and what the auth commands receive — NOT the ISO country code.
+
+
+NationalPhoneNumber:
+  type: string
+  maxLength: 24
+  description: "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'."
+
+
+OtpCode:
+  type: string
+  pattern: "^[0-9]{4,8}$"
+  description: "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev)."

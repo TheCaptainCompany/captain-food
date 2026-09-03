@@ -213,6 +213,9 @@ async fn seed_checkout_world(pool: &PgPool, with_line: bool) {
 
 fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
     CommandDeps {
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
@@ -717,6 +720,9 @@ async fn birth_row(pool: &PgPool) -> sqlx::postgres::PgRow {
 /// two postures are covered by two tests, and neither is a weakened version of the other.
 fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
     CommandDeps {
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         route_gates: application::generated::process_managers::RouteGates {
             order_placed_to_order: true,
             place_replacement_order_to_order: false,

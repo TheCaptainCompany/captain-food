@@ -10,7 +10,7 @@ use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
     IdentityVerifyPhoneOtpOutput, IdentityRefreshSessionInput, IdentityRefreshSessionOutput,
-    IdentityStampCustomerClaimInput, ServiceCallMeta,
+    IdentityStampCustomerClaimInput, IdentityStampRiderClaimInput, ServiceCallMeta,
 };
 use application::ports::Actor;
 use application::queries::CustomerReadRepository;
@@ -62,6 +62,14 @@ impl IdentityService for AlwaysVerifiedAuth {
     async fn stamp_customer_claim(
         &self,
         _input: IdentityStampCustomerClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
+    }
+
+    async fn stamp_rider_claim(
+        &self,
+        _input: IdentityStampRiderClaimInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
         Ok(())

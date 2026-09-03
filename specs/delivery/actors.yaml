@@ -205,3 +205,24 @@ Rider:
       throws:
         - { $ref: 'errors.yaml#/RiderNotFound' }
         - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }
+    # The rider SIGN-IN DOOR (#639 part C step 2c-i, PROP-20260831-180622 build-order row 2c):
+    # two pure effects on the Rider lane, both emitting nothing. Identify-only -- a verified phone
+    # with no rider behind it is REFUSED, never registered (RegisterRider above is the only birth).
+    # Shares ONE send budget with RequestPhoneVerification (#516): the counter is keyed on the
+    # canonical phone number, so the same four send-guard refusals apply.
+    - message: { $ref: 'commands.yaml#/RequestRiderSignInCode' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/PhoneCountryNotServed' }
+        - { $ref: 'errors.yaml#/RateLimited' }
+        - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+        - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
+      effect: "Delegate to the auth provider: send an SMS OTP, REFUSING when the send guards say so. Never consults the rider read model (no enumeration oracle). No event."
+    - message: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/InvalidVerificationCode' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+        - { $ref: 'errors.yaml#/RiderNotRegistered' }
+        - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
+      effect: "Verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event."

@@ -347,6 +347,17 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         "RequestEmailVerification" | "RequestPhoneChange" | "ConfirmPhoneChange" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, &bed.customers, cmd, &support::actor()).await", snake)
         }
+        // The rider sign-in door (#639 part C step 2c-i): the code request is the customer's send
+        // leg verbatim (it never consults the rider read model); the confirmation identifies
+        // through the bed's SpecRiders bridge, parks the post-stamp session, and names the support
+        // route the bed carries (SpecSupportContact). `None` = no X-SESSION-ID (the place_order
+        // shape: envelope data, not payload).
+        "RequestRiderSignInCode" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor()).await", snake)
+        }
+        "ConfirmRiderSignIn" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await", snake)
+        }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }
 }

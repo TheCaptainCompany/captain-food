@@ -185,6 +185,9 @@ async fn worker_drops_the_payload_it_translated_and_keeps_what_it_could_not_map(
 /// enqueued row, not a hand-simulated verdict. Returns the delivered count for the pass.
 async fn deliver_once(pool: &PgPool) -> u64 {
     let deps = CommandDeps {
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),

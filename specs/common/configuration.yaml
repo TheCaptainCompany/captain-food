@@ -231,6 +231,27 @@ keys:
 
 
   # ===================================================================
+  # Support route (SUPPORT-CONTACT, decided 2026-08-31; ADR-20260830-213135 / ADR-20260830-234532)
+  # ===================================================================
+
+  SUPPORT_CONTACT:
+    type: string
+    required: [staging, production]
+    gates: >
+      The functional support address printed on every typed refusal that names a human route --
+      first the rider sign-in refusal (`RiderNotRegistered`, #639 part C step 2c-i), next the
+      not-yet-linked restaurateur screen (#792). REQUIRED with NO DEFAULT on purpose
+      (ADR-20260830-213135): a refusal that renders no route is a control that does nothing, so
+      the surface must not boot with a blank. Unset (development), the rider sign-in door refuses
+      every attempt with a loud unconfigured error rather than printing an empty contact. A role
+      address on a domain we control, never a person; no voice leg (SUPPORT-CONTACT: the rider
+      handback screen gets an in-app report instead of a call button).
+    deploy:
+      production: "support@captain.food"
+      staging: "support@captain.food"
+
+
+  # ===================================================================
   # Telemetry (issue #191, PROP-170500 D1/D2) — without this, production is undiagnosable
   #
   # `specs/observability.yaml` declares 898 lines of REQUIRED spans, attributes, metrics and SLOs. None

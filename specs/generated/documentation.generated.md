@@ -34,6 +34,8 @@ A visitor browsing Captain.Food without being logged in.
 |  | ChangeCartLineQuantity | [✏️ `changeCartLineQuantity`](#mutation-changecartlinequantity) |
 |  | RequestPhoneOtp | [✏️ `requestPhoneVerification`](#mutation-requestphoneverification) |
 |  | VerifyPhone | [✏️ `verifyPhone`](#mutation-verifyphone) |
+| 🧭 **SignInAsRider** | RequestRiderSignInCode | [✏️ `requestRiderSignInCode`](#mutation-requestridersignincode) |
+|  | ConfirmRiderSignIn | [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) |
 
 <a id="story-customer"></a>
 ### 🎬 `customer` · 🙋 `CUSTOMER` · 🗣️ `fr-FR`
@@ -8784,32 +8786,22 @@ INBOUND INTEGRATION FACT, recorded through the identity ACL with NO command (ADR
 | <a id="event-customeridentityunlinked--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-customeridentityunlinked--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
 
-### 🔤 Scalars _(11)_
+### 🔤 Scalars _(7)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
-| <a id="scalar-retryafterseconds"></a>🔤 `RetryAfterSeconds` | integer | How long the caller must wait before the same request can succeed, in seconds — the SERVER's own remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never "retry immediately".  |
 | <a id="scalar-addressid"></a>🔤 `AddressId` | string _uuid_ | Identifies a saved address in a customer's address book. |
 | <a id="scalar-paymentmethodid"></a>🔤 `PaymentMethodId` | string | Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'. |
-| <a id="scalar-dialingcode"></a>🔤 `DialingCode` | string `^\+[0-9]{1,4}$` | Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.  |
-| <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
-| <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-erasurerequestid"></a>🔤 `ErasureRequestId` | string _uuid_ | Identifies ONE erasure journey, from the request through to the receipt. It is the customer's reference for a right they exercised, so it must outlive the customer: after stream deletion this id is the only handle joining the surviving tombstone, the `CustomerErased` receipt and the subject's own "is it done?" question. Pseudonymous by construction — it identifies a REQUEST, never a person. A second request while one is pending returns the SAME id (acceptance-first absorbs the duplicate; a typed rejection would punish a double-tap for no gain); a fresh request after a cancel gets a fresh one.  |
 | <a id="scalar-erasureconfirmationtoken"></a>🔤 `ErasureConfirmationToken` | string | The one-shot token proving the SECOND round-trip of an irreversible act — deliberately its own scalar and NOT `EmailVerificationToken`, because these are different secrets with different lifetimes and blast radii, and one name means one thing. It expires (the confirm window) so an unconfirmed request LAPSES VISIBLY on the status view instead of silently eating the subject's Art. 12(3) month: the confirmation step is OUR safeguard, so it may not consume their clock.  |
 | <a id="scalar-erasurestatus"></a>🔤 `ErasureStatus` | enum (REQUESTED \| CONFIRMED \| EXECUTING \| ERASED) | The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is row state on the erasure process (landing with the orchestrator), and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.  |
 | <a id="scalar-hasopenorders"></a>🔤 `HasOpenOrders` | enum (NONE \| PRESENT) | The open-order verdict for one customer, as an ENUM rather than a boolean or a count — because a process-manager `guard.that` admits only `{ const: <ENUM_MEMBER> }` (specs/common/processmanager.yaml). Expressing the re-check as a declared enum column keeps the erasure re-check inside the LIVE lane grammar instead of forcing a grammar extension for one saga (vernon). The read side derives it; nothing stores it.  |
 
-### ⛔ Errors _(13)_
+### ⛔ Errors _(7)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
-| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
-| <a id="error-phonecountrynotserved"></a>⛔ `PhoneCountryNotServed` | The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the served-country decision plus cost containment — a calling code is not a destination, and a code we do not serve can reach territories rated far above what we budgeted (the global ceiling, not this list, is the economic control against pumping) — which is why the refusal is fail-closed: an unparseable number lands here too, never on a send.  | 🇬🇧 We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us. | 🇫🇷 Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
-| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
-| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange) |
-| <a id="error-invalidverificationcode"></a>⛔ `InvalidVerificationCode` | The SMS OTP code does not match (rejected by Supabase Auth). | 🇬🇧 The verification code is incorrect. Please try again. | 🇫🇷 Le code de vérification est incorrect. Veuillez réessayer. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
-| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
 | <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification) |
 | <a id="error-emailalreadyinuse"></a>⛔ `EmailAlreadyInUse` | The email is already linked to another customer. | 🇬🇧 The email '{email}' is already in use by another account. | 🇫🇷 L'e-mail '{email}' est déjà utilisé par un autre compte. | [📩 `RequestEmailVerification`](#command-requestemailverification) |
 | <a id="error-phonealreadyinuse"></a>⛔ `PhoneAlreadyInUse` | The phone number is already linked to another customer (on change). | 🇬🇧 The phone number '{phone}' is already in use by another account. | 🇫🇷 Le numéro '{phone}' est déjà utilisé par un autre compte. | [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
@@ -8839,7 +8831,7 @@ _Phone-OTP verification registers a new customer or identifies a returning one; 
 
 _An SMS OTP is sent ONLY to a dialing code on the served allowlist, ONLY within this number's per-hour and per-day allowance, and ONLY while the platform's global daily SMS ceiling has room; otherwise the request is refused with a typed reason and NOTHING is handed to the sender. The global ceiling is the ECONOMIC control and the only one that bounds the TOTAL spend — an attacker rotates numbers so per-number caps multiply, and a ceiling-capped day grosses an attacker a few euros, which destroys the pumping economics for every range; the allowlist's job is cost containment (never paying a premium destination rate for a message we never wanted) plus refusing what we cannot serve; and the guard is fail-closed — a number that cannot be parsed is refused, never sent. One phone number has ONE budget, whichever door asks and however the number is written: '0612345678', '00612345678' and '612345678' under '+33' share a single counter, and requesting a phone CHANGE draws on the same budget as requesting verification — a budget keyed on the request rather than on the number is doubled by asking twice, differently._
 
-- **Verified by**: [🧪 `TestCustomerRequestPhoneVerification`](#test-testcustomerrequestphoneverification), [🧪 `TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards`](#test-testcustomerrequestphoneverificationisrefusedbythesendguards)
+- **Verified by**: [🧪 `TestCustomerRequestPhoneVerification`](#test-testcustomerrequestphoneverification), [🧪 `TestCustomerRequestPhoneVerificationIsRefusedByTheSendGuards`](#test-testcustomerrequestphoneverificationisrefusedbythesendguards), [🧪 `TestRiderRequestSignInCode`](#test-testriderrequestsignincode), [🧪 `TestRiderRequestSignInCodeIsRefusedByTheSendGuards`](#test-testriderrequestsignincodeisrefusedbythesendguards)
 
 <a id="rule-emailverificationuniquetokenvalid"></a>
 #### 📐 Rule: `EmailVerificationUniqueTokenValid`
@@ -9251,7 +9243,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(12)_
+### 🧰 API operations _(14)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -9342,6 +9334,20 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 
 - **Command**: [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) → handled by [🎭 `DeliveryPartnerRegistration`](#actor-deliverypartnerregistration)
 - **Roles**: EXTERNAL, ADMIN · **slice** V1
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-requestridersignincode"></a>
+#### ✏️ Mutation: `requestRiderSignInCode`
+
+- **Command**: [📩 `RequestRiderSignInCode`](#command-requestridersignincode) → handled by [🎭 `Rider`](#actor-rider)
+- **Roles**: PUBLIC · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-confirmridersignin"></a>
+#### ✏️ Mutation: `confirmRiderSignIn`
+
+- **Command**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) → handled by [🎭 `Rider`](#actor-rider)
+- **Roles**: PUBLIC · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 ### 🧩 Output types _(2)_
@@ -9470,6 +9476,8 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 | [📩 `RegisterRider`](#command-registerrider) | [⚡ `RiderRegistered`](#event-riderregistered) | [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered), [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound) |
 | [📩 `UpdateRiderInfo`](#command-updateriderinfo) | [⚡ `RiderInfoUpdated`](#event-riderinfoupdated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
 | [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition) |
+| [📩 `RequestRiderSignInCode`](#command-requestridersignincode) | _Delegate to the auth provider: send an SMS OTP, REFUSING when the send guards say so. Never consults the rider read model (no enumeration oracle). No event._ | [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted) |
+| [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) | _Verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole) |
 
 Lifecycle (generated from the declared state machine):
 
@@ -9650,7 +9658,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(16)_
+### 📩 Commands _(18)_
 
 <a id="command-acceptdelivery"></a>
 #### 📩 Command: `AcceptDelivery`
@@ -9882,6 +9890,36 @@ Change a rider's availability/lifecycle status.
 | --- | --- | --- | --- |
 | <a id="command-changeriderstatus--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
+
+<a id="command-requestridersignincode"></a>
+#### 📩 Command: `RequestRiderSignInCode`
+
+Ask the auth provider to send an SMS OTP to a rider's phone (the same OVHcloud SMS hook and the same send guards as RequestPhoneVerification). Emits no event, and MUST NOT reveal whether the phone belongs to a rider: the handler never consults the rider read model, so the outcome is identical for a rider's phone and a stranger's (no enumeration oracle).
+
+- **Dispatched by**: [✏️ `requestRiderSignInCode`](#mutation-requestridersignincode) · **handled by** [🎭 `Rider`](#actor-rider)
+- **Emits**: —
+- **Throws**: [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-requestridersignincode--dialingcode"></a>`dialingCode` | [🔤 `DialingCode`](#scalar-dialingcode) | ✅ |  |
+| <a id="command-requestridersignincode--nationalnumber"></a>`nationalNumber` | [🔤 `NationalPhoneNumber`](#scalar-nationalphonenumber) | ✅ |  |
+| <a id="command-requestridersignincode--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ⬜ | SMS language; defaults from the dialing code's country when absent. |
+
+<a id="command-confirmridersignin"></a>
+#### 📩 Command: `ConfirmRiderSignIn`
+
+Verify the SMS OTP with the auth provider, then IDENTIFY the rider: the proved auth subject is looked up in the `Rider` read model (`auth_ref -> rider_id`, the step-2b port); no rider -> RiderNotRegistered (nothing is created); a rider -> the RIDER role claim is stamped on the provider user (`identity.stamp_rider_claim`, `{ role: RIDER }` and nothing else) and the post-stamp provider session is parked for cookie pickup via POST /auth/session -- the credential is never in the GraphQL response. Emits no event.
+
+- **Dispatched by**: [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) · **handled by** [🎭 `Rider`](#actor-rider)
+- **Emits**: —
+- **Throws**: [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-confirmridersignin--dialingcode"></a>`dialingCode` | [🔤 `DialingCode`](#scalar-dialingcode) | ✅ |  |
+| <a id="command-confirmridersignin--nationalnumber"></a>`nationalNumber` | [🔤 `NationalPhoneNumber`](#scalar-nationalphonenumber) | ✅ |  |
+| <a id="command-confirmridersignin--code"></a>`code` | [🔤 `OtpCode`](#scalar-otpcode) | ✅ |  |
 
 ### ⚡ Events _(21)_
 
@@ -10225,7 +10263,7 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
 | <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(10)_
+### ⛔ Errors _(12)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10239,8 +10277,10 @@ A rider's availability/lifecycle status changed.
 | <a id="error-riderauthsubjectalreadybound"></a>⛔ `RiderAuthSubjectAlreadyBound` | The login credential (`authRef`) is already bound to ANOTHER rider id: the write-side reservation `(RIDER, authRef)` in `database/tables/reservations.yaml#/auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C, #794). Named for THIS population and distinct from `RiderAlreadyRegistered` (same rider id twice) and from `RefAlreadyUsed` (a HubRise import key): the human already has a rider account, and the remedy is to sign in to it, never to register a second one -- the binding is never released.  | 🇬🇧 This login is already linked to a rider account. Sign in to that account instead. | 🇫🇷 Cette identité de connexion est déjà liée à un compte livreur. Connectez-vous à ce compte. | [📩 `RegisterRider`](#command-registerrider) |
 | <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
+| <a id="error-ridernotregistered"></a>⛔ `RiderNotRegistered` | A phone was verified but no rider account is bound to the login it proves (#639 part C step 2c-i): rider sign-in is IDENTIFY-ONLY and registers nobody, so the sign-in is refused and nothing is created. Named for the RIDER population; the remedy is the support route (`SUPPORT_CONTACT`, ADR-20260830-213135 -- a required key with no default), never self-registration. Only the phone's owner can see it (the OTP was verified first), so it is not an enumeration oracle.  | 🇬🇧 This phone number is not linked to a rider account. Contact {supportContact} to get set up. | 🇫🇷 Ce numéro de téléphone n'est lié à aucun compte livreur. Contactez {supportContact} pour être enregistré. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
+| <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 
-### 📐 Business rules _(19)_
+### 📐 Business rules _(20)_
 
 <a id="rule-readydeliveryordertriggersdispatch"></a>
 #### 📐 Rule: `ReadyDeliveryOrderTriggersDispatch`
@@ -10367,6 +10407,13 @@ _A rider registers once (per auth user), may update editable profile fields, and
 _One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and revoking or suspending a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)._
 
 - **Verified by**: [🧪 `TestRiderAuthSubjectAlreadyBoundIsRejected`](#test-testriderauthsubjectalreadyboundisrejected)
+
+<a id="rule-ridersigninidentifiesonly"></a>
+#### 📐 Rule: `RiderSignInIdentifiesOnly`
+
+_Rider sign-in is identify-only, never register: a verified phone whose login is bound to a rider stamps `{ role: RIDER }` (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified phone with no rider behind it is refused with RiderNotRegistered and creates nothing; a login already carrying another role's claim is refused rather than overwritten; and the code REQUEST never reveals whether the phone belongs to a rider (#639 part C step 2c-i)._
+
+- **Verified by**: [🧪 `TestRiderRequestSignInCode`](#test-testriderrequestsignincode), [🧪 `TestRiderRequestSignInCodeForStrangerIsIdentical`](#test-testriderrequestsignincodeforstrangerisidentical), [🧪 `TestRiderConfirmSignInUnknownPhoneIsRejected`](#test-testriderconfirmsigninunknownphoneisrejected), [🧪 `TestRiderConfirmSignInIdentifies`](#test-testriderconfirmsigninidentifies), [🧪 `TestRiderConfirmSignInWrongCodeIsRejected`](#test-testriderconfirmsigninwrongcodeisrejected), [🧪 `TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected`](#test-testriderconfirmsigninsubjectholdinganotherroleisrejected)
 
 <a id="rule-restaurantdispatchbypassesrouting"></a>
 #### 📐 Rule: `RestaurantDispatchBypassesRouting`
@@ -10662,6 +10709,76 @@ _Registering a NEW rider id with a login already bound to another rider is rejec
 - **When**: [📩 `RegisterRider`](#command-registerrider)
 - **Thrown**: [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound)
 - **Verifies**: [📐 `RiderAuthSubjectBoundOnce`](#rule-riderauthsubjectboundonce)
+
+<a id="test-testriderrequestsignincode"></a>
+#### 🧪 Test: `TestRiderRequestSignInCode`
+
+_Sends an SMS OTP to a rider's phone; emits nothing_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `RequestRiderSignInCode`](#command-requestridersignincode)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly), [📐 `OtpSendIsGuardedByCountryAndBudget`](#rule-otpsendisguardedbycountryandbudget)
+
+<a id="test-testriderrequestsignincodeforstrangerisidentical"></a>
+#### 🧪 Test: `TestRiderRequestSignInCodeForStrangerIsIdentical`
+
+_Sends an SMS OTP to a phone that belongs to no rider, identically; emits nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestRiderSignInCode`](#command-requestridersignincode)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
+
+<a id="test-testriderrequestsignincodeisrefusedbythesendguards"></a>
+#### 🧪 Test: `TestRiderRequestSignInCodeIsRefusedByTheSendGuards`
+
+_Refuses a rider sign-in code to an unserved dialing code -- and hands nothing to the sender_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestRiderSignInCode`](#command-requestridersignincode)
+- **Thrown**: [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted)
+- **Verifies**: [📐 `OtpSendIsGuardedByCountryAndBudget`](#rule-otpsendisguardedbycountryandbudget)
+
+<a id="test-testriderconfirmsigninunknownphoneisrejected"></a>
+#### 🧪 Test: `TestRiderConfirmSignInUnknownPhoneIsRejected`
+
+_Refuses rider sign-in for a verified phone that no rider is bound to; creates nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
+- **Thrown**: [⛔ `RiderNotRegistered`](#error-ridernotregistered)
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
+
+<a id="test-testriderconfirmsigninidentifies"></a>
+#### 🧪 Test: `TestRiderConfirmSignInIdentifies`
+
+_Verifying the OTP on a rider's phone signs the rider in: the RIDER claim is stamped and the session parked; nothing appended_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
+
+<a id="test-testriderconfirmsigninwrongcodeisrejected"></a>
+#### 🧪 Test: `TestRiderConfirmSignInWrongCodeIsRejected`
+
+_Rejects rider sign-in when the OTP is wrong or expired_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
+- **Thrown**: [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired)
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
+
+<a id="test-testriderconfirmsigninsubjectholdinganotherroleisrejected"></a>
+#### 🧪 Test: `TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected`
+
+_Refuses rider sign-in when the verified login already holds another role's claim; overwrites nothing_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
+- **Thrown**: [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole)
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
 
 <a id="test-testriderinfoupdated"></a>
 #### 🧪 Test: `TestRiderInfoUpdated`
@@ -11218,7 +11335,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(59)_
+### 🔤 Scalars _(63)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -11246,6 +11363,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-timezone"></a>🔤 `TimeZone` | string | IANA timezone. Example: 'Europe/Paris'. |
 | <a id="scalar-locale"></a>🔤 `Locale` | string `^[a-z]{2}-[A-Z]{2}$` | i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).  |
 | <a id="scalar-currencycode"></a>🔤 `CurrencyCode` | string `^[A-Z]{3}$` | ISO 4217 currency code. Example: 'EUR'. |
+| <a id="scalar-retryafterseconds"></a>🔤 `RetryAfterSeconds` | integer | How long the caller must wait before the same request can succeed, in seconds — the SERVER's own remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never "retry immediately".  |
 | <a id="scalar-taxratepercent"></a>🔤 `TaxRatePercent` | number | Percentage tax rate. Example: 10.0 for 10%. |
 | <a id="scalar-quantity"></a>🔤 `Quantity` | number | Stock quantity in units. Decimals allowed to match HubRise inventory. 0 means out of stock.  |
 | <a id="scalar-customerdisplayname"></a>🔤 `CustomerDisplayName` | string |  |
@@ -11280,9 +11398,12 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-commandfailureseam"></a>🔤 `CommandFailureSeam` | enum (PAYMENT_GATEWAY \| COMMAND_PAYLOAD \| DOMAIN_INVARIANT \| INFRASTRUCTURE) | WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here. EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers are the three staged-flush arms of [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix. It comes back with #628, in the change that emits it.  |
 | <a id="scalar-commandfailurereason"></a>🔤 `CommandFailureReason` | enum (GATEWAY_REFUSED \| CARD_DECLINED \| PAYLOAD_UNDECODABLE \| UNCATALOGUED_INVARIANT \| TRANSIENT_INFRASTRUCTURE) | WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.  |
 | <a id="scalar-gatewaystatuscode"></a>🔤 `GatewayStatusCode` | integer | The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.  |
+| <a id="scalar-dialingcode"></a>🔤 `DialingCode` | string `^\+[0-9]{1,4}$` | Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.  |
+| <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
+| <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-erasureparkreason"></a>🔤 `ErasureParkReason` | enum (OPEN_ORDER \| FUNDS_IN_FLIGHT) | Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.  |
 
-### ⛔ Errors _(12)_
+### ⛔ Errors _(18)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -11292,11 +11413,17 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-forbidden"></a>⛔ `Forbidden` | Authenticated, but not allowed to act on this resource (e.g. not the owner). | 🇬🇧 You are not allowed to perform this action. | 🇫🇷 Vous n'êtes pas autorisé à effectuer cette action. | — |
 | <a id="error-validationerror"></a>⛔ `ValidationError` | Input failed schema validation (type, format, required, bounds). | 🇬🇧 The field '{field}' is invalid. | 🇫🇷 Le champ '{field}' est invalide. | — |
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
+| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
 | <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
+| <a id="error-phonecountrynotserved"></a>⛔ `PhoneCountryNotServed` | The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the served-country decision plus cost containment — a calling code is not a destination, and a code we do not serve can reach territories rated far above what we budgeted (the global ceiling, not this list, is the economic control against pumping) — which is why the refusal is fail-closed: an unparseable number lands here too, never on a send.  | 🇬🇧 We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us. | 🇫🇷 Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
+| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
+| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
+| <a id="error-invalidverificationcode"></a>⛔ `InvalidVerificationCode` | The SMS OTP code does not match (rejected by Supabase Auth). | 🇬🇧 The verification code is incorrect. Please try again. | 🇫🇷 Le code de vérification est incorrect. Veuillez réessayer. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
+| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
 ### 📡 Observability _(13)_
@@ -11402,7 +11529,7 @@ _criticality: **high**_
 | --- | --- | --- | --- | --- |
 | `rider.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason` |
 
-- **Metrics**: `rider_identity_resolve_ms` _(histogram)_, `rider_identity_not_found_total` _(counter)_, `rider_identity_lookup_failed_total` _(counter)_, `rider_identity_lookup_source_total` _(counter)_ · **Business metrics**: —
+- **Metrics**: `rider_identity_resolve_ms` _(histogram)_, `rider_identity_not_found_total` _(counter)_, `rider_identity_lookup_failed_total` _(counter)_, `rider_identity_lookup_source_total` _(counter)_, `rider_claim_stamp_failed_total` _(counter)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 

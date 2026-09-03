@@ -28,6 +28,7 @@ use domain::shared::errors::DomainError;
 
 use crate::generated::services::{
     DeliveryOfferJobInput, DeliveryService, IdentitySendEmailMagicLinkInput,
+    IdentityStampRiderClaimInput,
     IdentitySendPhoneOtpInput, IdentityService, IdentityVerifyEmailTokenInput,
     IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput, IdentityVerifyPhoneOtpOutput,
     PaymentRefundInput, PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
@@ -44,7 +45,7 @@ use crate::process_managers::test_support::MemStore;
 use crate::queries::{
     CartReadRepository, CatalogReadRepository, CustomerReadRepository, OfferView, OrderFilter,
     OrderReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantFilter,
-    RestaurantReadRepository,
+    RestaurantReadRepository, RiderIdentityRepository,
 };
 use crate::repository::Repository;
 
@@ -121,6 +122,12 @@ pub struct TestBed {
     pub probe: FakeProbe,
     /// Cookie-pickup parking (#112) — VerifyPhone parks the provider session here.
     pub auth_sessions: crate::auth_sessions::mem::MemAuthSessionStore,
+    /// The `Rider` read model's identity bridge (`auth_ref -> rider_id`, #639 part C step 2b) the
+    /// rider sign-in door identifies through — fed by seeded `RiderRegistered` facts.
+    pub riders: SpecRiders,
+    /// `SUPPORT_CONTACT` as the composition root resolves it (required, no default —
+    /// ADR-20260830-213135); the bed carries the decided string so the refusal can name it.
+    pub support_contact: SpecSupportContact,
 }
 
 /// Stream lengths before the WHEN — the diff baseline.
@@ -252,6 +259,10 @@ impl TestBed {
                 self.carts.set_status(e.cart_id, CartStatus::CHECKED_OUT);
             }
             // --- Customer read model -------------------------------------------------------
+            // --- Rider identity bridge (#639 part C step 2b) ------------------------------------
+            DomainEvent::RiderRegistered(e) => {
+                self.riders.bind(&e.auth_ref.0, e.rider_id);
+            }
             DomainEvent::CustomerRegistered(e) => {
                 self.customers.upsert(crate::queries::CustomerRow {
                     customer_id: e.customer_id,
@@ -962,6 +973,43 @@ impl CustomerReadRepository for SpecCustomers {
     }
 }
 
+/// The `Rider` read model's identity bridge as a fake (#639 part C step 2c-i): `auth_ref ->
+/// rider_id`, one column out, bound by seeded `RiderRegistered` facts. Answers WHO this login is
+/// and nothing else -- the read model's own rule (an identity index is not an authorization oracle).
+#[derive(Default)]
+pub struct SpecRiders {
+    rows: Mutex<Vec<(String, RiderId)>>,
+}
+
+impl SpecRiders {
+    fn bind(&self, auth_ref: &str, rider_id: RiderId) {
+        let mut rows = self.rows.lock().unwrap();
+        rows.retain(|(a, _)| a != auth_ref);
+        rows.push((auth_ref.to_string(), rider_id));
+    }
+}
+
+#[async_trait]
+impl RiderIdentityRepository for SpecRiders {
+    async fn rider_id_by_auth_subject(
+        &self,
+        auth_subject: AuthSubject,
+    ) -> Result<Option<RiderId>, DomainError> {
+        Ok(self.rows.lock().unwrap().iter().find(|(a, _)| *a == auth_subject.0).map(|(_, id)| *id))
+    }
+}
+
+/// `SUPPORT_CONTACT` as the bed resolves it: the decided string (SUPPORT-CONTACT, 2026-08-31), so
+/// the rider sign-in refusal names a route. `None` is the composition root's dev-only unset case,
+/// which the handler refuses loudly -- not a case a behaviour test drives.
+pub struct SpecSupportContact(pub Option<EmailAddress>);
+
+impl Default for SpecSupportContact {
+    fn default() -> Self {
+        Self(Some(EmailAddress("support@captain.food".into())))
+    }
+}
+
 #[derive(Default)]
 pub struct SpecOrders {
     rows: Mutex<Vec<crate::queries::OrderTrackingRow>>,
@@ -1192,11 +1240,38 @@ pub struct FakeIdentity {
     quota: crate::sms_guard::InMemorySmsQuotaStore,
 }
 
+/// The login the fake provider resolves a verified phone to -- a provider maps phone -> user, and
+/// the rider door (#639 part C step 2c-i) needs THREE distinguishable logins: the riderRegistered
+/// fixture's (`+33611223344` -> `auth-supabase-9`), a login the provider already holds STAMPED as a
+/// CUSTOMER (the one-subject-one-role sentinel, `+33699000002` -> `auth-supabase-customer`), and
+/// everybody else (`auth-supabase-1`, the customer suite's canonical subject -- unchanged).
+fn fake_auth_subject_for(national_number: &str) -> AuthSubject {
+    AuthSubject(
+        match national_number.trim_start_matches('0') {
+            "611223344" => "auth-supabase-9",
+            "699000002" => FAKE_CUSTOMER_STAMPED_SUBJECT,
+            _ => "auth-supabase-1",
+        }
+        .into(),
+    )
+}
+
+/// A login the fake provider holds ALREADY STAMPED with a customer claim (see
+/// [`fake_auth_subject_for`]): stamping RIDER on it would erase that claim, so the rider stamp
+/// refuses it -- the sentinel that drives `AuthSubjectHoldsAnotherRole`.
+const FAKE_CUSTOMER_STAMPED_SUBJECT: &str = "auth-supabase-customer";
+
 impl FakeIdentity {
     /// The phone-OTP sends this double actually made. **The money assertion**: a guarded refusal must
     /// leave this empty, and a rejection alone does not prove that nothing was sent.
     pub fn sent(&self) -> Vec<IdentitySendPhoneOtpInput> {
         self.sent.lock().expect("FakeIdentity poisoned").clone()
+    }
+
+    /// The `app_metadata` the provider holds after the last stamp (`None` = never stamped) --
+    /// what a rotated token would carry.
+    pub fn stamped(&self) -> Option<serde_json::Value> {
+        self.stamped.lock().expect("fake identity mutex").clone()
     }
 }
 
@@ -1225,7 +1300,7 @@ impl IdentityService for FakeIdentity {
             return Err(DomainError::rejected("InvalidVerificationCode", serde_json::json!({})));
         }
         Ok(IdentityVerifyPhoneOtpOutput {
-            auth_ref: AuthSubject("auth-supabase-1".into()),
+            auth_ref: fake_auth_subject_for(&input.national_number.0),
             // The provider session (#112) — a fake token trio; the handler parks it.
             access_token: Some("fake.access.jwt".into()),
             refresh_token: Some("fake.refresh".into()),
@@ -1266,6 +1341,29 @@ impl IdentityService for FakeIdentity {
                 "customer_id": input.customer_id.0.to_string(),
             }
         }));
+        Ok(())
+    }
+    async fn stamp_rider_claim(
+        &self,
+        input: IdentityStampRiderClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The one-subject-one-role refusal (PROP-20260831-180622 Concern): a login the provider
+        // already holds with ANOTHER claim object is refused, never overwritten -- the sentinel
+        // subject is such a login, and so is a subject this bed stamped CUSTOMER earlier.
+        let mut stamped = self.stamped.lock().expect("fake identity mutex");
+        let rider_only = serde_json::json!({ "captain_food": { "role": "RIDER" } });
+        let holds_other = input.auth_ref.0 == FAKE_CUSTOMER_STAMPED_SUBJECT
+            || stamped.as_ref().is_some_and(|held| *held != rider_only);
+        if holds_other {
+            return Err(DomainError::rejected(
+                "AuthSubjectHoldsAnotherRole",
+                serde_json::json!({ "authRef": input.auth_ref.0 }),
+            ));
+        }
+        // The provider holds `{ role: RIDER }` and NOTHING else (services.yaml
+        // identity.stamp_rider_claim) -- a rotated token then carries exactly that.
+        *stamped = Some(rider_only);
         Ok(())
     }
     async fn send_email_magic_link(

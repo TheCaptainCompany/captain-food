@@ -34,6 +34,9 @@ const INTENT: &str = "pi_780_fact_door";
 fn deps_over(pool: &PgPool) -> CommandDeps {
     CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(PgAuthSubjectReservationRepository::new(pool.clone())),

@@ -129,3 +129,22 @@ mutations:
     command: { $ref: 'commands.yaml#/RevokeDeliveryPartnerAvailability' }
     roles: [EXTERNAL, ADMIN]   # partner withdraws (EXTERNAL) or admin disables
     slice: V1
+
+
+  # Rider sign-in door (#639 part C step 2c-i, PROP-20260831-180622 build-order row 2c) -- the
+  # phone-OTP transposition of §5's staff pair. `roles: [PUBLIC]` is KEPT, with the justification
+  # ADR-20260818-101500 requires rather than left to be discovered later: THE CALLER HAS NO
+  # CREDENTIAL YET -- this IS the door that issues one, so there is no role it could arrive with,
+  # and `verifyPhone` (the customer's PUBLIC door) is the established precedent. Identify-only:
+  # nothing here registers anybody. Session delivery stays on POST /auth/session (never in the
+  # GraphQL response). Reachable from the rider surface only through the R1 per-screen PUBLIC
+  # capability (2c-ii, the next step) -- a staff surface cannot reach a PUBLIC operation today.
+  requestRiderSignInCode:
+    command: { $ref: 'commands.yaml#/RequestRiderSignInCode' }
+    roles: [PUBLIC]   # necessity: no credential exists before this door; identical outcome for a rider's phone and a stranger's
+    slice: V0
+
+  confirmRiderSignIn:
+    command: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+    roles: [PUBLIC]   # necessity: the OTP is the authentication; refuses an unknown phone, never registers
+    slice: V0

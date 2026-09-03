@@ -688,6 +688,12 @@ fixtures:
   riderRegistered:
     type: { $ref: 'events.yaml#/RiderRegistered' }
     data: { riderId: "rider-1", authRef: "auth-supabase-9", displayName: "Léa", phone: "+33611223344", status: "OFFLINE" }
+  # A rider registered on a login the fake provider already holds STAMPED as a CUSTOMER (the
+  # one-subject-one-role collision sentinel, behaviour_support::FakeIdentity) -- reachable only by
+  # REPLAY or a pre-#639 registration, since nothing today binds one login to two kinds.
+  riderRegisteredOnCustomerLogin:
+    type: { $ref: 'events.yaml#/RiderRegistered' }
+    data: { riderId: "rider-3", authRef: "auth-supabase-customer", displayName: "Sam", phone: "+33699000002", status: "OFFLINE" }
   riderInfoUpdated:
     type: { $ref: 'events.yaml#/RiderInfoUpdated' }
     data: { riderId: "rider-1", displayName: "Léa B." }
@@ -3666,6 +3672,106 @@ tests:
       data: { riderId: "rider-2", authRef: "already-bound", displayName: "Nadia", phone: "+33699887766" }
     thrown:
       - { $ref: 'errors.yaml#/RiderAuthSubjectAlreadyBound' }
+
+  # ----------------------------- Rider sign-in door (#639 part C step 2c-i) ----------------------------
+  # Identity fake conventions (behaviour_support::FakeIdentity): the provider resolves a phone to
+  # its login -- '611223344' is the riderRegistered fixture's login `auth-supabase-9`, the sentinel
+  # '699000002' is a login the fake provider already holds STAMPED as a CUSTOMER
+  # (`auth-supabase-customer`), everything else is `auth-supabase-1`; the canonical bad code
+  # `000000` is rejected. The support route is the bed's SpecSupportContact
+  # (`support@captain.food`, the SUPPORT-CONTACT decision).
+  TestRiderRequestSignInCode:
+    name: "Sends an SMS OTP to a rider's phone; emits nothing"
+    rules:
+      - { $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }
+      - { $ref: 'rules.yaml#/OtpSendIsGuardedByCountryAndBudget' }
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/RequestRiderSignInCode' }
+      data: { dialingCode: "+33", nationalNumber: "611223344", locale: "fr-FR" }
+    then: []
+
+  # The enumeration property: a STRANGER's phone gets the identical outcome -- the handler never
+  # asks the rider read model, so nothing about rider-ness can leak through the request leg.
+  TestRiderRequestSignInCodeForStrangerIsIdentical:
+    name: "Sends an SMS OTP to a phone that belongs to no rider, identically; emits nothing"
+    rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequestRiderSignInCode' }
+      data: { dialingCode: "+33", nationalNumber: "612345678" }
+    then: []
+
+  # The send guards (#516), the customer door's shape: '+212' is off the served set; the other
+  # three refusals are multi-call and proven by the hand-written sms_guard / sms_send_quota tests.
+  TestRiderRequestSignInCodeIsRefusedByTheSendGuards:
+    name: "Refuses a rider sign-in code to an unserved dialing code -- and hands nothing to the sender"
+    rules: [{ $ref: 'rules.yaml#/OtpSendIsGuardedByCountryAndBudget' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequestRiderSignInCode' }
+      data: { dialingCode: "+212", nationalNumber: "612345678" }
+    thrown:
+      - { $ref: 'errors.yaml#/PhoneCountryNotServed' }
+      - { $ref: 'errors.yaml#/RateLimited' }
+      - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+      - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
+
+  # IDENTIFY-ONLY, the test to see red first: a verified phone with no rider behind it is refused
+  # and creates nothing -- the whole reason `VerifyPhone` (register-or-identify) is not reused.
+  TestRiderConfirmSignInUnknownPhoneIsRejected:
+    name: "Refuses rider sign-in for a verified phone that no rider is bound to; creates nothing"
+    rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+      data: { dialingCode: "+33", nationalNumber: "612345678", code: "123456" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderNotRegistered' }
+
+  TestRiderConfirmSignInIdentifies:
+    name: "Verifying the OTP on a rider's phone signs the rider in: the RIDER claim is stamped and the session parked; nothing appended"
+    rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+      data: { dialingCode: "+33", nationalNumber: "611223344", code: "123456" }
+    then: []
+
+  TestRiderConfirmSignInWrongCodeIsRejected:
+    name: "Rejects rider sign-in when the OTP is wrong or expired"
+    rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+      data: { dialingCode: "+33", nationalNumber: "611223344", code: "000000" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidVerificationCode' }
+      - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+
+  # The one-subject-one-role collision (PROP-20260831-180622 Concern `one-subject-one-role`): the
+  # login behind the sentinel phone already carries a CUSTOMER claim, and the provider replaces the
+  # claim object wholesale -- so the sign-in is refused rather than the customer claim erased.
+  TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected:
+    name: "Refuses rider sign-in when the verified login already holds another role's claim; overwrites nothing"
+    rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegisteredOnCustomerLogin' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+      data: { dialingCode: "+33", nationalNumber: "699000002", code: "123456" }
+    thrown:
+      - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
 
   TestRiderInfoUpdated:
     name: "A rider updates editable profile fields"

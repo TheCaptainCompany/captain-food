@@ -701,6 +701,18 @@ pub mod rider_identity {
     pub fn lookup_source(source: &str) {
         lookup_source_counter().add(1, &[KeyValue::new("source", source.to_string())]);
     }
+
+    fn claim_stamp_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RIDER_CLAIM_STAMP_FAILED_TOTAL).build())
+    }
+
+    /// `rider_claim_stamp_failed_total{reason}` -- the RIDER claim stamp failed (#639 part C step
+    /// 2c-i): a DEFECT counter, the customer stamp's pattern under this contract's own name.
+    /// `reason` is bounded: not_configured | claim_conflict | provider_error.
+    pub fn claim_stamp_failed(reason: &str) {
+        claim_stamp_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
 }
 
 /// Technical metrics for the `customer-identification` contract (#437).

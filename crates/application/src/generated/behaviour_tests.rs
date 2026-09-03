@@ -637,6 +637,11 @@ fn fx_rider_registered() -> DomainEvent {
     DomainEvent::RiderRegistered(evs::RiderRegistered { rider_id: sc::RiderId(support::uid("rider-1")), auth_ref: sc::AuthSubject("auth-supabase-9".into()), display_name: "Léa".to_string(), phone: sc::PhoneNumber("+33611223344".into()), status: sc::RiderStatus::OFFLINE })
 }
 
+/// tests.yaml#/fixtures/riderRegisteredOnCustomerLogin — events.yaml#/RiderRegistered
+fn fx_rider_registered_on_customer_login() -> DomainEvent {
+    DomainEvent::RiderRegistered(evs::RiderRegistered { rider_id: sc::RiderId(support::uid("rider-3")), auth_ref: sc::AuthSubject("auth-supabase-customer".into()), display_name: "Sam".to_string(), phone: sc::PhoneNumber("+33699000002".into()), status: sc::RiderStatus::OFFLINE })
+}
+
 /// tests.yaml#/fixtures/riderInfoUpdated — events.yaml#/RiderInfoUpdated
 fn fx_rider_info_updated() -> DomainEvent {
     DomainEvent::RiderInfoUpdated(evs::RiderInfoUpdated { rider_id: sc::RiderId(support::uid("rider-1")), display_name: Some("Léa B.".to_string()), phone: None })
@@ -4134,6 +4139,105 @@ async fn test_rider_auth_subject_already_bound_is_rejected() {
     let err = result.expect_err("TestRiderAuthSubjectAlreadyBoundIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderAuthSubjectAlreadyBoundIsRejected", &err, &["RiderAuthSubjectAlreadyBound"]);
     bed.assert_appended("TestRiderAuthSubjectAlreadyBoundIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderRequestSignInCode — "Sends an SMS OTP to a rider's phone; emits nothing"
+/// rules: RiderSignInIdentifiesOnly, OtpSendIsGuardedByCountryAndBudget
+#[tokio::test]
+async fn test_rider_request_sign_in_code() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestRiderSignInCode { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("611223344".into()), locale: Some(sc::Locale("fr-FR".into())) };
+    let result = crate::commands::request_rider_sign_in_code(&bed.store, &bed.identity, cmd, &support::actor()).await;
+    let _ = result.expect("TestRiderRequestSignInCode: the spec expects acceptance");
+    bed.assert_appended("TestRiderRequestSignInCode", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderRequestSignInCodeForStrangerIsIdentical — "Sends an SMS OTP to a phone that belongs to no rider, identically; emits nothing"
+/// rules: RiderSignInIdentifiesOnly
+#[tokio::test]
+async fn test_rider_request_sign_in_code_for_stranger_is_identical() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestRiderSignInCode { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("612345678".into()), locale: None };
+    let result = crate::commands::request_rider_sign_in_code(&bed.store, &bed.identity, cmd, &support::actor()).await;
+    let _ = result.expect("TestRiderRequestSignInCodeForStrangerIsIdentical: the spec expects acceptance");
+    bed.assert_appended("TestRiderRequestSignInCodeForStrangerIsIdentical", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderRequestSignInCodeIsRefusedByTheSendGuards — "Refuses a rider sign-in code to an unserved dialing code -- and hands nothing to the sender"
+/// rules: OtpSendIsGuardedByCountryAndBudget
+#[tokio::test]
+async fn test_rider_request_sign_in_code_is_refused_by_the_send_guards() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestRiderSignInCode { dialing_code: sc::DialingCode("+212".into()), national_number: sc::NationalPhoneNumber("612345678".into()), locale: None };
+    let result = crate::commands::request_rider_sign_in_code(&bed.store, &bed.identity, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRiderRequestSignInCodeIsRefusedByTheSendGuards: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderRequestSignInCodeIsRefusedByTheSendGuards", &err, &["PhoneCountryNotServed", "RateLimited", "VerificationSendLimitReached", "VerificationSendCapacityExhausted"]);
+    bed.assert_appended("TestRiderRequestSignInCodeIsRefusedByTheSendGuards", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderConfirmSignInUnknownPhoneIsRejected — "Refuses rider sign-in for a verified phone that no rider is bound to; creates nothing"
+/// rules: RiderSignInIdentifiesOnly
+#[tokio::test]
+async fn test_rider_confirm_sign_in_unknown_phone_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("612345678".into()), code: sc::OtpCode("123456".into()) };
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let err = result.expect_err("TestRiderConfirmSignInUnknownPhoneIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderConfirmSignInUnknownPhoneIsRejected", &err, &["RiderNotRegistered"]);
+    bed.assert_appended("TestRiderConfirmSignInUnknownPhoneIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderConfirmSignInIdentifies — "Verifying the OTP on a rider's phone signs the rider in: the RIDER claim is stamped and the session parked; nothing appended"
+/// rules: RiderSignInIdentifiesOnly
+#[tokio::test]
+async fn test_rider_confirm_sign_in_identifies() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("611223344".into()), code: sc::OtpCode("123456".into()) };
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let _ = result.expect("TestRiderConfirmSignInIdentifies: the spec expects acceptance");
+    bed.assert_appended("TestRiderConfirmSignInIdentifies", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderConfirmSignInWrongCodeIsRejected — "Rejects rider sign-in when the OTP is wrong or expired"
+/// rules: RiderSignInIdentifiesOnly
+#[tokio::test]
+async fn test_rider_confirm_sign_in_wrong_code_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("611223344".into()), code: sc::OtpCode("000000".into()) };
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let err = result.expect_err("TestRiderConfirmSignInWrongCodeIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderConfirmSignInWrongCodeIsRejected", &err, &["InvalidVerificationCode", "VerificationCodeExpired"]);
+    bed.assert_appended("TestRiderConfirmSignInWrongCodeIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected — "Refuses rider sign-in when the verified login already holds another role's claim; overwrites nothing"
+/// rules: RiderSignInIdentifiesOnly
+#[tokio::test]
+async fn test_rider_confirm_sign_in_subject_holding_another_role_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-3")), vec![fx_rider_registered_on_customer_login()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("699000002".into()), code: sc::OtpCode("123456".into()) };
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let err = result.expect_err("TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected", &err, &["AuthSubjectHoldsAnotherRole"]);
+    bed.assert_appended("TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestRiderInfoUpdated — "A rider updates editable profile fields"

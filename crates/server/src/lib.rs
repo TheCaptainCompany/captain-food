@@ -598,6 +598,20 @@ pub async fn router() -> Router {
     // meaningful is SHARED state in Postgres. With no database, `/auth/sms-hook` 503s rather than
     // sending unguarded: fail-closed, since an unguarded send path is the failure being prevented.
     let mut sms_guard: Option<Arc<infrastructure::SmsSendAuthorizer>> = None;
+    // `SUPPORT_CONTACT` (#639 part C step 2c-i; ADR-20260830-213135: required, NO default), resolved
+    // ONCE here from the declared configuration and handed to the rider sign-in door as a value.
+    // Empty = unset (development only — staging/production refuse to boot without it): the door
+    // then fails CLOSED, loudly, rather than printing a refusal that names no route.
+    let support_contact: Option<domain::generated::scalars::EmailAddress> =
+        Some(config.support_contact.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| domain::generated::scalars::EmailAddress(s.to_string()));
+    if support_contact.is_none() {
+        tracing::warn!(
+            key = "SUPPORT_CONTACT",
+            "unset -- the rider sign-in door refuses every attempt until a support route is configured"
+        );
+    }
     let mut projector_status: Option<Arc<Mutex<ProjectionStatus>>> = None;
     let mut saga_status: Option<Arc<Mutex<ProcessManagerStatus>>> = None;
     let mut deletion_status: Option<Arc<Mutex<infrastructure::DeletionEngineStatus>>> = None;
@@ -670,10 +684,13 @@ pub async fn router() -> Router {
                 // The RIDER seam: ungated, Postgres, over the `Rider` projection (#639 part C
                 // step 2b). Its port is not on `ReadDeps` because no GraphQL query reads it — the
                 // table is `internal: true`; the request seam is its only reader.
+                // ONE `PgRiderRepository` for BOTH readers of the bridge — the request seam and
+                // the rider sign-in door's CommandDeps below (#639 part C step 2c-i): the port is
+                // reused, never re-derived (vernon/evans).
+                let rider_repository: Arc<dyn application::queries::RiderIdentityRepository> =
+                    Arc::new(infrastructure::PgRiderRepository::new(pool.clone()));
                 rider_identity_source = auth::RiderIdentitySource::new(Arc::new(
-                    auth::PgRiderIdentity::new(Arc::new(infrastructure::PgRiderRepository::new(
-                        pool.clone(),
-                    ))),
+                    auth::PgRiderIdentity::new(rider_repository.clone()),
                 ));
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
@@ -913,6 +930,11 @@ pub async fn router() -> Router {
                         .expect("identity service binding (services.yaml)"),
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
                         sessions: auth_sessions.clone(),
+                        // #639 part C step 2c-i: the rider sign-in door identifies through the
+                        // SAME bridge the request seam reads, and names the support route the
+                        // declared configuration resolved once above.
+                        riders: rider_repository.clone(),
+                        support_contact: support_contact.clone(),
                         // The SAME conditional Stripe binding the resolver side and the saga runner
                         // use (#272 Runtime D1): the mailbox workers execute the payment-dependent
                         // PM legs -- the PlaceOrderProcess/RefundProcess lanes are live and

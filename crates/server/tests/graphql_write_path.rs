@@ -134,6 +134,9 @@ async fn reset_schema(pool: &PgPool) {
 fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
     let deps = infrastructure::generated::command_router::CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),

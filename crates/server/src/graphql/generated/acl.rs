@@ -54,6 +54,12 @@ pub(crate) fn visible_customer_restaurant_account_restaurant_rider_admin(ctx: &a
     role_allows(ctx, ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)
 }
 
+/// roles: [PUBLIC]
+pub(crate) const ALLOW_PUBLIC: &[RequestRole] = &[RequestRole::Public];
+pub(crate) fn visible_public(ctx: &async_graphql::Context<'_>) -> bool {
+    role_allows(ctx, ALLOW_PUBLIC)
+}
+
 /// roles: [PUBLIC, CUSTOMER]
 pub(crate) const ALLOW_PUBLIC_CUSTOMER: &[RequestRole] = &[RequestRole::Public, RequestRole::Customer];
 pub(crate) fn visible_public_customer(ctx: &async_graphql::Context<'_>) -> bool {

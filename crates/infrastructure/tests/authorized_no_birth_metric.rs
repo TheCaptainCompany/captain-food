@@ -275,6 +275,9 @@ impl EventStore for GatedOrderReads {
 
 fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>, closed: Arc<AtomicBool>) -> CommandDeps {
     CommandDeps {
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         store: Arc::new(GatedOrderReads {
             inner: Arc::new(PgEventStore::new(pool.clone())),
             closed,

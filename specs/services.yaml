@@ -207,6 +207,27 @@ identity:
         authRef: { $ref: 'scalars.yaml#/AuthSubject' }
         customerId: { $ref: 'scalars.yaml#/CustomerId' }
       errors: []
+    stamp_rider_claim:
+      description: >
+        Write the RIDER role claim onto the provider-side auth user identified by `authRef`
+        (#639 part C step 2c-i, the rider sign-in door): sets `app_metadata.captain_food`
+        = `{ role: RIDER }` -- the role and NOTHING else. No `rider_id`, no id of any kind
+        (ADR-20260830-234532, ADR-20260818-004646): the rider's binding resolves on every request
+        from OUR Postgres (`Rider.auth_ref -> rider_id`, step 2b), and a stamped id would be a
+        cache the platform cannot invalidate. A SECOND stamper beside `stamp_customer_claim`, not
+        a parameter on it (ADR-20260818-101500: one stamper per role, each hardcoded, selected at
+        compile time -- the customer path cannot call this one and vice versa). The provider
+        REPLACES the `captain_food` object wholesale (the shallow-merge rule above), so stamping
+        RIDER on a subject that already carries another role's claim would ERASE that claim: until
+        the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, a subject holding a
+        non-RIDER claim is REFUSED with `AuthSubjectHoldsAnotherRole` -- fail closed, never an
+        overwrite. Idempotent on redelivery (already exactly `{ role: RIDER }` -> no-op).
+        FAIL-CLOSED on the credential like the customer stamp: without SUPABASE_SECRET_KEY it
+        errors, and the caller then parks nothing (an unstamped token is never parked).
+      input:
+        authRef: { $ref: 'scalars.yaml#/AuthSubject' }
+      errors:
+        - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
     send_email_magic_link:
       description: "Email a magic link to verify/link this address, localized by the stored locale."
       input:

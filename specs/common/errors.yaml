@@ -143,3 +143,66 @@ MailboxMessageNotRequeueable:
   messages:
     en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued."
     fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file."
+
+# --- Phone-OTP sign-in vocabulary (promoted from specs/customer/ by #639 part C step 2c-i) --------
+# Thrown by TWO doors now -- the customer's RequestPhoneVerification/VerifyPhone and the rider's
+# RequestRiderSignInCode/ConfirmRiderSignIn -- so the placement rule derives `common` (an error
+# lives with its throwing actor's scope; a multi-scope derivation is the kernel's). Same names,
+# same contexts, same en/fr copy: a kind-logical `errors.yaml#/...` ref never noticed the move.
+
+PhoneCountryNotServed:
+  description: >
+    The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation
+    error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not
+    deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the
+    served-country decision plus cost containment — a calling code is not a destination, and a code we
+    do not serve can reach territories rated far above what we budgeted (the global ceiling, not this
+    list, is the economic control against pumping) — which is why the refusal is fail-closed: an
+    unparseable number lands here too, never on a send.
+  context:
+    dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
+  messages:
+    en: "We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us."
+    fr: "Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous."
+
+
+VerificationSendLimitReached:
+  description: >
+    This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a
+    `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen
+    must offer help instead of a timer. A customer who genuinely burned five sends has a delivery
+    problem no sixth SMS will fix.
+  context: {}
+  messages:
+    en: "You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in."
+    fr: "Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter."
+
+
+VerificationSendCapacityExhausted:
+  description: >
+    The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised
+    (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps
+    limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It
+    must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under
+    way, and both need a human tonight.
+  context: {}
+  messages:
+    en: "We can't send verification codes right now. Please contact us — we'll get you signed in."
+    fr: "Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons."
+
+
+InvalidVerificationCode:
+  description: "The SMS OTP code does not match (rejected by Supabase Auth)."
+  context:
+    phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+  messages:
+    en: "The verification code is incorrect. Please try again."
+    fr: "Le code de vérification est incorrect. Veuillez réessayer."
+
+
+VerificationCodeExpired:
+  description: "The SMS OTP (or email link) has expired; request a new one."
+  context: {}
+  messages:
+    en: "The verification code has expired. Please request a new one."
+    fr: "Le code de vérification a expiré. Veuillez en demander un nouveau."

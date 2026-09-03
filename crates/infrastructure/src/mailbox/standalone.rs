@@ -136,6 +136,16 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         mailbox_requeue: Arc::new(crate::persistence::mailbox_lanes::PgMailboxRequeue::new(
             pool.clone(),
         )),
+        // #639 part C step 2c-i: the rider sign-in door's identity bridge (the same `rider` table
+        // the request seam reads) and its support route -- the latter in the same ENV-GATED posture
+        // as the gates below (this crate cannot read the generated Config); empty is unset, and
+        // unset makes the door fail closed, loudly.
+        riders: Arc::new(crate::PgRiderRepository::new(pool.clone())),
+        support_contact: std::env::var("SUPPORT_CONTACT")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .map(domain::generated::scalars::EmailAddress),
         // RSO-1 Phase 4: the PlaceOrder service-hours enforcement gate — same ENV-GATED posture
         // as the rest of this fn (this crate cannot read the generated Config; the bins' baked
         // profiles surface the key as an env var), same parse as the generated reader's booleans,
