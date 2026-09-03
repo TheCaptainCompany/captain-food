@@ -689,21 +689,6 @@ was to extract the gate to a serde-only crate whose cold build is seconds. **The
 "cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
 wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.
 
-## 19a. Two gate-recipe corrections that each cost one wasted cycle (2026-09-03)
-
-- **Postgres after a container restart**: `pg_ctlcluster 16 main start` alone suffices — the
-  `postgres` role's password is already `postgres` on this image, and `PGPASSWORD=postgres psql -h
-  localhost -U postgres -c 'select 1'` verifies it. Do NOT `ALTER USER postgres …` over the socket
-  (peer auth refuses it) and do not reach for `su postgres -c` (the sandbox refuses it). A card that
-  carried the `ALTER USER` step cost one denied command per executor.
-- **`link-check` is the LAST step of `make rust`, after the full build.** A guessed relative link in
-  a docs file therefore costs a whole `make rust` cycle to discover. Run `python3
-  tools/link-check.py` (seconds) before `make rust` whenever a change writes a relative link.
-- **Reading `make validate`**: redirect to a log, check `$?`, then `grep -cE '\[error\]'` on the
-  log. The `[error]` lines print *before* a long warning wall, so `| tail` shows a clean-looking
-  warning list under a failing verdict, and `| grep` makes `$?` grep's rather than make's — both
-  reported success over a failing gate this week.
-
 ## 19. Shapes a gate test keeps reproducing
 
 From [#679 "RETRIEVAL-QMD-CI decided: the decision-lookup stub suite runs in
@@ -938,3 +923,18 @@ is itself the argument: **a list that grows has no business stating its own leng
   review. The mechanism is `docs/decisions/_exempt.yaml`, whose own header describes exactly this
   case ("held/not-yet-deposited"), with the merge as the `retires_when`; it is self-pruning, so the
   entry errors as unused the moment the PR lands, which is the removal prompt.
+## 19a. Two gate-recipe corrections that each cost one wasted cycle (2026-09-03)
+
+- **Postgres after a container restart**: `pg_ctlcluster 16 main start` alone suffices — the
+  `postgres` role's password is already `postgres` on this image, and `PGPASSWORD=postgres psql -h
+  localhost -U postgres -c 'select 1'` verifies it. Do NOT `ALTER USER postgres …` over the socket
+  (peer auth refuses it) and do not reach for `su postgres -c` (the sandbox refuses it). A card that
+  carried the `ALTER USER` step cost one denied command per executor.
+- **`link-check` is the LAST step of `make rust`, after the full build.** A guessed relative link in
+  a docs file therefore costs a whole `make rust` cycle to discover. Run `python3
+  tools/link-check.py` (seconds) before `make rust` whenever a change writes a relative link.
+- **Reading `make validate`**: redirect to a log, check `$?`, then `grep -cE '\[error\]'` on the
+  log. The `[error]` lines print *before* a long warning wall, so `| tail` shows a clean-looking
+  warning list under a failing verdict, and `| grep` makes `$?` grep's rather than make's — both
+  reported success over a failing gate this week.
+
