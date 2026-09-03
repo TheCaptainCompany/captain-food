@@ -925,14 +925,29 @@ is itself the argument: **a list that grows has no business stating its own leng
   entry errors as unused the moment the PR lands, which is the removal prompt.
 ## 19a. Two gate-recipe corrections that each cost one wasted cycle (2026-09-03)
 
-- **Postgres after a container restart**: `pg_ctlcluster 16 main start` alone suffices — the
-  `postgres` role's password is already `postgres` on this image, and `PGPASSWORD=postgres psql -h
-  localhost -U postgres -c 'select 1'` verifies it. Do NOT `ALTER USER postgres …` over the socket
+- **Postgres after a container restart**: `pg_ctlcluster 16 main start` brings the cluster up —
+  the `postgres` role's password is already `postgres` on this image, and `PGPASSWORD=postgres psql
+  -h localhost -U postgres -c 'select 1'` verifies it. **That is NOT enough for the gate**: `make
+  test-crates` panics unless `DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres` is
+  ALSO exported (`crates/db_test_gate/src/lib.rs`, the #474 inversion). A reviewer lost a full run
+  to "cluster up, URL unset" on #849 after this section first said "alone suffices" — corrected
+  2026-09-03. Do NOT `ALTER USER postgres …` over the socket
   (peer auth refuses it) and do not reach for `su postgres -c` (the sandbox refuses it). A card that
   carried the `ALTER USER` step cost one denied command per executor.
 - **`link-check` is the LAST step of `make rust`, after the full build.** A guessed relative link in
   a docs file therefore costs a whole `make rust` cycle to discover. Run `python3
   tools/link-check.py` (seconds) before `make rust` whenever a change writes a relative link.
+- **Disk before `make test-crates`** (measured on #846/#849, 2026-09-03): `rm -rf
+  target/debug/incremental` then `find target/debug/deps -maxdepth 1 -type f -size +50M -delete`
+  (as two plain single commands — a compound `rm; du; df` line gets a permission denial) reach
+  **about 14 GB free**, not more; the workspace test build then consumes **~6.5 GB on top of what
+  `make rust` leaves**, and the first 2b push hit ENOSPC at 100% mid-build, which also loses the
+  Bash tool's own output. Rule: check `df -h /` before EACH of `make rust` and `make test-crates`;
+  when starting below ~16 GB, sweep again between the two rather than once at the start.
+- **Seeing a test red costs one full `server` test-binary build (~5 min) that must not overlap a
+  source edit** — files edited during the build may or may not be picked up, and the red state
+  becomes unrepeatable. Sequence: write the test, start the red build, stage the runtime change as
+  a script in the scratchpad, apply it only after the build exits.
 - **Reading `make validate`**: redirect to a log, check `$?`, then `grep -cE '\[error\]'` on the
   log. The `[error]` lines print *before* a long warning wall, so `| tail` shows a clean-looking
   warning list under a failing verdict, and `| grep` makes `$?` grep's rather than make's — both
