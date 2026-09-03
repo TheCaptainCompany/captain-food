@@ -538,7 +538,7 @@ async fn the_code_request_answers_identically_for_a_rider_and_a_stranger() {
 const ACCEPT_DELIVERY: &str = r#"mutation {
   acceptDelivery(input: {
     deliveryJobId: "00000000-0000-0000-0000-00000000000d",
-    riderId: "00000000-0000-0000-0000-000000000600d"
+    riderId: "00000000-0000-0000-0000-00000000600d"
   }) { messageId }
 }"#;
 
