@@ -1391,6 +1391,46 @@
     "en": "My deliveries",
     "fr": "Mes courses"
   },
+  "rider.sign_in.body": {
+    "en": "Enter your phone number. No password: you will receive a code by SMS.",
+    "fr": "Entrez votre numéro de téléphone. Aucun mot de passe : vous recevrez un code par SMS."
+  },
+  "rider.sign_in.code_body": {
+    "en": "Type the six digits you received by SMS.",
+    "fr": "Saisissez les six chiffres reçus par SMS."
+  },
+  "rider.sign_in.code_title": {
+    "en": "Your code",
+    "fr": "Votre code"
+  },
+  "rider.sign_in.dialing_code_label": {
+    "en": "Country code",
+    "fr": "Indicatif"
+  },
+  "rider.sign_in.phone_label": {
+    "en": "Phone number",
+    "fr": "Numéro de téléphone"
+  },
+  "rider.sign_in.request_code": {
+    "en": "Send me my code",
+    "fr": "Recevoir mon code"
+  },
+  "rider.sign_in.resend": {
+    "en": "Send a new code",
+    "fr": "Renvoyer un code"
+  },
+  "rider.sign_in.sending": {
+    "en": "Sending…",
+    "fr": "Envoi…"
+  },
+  "rider.sign_in.title": {
+    "en": "Rider sign-in",
+    "fr": "Connexion livreur"
+  },
+  "rider.sign_in.verifying": {
+    "en": "Checking…",
+    "fr": "Vérification…"
+  },
   "rider.title": {
     "en": "Captain Rider",
     "fr": "Captain Rider"

@@ -55,6 +55,17 @@ pub struct Screen {
     /// these BEFORE any network: the read would fail GraphQL validation on every paint and is
     /// skipped by design, never counted as a degraded render.
     pub skipped_reads: &'static [ResolverKey],
+    /// R1 (#639 part C step 2c-ii, PROP-20260831-180622 §5): the UserType token whose
+    /// `/{role}/graphql` path THIS screen's transports address, when the DSL declares
+    /// `graphql_role:`; `None` = the surface's own role (`Surface::role`, the default every
+    /// pre-R1 screen keeps byte-identically). Validator §26 proves every operation the screen
+    /// binds admits it, so a declared role can never be a role-refused transport.
+    pub graphql_role: Option<&'static str>,
+    /// The route a `requires_auth` screen bounces to when the surface has NO session
+    /// (`unauthenticated: { type: navigate, route }`, #639 2c-ii): the server 302s a
+    /// cookie-less document GET there, the client navigates there on a 401 from its role path.
+    /// `None` = the pre-2c-ii behaviour (customer surfaces: the auth sheet over the screen).
+    pub unauthenticated_route: Option<&'static str>,
     pub tree: &'static [Node],
 }
 
@@ -83,6 +94,8 @@ pub mod captain_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::PromotionsActive, ResolverKey::CategoriesAll, ResolverKey::RestaurantsFeatured, ResolverKey::RestaurantsAll],
             skipped_reads: &[ResolverKey::CategoriesAll],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -115,6 +128,8 @@ pub mod captain_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantsSearch, ResolverKey::CategoriesAll, ResolverKey::DishesSearch, ResolverKey::SearchesRecent],
             skipped_reads: &[ResolverKey::CategoriesAll],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -144,6 +159,8 @@ pub mod captain_frontoffice {
             sdui: true,
             data_requirements: &[],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("partner.header"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::HeroSection, props: &[("image", PropValue::Text("/assets/partner-hero.jpg")), ("title", PropValue::I18n("partner.hero_title")), ("body", PropValue::I18n("partner.hero_body"))], children: &[], branches: &[] },
@@ -193,6 +210,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::OrdersByRestaurant],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -221,6 +240,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::DeliveriesByRestaurant],
             skipped_reads: &[ResolverKey::DeliveriesByRestaurant],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -244,6 +265,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::RefundsPending],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -267,6 +290,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::SatisfactionByRestaurant],
             skipped_reads: &[ResolverKey::SatisfactionByRestaurant],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -287,6 +312,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::ConversationByOrder, ResolverKey::InternalNotesByOrder],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -329,6 +356,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationsQueue],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -350,6 +379,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationById],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -381,6 +412,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantLocations],
             skipped_reads: &[ResolverKey::RestaurantLocations],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -411,6 +444,8 @@ pub mod restaurant_backoffice {
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantLocations],
             skipped_reads: &[ResolverKey::RestaurantLocations],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -451,6 +486,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::RestaurantBySlug, ResolverKey::CatalogByRestaurant],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("sticky", PropValue::Text("true")), ("right_slot.0.type", PropValue::Text("icon_button")), ("right_slot.0.icon", PropValue::Text("share")), ("right_slot.0.action.type", PropValue::Text("share")), ("right_slot.0.action.url", PropValue::Binding("canonical_url")), ("right_slot.1.type", PropValue::Text("icon_button")), ("right_slot.1.icon", PropValue::Text("heart")), ("right_slot.1.active_when", PropValue::Text("is_favorited")), ("right_slot.1.action.type", PropValue::Text("toggle_favorite")), ("right_slot.1.action.restaurant_id", PropValue::Binding("restaurant.id"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("restaurant_info"))], children: &[
@@ -474,6 +511,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::CartCurrent],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("cart.title")), ("subtitle", PropValue::Binding("cart.restaurant.displayName"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::CartLines, props: &[("items", PropValue::Binding("cart.lines")), ("item_template.type", PropValue::Text("cart_line_row")), ("item_template.quantity_stepper.min", PropValue::Text("0")), ("item_template.quantity_stepper.on_change.type", PropValue::Text("change_cart_line_quantity")), ("item_template.quantity_stepper.on_change.line_id", PropValue::Binding("line.id")), ("item_template.quantity_stepper.on_change.quantity", PropValue::Binding("new_quantity"))], children: &[], branches: &[] },
@@ -493,6 +532,8 @@ pub mod restaurant_frontoffice {
             sdui: false,
             data_requirements: &[ResolverKey::CartCurrent, ResolverKey::MeProfile, ResolverKey::PaymentStatusByOrder, ResolverKey::RestaurantBySlug],
             skipped_reads: &[ResolverKey::PaymentStatusByOrder],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[],
         },
         Screen {
@@ -503,6 +544,8 @@ pub mod restaurant_frontoffice {
             sdui: false,
             data_requirements: &[ResolverKey::OrderById],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[],
         },
         Screen {
@@ -513,6 +556,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::OrdersMine],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -534,6 +579,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::ConversationByOrder],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("conversation.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("conversation.status"))], children: &[], branches: &[] },
@@ -554,6 +601,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::OrderById],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("claim.open.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::InfoRow, props: &[("label", PropValue::I18n("claim.order_ref")), ("value", PropValue::Binding("order.id"))], children: &[], branches: &[] },
@@ -572,6 +621,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationsMine],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -592,6 +643,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::ReclamationById],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("claim.detail.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("reclamation.status"))], children: &[], branches: &[] },
@@ -620,6 +673,8 @@ pub mod restaurant_frontoffice {
             sdui: true,
             data_requirements: &[ResolverKey::MeProfile, ResolverKey::FavoritesMine, ResolverKey::RewardsBalance],
             skipped_reads: &[ResolverKey::FavoritesMine],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -685,11 +740,36 @@ pub mod restaurant_frontoffice {
     ];
 }
 
-/// `specs/screens/rider.yaml` — 2 screen(s).
+/// `specs/screens/rider.yaml` — 3 screen(s).
 pub mod rider {
     use super::*;
 
     pub const SCREENS: &[Screen] = &[
+        Screen {
+            id: "sign_in",
+            route: "/sign-in",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            tree: &[
+            Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("rider_sign_in_topbar"))], children: &[
+                Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/sign-in"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.title"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.sign_in.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.sign_in.body"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("rider_sign_in_form"))], children: &[
+                Node { kind: ComponentKind::TextInput, props: &[("id", PropValue::Text("rider_dialing_code")), ("label", PropValue::I18n("rider.sign_in.dialing_code_label")), ("value", PropValue::Text("+33"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::PhoneField, props: &[("id", PropValue::Text("rider_phone")), ("label", PropValue::I18n("rider.sign_in.phone_label")), ("autofocus", PropValue::Text("true"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("rider_request_code")), ("label", PropValue::I18n("rider.sign_in.request_code")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("request_rider_sign_in_code")), ("action.variables.dialingCode", PropValue::Binding("rider_dialing_code.value")), ("action.variables.nationalNumber", PropValue::Binding("rider_phone.value")), ("action.loading_label", PropValue::I18n("rider.sign_in.sending")), ("action.on_success.type", PropValue::Text("open_bottom_sheet")), ("action.on_success.sheet_id", PropValue::Text("rider_code_sheet"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("rider_request_error")), ("for_action", PropValue::Text("request_rider_sign_in_code"))], children: &[], branches: &[] }
+            ], branches: &[] }
+        ],
+        },
         Screen {
             id: "jobs",
             route: "/",
@@ -698,6 +778,8 @@ pub mod rider {
             sdui: true,
             data_requirements: &[ResolverKey::DeliveriesMine],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: Some("/sign-in"),
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("rider_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -719,6 +801,8 @@ pub mod rider {
             sdui: true,
             data_requirements: &[ResolverKey::DeliveryByOrder],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: Some("/sign-in"),
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.job.title"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("delivery.status"))], children: &[], branches: &[] },
@@ -734,6 +818,13 @@ pub mod rider {
     ];
 
     pub const SHEETS: &[Sheet] = &[
+        Sheet { id: "rider_code_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("rider_code_sheet")), ("title", PropValue::I18n("rider.sign_in.code_title")), ("drag_to_close", PropValue::Text("false"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.sign_in.code_body"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::OtpInput, props: &[("id", PropValue::Text("rider_code")), ("length", PropValue::Text("6")), ("autofocus", PropValue::Text("true")), ("on_complete.type", PropValue::Text("confirm_rider_sign_in")), ("on_complete.variables.dialingCode", PropValue::Binding("rider_dialing_code.value")), ("on_complete.variables.nationalNumber", PropValue::Binding("rider_phone.value")), ("on_complete.variables.code", PropValue::Binding("rider_code.value")), ("on_complete.loading_label", PropValue::I18n("rider.sign_in.verifying")), ("on_complete.on_success.0.type", PropValue::Text("claim_session")), ("on_complete.on_success.1.type", PropValue::Text("navigate")), ("on_complete.on_success.1.route", PropValue::Text("/"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("rider_sign_in_error")), ("for_action", PropValue::Text("confirm_rider_sign_in"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("rider_resend_code")), ("label", PropValue::I18n("rider.sign_in.resend")), ("action.type", PropValue::Text("request_rider_sign_in_code")), ("action.variables.dialingCode", PropValue::Binding("rider_dialing_code.value")), ("action.variables.nationalNumber", PropValue::Binding("rider_phone.value")), ("action.loading_label", PropValue::I18n("rider.sign_in.sending"))], children: &[], branches: &[] }
+            ], branches: &[] } },
     ];
 }
 
@@ -750,6 +841,8 @@ pub mod system {
             sdui: true,
             data_requirements: &[ResolverKey::MailboxLanes, ResolverKey::MailboxPoisoned],
             skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
             tree: &[
             Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("mailbox.title")), ("subtitle", PropValue::I18n("mailbox.subtitle"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("lanes")), ("title", PropValue::I18n("mailbox.lanes"))], children: &[

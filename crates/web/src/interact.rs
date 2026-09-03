@@ -455,8 +455,32 @@ async fn apply_outcome(
             )
             .await;
         }
-        other => toast(&outcome_toast(other, "")),
+        other => {
+            // #639 2c-ii: a screen that declared WHERE this action's refusal lands
+            // (`inline_error` with `for_action`) shows it there — the reason stays on screen
+            // beside the one route out, in the caller's language (the server localized it);
+            // otherwise the toast, as before.
+            let text = outcome_toast(other, "");
+            let action = el.get_attribute(attrs::ACTION).unwrap_or_default();
+            if !reveal_inline_error(&action, &text) {
+                toast(&text);
+            }
+        }
     }
+}
+
+/// Fill and un-hide the `inline_error` declared for `action` (`data-for-action`), if the screen
+/// has one. Returns whether a slot took the message.
+fn reveal_inline_error(action: &str, text: &str) -> bool {
+    if action.is_empty() {
+        return false;
+    }
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return false };
+    let selector = format!("[data-c=\"inline_error\"][data-for-action=\"{action}\"]");
+    let Some(slot) = doc.query_selector(&selector).ok().flatten() else { return false };
+    slot.set_text_content(Some(text));
+    let _ = slot.remove_attribute("hidden");
+    true
 }
 
 /// `navigate` step target (#529): the special [`crate::executor::RELOAD_ROUTE`] token reloads the

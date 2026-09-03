@@ -6784,8 +6784,23 @@ pub(crate) fn mailbox_status_api(s: domain::generated::scalars::InboundMessageSt
     }
 }
 
-/// A mailbox status row → the API Operation shape (`operationStatus` / `operationStatusChanged`).
-pub(crate) fn operation_from_mailbox(row: &actor_client::mailbox::MailboxStatusRow) -> Operation {
+/// The caller's locale for the human-readable `Operation.message` (#639 part C step 2c-ii): the
+/// transport injects `crate::graphql::locale::RequestLocale` (cookie → Accept-Language → the
+/// platform default); a context with none — a direct schema execution in a test — keeps the
+/// pre-locale contract (English). The CODE is the contract (`errorCode`); the message is
+/// presentation, derived at READ time from the row's `{ code, context }` — never stored.
+pub(crate) fn request_locale(ctx: &async_graphql::Context<'_>) -> crate::graphql::locale::RequestLocale {
+    ctx.data_opt::<crate::graphql::locale::RequestLocale>().copied().unwrap_or_default()
+}
+
+/// A mailbox status row → the API Operation shape (`operationStatus` / `operationStatusChanged`),
+/// its message interpolated from the row's typed error context in the caller's locale — so a
+/// French rider reads `RiderNotRegistered` as the French catalogue sentence naming the support
+/// contact, on the poll path AND the push path (both build from the durable row).
+pub(crate) fn operation_from_mailbox(
+    row: &actor_client::mailbox::MailboxStatusRow,
+    locale: crate::graphql::locale::RequestLocale,
+) -> Operation {
     let error_code = row
         .error
         .as_ref()
@@ -6793,7 +6808,7 @@ pub(crate) fn operation_from_mailbox(row: &actor_client::mailbox::MailboxStatusR
         .and_then(|c| c.as_str())
         .map(str::to_owned);
     let message = match (&error_code, row.error.as_ref().and_then(|e| e.get("context"))) {
-        (Some(code), Some(context)) => domain::generated::errors::message_en(code, context),
+        (Some(code), Some(context)) => locale.message(code, context),
         _ => None,
     };
     Operation {

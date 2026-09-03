@@ -8,6 +8,10 @@ pub mod acl;
 /// the generated resolver literals only call it.
 pub mod cart_read;
 pub mod generated;
+/// The request's LOCALE for human-readable GraphQL text (#639 2c-ii): resolved once at the
+/// transport boundary, read back by the generated `operationStatus` legs to localize
+/// `Operation.message` from the row's typed error context.
+pub mod locale;
 pub mod routes;
 pub mod schema;
 /// The subgraph scope slice (#385 API-tier wiring, D8): a `graphql-{scope}` bin serves the

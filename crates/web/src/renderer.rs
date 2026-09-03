@@ -1186,12 +1186,17 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
             let g = |k: &str| trig.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone());
             use crate::executor::attrs;
             let len = prop_text(node, "length", ctx);
+            // A declared default (`value: "+33"` — the rider door's prefilled dialing code, #639
+            // 2c-ii): the ONE thing the driver's `{{ <id>.value }}` fill reads back, so a field the
+            // user never touches still submits its declared value.
+            let default_value = prop_text(node, "value", ctx);
             view! {
                 <label data-c=ty>
                     {label}
                     <input
                         id=field_id
                         placeholder=placeholder
+                        value={if default_value.is_empty() { None } else { Some(default_value) }}
                         data-action=g(attrs::ACTION)
                         data-vars=g(attrs::VARS)
                         data-var-bindings=g(attrs::VAR_BINDINGS)
@@ -1200,6 +1205,28 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
                         data-on-success=g(attrs::ON_SUCCESS)
                     />
                 </label>
+            }
+            .into_any()
+        }
+        // A refusal's own place on the screen (#639 2c-ii, ADR-20260830-213135): `for_action`
+        // names the action whose REJECTED/FAILED verdict lands here — the driver fills the text
+        // (the server's localized catalogue sentence, context interpolated) and un-hides it
+        // instead of a passing toast. Hidden until then; a static `message` renders as before.
+        ComponentKind::InlineError => {
+            let message = prop_text(node, "message", ctx);
+            let for_action = prop_text(node, "for_action", ctx);
+            let field_id = prop_text(node, "id", ctx);
+            let hidden = !for_action.is_empty() && message.is_empty();
+            view! {
+                <p
+                    data-c=ty
+                    id={if field_id.is_empty() { None } else { Some(field_id) }}
+                    role="alert"
+                    data-for-action={if for_action.is_empty() { None } else { Some(for_action) }}
+                    hidden=hidden
+                >
+                    {message}
+                </p>
             }
             .into_any()
         }
@@ -1462,14 +1489,23 @@ pub fn hydrate() {
         return;
     }
 
-    let transport = crate::graphql::HttpTransport::new(&origin, surface.role(), session);
+    // R1 (#639 2c-ii): the role path is the SCREEN's — its declared `graphql_role` when it has
+    // one (the rider sign-in door speaks to `/public/graphql`), else the surface's own role. Both
+    // transports of this page (reads here, writes + push socket in `interact`) are built from the
+    // same answer, so a screen can never read as one role and write as another.
+    let role = surface.role_for(screen);
+    let transport = crate::graphql::HttpTransport::new(&origin, role, session);
 
     // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
-    crate::interact::install(&origin, surface.role(), session);
+    crate::interact::install(&origin, role, session);
 
     let sheets = surface.sheets();
     wasm_bindgen_futures::spawn_local(async move {
         let mut ctx = RenderContext::new(&locale);
+        // #639 2c-ii: a 401 from this screen's role path is the POSITIVE "no session" signal — a
+        // staff path refuses an anonymous caller before any guard runs — so a gated screen that
+        // declares a door navigates there instead of painting a shell over a refused read.
+        let mut unauthorized = false;
         for resolver in screen.data_requirements {
             // #745: the generated §25b skip table — a structurally unfulfillable read (required
             // arg, no paint-time source, declared on the binding) is skipped before any network
@@ -1488,7 +1524,13 @@ pub fn hydrate() {
             // (The client degradation legs are RESERVED in the observability contract — no
             // OTel in WASM, so nothing is emitted here.)
             let result = crate::graphql::execute_resolver(&transport, *resolver, vars).await;
-            match crate::graphql::classify_resolve(surface.role(), *resolver, result) {
+            if matches!(
+                result,
+                Err(crate::graphql::ResolverError::Transport(crate::graphql::TransportError::Status { status: 401 }))
+            ) {
+                unauthorized = true;
+            }
+            match crate::graphql::classify_resolve(role, *resolver, result) {
                 crate::graphql::ResolveOutcome::Resolved(value) => {
                     ctx.insert_resolved(resolver.as_str(), value)
                 }
@@ -1505,6 +1547,16 @@ pub fn hydrate() {
         // ADR-20260722-174500); a staff surface without one bounces to its root, where the
         // role-pathed GraphQL enforces the real gate.
         if screen.requires_auth {
+            // The declared door first (#639 2c-ii): a surface that names one sends the
+            // unauthenticated visitor there — the server already 302s a cookie-less GET, this is
+            // the leg for a cookie that no longer verifies. A visitor whose reads answered has a
+            // session and stays.
+            if let (true, Some(route)) = (unauthorized, screen.unauthenticated_route) {
+                if let Some(w) = web_sys::window() {
+                    let _ = w.location().set_href(route);
+                }
+                return;
+            }
             let opened = web_sys::window()
                 .and_then(|w| w.document())
                 .and_then(|d| d.query_selector("[data-sheet-id=\"auth_sheet\"]").ok().flatten())

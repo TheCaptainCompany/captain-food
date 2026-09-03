@@ -32,7 +32,7 @@ public_user:
         RequestPhoneOtp: { $ref: 'api.yaml#/mutations/requestPhoneVerification' }
         VerifyPhone: { $ref: 'api.yaml#/mutations/verifyPhone' }
     SignInAsRider:
-      description: As a visitor on the rider surface, I sign in with my phone -- the platform identifies me as a rider (it never registers me here) and issues the RIDER credential; every rider activity starts here (#639 part C step 2c). Held by the anonymous persona because the door is walked WITHOUT a credential (op roles [PUBLIC]) -- a RIDER persona cannot call a PUBLIC-only operation.
+      description: As a visitor on the rider surface, I sign in with my phone -- the platform identifies me as a rider (it never registers me here) and issues the RIDER credential; every rider activity starts here (#639 part C step 2c). Held by the anonymous persona because the door is walked WITHOUT a credential (op roles [PUBLIC]) -- a RIDER persona cannot call a PUBLIC-only operation. Walked from the rider app's `sign_in` screen (`specs/screens/rider.yaml`, route `/sign-in`, transport role PUBLIC via `graphql_role` -- R1, 2c-ii) -- phone, then the six-digit code in the `rider_code_sheet`, then `claim_session` and the job list.
       steps:
         RequestRiderSignInCode: { $ref: 'api.yaml#/mutations/requestRiderSignInCode' }   # identical outcome whether or not the phone is a rider's
         ConfirmRiderSignIn: { $ref: 'api.yaml#/mutations/confirmRiderSignIn' }   # identify-only; the session then arrives via POST /auth/session, never in the response

@@ -16247,6 +16247,137 @@ mod screen_binding_gate {
     }
 }
 
+// ─── §26 — a screen's transport role (R1) vs the operations it binds (#639 part C 2c-ii) ────────
+mod screen_roles_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn screen_mut<'a>(model: &'a mut Model, file: &str, id: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut(file)
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .and_then(|s| s.iter_mut().find(|s| s.get("id").and_then(|x| x.as_str()) == Some(id)))
+            .and_then(|s| s.as_mapping_mut())
+            .unwrap_or_else(|| panic!("screen {id} exists in {file}"))
+    }
+
+    fn hits(m: &Model, rule: &str) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == rule)
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The real tree is GREEN under every §26 ERROR, and the rider door is the one screen that
+    /// declares a transport role — the capability exists and is exercised exactly once today.
+    #[test]
+    fn the_real_corpus_is_clean_and_the_rider_door_is_the_one_declared_transport_role() {
+        let model = real_model();
+        for rule in [
+            "screen-graphql-role-unknown",
+            "screen-graphql-role-not-admitted",
+            "screen-graphql-role-requires-anonymous",
+            "screen-graphql-role-refused-operation",
+            "screen-unauthenticated-route-unknown",
+        ] {
+            assert!(hits(&model, rule).is_empty(), "{rule} must be clean on the real corpus: {:?}", hits(&model, rule));
+        }
+        let declared: Vec<String> = model
+            .defs
+            .iter()
+            .filter(|(k, _)| k.starts_with("screens/"))
+            .flat_map(|(k, v)| {
+                v.get("screens")
+                    .and_then(|s| s.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter(|s| s.get("graphql_role").is_some())
+                            .map(|s| format!("{k}/{}", s.get("id").and_then(|x| x.as_str()).unwrap_or("?")))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+        assert_eq!(declared, vec!["screens/rider.yaml/sign_in".to_string()]);
+    }
+
+    /// RED on the planted defect the rule exists for: `graphql_role: PUBLIC` on the RIDER job list,
+    /// which binds `myDeliveries` / `acceptDelivery` / `changeRiderStatus` — RIDER-only operations
+    /// that would be SkipReason::RoleRefused on `/public/graphql`. Every refused operation fires,
+    /// and the not-admitted + requires-anonymous clauses fire beside it.
+    #[test]
+    fn a_public_transport_on_a_rider_only_screen_is_refused_per_bound_operation() {
+        let mut model = real_model();
+        screen_mut(&mut model, "screens/rider.yaml", "jobs")
+            .insert(Value::from("graphql_role"), Value::from("PUBLIC"));
+        let refused = hits(&model, "screen-graphql-role-refused-operation");
+        assert!(refused.iter().any(|h| h.contains("screens/jobs") && h.contains("query 'myDeliveries'")), "{refused:?}");
+        assert!(refused.iter().any(|h| h.contains("mutation 'acceptDelivery'")), "{refused:?}");
+        assert!(refused.iter().any(|h| h.contains("mutation 'changeRiderStatus'")), "{refused:?}");
+        assert_eq!(hits(&model, "screen-graphql-role-not-admitted").len(), 1, "PUBLIC is not one of [RIDER]");
+        assert_eq!(hits(&model, "screen-graphql-role-requires-anonymous").len(), 1, "jobs is requires_auth: true");
+        // Every clause is an ERROR, never a warning: the gate blocks.
+        assert!(validate(&model).issues.iter().any(|i| {
+            i.rule == "screen-graphql-role-refused-operation" && matches!(i.level, Level::Error)
+        }));
+    }
+
+    /// A token outside `scalars.yaml#/UserType` is refused by name.
+    #[test]
+    fn an_unknown_transport_role_token_is_refused() {
+        let mut model = real_model();
+        screen_mut(&mut model, "screens/rider.yaml", "sign_in")
+            .insert(Value::from("graphql_role"), Value::from("ANONYMOUS"));
+        assert_eq!(hits(&model, "screen-graphql-role-unknown").len(), 1);
+    }
+
+    /// The door's own contract, GREEN-to-RED on the operation, not the name: giving the sign-in
+    /// screen a RIDER-only read makes the same rule fire on THAT read alone.
+    #[test]
+    fn binding_a_refusing_read_to_the_door_fires_on_that_read() {
+        let mut model = real_model();
+        screen_mut(&mut model, "screens/rider.yaml", "sign_in")
+            .insert(Value::from("data_requirements"), Value::Sequence(vec![Value::from("deliveries.mine")]));
+        let refused = hits(&model, "screen-graphql-role-refused-operation");
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].contains("screens/sign_in") && refused[0].contains("query 'myDeliveries'"), "{refused:?}");
+    }
+
+    /// `unauthenticated:` must name an OPEN route of the same file — a bounce into another gated
+    /// screen is a loop, and a bounce on an open screen is dead declaration.
+    #[test]
+    fn the_unauthenticated_bounce_must_name_an_open_route_of_the_same_file() {
+        let mut model = real_model();
+        let mut un = serde_yaml::Mapping::new();
+        un.insert(Value::from("type"), Value::from("navigate"));
+        un.insert(Value::from("route"), Value::from("/jobs/:orderId"));
+        screen_mut(&mut model, "screens/rider.yaml", "jobs").insert(Value::from("unauthenticated"), Value::Mapping(un));
+        let found = hits(&model, "screen-unauthenticated-route-unknown");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("screens/jobs"), "{found:?}");
+    }
+
+    /// The general audience form (`screen.roles ⊆ ∩(roles of every bound operation)`) is a
+    /// WARNING held by the ratchet at exactly the two pre-existing hits — named here so the
+    /// baseline count is explained by a test, not by memory. Paying either down (a decision on
+    /// the op's ACL or the screen's audience, not this slice's) shrinks this list AND the baseline.
+    #[test]
+    fn the_audience_subset_rule_warns_on_exactly_the_two_known_dead_controls() {
+        let found = hits(&real_model(), "screen-role-refused-operation");
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().any(|h| h.contains("screens/deliveries_board") && h.contains("escalateDelivery") && h.contains("RESTAURANT_ACCOUNT")), "{found:?}");
+        assert!(found.iter().any(|h| h.contains("screens/restaurant") && h.contains("markRestaurantAsFavorite") && h.contains("PUBLIC")), "{found:?}");
+    }
+}
+
 // ─── §25b — screen read fulfillability + `skipped_reads` declarations (#745) ─────────────────────
 mod screen_fulfillability {
     use super::super::*;

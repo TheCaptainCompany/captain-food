@@ -43,6 +43,12 @@ actions:
   complete_delivery: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/completeDelivery' } }
   mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
   rider_toggle_online: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/changeRiderStatus' }, note: "The online/offline availability toggle (#95 closed the gap)." }
+  # The sign-in door (#639 part C step 2c): two identify-only `roles: [PUBLIC]` mutations, reachable
+  # from this surface ONLY through the `sign_in` screen's `graphql_role: PUBLIC` (R1, PROP-20260831-180622
+  # §5). The session itself never travels in a GraphQL response: `claim_session` collects it from
+  # `POST /auth/session` after the confirmation is accepted.
+  request_rider_sign_in_code: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requestRiderSignInCode' } }
+  confirm_rider_sign_in:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/confirmRiderSignIn' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME
@@ -63,9 +69,74 @@ global_components:
           action: { type: rider_toggle_online }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# BOTTOM SHEETS — the code entry of the sign-in door. Mounted hidden on every screen (renderer
+# rule) but opened ONLY by the `sign_in` screen's request button, so its PUBLIC-only confirmation
+# is bound by that screen alone (the validator follows `open_bottom_sheet` edges when it computes
+# what a screen binds).
+# ──────────────────────────────────────────────────────────────────────────────
+bottom_sheets:
+  rider_code_sheet:
+    id: rider_code_sheet
+    type: bottom_sheet
+    title: { $ref: 'rider.translations.yaml#/rider.sign_in.code_title' }
+    drag_to_close: false
+    sections:
+      - { type: text, value: { $ref: 'rider.translations.yaml#/rider.sign_in.code_body' } }
+      # On the 6th digit: confirm. On SUCCESS the parked session is claimed FIRST (`claim_session`
+      # awaits `POST /auth/session`, which answers Set-Cookie), THEN the app navigates to the job
+      # list — the order is load-bearing, exactly as the customer door's `verify_otp` pair (#529).
+      # The phone parts are re-read from the sign-in screen's own inputs, which are still in the DOM.
+      - { type: otp_input, id: rider_code, length: 6, autofocus: true, on_complete: { type: confirm_rider_sign_in, variables: { dialingCode: "{{ rider_dialing_code.value }}", nationalNumber: "{{ rider_phone.value }}", code: "{{ rider_code.value }}" }, loading_label: { $ref: 'rider.translations.yaml#/rider.sign_in.verifying' }, on_success: [{ type: claim_session }, { type: navigate, route: "/" }] } }
+      # The refusal states, rendered HERE in the rider's language rather than as a passing toast
+      # (ADR-20260830-213135): `RiderNotRegistered` (naming the support contact from the error's own
+      # context — the key is baked server-side, never spelled in this file), `AuthSubjectHoldsAnotherRole`,
+      # and the OTP refusals (`InvalidVerificationCode`, `VerificationCodeExpired`, …). The text is the
+      # errors.yaml message localized by the server; this component only declares WHERE it lands.
+      - { type: inline_error, id: rider_sign_in_error, for_action: confirm_rider_sign_in }
+      # The one route out of an OTP refusal: ask for a fresh code (same operation, same phone).
+      - { type: text_button, id: rider_resend_code, label: { $ref: 'rider.translations.yaml#/rider.sign_in.resend' }, action: { type: request_rider_sign_in_code, variables: { dialingCode: "{{ rider_dialing_code.value }}", nationalNumber: "{{ rider_phone.value }}" }, loading_label: { $ref: 'rider.translations.yaml#/rider.sign_in.sending' } } }
+
+# ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
 # ──────────────────────────────────────────────────────────────────────────────
 screens:
+
+  # SCREEN 0 — The sign-in door (#639 part C step 2c-ii; PROP-20260831-180622 §5 FORK 3 = R1,
+  # founder 2026-08-31). The ONE screen of this surface that speaks to `/public/graphql`
+  # (`graphql_role: PUBLIC`): the two identify-only mutations it binds admit PUBLIC and nothing
+  # else, and the validator refuses the declaration if any bound operation would refuse that role
+  # (`screen-graphql-role-refused-operation`). Deliberately NOT the `rider_topbar` chrome: its
+  # online toggle is a RIDER mutation, which this screen's transport could never carry.
+  # On-bike ergonomics: two inputs (the dialing code is prefilled, the number is the only typing),
+  # one large primary button, the six-digit code in a sheet. No greyed control: a state that cannot
+  # proceed shows its reason inline and the one route out (resend / the support contact).
+  - id: sign_in
+    roles: [PUBLIC]
+    route: "/sign-in"
+    title: { $ref: 'rider.translations.yaml#/rider.sign_in.title' }
+    sdui: true
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [request_rider_sign_in_code, confirm_rider_sign_in]
+    components:
+      - type: sticky_header
+        id: rider_sign_in_topbar
+        slots:
+          left: [{ type: logo, asset: "/assets/logo.svg", link: "/sign-in" }]
+          center: [{ type: text, value: { $ref: 'rider.translations.yaml#/rider.title' } }]
+      - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.sign_in.title' } }
+      - { type: text, value: { $ref: 'rider.translations.yaml#/rider.sign_in.body' } }
+      - type: section
+        id: rider_sign_in_form
+        content:
+          - { type: text_input, id: rider_dialing_code, label: { $ref: 'rider.translations.yaml#/rider.sign_in.dialing_code_label' }, value: "+33" }
+          - { type: phone_field, id: rider_phone, label: { $ref: 'rider.translations.yaml#/rider.sign_in.phone_label' }, autofocus: true }
+          # Acceptance opens the code sheet (never before the response — the #529 rule). The request
+          # answers the same way for a rider's phone and a stranger's (no enumeration oracle), so the
+          # sheet opens for both; the refusal, if any, comes at confirmation.
+          - { type: button, id: rider_request_code, label: { $ref: 'rider.translations.yaml#/rider.sign_in.request_code' }, variant: primary, full_width: true, action: { type: request_rider_sign_in_code, variables: { dialingCode: "{{ rider_dialing_code.value }}", nationalNumber: "{{ rider_phone.value }}" }, loading_label: { $ref: 'rider.translations.yaml#/rider.sign_in.sending' }, on_success: { type: open_bottom_sheet, sheet_id: rider_code_sheet } } }
+          - { type: inline_error, id: rider_request_error, for_action: request_rider_sign_in_code }
 
   # SCREEN 1 — Job list (assigned/available deliveries; accept from here)
   - id: jobs
@@ -74,6 +145,10 @@ screens:
     title: { $ref: 'rider.translations.yaml#/rider.jobs.title' }
     sdui: true
     requires_auth: true
+    # No session -> the door (2c-ii). Server-side: a document GET with no auth cookie is 302'd
+    # there before any render; client-side: a 401 from this surface's role path on the screen's
+    # reads navigates there. Before 2c-ii this screen rendered its shell with the read failed.
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [deliveries.mine]
     actions_used: [accept_delivery, rider_toggle_online]
     components:
@@ -96,6 +171,9 @@ screens:
     title: { $ref: 'rider.translations.yaml#/rider.job.title' }
     sdui: true
     requires_auth: true
+    # Before 2c-ii an unauthenticated visitor here was bounced to `/` (the staff-surface arm of the
+    # #92 client guard), where `jobs` then rendered its shell with the read failed.
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [delivery.byOrder]
     actions_used: [confirm_pickup, complete_delivery, phone_call]
     gaps:
