@@ -74,13 +74,24 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
     } else {
         crate::auth::CustomerIdentitySource::Claim
     };
+    // The RIDER seam has no gate (#639 part C step 2b): Postgres, over the `Rider` projection's
+    // `auth_ref` bridge, in every bin that mounts `/rider/graphql` -- the same adapter the monolith
+    // wires, no logic fork.
+    let identity_sources = crate::auth::IdentitySources {
+        customer: customer_identity_source,
+        rider: crate::auth::RiderIdentitySource::new(std::sync::Arc::new(
+            crate::auth::PgRiderIdentity::new(std::sync::Arc::new(
+                infrastructure::PgRiderRepository::new(pool.clone()),
+            )),
+        )),
+    };
     let schema = crate::graphql_schema::build_schema_for_scope(
         Some(di.read),
         Some(di.write),
         Some(event_bus),
         Some(settings.scope),
     );
-    crate::graphql::routes::graphql_routes(schema, di.tenant_lookup, customer_identity_source)
+    crate::graphql::routes::graphql_routes(schema, di.tenant_lookup, identity_sources)
         // API auth (ADR-0047): the same Supabase-JWT verifier the monolith layers — the subgraph
         // IS the schema boundary, so authn/authz live here, never in the (stateless) gateway.
         .layer(Extension(crate::auth::AuthContext::from_config(

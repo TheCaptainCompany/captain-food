@@ -7,13 +7,14 @@
 //! has carried `authRef` as required since it was written; until now nothing projected it, so the
 //! RIDER role had no resolvable identity at all.
 //!
-//! **Deliberately no `by_auth_ref` here yet.** The resolver arrives with the rider sign-in door
-//! (#639 part C), and a lookup nothing calls is a port that cannot be verified — the shape the
-//! erasure chunk already paid for once. When it lands, two things are not negotiable: it selects
-//! `rider_id` and NOTHING else (the table answers *who this connection is*, never *what it may
-//! see* — see the read model's own `rules:`), and it must never `LIMIT 1`, because picking a row
-//! is an elevation decision made by row order. The `UNIQUE` on `auth_ref` is what lets the query be
-//! written without one.
+//! **The `auth_ref` lookup lives in `rider.rs`** (`PgRiderRepository`, #639 part C step 2b — the
+//! rider sign-in door), not here: this module is the projector's store, that one is the request
+//! seam's reader, and they were kept apart so a lookup nothing calls could not be declared before
+//! its caller existed (the shape the erasure chunk paid for once). Two things about that reader are
+//! not negotiable: it selects `rider_id` and NOTHING else (the table answers *who this connection
+//! is*, never *what it may see* — see the read model's own `rules:`), and it never `LIMIT 1`s,
+//! because picking a row is an elevation decision made by row order. The `UNIQUE` on `auth_ref` is
+//! what lets the query be written without one.
 
 use application::queries::RiderRow;
 use domain::generated::scalars::{AuthSubject, PhoneNumber, RiderId};

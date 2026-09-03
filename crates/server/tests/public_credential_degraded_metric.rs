@@ -84,7 +84,7 @@ async fn router() -> axum::Router {
     server::graphql_routes(
         server::graphql_schema::build_schema(None, None, None),
         server::TenantLookup(None),
-        server::CustomerIdentitySource::Claim,
+        claim_only_sources(),
     )
     .layer(axum::Extension(server::AuthContext::from_config(
         jwks_endpoint().await,
@@ -177,4 +177,22 @@ async fn the_pre_claim_window_counts_as_a_degrade_on_the_open_path_and_as_a_gap_
         vec![("claim_absent".to_string(), 1)],
         "and the open-path degrade did not double-count"
     );
+}
+
+/// The RIDER seam these tests do not exercise: a table with no rows, so every rider subject is
+/// nobody (fail closed). `IdentitySources` refuses to be built without one on purpose.
+struct NoRiderRows;
+
+#[async_trait::async_trait]
+impl server::ResolveRiderIdentity for NoRiderRows {
+    async fn resolve(&self, _auth_subject: &str) -> server::RiderIdentityResolution {
+        server::RiderIdentityResolution::NoMapping
+    }
+}
+
+fn claim_only_sources() -> server::IdentitySources {
+    server::IdentitySources {
+        customer: server::CustomerIdentitySource::Claim,
+        rider: server::RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)),
+    }
 }

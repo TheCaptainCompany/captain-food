@@ -940,7 +940,7 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
     server::graphql_routes(
         schema,
         server::TenantLookup(Some(restaurants)),
-        server::CustomerIdentitySource::Claim,
+        claim_only_sources(),
     )
         .layer(axum::Extension(server::AuthContext::from_config(
             jwks_endpoint().await,
@@ -1042,4 +1042,22 @@ async fn without_the_cookie_the_same_request_is_anonymous() {
     let resp = post_current(storefront_router(carts).await, "resto-a.captain.food", None).await;
     assert!(resp.get("errors").is_none(), "unexpected errors: {resp}");
     assert_eq!(resp["data"]["current"], json!(null), "no credential, no claim leg: {resp}");
+}
+
+/// The RIDER seam these tests do not exercise: a table with no rows, so every rider subject is
+/// nobody (fail closed). `IdentitySources` refuses to be built without one on purpose.
+struct NoRiderRows;
+
+#[async_trait::async_trait]
+impl server::ResolveRiderIdentity for NoRiderRows {
+    async fn resolve(&self, _auth_subject: &str) -> server::RiderIdentityResolution {
+        server::RiderIdentityResolution::NoMapping
+    }
+}
+
+fn claim_only_sources() -> server::IdentitySources {
+    server::IdentitySources {
+        customer: server::CustomerIdentitySource::Claim,
+        rider: server::RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)),
+    }
 }

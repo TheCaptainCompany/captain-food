@@ -25,8 +25,9 @@ use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use serde_json::json;
 use server::{
-    graphql_acl::RequestRole, CustomerIdentityResolution, CustomerIdentitySource,
-    LookupFailureReason, ResolveCustomerIdentity,
+    graphql_acl::RequestRole, CustomerIdentityResolution, CustomerIdentitySource, IdentitySources,
+    LookupFailureReason, ResolveCustomerIdentity, ResolveRiderIdentity, RiderIdentityResolution,
+    RiderIdentitySource,
 };
 
 /// TEST-ONLY ES256 keypair -- the same material as `crates/server/src/auth.rs`'s own suite,
@@ -91,6 +92,21 @@ impl ResolveCustomerIdentity for ScriptedResolver {
     }
 }
 
+/// The RIDER seam this suite does not exercise: a table with no rows (fail closed).
+struct NoRiderRows;
+
+#[async_trait]
+impl ResolveRiderIdentity for NoRiderRows {
+    async fn resolve(&self, _auth_subject: &str) -> RiderIdentityResolution {
+        RiderIdentityResolution::NoMapping
+    }
+}
+
+/// The seams under test: the CUSTOMER one as scripted, the RIDER one inert.
+fn sources(customer: CustomerIdentitySource) -> IdentitySources {
+    IdentitySources { customer, rider: RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)) }
+}
+
 /// Every data point of `metric_name` in the LATEST export, as `(attribute value, count)` — the
 /// `public_credential_degraded_metric.rs` reading pattern.
 fn points(exporter: &InMemoryMetricExporter, metric_name: &str, key: &str) -> Vec<(String, u64)> {
@@ -151,7 +167,7 @@ async fn resolve_read_scope_under_postgres_mode() {
     let scope_a = server::resolve_read_scope(
         &principal_a,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(1)),
-        &CustomerIdentitySource::Postgres(resolver_a),
+        &sources(CustomerIdentitySource::Postgres(resolver_a)),
     )
     .await;
     assert_eq!(
@@ -177,7 +193,7 @@ async fn resolve_read_scope_under_postgres_mode() {
     let scope_b = server::resolve_read_scope(
         &principal_b,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(2)),
-        &CustomerIdentitySource::Postgres(resolver_b),
+        &sources(CustomerIdentitySource::Postgres(resolver_b)),
     )
     .await;
     assert_eq!(scope_b, application::queries::ReadScope::Public, "no mapping row -- fails closed");
@@ -208,7 +224,7 @@ async fn resolve_read_scope_under_postgres_mode() {
     let scope_c = server::resolve_read_scope(
         &principal_c,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(3)),
-        &CustomerIdentitySource::Postgres(resolver_c),
+        &sources(CustomerIdentitySource::Postgres(resolver_c)),
     )
     .await;
     assert_eq!(
@@ -236,7 +252,7 @@ async fn resolve_read_scope_under_postgres_mode() {
     let scope_d = server::resolve_read_scope(
         &principal_a,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(4)),
-        &CustomerIdentitySource::Claim,
+        &sources(CustomerIdentitySource::Claim),
     )
     .await;
     assert_eq!(
