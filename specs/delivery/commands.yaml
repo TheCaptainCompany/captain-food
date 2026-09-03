@@ -223,3 +223,41 @@ ChangeRiderStatus:
     riderId: { $ref: 'scalars.yaml#/RiderId' }
     status: { $ref: 'scalars.yaml#/RiderStatus' }
   required: [riderId, status]
+
+
+# --- Rider sign-in door (#639 part C step 2c-i, PROP-20260831-180622 build-order row 2c) ---------
+# The phone-OTP transposition of the proposal's §5 staff pair. IDENTIFY-ONLY, never register: a
+# verified phone with no rider behind it is REFUSED and creates nothing -- which is exactly why
+# `VerifyPhone` (register-or-identify) is not reused with a wider roles list (ADR-20260818-101500).
+
+RequestRiderSignInCode:
+  description: >
+    Ask the auth provider to send an SMS OTP to a rider's phone (the same OVHcloud SMS hook and the
+    same send guards as RequestPhoneVerification). Emits no event, and MUST NOT reveal whether the
+    phone belongs to a rider: the handler never consults the rider read model, so the outcome is
+    identical for a rider's phone and a stranger's (no enumeration oracle).
+  type: object
+  properties:
+    dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
+    nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+      nullable: true
+      description: "SMS language; defaults from the dialing code's country when absent."
+  required: [dialingCode, nationalNumber]
+
+
+ConfirmRiderSignIn:
+  description: >
+    Verify the SMS OTP with the auth provider, then IDENTIFY the rider: the proved auth subject is
+    looked up in the `Rider` read model (`auth_ref -> rider_id`, the step-2b port); no rider ->
+    RiderNotRegistered (nothing is created); a rider -> the RIDER role claim is stamped on the
+    provider user (`identity.stamp_rider_claim`, `{ role: RIDER }` and nothing else) and the
+    post-stamp provider session is parked for cookie pickup via POST /auth/session -- the
+    credential is never in the GraphQL response. Emits no event.
+  type: object
+  properties:
+    dialingCode: { $ref: 'scalars.yaml#/DialingCode' }
+    nationalNumber: { $ref: 'scalars.yaml#/NationalPhoneNumber' }
+    code: { $ref: 'scalars.yaml#/OtpCode' }
+  required: [dialingCode, nationalNumber, code]

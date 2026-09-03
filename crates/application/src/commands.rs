@@ -25,7 +25,7 @@ use domain::generated::commands::{
     ActivateRestaurant, AddCatalogCategory, AddOptionList, AddProduct,
     CancelCustomerErasure, ChangeLanguage,
     ChangeOrderAcceptanceMode, ChangeRestaurantListingStatus, ClaimRestaurantListing,
-    ConfirmCustomerErasure, RequestCustomerErasure,
+    ConfirmCustomerErasure, ConfirmRiderSignIn, RequestCustomerErasure, RequestRiderSignInCode,
     ConfigureGoogleBusinessProfileOrderLink, ConfirmEmailVerification, ConfirmPhoneChange,
     ConfigureCatalogSlug, ConfigureRestaurantSlug, CreateCatalog, DeactivateRestaurant,
     DeleteRestaurantAccount,
@@ -57,9 +57,9 @@ use domain::generated::events::{
     RestaurantSlugConfigured, RestaurantSlugReconfigured, RestaurantUnfavorited, RestaurantUpdated,
 };
 use domain::generated::scalars::{
-    CatalogId, CurrencyCode, CustomerId, DialingCode, ExternalReference, NationalPhoneNumber,
-    PhoneNumber, RestaurantAccountId, RestaurantId, RestaurantListingStatus, RestaurantStatus,
-    StockStatus,
+    CatalogId, CurrencyCode, CustomerId, DialingCode, EmailAddress, ExternalReference,
+    NationalPhoneNumber, PhoneNumber, RestaurantAccountId, RestaurantId, RestaurantListingStatus,
+    RestaurantStatus, SessionId, StockStatus,
 };
 use domain::prospect::ProspectState;
 use domain::restaurant::RestaurantState;
@@ -71,7 +71,8 @@ use crate::ports::{
 };
 use crate::queries::{
     CustomerReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantReadRepository,
-    AuthSubjectReservationRepository, BoundPrincipal, SlugReservationRepository,
+    AuthSubjectReservationRepository, BoundPrincipal, RiderIdentityRepository,
+    SlugReservationRepository,
 };
 
 // --- Cart / Order / DeliveryJob / PlaceOrderProcess (checkout→order→delivery flow, ADR-0046 round 2) ---
@@ -144,9 +145,9 @@ use domain::generated::events::{CustomerCreditConsumed, CustomerCreditGranted};
 
 use crate::generated::services::{
     IdentityRefreshSessionInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
-    IdentityService, IdentityStampCustomerClaimInput, IdentityVerifyEmailTokenInput,
-    IdentityVerifyPhoneOtpInput, PaymentRequestInput, PaymentRequestOutput, PaymentService,
-    ServiceCallMeta,
+    IdentityService, IdentityStampCustomerClaimInput, IdentityStampRiderClaimInput,
+    IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
+    PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
 use crate::queries::{CatalogReadRepository, OfferView};
@@ -3543,6 +3544,138 @@ pub async fn verify_phone(
     // live identity flow rather than a batch job.
     let created = create_if_absent(store, &stream_name, &[event], actor).await?;
     Ok(VerifyPhoneOutcome { customer_id, created: created == Created::Yes })
+}
+
+// ─── The rider sign-in door (#639 part C step 2c-i, PROP-20260831-180622 build-order row 2c) ─────
+
+/// Handle `commands.yaml#/RequestRiderSignInCode` — a pure EFFECT (actors.yaml: emits nothing):
+/// delegate the SMS OTP send to the wrapped auth provider, exactly as [`request_phone_verification`]
+/// does. It NEVER consults the rider read model — that is the enumeration property, held by
+/// construction rather than by a check: a rider's phone and a stranger's take the identical path,
+/// so nothing about rider-ness can leak through this leg.
+pub async fn request_rider_sign_in_code(
+    _store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    cmd: RequestRiderSignInCode,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    auth.send_phone_otp(
+        IdentitySendPhoneOtpInput {
+            dialing_code: cmd.dialing_code,
+            national_number: cmd.national_number,
+            locale: cmd.locale,
+        },
+        &ServiceCallMeta::new(actor.correlation_id),
+    )
+    .await
+}
+
+/// Handle `commands.yaml#/ConfirmRiderSignIn` — IDENTIFY-ONLY, never register (the whole reason
+/// [`verify_phone`] is not reused with a wider roles list, ADR-20260818-101500). The OTP is verified
+/// through the identity port; the proved subject is looked up through the `Rider` read model's
+/// bridge (`auth_ref -> rider_id`, the step-2b port — a projection read, because sign-in is a
+/// query-shaped decision, not an irreversible act; never the reservation table, never a fold); no
+/// rider → `RiderNotRegistered` naming the support route, and NOTHING is created; a rider → the
+/// RIDER role claim is stamped (`identity.stamp_rider_claim`, `{ role: RIDER }` and nothing else),
+/// the session is rotated so the token carries it, and that POST-STAMP session is parked for
+/// `POST /auth/session` (the credential is never in the GraphQL response). Emits no event.
+///
+/// Two refusals come BEFORE the OTP is spent, so a correct retry still has its code: no
+/// `SUPPORT_CONTACT` (dev-only, loud), and no `X-SESSION-ID` on the request
+/// (`RiderSignInRequiresSession`, B1 of the #852 review) — the parked credential is owned by that
+/// session, and the store's both-`None` claim is another channel's contract, so this door never
+/// parks without an owner.
+///
+/// Failure posture differs from the customer's on purpose: there the OTP also REGISTERED, so a
+/// stamp failure was logged and the fact still recorded; here the stamp IS the outcome, so any
+/// failure is returned — a typed rejection surfaces as `Operation.errorCode`, a provider failure
+/// as FAILED — and an unstamped token is never parked.
+pub async fn confirm_rider_sign_in(
+    _store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    riders: &dyn RiderIdentityRepository,
+    sessions: &dyn crate::auth_sessions::AuthSessionStore,
+    // `configuration.yaml#/SUPPORT_CONTACT`, resolved ONCE at the composition root (required, no
+    // default — ADR-20260830-213135). `None` is the development-only unset case.
+    support_contact: Option<&EmailAddress>,
+    cmd: ConfirmRiderSignIn,
+    // Envelope data, not command payload (ADR-0041): the dispatch-layer X-SESSION-ID that owns the
+    // parked session — `POST /auth/session` claims it only from that same session.
+    session_id: Option<SessionId>,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    // Fail CLOSED before spending the OTP: a refusal that renders no route is a control that does
+    // nothing, so a door that could not name one must not open at all (the ADR's "cannot boot
+    // without a value", here at the one place a value is consumed). Loud, and dev-only.
+    let Some(support_contact) = support_contact else {
+        return Err(DomainError::Repository(
+            "SUPPORT_CONTACT unset -- the rider sign-in door cannot name a support route, so it \
+             refuses (configuration.yaml#/SUPPORT_CONTACT: required, no default)"
+                .into(),
+        ));
+    };
+    // Fail CLOSED before spending the OTP, again (B1, the independent review of #852): the
+    // credential is parked for `POST /auth/session` under the OWNING X-SESSION-ID, and a session
+    // parked with no owner could be claimed by ANY header-less caller holding the messageId (which
+    // travels in spans and logs). The store's both-`None` claim is another channel's contract and
+    // stays; this door simply refuses to park ownerless -- and refuses HERE, so nothing is
+    // verified, stamped or parked, and the code stays usable for a correct retry.
+    let Some(session_id) = session_id else {
+        return Err(reject("RiderSignInRequiresSession", json!({})));
+    };
+    let verified = auth
+        .verify_phone_otp(
+            IdentityVerifyPhoneOtpInput {
+                dialing_code: cmd.dialing_code.clone(),
+                national_number: cmd.national_number.clone(),
+                code: cmd.code.clone(),
+            },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    let auth_ref = verified.auth_ref.clone();
+
+    // IDENTIFY, through the read model's bridge. A verified phone with no rider behind it is
+    // refused and creates nothing — the test that sees red first.
+    if riders.rider_id_by_auth_subject(auth_ref.clone()).await?.is_none() {
+        return Err(reject("RiderNotRegistered", json!({ "supportContact": support_contact })));
+    }
+
+    // STAMP → rotate → park (the #437 ordering): `{ role: RIDER }` and nothing else. A subject
+    // already holding another claim object is refused by the stamper itself
+    // (`AuthSubjectHoldsAnotherRole`, fail closed, never an overwrite).
+    auth.stamp_rider_claim(
+        IdentityStampRiderClaimInput { auth_ref: auth_ref.clone() },
+        &ServiceCallMeta::new(actor.correlation_id),
+    )
+    .await?;
+
+    // The PRE-rotation tokens are never parked — minted before the stamp, they cannot carry the
+    // claim. No refresh token (a provider/mock without sessions) or no acceptance messageId (a
+    // direct handler call) means nothing to park, and nothing is silently parked claimless.
+    let (Some(refresh_token), Some(message_id)) = (verified.refresh_token.clone(), actor.cause_id) else {
+        tracing::warn!(
+            auth_ref = %auth_ref.0,
+            "rider sign-in verified and stamped, but the provider returned no session to rotate -- nothing parked"
+        );
+        return Ok(());
+    };
+    let rotated = auth
+        .refresh_session(
+            IdentityRefreshSessionInput { refresh_token },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    sessions
+        .park(crate::auth_sessions::ParkedAuthSession {
+            message_id,
+            session_id: Some(session_id.0),
+            access_token: rotated.access_token,
+            refresh_token: rotated.refresh_token,
+            expires_in: rotated.expires_in,
+        })
+        .await?;
+    Ok(())
 }
 
 /// Handle `commands.yaml#/RequestEmailVerification` — a pure EFFECT (emits nothing): reject an email

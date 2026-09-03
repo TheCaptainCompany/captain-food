@@ -137,3 +137,40 @@ pub const MAILBOX_MESSAGE_NOT_REQUEUEABLE: ErrorDef = ErrorDef {
     message_en: "This mailbox message did not fail at the delivery-attempts cap; it cannot be requeued.",
     message_fr: "Ce message n'a pas échoué au plafond de tentatives de livraison ; il ne peut pas être remis en file.",
 };
+
+/// The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the served-country decision plus cost containment — a calling code is not a destination, and a code we do not serve can reach territories rated far above what we budgeted (the global ceiling, not this list, is the economic control against pumping) — which is why the refusal is fail-closed: an unparseable number lands here too, never on a send.
+/// Context: `dialingCode`.
+pub const PHONE_COUNTRY_NOT_SERVED: ErrorDef = ErrorDef {
+    code: "PhoneCountryNotServed",
+    message_en: "We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us.",
+    message_fr: "Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous.",
+};
+
+/// This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.
+pub const VERIFICATION_SEND_LIMIT_REACHED: ErrorDef = ErrorDef {
+    code: "VerificationSendLimitReached",
+    message_en: "You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in.",
+    message_fr: "Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter.",
+};
+
+/// The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.
+pub const VERIFICATION_SEND_CAPACITY_EXHAUSTED: ErrorDef = ErrorDef {
+    code: "VerificationSendCapacityExhausted",
+    message_en: "We can't send verification codes right now. Please contact us — we'll get you signed in.",
+    message_fr: "Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons.",
+};
+
+/// The SMS OTP code does not match (rejected by Supabase Auth).
+/// Context: `phone`.
+pub const INVALID_VERIFICATION_CODE: ErrorDef = ErrorDef {
+    code: "InvalidVerificationCode",
+    message_en: "The verification code is incorrect. Please try again.",
+    message_fr: "Le code de vérification est incorrect. Veuillez réessayer.",
+};
+
+/// The SMS OTP (or email link) has expired; request a new one.
+pub const VERIFICATION_CODE_EXPIRED: ErrorDef = ErrorDef {
+    code: "VerificationCodeExpired",
+    message_en: "The verification code has expired. Please request a new one.",
+    message_fr: "Le code de vérification a expiré. Veuillez en demander un nouveau.",
+};

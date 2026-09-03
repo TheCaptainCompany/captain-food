@@ -347,6 +347,18 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         "RequestEmailVerification" | "RequestPhoneChange" | "ConfirmPhoneChange" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, &bed.customers, cmd, &support::actor()).await", snake)
         }
+        // The rider sign-in door (#639 part C step 2c-i): the code request is the customer's send
+        // leg verbatim (it never consults the rider read model); the confirmation identifies
+        // through the bed's SpecRiders bridge, parks the post-stamp session, and names the support
+        // route the bed carries (SpecSupportContact). The `None` here is the X-SESSION-ID slot
+        // (envelope data, not payload -- the place_order shape); `emit_behaviour_tests` fills it
+        // per case, since a confirm without a session is REFUSED (#852 review, B1).
+        "RequestRiderSignInCode" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor()).await", snake)
+        }
+        "ConfirmRiderSignIn" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await", snake)
+        }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }
 }
@@ -633,6 +645,30 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
                     None => format!("support::actor_principal(\"{}\", None)", ut),
                 };
                 call = call.replace("&support::actor()", &format!("&{}", expr));
+            }
+            // The rider confirm's session is ENVELOPE data (X-SESSION-ID, ADR-0041), so no spec
+            // case can carry it as payload. The bed presents a session by default -- the production
+            // shape, the SDUI client always sends the header -- and withholds it ONLY for a case
+            // whose declared outcome IS the missing-session refusal: that refusal's sole
+            // precondition is the absent envelope, so the `thrown` set names it and no `when.session`
+            // key is needed (#852 review, B1).
+            if msg == "ConfirmRiderSignIn" {
+                let refuses_without_session = t
+                    .get("thrown")
+                    .and_then(|x| x.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.get("$ref").and_then(|x| x.as_str()))
+                            .filter_map(ref_name)
+                            .any(|name| name == "RiderSignInRequiresSession")
+                    })
+                    .unwrap_or(false);
+                if !refuses_without_session {
+                    call = call.replace(
+                        ", None, &support::actor()",
+                        ", Some(sc::SessionId(support::uid(\"session-1\"))), &support::actor()",
+                    );
+                }
             }
             // TipOrder derives `tippedBy` from the acting persona (ADR-0041): dispatch as the
             // RESTAURANT user type when the asserted fact says the restaurant tipped.

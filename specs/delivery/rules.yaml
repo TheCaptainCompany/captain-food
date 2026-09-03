@@ -60,3 +60,6 @@ RiderLifecycle:
 
 RiderAuthSubjectBoundOnce:
   description: "One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and revoking or suspending a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)."
+
+RiderSignInIdentifiesOnly:
+  description: "Rider sign-in is identify-only, never register: a verified phone whose login is bound to a rider stamps `{ role: RIDER }` (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified phone with no rider behind it is refused with RiderNotRegistered and creates nothing; a login already carrying another role's claim is refused rather than overwritten; a confirmation that carries no session to own the parked credential is refused with RiderSignInRequiresSession BEFORE the OTP is spent, so a parked rider session always has an owner; and the code REQUEST never reveals whether the phone belongs to a rider (#639 part C step 2c-i)."

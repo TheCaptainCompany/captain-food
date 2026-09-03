@@ -198,6 +198,8 @@ pub struct Config {
     pub supabase_sms_hook_secret: Option<String>,
     /// Supabase SECRET (service-role) key authorizing exactly one server-side operation: the admin `app_metadata` stamp on the identity project (`identity.stamp_customer_claim`, #437 — PUT /auth/v1/admin/users/{authRef} writing `app_metadata.captain_food` = `{ role, customer_id }` at phone verification). Its PRESENCE is the gate — no feature flag: unset, stamping fails CLOSED (verification stands, but the session is never rotated or parked, so login degrades to a fresh-OTP retry once configured — an unstamped token is never parked). Never used on the anon OTP flows, which keep SUPABASE_PUBLISHABLE_KEY; never sent to any client.
     pub supabase_secret_key: Option<String>,
+    /// The functional support address printed on every typed refusal that names a human route -- first the rider sign-in refusal (`RiderNotRegistered`, #639 part C step 2c-i), next the not-yet-linked restaurateur screen (#792). REQUIRED with NO DEFAULT on purpose (ADR-20260830-213135): a refusal that renders no route is a control that does nothing, so the surface must not boot with a blank. Unset (development), the rider sign-in door refuses every attempt with a loud unconfigured error rather than printing an empty contact. A role address on a domain we control, never a person; no voice leg (SUPPORT-CONTACT: the rider handback screen gets an in-app report instead of a call button).
+    pub support_contact: String,
     /// Honeycomb INGEST key for the OTLP trace/metric exporter (`x-honeycomb-team`). Unset, the exporter is not constructed at all and the app runs with local structured logs only — every span is built and dropped, so a production incident is diagnosed by reading stdout, which is the pre-#191 situation. This must be an INGEST key: a management key (`<id>:<secret>`, what the Honeycomb MCP server and Query API use) has a different shape and is rejected at startup rather than failing as an opaque 401 on the first export.
     pub honeycomb_api_key: Option<String>,
     /// DEFAULT `https://api.eu1.honeycomb.io`. OTLP/HTTP base endpoint. Defaults to and is baked as the **EU** host (`api.eu1.honeycomb.io`) — the US host `api.honeycomb.io` is a GDPR decision, not a preference, because spans carry customer and order ids (ADR-0042 pinned data to Frankfurt). Pointed at the wrong region, exports 401 against an account that does not hold the key and telemetry is silently absent.
@@ -340,6 +342,11 @@ impl Config {
         let auth_session_key = auth_session_key.unwrap_or_default();
         let supabase_sms_hook_secret = raw("SUPABASE_SMS_HOOK_SECRET");
         let supabase_secret_key = raw("SUPABASE_SECRET_KEY");
+        let support_contact = raw("SUPPORT_CONTACT").or_else(|| baked("SUPPORT_CONTACT", profile).map(str::to_string));
+        if support_contact.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
+            problems.missing.push(MissingKey { name: "SUPPORT_CONTACT", gates: "The functional support address printed on every typed refusal that names a human route -- first the rider sign-in refusal (`RiderNotRegistered`, #639 part C step 2c-i), next the not-yet-linked restaurateur screen (#792). REQUIRED with NO DEFAULT on purpose (ADR-20260830-213135): a refusal that renders no route is a control that does nothing, so the surface must not boot with a blank. Unset (development), the rider sign-in door refuses every attempt with a loud unconfigured error rather than printing an empty contact. A role address on a domain we control, never a person; no voice leg (SUPPORT-CONTACT: the rider handback screen gets an in-app report instead of a call button)." });
+        }
+        let support_contact = support_contact.unwrap_or_default();
         let honeycomb_api_key = raw("HONEYCOMB_API_KEY");
         let honeycomb_api_endpoint = raw("HONEYCOMB_API_ENDPOINT").or_else(|| baked("HONEYCOMB_API_ENDPOINT", profile).map(str::to_string));
         let honeycomb_api_endpoint = honeycomb_api_endpoint.unwrap_or_else(|| "https://api.eu1.honeycomb.io".to_string());
@@ -464,6 +471,7 @@ impl Config {
                 auth_session_key,
                 supabase_sms_hook_secret,
                 supabase_secret_key,
+                support_contact,
                 honeycomb_api_key,
                 honeycomb_api_endpoint,
                 honeycomb_dataset,
@@ -529,6 +537,7 @@ impl Config {
         out.push_str(&format!("  AUTH_SESSION_KEY           = {}\n", if self.auth_session_key.is_empty() { "unset" } else { "set" }));
         out.push_str(&format!("  SUPABASE_SMS_HOOK_SECRET   = {}\n", if self.supabase_sms_hook_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  SUPABASE_SECRET_KEY        = {}\n", if self.supabase_secret_key.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  SUPPORT_CONTACT            = {}\n", self.support_contact));
         out.push_str(&format!("  HONEYCOMB_API_KEY          = {}\n", if self.honeycomb_api_key.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  HONEYCOMB_API_ENDPOINT     = {}\n", self.honeycomb_api_endpoint));
         out.push_str(&format!("  HONEYCOMB_DATASET          = {}\n", self.honeycomb_dataset));
@@ -570,7 +579,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 44;
+pub const KEY_COUNT: usize = 45;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -583,6 +592,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "AUTH_SESSION_KEY",
     "SUPABASE_SMS_HOOK_SECRET",
     "SUPABASE_SECRET_KEY",
+    "SUPPORT_CONTACT",
     "HONEYCOMB_API_KEY",
     "HONEYCOMB_API_ENDPOINT",
     "HONEYCOMB_DATASET",
@@ -630,6 +640,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("SUPABASE_PUBLISHABLE_KEY", "staging", "sb_publishable_iJnNRwbG123-7bNcFEtz7Q_IvhhfwBE"),
     ("SUPABASE_JWKS_URL", "production", "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"),
     ("SUPABASE_JWKS_URL", "staging", "https://zcshlzhiinwmpzujuiep.supabase.co/auth/v1/.well-known/jwks.json"),
+    ("SUPPORT_CONTACT", "production", "support@captain.food"),
+    ("SUPPORT_CONTACT", "staging", "support@captain.food"),
     ("HONEYCOMB_API_ENDPOINT", "production", "https://api.eu1.honeycomb.io"),
     ("HONEYCOMB_API_ENDPOINT", "staging", "https://api.eu1.honeycomb.io"),
     ("HONEYCOMB_DATASET", "production", "captain-food"),

@@ -96,6 +96,16 @@ pub struct CommandDeps {
     /// config flip, never a redeploy. `ROUTE_ORDER_BIRTH_THROUGH_LANE` has been ON since the
     /// ADR-20260830-012200 founder flip.
     pub route_gates: application::generated::process_managers::RouteGates,
+    /// The `Rider` read model's identity bridge (`auth_ref -> rider_id`, #639 part C step 2b) the
+    /// rider sign-in door identifies through (step 2c-i): a projection read -- sign-in is a
+    /// query-shaped decision, never an irreversible act -- so the read model is the right source,
+    /// never the reservation table and never a fold.
+    pub riders: Arc<dyn application::queries::RiderIdentityRepository>,
+    /// `configuration.yaml#/SUPPORT_CONTACT` (required, no default -- ADR-20260830-213135),
+    /// resolved ONCE at the composition root like the gates above; `None` is the development-only
+    /// unset case, on which the rider sign-in door fails CLOSED with a loud unconfigured error
+    /// rather than printing an empty route.
+    pub support_contact: Option<domain::generated::scalars::EmailAddress>,
 }
 
 
@@ -510,7 +520,11 @@ async fn rider(
     let _ = (deps, actor, env);
     match message {
         RiderInbox::ChangeRiderStatus(cmd) => run(async { application::commands::change_rider_status(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+        // The rider sign-in door (#639 part C step 2c-i): identify-only, both emitting nothing. The
+        // parked session's owner is the row's X-SESSION-ID (envelope, never payload).
+        RiderInbox::ConfirmRiderSignIn(cmd) => run(async { application::commands::confirm_rider_sign_in(deps.store.as_ref(), deps.auth.as_ref(), deps.riders.as_ref(), deps.sessions.as_ref(), deps.support_contact.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), actor).await }).await,
         RiderInbox::RegisterRider(cmd) => run(async { application::commands::register_rider(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+        RiderInbox::RequestRiderSignInCode(cmd) => run(async { application::commands::request_rider_sign_in_code(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor).await }).await,
         RiderInbox::UpdateRiderInfo(cmd) => run(async { application::commands::update_rider_info(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
     }
 }

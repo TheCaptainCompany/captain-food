@@ -1899,6 +1899,51 @@ impl From<GatewayStatusCode> for ds::GatewayStatusCode {
     }
 }
 
+/// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DialingCode(pub String);
+async_graphql::scalar!(DialingCode, "DialingCode", "Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.");
+impl From<ds::DialingCode> for DialingCode {
+    fn from(v: ds::DialingCode) -> Self {
+        Self(v.0)
+    }
+}
+impl From<DialingCode> for ds::DialingCode {
+    fn from(v: DialingCode) -> Self {
+        Self(v.0)
+    }
+}
+
+/// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct NationalPhoneNumber(pub String);
+async_graphql::scalar!(NationalPhoneNumber, "NationalPhoneNumber", "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.");
+impl From<ds::NationalPhoneNumber> for NationalPhoneNumber {
+    fn from(v: ds::NationalPhoneNumber) -> Self {
+        Self(v.0)
+    }
+}
+impl From<NationalPhoneNumber> for ds::NationalPhoneNumber {
+    fn from(v: NationalPhoneNumber) -> Self {
+        Self(v.0)
+    }
+}
+
+/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct OtpCode(pub String);
+async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).");
+impl From<ds::OtpCode> for OtpCode {
+    fn from(v: ds::OtpCode) -> Self {
+        Self(v.0)
+    }
+}
+impl From<OtpCode> for ds::OtpCode {
+    fn from(v: OtpCode) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConversationMessageId(pub uuid::Uuid);
@@ -2095,51 +2140,6 @@ impl From<ds::PaymentMethodId> for PaymentMethodId {
 }
 impl From<PaymentMethodId> for ds::PaymentMethodId {
     fn from(v: PaymentMethodId) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DialingCode(pub String);
-async_graphql::scalar!(DialingCode, "DialingCode", "Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.");
-impl From<ds::DialingCode> for DialingCode {
-    fn from(v: ds::DialingCode) -> Self {
-        Self(v.0)
-    }
-}
-impl From<DialingCode> for ds::DialingCode {
-    fn from(v: DialingCode) -> Self {
-        Self(v.0)
-    }
-}
-
-/// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct NationalPhoneNumber(pub String);
-async_graphql::scalar!(NationalPhoneNumber, "NationalPhoneNumber", "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.");
-impl From<ds::NationalPhoneNumber> for NationalPhoneNumber {
-    fn from(v: ds::NationalPhoneNumber) -> Self {
-        Self(v.0)
-    }
-}
-impl From<NationalPhoneNumber> for ds::NationalPhoneNumber {
-    fn from(v: NationalPhoneNumber) -> Self {
-        Self(v.0)
-    }
-}
-
-/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct OtpCode(pub String);
-async_graphql::scalar!(OtpCode, "OtpCode", "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).");
-impl From<ds::OtpCode> for OtpCode {
-    fn from(v: ds::OtpCode) -> Self {
-        Self(v.0)
-    }
-}
-impl From<OtpCode> for ds::OtpCode {
-    fn from(v: OtpCode) -> Self {
         Self(v.0)
     }
 }

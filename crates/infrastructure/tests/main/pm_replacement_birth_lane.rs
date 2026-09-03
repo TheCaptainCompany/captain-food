@@ -146,6 +146,9 @@ async fn seed_resolution(pool: &PgPool) {
 /// default — this suite turns exactly one knob, and it is not that one.
 fn order_deps(pool: &PgPool) -> CommandDeps {
     CommandDeps {
+        // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
+        riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        support_contact: None,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),

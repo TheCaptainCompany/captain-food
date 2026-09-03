@@ -83,3 +83,26 @@ pub const INVALID_RIDER_STATUS_TRANSITION: ErrorDef = ErrorDef {
     message_en: "A rider cannot move from '{currentStatus}' to '{targetStatus}'.",
     message_fr: "Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'.",
 };
+
+/// A phone was verified but no rider account is bound to the login it proves (#639 part C step 2c-i): rider sign-in is IDENTIFY-ONLY and registers nobody, so the sign-in is refused and nothing is created. Named for the RIDER population; the remedy is the support route (`SUPPORT_CONTACT`, ADR-20260830-213135 -- a required key with no default), never self-registration. Only the phone's owner can see it (the OTP was verified first), so it is not an enumeration oracle.
+/// Context: `supportContact`.
+pub const RIDER_NOT_REGISTERED: ErrorDef = ErrorDef {
+    code: "RiderNotRegistered",
+    message_en: "This phone number is not linked to a rider account. Contact {supportContact} to get set up.",
+    message_fr: "Ce numéro de téléphone n'est lié à aucun compte livreur. Contactez {supportContact} pour être enregistré.",
+};
+
+/// The sign-in confirmation arrived with no `X-SESSION-ID` (the independent review of #852, B1). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId -- which travels in spans and logs. So the door refuses BEFORE the OTP is spent (the code stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's, not the rider's (the SDUI client always sends the header, so a rider never sees this). The `AuthSessionStore` port's both-`None` claim is untouched -- that is another channel's contract; this door simply never parks without an owner.
+pub const RIDER_SIGN_IN_REQUIRES_SESSION: ErrorDef = ErrorDef {
+    code: "RiderSignInRequiresSession",
+    message_en: "Sign-in needs a browser session. Reload the page and try again.",
+    message_fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez.",
+};
+
+/// The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
+/// Context: `authRef`.
+pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {
+    code: "AuthSubjectHoldsAnotherRole",
+    message_en: "This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet.",
+    message_fr: "Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur.",
+};

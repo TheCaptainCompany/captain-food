@@ -314,6 +314,13 @@ pub mod metric {
     /// reason as the customer twin, so an in-request reuse can never hide an outage; only `db`
     /// fires today.
     pub const RIDER_IDENTITY_LOOKUP_SOURCE_TOTAL: &str = "rider_identity_lookup_source_total";
+    /// `rider-identity` contract (#639 part C step 2c-i): the RIDER claim stamp
+    /// (`identity.stamp_rider_claim`) failed -- a DEFECT counter, attribute `reason`
+    /// (not_configured | claim_conflict | provider_error). The `customer_claim_stamp_failed_total`
+    /// pattern under this contract's own name: each one is a rider whose verified sign-in issued
+    /// no credential. `claim_conflict` is the one-subject-one-role refusal (PROP-20260831-180622
+    /// Concern): fail closed, never an overwrite.
+    pub const RIDER_CLAIM_STAMP_FAILED_TOTAL: &str = "rider_claim_stamp_failed_total";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

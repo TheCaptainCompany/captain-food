@@ -2089,6 +2089,34 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         );
     }
 
+    /// **The rider stamp's writer and reader agree too** (#639 part C step 2c-i): the SECOND
+    /// hardcoded stamper writes `{ role: RIDER }` and nothing else, and the verifier turns exactly
+    /// that into a RIDER grant carrying NO domain binding — `Identity::Unbound` at the verifier,
+    /// bound only by the seam (2b). The ABSENCE is asserted as much as the presence: a rider id in
+    /// the stamp would be a cache the platform cannot invalidate (ADR-20260830-234532), and
+    /// `ProductClaims` has no field for one to land in.
+    #[test]
+    fn the_verifier_reads_what_the_rider_stamp_writes() {
+        let body = infrastructure::integrations::supabase_auth::stamp_rider_put_body();
+        let claims: Claims = serde_json::from_value(serde_json::json!({
+            "sub": "auth-subject",
+            "app_metadata": body["app_metadata"],
+        }))
+        .expect("the rider stamp is a Supabase-shaped claims payload");
+
+        let grant = claims.app_metadata.grant().expect("the rider stamp yields a grant");
+        assert_eq!(grant.role, RequestRole::Rider, "the stamp hardcodes RIDER");
+        assert!(
+            grant.claims.customer_id.is_none()
+                && grant.claims.restaurant_id.is_none()
+                && grant.claims.restaurant_account_id.is_none(),
+            "the rider stamp binds NOTHING at the verifier -- the binding is the seam's"
+        );
+        let ours = body["app_metadata"][PRODUCT_CLAIM_KEY].as_object().expect("the captain_food object");
+        assert_eq!(ours.len(), 1, "the role and nothing else -- no rider_id, no id of any kind");
+        assert_eq!(ours["role"], serde_json::json!("RIDER"), "and the wire key is the one constant both crates name");
+    }
+
     /// **Role parsing fails CLOSED.** An absent or unrecognised role grants nothing — it does not
     /// fall back to CUSTOMER. The token below carries a perfectly good `customer_id`, so the only
     /// thing standing between it and a customer session is the role check.

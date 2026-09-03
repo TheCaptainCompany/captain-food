@@ -3098,8 +3098,12 @@ impl RestaurantAccountInbox {
 pub enum RiderInbox {
     /// COMMAND `ChangeRiderStatus`.
     ChangeRiderStatus(domain::generated::commands::ChangeRiderStatus),
+    /// COMMAND `ConfirmRiderSignIn`.
+    ConfirmRiderSignIn(domain::generated::commands::ConfirmRiderSignIn),
     /// COMMAND `RegisterRider`.
     RegisterRider(domain::generated::commands::RegisterRider),
+    /// COMMAND `RequestRiderSignInCode`.
+    RequestRiderSignInCode(domain::generated::commands::RequestRiderSignInCode),
     /// COMMAND `UpdateRiderInfo`.
     UpdateRiderInfo(domain::generated::commands::UpdateRiderInfo),
 }
@@ -3111,7 +3115,7 @@ impl RiderInbox {
 
     /// Every message type this actor DECLARES it receives, in emission order — the
     /// operator-facing answer to "is this row's type one we know?" without constructing a value.
-    pub const DECLARED: &'static [&'static str] = &["ChangeRiderStatus", "RegisterRider", "UpdateRiderInfo"];
+    pub const DECLARED: &'static [&'static str] = &["ChangeRiderStatus", "ConfirmRiderSignIn", "RegisterRider", "RequestRiderSignInCode", "UpdateRiderInfo"];
 
     /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
     /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
@@ -3132,11 +3136,25 @@ impl RiderInbox {
                     message_type: "ChangeRiderStatus",
                     detail: e.to_string(),
                 }),
+            "ConfirmRiderSignIn" => serde_json::from_value::<domain::generated::commands::ConfirmRiderSignIn>(payload.clone())
+                .map(Self::ConfirmRiderSignIn)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "ConfirmRiderSignIn",
+                    detail: e.to_string(),
+                }),
             "RegisterRider" => serde_json::from_value::<domain::generated::commands::RegisterRider>(payload.clone())
                 .map(Self::RegisterRider)
                 .map_err(|e| InboxParseError::Payload {
                     actor_type: Self::ACTOR_TYPE,
                     message_type: "RegisterRider",
+                    detail: e.to_string(),
+                }),
+            "RequestRiderSignInCode" => serde_json::from_value::<domain::generated::commands::RequestRiderSignInCode>(payload.clone())
+                .map(Self::RequestRiderSignInCode)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RequestRiderSignInCode",
                     detail: e.to_string(),
                 }),
             "UpdateRiderInfo" => serde_json::from_value::<domain::generated::commands::UpdateRiderInfo>(payload.clone())
@@ -3157,7 +3175,9 @@ impl RiderInbox {
     pub fn message_type(&self) -> &'static str {
         match self {
             Self::ChangeRiderStatus(_) => "ChangeRiderStatus",
+            Self::ConfirmRiderSignIn(_) => "ConfirmRiderSignIn",
             Self::RegisterRider(_) => "RegisterRider",
+            Self::RequestRiderSignInCode(_) => "RequestRiderSignInCode",
             Self::UpdateRiderInfo(_) => "UpdateRiderInfo",
         }
     }
@@ -3166,7 +3186,9 @@ impl RiderInbox {
     pub fn kind(&self) -> InboxKind {
         match self {
             Self::ChangeRiderStatus(_) => InboxKind::Command,
+            Self::ConfirmRiderSignIn(_) => InboxKind::Command,
             Self::RegisterRider(_) => InboxKind::Command,
+            Self::RequestRiderSignInCode(_) => InboxKind::Command,
             Self::UpdateRiderInfo(_) => InboxKind::Command,
         }
     }

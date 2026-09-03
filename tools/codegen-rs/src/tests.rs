@@ -5603,17 +5603,41 @@ Catalog:
         let states = emit_domain_states(&model);
         let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
         assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
-        // 0 errors, and the CALIBRATION holds: exactly one command legitimately lacks its
-        // identity property (RequestPhoneVerification — the server mints the customer id), which
-        // is why identity-property-not-on-command is a WARN, not an error (§2d doc).
+        // 0 errors, and the CALIBRATION holds: exactly THREE commands legitimately lack their
+        // identity property, and they are the ones a caller WITHOUT a credential sends — the id
+        // is minted (or resolved) server-side, so the lane is addressing-only: the customer's
+        // RequestPhoneVerification, and the rider sign-in door's RequestRiderSignInCode /
+        // ConfirmRiderSignIn (#639 part C step 2c-i: the caller cannot know a riderId before it
+        // signs in). That is why identity-property-not-on-command is a WARN, not an error (§2d
+        // doc). An EXACT inventory by name, never a floor: a fourth is a decision taken here.
         let Report { issues, .. } = validate(&model);
         for i in &issues {
             assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
         }
-        let cmd_warns: Vec<&Issue> = issues.iter().filter(|i| i.rule == "identity-property-not-on-command").collect();
-        assert_eq!(cmd_warns.len(), 1, "{:?}", cmd_warns.iter().map(|i| (&i.location, &i.message)).collect::<Vec<_>>());
-        assert_eq!(cmd_warns[0].location, "actors.yaml/Customer");
-        assert!(cmd_warns[0].message.contains("RequestPhoneVerification"), "{}", cmd_warns[0].message);
+        const LEGITIMATELY_UNADDRESSED: [&str; 3] =
+            ["RequestPhoneVerification", "RequestRiderSignInCode", "ConfirmRiderSignIn"];
+        let mut inventory: Vec<(String, &str)> = issues
+            .iter()
+            .filter(|i| i.rule == "identity-property-not-on-command")
+            .map(|i| {
+                let command = LEGITIMATELY_UNADDRESSED
+                    .iter()
+                    .copied()
+                    .find(|c| i.message.contains(&format!("commands.yaml#/{c}'")))
+                    .unwrap_or_else(|| panic!("an UNCALIBRATED command lacks its identity property -- decide it here by name: {} at {}: {}", i.rule, i.location, i.message));
+                (i.location.clone(), command)
+            })
+            .collect();
+        inventory.sort();
+        assert_eq!(
+            inventory,
+            vec![
+                ("actors.yaml/Customer".to_string(), "RequestPhoneVerification"),
+                ("actors.yaml/Rider".to_string(), "ConfirmRiderSignIn"),
+                ("actors.yaml/Rider".to_string(), "RequestRiderSignInCode"),
+            ],
+            "the calibrated inventory of legitimately unaddressed commands"
+        );
     }
 
     // ── §2g — actor `answers:` blocks (PROP-20260815-142349, #582 actors half) ──────────────────

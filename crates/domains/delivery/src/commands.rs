@@ -140,3 +140,21 @@ pub struct ChangeRiderStatus {
     pub rider_id: RiderId,
     pub status: RiderStatus,
 }
+
+/// Ask the auth provider to send an SMS OTP to a rider's phone (the same OVHcloud SMS hook and the same send guards as RequestPhoneVerification). Emits no event, and MUST NOT reveal whether the phone belongs to a rider: the handler never consults the rider read model, so the outcome is identical for a rider's phone and a stranger's (no enumeration oracle).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestRiderSignInCode {
+    pub dialing_code: DialingCode,
+    pub national_number: NationalPhoneNumber,
+    pub locale: Option<Locale>,
+}
+
+/// Verify the SMS OTP with the auth provider, then IDENTIFY the rider: the proved auth subject is looked up in the `Rider` read model (`auth_ref -> rider_id`, the step-2b port); no rider -> RiderNotRegistered (nothing is created); a rider -> the RIDER role claim is stamped on the provider user (`identity.stamp_rider_claim`, `{ role: RIDER }` and nothing else) and the post-stamp provider session is parked for cookie pickup via POST /auth/session -- the credential is never in the GraphQL response. Emits no event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmRiderSignIn {
+    pub dialing_code: DialingCode,
+    pub national_number: NationalPhoneNumber,
+    pub code: OtpCode,
+}

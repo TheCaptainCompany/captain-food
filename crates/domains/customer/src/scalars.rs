@@ -12,18 +12,6 @@ pub struct AddressId(pub uuid::Uuid);
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PaymentMethodId(pub String);
 
-/// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct DialingCode(pub String);
-
-/// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NationalPhoneNumber(pub String);
-
-/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct OtpCode(pub String);
-
 /// Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EmailVerificationToken(pub String);

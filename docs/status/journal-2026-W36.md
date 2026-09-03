@@ -2,6 +2,77 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-03 — #639 part C step 2c-i: the rider sign-in door, backend half — the platform now
+> ISSUES a `role: RIDER` credential, to riders only, and stamps no id.** PR
+> [#852](https://github.com/TheCaptainCompany/captain-food/pull/852), `HOLD: human`, hands back in
+> draft; PROP-20260831-180622 gains build-order row **2c** (2c-i this PR; 2c-ii = R1 + the rider
+> sign-in screen, next) and the **`one-subject-one-role` Concern** (registered, not checked). What
+> landed: `stamp_rider_put_body()` / `identity.stamp_rider_claim` — a SECOND hardcoded stamper
+> beside the customer's, its whole `captain_food` object `{ role: RIDER }` and nothing else (a
+> distinct function, a distinct port method, its own decision type; `stamp_put_body` untouched and
+> unparameterised), with its verifier-parity test `the_verifier_reads_what_the_rider_stamp_writes`
+> asserting the ABSENCE of any binding as much as the role; two identify-only `roles: [PUBLIC]`
+> mutations `requestRiderSignInCode` / `confirmRiderSignIn` on the `Rider` lane, both emitting
+> nothing — the request leg never consults the rider read model (enumeration-safe by construction,
+> asserted as "consulted zero times"), the confirm leg verifies the OTP, looks the subject up
+> through the 2b `RiderIdentityRepository` bridge (a projection read: sign-in is query-shaped),
+> REFUSES an unknown phone with `RiderNotRegistered` naming `SUPPORT_CONTACT`, refuses a subject
+> already holding another claim object with `AuthSubjectHoldsAnotherRole` (fail closed, never an
+> overwrite — the stamper's decision is strict: exactly `{ role: RIDER }` is a no-op, nothing of
+> ours is a PUT, anything else is refused), then stamps → rotates → parks the POST-STAMP session
+> for `POST /auth/session` owned by the row's X-SESSION-ID (envelope, not payload). `SUPPORT_CONTACT`
+> is declared (`required: [staging, production]`, no default, baked `support@captain.food`),
+> resolved once at the composition root as `Option<EmailAddress>`; unset (dev) makes the door fail
+> CLOSED before spending the OTP rather than print an empty route. **Two card instructions could not
+> both hold and the validator said which**: (1) `roles: [PUBLIC]` + "a story step under the rider
+> persona" — `story-role-not-authorized`: a RIDER persona may not call a `[PUBLIC]` op, so the
+> activity is `public_user.SignInAsRider` (the `verifyPhone` precedent), the ACL decision kept;
+> (2) declaring the OTP refusals on the Rider inbox made them multi-scope — `scope-placement-error`
+> derives `common`, and kernel purity then drags `DialingCode` along — so the OTP vocabulary (three
+> scalars, five errors) is promoted to `specs/common/`, zero ref rewrites, zero stored-shape or SQL
+> change. **Seen red first**: the six spec cases compiled RED against the emitter (E0061, the
+> handler call had no arm), and transport test (a) was run against the exact mutant the card
+> names — `confirmRiderSignIn` in `verifyPhone`'s register-or-identify posture — and failed with
+> `expected a TYPED rejection, got Ok(())` before the refusal was restored. The transport tests
+> (`crates/server/tests/rider_sign_in_door.rs`) drive `POST /public/graphql` on the production
+> `graphql_routes`, then deliver the `MemMailbox` row through the HUMAN-OWNED router
+> (`infrastructure::inbox::route`, the same `RiderInbox` arm the worker runs) over a scripted
+> identity port whose CUSTOMER stamper panics — compile-time selection observed at runtime — and
+> every port the door never reads keeps its production type over a `connect_lazy` pool (no
+> database, no lookalike doubles: `behaviour_support` is `cfg(test)` and invisible to integration
+> tests); the end-to-end leg signs a JWT whose `app_metadata` is the stamper's own PUT body and
+> passes `acceptDelivery`'s `RoleGuard` once the seam resolves a row, FORBIDDEN as PUBLIC without
+> one. `CommandDeps` (hand-written, `inbox.rs`) grew `riders` + `support_contact`, so every
+> construction site moved (the composition root shares ONE `PgRiderRepository` between the seam
+> and the door; `mailbox/standalone.rs` — FENCED — took the two-field minimum in its env-gated
+> posture). Telemetry: `rider_claim_stamp_failed_total{reason}` on the `rider-identity` contract
+> (the customer counter's pattern under this contract's own name; the shared `claims.stamp` span).
+> Not done here, by scope: the screen and the per-screen PUBLIC capability (2c-ii); any revocation,
+> custody or roster work. Adjacent finding for the architect: a provider failure AFTER the OTP is
+> consumed (stamp/rotate/park) surfaces to the rider as `InvalidVerificationCode` on the mailbox's
+> retry, since the retry re-verifies a spent code — the customer door swallows the same failure
+> instead; both want a typed `SignInUnavailable`. Gates: `make validate` 0 errors (ratchet
+> `identity-property-not-on-command` 1 → 3, accepted: the sign-in commands cannot carry a
+> `riderId`); `make rust` and `make test-crates` (`DB_TESTS_REQUIRED=1`, real Postgres) green.
+> **Review round 1 applied (same day)** — the independent reviewer's ONE blocking finding, B1: a
+> confirm sent with no `X-SESSION-ID` parked an OWNERLESS session (`session_id: None`; the
+> `AuthSessionStore` both-`None` claim is another channel's contract, and Postgres matches it with
+> `IS NOT DISTINCT FROM`), so any header-less `POST /auth/session` holding the acceptance
+> messageId — present in spans and logs — could take the credential; unreachable from the SDUI
+> client (always sends the header), reachable from anything else. Fixed AT THE DOOR, never at the
+> port: `confirm_rider_sign_in` refuses with the typed `RiderSignInRequiresSession` BEFORE the OTP
+> is spent (the code stays usable for a correct retry; nothing verified, stamped or parked), the
+> parked row is now `Some(owner)` by construction. Seen red first through the real transport —
+> door test (f), a known rider with the right code and no header: `expected a TYPED rejection,
+> got Ok(())` — and in the generated bed. **The bed had been passing `None` for every rider
+> confirm** (not in the card): the emitter now presents a session by default and withholds it
+> only for the case whose declared outcome IS the missing-session refusal (`thrown` names it; no
+> `when.session` key added). Also here: `SUPPORT_CONTACT`-unset seen red against a mutant (door
+> test (g), `got Ok(())` with the guard removed); `TestRiderConfirmSignInIdentifies` renamed to
+> what `then: []` proves (the stamp/park port effects live in transport test (b) — an emitter gap,
+> noted, not filed); STATUS's Concern count corrected to five; and the post-verify provider-failure
+> finding filed as [#853](https://github.com/TheCaptainCompany/captain-food/issues/853).
+
 > **2026-09-03 — #639 part C step 2b: the rider sign-in door — a rider is whoever OUR Postgres says
 > the login belongs to, never whoever the token says, and nobody when there is no row.** PR
 > [#849](https://github.com/TheCaptainCompany/captain-food/pull/849), `HOLD: human`, hands back in

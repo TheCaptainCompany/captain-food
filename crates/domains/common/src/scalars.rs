@@ -493,3 +493,15 @@ pub enum CommandFailureReason {
 /// The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct GatewayStatusCode(pub i64);
+
+/// Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DialingCode(pub String);
+
+/// National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NationalPhoneNumber(pub String);
+
+/// One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OtpCode(pub String);

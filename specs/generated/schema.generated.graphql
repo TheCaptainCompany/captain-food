@@ -74,6 +74,9 @@ scalar TraceSampleRatio
 scalar LogLevel
 scalar RestaurantAccountId
 scalar GatewayStatusCode
+scalar DialingCode
+scalar NationalPhoneNumber
+scalar OtpCode
 scalar ConversationMessageId
 scalar MessageBody
 scalar MuteReason
@@ -81,9 +84,6 @@ scalar EscalationReason
 scalar TranslatedText
 scalar AddressId
 scalar PaymentMethodId
-scalar DialingCode
-scalar NationalPhoneNumber
-scalar OtpCode
 scalar EmailVerificationToken
 scalar ErasureRequestId
 scalar ErasureConfirmationToken
@@ -1303,6 +1303,18 @@ input RevokeDeliveryPartnerAvailabilityInput {
   reason: String
 }
 
+input RequestRiderSignInCodeInput {
+  dialingCode: DialingCode!
+  nationalNumber: NationalPhoneNumber!
+  locale: Locale
+}
+
+input ConfirmRiderSignInInput {
+  dialingCode: DialingCode!
+  nationalNumber: NationalPhoneNumber!
+  code: OtpCode!
+}
+
 input RegisterRestaurantAccountInput {
   restaurantAccountId: RestaurantAccountId!
   legalName: RestaurantLegalName!
@@ -1942,6 +1954,8 @@ type Mutation {
   registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
   approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")
+  requestRiderSignInCode(input: RequestRiderSignInCodeInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "RequestRiderSignInCode")
+  confirmRiderSignIn(input: ConfirmRiderSignInInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "ConfirmRiderSignIn")
   registerRestaurantAccount(input: RegisterRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "RegisterRestaurantAccount")
   updateRestaurantAccount(input: UpdateRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "UpdateRestaurantAccount")
   deleteRestaurantAccount(input: DeleteRestaurantAccountInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @command(name: "DeleteRestaurantAccount")

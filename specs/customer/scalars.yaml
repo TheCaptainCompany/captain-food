@@ -17,26 +17,6 @@ PaymentMethodId:
   description: "Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'."
 
 
-DialingCode:
-  type: string
-  pattern: "^\\+[0-9]{1,4}$"
-  description: >
-    Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker
-    emits and what the auth commands receive — NOT the ISO country code.
-
-
-NationalPhoneNumber:
-  type: string
-  maxLength: 24
-  description: "National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'."
-
-
-OtpCode:
-  type: string
-  pattern: "^[0-9]{4,8}$"
-  description: "One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev)."
-
-
 EmailVerificationToken:
   type: string
   maxLength: 512
