@@ -59,6 +59,9 @@ pub struct CommandDeps {
     pub store: Arc<dyn application::ports::EventStore>,
     pub restaurants: Arc<dyn application::queries::RestaurantReadRepository>,
     pub slugs: Arc<dyn application::queries::SlugReservationRepository>,
+    /// The `(principal_kind, auth_subject)` reservation `register_rider` binds a login through
+    /// (#639 part C step 2a, #794) -- reserve only, no release by construction.
+    pub auth_subjects: Arc<dyn application::queries::AuthSubjectReservationRepository>,
     pub ownership: Arc<dyn application::ports::GoogleOwnershipVerifier>,
     pub probe: Arc<dyn application::ports::GbpOrderLinkProbe>,
     pub prospection: Arc<dyn application::queries::ProspectionReadRepository>,
@@ -507,7 +510,7 @@ async fn rider(
     let _ = (deps, actor, env);
     match message {
         RiderInbox::ChangeRiderStatus(cmd) => run(async { application::commands::change_rider_status(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
-        RiderInbox::RegisterRider(cmd) => run(async { application::commands::register_rider(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+        RiderInbox::RegisterRider(cmd) => run(async { application::commands::register_rider(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         RiderInbox::UpdateRiderInfo(cmd) => run(async { application::commands::update_rider_info(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
     }
 }

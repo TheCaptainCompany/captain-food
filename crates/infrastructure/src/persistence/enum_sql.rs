@@ -12,7 +12,7 @@ use domain::generated::scalars::{
     CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
     DeliveryTimeliness, GbpLinkStatus,
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
-    ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
+    PrincipalKind, ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
     RestaurantStatus, RiderStatus, ScopeType, ServiceType, ThumbRating, UserType,
 };
@@ -122,6 +122,10 @@ enum_text!(ReclamationResolution {
 // strand historical rows, which is also why the UUIDv5 membership key pins its own literal
 // (`membership_id_is_pinned` in the projector).
 enum_text!(ScopeType { ORDER, RESTAURANT });
+// The `principal_kind` half of the auth_subject_reservations key (#639 part C step 2a, #794). A
+// NEW scalar with no stored history before that table (ADR-20260831-220559), so these are the
+// first rows ever written with it.
+enum_text!(PrincipalKind { CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, MEMBER });
 enum_text!(UserType {
     PUBLIC,
     CUSTOMER,
@@ -197,6 +201,8 @@ mod tests {
             DeliveryDispatchProcessStatus::from_text("FAILED").unwrap(),
             DeliveryDispatchProcessStatus::FAILED
         );
+        assert_eq!(PrincipalKind::RESTAURANT_ACCOUNT.to_text(), "RESTAURANT_ACCOUNT");
+        assert_eq!(PrincipalKind::from_text("MEMBER").unwrap(), PrincipalKind::MEMBER);
         assert!(RestaurantStatus::from_text("BOGUS").is_err());
     }
 }

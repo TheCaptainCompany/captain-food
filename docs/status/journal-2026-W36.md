@@ -2,6 +2,36 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-03 — #639 part C step 2a: a rider's login is bound to ONE rider id, decided by Postgres
+> before the fact is recorded (#794, the `slug_reservations` copy job).** Fourth attempt at step 2 —
+> the first three executors were killed by container restarts (two before any push, the third after
+> pushing only the claim), so this one pushed after every green milestone. What landed, on PR
+> [#846](https://github.com/TheCaptainCompany/captain-food/pull/846), still in draft under
+> `HOLD: human`: `auth_subject_reservations` with a **composite** primary key
+> `(principal_kind, auth_subject)` typed by `PrincipalKind` + `AuthSubject` — never the subject
+> alone, because a rider who is also a customer holds two bindings and a subject-only key would bar
+> a rider from ever becoming a restaurant member; `principal_id` typed by the kind exactly as
+> `ScopeMembership.member_id` is; **no `released_at` and no `release` method** — stronger than the
+> slug sibling, since freeing a revoked rider's login would let a later registration bind the same
+> human to a NEW rider id and orphan their history. `register_rider` reserves BEFORE the
+> `RiderRegistered` append; a lost insert is the new typed `RiderAuthSubjectAlreadyBound` (en/fr),
+> wired into `RegisterRider`'s `throws`, pinned by `TestRiderAuthSubjectAlreadyBoundIsRejected`
+> under the new rule `RiderAuthSubjectBoundOnce` — a real assertion only because the in-memory port
+> is seeded with a FOREIGN holder under `"already-bound"` (the `SpecSlugReservations` sentinel
+> convention). The DB-gated
+> `two_concurrent_claims_of_one_login_bind_exactly_one_rider` races two `reserve`s on real Postgres
+> (`INSERT … ON CONFLICT (principal_kind, auth_subject) DO NOTHING`), which the fake cannot stand in
+> for: its mutex would pass a read-then-write implementation too. Migration `20260903060000`
+> mirrors the generated DDL byte-for-byte; `REQUIRED_SCHEMA_VERSION` moves with it. The SQL emitter
+> learned a composite key (two `pk: true` columns → one table-level `PRIMARY KEY (a, b)`; single-key
+> tables are byte-identical). The port takes a `BoundPrincipal` witness enum (one `Rider` arm today)
+> so the `(kind, id)` pair can never disagree — compiler first. **Fence report**: `CommandDeps`
+> lives in `crates/infrastructure/src/inbox.rs` and `standalone.rs` constructs it, both fenced by
+> the card; the minimum taken is one field, one match arm and one wiring line. **Build-order row 2
+> of PROP-20260831-180622 is NOT yet marked landed** — 2b (the resolver, the §10 pair, the WS
+> mirror, the `role_injection_gate` fix, the duplicate-`authRef` classification test) is the next
+> dispatch, and NO RIDER CAN SIGN IN yet.
+
 > **2026-09-01 — A link checker exists, and a broken citation can no longer ship silently.**
 > Founder directive, 2026-09-01, verbatim: *"excellent point put in place this url checker that must
 > be executed locally and enforced in the CI too"* — both halves, and both landed: `make link-check`

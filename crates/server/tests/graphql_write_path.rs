@@ -136,6 +136,7 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+        auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
         ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
         probe: Arc::new(UnverifiedGbpOrderLinkProbe),
         prospection: Arc::new(PgProspectionRepository::new(pool.clone())),

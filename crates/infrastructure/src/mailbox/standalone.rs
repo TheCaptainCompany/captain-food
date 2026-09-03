@@ -122,6 +122,7 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         store: Arc::new(crate::persistence::PgEventStore::new(pool.clone())),
         restaurants: Arc::new(crate::persistence::PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(crate::PgSlugReservationRepository::new(pool.clone())),
+        auth_subjects: Arc::new(crate::PgAuthSubjectReservationRepository::new(pool.clone())),
         ownership: Arc::new(crate::FailClosedGoogleOwnershipVerifier),
         probe: Arc::new(crate::UnverifiedGbpOrderLinkProbe),
         prospection: Arc::new(crate::persistence::PgProspectionRepository::new(pool.clone())),

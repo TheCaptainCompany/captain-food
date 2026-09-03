@@ -37,6 +37,7 @@ pub mod runtime_posture;
 pub mod slug_alias_store;
 pub mod sms_send_quota;
 pub mod slug_reservation;
+pub mod auth_subject_reservation;
 
 pub use auth_sessions::PgAuthSessionStore;
 pub use sms_send_quota::PgSmsQuotaStore;
@@ -45,6 +46,7 @@ pub use catalog::PgCatalogRepository;
 pub use customer::PgCustomerRepository;
 pub use customer_credit_balance::PgCustomerCreditRepository;
 pub use slug_reservation::PgSlugReservationRepository;
+pub use auth_subject_reservation::PgAuthSubjectReservationRepository;
 pub use delivery::PgDeliveryRepository;
 pub use delivery_satisfaction::PgDeliverySatisfactionRepository;
 pub use event_bus::{AppendedEvent, EventBus};
