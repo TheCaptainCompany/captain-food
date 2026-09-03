@@ -599,6 +599,66 @@ customer-identity:
   error_budget: { max_error_rate_pct: 0.1 }
 
 # =====================================================================
+# rider-identity -- #639 part C step 2b, the rider sign-in door (PROP-20260831-180622 build-order
+# row 2; ADR-20260818-004646, ADR-20260830-234532): the request-seam translation from the verified
+# auth SUBJECT to the RIDER's domain identity, resolved from OUR Postgres -- the `Rider` read model's
+# `auth_ref` bridge, one btree probe on its UNIQUE constraint -- on EVERY request and WS connect.
+# UNGATED, by design, and that is the one way it differs from customer-identity: no rider token has
+# ever carried a domain binding (the sole claim stamper hardcodes CUSTOMER), so an OFF state would
+# preserve nothing -- "no rider can sign in" is the feature's absence, not a gate. The JWT is
+# UNREAD for this decision structurally: `Identity::Rider` holds the subject and nothing else, and
+# `ProductClaims` parses no rider field. NoMapping and LookupFailed BOTH fail closed to Public
+# identically at the API boundary and are DISTINGUISHABLE here for the customer seam's reason:
+# a missing row is OBSERVE (a provisioning gap, a projector not yet caught up -- rebuild by
+# checkpoint reset, never TRUNCATE -- or a registration the reservation refused), a failed lookup
+# is PAGE (the seam itself is unavailable). Its OWN metric names rather than a `role` label on the
+# customer seam's: a paging rule keyed on `customer_identity_lookup_failed_total` must not go
+# quiet while riders fail on a seam it does not watch.
+# =====================================================================
+rider-identity:
+  feature: rider-identity
+  criticality: high
+  workflow:
+    surface: graphql   # read-path binding, request seam -- no single command/saga/aggregate (validator §8)
+
+  run_identity:
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    # ONE per RIDER-path resolution, INSIDE auth.read_scope's span. Never emitted for any other
+    # role. `business.result` is the seam's typed three-way outcome; `business.failure_reason` is
+    # set only when it is `lookup_failed` (the coarse DomainError class, never the driver message).
+    - name: "rider.identity.resolve"
+      kind: INTERNAL
+      required: false   # only a RIDER-path caller opens it; every other role's request never does
+      attributes:
+        - { key: "business.result", type: string, required: true }   # resolved | not_found | lookup_failed
+        - { key: "business.correlation_id", type: string, required: true }
+        - { key: "business.failure_reason", type: string, required: false }
+
+  metrics:
+    - { name: "rider_identity_resolve_ms", type: histogram, attributes: ["result"] }
+    # OBSERVE: no `rider` row for this subject -- fails closed to Public.
+    - { name: "rider_identity_not_found_total", type: counter, attributes: [] }
+    # PAGE: the seam could not be asked. `reason` is the coarse DomainError class.
+    - { name: "rider_identity_lookup_failed_total", type: counter, attributes: ["reason"] }
+    # `db` is one real Postgres round trip; `request_reuse` is declared for the same reason as on
+    # customer-identity (an in-request reuse must never hide an outage) and is not reachable yet.
+    - { name: "rider_identity_lookup_source_total", type: counter, attributes: ["source"] }
+
+  status_rules:
+    success:
+      required_spans: []   # the span is opened only on the RIDER path
+    technical_error:
+      any_span_errors: true
+
+  # One probe on `rider.auth_ref`'s UNIQUE index -- the customer seam's budget, and for the same
+  # reason: if it drifts, something started scanning.
+  latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
+  error_budget: { max_error_rate_pct: 0.1 }
+
+# =====================================================================
 # refund — the compensation saga (Stripe refund driven by RefundProcess)
 # OrderRejected/Cancelled* or RefundRequested -> [Stripe refund] -> PaymentRefunded (recorded)
 # =====================================================================

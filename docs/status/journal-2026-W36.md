@@ -2,6 +2,46 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-03 — #639 part C step 2b: the rider sign-in door — a rider is whoever OUR Postgres says
+> the login belongs to, never whoever the token says, and nobody when there is no row.** PR
+> [#849](https://github.com/TheCaptainCompany/captain-food/pull/849), `HOLD: human`, hands back in
+> draft; build-order row 2 of PROP-20260831-180622 is now LANDED (2a = #846). **The §10 pair was seen
+> red first, both halves, for the real reason** — (a) *"Postgres wins over the claim"* got
+> `Rider(B)` where the table said `A`; (b) *"no row -> fail closed"* got `Rider(B)` where `Public`
+> was owed — and the *try-Postgres-else-claim* shape was tried on purpose: it passes (a) and fails
+> only (b), exactly as `beck` predicted; the WS-seam mirror
+> (`ws_connection_init_resolves_rider_through_postgres_not_the_claim`, a signed JWT through
+> `authorize_and_resolve_scope`) was red the same way. **The binding is unspellable, not merely
+> unread**: `Identity::Rider { sub }` has no id field and `ProductClaims` parses no `rider_id`, so
+> `serde` treats a token's `rider_id` as a stranger's key — the four-key serde pin now asserts that
+> absence. The RIDER seam is `Postgres` with no `Claim` arm and no OFF state (`RiderIdentitySource`
+> is a private-field struct; the no-database boot mode gets `NoDatabaseRiderIdentity`, which answers
+> `LookupFailed` — PAGE — rather than pretending a missing database is a provisioning gap);
+> `IdentitySources { customer, rider }` is the one value both transports carry, so a transport
+> cannot wire one seam and forget the other. The three-way outcome became `IdentityResolution<Id>`
+> with the customer and rider names as aliases, so the vocabulary cannot drift between seams. The
+> read port `RiderIdentityRepository::rider_id_by_auth_subject` is born `AuthSubject` beside the
+> still-`ExternalReference` `by_auth_ref` (#836 unifies them), selects `rider_id` and nothing else,
+> and never `LIMIT 1`s. Its own `rider-identity` observability contract (the customer shape under
+> its own metric names — a paging rule keyed on `customer_identity_lookup_failed_total` must not go
+> quiet while riders fail on a seam it does not watch). **Two more gates**:
+> `crates/server/tests/role_injection_gate.rs` now walks `tests/` RECURSIVELY — the `read_dir`
+> walk stopped at the top level and its `scanned >= 8` floor was met there, so a suite in a
+> sub-folder was invisible while the gate stayed green; seen red by planting
+> `.data(RequestRole::Admin)` one level down — and `rider_duplicate_auth_ref.rs` pins what the
+> default `DbFaultPolicy::Skip` does with two `RiderRegistered` sharing an `authRef` (reachable
+> now only by REPLAY of pre-#794 history): the checkpoint advances past the duplicate, the second
+> rider has no row, and the door reads the FIRST rider — the policy default is untouched, its own
+> decision. **What this does NOT do**: no claim writer mints a `role: RIDER` token (the sole
+> stamper hardcodes CUSTOMER), so end-to-end rider sign-in still waits on the token that walks
+> through the door; and an unresolved rider still ACTS as RIDER on the write half (`ActingRole`
+> follows the identity, exactly as an unmapped customer under the Postgres gate does) while reading
+> `Public` — the same asymmetry the customer seam already carries, named for the architect rather
+> than widened here. Card defects: none of substance; the "part A already landed the table" note
+> and the three `(principal_kind, auth_ref)` / "unbuilt" sites (#848 item 4) are corrected in the
+> proposal in the same change. Gates: `make validate` 0 errors, ratchet exact match; `make rust`
+> and `make test-crates` (`DB_TESTS_REQUIRED=1`, real Postgres) green.
+
 > **2026-09-03 — #639 part C step 2a: a rider's login is bound to ONE rider id, decided by Postgres
 > before the fact is recorded (#794, the `slug_reservations` copy job).** Fourth attempt at step 2 —
 > the first three executors were killed by container restarts (two before any push, the third after
