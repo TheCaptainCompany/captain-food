@@ -689,6 +689,28 @@ was to extract the gate to a serde-only crate whose cold build is seconds. **The
 "cheap enough" is the dependency tree (`cargo tree -p <it>` = the lean set), not a warm-cache
 wall-clock** — a green deploy on a warm runner hides the cold-cache tail that a rollback hits first.
 
+## 19b. Four test-bed traps that each cost a cycle (#852, 2026-09-03)
+
+- **`crates/application/src/behaviour_support.rs` is `#[cfg(test)]`**: its `Spec*`/`Fake*` doubles
+  do not exist for an integration test in another crate (one failed `cargo check`). For "every
+  unrelated port in its production type, no database", use `PgPoolOptions::connect_lazy(..)` — it
+  opens no connection and errors loudly the moment a port is actually used.
+- **The generated behaviour bed hardwires envelope arguments per command** in `bt_command_call`
+  (`tools/codegen-rs/src/emit/behaviour_tests.rs`): `None` for `ConfirmRiderSignIn`'s session,
+  `PlaceOrder` likewise. A handler that starts refusing on an absent envelope value silently flips
+  every generated case for that command red — the runtime path was reviewed, the bed was not. Rule
+  for a dispatch card: **a refusal on envelope data names the bed's argument for that command**,
+  and the emitter change that presents it is part of the same fix.
+- **A warning can be pinned twice** — by `warning-baseline.json` AND by a by-name codegen test (e.g.
+  `typed_identity_migration_keeps_generated_runtime_byte_identical`'s exact inventory of unaddressed
+  commands). `make warning-baseline` alone does not make `make rust` green; find the second pin
+  before the six-minute run tells you (`grep -rn '<warning-key>' tools/codegen-rs/src/tests.rs`).
+- **`CommandDeps` (`crates/infrastructure/src/inbox.rs`) has sixteen struct-literal sites** (14 tests
+  + the composition root + `standalone.rs`); adding a field means editing all of them, and a
+  mechanical insert must go after the literal's opening line, not after `store:` — one site nests a
+  `store: Arc::new(GatedOrderReads { ... })` literal. Also: `cargo test` takes ONE name filter; two
+  is `unexpected argument`.
+
 ## 19. Shapes a gate test keeps reproducing
 
 From [#679 "RETRIEVAL-QMD-CI decided: the decision-lookup stub suite runs in

@@ -21,6 +21,7 @@ The rules live in [`sessions/`](sessions/); this page is the index.
 - [18. A CI-workflow change: does it fit the job's timeout, and does it regress the rollback path?](sessions/gates.md#18-a-ci-workflow-change-does-it-fit-the-jobs-timeout-and-does-it-regress-the-rollback-path)
 - [19. Shapes a gate test keeps reproducing](sessions/gates.md#19-shapes-a-gate-test-keeps-reproducing)
 - [19a. Two gate-recipe corrections that each cost one wasted cycle](sessions/gates.md#19a-two-gate-recipe-corrections-that-each-cost-one-wasted-cycle-2026-09-03)
+- [19b. Four test-bed traps that each cost a cycle](sessions/gates.md#19b-four-test-bed-traps-that-each-cost-a-cycle-852-2026-09-03)
 
 ## [`sessions/environment.md`](sessions/environment.md)
 
