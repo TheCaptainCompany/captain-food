@@ -92,6 +92,13 @@ pub const RIDER_NOT_REGISTERED: ErrorDef = ErrorDef {
     message_fr: "Ce numéro de téléphone n'est lié à aucun compte livreur. Contactez {supportContact} pour être enregistré.",
 };
 
+/// The sign-in confirmation arrived with no `X-SESSION-ID` (the independent review of #852, B1). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId -- which travels in spans and logs. So the door refuses BEFORE the OTP is spent (the code stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's, not the rider's (the SDUI client always sends the header, so a rider never sees this). The `AuthSessionStore` port's both-`None` claim is untouched -- that is another channel's contract; this door simply never parks without an owner.
+pub const RIDER_SIGN_IN_REQUIRES_SESSION: ErrorDef = ErrorDef {
+    code: "RiderSignInRequiresSession",
+    message_en: "Sign-in needs a browser session. Reload the page and try again.",
+    message_fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez.",
+};
+
 /// The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
 /// Context: `authRef`.
 pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {

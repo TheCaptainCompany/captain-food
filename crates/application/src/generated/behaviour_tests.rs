@@ -4190,13 +4190,13 @@ async fn test_rider_confirm_sign_in_unknown_phone_is_rejected() {
     spec_baseline(&bed).await;
     let before = bed.snapshot();
     let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("612345678".into()), code: sc::OtpCode("123456".into()) };
-    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor()).await;
     let err = result.expect_err("TestRiderConfirmSignInUnknownPhoneIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderConfirmSignInUnknownPhoneIsRejected", &err, &["RiderNotRegistered"]);
     bed.assert_appended("TestRiderConfirmSignInUnknownPhoneIsRejected", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestRiderConfirmSignInIdentifies — "Verifying the OTP on a rider's phone signs the rider in: the RIDER claim is stamped and the session parked; nothing appended"
+/// tests.yaml#/tests/TestRiderConfirmSignInIdentifies — "Verifying the OTP on a rider's phone is accepted and appends nothing -- identify-only, never register"
 /// rules: RiderSignInIdentifiesOnly
 #[tokio::test]
 async fn test_rider_confirm_sign_in_identifies() {
@@ -4205,7 +4205,7 @@ async fn test_rider_confirm_sign_in_identifies() {
     bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
     let before = bed.snapshot();
     let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("611223344".into()), code: sc::OtpCode("123456".into()) };
-    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor()).await;
     let _ = result.expect("TestRiderConfirmSignInIdentifies: the spec expects acceptance");
     bed.assert_appended("TestRiderConfirmSignInIdentifies", &before, &[]);
 }
@@ -4219,7 +4219,7 @@ async fn test_rider_confirm_sign_in_wrong_code_is_rejected() {
     bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
     let before = bed.snapshot();
     let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("611223344".into()), code: sc::OtpCode("000000".into()) };
-    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor()).await;
     let err = result.expect_err("TestRiderConfirmSignInWrongCodeIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderConfirmSignInWrongCodeIsRejected", &err, &["InvalidVerificationCode", "VerificationCodeExpired"]);
     bed.assert_appended("TestRiderConfirmSignInWrongCodeIsRejected", &before, &[]);
@@ -4234,10 +4234,25 @@ async fn test_rider_confirm_sign_in_subject_holding_another_role_is_rejected() {
     bed.seed(&format!("Rider-{}", support::uid("rider-3")), vec![fx_rider_registered_on_customer_login()]).await;
     let before = bed.snapshot();
     let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("699000002".into()), code: sc::OtpCode("123456".into()) };
-    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor()).await;
     let err = result.expect_err("TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected", &err, &["AuthSubjectHoldsAnotherRole"]);
     bed.assert_appended("TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderConfirmSignInWithoutSessionIsRejected — "Refuses rider sign-in when the request carries no session to own the parked credential; spends no OTP, parks nothing"
+/// rules: RiderSignInIdentifiesOnly
+#[tokio::test]
+async fn test_rider_confirm_sign_in_without_session_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmRiderSignIn { dialing_code: sc::DialingCode("+33".into()), national_number: sc::NationalPhoneNumber("611223344".into()), code: sc::OtpCode("123456".into()) };
+    let result = crate::commands::confirm_rider_sign_in(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await;
+    let err = result.expect_err("TestRiderConfirmSignInWithoutSessionIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRiderConfirmSignInWithoutSessionIsRejected", &err, &["RiderSignInRequiresSession"]);
+    bed.assert_appended("TestRiderConfirmSignInWithoutSessionIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestRiderInfoUpdated — "A rider updates editable profile fields"

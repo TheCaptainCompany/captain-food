@@ -3580,6 +3580,12 @@ pub async fn request_rider_sign_in_code(
 /// the session is rotated so the token carries it, and that POST-STAMP session is parked for
 /// `POST /auth/session` (the credential is never in the GraphQL response). Emits no event.
 ///
+/// Two refusals come BEFORE the OTP is spent, so a correct retry still has its code: no
+/// `SUPPORT_CONTACT` (dev-only, loud), and no `X-SESSION-ID` on the request
+/// (`RiderSignInRequiresSession`, B1 of the #852 review) — the parked credential is owned by that
+/// session, and the store's both-`None` claim is another channel's contract, so this door never
+/// parks without an owner.
+///
 /// Failure posture differs from the customer's on purpose: there the OTP also REGISTERED, so a
 /// stamp failure was logged and the fact still recorded; here the stamp IS the outcome, so any
 /// failure is returned — a typed rejection surfaces as `Operation.errorCode`, a provider failure
@@ -3607,6 +3613,15 @@ pub async fn confirm_rider_sign_in(
              refuses (configuration.yaml#/SUPPORT_CONTACT: required, no default)"
                 .into(),
         ));
+    };
+    // Fail CLOSED before spending the OTP, again (B1, the independent review of #852): the
+    // credential is parked for `POST /auth/session` under the OWNING X-SESSION-ID, and a session
+    // parked with no owner could be claimed by ANY header-less caller holding the messageId (which
+    // travels in spans and logs). The store's both-`None` claim is another channel's contract and
+    // stays; this door simply refuses to park ownerless -- and refuses HERE, so nothing is
+    // verified, stamped or parked, and the code stays usable for a correct retry.
+    let Some(session_id) = session_id else {
+        return Err(reject("RiderSignInRequiresSession", json!({})));
     };
     let verified = auth
         .verify_phone_otp(
@@ -3654,7 +3669,7 @@ pub async fn confirm_rider_sign_in(
     sessions
         .park(crate::auth_sessions::ParkedAuthSession {
             message_id,
-            session_id: session_id.map(|s| s.0),
+            session_id: Some(session_id.0),
             access_token: rotated.access_token,
             refresh_token: rotated.refresh_token,
             expires_in: rotated.expires_in,

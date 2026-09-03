@@ -19,7 +19,14 @@
 //!       and the rider bridge is consulted ZERO times on that leg — no enumeration oracle;
 //!   (e) end to end: a token carrying exactly what the rider stamp writes, signed, reaches
 //!       `acceptDelivery` on `/rider/graphql` past `RoleGuard` once the seam resolves a row — the
-//!       door actually opens — and stays FORBIDDEN as PUBLIC with no row (the 2b control leg).
+//!       door actually opens — and stays FORBIDDEN as PUBLIC with no row (the 2b control leg);
+//!   (f) a confirm carrying NO `X-SESSION-ID` is REFUSED (`RiderSignInRequiresSession`) BEFORE the
+//!       OTP is spent — the verifier is never called, nothing is stamped, nothing is parked: a
+//!       parked rider session always has an owner, so no header-less `POST /auth/session` can
+//!       claim one (B1 of the independent review of #852; the `AuthSessionStore` both-`None`
+//!       claim is another channel's contract and is untouched);
+//!   (g) `SUPPORT_CONTACT` unset (development) fails CLOSED before the OTP is spent, with the
+//!       loud unconfigured `Repository` error — nothing verified, sent, stamped or parked.
 //!
 //! Seen RED first on (a): before the handler existed, the router had no arm for
 //! `RiderInbox::ConfirmRiderSignIn` (E0004 — the human-owned router's whole mechanism); the failure
@@ -28,6 +35,7 @@
 use std::sync::{Arc, Mutex};
 
 use application::auth_sessions::mem::MemAuthSessionStore;
+use application::auth_sessions::AuthSessionStore;
 use application::generated::inboxes::ActorInbox;
 use application::generated::services::{
     IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendEmailMagicLinkInput,
@@ -116,6 +124,9 @@ fn jwt_of_the_rider_stamp(sub: uuid::Uuid) -> String {
 struct ScriptedIdentity {
     /// Canonical phones an OTP was sent to.
     sent: Mutex<Vec<String>>,
+    /// How many OTPs were VERIFIED (spent): a refusal that must not cost the rider a code asserts
+    /// this stayed at zero.
+    verified: Mutex<u32>,
     /// Subjects the RIDER stamper was asked to stamp — the port input is the subject and nothing
     /// else; the wire shape is the adapter's (`stamp_rider_put_body`, pinned separately).
     rider_stamps: Mutex<Vec<String>>,
@@ -145,6 +156,7 @@ impl IdentityService for ScriptedIdentity {
         input: IdentityVerifyPhoneOtpInput,
         _meta: &ServiceCallMeta,
     ) -> Result<IdentityVerifyPhoneOtpOutput, DomainError> {
+        *self.verified.lock().expect("scripted identity") += 1;
         Ok(IdentityVerifyPhoneOtpOutput {
             auth_ref: AuthSubject(subject_of(&input.national_number.0)),
             access_token: Some("pre-stamp.access".into()),
@@ -351,12 +363,21 @@ impl Door {
     /// One real request: `POST /public/graphql`, anonymous, with the X-SESSION-ID that will own the
     /// parked session. Returns the GraphQL response body.
     async fn post_public(&self, query: &str, session: uuid::Uuid) -> Value {
-        let request = axum::http::Request::builder()
+        self.post_public_as(query, Some(session)).await
+    }
+
+    /// The same request with the X-SESSION-ID header OPTIONAL — `None` sends no header at all,
+    /// the shape a non-SDUI caller can produce (f).
+    async fn post_public_as(&self, query: &str, session: Option<uuid::Uuid>) -> Value {
+        let mut builder = axum::http::Request::builder()
             .method("POST")
             .uri("/public/graphql")
             .header(axum::http::header::HOST, "chez-test.captain.food")
-            .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .header("X-SESSION-ID", session.to_string())
+            .header(axum::http::header::CONTENT_TYPE, "application/json");
+        if let Some(session) = session {
+            builder = builder.header("X-SESSION-ID", session.to_string());
+        }
+        let request = builder
             .body(axum::body::Body::from(json!({ "query": query }).to_string()))
             .expect("request builds");
         let response = self.app.clone().oneshot(request).await.expect("router answers");
@@ -368,7 +389,11 @@ impl Door {
     /// The typed acceptance of a mutation, or a panic naming the GraphQL error (a `[PUBLIC]` guard
     /// refusing the anonymous path would show up here, as FORBIDDEN).
     async fn accept(&self, field: &str, query: &str, session: uuid::Uuid) -> Value {
-        let body = self.post_public(query, session).await;
+        self.accept_as(field, query, Some(session)).await
+    }
+
+    async fn accept_as(&self, field: &str, query: &str, session: Option<uuid::Uuid>) -> Value {
+        let body = self.post_public_as(query, session).await;
         assert!(
             body["errors"].is_null(),
             "{field} must be ACCEPTED on /public/graphql, got errors: {}",
@@ -580,4 +605,91 @@ async fn the_token_the_rider_stamp_writes_opens_the_rider_door_once_the_seam_res
     let unbound = door(ScriptedIdentity::default(), ScriptedRiders::default(), RiderIdentityResolution::NoMapping).await;
     let (message, code) = post_as_rider(&unbound, &jwt).await;
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row => PUBLIC, whatever the token says -- got: {message}");
+}
+
+// ─── (f) no session, no credential: refused before the OTP is spent ─────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_confirm_without_a_session_header_is_refused_before_the_otp_is_spent_and_nothing_is_parked() {
+    // A KNOWN rider with the RIGHT code: the missing session is the ONLY reason to refuse.
+    let door = door(ScriptedIdentity::default(), a_known_rider(), RiderIdentityResolution::NoMapping).await;
+    let message_id = uuid::Uuid::from_u128(0xF1);
+
+    // The transport ACCEPTS a header-less confirm (the generated dispatch yields `Option`), and
+    // the acceptance itself says so: no session travelled with the row.
+    let acceptance = door.accept_as("confirmRiderSignIn", &confirm(RIDER_PHONE, message_id), None).await;
+    assert!(acceptance["sessionId"].is_null(), "no X-SESSION-ID was sent, none is echoed: {acceptance}");
+
+    let (code, context) = rejection(door.deliver(message_id).await);
+    assert_eq!(
+        code, "RiderSignInRequiresSession",
+        "a confirm with no session to OWN the parked credential is refused -- never parked ownerless"
+    );
+    assert_eq!(context, json!({}), "the refusal carries nothing");
+    assert_eq!(
+        *door.identity.verified.lock().unwrap(),
+        0,
+        "refused BEFORE the OTP is spent -- the code stays usable for a correct retry"
+    );
+    assert_eq!(*door.riders.consulted.lock().unwrap(), 0, "the bridge was never asked");
+    assert!(door.identity.rider_stamps.lock().unwrap().is_empty(), "nothing stamped");
+    assert!(door.sessions.parked().is_empty(), "nothing parked -- a parked rider session always has an owner");
+    // And the ownerless claim the review described cannot happen: a header-less claim finds nothing.
+    assert!(
+        door.sessions.claim(message_id, None).await.expect("claim answers").is_none(),
+        "no header-less POST /auth/session can claim a credential for this messageId"
+    );
+}
+
+// ─── (g) SUPPORT_CONTACT unset: fail closed, before the OTP is spent ─────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn support_contact_unset_fails_closed_before_the_otp_is_spent_and_nothing_is_sent_stamped_or_parked() {
+    use domain::generated::scalars::{DialingCode, NationalPhoneNumber, OtpCode, SessionId};
+
+    let identity = ScriptedIdentity::default();
+    let riders = a_known_rider();
+    let sessions = MemAuthSessionStore::default();
+    let cmd = domain::generated::commands::ConfirmRiderSignIn {
+        dialing_code: DialingCode("+33".into()),
+        national_number: NationalPhoneNumber(RIDER_PHONE.into()),
+        code: OtpCode("123456".into()),
+    };
+    let actor = Actor {
+        user_id: uuid::Uuid::nil(),
+        user_type: "PUBLIC".into(),
+        domain_id: None,
+        correlation_id: uuid::Uuid::from_u128(0x61),
+        cause_id: Some(uuid::Uuid::from_u128(0x62)),
+    };
+    // Everything a sign-in needs is present -- a known rider, the right code, an owning session --
+    // EXCEPT the support route the refusal path would name.
+    let result = application::commands::confirm_rider_sign_in(
+        &UntouchableEventStore,
+        &identity,
+        &riders,
+        &sessions,
+        None,
+        cmd,
+        Some(SessionId(uuid::Uuid::from_u128(0x5E55))),
+        &actor,
+    )
+    .await;
+
+    match result {
+        Err(DomainError::Repository(msg)) => assert!(
+            msg.contains("SUPPORT_CONTACT"),
+            "the loud unconfigured error names the key: {msg}"
+        ),
+        other => panic!("SUPPORT_CONTACT unset must fail CLOSED with the Repository error, got {other:?}"),
+    }
+    assert_eq!(*identity.verified.lock().unwrap(), 0, "refused BEFORE the OTP is spent");
+    assert!(identity.sent.lock().unwrap().is_empty(), "nothing sent");
+    assert!(identity.rider_stamps.lock().unwrap().is_empty(), "nothing stamped");
+    assert_eq!(*riders.consulted.lock().unwrap(), 0, "the bridge was never asked");
+    assert!(sessions.parked().is_empty(), "nothing parked");
+    assert!(
+        sessions.claim(uuid::Uuid::from_u128(0x62), Some(uuid::Uuid::from_u128(0x5E55))).await.expect("claim answers").is_none(),
+        "and nothing is claimable"
+    );
 }

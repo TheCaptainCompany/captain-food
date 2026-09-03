@@ -9477,7 +9477,7 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 | [📩 `UpdateRiderInfo`](#command-updateriderinfo) | [⚡ `RiderInfoUpdated`](#event-riderinfoupdated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
 | [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition) |
 | [📩 `RequestRiderSignInCode`](#command-requestridersignincode) | _Delegate to the auth provider: send an SMS OTP, REFUSING when the send guards say so. Never consults the rider read model (no enumeration oracle). No event._ | [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted) |
-| [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) | _Verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole) |
+| [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) | _Refuse a request carrying no session to own the parked credential (RiderSignInRequiresSession) BEFORE the OTP is spent; verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `RiderSignInRequiresSession`](#error-ridersigninrequiressession) |
 
 Lifecycle (generated from the declared state machine):
 
@@ -9913,7 +9913,7 @@ Verify the SMS OTP with the auth provider, then IDENTIFY the rider: the proved a
 
 - **Dispatched by**: [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) · **handled by** [🎭 `Rider`](#actor-rider)
 - **Emits**: —
-- **Throws**: [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole)
+- **Throws**: [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `RiderSignInRequiresSession`](#error-ridersigninrequiressession)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10263,7 +10263,7 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
 | <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(12)_
+### ⛔ Errors _(13)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10278,6 +10278,7 @@ A rider's availability/lifecycle status changed.
 | <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-ridernotregistered"></a>⛔ `RiderNotRegistered` | A phone was verified but no rider account is bound to the login it proves (#639 part C step 2c-i): rider sign-in is IDENTIFY-ONLY and registers nobody, so the sign-in is refused and nothing is created. Named for the RIDER population; the remedy is the support route (`SUPPORT_CONTACT`, ADR-20260830-213135 -- a required key with no default), never self-registration. Only the phone's owner can see it (the OTP was verified first), so it is not an enumeration oracle.  | 🇬🇧 This phone number is not linked to a rider account. Contact {supportContact} to get set up. | 🇫🇷 Ce numéro de téléphone n'est lié à aucun compte livreur. Contactez {supportContact} pour être enregistré. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
+| <a id="error-ridersigninrequiressession"></a>⛔ `RiderSignInRequiresSession` | The sign-in confirmation arrived with no `X-SESSION-ID` (the independent review of #852, B1). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId -- which travels in spans and logs. So the door refuses BEFORE the OTP is spent (the code stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's, not the rider's (the SDUI client always sends the header, so a rider never sees this). The `AuthSessionStore` port's both-`None` claim is untouched -- that is another channel's contract; this door simply never parks without an owner.  | 🇬🇧 Sign-in needs a browser session. Reload the page and try again. | 🇫🇷 La connexion nécessite une session de navigation. Rechargez la page et réessayez. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 | <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 
 ### 📐 Business rules _(20)_
@@ -10411,9 +10412,9 @@ _One login credential binds to at most one rider id, forever: a registration who
 <a id="rule-ridersigninidentifiesonly"></a>
 #### 📐 Rule: `RiderSignInIdentifiesOnly`
 
-_Rider sign-in is identify-only, never register: a verified phone whose login is bound to a rider stamps `{ role: RIDER }` (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified phone with no rider behind it is refused with RiderNotRegistered and creates nothing; a login already carrying another role's claim is refused rather than overwritten; and the code REQUEST never reveals whether the phone belongs to a rider (#639 part C step 2c-i)._
+_Rider sign-in is identify-only, never register: a verified phone whose login is bound to a rider stamps `{ role: RIDER }` (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified phone with no rider behind it is refused with RiderNotRegistered and creates nothing; a login already carrying another role's claim is refused rather than overwritten; a confirmation that carries no session to own the parked credential is refused with RiderSignInRequiresSession BEFORE the OTP is spent, so a parked rider session always has an owner; and the code REQUEST never reveals whether the phone belongs to a rider (#639 part C step 2c-i)._
 
-- **Verified by**: [🧪 `TestRiderRequestSignInCode`](#test-testriderrequestsignincode), [🧪 `TestRiderRequestSignInCodeForStrangerIsIdentical`](#test-testriderrequestsignincodeforstrangerisidentical), [🧪 `TestRiderConfirmSignInUnknownPhoneIsRejected`](#test-testriderconfirmsigninunknownphoneisrejected), [🧪 `TestRiderConfirmSignInIdentifies`](#test-testriderconfirmsigninidentifies), [🧪 `TestRiderConfirmSignInWrongCodeIsRejected`](#test-testriderconfirmsigninwrongcodeisrejected), [🧪 `TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected`](#test-testriderconfirmsigninsubjectholdinganotherroleisrejected)
+- **Verified by**: [🧪 `TestRiderRequestSignInCode`](#test-testriderrequestsignincode), [🧪 `TestRiderRequestSignInCodeForStrangerIsIdentical`](#test-testriderrequestsignincodeforstrangerisidentical), [🧪 `TestRiderConfirmSignInUnknownPhoneIsRejected`](#test-testriderconfirmsigninunknownphoneisrejected), [🧪 `TestRiderConfirmSignInIdentifies`](#test-testriderconfirmsigninidentifies), [🧪 `TestRiderConfirmSignInWrongCodeIsRejected`](#test-testriderconfirmsigninwrongcodeisrejected), [🧪 `TestRiderConfirmSignInSubjectHoldingAnotherRoleIsRejected`](#test-testriderconfirmsigninsubjectholdinganotherroleisrejected), [🧪 `TestRiderConfirmSignInWithoutSessionIsRejected`](#test-testriderconfirmsigninwithoutsessionisrejected)
 
 <a id="rule-restaurantdispatchbypassesrouting"></a>
 #### 📐 Rule: `RestaurantDispatchBypassesRouting`
@@ -10753,7 +10754,7 @@ _Refuses rider sign-in for a verified phone that no rider is bound to; creates n
 <a id="test-testriderconfirmsigninidentifies"></a>
 #### 🧪 Test: `TestRiderConfirmSignInIdentifies`
 
-_Verifying the OTP on a rider's phone signs the rider in: the RIDER claim is stamped and the session parked; nothing appended_
+_Verifying the OTP on a rider's phone is accepted and appends nothing -- identify-only, never register_
 
 - **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
 - **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
@@ -10778,6 +10779,16 @@ _Refuses rider sign-in when the verified login already holds another role's clai
 - **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
 - **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
 - **Thrown**: [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole)
+- **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
+
+<a id="test-testriderconfirmsigninwithoutsessionisrejected"></a>
+#### 🧪 Test: `TestRiderConfirmSignInWithoutSessionIsRejected`
+
+_Refuses rider sign-in when the request carries no session to own the parked credential; spends no OTP, parks nothing_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `ConfirmRiderSignIn`](#command-confirmridersignin)
+- **Thrown**: [⛔ `RiderSignInRequiresSession`](#error-ridersigninrequiressession)
 - **Verifies**: [📐 `RiderSignInIdentifiesOnly`](#rule-ridersigninidentifiesonly)
 
 <a id="test-testriderinfoupdated"></a>

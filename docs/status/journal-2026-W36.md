@@ -54,6 +54,24 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > instead; both want a typed `SignInUnavailable`. Gates: `make validate` 0 errors (ratchet
 > `identity-property-not-on-command` 1 → 3, accepted: the sign-in commands cannot carry a
 > `riderId`); `make rust` and `make test-crates` (`DB_TESTS_REQUIRED=1`, real Postgres) green.
+> **Review round 1 applied (same day)** — the independent reviewer's ONE blocking finding, B1: a
+> confirm sent with no `X-SESSION-ID` parked an OWNERLESS session (`session_id: None`; the
+> `AuthSessionStore` both-`None` claim is another channel's contract, and Postgres matches it with
+> `IS NOT DISTINCT FROM`), so any header-less `POST /auth/session` holding the acceptance
+> messageId — present in spans and logs — could take the credential; unreachable from the SDUI
+> client (always sends the header), reachable from anything else. Fixed AT THE DOOR, never at the
+> port: `confirm_rider_sign_in` refuses with the typed `RiderSignInRequiresSession` BEFORE the OTP
+> is spent (the code stays usable for a correct retry; nothing verified, stamped or parked), the
+> parked row is now `Some(owner)` by construction. Seen red first through the real transport —
+> door test (f), a known rider with the right code and no header: `expected a TYPED rejection,
+> got Ok(())` — and in the generated bed. **The bed had been passing `None` for every rider
+> confirm** (not in the card): the emitter now presents a session by default and withholds it
+> only for the case whose declared outcome IS the missing-session refusal (`thrown` names it; no
+> `when.session` key added). Also here: `SUPPORT_CONTACT`-unset seen red against a mutant (door
+> test (g), `got Ok(())` with the guard removed); `TestRiderConfirmSignInIdentifies` renamed to
+> what `then: []` proves (the stamp/park port effects live in transport test (b) — an emitter gap,
+> noted, not filed); STATUS's Concern count corrected to five; and the post-verify provider-failure
+> finding filed as [#853](https://github.com/TheCaptainCompany/captain-food/issues/853).
 
 > **2026-09-03 — #639 part C step 2b: the rider sign-in door — a rider is whoever OUR Postgres says
 > the login belongs to, never whoever the token says, and nobody when there is no row.** PR

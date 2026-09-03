@@ -225,4 +225,5 @@ Rider:
         - { $ref: 'errors.yaml#/VerificationCodeExpired' }
         - { $ref: 'errors.yaml#/RiderNotRegistered' }
         - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
-      effect: "Verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event."
+        - { $ref: 'errors.yaml#/RiderSignInRequiresSession' }
+      effect: "Refuse a request carrying no session to own the parked credential (RiderSignInRequiresSession) BEFORE the OTP is spent; verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event."

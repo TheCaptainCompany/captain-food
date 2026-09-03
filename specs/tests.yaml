@@ -3734,8 +3734,11 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/RiderNotRegistered' }
 
+  # Identify-only means the ACCEPTED outcome appends nothing -- that is all `then: []` proves. The
+  # stamp and the parked session are PORT effects the generated bed cannot assert; the transport
+  # door test (b) in crates/server/tests/rider_sign_in_door.rs carries those assertions.
   TestRiderConfirmSignInIdentifies:
-    name: "Verifying the OTP on a rider's phone signs the rider in: the RIDER claim is stamped and the session parked; nothing appended"
+    name: "Verifying the OTP on a rider's phone is accepted and appends nothing -- identify-only, never register"
     rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
     actor: { $ref: 'actors.yaml#/Rider' }
     given:
@@ -3772,6 +3775,24 @@ tests:
       data: { dialingCode: "+33", nationalNumber: "699000002", code: "123456" }
     thrown:
       - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
+
+  # B1 of the independent review of #852: the parked credential is owned by the request's
+  # X-SESSION-ID (envelope, ADR-0041), and the session store's both-None claim is another
+  # channel's contract -- so a confirmation carrying no session is refused BEFORE the OTP is
+  # spent, and nothing is ever parked ownerless. A KNOWN rider with the RIGHT code, so the
+  # missing session is the only reason to refuse. The bed withholds the session for exactly this
+  # case (the refusal's sole precondition is the absent envelope; there is no payload field).
+  TestRiderConfirmSignInWithoutSessionIsRejected:
+    name: "Refuses rider sign-in when the request carries no session to own the parked credential; spends no OTP, parks nothing"
+    rules: [{ $ref: 'rules.yaml#/RiderSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmRiderSignIn' }
+      data: { dialingCode: "+33", nationalNumber: "611223344", code: "123456" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderSignInRequiresSession' }
 
   TestRiderInfoUpdated:
     name: "A rider updates editable profile fields"
