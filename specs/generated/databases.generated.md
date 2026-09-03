@@ -8,7 +8,7 @@ Resolved from [`specs/database/databases.yaml`](../database/databases.yaml) and 
 
 | Database | K8s object | Owning role | Recovery | Tables (resolved) |
 |---|---|---|---|---|
-| `captain_write` | `captain-write` | `migrator` | pitr | `CityDeliveryRanking` · `DeliveryChannelCatalog` · `RestaurantDispatchConfig` · `RuntimePosture` · `auth_sessions` · `cart_binding_process_manager` · `delivery_dispatch_process_manager` · `domain_events` · `domain_stream` · `inbound_messages` · `mailbox_partitions` · `payment_process_manager` · `refund_process_manager` · `slug_reservations` · `sms_send_quota` |
+| `captain_write` | `captain-write` | `migrator` | pitr | `CityDeliveryRanking` · `DeliveryChannelCatalog` · `RestaurantDispatchConfig` · `RuntimePosture` · `auth_sessions` · `auth_subject_reservations` · `cart_binding_process_manager` · `delivery_dispatch_process_manager` · `domain_events` · `domain_stream` · `inbound_messages` · `mailbox_partitions` · `payment_process_manager` · `refund_process_manager` · `slug_reservations` · `sms_send_quota` |
 | `read_order` | `read-order` | `migrator` | replay | `Cart` · `CustomerCreditBalance` · `OrderConversation` · `OrderTracking` · `PricingPolicy` · `ScopeMembership` · `UberEstimationPolicy` · `UberSplitPolicy` |
 | `read_catalog` | `read-catalog` | `migrator` | replay | `Catalog` · `PricingPolicy` · `ScopeMembership` · `UberEstimationPolicy` · `UberSplitPolicy` |
 | `read_common` | `read-common` | `migrator` | replay | `City` · `Customer` · `PricingPolicy` · `ProspectionPipeline` · `Restaurant` · `Rider` · `ScopeMembership` · `SlugAlias` · `UberEstimationPolicy` · `UberSplitPolicy` |
@@ -46,6 +46,7 @@ Every table of a covered kind, with its resolved database SET (a set even while 
 | `UberEstimationPolicy` | referential table | replicated | `read_order` · `read_catalog` · `read_common` |
 | `UberSplitPolicy` | referential table | replicated | `read_order` · `read_catalog` · `read_common` |
 | `auth_sessions` | connection table | declared | `captain_write` |
+| `auth_subject_reservations` | write-side reservation table | derived | `captain_write` |
 | `cart_binding_process_manager` | process-manager state table | derived | `captain_write` |
 | `delivery_dispatch_process_manager` | process-manager state table | derived | `captain_write` |
 | `domain_events` | event-store table | derived | `captain_write` |

@@ -585,7 +585,7 @@ PrincipalKind:
     - MEMBER             # a natural person acting WITHIN a scope by grant -- a MemberId
   description: >
     WHAT KIND OF PRINCIPAL acts -- the vocabulary `ScopeMembership.member_type` is really typed by,
-    and the first half of the rider sign-in reservation key `(principal_kind, auth_ref)`. One
+    and the first half of the rider sign-in reservation key `(principal_kind, auth_subject)`. One
     member per entry in `actors.yaml`'s `principals` map, plus `MEMBER`.
 
     A NEW scalar with NO stored history: nothing has ever been written with this type, so `MEMBER`

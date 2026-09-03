@@ -13,7 +13,8 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    CatalogId, RefundStatus, RestaurantAccountId, RestaurantId, RiderId, ScopeType, SessionId, Slug,
+    AuthSubject, CatalogId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
+    ScopeType, SessionId, Slug,
     StockStatus, UserType,
 };
 use domain::shared::errors::DomainError;
@@ -76,6 +77,49 @@ pub trait SlugReservationRepository: Send + Sync {
     /// Mark `slug` as released by `restaurant_id` on a rename: the row stays (so nobody else may take
     /// it) but stops being the restaurant's current address.
     async fn release(&self, slug: Slug, restaurant_id: RestaurantId) -> Result<(), DomainError>;
+}
+
+/// The principal a login credential is being BOUND to (#639 part C step 2a, #794). Each arm carries
+/// its own kind, so the `(principal_kind, principal_id)` pair the reservation stores can never
+/// disagree -- a `RiderId` under `CUSTOMER` is unspellable (ADR-20260803-234035: the type system
+/// before a check). One arm today; the other doors add theirs as they land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundPrincipal {
+    Rider(RiderId),
+}
+
+impl BoundPrincipal {
+    /// The `principal_kind` half of the reservation key.
+    pub fn kind(&self) -> PrincipalKind {
+        match self {
+            BoundPrincipal::Rider(_) => PrincipalKind::RIDER,
+        }
+    }
+
+    /// The domain id bound to the credential -- typed by [`Self::kind`], never the auth subject.
+    pub fn id(&self) -> uuid::Uuid {
+        match self {
+            BoundPrincipal::Rider(id) => id.0,
+        }
+    }
+}
+
+/// The write-side arbiter of "one login credential, one principal of each kind"
+/// (`database/tables/reservations.yaml#/auth_subject_reservations`, #794). Keyed by
+/// `(principal_kind, auth_subject)` -- NEVER the subject alone: a rider who is also a customer holds
+/// two bindings, and a subject-only key would bar a rider from ever becoming a restaurant member.
+///
+/// There is deliberately NO `release`: revoking a rider must not free the binding, or a later
+/// registration would bind the same human to a NEW rider id and orphan their history. That absence
+/// is enforced by this trait's shape, not by a check.
+#[async_trait]
+pub trait AuthSubjectReservationRepository: Send + Sync {
+    /// Bind `subject` to `principal` under `principal.kind()`.
+    ///
+    /// `Ok(true)` = bound (or already bound to this same principal id -- an idempotent replay).
+    /// `Ok(false)` = bound to a DIFFERENT principal of that kind. The caller maps `false` to the
+    /// population's typed error (`RiderAuthSubjectAlreadyBound` for riders).
+    async fn reserve(&self, subject: AuthSubject, principal: BoundPrincipal) -> Result<bool, DomainError>;
 }
 
 #[async_trait]

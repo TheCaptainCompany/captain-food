@@ -35,7 +35,7 @@ use infrastructure::mailbox::{
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCatalogRepository, PgCustomerRepository, PgEventStore, PgProspectionRepository,
-    PgRestaurantRepository, PgSlugReservationRepository, UnverifiedGbpOrderLinkProbe,
+    PgRestaurantRepository, PgAuthSubjectReservationRepository, PgSlugReservationRepository, UnverifiedGbpOrderLinkProbe,
 };
 use sqlx::PgPool;
 
@@ -77,6 +77,7 @@ fn deps_over(store: Arc<dyn EventStore>, pool: &PgPool) -> CommandDeps {
         store,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
+        auth_subjects: Arc::new(PgAuthSubjectReservationRepository::new(pool.clone())),
         ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
         probe: Arc::new(UnverifiedGbpOrderLinkProbe),
         prospection: Arc::new(PgProspectionRepository::new(pool.clone())),

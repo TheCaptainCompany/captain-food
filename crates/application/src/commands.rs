@@ -71,7 +71,7 @@ use crate::ports::{
 };
 use crate::queries::{
     CustomerReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantReadRepository,
-    SlugReservationRepository,
+    AuthSubjectReservationRepository, BoundPrincipal, SlugReservationRepository,
 };
 
 // --- Cart / Order / DeliveryJob / PlaceOrderProcess (checkout→order→delivery flow, ADR-0046 round 2) ---
@@ -1704,8 +1704,17 @@ pub(crate) async fn require_rider(
 /// creation commands this is NOT absorbed as a replay, per tests.yaml
 /// TestRiderRegisterAgainIsRejected). The initial availability status is OFFLINE — the rider goes
 /// AVAILABLE explicitly via ChangeRiderStatus (rules.yaml#/RiderLifecycle).
+///
+/// The CREDENTIAL is bound once population-wide, by `auth_subjects` -- a write-side reservation
+/// keyed `(RIDER, authRef)` with a real `UNIQUE` constraint (#639 part C step 2a, #794), never by
+/// the eventually-consistent `Rider` projection (whose `auth_ref UNIQUE` fires in the projector,
+/// AFTER the fact is recorded). A lost reservation is `errors.yaml#/RiderAuthSubjectAlreadyBound`
+/// (rules.yaml#/RiderAuthSubjectBoundOnce). Ordering: reserve BEFORE appending -- an orphan
+/// reservation is re-driven by the same rider re-submitting (the row is already theirs), whereas an
+/// event with no reservation would be two riders believing they own one login.
 pub async fn register_rider(
     store: &dyn EventStore,
+    auth_subjects: &dyn AuthSubjectReservationRepository,
     cmd: RegisterRider,
     actor: &Actor,
 ) -> Result<(), DomainError> {
@@ -1715,6 +1724,12 @@ pub async fn register_rider(
     let (state, _version) = Repository::new(store).load::<RiderState>(cmd.rider_id).await?;
     if state.is_some() {
         return Err(already(&cmd.rider_id));
+    }
+    if !auth_subjects
+        .reserve(cmd.auth_ref.clone(), BoundPrincipal::Rider(cmd.rider_id))
+        .await?
+    {
+        return Err(reject("RiderAuthSubjectAlreadyBound", json!({ "authRef": cmd.auth_ref })));
     }
     let event = DomainEvent::RiderRegistered(RiderRegistered {
         rider_id: cmd.rider_id,

@@ -57,7 +57,8 @@ captain_write:
     The write side, ONE database (STO-1(a), widened from the directive's `DomainEventLogDb` and
     renamed so the contents are not surprising): `domain_events` + `domain_stream`, the actor
     mailbox (`inbound_messages` + `mailbox_partitions`), the four `*_process_manager` state
-    tables and `slug_reservations` — everything the fenced completion transaction touches. Plus
+    tables and the two write-side reservations (`slug_reservations`, `auth_subject_reservations`) —
+    everything the fenced completion transaction touches. Plus
     the two PLATFORM connection tables that are deliberately NOT adapter state:
     `auth_sessions` (ADP-1 leg 2 (b) — encrypted, used by the actor path and the BFF login route,
     not by any adapter) and `sms_send_quota` (a cross-replica money ceiling on the OTP send path).

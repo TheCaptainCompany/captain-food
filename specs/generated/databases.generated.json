@@ -11,6 +11,7 @@
         "RestaurantDispatchConfig",
         "RuntimePosture",
         "auth_sessions",
+        "auth_subject_reservations",
         "cart_binding_process_manager",
         "delivery_dispatch_process_manager",
         "domain_events",
@@ -269,6 +270,13 @@
     "auth_sessions": {
       "kind": "connection table",
       "placement": "declared",
+      "databases": [
+        "captain_write"
+      ]
+    },
+    "auth_subject_reservations": {
+      "kind": "write-side reservation table",
+      "placement": "derived",
       "databases": [
         "captain_write"
       ]

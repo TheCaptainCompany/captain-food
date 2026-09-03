@@ -33,7 +33,7 @@ pub use integrations::retention_sweep_worker::{RetentionSweepSummary, RetentionS
 pub use integrations::sync_sirene_worker::{SireneSyncStatus, SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{
     spawn_event_listener, AppendedEvent, EventBus, EventWake, EventWaiter, PgCartRepository,
-    PgAuthSessionStore, PgCatalogRepository, PgCustomerCreditRepository,
+    PgAuthSessionStore, PgAuthSubjectReservationRepository, PgCatalogRepository, PgCustomerCreditRepository,
     PgCustomerRepository,
     PgDeliveryPartnerAvailabilityRepository, PgDeliveryRepository, PgDeliverySatisfactionRepository,
     PgEventStore, PgOrderConversationRepository, PgOrderRepository,

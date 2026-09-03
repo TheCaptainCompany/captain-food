@@ -181,7 +181,11 @@ pub fn wire() -> HealthDto {
 /// backoff scheduler reads on every retry) — so the rule is now EXECUTABLE: the codegen guard
 /// `required_schema_version_matches_the_latest_migration` fails the build whenever this constant
 /// is not the newest migration timestamp. It moves in the SAME commit as the migration, period.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260830210000;
+///
+/// `20260903060000` = `auth_subject_reservations` (#639 part C step 2a, #794): `register_rider`
+/// reserves `(RIDER, authRef)` through it BEFORE appending `RiderRegistered`, so a build without the
+/// table would fail every rider registration at the reservation insert.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260903060000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -883,6 +887,7 @@ pub async fn router() -> Router {
                         store: Arc::new(PgEventStore::new(pool.clone())),
                         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
                         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
+                        auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
                         ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
                         probe: Arc::new(UnverifiedGbpOrderLinkProbe),
                         prospection: Arc::new(PgProspectionRepository::new(pool.clone())),

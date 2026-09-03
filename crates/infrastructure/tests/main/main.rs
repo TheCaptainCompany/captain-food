@@ -21,6 +21,7 @@
 mod common;
 
 mod actors_projector_batching;
+mod auth_subject_reservation;
 mod cart_projection;
 mod catalog_projection;
 mod customer_projection;

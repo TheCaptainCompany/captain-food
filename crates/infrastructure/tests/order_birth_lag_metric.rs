@@ -58,7 +58,7 @@ use infrastructure::generated::command_router::CommandDeps;
 use infrastructure::mailbox::MailboxCommandHandler;
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, PgCustomerRepository,
-    PgEventStore, PgProspectionRepository, PgRestaurantRepository, PgSlugReservationRepository,
+    PgEventStore, PgProspectionRepository, PgRestaurantRepository, PgAuthSubjectReservationRepository, PgSlugReservationRepository,
     UnverifiedGbpOrderLinkProbe,
 };
 use sqlx::PgPool;
@@ -229,6 +229,7 @@ fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps 
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
+        auth_subjects: Arc::new(PgAuthSubjectReservationRepository::new(pool.clone())),
         ownership: Arc::new(FailClosedGoogleOwnershipVerifier),
         probe: Arc::new(UnverifiedGbpOrderLinkProbe),
         prospection: Arc::new(PgProspectionRepository::new(pool.clone())),

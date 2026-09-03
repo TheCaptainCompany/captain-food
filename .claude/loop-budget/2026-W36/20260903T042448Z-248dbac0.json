@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3936,
+  "recordedAt": "2026-09-03T04:24:48.362Z",
+  "branch": "main",
+  "note": "#639 part C step 2 second attempt: executor killed by container restart before any push; billed start-to-third-attempt-start"
+}

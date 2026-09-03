@@ -310,6 +310,13 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         "ConfigureRestaurantSlug" => {
             format!("crate::commands::{}(&bed.store, &bed.slugs, cmd, &support::actor()).await", snake)
         }
+        // A rider's login credential is bound ONCE, population-wide, by the write-side
+        // `auth_subject_reservations` table (#639 part C step 2a, #794) -- the same arbitration as
+        // the storefront slug, so the handler takes that port; the TestBed fake's "already-bound"
+        // sentinel drives the rejection case.
+        "RegisterRider" => {
+            format!("crate::commands::{}(&bed.store, &bed.auth_subjects, cmd, &support::actor()).await", snake)
+        }
         // The requeue consults/flips the inbound_messages row through the MailboxRequeue port (#315);
         // the TestBed fake's sentinels drive the poisoned / settled / unknown cases.
         "RequeueMailboxMessage" => {

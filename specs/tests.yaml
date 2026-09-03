@@ -3652,6 +3652,21 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/RiderAlreadyRegistered' }
 
+  # Port-state sentinel (behaviour_support::SpecAuthSubjectReservations): "already-bound" is a
+  # credential the fake reservation table already holds under (RIDER, <foreign rider id>). Same
+  # convention as SpecSlugReservations' "already-held" -- without the seeded foreign holder this
+  # case would be a tautology, because no aggregate exists for rider-2 and the fold alone accepts.
+  TestRiderAuthSubjectAlreadyBoundIsRejected:
+    name: "Registering a NEW rider id with a login already bound to another rider is rejected"
+    rules: [{ $ref: 'rules.yaml#/RiderAuthSubjectBoundOnce' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RegisterRider' }
+      data: { riderId: "rider-2", authRef: "already-bound", displayName: "Nadia", phone: "+33699887766" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderAuthSubjectAlreadyBound' }
+
   TestRiderInfoUpdated:
     name: "A rider updates editable profile fields"
     rules: [{ $ref: 'rules.yaml#/RiderLifecycle' }]

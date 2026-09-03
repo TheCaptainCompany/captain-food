@@ -60,6 +60,14 @@ pub const RIDER_ALREADY_REGISTERED: ErrorDef = ErrorDef {
     message_fr: "Vous êtes déjà inscrit en tant que livreur.",
 };
 
+/// The login credential (`authRef`) is already bound to ANOTHER rider id: the write-side reservation `(RIDER, authRef)` in `database/tables/reservations.yaml#/auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C, #794). Named for THIS population and distinct from `RiderAlreadyRegistered` (same rider id twice) and from `RefAlreadyUsed` (a HubRise import key): the human already has a rider account, and the remedy is to sign in to it, never to register a second one -- the binding is never released.
+/// Context: `authRef`.
+pub const RIDER_AUTH_SUBJECT_ALREADY_BOUND: ErrorDef = ErrorDef {
+    code: "RiderAuthSubjectAlreadyBound",
+    message_en: "This login is already linked to a rider account. Sign in to that account instead.",
+    message_fr: "Cette identité de connexion est déjà liée à un compte livreur. Connectez-vous à ce compte.",
+};
+
 /// No rider with this id.
 /// Context: `riderId`.
 pub const RIDER_NOT_FOUND: ErrorDef = ErrorDef {
