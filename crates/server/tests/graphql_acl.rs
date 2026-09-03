@@ -471,15 +471,10 @@ fn every_role_acts_as_itself_when_bound_and_as_public_when_not() {
         );
     }
 
-    // Only the four roles with a domain binding CAN be unbound — `role_binding` with `None` for
-    // ADMIN / EXTERNAL / PUBLIC yields their own claim-free identities, not `Unbound`, which is
-    // why they keep acting as themselves above.
-    for role in [
-        RequestRole::Customer,
-        RequestRole::RestaurantAccount,
-        RequestRole::Restaurant,
-        RequestRole::Rider,
-    ] {
+    // Only the three roles whose domain binding is a CLAIM can be unbound — `role_binding` with
+    // `None` for ADMIN / EXTERNAL / PUBLIC yields their own claim-free identities, not `Unbound`,
+    // which is why they keep acting as themselves above.
+    for role in [RequestRole::Customer, RequestRole::RestaurantAccount, RequestRole::Restaurant] {
         let unbound = server::Principal::role_binding(role, "s".to_string(), None);
         assert_eq!(
             unbound.acting_role(role).get(),
@@ -492,6 +487,23 @@ fn every_role_acts_as_itself_when_bound_and_as_public_when_not() {
             "{role:?}: and no false author in domain_events.user_type either"
         );
     }
+
+    // RIDER left that list with #639 part C step 2b: its binding is not a claim but a Postgres
+    // resolution at the request seam (`Identity::Rider { sub }` has no id field), so `None` here
+    // is not "unbound" — there is nothing a rider token could be missing. A RIDER-role token is
+    // therefore never `Unbound`, ACTS as RIDER and RECORDS RIDER, while its READ scope is whatever
+    // the seam resolved (Public when the `Rider` table has no row). That is the asymmetry the
+    // CUSTOMER seam already carries under `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` (an unmapped
+    // customer acts as CUSTOMER and reads Public); it is pinned here so a change to it is a
+    // visible diff, and it is the architect's to widen (step 4: restriction as a term in the
+    // derivation), not this test's to hide.
+    let rider = server::Principal::role_binding(RequestRole::Rider, "s".to_string(), None);
+    assert_eq!(
+        rider.acting_role(RequestRole::Rider).get(),
+        RequestRole::Rider,
+        "a RIDER token is never Unbound: the binding is the seam's, not the claim's"
+    );
+    assert_eq!(rider.recorded_role(), RequestRole::Rider, "and it records the verified role");
 }
 
 /// The `/public` rule the ACL depends on: an identified customer on the OPEN path (#469 — the
