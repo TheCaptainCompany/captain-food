@@ -2,6 +2,47 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-03 — #639 part C step 2c-ii: the rider sign-in SCREEN, and R1 — the per-screen transport role
+> that makes it reachable. A rider can sign in end to end from the rider app for the first time.** PR
+> [#854](https://github.com/TheCaptainCompany/captain-food/pull/854), `HOLD: human`, hands back in draft;
+> PROP-20260831-180622 build-order row **2c is LANDED** (2c-i #852 + this). **R1** (FORK 3, founder
+> 2026-08-31): the screens DSL gains `graphql_role: <UserType>` — generated onto
+> `Screen::graphql_role`, honoured by `Surface::role_for(screen)` (`crates/web/src/router.rs`), which
+> `hydrate()` uses for BOTH transports of a page (reads and the interact driver's writes + push
+> socket) and SSR uses for the skip/failure split; default = the surface role, every pre-R1 screen
+> byte-identical (pinned). Validator **§26** (`validate/screen_roles.rs`) makes the wrong combination
+> unspellable: a declared role must be one of the screen's `roles`, `PUBLIC` requires
+> `requires_auth: false`, and every operation the screen BINDS — its tree with chrome expanded, its
+> reads, the sheets it opens transitively — must admit it (`screen-graphql-role-refused-operation`,
+> an ERROR, seen RED against a planted `graphql_role: PUBLIC` on the RIDER job list: five errors, one
+> per refused operation plus the two clause errors). **graphql-architect's general form**
+> (`screen.roles ⊆ ∩(op roles)`) turned out RED on two existing screens — `deliveries_board` ×
+> `escalateDelivery` refuses RESTAURANT_ACCOUNT, the storefront `restaurant` × `markRestaurantAsFavorite`
+> refuses PUBLIC: two pre-existing controls that render and do nothing for part of their audience —
+> so it lands as a WARNING held by the ratchet at exactly those two (+2 baseline, pinned by a test),
+> filed for the architect rather than re-scoped here. **The screen**: `/sign-in` (`roles: [PUBLIC]`,
+> `graphql_role: PUBLIC`) — prefilled `+33` + phone → `requestRiderSignInCode` → the six-digit code in
+> `rider_code_sheet` → `confirmRiderSignIn` → `claim_session` (awaited) → `/`; deliberately not the
+> `rider_topbar` chrome, whose online toggle is a RIDER mutation §26 would refuse. `jobs`/`job_detail`
+> declare `unauthenticated: { type: navigate, route: "/sign-in" }`: the server 302s a cookie-less GET
+> to the door before any render (`hosts.rs::unauthenticated_bounce`, cookie PRESENCE is the signal),
+> the client navigates there on an HTTP 401 from its role path (the positive no-session signal; a
+> signed-in rider whose reads answer never bounces). Before: `job_detail` bounced to `/` and `jobs`
+> painted its shell over a failed read. **The refusals** (ADR-20260830-213135) render in their own
+> `inline_error` (`for_action`) beside the resend button, in the caller's language — which required a
+> finding the card did not anticipate: `Operation.message` was built with `message_en` on every leg
+> and no error-code translation exists anywhere (the customer door shows an English toast today). It
+> is now localized at READ time from the mailbox row's typed `{ code, context }` (`RequestLocale`,
+> cookie → Accept-Language → default, injected on the HTTP and WS transports; the push leg re-reads
+> the durable row on a terminal verdict so both legs agree), so `RiderNotRegistered` reads as the
+> French catalogue sentence naming the baked `SUPPORT_CONTACT` — no stored shape, no schema change,
+> the fenced mailbox handler untouched. The deploy emitter derived the ingress consequence on its own:
+> `riders.captain.food` now routes `/public/graphql` to `gateway-public`. **Card defects**: (5c)
+> presumed a story→screen `$ref` grammar that does not exist (zero `screen` hits in `stories.yaml`,
+> no rule) — prose only, filed; "the existing customer-door copy" for OTP errors does not exist; the
+> card's example name `transport_role` yielded to the proposal's own `graphql_role` (§5, §8.1).
+> Fence untouched. Gates: see the PR body.
+
 > **2026-09-03 — #639 part C step 2c-i: the rider sign-in door, backend half — the platform now
 > ISSUES a `role: RIDER` credential, to riders only, and stamps no id.** PR
 > [#852](https://github.com/TheCaptainCompany/captain-food/pull/852), `HOLD: human`, hands back in
