@@ -45,22 +45,23 @@ use super::schema::CaptainSchema;
 pub struct GraphqlState {
     schema: CaptainSchema,
     tenants: crate::hosts::TenantLookup,
-    /// Where a CUSTOMER's domain identity comes from for THIS request (IDENT-1 Phase A,
-    /// ADR-20260818-004646, #641) — resolved ONCE at startup/config-load and cloned into every
-    /// request's state; `resolve_read_scope` never falls back per request.
-    identity: crate::auth::CustomerIdentitySource,
+    /// Where a CUSTOMER's (IDENT-1 Phase A, ADR-20260818-004646, #641) and a RIDER's (#639 part C
+    /// step 2b) domain identity come from for THIS request — resolved ONCE at startup/config-load
+    /// and cloned into every request's state; `resolve_read_scope` never falls back per request.
+    identity: crate::auth::IdentitySources,
 }
 
 /// Mount `/{role}/graphql` for the seven roles (unknown role segments 404). Returns a `Router<()>` (the
 /// schema + tenant lookup are applied as state) so it can be merged into the main router.
 ///
-/// `identity` is the gate-then-stabilize choice for CUSTOMER read-scope resolution (#641): pass
-/// `CustomerIdentitySource::Claim` for the default (legacy) behaviour, or
-/// `CustomerIdentitySource::Postgres(..)` once `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set.
+/// `identity` carries the gate-then-stabilize choice for CUSTOMER read-scope resolution (#641:
+/// `CustomerIdentitySource::Claim` for the default behaviour, `Postgres(..)` once
+/// `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set) AND the RIDER seam, which has no choice to
+/// make — it is Postgres or nothing (#639 part C step 2b).
 pub fn graphql_routes(
     schema: CaptainSchema,
     tenants: crate::hosts::TenantLookup,
-    identity: crate::auth::CustomerIdentitySource,
+    identity: crate::auth::IdentitySources,
 ) -> Router {
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
@@ -208,15 +209,16 @@ async fn graphql_handler(
 /// Verifies the token for `path_role` — `/public` never refuses (see [`AuthContext::public_principal`]),
 /// every other path fails with the mapped [`AuthError`] on an invalid/missing/wrong-role credential
 /// — then resolves the caller's [`application::queries::ReadScope`] ONCE (`resolve_read_scope`)
-/// under `customer_identity`: the default `CustomerIdentitySource::Claim`, or — once
-/// `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set — `CustomerIdentitySource::Postgres`, which
-/// resolves a CUSTOMER caller through Postgres instead of trusting the JWT's `captain_food.customer_id`
-/// claim.
+/// through `sources`: the CUSTOMER seam under its gate (the default `CustomerIdentitySource::Claim`,
+/// or — once `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set — `CustomerIdentitySource::Postgres`,
+/// which resolves a CUSTOMER caller through Postgres instead of trusting the JWT's
+/// `captain_food.customer_id` claim), and the RIDER seam, always Postgres (#639 part C step 2b) —
+/// and only THEN mints the [`crate::auth::ActingRole`], from the principal the seam handed back.
 async fn authorize_and_resolve_scope(
     auth: &AuthContext,
     path_role: RequestRole,
     headers: &HeaderMap,
-    customer_identity: &crate::auth::CustomerIdentitySource,
+    sources: &crate::auth::IdentitySources,
 ) -> Result<
     (
         crate::auth::Principal,
@@ -227,18 +229,25 @@ async fn authorize_and_resolve_scope(
     crate::auth::AuthError,
 > {
     let principal = auth.authorize(path_role, headers).await?;
-    // Minted HERE, in the one function both transports go through, and returned as a tuple element
-    // they both destructure — so a transport that fails to inject it does not compile (#639 part
-    // B). The type stops a bad acting role being minted; returning it stops a good one being
-    // forgotten, which would otherwise be a silent permanent 403 on one transport only. That
-    // discharges ADR-20260818-101500's every-transport clause structurally rather than by review.
-    let acting = principal.acting_role(path_role);
     // The ONE `request.correlation_id` of this request/connection (#451): minted here, at the
     // transport boundary, and shared by every read-path span it opens (`auth.read_scope`,
     // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
     // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
     let correlation = crate::graphql::session::RequestCorrelationId::mint();
-    let scope = crate::auth::resolve_read_scope(&principal, correlation, customer_identity).await;
+    // The seam CONSUMES the verified principal and hands back the one this request runs as: for a
+    // RIDER its identity is the seam's outcome (`Identity::Rider` only when the `Rider` table
+    // answered a row, `Unbound` otherwise), and the pre-seam value no longer exists to mint from.
+    let (principal, scope) =
+        crate::auth::resolve_read_scope(principal, correlation, sources).await;
+    // Minted HERE, AFTER the seam, from the principal it handed back — so the witness and the read
+    // scope are two readings of ONE resolution, and a bare `role: RIDER` token with no row acts as
+    // PUBLIC exactly as it reads `Public` (the #849 re-presentation: as first pushed this line sat
+    // above the seam and minted RIDER from the token alone). Returned as a tuple element both
+    // transports destructure, so a transport that fails to inject it does not compile (#639 part
+    // B): the type stops a bad acting role being minted; returning it stops a good one being
+    // forgotten, which would otherwise be a silent permanent 403 on one transport only. That
+    // discharges ADR-20260818-101500's every-transport clause structurally rather than by review.
+    let acting = principal.acting_role(path_role);
     Ok((principal, acting, correlation, scope))
 }
 
@@ -485,6 +494,17 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The identity seams for tests that exercise neither: CUSTOMER under the default claim path,
+    /// RIDER over a table with no rows (every rider subject is nobody — fail closed).
+    fn claim_only_sources() -> crate::auth::IdentitySources {
+        crate::auth::IdentitySources {
+            customer: crate::auth::CustomerIdentitySource::Claim,
+            rider: crate::auth::RiderIdentitySource::new(Arc::new(WsScriptedRiderResolver(
+                crate::auth::RiderIdentityResolution::NoMapping,
+            ))),
+        }
+    }
+
     fn upgrade_headers_with_cookie() -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert(
@@ -549,7 +569,7 @@ mod tests {
         let router = graphql_routes(
             crate::graphql::schema::build_schema(None, None, None),
             crate::hosts::TenantLookup(None),
-            crate::auth::CustomerIdentitySource::Claim,
+            claim_only_sources(),
         )
         .layer(Extension(crate::auth::AuthContext::from_config(
             String::new(),
@@ -574,7 +594,7 @@ mod tests {
         graphql_routes(
             crate::graphql::schema::build_schema(None, None, None),
             crate::hosts::TenantLookup(None),
-            crate::auth::CustomerIdentitySource::Claim,
+            claim_only_sources(),
         )
         .layer(Extension(crate::auth::AuthContext::from_config(
             String::new(),
@@ -724,6 +744,36 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         }
     }
 
+    struct WsScriptedRiderResolver(crate::auth::RiderIdentityResolution);
+
+    #[async_trait::async_trait]
+    impl crate::auth::ResolveRiderIdentity for WsScriptedRiderResolver {
+        async fn resolve(&self, _auth_subject: &str) -> crate::auth::RiderIdentityResolution {
+            self.0.clone()
+        }
+    }
+
+    /// A verified RIDER token carrying a `rider_id` claim — the value the seam must NEVER read.
+    fn ws_rider_jwt(sub: uuid::Uuid, claim_rider_id: uuid::Uuid) -> String {
+        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
+        header.kid = Some("captain-test-es256".into());
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_secs()
+            + 3600;
+        let claims = json!({
+            "sub": sub.to_string(),
+            "aud": "authenticated",
+            "iss": format!("{WS_TEST_SUPABASE_URL}/auth/v1"),
+            "exp": exp,
+            "app_metadata": { "captain_food": { "role": "RIDER", "rider_id": claim_rider_id.to_string() } },
+        });
+        let key = jsonwebtoken::EncodingKey::from_ec_pem(WS_TEST_EC_PRIVATE_KEY_PEM.as_bytes())
+            .expect("test EC key parses");
+        jsonwebtoken::encode(&header, &claims, &key).expect("sign test JWT")
+    }
+
     /// (e) WS connect path covered: the SAME `authorize_and_resolve_scope` the WS `connection_init`
     /// closure calls resolves a CUSTOMER through Postgres — the token's claim carries a
     /// deliberately WRONG id, the seam answers the RIGHT one, and the resolved scope carries the
@@ -748,9 +798,12 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
             HeaderMap::new(),
             &json!({ "Authorization": format!("Bearer {jwt}") }),
         );
-        let identity = crate::auth::CustomerIdentitySource::Postgres(Arc::new(WsScriptedResolver(
-            crate::auth::CustomerIdentityResolution::Resolved(CustomerId(right_id)),
-        )));
+        let identity = crate::auth::IdentitySources {
+            customer: crate::auth::CustomerIdentitySource::Postgres(Arc::new(WsScriptedResolver(
+                crate::auth::CustomerIdentityResolution::Resolved(CustomerId(right_id)),
+            ))),
+            rider: claim_only_sources().rider,
+        };
         let (_, acting, _, scope) =
             authorize_and_resolve_scope(&auth, RequestRole::Customer, &headers, &identity)
                 .await
@@ -770,6 +823,54 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         assert_ne!(
             scope,
             application::queries::ReadScope::Customer(CustomerId(wrong_claim)),
+            "and never the claim's id"
+        );
+    }
+
+    /// The RIDER mirror of the test above (#639 part C step 2b — the rider sign-in door): through
+    /// the SAME `authorize_and_resolve_scope` both transports call, a signed JWT and the real WS
+    /// auth headers, a RIDER token whose claim carries a deliberately WRONG rider id resolves to
+    /// the id the `Rider` table answers — and never to the claim's. Unlike the customer twin there
+    /// is no gate to select: the rider seam is Postgres, always.
+    #[tokio::test]
+    async fn ws_connection_init_resolves_rider_through_postgres_not_the_claim() {
+        use domain::generated::scalars::RiderId;
+
+        let auth = crate::auth::AuthContext::from_config(
+            ws_jwks_endpoint().await,
+            WS_TEST_SUPABASE_URL.into(),
+        );
+        let sub = uuid::Uuid::from_u128(0x639);
+        let wrong_claim = uuid::Uuid::from_u128(0xBAD);
+        let right_id = uuid::Uuid::from_u128(0x600D);
+        let jwt = ws_rider_jwt(sub, wrong_claim);
+        let headers = ws_auth_headers(
+            HeaderMap::new(),
+            &json!({ "Authorization": format!("Bearer {jwt}") }),
+        );
+        let identity = crate::auth::IdentitySources {
+            customer: crate::auth::CustomerIdentitySource::Claim,
+            rider: crate::auth::RiderIdentitySource::new(Arc::new(WsScriptedRiderResolver(
+                crate::auth::RiderIdentityResolution::Resolved(RiderId(right_id)),
+            ))),
+        };
+        let (_, acting, _, scope) =
+            authorize_and_resolve_scope(&auth, RequestRole::Rider, &headers, &identity)
+                .await
+                .expect("a well-formed RIDER token authorizes");
+        assert_eq!(
+            acting.get(),
+            RequestRole::Rider,
+            "a rider acts as RIDER on the socket, exactly as on POST"
+        );
+        assert_eq!(
+            scope,
+            application::queries::ReadScope::Rider(RiderId(right_id)),
+            "the WS connect path must resolve a rider through Postgres, not the claim"
+        );
+        assert_ne!(
+            scope,
+            application::queries::ReadScope::Rider(RiderId(wrong_claim)),
             "and never the claim's id"
         );
     }

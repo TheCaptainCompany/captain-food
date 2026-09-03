@@ -130,11 +130,13 @@ keys:
       (a runtime try-Postgres-else-claim is the dual-path the ADR forbids): the gated-ON path
       contains no claim read at all for CUSTOMER read-scope resolution. A NoMapping row and a
       failed lookup BOTH fail closed to Public identically at the API boundary, distinguishably in
-      telemetry (specs/observability.yaml#/customer-identity). Scope: CUSTOMER only -- RESTAURANT,
-      RESTAURANT_ACCOUNT and RIDER have no sign-in operation in the DSL at all (STAFF-AUTH,
-      DECISIONS §46), so there is no subject to key a mapping on for them; this key does not touch
-      their claim reads. Flipping the default is a SEPARATE recorded decision after the gated form
-      is smoked.
+      telemetry (specs/observability.yaml#/customer-identity). Scope: CUSTOMER only. RESTAURANT and
+      RESTAURANT_ACCOUNT have no sign-in operation in the DSL yet (STAFF-AUTH, DECISIONS §46) and
+      this key does not touch their claim reads; RIDER resolves through its OWN seam
+      (specs/observability.yaml#/rider-identity, #639 part C step 2b), which this key does not
+      gate either -- that seam is Postgres unconditionally, because no rider token has ever carried
+      a claim an OFF state could preserve. Flipping the default is a SEPARATE recorded decision
+      after the gated form is smoked.
 
 
   # ===================================================================

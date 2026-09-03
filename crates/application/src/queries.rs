@@ -389,6 +389,30 @@ pub trait CustomerReadRepository: Send + Sync {
     async fn by_auth_ref(&self, auth_ref: ExternalReference) -> Result<Option<CustomerRow>, DomainError>;
 }
 
+/// Read port over the `Rider` projection's identity bridge (#639 part C step 2b,
+/// ADR-20260818-004646): the verified auth subject → `rider_id`, read by the request seam
+/// (`resolve_read_scope`) once per GraphQL request and once per WS connect — never by a GraphQL
+/// query (the table is `internal: true`, and no api.yaml type can speak for this reader).
+///
+/// Deliberately its OWN port beside [`CustomerReadRepository::by_auth_ref`], typed `AuthSubject`
+/// from birth: the customer port still takes `ExternalReference` (the HubRise catalog-ref scalar)
+/// and step 1b (#836) retypes it; this one is born with the right scalar so #836 unifies two
+/// `AuthSubject` ports instead of retyping a third site.
+///
+/// It answers WHO this connection is and nothing else — one column out, never `status`, never the
+/// row (the read model's own rules: an identity index must not become an authorization oracle, and
+/// a `SUSPENDED => deny` check belongs in the handler that folds the `Rider-{id}` stream).
+#[async_trait]
+pub trait RiderIdentityRepository: Send + Sync {
+    /// The rider bound to this verified auth subject, or `None` when no `RiderRegistered` has been
+    /// projected for it. The adapter must never `LIMIT 1`: picking a row is an elevation decision
+    /// made by row order, and `rider.auth_ref UNIQUE` is what makes a bare `fetch_optional` honest.
+    async fn rider_id_by_auth_subject(
+        &self,
+        auth_subject: AuthSubject,
+    ) -> Result<Option<RiderId>, DomainError>;
+}
+
 /// Optional filters for the order list — mirrors the `orders` query args in api.yaml
 /// (`customerId` / `restaurantId` / `status`); ownership/scope is enforced server-side.
 #[derive(Debug, Clone, Default)]

@@ -134,11 +134,27 @@ enum Identity {
     Customer { sub: String, customer_id: uuid::Uuid },
     Restaurant { sub: String, restaurant_id: uuid::Uuid },
     RestaurantAccount { sub: String, restaurant_account_id: uuid::Uuid },
-    Rider { sub: String, rider_id: uuid::Uuid },
-    /// Verified on a ROLE path, but the token carries no usable `captain_*` claim for that role
-    /// (absent, or malformed — indistinguishable by design). Denies everything scoped and is
-    /// counted as a provisioning gap by [`read_scope`]. Unreachable from `/public`, which degrades
-    /// such a caller to [`Identity::Anonymous`] instead (see [`AuthContext::public_principal`]).
+    /// A RIDER the request seam RESOLVED — the `Rider` read model answered a row for this subject
+    /// (#639 part C step 2b). The SUBJECT and nothing else, by construction: the rider's domain id
+    /// is carried by the `ReadScope` the same resolution returned, never by a claim, so there is
+    /// no field here for a claim to bind into. **The only producer is the seam**
+    /// ([`resolve_rider_scope`]; [`Principal::role_binding`] mints one for tests) — the token
+    /// verifier ([`Principal::role_path`]) yields [`Identity::Unbound`] for every RIDER token,
+    /// because a token cannot prove a binding it never carries. That is what makes an
+    /// `ActingRole(Rider)` unspellable for a subject with no row: the identity that mints it does
+    /// not exist until Postgres said so (the #849 re-presentation — as first pushed, this variant
+    /// was minted at the verifier, and a bare `role: RIDER` token acted RIDER while reading
+    /// `Public`).
+    Rider { sub: String },
+    /// Verified on a ROLE path, with no domain binding. For CUSTOMER / RESTAURANT /
+    /// RESTAURANT_ACCOUNT: the token carries no usable `captain_*` claim for that role (absent, or
+    /// malformed — indistinguishable by design). For RIDER: EVERY verified token, until the seam
+    /// binds it — a rider's binding is a Postgres row, never a claim, and a caller the seam did
+    /// not resolve (no row, or the seam could not answer) stays here. Denies everything scoped,
+    /// on both halves: acts as PUBLIC ([`ActingRole::of`]) and records PUBLIC
+    /// ([`Principal::recorded_role`]). Counted as a provisioning gap by [`read_scope`] when reached
+    /// as a claims question. Unreachable from `/public`, which degrades such a caller to
+    /// [`Identity::Anonymous`] instead (see [`AuthContext::public_principal`]).
     Unbound { sub: String, role: RequestRole },
 }
 
@@ -190,10 +206,16 @@ mod acting_role {
                 // The ONE arm that cannot act. Verified on a role path, no domain binding — so
                 // there is no restaurant, rider or account it could be acting FOR, and every
                 // scoped operation would resolve its target from the request payload instead of
-                // from the caller. It degrades to PUBLIC rather than erroring so the answer
-                // matches `super::read_scope`, which already resolves this population to
-                // `ReadScope::Public`: one caller, one posture, on the read half and the write
-                // half alike.
+                // from the caller. It degrades to PUBLIC rather than erroring, and the posture is
+                // ONE per caller because it is decided ONCE — by the seam's resolution
+                // (`super::resolve_read_scope`), which hands back the principal whose identity IS
+                // its outcome: an unresolved rider is `Unbound`, a resolved one is `Rider`. The
+                // read half (the `ReadScope` returned beside it) and the write half (this witness,
+                // minted from that principal AFTER the seam answered, and `recorded_role`, stamped
+                // from the same principal) both read that one outcome. The #849 re-presentation
+                // restored this: as first pushed the witness was minted from `Identity::Rider`
+                // BEFORE the seam ran, so a bare `role: RIDER` token with no row read `Public` and
+                // acted RIDER.
                 Identity::Unbound { .. } => ActingRole(RequestRole::Public),
                 Identity::Anonymous
                 | Identity::External { .. }
@@ -285,9 +307,13 @@ impl Principal {
                     Identity::RestaurantAccount { sub, restaurant_account_id }
                 })
             }
-            RequestRole::Rider => {
-                bind(&claims.rider_id, |sub, rider_id| Identity::Rider { sub, rider_id })
-            }
+            // No `bind`, and no `Identity::Rider` either: a RIDER token proves the subject and the
+            // role, and the domain binding is the request seam's to resolve (#639 part C step 2b)
+            // — so at the verifier a rider is UNBOUND, exactly like a RESTAURANT token with no
+            // `restaurant_id`, and only the seam's `Resolved` outcome upgrades it
+            // (`resolve_rider_scope`). `ProductClaims` has no rider field at all, so a
+            // `captain_food.rider_id` key in a token is a stranger's key.
+            RequestRole::Rider => Identity::Unbound { sub, role: path_role },
             RequestRole::Public => Identity::Anonymous,
         };
         Self { identity }
@@ -395,10 +421,21 @@ impl Principal {
     /// binding that disagrees with the role. The identity stays one private value and this
     /// constructor cannot assemble a pair the real path would reject.
     pub fn role_binding(role: RequestRole, sub: String, binding: Option<uuid::Uuid>) -> Self {
+        // RIDER: the binding is REAL but never a claim — it is a Postgres row the request seam
+        // resolves (#639 part C step 2b), so `role_path` cannot mint a bound rider and this
+        // constructor stands in for the seam's outcome instead: `Some(_)` is the identity the seam
+        // returns for a row (the id itself lives in the `ReadScope` a test injects beside it),
+        // `None` is the unbound caller a guard must refuse — same contract as every other role.
+        if role == RequestRole::Rider {
+            let identity = match binding {
+                Some(_) => Identity::Rider { sub },
+                None => Identity::Unbound { sub, role },
+            };
+            return Self { identity };
+        }
         let binding = binding.map(|id| id.to_string());
         let claims = match role {
             RequestRole::Customer => ProductClaims { customer_id: binding, ..Default::default() },
-            RequestRole::Rider => ProductClaims { rider_id: binding, ..Default::default() },
             RequestRole::Restaurant => {
                 ProductClaims { restaurant_id: binding, ..Default::default() }
             }
@@ -406,10 +443,12 @@ impl Principal {
                 ProductClaims { restaurant_account_id: binding, ..Default::default() }
             }
             // ADMIN, EXTERNAL and PUBLIC carry no domain binding — their arms in `role_path` ignore
-            // the claim object entirely, so an argument here would be dropped, not honoured.
-            RequestRole::Admin | RequestRole::External | RequestRole::Public => {
-                ProductClaims::default()
-            }
+            // the claim object entirely, so an argument here would be dropped, not honoured. RIDER
+            // returned above.
+            RequestRole::Admin
+            | RequestRole::External
+            | RequestRole::Public
+            | RequestRole::Rider => ProductClaims::default(),
         };
         Self::role_path(role, sub, &claims)
     }
@@ -489,10 +528,11 @@ struct ProductClaims {
     /// fails closed to Public.
     #[serde(default)]
     customer_id: Option<String>,
-    /// The RIDER's domain id (#433) — minted by the #415 per-person rider onboarding. Until that
-    /// lands no rider token carries it, and rider reads fail closed.
-    #[serde(default)]
-    rider_id: Option<String>,
+    // Deliberately NO `rider_id` (#639 part C step 2b): a rider's binding lives in the `Rider` read
+    // model and is resolved per request at the seam (ADR-20260818-004646 — no business identifier
+    // in the identity provider). Not parsing the key is what makes "bind the claim" unspellable:
+    // there is no field for it to arrive in. `serde` ignores unknown keys, so a token carrying one
+    // is inert rather than refused.
 }
 
 /// What a verified token PROVES about this product: a role that parsed, travelling with the claim
@@ -1770,7 +1810,8 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
     /// against a seeded JWKS, the token delivered ONLY via the `captain_auth` cookie (the
     /// storefront's one credential — no Authorization header exists on the request), and the
     /// verified claim landing in `Principal.customer_id` → `ReadScope::Customer`. A field
-    /// transposition in `authorize()`'s Principal construction (customer claim into `rider_id`)
+    /// transposition in `authorize()`'s Principal construction (customer claim into another
+    /// role's field)
     /// is caught HERE and nowhere else.
     #[tokio::test]
     async fn cookie_delivered_jwt_yields_the_customer_principal_and_scope() {
@@ -2094,9 +2135,11 @@ fn claim_uuid(v: &Option<String>) -> Option<uuid::Uuid> {
 // IDENT-1 Phase A (ADR-20260818-004646, #641) — the request-seam translation from the verified
 // auth SUBJECT (`authRef`) to the CUSTOMER's domain identity, resolved from Postgres INSTEAD OF
 // the JWT `captain_food.customer_id` claim, gated by `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES`
-// (specs/customer/configuration.yaml, DEFAULT off). Scope: CUSTOMER only — the other three roles
-// have no sign-in operation in the DSL at all (STAFF-AUTH, DECISIONS §46), so there is no subject
-// to key a mapping on for them; their claim reads are untouched.
+// (specs/customer/configuration.yaml, DEFAULT off). Scope of the GATE: CUSTOMER only. The RIDER
+// seam beside it (#639 part C step 2b, PROP-20260831-180622 row 2) is UNGATED — Postgres over the
+// `Rider` read model part A landed, on every request — because no rider token has ever carried a
+// domain binding, so there is no claim path an OFF state could preserve. RESTAURANT and
+// RESTAURANT_ACCOUNT still read their claims (STAFF-AUTH step 6 owns them).
 // =====================================================================================
 
 /// The request-seam TRANSLATION from the verified auth subject to this product's CUSTOMER domain
@@ -2110,22 +2153,32 @@ pub trait ResolveCustomerIdentity: Send + Sync {
     async fn resolve(&self, auth_ref: &str) -> CustomerIdentityResolution;
 }
 
-/// The seam's typed THREE-WAY outcome. A bare `Option<CustomerId>` would collapse "no mapping row"
-/// and "could not ask" into one signal — the ADR requires them distinguishable, because they fail
-/// closed IDENTICALLY at the API boundary (both become `ReadScope::Public`) but have OPPOSITE
-/// operator responses: a missing mapping is an ordinary provisioning gap (OBSERVE), a failed
-/// lookup means the identity seam itself is unavailable (PAGE).
+/// A seam's typed THREE-WAY outcome, generic over the domain id it resolves to. A bare
+/// `Option<Id>` would collapse "no mapping row" and "could not ask" into one signal — the ADR
+/// requires them distinguishable, because they fail closed IDENTICALLY at the API boundary (both
+/// become `ReadScope::Public`) but have OPPOSITE operator responses: a missing mapping is an
+/// ordinary provisioning gap (OBSERVE), a failed lookup means the identity seam itself is
+/// unavailable (PAGE).
+///
+/// One enum for both seams (#639 part C step 2b added the RIDER one) so the outcome vocabulary
+/// cannot drift between roles: [`CustomerIdentityResolution`] and [`RiderIdentityResolution`] are
+/// aliases, and a variant added to one is added to the other.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CustomerIdentityResolution {
-    /// The verified subject maps to this CUSTOMER.
-    Resolved(domain::generated::scalars::CustomerId),
-    /// The subject is verified but carries no Customer.auth_ref mapping — ordinary (a
+pub enum IdentityResolution<Id> {
+    /// The verified subject maps to this domain identity.
+    Resolved(Id),
+    /// The subject is verified but carries no `auth_ref` mapping row — ordinary (a
     /// not-yet-provisioned or genuinely unmapped subject), never an outage signal on its own.
     NoMapping,
     /// The lookup itself could not be answered (a repository/adapter failure) — distinct from
-    /// [`CustomerIdentityResolution::NoMapping`] because THIS is the outage class.
+    /// [`IdentityResolution::NoMapping`] because THIS is the outage class.
     LookupFailed(LookupFailureReason),
 }
+
+/// The CUSTOMER seam's outcome (#641).
+pub type CustomerIdentityResolution = IdentityResolution<domain::generated::scalars::CustomerId>;
+/// The RIDER seam's outcome (#639 part C step 2b).
+pub type RiderIdentityResolution = IdentityResolution<domain::generated::scalars::RiderId>;
 
 /// The coarse, CLOSED set of reasons a lookup can fail — safe as a telemetry label (never the
 /// underlying error string, which is unbounded cardinality on a labeled series).
@@ -2195,7 +2248,7 @@ impl ResolveCustomerIdentity for PgCustomerIdentity {
 /// (gate-then-stabilize; the ADR forbids a runtime try-Postgres-else-claim dual path): the mode is
 /// fixed for the process's lifetime and cloned into every request's `GraphqlState`
 /// (`crate::graphql::routes`). The gated-ON path reads no claim at all for this decision — see
-/// [`resolve_customer_scope`], whose match arm destructures `Identity::Customer` as `{ sub, .. }`.
+/// [`resolve_identity_scope`], whose match arm destructures `Identity::Customer` as `{ sub, .. }`.
 #[derive(Clone)]
 pub enum CustomerIdentitySource {
     /// DEFAULT (config default `false`). The legacy JWT claim path — [`read_scope`], unchanged, no
@@ -2205,12 +2258,96 @@ pub enum CustomerIdentitySource {
     Postgres(Arc<dyn ResolveCustomerIdentity>),
 }
 
+/// The request-seam TRANSLATION from the verified auth subject to this product's RIDER domain
+/// identity (#639 part C step 2b — the rider sign-in door; ADR-20260818-004646: no business
+/// identifier lives in the identity provider, so the mapping resolves in OUR Postgres, from the
+/// `Rider` read model part A landed). Same shape as [`ResolveCustomerIdentity`]; only
+/// implementations perform I/O.
+#[async_trait::async_trait]
+pub trait ResolveRiderIdentity: Send + Sync {
+    /// `auth_subject` is the verified Supabase `sub` — already authenticated by
+    /// [`AuthContext::authorize`], never attacker-controlled at this point.
+    async fn resolve(&self, auth_subject: &str) -> RiderIdentityResolution;
+}
+
+/// The Postgres implementation: wraps the `RiderIdentityRepository` read port (one btree probe on
+/// `rider.auth_ref UNIQUE`, `rider_id` and nothing else) — a PROJECTION probe, never a fold of the
+/// `Rider-{id}` stream per request, which would be unbounded and would put the read path on
+/// `domain_events` (ADR-20260830-234532 names that as the shape nobody should build).
+pub struct PgRiderIdentity {
+    riders: Arc<dyn application::queries::RiderIdentityRepository>,
+}
+
+impl PgRiderIdentity {
+    pub fn new(riders: Arc<dyn application::queries::RiderIdentityRepository>) -> Self {
+        Self { riders }
+    }
+}
+
+#[async_trait::async_trait]
+impl ResolveRiderIdentity for PgRiderIdentity {
+    async fn resolve(&self, auth_subject: &str) -> RiderIdentityResolution {
+        match self
+            .riders
+            .rider_id_by_auth_subject(domain::generated::scalars::AuthSubject(auth_subject.to_string()))
+            .await
+        {
+            Ok(Some(rider_id)) => RiderIdentityResolution::Resolved(rider_id),
+            Ok(None) => RiderIdentityResolution::NoMapping,
+            Err(e) => RiderIdentityResolution::LookupFailed(LookupFailureReason::from_domain_error(&e)),
+        }
+    }
+}
+
+/// The rider seam of a process booted WITHOUT a database (the monolith's no-`DATABASE_URL` mode,
+/// where customers stay on the claim path and no read model exists at all). It does not pretend:
+/// every resolution is [`IdentityResolution::LookupFailed`] — "the seam could not be asked" — so a
+/// rider fails closed to `Public` AND the PAGE-class counter fires. It is deliberately NOT a
+/// `NoMapping` stand-in, which would report a missing database as an ordinary provisioning gap.
+pub struct NoDatabaseRiderIdentity;
+
+#[async_trait::async_trait]
+impl ResolveRiderIdentity for NoDatabaseRiderIdentity {
+    async fn resolve(&self, _auth_subject: &str) -> RiderIdentityResolution {
+        RiderIdentityResolution::LookupFailed(LookupFailureReason::Repository)
+    }
+}
+
+/// Where a RIDER's domain identity comes from: **Postgres, always** — there is deliberately no
+/// `Claim` variant and no OFF state. `CustomerIdentitySource::Claim` is a real gate because OFF
+/// reproduces working customer behaviour byte for byte; for RIDER no token has ever carried a
+/// domain binding (the sole claim stamper hardcodes CUSTOMER), so an OFF state would preserve
+/// nothing — "the feature does not exist" is dead code, not gate-then-stabilize
+/// (PROP-20260831-180622 §10). One arm, final-vision-first.
+///
+/// A struct with a private field rather than a bare `Arc`: the only way to hold one is through
+/// [`RiderIdentitySource::new`], so a composition root cannot leave the rider seam unset and have
+/// the request path silently fall back to anything.
+#[derive(Clone)]
+pub struct RiderIdentitySource(Arc<dyn ResolveRiderIdentity>);
+
+impl RiderIdentitySource {
+    pub fn new(resolver: Arc<dyn ResolveRiderIdentity>) -> Self {
+        Self(resolver)
+    }
+}
+
+/// The identity seams a request resolves through, selected ONCE at startup/config-load and cloned
+/// into every request's `GraphqlState` (`crate::graphql::routes`). One value rather than two
+/// parameters so a transport cannot wire the customer seam and forget the rider one.
+#[derive(Clone)]
+pub struct IdentitySources {
+    pub customer: CustomerIdentitySource,
+    pub rider: RiderIdentitySource,
+}
+
 /// Resolve a verified [`Principal`] into the application's [`application::queries::ReadScope`] —
 /// a PURE function of the token's verified claims (#433, ADR-20260809-050000 CARD-11: the
 /// login-to-domain bridge lives in JWT claims for EVERY role; product-owner correction on #430).
 ///
-/// No per-request lookup, no database, no async: `sub` is NEVER an identity — a customer or rider
-/// token whose `captain_*` claim is absent (or malformed) fails closed to Public, and the
+/// No per-request lookup, no database, no async: `sub` is NEVER an identity — a customer token
+/// whose `captain_*` claim is absent (or malformed) fails closed to Public, a rider ALWAYS does
+/// here (its identity exists only through the seam, #639 part C step 2b), and the
 /// `read_authorization_bridge_unresolved_total{role}` counter now means exactly one thing: an
 /// authenticated caller whose token carries no domain binding (a provisioning gap or pre-refresh
 /// staleness — never ordinary user denial, never a DB outage).
@@ -2221,7 +2358,7 @@ pub enum CustomerIdentitySource {
 /// a named follow-up on #432, envelope-shape territory, not silently claimed here.
 pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
     use application::queries::ReadScope;
-    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId};
+    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId};
 
     match &principal.identity {
         Identity::Admin { .. } => ReadScope::Admin,
@@ -2230,7 +2367,11 @@ pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
             ReadScope::RestaurantAccount(RestaurantAccountId(*restaurant_account_id))
         }
         Identity::Customer { customer_id, .. } => ReadScope::Customer(CustomerId(*customer_id)),
-        Identity::Rider { rider_id, .. } => ReadScope::Rider(RiderId(*rider_id)),
+        // A rider's scope is NEVER a function of the claims (#639 part C step 2b): it exists only
+        // as the seam's outcome (`resolve_rider_scope` returns it beside the `Identity::Rider` it
+        // minted, and never reaches this arm). Reached directly — a test-built principal — the
+        // identity carries no id to derive it from, and the only honest answer is fail-closed.
+        Identity::Rider { .. } => ReadScope::Public,
         Identity::Anonymous | Identity::External { .. } => ReadScope::Public,
         // The one arm that can be a DEFECT rather than a decision: an authenticated caller on a
         // role path with no domain binding. The claim/role pair cannot disagree here — the identity
@@ -2266,20 +2407,37 @@ fn role_label(role: RequestRole) -> &'static str {
 /// this boundary — but are DISTINGUISHABLE in telemetry (`customer-identity` contract, #641):
 /// `NoMapping` is OBSERVE (an ordinary provisioning gap), `LookupFailed` is PAGE (the seam itself
 /// is unavailable).
-async fn resolve_customer_scope(
-    principal: &Principal,
+///
+/// Takes the principal BY VALUE and hands one back: for a RIDER the identity returned IS the
+/// seam's outcome (see [`resolve_rider_scope`]), for every other role it is the one that came in.
+async fn resolve_identity_scope(
+    principal: Principal,
     correlation_id: crate::graphql::session::RequestCorrelationId,
-    customer_identity: &CustomerIdentitySource,
-) -> application::queries::ReadScope {
+    sources: &IdentitySources,
+) -> (Principal, application::queries::ReadScope) {
     use application::queries::ReadScope;
 
-    let (sub, resolver) = match (&principal.identity, customer_identity) {
+    let (sub, resolver) = match (&principal.identity, &sources.customer) {
         (Identity::Customer { sub, .. }, CustomerIdentitySource::Postgres(resolver)) => {
             (sub.clone(), resolver.clone())
         }
-        // Every other combination — every non-CUSTOMER role, an Unbound/Anonymous CUSTOMER caller,
-        // or CustomerIdentitySource::Claim (the default) — is the unchanged pure claims function.
-        _ => return read_scope(principal),
+        // RIDER (#639 part C step 2b): Postgres, ALWAYS, whatever the customer gate says, and
+        // whatever shape the principal arrived in — the verifier yields `Unbound { role: Rider }`
+        // (a token cannot prove a rider binding); a test may hand in an `Identity::Rider`. Either
+        // way the seam is authoritative and REBUILDS the identity from its outcome, which is why
+        // the incoming principal is dropped here. There is no claim to bind and no claim to fall
+        // back to: `NoMapping` is `Public`, never "whoever the token says".
+        (Identity::Unbound { sub, role: RequestRole::Rider } | Identity::Rider { sub }, _) => {
+            let sub = sub.clone();
+            return resolve_rider_scope(sub, correlation_id, &sources.rider).await;
+        }
+        // Every other combination — the remaining roles, an Unbound/Anonymous caller, or
+        // CustomerIdentitySource::Claim (the default) — is the unchanged pure claims function,
+        // and the principal goes back as it came.
+        _ => {
+            let scope = read_scope(&principal);
+            return (principal, scope);
+        }
     };
 
     let span = telemetry::spans::customer_identity_resolve(&correlation_id.0.to_string());
@@ -2308,10 +2466,60 @@ async fn resolve_customer_scope(
     // request; it is not reachable from this change alone, and this counter guarantees that shape
     // can never silently hide an outage once it exists.
     telemetry::meters::customer_identity::lookup_source("db");
-    scope
+    (principal, scope)
 }
 
-/// [`resolve_customer_scope`] under the contract's `auth.read_scope` span (ONE per request),
+/// The RIDER half of [`resolve_identity_scope`] under the `rider-identity` contract: one
+/// `rider.identity.resolve` span, the three-way outcome on its own counters (never the customer
+/// seam's — a paging rule keyed on `customer_identity_lookup_failed_total` must not go quiet
+/// because riders started failing on a differently-named seam). `NoMapping` and `LookupFailed`
+/// both fail closed to `Public`; only telemetry tells them apart (OBSERVE vs PAGE).
+///
+/// **The one producer of [`Identity::Rider`] on the request path.** The principal handed back is
+/// BUILT from the outcome, not from whatever the caller presented: a row makes an
+/// `Identity::Rider` (acts RIDER, records RIDER, reads that rider), anything else is
+/// `Identity::Unbound { role: Rider }` (acts PUBLIC, records PUBLIC, reads `Public`) — so the
+/// write-half witness minted from this principal can only say RIDER when Postgres said so
+/// (the #849 re-presentation).
+async fn resolve_rider_scope(
+    sub: String,
+    correlation_id: crate::graphql::session::RequestCorrelationId,
+    source: &RiderIdentitySource,
+) -> (Principal, application::queries::ReadScope) {
+    use application::queries::ReadScope;
+
+    let span = telemetry::spans::rider_identity_resolve(&correlation_id.0.to_string());
+    let started = std::time::Instant::now();
+    let outcome = source.0.resolve(&sub).instrument(span.clone()).await;
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let unbound = || Identity::Unbound { sub: sub.clone(), role: RequestRole::Rider };
+    let (identity, scope, result, reason) = match &outcome {
+        RiderIdentityResolution::Resolved(rider_id) => (
+            Identity::Rider { sub: sub.clone() },
+            ReadScope::Rider(*rider_id),
+            "resolved",
+            None,
+        ),
+        RiderIdentityResolution::NoMapping => {
+            telemetry::meters::rider_identity::not_found();
+            (unbound(), ReadScope::Public, "not_found", None)
+        }
+        RiderIdentityResolution::LookupFailed(reason) => {
+            telemetry::meters::rider_identity::lookup_failed(reason.label());
+            (unbound(), ReadScope::Public, "lookup_failed", Some(reason.label()))
+        }
+    };
+    telemetry::spans::record_rider_identity_resolve_result(&span, result, reason);
+    telemetry::meters::rider_identity::duration(elapsed_ms, result);
+    // ONE real Postgres round trip per request / WS connect, on the same seam the customer arm
+    // uses — no second mechanism, no cache. `request_reuse` is declared for the same reason as on
+    // the customer contract: so a later in-request reuse can never hide an outage.
+    telemetry::meters::rider_identity::lookup_source("db");
+    (Principal { identity }, scope)
+}
+
+/// [`resolve_identity_scope`] under the contract's `auth.read_scope` span (ONE per request),
 /// stamped with the request's correlation id. This is the transport entry point; the function
 /// above resolves the CUSTOMER-Postgres arm, delegating everything else to [`read_scope`], the pure
 /// claims function.
@@ -2327,16 +2535,27 @@ async fn resolve_customer_scope(
 /// the process (`CustomerIdentitySource`, gate-then-stabilize) — never a per-request fallback: the
 /// Postgres arm, when selected, never falls back to the claim on `NoMapping` or `LookupFailed`,
 /// both of which fail closed to `Public` instead.
+///
+/// **Consumes the principal and hands back the one the request runs as** (the #849
+/// re-presentation): for a RIDER the identity returned is the seam's OUTCOME — `Identity::Rider`
+/// only when a row answered, `Identity::Unbound` otherwise — and the pre-seam principal no longer
+/// exists to mint anything from. Both halves of the request read this one value: the
+/// `ActingRole` the guards check is minted from it AFTER this call
+/// (`routes::authorize_and_resolve_scope`), and `recorded_role` stamps the envelope from it.
 pub async fn resolve_read_scope(
-    principal: &Principal,
+    principal: Principal,
     correlation_id: crate::graphql::session::RequestCorrelationId,
-    customer_identity: &CustomerIdentitySource,
-) -> application::queries::ReadScope {
+    sources: &IdentitySources,
+) -> (Principal, application::queries::ReadScope) {
     let span = telemetry::spans::auth_read_scope(&format!("{:?}", principal.recorded_role()));
     span.record("business.correlation_id", correlation_id.0.to_string().as_str());
-    let scope = resolve_customer_scope(principal, correlation_id, customer_identity)
+    let (principal, scope) = resolve_identity_scope(principal, correlation_id, sources)
         .instrument(span.clone())
         .await;
+    // `business.role` re-recorded from the principal the seam handed back: at span open a RIDER
+    // reads as the verifier's answer (PUBLIC — a token proves no binding); the value that matters
+    // is the seam's, the same role the mutation envelope will stamp.
+    span.record("business.role", format!("{:?}", principal.recorded_role()).as_str());
     // Asked of the identity AND the scope it actually resolved to (`Principal::bridge_resolved`),
     // because the inline form this replaced read the role — and went silently "always true" the
     // moment an Unbound caller stopped reporting its declared role (#639 part B), turning the one
@@ -2344,7 +2563,7 @@ pub async fn resolve_read_scope(
     // `false` now and both are meant to be: an Unbound caller, and a bound one whose Postgres
     // lookup said no or could not answer (#641).
     telemetry::spans::record_bridge_resolved(&span, principal.bridge_resolved(&scope));
-    scope
+    (principal, scope)
 }
 
 #[cfg(test)]
@@ -2362,7 +2581,6 @@ mod read_scope_tests {
         let claim = claim.map(|c| c.to_string());
         let claims = match role {
             RequestRole::Customer => ProductClaims { customer_id: claim, ..Default::default() },
-            RequestRole::Rider => ProductClaims { rider_id: claim, ..Default::default() },
             RequestRole::Restaurant => ProductClaims { restaurant_id: claim, ..Default::default() },
             RequestRole::RestaurantAccount => {
                 ProductClaims { restaurant_account_id: claim, ..Default::default() }
@@ -2387,9 +2605,23 @@ mod read_scope_tests {
         assert_eq!(read_scope(&p), ReadScope::Customer(CustomerId(customer_claim)));
         assert_eq!(p.user_id(), Some(sub.as_str()), "the subject rides along, unused as identity");
 
-        let rider_claim = uuid::Uuid::from_u128(4);
-        let p = principal(RequestRole::Rider, &sub, Some(rider_claim));
-        assert_eq!(read_scope(&p), ReadScope::Rider(RiderId(rider_claim)));
+        // A RIDER is the one role whose scope is NEVER a claims function (#639 part C step 2b):
+        // `ProductClaims` has no rider field, so the binding argument has nowhere to land, and
+        // the pure function fails closed. The seam (`resolve_read_scope`) is the only door — the
+        // §10 pair below is where a rider actually resolves.
+        let p = principal(RequestRole::Rider, &sub, Some(uuid::Uuid::from_u128(4)));
+        assert_eq!(read_scope(&p), ReadScope::Public, "a rider never resolves without Postgres");
+        assert_eq!(
+            p.recorded_role(),
+            RequestRole::Public,
+            "and until the seam binds it a rider token is Unbound: it records PUBLIC, not the role \
+             it asserts — RIDER here was a false author (the #849 re-presentation)"
+        );
+        assert_eq!(
+            p.acting_role(RequestRole::Rider).get(),
+            RequestRole::Public,
+            "and acts as PUBLIC on the write half, for the same reason"
+        );
 
         let rid = uuid::Uuid::from_u128(11);
         let p = principal(RequestRole::Restaurant, "s", Some(rid));
@@ -2457,7 +2689,6 @@ mod read_scope_tests {
             restaurant_id: Some(uuid::Uuid::from_u128(11).to_string()),
             restaurant_account_id: Some(uuid::Uuid::from_u128(12).to_string()),
             customer_id: Some(uuid::Uuid::from_u128(13).to_string()),
-            rider_id: Some(uuid::Uuid::from_u128(14).to_string()),
         };
         let p = Principal::role_path(RequestRole::Restaurant, "sub".into(), &every_claim);
         assert_eq!(
@@ -2469,7 +2700,7 @@ mod read_scope_tests {
 
     /// The serde seam the pure test cannot reach: a misspelled claim field name would silently
     /// deserialize to `None` -> Public everywhere, and the first detector would be a production
-    /// smoke timeout. All five keys pinned, INSIDE the product object; a malformed uuid claim fails
+    /// smoke timeout. All four keys pinned, INSIDE the product object; a malformed uuid claim fails
     /// closed. The nesting is pinned too (#519): the same keys at the TOP level of `app_metadata`
     /// are a stranger's metadata, and must deserialize to no grant at all.
     #[test]
@@ -2492,7 +2723,9 @@ mod read_scope_tests {
         assert_eq!(claim_uuid(&grant.claims.restaurant_id), Some(uuid::Uuid::from_u128(1)));
         assert_eq!(claim_uuid(&grant.claims.restaurant_account_id), Some(uuid::Uuid::from_u128(2)));
         assert_eq!(claim_uuid(&grant.claims.customer_id), Some(uuid::Uuid::from_u128(3)));
-        assert_eq!(claim_uuid(&grant.claims.rider_id), Some(uuid::Uuid::from_u128(4)));
+        // `rider_id` stays IN the fixture and is asserted NOWHERE: since #639 part C step 2b the
+        // product parses no such claim (a rider binds through Postgres at the seam), so the key
+        // is a stranger's — inert, not refused, exactly like the flat pre-#519 keys below.
 
         // Garbage never widens into an identity — indistinguishable from absent, by design.
         assert_eq!(claim_uuid(&Some("not-a-uuid".into())), None);
@@ -2514,4 +2747,138 @@ mod read_scope_tests {
     // #430's `an_empty_resolver_degrades_to_public` is DELETED deliberately: its premise (a
     // resolver whose DB dependency may be missing) dissolved when resolution became a pure claims
     // function — there is no dependency left to be missing.
+
+    // ---- The §10 PAIR (PROP-20260831-180622, #639 part C step 2b: the rider sign-in door) ----
+    //
+    // `beck`: the pair is the whole point. "Try Postgres, else fall back to the claim" — the
+    // implementation a reasonable person writes — passes (a) and FAILS (b), and (b) is the slice:
+    // a rider the projector has not caught up on must be nobody, not whoever the token says.
+
+    /// A scripted `Rider` table: `auth_subject -> rider_id` rows, `NoMapping` for everything else.
+    struct ScriptedRiderTable(std::collections::HashMap<String, uuid::Uuid>);
+
+    #[async_trait::async_trait]
+    impl ResolveRiderIdentity for ScriptedRiderTable {
+        async fn resolve(&self, auth_subject: &str) -> RiderIdentityResolution {
+            match self.0.get(auth_subject) {
+                Some(id) => RiderIdentityResolution::Resolved(RiderId(*id)),
+                None => RiderIdentityResolution::NoMapping,
+            }
+        }
+    }
+
+    fn sources_with_rider_table(rows: &[(&str, uuid::Uuid)]) -> IdentitySources {
+        IdentitySources {
+            customer: CustomerIdentitySource::Claim,
+            rider: RiderIdentitySource::new(Arc::new(ScriptedRiderTable(
+                rows.iter().map(|(sub, id)| (sub.to_string(), *id)).collect(),
+            ))),
+        }
+    }
+
+    /// A RIDER principal built through the REAL claims path — a `captain_food` object carrying
+    /// `role: RIDER` AND a `rider_id` — so the pair proves the seam ignores a claim that is
+    /// actually present in the token, not one the fixture never planted.
+    fn rider_token_principal(sub: &str, claim_rider_id: uuid::Uuid) -> Principal {
+        let meta: AppMetadata = serde_json::from_value(serde_json::json!({
+            "captain_food": { "role": "RIDER", "rider_id": claim_rider_id.to_string() }
+        }))
+        .expect("app_metadata blob");
+        let grant = meta.grant().expect("a RIDER role parses into a grant");
+        Principal::role_path(RequestRole::Rider, sub.to_string(), &grant.claims)
+    }
+
+    /// (a) a rider WITH a row resolves to that row's riderId, even when the JWT claim says
+    /// something else — Postgres wins over the claim.
+    #[tokio::test]
+    async fn a_rider_with_a_row_resolves_to_that_row_never_to_the_claim() {
+        let sub = "auth-supabase-rider-S";
+        let rider_a = uuid::Uuid::from_u128(0xA);
+        let rider_b = uuid::Uuid::from_u128(0xB);
+        let principal = rider_token_principal(sub, rider_b);
+        assert_eq!(
+            principal.acting_role(RequestRole::Rider).get(),
+            RequestRole::Public,
+            "before the seam answers, a rider token can act as nobody"
+        );
+
+        let (principal, scope) = resolve_read_scope(
+            principal,
+            crate::graphql::session::RequestCorrelationId::mint(),
+            &sources_with_rider_table(&[(sub, rider_a)]),
+        )
+        .await;
+
+        assert_eq!(scope, ReadScope::Rider(RiderId(rider_a)), "Postgres wins over the claim");
+        assert_ne!(
+            scope,
+            ReadScope::Rider(RiderId(rider_b)),
+            "the claim's rider id is never the scope"
+        );
+        assert!(principal.bridge_resolved(&scope), "a resolved rider reads as resolved");
+        // The write half reads the SAME outcome (#849 re-presentation): the principal handed back
+        // is the seam's, so the witness and the envelope say RIDER because Postgres did.
+        assert_eq!(principal.acting_role(RequestRole::Rider).get(), RequestRole::Rider);
+        assert_eq!(principal.recorded_role(), RequestRole::Rider);
+        assert_eq!(principal.user_id(), Some(sub), "the subject rides along");
+    }
+
+    /// (b) a rider with NO row resolves to `ReadScope::Public` — specifically NOT the claim's rider
+    /// id. This is the slice itself: without it the claim stays authoritative for everyone the
+    /// projector has not caught up on.
+    #[tokio::test]
+    async fn a_rider_with_no_row_resolves_to_public_never_to_the_claim() {
+        let sub = "auth-supabase-rider-S";
+        let rider_b = uuid::Uuid::from_u128(0xB);
+        let principal = rider_token_principal(sub, rider_b);
+
+        let (principal, scope) = resolve_read_scope(
+            principal,
+            crate::graphql::session::RequestCorrelationId::mint(),
+            &sources_with_rider_table(&[]),
+        )
+        .await;
+
+        assert_eq!(scope, ReadScope::Public, "no row -> fail closed");
+        assert_ne!(
+            scope,
+            ReadScope::Rider(RiderId(rider_b)),
+            "and specifically NOT the claim's rider: try-Postgres-else-claim passes (a) and fails here"
+        );
+        assert!(
+            !principal.bridge_resolved(&scope),
+            "an unmapped rider is the population `bridge_resolved: false` names"
+        );
+        // And nobody on the write half either (#849 re-presentation): the witness minted from this
+        // principal is PUBLIC and the envelope records PUBLIC — as first pushed, both said RIDER.
+        assert_eq!(
+            principal.acting_role(RequestRole::Rider).get(),
+            RequestRole::Public,
+            "no row -> cannot act as a rider"
+        );
+        assert_eq!(
+            principal.recorded_role(),
+            RequestRole::Public,
+            "no row -> no RIDER author in domain_events.user_type"
+        );
+    }
+
+    /// The seam is authoritative whatever shape a rider principal arrives in: a test-built BOUND
+    /// rider (`Principal::role_binding(Rider, _, Some(_))`) handed to a seam with no row comes back
+    /// Unbound — there is no way to keep a RIDER witness the table does not back.
+    #[tokio::test]
+    async fn a_test_built_bound_rider_is_demoted_by_a_seam_with_no_row() {
+        let principal =
+            Principal::role_binding(RequestRole::Rider, "s".into(), Some(uuid::Uuid::from_u128(1)));
+        assert_eq!(principal.acting_role(RequestRole::Rider).get(), RequestRole::Rider);
+        let (principal, scope) = resolve_read_scope(
+            principal,
+            crate::graphql::session::RequestCorrelationId::mint(),
+            &sources_with_rider_table(&[]),
+        )
+        .await;
+        assert_eq!(scope, ReadScope::Public);
+        assert_eq!(principal.acting_role(RequestRole::Rider).get(), RequestRole::Public);
+        assert_eq!(principal.recorded_role(), RequestRole::Public);
+    }
 }

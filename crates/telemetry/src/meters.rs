@@ -655,6 +655,54 @@ pub mod customer_identity {
     }
 }
 
+/// Technical metrics for the `rider-identity` contract (#639 part C step 2b): the request-seam
+/// RIDER identity resolution — ungated, Postgres on every request.
+pub mod rider_identity {
+    use super::*;
+
+    fn resolve_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::RIDER_IDENTITY_RESOLVE_MS).with_unit("ms").build()
+        })
+    }
+
+    fn not_found_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RIDER_IDENTITY_NOT_FOUND_TOTAL).build())
+    }
+
+    fn lookup_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RIDER_IDENTITY_LOOKUP_FAILED_TOTAL).build())
+    }
+
+    fn lookup_source_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RIDER_IDENTITY_LOOKUP_SOURCE_TOTAL).build())
+    }
+
+    /// `rider_identity_resolve_ms{result}` — one RIDER resolution.
+    pub fn duration(elapsed_ms: f64, result: &str) {
+        resolve_histogram().record(elapsed_ms, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `rider_identity_not_found_total` — no `rider` row for the verified subject. OBSERVE.
+    pub fn not_found() {
+        not_found_counter().add(1, &[]);
+    }
+
+    /// `rider_identity_lookup_failed_total{reason}` — the seam could not be asked. PAGE.
+    pub fn lookup_failed(reason: &str) {
+        lookup_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `rider_identity_lookup_source_total{source}` (`db` | `request_reuse`).
+    pub fn lookup_source(source: &str) {
+        lookup_source_counter().add(1, &[KeyValue::new("source", source.to_string())]);
+    }
+}
+
 /// Technical metrics for the `customer-identification` contract (#437).
 pub mod customer_identification {
     use super::*;

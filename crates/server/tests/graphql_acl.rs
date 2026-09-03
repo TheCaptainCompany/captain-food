@@ -471,9 +471,11 @@ fn every_role_acts_as_itself_when_bound_and_as_public_when_not() {
         );
     }
 
-    // Only the four roles with a domain binding CAN be unbound — `role_binding` with `None` for
-    // ADMIN / EXTERNAL / PUBLIC yields their own claim-free identities, not `Unbound`, which is
-    // why they keep acting as themselves above.
+    // Only the four roles that carry a domain binding can be unbound — `role_binding` with `None`
+    // for ADMIN / EXTERNAL / PUBLIC yields their own claim-free identities, not `Unbound`, which is
+    // why they keep acting as themselves above. RIDER is back in this list (the #849
+    // re-presentation): its binding is a Postgres row rather than a claim, but "no binding" means
+    // the same thing — nobody — and 2b as first pushed had taken it OUT and asserted the inverse.
     for role in [
         RequestRole::Customer,
         RequestRole::RestaurantAccount,
@@ -492,6 +494,91 @@ fn every_role_acts_as_itself_when_bound_and_as_public_when_not() {
             "{role:?}: and no false author in domain_events.user_type either"
         );
     }
+
+}
+
+/// A scripted `Rider` table for the seam-driven pair below: one fixed outcome for every subject.
+struct ScriptedRiderTable(server::RiderIdentityResolution);
+
+#[async_trait::async_trait]
+impl server::ResolveRiderIdentity for ScriptedRiderTable {
+    async fn resolve(&self, _auth_subject: &str) -> server::RiderIdentityResolution {
+        self.0.clone()
+    }
+}
+
+fn rider_seam(outcome: server::RiderIdentityResolution) -> server::IdentitySources {
+    server::IdentitySources {
+        customer: server::CustomerIdentitySource::Claim,
+        rider: server::RiderIdentitySource::new(std::sync::Arc::new(ScriptedRiderTable(outcome))),
+    }
+}
+
+/// The RIDER binding is not a claim but a Postgres row, resolved at the request seam (#639 part C
+/// step 2b) — so the unbound rider is asserted the way the runtime produces one: a RIDER-role
+/// principal DRIVEN THROUGH `resolve_read_scope` over a seam with no row, never a scope injected by
+/// hand. The principal the seam hands back acts as PUBLIC and records PUBLIC; the same principal
+/// through a seam that answers a row acts as RIDER and records RIDER. Both halves read the ONE
+/// outcome (ADR-20260830-191457; ADR-20260818-101500 "unbound => denied").
+///
+/// The #849 re-presentation: as first pushed, this file asserted the inverse — a no-row rider
+/// "ACTS as RIDER and RECORDS RIDER" — because the runtime minted the witness before the seam ran
+/// and the test had been rewritten to match it.
+#[tokio::test]
+async fn an_unbound_rider_acts_and_records_as_public_through_the_seam() {
+    let sub = "rider-subject-with-no-row";
+    let correlation = server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(0x2B));
+
+    // No row: nobody, on both halves.
+    let token_only = server::Principal::role_binding(RequestRole::Rider, sub.to_string(), None);
+    let (unbound, scope) = server::resolve_read_scope(
+        token_only,
+        correlation,
+        &rider_seam(server::RiderIdentityResolution::NoMapping),
+    )
+    .await;
+    assert_eq!(scope, application::queries::ReadScope::Public, "no row: reads as nobody");
+    assert_eq!(
+        unbound.acting_role(RequestRole::Rider).get(),
+        RequestRole::Public,
+        "no row: acts as nobody — the RIDER guards refuse"
+    );
+    assert_eq!(
+        unbound.recorded_role(),
+        RequestRole::Public,
+        "no row: recorded as nobody — no false RIDER author in domain_events.user_type"
+    );
+    assert_eq!(unbound.user_id(), Some(sub), "the auth subject stays on the envelope, honestly");
+
+    // The seam could not answer: identical at this boundary (PAGE vs OBSERVE is telemetry's).
+    let token_only = server::Principal::role_binding(RequestRole::Rider, sub.to_string(), None);
+    let (failed, scope) = server::resolve_read_scope(
+        token_only,
+        correlation,
+        &rider_seam(server::RiderIdentityResolution::LookupFailed(
+            server::LookupFailureReason::Repository,
+        )),
+    )
+    .await;
+    assert_eq!(scope, application::queries::ReadScope::Public);
+    assert_eq!(failed.acting_role(RequestRole::Rider).get(), RequestRole::Public);
+    assert_eq!(failed.recorded_role(), RequestRole::Public);
+
+    // A row: the SAME token, and now a rider on both halves — the pair that keeps the refusals
+    // above honest.
+    let rider_id = domain::generated::scalars::RiderId(uuid::Uuid::from_u128(0x600D));
+    let token_only = server::Principal::role_binding(RequestRole::Rider, sub.to_string(), None);
+    let (bound, scope) = server::resolve_read_scope(
+        token_only,
+        correlation,
+        &rider_seam(server::RiderIdentityResolution::Resolved(rider_id)),
+    )
+    .await;
+    assert_eq!(scope, application::queries::ReadScope::Rider(rider_id), "a row: reads that rider");
+    assert_eq!(bound.acting_role(RequestRole::Rider).get(), RequestRole::Rider, "a row: acts as RIDER");
+    assert_eq!(bound.recorded_role(), RequestRole::Rider, "a row: recorded as RIDER");
+    // And the /public rule still holds for a resolved rider: the ACL runs against the PATH.
+    assert_eq!(bound.acting_role(RequestRole::Public).get(), RequestRole::Public);
 }
 
 /// The `/public` rule the ACL depends on: an identified customer on the OPEN path (#469 — the

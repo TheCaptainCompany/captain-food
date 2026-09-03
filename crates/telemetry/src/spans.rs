@@ -302,6 +302,31 @@ pub fn record_customer_identity_resolve_result(span: &Span, result: &str, reason
     }
 }
 
+/// The `rider-identity` contract's one span (#639 part C step 2b), the exact shape of
+/// [`customer_identity_resolve`] under its own name: `business.result` is late-bound, and
+/// `otel.status_code` is declared so `lookup_failed` can export as an ERROR span rather than a
+/// plain success (the contract's `technical_error: any_span_errors` rule needs a field to set).
+pub fn rider_identity_resolve(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "rider.identity.resolve",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        business.failure_reason = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the rider seam's typed outcome — `reason` only for `lookup_failed`, which also sets
+/// OTel ERROR status.
+pub fn record_rider_identity_resolve_result(span: &Span, result: &str, reason: Option<&str>) {
+    span.record(attr::RESULT, result);
+    if let Some(reason) = reason {
+        span.record(attr::FAILURE_REASON, reason);
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 // --- late-bound recorders -----------------------------------------------------------------------
 //
 // Each takes the span explicitly rather than using `Span::current()`. After an `.instrument(..).await`

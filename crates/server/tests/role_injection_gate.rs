@@ -21,13 +21,37 @@
 //! `x: RequestRole` under some other name still slips — which is why the guard names the
 //! recurrence class rather than claiming completeness.
 //!
-//! Seen RED before it was trusted, by restoring `.data(role)` at `mailbox_lanes.rs:302`.
+//! Seen RED before it was trusted, by restoring `.data(role)` at `mailbox_lanes.rs:302`; the
+//! recursive walk seen RED by planting `.data(RequestRole::Admin)` in a `tests/<sub>/` file the
+//! top-level walk could not see.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The two spellings that put a bare `RequestRole` into the execution context. `acting(role)` and
 /// `acting(RequestRole::X)` are the correct forms and contain neither.
 const FORBIDDEN: [&str; 2] = [".data(role)", ".data(RequestRole::"];
+
+/// Every `.rs` under `dir`, RECURSIVELY, in a stable order. The first cut walked `read_dir`
+/// once and stopped at the top level (#639 part C step 2b found it): a suite in `tests/<sub>/`
+/// — a shared `common/` module, or a file someone tidied into a folder — was simply not scanned,
+/// and because the `scanned >= 8` floor was met by the top level alone the gate stayed GREEN
+/// while blind to it. A gate that only looks where the offence used to be is a gate that
+/// documents the last incident rather than preventing the next one.
+fn rust_sources_under(dir: &Path, out: &mut Vec<PathBuf>) {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{} is readable: {e}", dir.display()))
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            rust_sources_under(&path, out);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push(path);
+        }
+    }
+}
 
 #[test]
 fn no_test_in_this_crate_injects_a_bare_request_role_into_the_schema() {
@@ -35,13 +59,8 @@ fn no_test_in_this_crate_injects_a_bare_request_role_into_the_schema() {
     let mut offences: Vec<String> = Vec::new();
     let mut scanned = 0usize;
 
-    let mut entries: Vec<_> = std::fs::read_dir(&dir)
-        .expect("crates/server/tests is readable")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
-        .collect();
-    entries.sort();
+    let mut entries: Vec<PathBuf> = Vec::new();
+    rust_sources_under(&dir, &mut entries);
 
     for path in &entries {
         // This file names the forbidden spellings in order to forbid them.
@@ -50,15 +69,11 @@ fn no_test_in_this_crate_injects_a_bare_request_role_into_the_schema() {
         }
         let src = std::fs::read_to_string(path).expect("test source is readable");
         scanned += 1;
+        let shown = path.strip_prefix(&dir).unwrap_or(path).display();
         for (n, line) in src.lines().enumerate() {
             for needle in FORBIDDEN {
                 if line.contains(needle) {
-                    offences.push(format!(
-                        "{}:{}: {}",
-                        path.file_name().unwrap_or_default().to_string_lossy(),
-                        n + 1,
-                        line.trim()
-                    ));
+                    offences.push(format!("{shown}:{}: {}", n + 1, line.trim()));
                 }
             }
         }

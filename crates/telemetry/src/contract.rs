@@ -296,6 +296,24 @@ pub mod metric {
     /// each resolve read scope once per request, so only `db` fires today; `request_reuse` is
     /// declared for a later resolver reusing this seam's result within the same request.
     pub const CUSTOMER_IDENTITY_LOOKUP_SOURCE_TOTAL: &str = "customer_identity_lookup_source_total";
+    /// `rider-identity` contract (#639 part C step 2b — the rider sign-in door): the resolution
+    /// latency, attribute `result` (resolved | not_found | lookup_failed). One btree probe on
+    /// `rider.auth_ref UNIQUE`, the same budget discipline as the customer seam.
+    pub const RIDER_IDENTITY_RESOLVE_MS: &str = "rider_identity_resolve_ms";
+    /// `rider-identity` contract: the verified subject has no `rider` row — a provisioning gap, a
+    /// projector not yet caught up, or a registration the reservation refused. Fails closed to
+    /// Public. OBSERVE, never PAGE.
+    pub const RIDER_IDENTITY_NOT_FOUND_TOTAL: &str = "rider_identity_not_found_total";
+    /// `rider-identity` contract: the seam itself could not be asked — a DEFECT counter, attribute
+    /// `reason` (repository | invariant | rejected). The OPPOSITE operator response from
+    /// [`RIDER_IDENTITY_NOT_FOUND_TOTAL`]: PAGE on any sustained non-zero rate. Its OWN name, not a
+    /// `role` label on the customer counter, so a paging rule keyed on the customer seam cannot go
+    /// quiet while riders fail on this one.
+    pub const RIDER_IDENTITY_LOOKUP_FAILED_TOTAL: &str = "rider_identity_lookup_failed_total";
+    /// `rider-identity` contract: attribute `source` (db | request_reuse) — declared for the same
+    /// reason as the customer twin, so an in-request reuse can never hide an outage; only `db`
+    /// fires today.
+    pub const RIDER_IDENTITY_LOOKUP_SOURCE_TOTAL: &str = "rider_identity_lookup_source_total";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

@@ -111,8 +111,10 @@ pub use auth::ActingRole;
 /// exercise `resolve_read_scope` directly over a REAL verified `Principal` (its own constructors
 /// stay module-private — only `AuthContext::authorize` produces one).
 pub use auth::{
-    resolve_read_scope, CustomerIdentityResolution, CustomerIdentitySource, LookupFailureReason,
-    PgCustomerIdentity, ResolveCustomerIdentity,
+    resolve_read_scope, CustomerIdentityResolution, CustomerIdentitySource, IdentityResolution,
+    IdentitySources, LookupFailureReason, NoDatabaseRiderIdentity, PgCustomerIdentity,
+    PgRiderIdentity, ResolveCustomerIdentity, ResolveRiderIdentity, RiderIdentityResolution,
+    RiderIdentitySource,
 };
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
@@ -582,6 +584,11 @@ pub async fn router() -> Router {
     // ONCE here from the DECLARED configuration — never a per-request fallback. DEFAULT (and the
     // only reachable value without a database) is the legacy claim path.
     let mut customer_identity_source = auth::CustomerIdentitySource::Claim;
+    // The RIDER seam (#639 part C step 2b) has no claim path to fall back to: without a database it
+    // answers `LookupFailed` (fail closed, PAGE-class), and the pool branch below replaces it with
+    // the Postgres resolver over the `Rider` projection's `auth_ref` bridge.
+    let mut rider_identity_source =
+        auth::RiderIdentitySource::new(Arc::new(auth::NoDatabaseRiderIdentity));
     // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
     // fail-closed no-op (parking succeeds, claiming yields nothing → no cookie, anonymous still works).
     let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
@@ -660,6 +667,14 @@ pub async fn router() -> Router {
                         auth::PgCustomerIdentity::new(di.read.customers.clone()),
                     ));
                 }
+                // The RIDER seam: ungated, Postgres, over the `Rider` projection (#639 part C
+                // step 2b). Its port is not on `ReadDeps` because no GraphQL query reads it — the
+                // table is `internal: true`; the request seam is its only reader.
+                rider_identity_source = auth::RiderIdentitySource::new(Arc::new(
+                    auth::PgRiderIdentity::new(Arc::new(infrastructure::PgRiderRepository::new(
+                        pool.clone(),
+                    ))),
+                ));
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
                 // The host fallback shares it too (#98: registered-vs-unclaimed tenant slugs).
@@ -1396,7 +1411,7 @@ pub async fn router() -> Router {
     base.merge(graphql::routes::graphql_routes(
         schema,
         tenant_lookup.clone(),
-        customer_identity_source,
+        auth::IdentitySources { customer: customer_identity_source, rider: rider_identity_source },
     ))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))

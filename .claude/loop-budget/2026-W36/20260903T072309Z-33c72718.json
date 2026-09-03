@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3120,
+  "recordedAt": "2026-09-03T07:23:09.894Z",
+  "branch": "main",
+  "note": "#639 part C step 2b: rider sign-in door resolver, §10 pair, WS mirror, rider-identity contract, recursive role_injection_gate, duplicate-authRef test (PR #849)"
+}
