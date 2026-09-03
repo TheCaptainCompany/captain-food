@@ -184,6 +184,21 @@ session transcript.** Write the "what is true right now / what is deliberately n
 into the PR *as you go*. A coordinator that keeps that state only in context loses it; an executor
 that saves its report for the final message loses the whole run when the container recycles.
 
+**Sharpened 2026-09-03: the restart can recur roughly hourly, and the FIRST push has to happen before
+any build.** Three executors on #639 part C step 2 died in a row (03:19, 04:24, ~05:30 UTC), each
+during a `cargo` build; the container came back each time with identical disk numbers, so the cause
+was not exhaustion and is still unknown. The first two had pushed nothing — ~111 min and ~66 min
+billed to the budget for zero commits — because the claim commit and draft PR were sequenced
+*after* reading code. The third was dispatched with claim → push → draft PR as its first three
+actions and lost minutes. **Rule for a dispatch card**: the first push is the claim commit, before
+any code is read; then push after every green milestone (specs land, crates compile, tests green),
+a bound of fifteen to twenty minutes between pushes during builds; build narrowly first
+(`cargo test -p <crate>`) and run the full `make test-crates` once at the end. Splitting a large
+step into two dispatches (2a/2b) was worth more than any retry count. A relaunched executor also
+inherits the dead attempt's OPEN budget timer under the same run id (`loop-budget.sh start` exits 3):
+`stop --note "attempt N: killed by restart"` then `start`, so the lost time is billed honestly
+rather than swallowed.
+
 **Sharpened 2026-08-25: the death is SILENT, and a waiting coordinator can wait forever.** Two
 `reviewer` agents were launched, the session went idle, the container suspended, and on resume the
 agents were gone — but **no completion notification is ever emitted for an agent that dies this
