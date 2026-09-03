@@ -78,11 +78,16 @@ impl SubscriptionRoot {
                         let terminal = !matches!(update.status, M::RECEIVED | M::SCHEDULED);
                         // A terminal REJECTED/FAILED push carries the bus's English summary; the
                         // durable row carries the typed context, so re-read it and localize
-                        // exactly as the poll leg does (#639 2c-ii) — the row is the pull truth.
+                        // exactly as the poll leg does (#639 2c-ii) — the row is the pull truth,
+                        // but ONLY once it says so: a bus frame can be observed before the row's
+                        // completion is (the subscriptions suite scripts exactly that), and a
+                        // still-open row must never turn a terminal push back into PENDING.
                         if terminal && update.error_code.is_some() {
                             if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
-                                yield Ok(super::mutation::operation_from_mailbox(&row, locale));
-                                break;
+                                if !matches!(row.status, M::RECEIVED | M::SCHEDULED) {
+                                    yield Ok(super::mutation::operation_from_mailbox(&row, locale));
+                                    break;
+                                }
                             }
                         }
                         yield Ok(Operation {
