@@ -212,7 +212,8 @@ async fn graphql_handler(
 /// through `sources`: the CUSTOMER seam under its gate (the default `CustomerIdentitySource::Claim`,
 /// or — once `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set — `CustomerIdentitySource::Postgres`,
 /// which resolves a CUSTOMER caller through Postgres instead of trusting the JWT's
-/// `captain_food.customer_id` claim), and the RIDER seam, always Postgres (#639 part C step 2b).
+/// `captain_food.customer_id` claim), and the RIDER seam, always Postgres (#639 part C step 2b) —
+/// and only THEN mints the [`crate::auth::ActingRole`], from the principal the seam handed back.
 async fn authorize_and_resolve_scope(
     auth: &AuthContext,
     path_role: RequestRole,
@@ -228,18 +229,25 @@ async fn authorize_and_resolve_scope(
     crate::auth::AuthError,
 > {
     let principal = auth.authorize(path_role, headers).await?;
-    // Minted HERE, in the one function both transports go through, and returned as a tuple element
-    // they both destructure — so a transport that fails to inject it does not compile (#639 part
-    // B). The type stops a bad acting role being minted; returning it stops a good one being
-    // forgotten, which would otherwise be a silent permanent 403 on one transport only. That
-    // discharges ADR-20260818-101500's every-transport clause structurally rather than by review.
-    let acting = principal.acting_role(path_role);
     // The ONE `request.correlation_id` of this request/connection (#451): minted here, at the
     // transport boundary, and shared by every read-path span it opens (`auth.read_scope`,
     // `cart.price` at the pricing seam). Reads carry no command envelope, so nothing upstream
     // supplies one — but it must be one PER REQUEST, not one per span, or it correlates nothing.
     let correlation = crate::graphql::session::RequestCorrelationId::mint();
-    let scope = crate::auth::resolve_read_scope(&principal, correlation, sources).await;
+    // The seam CONSUMES the verified principal and hands back the one this request runs as: for a
+    // RIDER its identity is the seam's outcome (`Identity::Rider` only when the `Rider` table
+    // answered a row, `Unbound` otherwise), and the pre-seam value no longer exists to mint from.
+    let (principal, scope) =
+        crate::auth::resolve_read_scope(principal, correlation, sources).await;
+    // Minted HERE, AFTER the seam, from the principal it handed back — so the witness and the read
+    // scope are two readings of ONE resolution, and a bare `role: RIDER` token with no row acts as
+    // PUBLIC exactly as it reads `Public` (the #849 re-presentation: as first pushed this line sat
+    // above the seam and minted RIDER from the token alone). Returned as a tuple element both
+    // transports destructure, so a transport that fails to inject it does not compile (#639 part
+    // B): the type stops a bad acting role being minted; returning it stops a good one being
+    // forgotten, which would otherwise be a silent permanent 403 on one transport only. That
+    // discharges ADR-20260818-101500's every-transport clause structurally rather than by review.
+    let acting = principal.acting_role(path_role);
     Ok((principal, acting, correlation, scope))
 }
 

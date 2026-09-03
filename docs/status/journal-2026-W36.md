@@ -34,10 +34,22 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > rider has no row, and the door reads the FIRST rider — the policy default is untouched, its own
 > decision. **What this does NOT do**: no claim writer mints a `role: RIDER` token (the sole
 > stamper hardcodes CUSTOMER), so end-to-end rider sign-in still waits on the token that walks
-> through the door; and an unresolved rider still ACTS as RIDER on the write half (`ActingRole`
-> follows the identity, exactly as an unmapped customer under the Postgres gate does) while reading
-> `Public` — the same asymmetry the customer seam already carries, named for the architect rather
-> than widened here. Card defects: none of substance; the "part A already landed the table" note
+> through the door. **Corrected in the re-presentation (same day): 2b as first pushed REGRESSED
+> part B for RIDER.** The independent reviewer's one blocking finding: `authorize_and_resolve_scope`
+> minted the `ActingRole` from `Identity::Rider` BEFORE `resolve_read_scope` ran, so a bare
+> `role: RIDER` JWT with no `Rider` row read `Public` and still ACTED as RIDER on all five
+> `ALLOW_RIDER` guards and RECORDED `RIDER` in `domain_events.user_type` — a false author in an
+> immutable log, and on `acceptDelivery` (target from the payload, never the caller) an acceptance
+> naming any rider. The first push had rewritten the `graphql_acl.rs` assertion to match the runtime
+> and called it "the customer seam's own asymmetry, named not widened" — inaccurate, since the
+> customer asymmetry needs a stamped claim and sits behind a default-OFF gate while the rider arm
+> needed no claim and had no gate. The re-presentation restores unbound ⇒ denied on BOTH halves: the
+> verifier yields `Identity::Unbound { role: RIDER }` for every rider token, the seam hands back a
+> principal whose identity IS its outcome (`Identity::Rider` only on a row — its sole producer),
+> and the witness is minted from that principal after the seam; `ActingRole` keeps its one
+> constructor. Seen red first: `rider_without_a_row_is_forbidden_on_the_write_half.rs` (a signed
+> bare-`RIDER` JWT through the real `POST /rider/graphql` → FORBIDDEN as PUBLIC; resolved-row
+> control passes the guard). Card defects: none of substance; the "part A already landed the table" note
 > and the three `(principal_kind, auth_ref)` / "unbuilt" sites (#848 item 4) are corrected in the
 > proposal in the same change. Gates: `make validate` 0 errors, ratchet exact match; `make rust`
 > and `make test-crates` (`DB_TESTS_REQUIRED=1`, real Postgres) green.

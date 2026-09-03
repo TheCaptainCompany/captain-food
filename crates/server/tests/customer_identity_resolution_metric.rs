@@ -164,8 +164,8 @@ async fn resolve_read_scope_under_postgres_mode() {
     let resolver_a = std::sync::Arc::new(ScriptedResolver(CustomerIdentityResolution::Resolved(
         CustomerId(right_id),
     )));
-    let scope_a = server::resolve_read_scope(
-        &principal_a,
+    let (_, scope_a) = server::resolve_read_scope(
+        principal_a.clone(),
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(1)),
         &sources(CustomerIdentitySource::Postgres(resolver_a)),
     )
@@ -190,8 +190,8 @@ async fn resolve_read_scope_under_postgres_mode() {
     let principal_b = auth.authorize(RequestRole::Customer, &headers_b).await.expect("authorizes");
     let resolver_b =
         std::sync::Arc::new(ScriptedResolver(CustomerIdentityResolution::NoMapping));
-    let scope_b = server::resolve_read_scope(
-        &principal_b,
+    let (_, scope_b) = server::resolve_read_scope(
+        principal_b,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(2)),
         &sources(CustomerIdentitySource::Postgres(resolver_b)),
     )
@@ -221,8 +221,8 @@ async fn resolve_read_scope_under_postgres_mode() {
     let resolver_c = std::sync::Arc::new(ScriptedResolver(CustomerIdentityResolution::LookupFailed(
         LookupFailureReason::Repository,
     )));
-    let scope_c = server::resolve_read_scope(
-        &principal_c,
+    let (_, scope_c) = server::resolve_read_scope(
+        principal_c,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(3)),
         &sources(CustomerIdentitySource::Postgres(resolver_c)),
     )
@@ -249,8 +249,8 @@ async fn resolve_read_scope_under_postgres_mode() {
     // because there is no other source to consult. No fixture ever exercises the Postgres seam
     // here: this proves the OFF path takes NO lookup at all, not merely "a lookup that happens to
     // agree".
-    let scope_d = server::resolve_read_scope(
-        &principal_a,
+    let (_, scope_d) = server::resolve_read_scope(
+        principal_a,
         server::graphql_session::RequestCorrelationId(uuid::Uuid::from_u128(4)),
         &sources(CustomerIdentitySource::Claim),
     )
