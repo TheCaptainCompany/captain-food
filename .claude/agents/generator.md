@@ -3,6 +3,7 @@ name: generator
 description: >
   Captain.Food code/artifact generator. Use in EXECUTION mode to (re)generate artifacts from the
   approved DSL via the codegen, and to evolve generator/emitter logic. Treats specs/** as frozen input.
+model: sonnet
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
