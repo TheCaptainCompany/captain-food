@@ -975,7 +975,7 @@ is itself the argument: **a list that grows has no business stating its own leng
   warning list under a failing verdict, and `| grep` makes `$?` grep's rather than make's — both
   reported success over a failing gate this week.
 
-## 19c. Five more test-bed and gate findings from #854 and the 2026-09-04 records pass
+## 19c. Test-bed and gate findings from #854 and the 2026-09-04 records pass
 
 - **The loop-budget timer's 240-minute staleness bound fires on a legitimate long run under the same
   run id** (#854: `stop` refused with exit 3 at 340 min and required `--elapsed-seconds`). A run
