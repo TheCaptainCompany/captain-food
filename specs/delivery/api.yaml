@@ -32,6 +32,26 @@ types:
       handedBackAt: { type: string, format: date-time, nullable: true }
 
 
+  # #639 part C step 4-i (ADR-20260904-081527 §2/§4): the attribution behind a restriction, nested
+  # under `myStanding` — no `reads:` (hand-written resolver, entities.yaml-style bare shape).
+  RiderRestrictionInfo:
+    description: "Why and when a rider's access is restricted (#639 part C step 4-i) — the Art. 11 attribution: ground, decidedAt, effectiveAt."
+    properties:
+      ground: { $ref: 'scalars.yaml#/RiderRestrictionGround', nullable: true }
+      decidedAt: { type: string, format: date-time }
+      effectiveAt: { type: string, format: date-time }
+
+  # The rider's own standing answer (#639 part C step 4-i, ADR-20260904-081527 §4) — bootstraps the
+  # `/restricted` screen (4-ii) with no `orderId` in hand: `heldDelivery` is keyed on
+  # `ReadScope::Rider.id`, never the JWT `sub` (#869).
+  RiderStandingInfo:
+    description: "The calling rider's own standing (#639 part C step 4-i) — ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any) so the restricted rider's one control (hand it back) needs no second query."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/RiderRestriction' }, { $ref: 'database/projection_views.yaml#/View_DeliveryJob' }]
+    properties:
+      standing: { $ref: 'scalars.yaml#/RiderStanding' }
+      restriction: { $ref: '#/types/RiderRestrictionInfo', nullable: true }
+      heldDelivery: { $ref: '#/types/DeliveryJob', nullable: true }
+
   DeliveryPartnerAvailability:
     description: "A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue."
     reads: [{ $ref: 'database/projection_views.yaml#/View_DeliveryPartnerAvailability' }]
@@ -54,6 +74,19 @@ queries:
       orderId: { $ref: 'scalars.yaml#/OrderId', required: true }
     returns: { $ref: '#/types/DeliveryJob', nullable: true }
     roles: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]
+    whileRestricted: [RIDER]   # #639 part C step 4-i, ADR-20260904-081527 §4: the held-job read stays reachable
+    slice: V0
+
+  # #639 part C step 4-i (ADR-20260904-081527 §4): the ONE additive query the restricted-rider carve-out
+  # needs — NOT `myDeliveries` (refused §4: it hands the unassigned PENDING pool to whoever holds the
+  # session, which under ACCOUNT_COMPROMISE is exactly the exposure the restriction closes). Keyed on
+  # `ReadScope::Rider.id` — never the JWT `sub` (#869) — so the /restricted screen (4-ii) bootstraps
+  # with no `orderId` in hand.
+  myStanding:
+    description: "The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any). `Rider.standing` and `RiderRestriction` advance under TWO SEPARATE projector checkpoints (round 3 item 4, #639 part C step 4-i), so `standing: RESTRICTED` with `restriction: null` is a possible one-tick transient between the two catching up — a client renders that combination as \"ground pending\", never as an error or a stale-looking blank."
+    returns: { $ref: '#/types/RiderStandingInfo' }
+    roles: [RIDER]
+    whileRestricted: [RIDER]
     slice: V0
 
   myDeliveries:
@@ -142,6 +175,7 @@ mutations:
     command: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
     roles: [RIDER, ADMIN]   # the reporter, or ops on their behalf
     derived: { riderId: rider }
+    whileRestricted: [RIDER]   # #639 part C step 4-i, ADR-20260904-081527 §4: a restricted rider may still report on the job they hold
     slice: V0
 
   resolveDeliveryIssue:
@@ -156,12 +190,26 @@ mutations:
     slice: V0
 
   # #639 part C step 3-ii, ADR-20260904-015903 §1/§5/§6: the second door in the restricted-rider's
-  # carve-out (with reportDeliveryIssue, 3-i) — revocation of ACCESS is not release of CUSTODY. The
-  # input never carries riderId (#865 grammar): the resolver injects it from ReadScope::Rider.
+  # carve-out (with reportDeliveryIssue, 3-i) — restriction of ACCESS is not release of CUSTODY
+  # (#639 part C step 4-i, ADR-20260904-081527 §7: "restriction", never "revocation", for this act).
+  # The input never carries riderId (#865 grammar): the resolver injects it from ReadScope::Rider.
   handBackDelivery:
     command: { $ref: 'commands.yaml#/HandBackDelivery' }
     roles: [RIDER]
     derived: { riderId: rider }
+    whileRestricted: [RIDER]   # #639 part C step 4-i, ADR-20260904-081527 §4: restriction of ACCESS is not release of CUSTODY
+    slice: V0
+
+
+  # --- Rider standing: the human-only doors (#639 part C step 4-i, ADR-20260904-081527 §6/§11) -----
+  restrictRider:
+    command: { $ref: 'commands.yaml#/RestrictRider' }
+    roles: [ADMIN]   # the target is payload (riderId), the actor is the envelope — no `derived:`
+    slice: V0
+
+  reinstateRider:
+    command: { $ref: 'commands.yaml#/ReinstateRider' }
+    roles: [ADMIN]
     slice: V0
 
 

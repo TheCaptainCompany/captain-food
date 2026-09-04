@@ -201,7 +201,7 @@ pub fn wire() -> HealthDto {
 /// (`order_tracking_store::upsert`'s full 39-column list), so a build without the column would fail
 /// every Order-group projection with `column "delivery_handed_back" does not exist` (42703) — the
 /// whole customer tracking read model would stop updating, not just the handback banner.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904090000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904110000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -450,6 +450,8 @@ pub fn build_graphql_di(
         Arc::new(PgCustomerRepository::new(pool.clone()));
     let deliveries: Arc<dyn DeliveryReadRepository> =
         Arc::new(PgDeliveryRepository::new(pool.clone()));
+    let rider_restrictions: Arc<dyn application::queries::RiderRestrictionReadRepository> =
+        Arc::new(infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()));
     let refunds: Arc<dyn RefundReadRepository> =
         Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
@@ -477,6 +479,7 @@ pub fn build_graphql_di(
         order_conversations,
         customers,
         deliveries,
+        rider_restrictions,
         refunds,
         delivery_satisfaction,
         delivery_partner_availabilities,

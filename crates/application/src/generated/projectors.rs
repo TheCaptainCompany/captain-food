@@ -186,10 +186,10 @@ pub fn project_customer<C: CustomerCompute>(c: &C, state: Option<CustomerRow>, e
 /// Hand-written business logic for `Rider`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait RiderCompute {
+    fn standing(&self, prev: Option<&RiderRow>, env: &Envelope) -> RiderStanding;
 }
 
 pub fn project_rider<C: RiderCompute>(c: &C, state: Option<RiderRow>, env: &Envelope) -> Option<RiderRow> {
-    let _ = c;
     let created = state.as_ref().map(|r| r.created_at);
     let next = match &env.event {
         DomainEvent::RiderRegistered(e) => Some(RiderRow {
@@ -198,11 +198,46 @@ pub fn project_rider<C: RiderCompute>(c: &C, state: Option<RiderRow>, env: &Enve
             display_name: e.display_name.clone(),
             phone: e.phone.clone(),
             status: e.status.clone(),
+            standing: c.standing(state.as_ref(), env),
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
         DomainEvent::RiderInfoUpdated(e) => { let mut row = state?; if let Some(v) = &e.display_name { row.display_name = v.clone(); } if let Some(v) = &e.phone { row.phone = v.clone(); } Some(row) },
         DomainEvent::RiderStatusChanged(e) => { let mut row = state?; row.status = e.status.clone(); Some(row) },
+        DomainEvent::RiderRestricted(_) => { let mut row = state?; let v = c.standing(Some(&row), env); row.standing = v; Some(row) },
+        DomainEvent::RiderReinstated(_) => { let mut row = state?; let v = c.standing(Some(&row), env); row.standing = v; Some(row) },
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
+/// Hand-written business logic for `RiderRestriction`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait RiderRestrictionCompute {
+    fn standing(&self, prev: Option<&RiderRestrictionRow>, env: &Envelope) -> RiderStanding;
+    fn decided_at(&self, prev: Option<&RiderRestrictionRow>, env: &Envelope) -> Option<chrono::DateTime<chrono::Utc>>;
+    fn effective_at(&self, prev: Option<&RiderRestrictionRow>, env: &Envelope) -> Option<chrono::DateTime<chrono::Utc>>;
+}
+
+pub fn project_rider_restriction<C: RiderRestrictionCompute>(c: &C, state: Option<RiderRestrictionRow>, env: &Envelope) -> Option<RiderRestrictionRow> {
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::RiderRegistered(e) => Some(RiderRestrictionRow {
+            rider_id: e.rider_id.clone(),
+            standing: c.standing(state.as_ref(), env),
+            ground: None,
+            decided_at: c.decided_at(state.as_ref(), env),
+            effective_at: c.effective_at(state.as_ref(), env),
+            reinstated_at: None,
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        DomainEvent::RiderRestricted(e) => { let mut row = state?; row.ground = Some(e.ground.clone()); let v = c.standing(Some(&row), env); row.standing = v; let v = c.decided_at(Some(&row), env); row.decided_at = v; let v = c.effective_at(Some(&row), env); row.effective_at = v; Some(row) },
+        DomainEvent::RiderReinstated(_) => { let mut row = state?; row.reinstated_at = Some(env.occurred_at); let v = c.standing(Some(&row), env); row.standing = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

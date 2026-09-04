@@ -231,9 +231,13 @@ impl RiderIdentityRepository for ScriptedRiders {
     async fn rider_id_by_auth_subject(
         &self,
         auth_subject: AuthSubject,
-    ) -> Result<Option<RiderId>, DomainError> {
+    ) -> Result<Option<(RiderId, domain::generated::scalars::RiderStanding)>, DomainError> {
         *self.consulted.lock().expect("scripted riders") += 1;
-        Ok(self.known.iter().find(|(s, _)| *s == auth_subject.0).map(|(_, id)| *id))
+        Ok(self
+            .known
+            .iter()
+            .find(|(s, _)| *s == auth_subject.0)
+            .map(|(_, id)| (*id, domain::generated::scalars::RiderStanding::ACTIVE)))
     }
 }
 
@@ -598,7 +602,7 @@ async fn the_token_the_rider_stamp_writes_opens_the_rider_door_once_the_seam_res
     // mailbox. Whether that lands PENDING or fails on something downstream is not the point; not
     // FORBIDDEN is.
     let resolved = door(ScriptedIdentity::default(), ScriptedRiders::default(),
-        RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D)))).await;
+        RiderIdentityResolution::Resolved((RiderId(uuid::Uuid::from_u128(0x600D)), domain::generated::scalars::RiderStanding::ACTIVE))).await;
     let (message, code) = post_as_rider(&resolved, &jwt).await;
     assert_ne!(code.as_deref(), Some("FORBIDDEN"), "the stamped credential acts as RIDER -- got: {message}");
     assert!(!message.starts_with("forbidden:"), "past the guard -- got: {message}");

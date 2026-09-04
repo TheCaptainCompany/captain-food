@@ -253,6 +253,7 @@ rider:
         DeclineDelivery: { $ref: 'api.yaml#/mutations/declineDelivery' }   # refuse a PENDING offer (#639 part C step 3-i)
         ReportDeliveryIssue: { $ref: 'api.yaml#/mutations/reportDeliveryIssue' }   # "Un problème" — report by kind, the restaurant is told (#639 part C step 3-i)
         HandBackDelivery: { $ref: 'api.yaml#/mutations/handBackDelivery' }   # "Je ne peux pas continuer" — hand a held job back with the food's whereabouts (#639 part C step 3-ii)
+        ViewMyStanding: { $ref: 'api.yaml#/queries/myStanding' }   # #639 part C step 4-i: is my access restricted, and why — the outcome is still the food's custody (ADR-20260904-081527 §10)
 
 admin:
   description: A platform operator who onboards accounts and oversees the platform.
@@ -289,6 +290,11 @@ admin:
       steps:
         ReviewPipeline: { $ref: 'api.yaml#/queries/prospectionPipeline' }
         LogReply: { $ref: 'api.yaml#/mutations/recordProspectReply' }
+    ManageRiderStanding:
+      description: As an admin, I restrict a rider's access on a closed ground when a legal/eligibility fact requires it, and reinstate one once it is resolved — a human decision, never automated (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527).
+      steps:
+        RestrictRider: { $ref: 'api.yaml#/mutations/restrictRider' }
+        ReinstateRider: { $ref: 'api.yaml#/mutations/reinstateRider' }
     ArbitrateRefunds:
       description: As an admin, I arbitrate pending refund requests when the restaurant does not decide (RefundProcess).
       steps:

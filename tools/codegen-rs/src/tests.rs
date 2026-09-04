@@ -18549,17 +18549,19 @@ mod api_operation_key_gate {
         assert!(h.is_empty(), "{h:?}");
     }
 
-    /// RED on the planted defect the rule exists for — step 4's seam: `whileRestricted:` on a
-    /// mutation BEFORE the loader knows the key would be silently dropped (a restriction carve-out
-    /// declared and never enforced). The rule names the key and the operation, as an ERROR.
+    /// RED on the planted defect the rule exists for — a key the loader never reads would be
+    /// silently dropped (a declared-and-never-enforced key). `whileRestricted:` is no longer this
+    /// test's planted key: #639 part C step 4-i joined it to the loader AND to this closed set in
+    /// the SAME change (the seam this test proves stays exercised, re-planted with a genuinely
+    /// unknown key so the assertion keeps meaning what it says).
     #[test]
     fn an_unknown_mutation_key_is_refused_by_name() {
         let mut model = real_model();
         op_mut(&mut model, "mutations", "acceptDelivery")
-            .insert(Value::from("whileRestricted"), Value::Sequence(vec![Value::from("RIDER")]));
+            .insert(Value::from("requiresApproval"), Value::from(true));
         let h = hits(&model, "api-operation-key");
         assert_eq!(h.len(), 1, "{h:?}");
-        assert!(h[0].contains("api.yaml/mutations/acceptDelivery") && h[0].contains("whileRestricted"), "{h:?}");
+        assert!(h[0].contains("api.yaml/mutations/acceptDelivery") && h[0].contains("requiresApproval"), "{h:?}");
         assert!(validate(&model)
             .issues
             .iter()
@@ -18721,6 +18723,194 @@ mod api_derived_gate {
             .unwrap_or_default();
         assert!(!required.contains(&"riderId"), "riderId must stay OUT of ReportDeliveryIssue's required: {required:?}");
         assert!(hits(&model, "api-derived-role-mismatch").is_empty());
+    }
+}
+
+// ─── §29 — `whileRestricted:` the standing carve-out grammar (#639 part C step 4-i,
+// ADR-20260904-081527 §4) + pm-sends-human-only-command (§6/§8) ──────────────────────────────────
+mod while_restricted_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn op_mut<'a>(model: &'a mut Model, section: &str, name: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut("api.yaml")
+            .and_then(|v| v.get_mut(section))
+            .and_then(|v| v.get_mut(name))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("api.yaml/{section}/{name} exists"))
+    }
+
+    fn hits(m: &Model, rule: &str) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == rule)
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The real corpus is clean on every §29 rule and on `pm-sends-human-only-command`: the four
+    /// carved operations (`myStanding`, `delivery`, `reportDeliveryIssue`, `handBackDelivery`) all
+    /// name `RIDER`, a subset of their own `roles:`, a standing-bearing role, and every carved
+    /// MUTATION declares `derived: { riderId: rider }`; no processmanager.yaml `sends:` names
+    /// `RestrictRider`/`ReinstateRider`.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let model = real_model();
+        for rule in [
+            "api-while-restricted-not-subset",
+            "api-while-restricted-no-standing-source",
+            "api-while-restricted-mutation-derives-actor",
+            "pm-sends-human-only-command",
+            "pm-emits-human-only-event",
+            "error-exemption-unjustified",
+        ] {
+            let h = hits(&model, rule);
+            assert!(h.is_empty(), "{rule}: {h:?}");
+        }
+    }
+
+    /// RED: `whileRestricted:` names a role absent from the operation's own `roles:` — the
+    /// SUBSET rule (`myStanding` is `roles: [RIDER]`; swap the carve-out to ADMIN).
+    #[test]
+    fn a_while_restricted_role_outside_roles_is_not_a_subset() {
+        let mut model = real_model();
+        op_mut(&mut model, "queries", "myStanding")
+            .insert(Value::from("whileRestricted"), Value::Sequence(vec![Value::from("ADMIN")]));
+        let h = hits(&model, "api-while-restricted-not-subset");
+        assert!(!h.is_empty(), "{h:?}");
+    }
+
+    /// RED: `whileRestricted:` names a role with no standing to test (ADMIN is not
+    /// standing-bearing) — even when ADMIN is legitimately in `roles:` too.
+    #[test]
+    fn a_while_restricted_role_with_no_standing_is_refused() {
+        let mut model = real_model();
+        op_mut(&mut model, "mutations", "reportDeliveryIssue")
+            .insert(Value::from("whileRestricted"), Value::Sequence(vec![Value::from("ADMIN")]));
+        let h = hits(&model, "api-while-restricted-no-standing-source");
+        assert!(!h.is_empty(), "{h:?}");
+    }
+
+    /// RED: `whileRestricted:` is declared but `roles:` is omitted — nothing to carve out of an
+    /// open operation.
+    #[test]
+    fn a_while_restricted_key_with_no_roles_is_refused() {
+        let mut model = real_model();
+        let op = op_mut(&mut model, "queries", "myStanding");
+        op.remove(Value::from("roles"));
+        op.insert(Value::from("whileRestricted"), Value::Sequence(vec![Value::from("RIDER")]));
+        let h = hits(&model, "api-while-restricted-not-subset");
+        assert!(!h.is_empty(), "{h:?}");
+    }
+
+    /// RED: a carved MUTATION with no `derived: { …: rider }` — a restricted rider under the
+    /// carve-out could act as any other identity.
+    #[test]
+    fn a_carved_mutation_with_no_derived_rider_is_refused() {
+        let mut model = real_model();
+        op_mut(&mut model, "mutations", "handBackDelivery").remove(Value::from("derived"));
+        let h = hits(&model, "api-while-restricted-mutation-derives-actor");
+        assert!(!h.is_empty(), "{h:?}");
+    }
+
+    /// M7 (#639 part C step 4-i card): a `sends: RestrictRider` planted in a COPY of
+    /// processmanager.yaml — never a touch to the real fenced file — validates RED on
+    /// `pm-sends-human-only-command`. Plants it on `RefundProcess`'s first receives leg (any leg
+    /// works; the rule reads every `sends:` regardless of which command triggers it).
+    #[test]
+    fn a_pm_send_of_a_human_only_command_is_refused() {
+        let mut model = real_model();
+        let pm = model
+            .defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut("RefundProcess"))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("RefundProcess.receives exists");
+        let leg = pm.first_mut().expect("at least one receives leg").as_mapping_mut().expect("leg is a mapping");
+        let mut send = serde_yaml::Mapping::new();
+        let mut cmd_ref = serde_yaml::Mapping::new();
+        cmd_ref.insert(Value::from("$ref"), Value::from("commands.yaml#/RestrictRider"));
+        send.insert(Value::from("command"), Value::Mapping(cmd_ref));
+        leg.entry(Value::from("sends"))
+            .or_insert_with(|| Value::Sequence(vec![]))
+            .as_sequence_mut()
+            .expect("sends is a sequence")
+            .push(Value::Mapping(send));
+        let h = hits(&model, "pm-sends-human-only-command");
+        assert!(!h.is_empty(), "planting `sends: RestrictRider` on a process manager must be refused: {h:?}");
+    }
+
+    /// Round-2 item 1: `pm-emits-human-only-event` -- the `emits:` complement of `pm-sends-human-only-command`.
+    /// A `processmanager.yaml` `receives[].emits:` naming `RiderRestricted` (RestrictRider's own emitted
+    /// event, derived from `human_only_commands`/`human_only_events` -- never hand-listed) would let a
+    /// saga PRODUCE the result of a human decision without ever going through the door that requires one.
+    /// Plants it on `RefundProcess`'s first receives leg's `emits:` list (a scratch model mutation, never
+    /// a touch to the real fenced file).
+    #[test]
+    fn a_pm_emit_of_a_human_only_event_is_refused() {
+        let mut model = real_model();
+        let pm = model
+            .defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut("RefundProcess"))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("RefundProcess.receives exists");
+        let leg = pm.first_mut().expect("at least one receives leg").as_mapping_mut().expect("leg is a mapping");
+        let mut ev_ref = serde_yaml::Mapping::new();
+        ev_ref.insert(Value::from("$ref"), Value::from("events.yaml#/RiderRestricted"));
+        leg.entry(Value::from("emits"))
+            .or_insert_with(|| Value::Sequence(vec![]))
+            .as_sequence_mut()
+            .expect("emits is a sequence")
+            .push(Value::Mapping(ev_ref));
+        let h = hits(&model, "pm-emits-human-only-event");
+        assert!(!h.is_empty(), "planting `emits: RiderRestricted` on a process manager must be refused: {h:?}");
+    }
+
+    fn error_mut<'a>(model: &'a mut Model, name: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut("errors.yaml")
+            .and_then(|v| v.get_mut(name))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("errors.yaml/{name} exists"))
+    }
+
+    /// Round-3 item 1(ii): `noTestFixturePossible: true` planted on `RiderNotFound` -- a error
+    /// thrown by ordinary commands with no `readOnlyCatchAll`-bearing property anywhere in their
+    /// input -- must be refused. Proves the flag cannot be hand-typed onto an arbitrary error to
+    /// escape `test-uncovered-error`.
+    #[test]
+    fn a_hand_typed_exemption_on_an_ordinary_error_is_refused() {
+        let mut model = real_model();
+        error_mut(&mut model, "RiderNotFound")
+            .insert(Value::from("noTestFixturePossible"), Value::from(true));
+        let h = hits(&model, "error-exemption-unjustified");
+        assert!(!h.is_empty(), "planting noTestFixturePossible on RiderNotFound must be refused: {h:?}");
+    }
+
+    /// Round-3 item 1(ii): removing the flag from `RiderRestrictionGroundUnrecognised` (the ONE
+    /// legitimate use, a command whose `ground` property's scalar declares `readOnlyCatchAll`)
+    /// must fall back to `test-uncovered-error` -- proving the exemption is load-bearing (the gate
+    /// still runs once the flag is gone) rather than the error being coverable some other way.
+    #[test]
+    fn removing_the_justified_exemption_falls_back_to_test_uncovered_error() {
+        let mut model = real_model();
+        error_mut(&mut model, "RiderRestrictionGroundUnrecognised").remove(Value::from("noTestFixturePossible"));
+        let h = hits(&model, "test-uncovered-error");
+        assert!(
+            h.iter().any(|m| m.contains("RiderRestrictionGroundUnrecognised")),
+            "removing the flag must surface test-uncovered-error again: {h:?}"
+        );
     }
 }
 

@@ -313,17 +313,28 @@ pub fn rider_identity_resolve(correlation_id: &str) -> Span {
         business.correlation_id = correlation_id,
         business.result = Empty,
         business.failure_reason = Empty,
+        business.standing = Empty,
         otel.status_code = Empty,
     )
 }
 
 /// Record the rider seam's typed outcome — `reason` only for `lookup_failed`, which also sets
-/// OTel ERROR status.
-pub fn record_rider_identity_resolve_result(span: &Span, result: &str, reason: Option<&str>) {
+/// OTel ERROR status; `standing` (#639 part C step 4-i, ADR-20260904-081527 §9) only on
+/// `result=resolved` — an attribute on the wide event, never a label on the histogram, so "why was
+/// THIS rider denied at 19:40" is answerable per request.
+pub fn record_rider_identity_resolve_result(
+    span: &Span,
+    result: &str,
+    reason: Option<&str>,
+    standing: Option<&str>,
+) {
     span.record(attr::RESULT, result);
     if let Some(reason) = reason {
         span.record(attr::FAILURE_REASON, reason);
         span.record("otel.status_code", "ERROR");
+    }
+    if let Some(standing) = standing {
+        span.record("business.standing", standing);
     }
 }
 
@@ -499,6 +510,25 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
     if !stamped {
         span.record("otel.status_code", "ERROR");
     }
+}
+
+/// `rider.standing.denied` (INTERNAL) — the `StandingGuard`'s own carve-out-tested RIDER denial
+/// (`rider-restriction` contract, #639 part C step 4-i round 2 item 6(a)). Round 1 declared this
+/// span in `observability.yaml` but the runtime only ever emitted a bare `tracing::info!` EVENT —
+/// no constructor here, so the declared attributes were never actually populated and
+/// `status_rules.technical_error.any_span_errors` was unreachable by construction (obs-technical-
+/// error-unreachable's own shape). Fixed at the root rather than reworded away: this constructor
+/// is the real thing. No `otel.status_code` field — a denial here is the ORDINARY, expected
+/// outcome of a restriction the platform itself imposed (the same posture as
+/// `auth_scope_membership`, never a technical error), so there is no failure mode for this span to
+/// classify; `rider-restriction`'s `status_rules` drops `technical_error` accordingly.
+pub fn rider_standing_denied(operation: &str, correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "rider.standing.denied",
+        otel.kind = "internal",
+        business.operation = operation,
+        business.correlation_id = correlation_id,
+    )
 }
 
 #[cfg(test)]

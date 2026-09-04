@@ -354,6 +354,24 @@ enum RiderStatus {
   SUSPENDED
 }
 
+enum RiderAvailabilityTarget {
+  OFFLINE
+  AVAILABLE
+  ON_DELIVERY
+}
+
+enum RiderStanding {
+  ACTIVE
+  RESTRICTED
+}
+
+enum RiderRestrictionGround {
+  RIDER_REQUESTED
+  ELIGIBILITY_DOCUMENT_LAPSED
+  IDENTITY_MISMATCH
+  ACCOUNT_COMPROMISE
+}
+
 enum DeliveryProvider {
   PARTNER
   INDEPENDENT
@@ -503,6 +521,7 @@ directive @auth(requires: [UserType!]!) on FIELD_DEFINITION
 directive @public on FIELD_DEFINITION
 directive @command(name: String!) on FIELD_DEFINITION
 directive @reads(views: [String!]!) on FIELD_DEFINITION
+directive @whileRestricted(roles: [UserType!]!) on FIELD_DEFINITION
 
 # ==============================================================================
 # Output types (entities.yaml + FK-derived navigation + projections)
@@ -860,6 +879,18 @@ type DeliveryJob {
   handedBackAt: DateTime
   order: Order!
   restaurant: Restaurant!
+}
+
+type RiderRestrictionInfo {
+  ground: RiderRestrictionGround
+  decidedAt: DateTime!
+  effectiveAt: DateTime!
+}
+
+type RiderStandingInfo {
+  standing: RiderStanding!
+  restriction: RiderRestrictionInfo
+  heldDelivery: DeliveryJob
 }
 
 type DeliveryPartnerAvailability {
@@ -1286,7 +1317,7 @@ input CancelCustomerErasureInput {
 `riderId` is derived from the caller's RIDER identity.
 """
 input ChangeRiderStatusInput {
-  status: RiderStatus!
+  status: RiderAvailabilityTarget!
 }
 
 """
@@ -1349,6 +1380,15 @@ input DeclineDeliveryInput {
 input HandBackDeliveryInput {
   deliveryJobId: DeliveryJobId!
   foodLocation: FoodCustody!
+}
+
+input RestrictRiderInput {
+  riderId: RiderId!
+  ground: RiderRestrictionGround!
+}
+
+input ReinstateRiderInput {
+  riderId: RiderId!
 }
 
 input RegisterDeliveryPartnerAvailabilityInput {
@@ -1943,7 +1983,8 @@ type Query {
   orderConversationInternalNotes(input: OrderConversationInternalNotesQueryInput!): ConversationInternalNotes @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["OrderConversation"])
   me: CustomerProfile @auth(requires: [CUSTOMER]) @reads(views: ["Customer"])
   erasureStatus: CustomerErasure @auth(requires: [CUSTOMER]) @reads(views: ["View_CustomerErasure"])
-  delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"])
+  delivery(input: DeliveryQueryInput!): DeliveryJob @auth(requires: [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN]) @reads(views: ["View_DeliveryJob"]) @whileRestricted(roles: [RIDER])
+  myStanding: RiderStandingInfo! @auth(requires: [RIDER]) @reads(views: ["RiderRestriction", "View_DeliveryJob"]) @whileRestricted(roles: [RIDER])
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
   deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
@@ -2016,10 +2057,12 @@ type Mutation {
   completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")
   cancelDelivery(input: CancelDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "CancelDelivery")
   escalateDelivery(input: EscalateDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "EscalateDelivery")
-  reportDeliveryIssue(input: ReportDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ReportDeliveryIssue")
+  reportDeliveryIssue(input: ReportDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ReportDeliveryIssue") @whileRestricted(roles: [RIDER])
   resolveDeliveryIssue(input: ResolveDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "ResolveDeliveryIssue")
   declineDelivery(input: DeclineDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "DeclineDelivery")
-  handBackDelivery(input: HandBackDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "HandBackDelivery")
+  handBackDelivery(input: HandBackDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "HandBackDelivery") @whileRestricted(roles: [RIDER])
+  restrictRider(input: RestrictRiderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RestrictRider")
+  reinstateRider(input: ReinstateRiderInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ReinstateRider")
   registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
   approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")

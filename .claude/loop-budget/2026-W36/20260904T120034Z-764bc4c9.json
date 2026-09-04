@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3648,
+  "recordedAt": "2026-09-04T12:00:34.409Z",
+  "branch": "639-staff-auth-rider-standing",
+  "note": "round 2 of #639 part C step 4-i (PR #875): nine blocking review findings fixed in place, gates re-run green"
+}

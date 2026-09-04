@@ -636,6 +636,11 @@ rider-identity:
         - { key: "business.result", type: string, required: true }   # resolved | not_found | lookup_failed
         - { key: "business.correlation_id", type: string, required: true }
         - { key: "business.failure_reason", type: string, required: false }
+        # #639 part C step 4-i (ADR-20260904-081527 §9): the standing the seam read, on
+        # result=resolved ONLY — an attribute on the wide event, never a label on the histogram, so
+        # "why was THIS rider denied at 19:40" is answerable per request. NO `business.ground`
+        # anywhere on OTLP (§3) — the ground is attribution for counsel and the notice, never here.
+        - { key: "business.standing", type: string, required: false }
 
   metrics:
     - { name: "rider_identity_resolve_ms", type: histogram, attributes: ["result"] }
@@ -661,6 +666,70 @@ rider-identity:
 
   # One probe on `rider.auth_ref`'s UNIQUE index -- the customer seam's budget, and for the same
   # reason: if it drifts, something started scanning.
+  latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
+  error_budget: { max_error_rate_pct: 0.1 }
+
+# =====================================================================
+# rider-restriction -- #639 part C step 4-i (ADR-20260904-081527 §9): the standing GUARD at the
+# gateway boundary, the first guard-level emitter (today a plain FORBIDDEN emits nothing) -- and the
+# projection lag gauge, because while the Rider projector lags a restricted rider is still GRANTED
+# and "immediately" is a measured claim only with this gauge. An already-open WS subscription NEVER
+# fires the counter -- standing resolves once at connection_init (step 5's problem, documented not
+# fixed).
+# =====================================================================
+rider-restriction:
+  feature: rider-restriction
+  criticality: high
+  workflow:
+    surface: graphql   # StandingGuard runs at the gateway boundary — no single command/saga/aggregate
+    # Round 3 item 4 (graphql, dba, young, reviewer, obs): `Rider.standing` (the `"Rider"`
+    # checkpoint) and `RiderRestriction` (its OWN checkpoint, round 2 item 7) advance
+    # INDEPENDENTLY, so `myStanding` can legitimately answer `standing: RESTRICTED` with
+    # `restriction: null` for the one tick between them — not a bug, a client-visible transient
+    # ("ground pending"), never rendered as an error.
+
+  run_identity:
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  # Round 2 item 6(a) (observability-agent, dba, farley): as landed in round 1 this declared a span
+  # the runtime never constructed — only a bare `tracing::info!` EVENT (`crates/server/src/graphql/
+  # acl.rs`, `StandingGuard::check`), no matching constructor in `crates/telemetry/src/spans.rs` —
+  # so the attributes below were never actually emitted, and `status_rules.technical_error.
+  # any_span_errors` (removed below) was unreachable by construction (the same shape
+  # `obs-technical-error-unreachable` already catches elsewhere in this file). FIXED AT THE ROOT
+  # rather than reworded away (`crates/telemetry/src/spans.rs::rider_standing_denied`): the span is
+  # real now, opened on every carved-out-tested RIDER denial, and `rider_id` rides beside it as a
+  # nested INFO event (the #748 skip-trace pattern — deliberately off the span's own structured
+  # attributes and off the counter, so a rider identity never becomes a metric cardinality axis;
+  # joinable to both by `correlation_id`, visible under the deployed `LOG_LEVEL=info` default).
+  spans:
+    - name: "rider.standing.denied"
+      kind: INTERNAL
+      required: false   # only a carve-out-tested RIDER denial opens it
+      attributes:
+        - { key: "business.operation", type: string, required: true }
+        - { key: "business.correlation_id", type: string, required: true }
+
+  metrics:
+    # `operation` bounded by the closed `api-operation-key` set; NO `rider_id` label (the span
+    # above, and its nested event, carry it — joinable by correlation_id).
+    - { name: "rider_restricted_denied_total", type: counter, attributes: ["operation"] }
+    # The `scope_membership_lag_positions` mirror, for the Rider projector group. Round 2 item 6(b)
+    # (dba, farley): reworded to what `drain_group` actually records — "0 when caught up" was FALSE
+    # as written (`drain_group` returns on a short page and the idle gate never re-records, so an
+    # idle platform exports the pre-drain page length until the log next moves). True shape: the
+    # pending page length at each scan — a lower bound capped at `batch_size` while draining,
+    # RE-RECORDED only when the log moves, and 0 on every empty scan (each tick after the log
+    # moved). This is `drain_group`'s own shared, pre-existing behaviour (mirrored by
+    # `scope_membership_lag_positions` and `read_authorization::lag_positions` too) — not fixed
+    # here (architect-owned issue).
+    - { name: "rider_standing_lag_positions", type: gauge, attributes: [] }
+
+  status_rules:
+    success:
+      required_spans: []   # opened only on a denial
+
   latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
   error_budget: { max_error_rate_pct: 0.1 }
 

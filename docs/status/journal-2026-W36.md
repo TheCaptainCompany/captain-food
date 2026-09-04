@@ -2,6 +2,192 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #639 part C step 4-i, PR #875: rider standing lands (still draft, HOLD: human).**
+> Base `3498fa04` (the empty claim commit) on `origin/main` `d4e02d26` (the commit introducing
+> [ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md)).
+> Executor tier: sonnet (ADR-20260904-013450). `git diff --stat` against `origin/main`: 107 files
+> changed, 4353 insertions(+), 369 deletions(-) (final count, after the walk test and the two
+> observability tests below landed).
+>
+> **Landed**: `RiderStanding`/`RiderRestrictionGround` (+ `readOnlyCatchAll: UNRECOGNISED`, a NEW
+> scalar attribute — [docs/claude/dsl.md](../claude/dsl.md) "readOnlyCatchAll", `#[serde(other)]` +
+> a tolerant `EnumText` + the SDL/mirror-enum exclusion via a plain `_from_domain` fn, not a `From`
+> — `impl From<Foreign> for Option<Foreign>` violates the orphan rule) / `RiderAvailabilityTarget`;
+> `RestrictRider`/`ReinstateRider` (`requires: acting: { ADMIN: any }`, no EXTERNAL); `RiderRestricted`
+> `{ ground, decidedAt, effectiveAt }` / `RiderReinstated`; three new errors; the Rider lifecycle's
+> four `-> SUSPENDED` entry edges retired via a NEW `legacyStates:` lifecycle key (exempts the
+> `SUSPENDED -> OFFLINE` legacy exit from the reachability gate — `validate/lifecycles.rs`); five new
+> rules; `restrictRider`/`reinstateRider` [ADMIN] + `myStanding` [RIDER] (hand-written resolver — the
+> compound `standing`/`restriction`/`heldDelivery` shape has no mechanical fold); the NEW
+> `whileRestricted:` grammar ([docs/claude/dsl.md](../claude/dsl.md) "whileRestricted" — 3 validator
+> rules, `@whileRestricted` SDL directive, `StandingGuard.and()`-chained onto every role-guarded op
+> with an empty carve set by default) carving `{ myStanding, delivery, reportDeliveryIssue,
+> handBackDelivery }` — never `myDeliveries` (the PENDING-pool exposure); `pm-sends-human-only-command`
+> (no saga may send a command whose `requires: acting` has no EXTERNAL key); `Rider.standing` column
+> (a Complex/hand-written fold — the creating arm's own compute hook returns the PRIOR row's value
+> when one exists, never a literal, so a replay-in-place never re-grants) + new table
+> `RiderRestriction`; `ReadScope::Rider` becomes the struct variant `{ id, standing }`
+> (compiler-first — the 7 generated derived-injection sites + ~15 hand-written match sites all moved
+> in the same change, none missed: `cargo build --workspace --tests` is the proof, not a grep).
+> Migration `20260904110000_rider_standing.sql` (metadata-only ALTER + a new table, no checkpoint
+> rewind). NEW `crates/server/tests/rider_standing_walk.rs` (farley's DB-gated walk, section D):
+> the full migration chain applied dynamically (own `apply_all_migrations`, read from
+> `migrations/*.sql` at test runtime — `View_DeliveryJob` is a SQL view over `domain_events`, so
+> only the real chain has it), a registered restaurant through the real router, a rider/order/job
+> birth seeded by raw `domain_events` insert (`specs/tests.yaml`'s `orderPlaced`/`deliveryRequested`
+> fixtures verbatim, re-keyed), then `acceptDelivery` (ACTIVE, admitted) → `restrictRider` (ADMIN) →
+> `acceptDelivery` (RESTRICTED, synchronous FORBIDDEN, never enqueued) + `delivery(orderId)` (stays
+> reachable) + `myStanding` (RESTRICTED + the held job) → `reinstateRider` → `acceptDelivery`
+> (ACTIVE again, PENDING — the guard reopened — terminal `DeliveryAlreadyAssigned`, the business
+> layer's own, unrelated call). Two NEW observability tests (A.9 / D "Observability"):
+> `crates/server/tests/rider_restriction_denied_metric.rs` (`rider_restricted_denied_total{operation}`
+> fires exactly once, on the refused op, carries no `rider_id` label) and
+> `crates/infrastructure/tests/rider_standing_lag_metric.rs` (`rider_standing_lag_positions` reads 0
+> once a real drain has caught up — see the "Left out" note below for the half this could NOT prove).
+> `docs/SPEC-LOG.md` row, `docs/claude/dsl.md` two new sections, this entry, all in the same change.
+>
+> **Gates (VERDICT lines, wall-clock)**: `rm -rf target/debug/incremental` first (disk pressure hit
+> repeatedly across the run, low-single-digit-GB→9G+ after cleanup each time — see the
+> operational-learnings paragraph below) · `cargo build --workspace` — **0 errors, 88s** (final re-run,
+> after the walk/metric tests) · `make validate` — **0 errors** (`grep -cE '\[error\]'` = 0),
+> warning surface unchanged, **2s** · `make rust` (build + test + validate + generate + link-check)
+> — **0 errors, exit 0** (final re-run) · `cargo build --workspace --tests` — **0 errors** (confirms
+> every test binary, not just lib code) · `cargo test --manifest-path tools/codegen-rs/Cargo.toml
+> --bin generate` — **409 passed, 0 failed** (new: `while_restricted_gate` module, 6 tests) ·
+> `cargo clippy -p server -p application -p infrastructure -p domain -p telemetry --all-targets --
+> -D clippy::disallowed-methods -D clippy::mistyped_literal_suffixes` — **exit 0** (warnings present,
+> neither denied lint fired; 7m02s on the final from-clean run after `rm -rf target` cleared a
+> disk-pressure incident, see the operational-learnings paragraph below) · DB-gated (`DATABASE_URL` to a live
+> local Postgres, `DB_TESTS_REQUIRED=1`): `make test-crates` full workspace suite, isolated database
+> (`cf639`, the shared-Postgres collision below) — **1649 passed, 0 failed, as of `72ed93ab`**
+> (round 2 landed 3 more atop this figure, round 3 none — see PR #875's later commits for the
+> current count) (the 4 new tests below
+> included) · `rider_projection.rs` — **7 passed**
+> (5 new: the standing fold, the legacy-SUSPENDED non-restriction, the replay-in-place mutant, the
+> unknown-ground tolerant decode, the pre-migration DEFAULT backfill); `rider_restricted_is_refused_on_the_write_half.rs`
+> (NEW) — **2 passed**; `rider_id_derived_at_the_door.rs` — **5 passed** (1 new: the SUSPENDED
+> unspellable-enum test); `graphql_acl.rs` — **12 passed** (1 new: `the_standing_doors_admit_exactly_admin`);
+> `rider_without_a_row_is_forbidden_on_the_write_half.rs` — **3 passed** (1 assertion line added);
+> `rider_standing_walk.rs` (NEW) — **1 passed, 5.6s**; `rider_restriction_denied_metric.rs` (NEW,
+> own binary — `telemetry::meters` binds the process-wide OTel meter once via `OnceLock`) — **1
+> passed**; `rider_standing_lag_metric.rs` (NEW, own binary, same reason) — **2 passed** (the
+> embedded-migration-manifest check rides along by `#[path]`).
+>
+> **Operational learnings (round 2 item 9 — farley, reviewer, beck: pasted here from the
+> hand-back rather than left as a dangling forward-reference)**: (1) disk exhaustion, twice,
+> from the SAME cause — `df -h /` reports a nominal 252G filesystem, but the actually-usable
+> capacity this session ever observed topped out around 37-38G (`du -sh /*` sums to the same
+> ~28G `df` reports as used, so there is no hidden/leaked space — the filesystem is just much
+> smaller than its `Size` column claims); `target/debug` alone reached 18G mid-session from the
+> cumulative weight of many builds across one long session, and periodic
+> `rm -rf target/debug/incremental` did not keep pace — a full `rm -rf target/` (18G freed
+> instantly) is the reliable fix and should be reached for earlier (~5G avail), not after a
+> command has already died from ENOSPC losing its output. (2) The scratchpad task-output
+> directory shares the SAME filesystem as the repo, so a `run_in_background` command can lose
+> its own stdout to ENOSPC when disk is critical — a confusing failure mode distinct from the
+> command's own logic failing. (3) `ReadScope`-injecting test harnesses
+> (`graphql_write_path.rs`'s `acting()` idiom) mint an `ActingRole` but never a full
+> `crate::auth::Principal` — `operationStatus`'s ownership check
+> (`mailbox_operation_owned`) reads `ctx.data_opt::<Principal>()`, NOT `ActingRole`, so polling
+> `operationStatus` as a non-ADMIN role under this harness spins to its timeout with no
+> diagnostic even though the row is `SUCCEEDED` in the DB the whole time (confirmed via direct
+> `psql`); poll as ADMIN regardless of which role enqueued the operation (ADMIN sees every
+> operation unconditionally, and the guard decision under test already happened at enqueue
+> time). (4) `OfferId`/`ProductId` are real UUID scalars in production, but `specs/tests.yaml`'s
+> canonical fixtures (`orderPlaced`, etc.) use human-readable placeholder strings (`"off-1"`)
+> that decode fine through the TYPED behaviour-test harness but fail a real Postgres
+> JSONB→struct decode (`UUID parsing failed: invalid character: found 'o' at 0`) — substitute
+> real UUIDs for any UUID-scalar field before reusing a `tests.yaml` fixture verbatim in a
+> raw-event-append DB-gated test. Landed in
+> [gates.md](../claude/sessions/gates.md) (item (3) and (4) above) in the same change.
+>
+> **Eight mutants, verbatim reds, all reverted (the codebase is currently GREEN)**:
+> - **M1** (seam maps RESTRICTED like ACTIVE): `auth.rs::resolve_rider_scope`'s `ReadScope::Rider`
+>   construction hardcoded to `RiderStanding::ACTIVE`. `rider_restricted_is_refused_on_the_write_half.rs`
+>   both tests FAILED: `assertion left == right failed: a RESTRICTED rider must be refused by the
+>   standing guard — got: Data 'alloc::sync::Arc<dyn actor_client::mailbox::Mailbox>' does not
+>   exist. left: None right: Some("FORBIDDEN")`.
+> - **M2** (`StandingGuard` allow-all): `check()` short-circuited `return Ok(())`. Same two tests,
+>   identical failure text (the guard chain masks identically from the outside — correct: the two
+>   mutants are behaviourally indistinguishable from the caller's seat, which is the point of
+>   defense-in-depth).
+> - **M3** (`ChangeRiderStatusInput.status` still `RiderStatus`): reverted `commands.yaml`'s
+>   `ChangeRiderStatus.status` `$ref` to `RiderStatus`, regenerated (0 codegen errors — the spec
+>   itself is legal), then `cargo build -p application` — **4 compile errors**:
+>   `error[E0308]: mismatched types` at `commands.rs:1841` (`cmd.status == RiderAvailabilityTarget::AVAILABLE`,
+>   expected `RiderStatus`) and three more on the `match cmd.status { RiderAvailabilityTarget::… }`
+>   arms — `expected RiderStatus, found RiderAvailabilityTarget`. check-drift-shaped: the hand-written
+>   handler and the generated command type disagree the instant the spec reverts.
+> - **M4** (fold keys on `status == SUSPENDED`): added a `RiderStatusChanged(e) if e.status ==
+>   SUSPENDED => RESTRICTED` arm to `RiderCompute::standing`. The DB-gated
+>   `a_legacy_suspended_status_does_not_restrict_and_the_fact_does` test stayed GREEN — a genuine
+>   finding, not a gap: `standing`'s `from:` lineage names only `RiderRestricted`/`RiderReinstated`,
+>   so the GENERATED dispatch never calls the hook on `RiderStatusChanged` at all (the classifier
+>   gates the call on lineage membership) — the mutant is structurally unreachable through the
+>   declared fold, by construction. Verified instead with a direct hook-level probe (temporary,
+>   not committed) calling `RiderProjector.standing` with a `RiderStatusChanged{SUSPENDED}` envelope
+>   directly: `assertion left == right failed: … left: RESTRICTED right: ACTIVE`.
+>   Round 2 item 9 (farley, reviewer, beck): M4 as planted was an EQUIVALENT mutant to "no arm at
+>   all" — since the hook is never called on `RiderStatusChanged` by construction, adding a branch
+>   to it is inert — and `a_legacy_suspended_status_does_not_restrict_and_the_fact_does` (test 5,
+>   `rider_projection.rs`) is the test that actually guards the `standing` column's `from:` lineage
+>   (only `RiderRestricted`/`RiderReinstated`) staying closed to `RiderStatusChanged`, DB-gated
+>   through the real generated dispatch rather than a direct hook call.
+> - **M5** (the creating arm writes standing): `_ => RiderStanding::ACTIVE` unconditionally
+>   (dropping the `prev`-preserving fallback). The DB-gated replay test (`run_once()` drains a
+>   whole stream to exhaustion per call, so a LATER `RiderRestricted` on the same stream self-heals
+>   within the SAME call and masks this exact mutant — a second genuine finding, test rewritten with
+>   `.with_batch_size(1)` and an assertion BETWEEN two separate `run_once()` calls, which ALSO could
+>   not observe it, since `run_once()`'s inner loop drains to exhaustion regardless of batch size)
+>   stayed green; caught instead by a new committed unit test on the Compute hook directly:
+>   `assertion left == right failed: a replayed creation must preserve the prior standing
+>   left: ACTIVE right: RESTRICTED`.
+> - **M6** (`#[serde(other)]` dropped): removed `readOnlyCatchAll: UNRECOGNISED` from
+>   `scalars.yaml#/RiderRestrictionGround`, regenerated (0 codegen errors), `cargo build -p
+>   infrastructure` — **2 compile errors**: `error[E0599]: no variant … named 'UNRECOGNISED' found
+>   for enum 'RiderRestrictionGround'` at both arms of the hand-written `EnumText` impl
+>   (`enum_sql.rs:103`, `:112`) — compile-red, earlier and stronger than the card's anticipated
+>   runtime "unknown variant" message, because the catch-all variant disappears from the TYPE, not
+>   just from decode.
+> - **M7** (a `sends: RestrictRider` planted in a processmanager.yaml): the codegen test
+>   `while_restricted_gate::a_pm_send_of_a_human_only_command_is_refused` plants it on
+>   `RefundProcess`'s first `receives` leg (a scratch model mutation, never the real fenced file) and
+>   asserts `pm-sends-human-only-command` fires: `["processmanager.yaml/RefundProcess.receives[0].sends[0]:
+>   process manager 'RefundProcess' sends 'RestrictRider', whose actors.yaml \`requires: acting\`
+>   carries no EXTERNAL key -- a human-only door (#639 part C step 4-i, ADR-20260904-081527 §6/§8).
+>   No saga may impersonate the human this door requires; route the decision to an admin surface
+>   instead."]`.
+> - **M8** (`restrictRider roles: [RIDER, ADMIN]`): edited `api.yaml`, regenerated (0 codegen
+>   errors), `graphql_acl.rs::the_standing_doors_admit_exactly_admin` FAILED:
+>   `restrictRider must be FORBIDDEN for Rider: ServerError { message: "Data
+>   'alloc::sync::Arc<dyn actor_client::mailbox::Mailbox>' does not exist.", … }` — the guard PASSED
+>   for RIDER (no FORBIDDEN), which is exactly the widened-access defect the test exists to catch.
+>
+> **Left out, with attribution**: 4-ii's SMS notice, 4-iii's admin roster surface (both explicitly
+> NOT this slice per the ADR's §11); `TestRiderStatusChangeTargetCannotSpellSuspended` (named on the
+> dispatch card for `specs/tests.yaml`) — NOT added there: `status: "SUSPENDED"` is not a legal
+> value of `RiderAvailabilityTarget`, so a `tests.yaml` fixture spelling it cannot even validate
+> (the point of the test IS that it is unspellable) — the equivalent coverage instead lives in
+> `rider_id_derived_at_the_door.rs::a_suspended_status_is_unspellable_on_change_rider_status_inline_and_via_variables`
+> (attribution: card defect — the named test cannot exist in the form the card names it, the correct
+> surface is the server-side static-validation test, already written). **The lag gauge's "> 0 while
+> behind" half** (card D "Observability") — a genuine, load-bearing gap, found live writing
+> `rider_standing_lag_metric.rs`: `rider_standing_lag_positions` is an OTel `Gauge` (last-value-wins
+> per collection interval, not a replayable series), and `drain_group`'s loop returns the moment one
+> page comes back SHORT of `batch_size` — WITHOUT one more, empty scan — so the "0 when caught up"
+> contract note is only true when the backlog is an exact multiple of the batch size (this slice's
+> test forces that on purpose, `.with_batch_size(2)` over 2 seeded facts; the module doc comment
+> spells out why). This is `drain_group`'s own, PRE-EXISTING behaviour — shared verbatim by
+> `scope_membership_lag_positions` and `read_authorization::lag_positions`, this slice's mirror, not
+> its origin — so it is flagged for the architect rather than "fixed" here: touching the shared loop
+> would move every OTHER group's lag reading too, well past this card's licensed diff. (Attribution:
+> roster width — no lens at the mob briefing flagged the shared drain loop's early-return shape;
+> catching it took writing the test against the real code, not a design review.)
+>
+> Next: the coordinator's independent-reviewer pass (`HOLD: human` — this posture is NOT the
+> founder; the TEAM reviews before merge, ADR-20260815-134655), then 4-ii (the restricted rider is
+> told) before any production `RestrictRider`, per the ADR's own deploy-order clause.
+
 > **2026-09-04 — Step 4 (rider restriction) decided by the team: standing is a GRANT on the identity
 > row, the doors are human-only, three slices in one train.**
 > [ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md),

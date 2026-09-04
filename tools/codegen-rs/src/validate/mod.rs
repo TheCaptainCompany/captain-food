@@ -4,6 +4,7 @@
 pub(crate) mod answers; // §2g actor `answers:` blocks (PROP-20260815-142349, #582)
 pub(crate) mod api_derived; // §28 mutation `derived:` properties -- server-injected, never client input (#865)
 pub(crate) mod api_operation_keys; // §27 api operation keys are a closed set per section (#639 part C 3-i, step 4's seam)
+pub(crate) mod api_while_restricted; // §29 whileRestricted: is the standing carve-out grammar (#639 part C step 4-i, ADR-20260904-081527 §4)
 pub(crate) mod bins; // §15 bin topology ↔ c4-l2 containers (#382)
 pub(crate) mod business_metrics; // §19 business-metric catalog (ADR-20260811-014129, #484)
 pub(crate) mod citations; // §23 record-citation ratchet (docs/** + CLAUDE.md, #658 slice 1)
@@ -13,6 +14,7 @@ pub(crate) mod decisions; // §22 decision-register rows (docs/decisions/*.yaml,
 pub(crate) mod lifecycles; // §2c aggregate lifecycles (parse + validate)
 pub(crate) mod mailbox; // §2d actor-mailbox addressing + §2e declared state/requires
 pub(crate) mod metric_emitters; // §20 declared-but-silent metrics (observability.yaml vs crates/**, #608)
+pub(crate) mod pm_human_only; // pm-sends-human-only-command (#639 part C step 4-i, ADR-20260904-081527 §6/§8)
 pub(crate) mod process_managers; // §2b typed-step process managers
 pub(crate) mod proposals; // §13 docs/proposals hygiene
 pub(crate) mod read_targets; // §5c-bis read-target ownership (reads/readsInfrastructure, ADR-20260812-214500)
@@ -33,6 +35,7 @@ pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warni
 pub(crate) use answers::*;
 pub(crate) use api_derived::*;
 pub(crate) use api_operation_keys::*;
+pub(crate) use api_while_restricted::*;
 pub(crate) use bins::*;
 pub(crate) use business_metrics::*;
 pub(crate) use citations::*;
@@ -42,6 +45,7 @@ pub(crate) use decisions::*;
 pub(crate) use lifecycles::*;
 pub(crate) use mailbox::*;
 pub(crate) use metric_emitters::*;
+pub(crate) use pm_human_only::*;
 pub(crate) use process_managers::*;
 pub(crate) use proposals::*;
 pub(crate) use read_targets::*;

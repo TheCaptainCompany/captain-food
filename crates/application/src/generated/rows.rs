@@ -86,6 +86,20 @@ pub struct RiderRow {
     pub display_name: String,
     pub phone: PhoneNumber,
     pub status: RiderStatus,
+    pub standing: RiderStanding,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The attribution behind `Rider.standing` (#639 part C step 4-i, ADR-20260904-081527 §2): ground, decidedAt, effectiveAt, reinstatedAt -- the source of `myStanding` (§4) and of 4-iii's admin surface. Kept OFF the identity row on purpose: `Rider` carries the grant and nothing the notice needs, `auth_ref` and `phone` never migrate here. NOT `internal` -- unlike `Rider`, this table IS a legitimate GraphQL `reads` target (myStanding), never the request seam's own identity lookup. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiderRestrictionRow {
+    pub rider_id: RiderId,
+    pub standing: RiderStanding,
+    pub ground: Option<RiderRestrictionGround>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub effective_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub reinstated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

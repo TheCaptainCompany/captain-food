@@ -81,9 +81,10 @@ use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
     AcceptDelivery, AddCartLine, BindCartToCustomer, CancelDelivery,
     ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
-    HandBackDelivery, PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction,
-    RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder,
-    UnassignDeliveryFromPartner, UpdateRiderInfo,
+    ChangeRiderStatus, HandBackDelivery, PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant,
+    RecordDeliverySatisfaction, ReinstateRider, RegisterRider, RemoveCartLine, ReportDeliveryIssue,
+    RequestRefund, ResolveDeliveryIssue, RestrictRider, TipOrder, UnassignDeliveryFromPartner,
+    UpdateRiderInfo,
 };
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
@@ -94,10 +95,12 @@ use domain::generated::events::{
     DeliveryPickedUp, DeliverySatisfactionRecorded,
     DeliveryUnassignedFromPartner, OrderPlaced, OrderRated, OrderTipped, PaymentIntentCreated,
     RefundRequested, RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
+    RiderReinstated, RiderRestricted, RiderStatusChanged,
 };
 use domain::generated::scalars::{
     CartId, CartStatus, CatalogItemAvailability, DeliveryJobId, DeliveryStatus, Mode,
     OrderAcceptanceMode, OrderId, OrderStatus, OptionId, PaymentProcessStatus, PaymentStatus,
+    RiderAvailabilityTarget, RiderRestrictionGround,
     RiderId, RiderStatus, ServiceType, ServiceWindowVerdict, TipRecipient, Tipper,
 };
 use domain::order::OrderState;
@@ -159,7 +162,7 @@ use crate::repository::Repository;
 // unchanged; their seams (require_*/invalid_*/…_stream/canonical_predecessor) stay below as
 // pub(crate) hand-written policy.
 pub use crate::generated::handlers::{
-    accept_order, cancel_order_by_customer, cancel_order_by_restaurant, change_rider_status,
+    accept_order, cancel_order_by_customer, cancel_order_by_restaurant,
     mark_order_delivered, mark_order_ready, reject_order, start_preparation,
     update_delivery_status,
 };
@@ -1819,6 +1822,129 @@ pub async fn update_rider_info(
         phone: cmd.phone,
     });
     Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ChangeRiderStatus` → emit `events.yaml#/RiderStatusChanged` (#639 part C
+/// step 4-i, ADR-20260904-081527 §6). Hand-written rather than the mechanical require+guard+append
+/// generator: the command's `status` is `RiderAvailabilityTarget` (OFFLINE/AVAILABLE/ON_DELIVERY —
+/// SUSPENDED unspellable at this door) while the event/lifecycle stay on `RiderStatus`, so the
+/// generator cannot build the event by same-named-field copy; and a restricted rider's move to
+/// AVAILABLE is refused `RiderAccessRestricted` (rules.yaml#/RiderAvailabilityNeverSpellsRestriction)
+/// BEFORE the lifecycle table is even consulted — the aggregate's own belt, one aggregate, no
+/// cross-aggregate read.
+pub async fn change_rider_status(
+    store: &dyn EventStore,
+    cmd: ChangeRiderStatus,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_rider(store, &cmd.rider_id).await?;
+    if cmd.status == RiderAvailabilityTarget::AVAILABLE && state.restriction.is_some() {
+        return Err(reject("RiderAccessRestricted", json!({ "riderId": cmd.rider_id })));
+    }
+    let target = match cmd.status {
+        RiderAvailabilityTarget::OFFLINE => RiderStatus::OFFLINE,
+        RiderAvailabilityTarget::AVAILABLE => RiderStatus::AVAILABLE,
+        RiderAvailabilityTarget::ON_DELIVERY => RiderStatus::ON_DELIVERY,
+    };
+    let event = DomainEvent::RiderStatusChanged(RiderStatusChanged { rider_id: cmd.rider_id, status: target });
+    if domain::rider::lifecycle::transition(state.status, &event).is_none() {
+        return Err(reject(
+            "InvalidRiderStatusTransition",
+            json!({ "riderId": cmd.rider_id, "currentStatus": state.status, "targetStatus": target }),
+        ));
+    }
+    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RestrictRider` → emit `events.yaml#/RiderRestricted` (#639 part C step
+/// 4-i, ADR-20260904-081527 §1-3, §5-6, ADR-20260904-014136). The `requires: acting: { ADMIN: any
+/// }` grammar (actors.yaml) needs no per-instance state comparison to enforce — `any` — so there is
+/// nothing beyond the GraphQL door's `roles: [ADMIN]` and the `pm-sends-human-only-command`
+/// validator gate to assert here (the `requires_post_message` pattern's ADMIN arm: `Ok(())`, no
+/// state comparison). `decidedAt`/`effectiveAt` are BOTH stamped from `now` — never in the past,
+/// never admin-typed (a backdating vector inside the Art. 11 log). Rejects when already restricted
+/// (`RiderRestrictionLifecycle`) and, as a belt, an `UNRECOGNISED` ground is REJECTED
+/// (`RiderRestrictionGroundUnrecognised`) rather than stored -- unspellable at the GraphQL door
+/// already (the wire type is the closed four), this is the handler's OWN belt against a caller that
+/// bypasses the door entirely (round 2 item 5).
+pub async fn restrict_rider(
+    store: &dyn EventStore,
+    cmd: RestrictRider,
+    actor: &Actor,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), DomainError> {
+    // Round-2 item 5 handler belt: `UNRECOGNISED` is unspellable at the GraphQL door already
+    // (RiderRestrictionGround excludes it on write), but this is the LAST line of defense against
+    // a caller that bypasses the door entirely -- no `tests.yaml` fixture can spell it, pinned by
+    // a Rust unit test constructing the raw command from JSON instead.
+    if cmd.ground == RiderRestrictionGround::UNRECOGNISED {
+        return Err(reject("RiderRestrictionGroundUnrecognised", json!({ "riderId": cmd.rider_id })));
+    }
+    let (state, version) = require_rider(store, &cmd.rider_id).await?;
+    if state.restriction.is_some() {
+        return Err(reject("RiderAlreadyRestricted", json!({ "riderId": cmd.rider_id })));
+    }
+    let now_text = rfc3339_z(now);
+    let event = DomainEvent::RiderRestricted(RiderRestricted {
+        rider_id: cmd.rider_id,
+        ground: cmd.ground,
+        decided_at: now_text.clone(),
+        effective_at: now_text,
+    });
+    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ReinstateRider` → emit `events.yaml#/RiderReinstated` (#639 part C step
+/// 4-i, ADR-20260904-081527 §1/§6). A new fact, never a row edit — rollback of a wrong restriction
+/// is a fresh ReinstateRider, never mutating the RiderRestricted row.
+pub async fn reinstate_rider(store: &dyn EventStore, cmd: ReinstateRider, actor: &Actor) -> Result<(), DomainError> {
+    let (state, version) = require_rider(store, &cmd.rider_id).await?;
+    if state.restriction.is_none() {
+        return Err(reject("RiderNotRestricted", json!({ "riderId": cmd.rider_id })));
+    }
+    let event = DomainEvent::RiderReinstated(RiderReinstated { rider_id: cmd.rider_id });
+    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Tests — restrict_rider's own handler belt (#639 part C step 4-i round 2, item 5). `UNRECOGNISED`
+// is unspellable at the GraphQL door already (RiderRestrictionGround excludes it from `enum:`), so
+// no `tests.yaml` fixture can ever construct it (`test-invalid-enum-value` rejects the literal
+// before a `thrown:` could even be asserted, errors.yaml#/RiderRestrictionGroundUnrecognised's
+// `noTestFixturePossible: true`). The ONLY way to reach it in Rust is to deserialize a raw JSON
+// payload naming an unknown ground string — a caller bypassing the GraphQL door entirely — which
+// is exactly what this test does, never a typed literal construction of the variant.
+// ================================================================================================
+#[cfg(test)]
+mod restrict_rider_unrecognised_ground_tests {
+    use super::{restrict_rider, rejection_code};
+    use crate::behaviour_support::actor;
+    use crate::process_managers::test_support::MemStore;
+    use domain::generated::commands::RestrictRider;
+    use domain::generated::scalars::{RiderId, RiderRestrictionGround};
+
+    /// A raw-JSON command whose `ground` is a string the closed enum does not declare decodes to
+    /// the `#[serde(other)]` catch-all (`UNRECOGNISED`) rather than failing to parse — and the
+    /// handler's OWN belt rejects it before ever touching the store (`require_rider` runs AFTER
+    /// this check, so no seeded row is needed).
+    #[tokio::test]
+    async fn an_unrecognised_ground_is_rejected_before_the_store_is_touched() {
+        let rider_id = uuid::Uuid::from_u128(0xD1);
+        let raw = serde_json::json!({ "riderId": rider_id, "ground": "SOME_FUTURE_GROUND_THIS_BUILD_DOES_NOT_KNOW" });
+        let cmd: RestrictRider = serde_json::from_value(raw).expect("raw JSON decodes (the catch-all tolerates it)");
+        assert_eq!(cmd.ground, RiderRestrictionGround::UNRECOGNISED, "the catch-all absorbed the unknown string");
+
+        let store = MemStore::default(); // never queried -- the belt fires first.
+        let err = restrict_rider(&store, cmd, &actor(), chrono::Utc::now()).await.unwrap_err();
+        assert_eq!(rejection_code(&err), Some("RiderRestrictionGroundUnrecognised"));
+
+        // Round 3 item 7 (beck): the rejection carries the SAME `riderId` context every other
+        // `reject()` call in this file builds (never a tautological code-vs-itself comparison).
+        let domain::shared::errors::DomainError::Rejected { context, .. } = &err else {
+            panic!("restrict_rider must build a typed Rejected error, got: {err:?}");
+        };
+        assert_eq!(context, &serde_json::json!({ "riderId": RiderId(rider_id) }));
+    }
 }
 
 // ================================================================================================

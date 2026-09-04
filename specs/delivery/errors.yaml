@@ -143,6 +143,49 @@ RiderSignInRequiresSession:
     fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez."
 
 
+RiderAlreadyRestricted:
+  description: "The rider is already restricted (#639 part C step 4-i) — restrict only an unrestricted rider; a second ground needs a reinstatement first (the Art. 11 log is never overwritten)."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "This rider is already restricted."
+    fr: "Ce livreur est déjà restreint."
+
+
+RiderNotRestricted:
+  description: "The rider is not currently restricted (#639 part C step 4-i) — reinstate only a restricted rider."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "This rider is not restricted."
+    fr: "Ce livreur n'est pas restreint."
+
+
+RiderAccessRestricted:
+  description: "The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "Your access is restricted, so you cannot go available for deliveries."
+    fr: "Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons."
+
+
+RiderRestrictionGroundUnrecognised:
+  description: "restrictRider's `ground` decoded as the read-only catch-all (#639 part C step 4-i round 2, item 5 -- ADR-20260904-081527 §3) — unspellable at the GraphQL door already (RiderRestrictionGround excludes UNRECOGNISED on write, ADR-20260803-234035), so this is the HANDLER's own belt against a caller that bypasses the door entirely (a hypothetical future direct command-bus caller, never a real GraphQL client). No `tests.yaml` fixture can spell it — the same unspellable shape as ChangeRiderStatus/SUSPENDED — so this is pinned by a Rust unit test constructing the raw command from JSON, not a behaviour-test case."
+  # A readOnlyCatchAll value is excluded from the scalar's `enum:` list by construction
+  # (docs/claude/dsl.md "readOnlyCatchAll"), so a tests.yaml fixture spelling `ground:
+  # "UNRECOGNISED"` fails `test-invalid-enum-value` before it could ever reach a `thrown:`
+  # assertion — this error is structurally unspellable in any tests.yaml case, never a coverage
+  # oversight. Exempts it from `test-uncovered-error`; pinned instead by
+  # `crates/application/src/commands.rs::restrict_rider_unrecognised_ground_tests`.
+  noTestFixturePossible: true
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "That restriction ground is not recognised."
+    fr: "Ce motif de restriction n'est pas reconnu."
+
+
 AuthSubjectHoldsAnotherRole:
   description: >
     The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a

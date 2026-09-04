@@ -1033,3 +1033,22 @@ is itself the argument: **a list that grows has no business stating its own leng
   it, or the next PR's merge ref inherits the red. Cost on 2026-09-04: one CI `build-test` red on
   #864 attributed to the branch until the reviewer read the log.
 
+
+## 19e. What round 2 of #639 part C step 4-i taught the test bed (2026-09-04)
+
+- **A `ReadScope`-injecting DB-gated test harness (`graphql_write_path.rs`'s `acting()` idiom) mints
+  an `ActingRole` but never a full `crate::auth::Principal`.** `operationStatus`'s ownership check
+  (`mailbox_operation_owned`) reads `ctx.data_opt::<Principal>()`, not `ActingRole` — polling
+  `operationStatus` as a non-ADMIN role under this harness is invisible to that check and the poll
+  loop spins to its own timeout with no diagnostic, even though the row reads `SUCCEEDED` in the
+  database the whole time (confirmed live via direct `psql`). Poll as ADMIN regardless of which
+  role enqueued the operation — ADMIN sees every operation unconditionally, and the guard decision
+  under test already happened at enqueue time, so nothing is lost by polling under a different role
+  than the one that acted.
+- **`OfferId`/`ProductId` are real UUID scalars in production, but `specs/tests.yaml`'s canonical
+  fixtures (`orderPlaced`, `deliveryRequested`, …) spell human-readable placeholder strings
+  (`"off-1"`, `"prod-1"`) that decode fine through the TYPED behaviour-test harness and fail a real
+  Postgres JSONB→struct decode with an opaque `UUID parsing failed: invalid character: found 'o' at
+  0`. Before reusing a `tests.yaml` fixture verbatim inside a raw `domain_events` INSERT for a
+  DB-gated test, substitute a real UUID for every UUID-scalar field the fixture spells as a
+  placeholder.

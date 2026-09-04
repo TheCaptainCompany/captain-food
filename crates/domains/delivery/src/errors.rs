@@ -99,6 +99,38 @@ pub const RIDER_SIGN_IN_REQUIRES_SESSION: ErrorDef = ErrorDef {
     message_fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez.",
 };
 
+/// The rider is already restricted (#639 part C step 4-i) — restrict only an unrestricted rider; a second ground needs a reinstatement first (the Art. 11 log is never overwritten).
+/// Context: `riderId`.
+pub const RIDER_ALREADY_RESTRICTED: ErrorDef = ErrorDef {
+    code: "RiderAlreadyRestricted",
+    message_en: "This rider is already restricted.",
+    message_fr: "Ce livreur est déjà restreint.",
+};
+
+/// The rider is not currently restricted (#639 part C step 4-i) — reinstate only a restricted rider.
+/// Context: `riderId`.
+pub const RIDER_NOT_RESTRICTED: ErrorDef = ErrorDef {
+    code: "RiderNotRestricted",
+    message_en: "This rider is not restricted.",
+    message_fr: "Ce livreur n'est pas restreint.",
+};
+
+/// The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus.
+/// Context: `riderId`.
+pub const RIDER_ACCESS_RESTRICTED: ErrorDef = ErrorDef {
+    code: "RiderAccessRestricted",
+    message_en: "Your access is restricted, so you cannot go available for deliveries.",
+    message_fr: "Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons.",
+};
+
+/// restrictRider's `ground` decoded as the read-only catch-all (#639 part C step 4-i round 2, item 5 -- ADR-20260904-081527 §3) — unspellable at the GraphQL door already (RiderRestrictionGround excludes UNRECOGNISED on write, ADR-20260803-234035), so this is the HANDLER's own belt against a caller that bypasses the door entirely (a hypothetical future direct command-bus caller, never a real GraphQL client). No `tests.yaml` fixture can spell it — the same unspellable shape as ChangeRiderStatus/SUSPENDED — so this is pinned by a Rust unit test constructing the raw command from JSON, not a behaviour-test case.
+/// Context: `riderId`.
+pub const RIDER_RESTRICTION_GROUND_UNRECOGNISED: ErrorDef = ErrorDef {
+    code: "RiderRestrictionGroundUnrecognised",
+    message_en: "That restriction ground is not recognised.",
+    message_fr: "Ce motif de restriction n'est pas reconnu.",
+};
+
 /// The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
 /// Context: `authRef`.
 pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {

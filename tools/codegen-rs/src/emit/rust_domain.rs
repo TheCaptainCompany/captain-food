@@ -42,6 +42,17 @@ pub(crate) fn push_scalar(out: &mut String, name: &str, node: &Value) {
                 out.push_str(&format!("    {},\n", vs));
             }
         }
+        // `readOnlyCatchAll: <VARIANT>` (#639 part C step 4-i, ADR-20260904-081527 §3;
+        // docs/claude/dsl.md "readOnlyCatchAll"): a READ-ONLY decode-tolerant variant — an unknown
+        // stored value decodes to it (`#[serde(other)]`) instead of failing the whole load; the
+        // SDL enum (`api.rs#enums_block`, which walks only `enum:`) and every write door EXCLUDE
+        // it, because it is never a value a command may spell.
+        if let Some(catch_all) = node.get("readOnlyCatchAll").and_then(|c| c.as_str()) {
+            out.push_str(&format!(
+                "    /// Read-only catch-all: an unrecognised stored value tolerates decode instead of\n    /// failing the whole load. Unspellable at any write door.\n    #[serde(other)]\n    {},\n",
+                catch_all
+            ));
+        }
         out.push_str("}\n");
         return;
     }
@@ -1276,7 +1287,6 @@ pub(crate) const LIFECYCLE_GENERATED_HANDLERS: &[(&str, &str)] = &[
     ("Order", "RejectOrder"),
     ("Order", "CancelOrderByCustomer"),
     ("Order", "CancelOrderByRestaurant"),
-    ("Rider", "ChangeRiderStatus"),
     ("DeliveryJob", "UpdateDeliveryStatus"),
 ];
 

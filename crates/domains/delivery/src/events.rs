@@ -218,3 +218,20 @@ pub struct RiderStatusChanged {
     pub rider_id: RiderId,
     pub status: RiderStatus,
 }
+
+/// An admin restricted a rider's access, citing one of the closed grounds (ADR-20260904-014136, ADR-20260904-081527 §1-3, §5). Business payload only — the deciding admin is envelope metadata (`domain_events.user_id`). `decidedAt` and `effectiveAt` are both server-set and equal in V0 (the future-effectiveAt form is designed, not shipped, §5); both are kept on the payload as the legal shape either way. The read-side fold keys on THIS FACT, never on `ground`'s value or on RiderStatus — a legacy `RiderStatusChanged { SUSPENDED }` alone never restricts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderRestricted {
+    pub rider_id: RiderId,
+    pub ground: RiderRestrictionGround,
+    pub decided_at: String,
+    pub effective_at: String,
+}
+
+/// A previously restricted rider was reinstated by an admin (#639 part C step 4-i, ADR-20260904-081527 §1/§6) — a new fact, never a row edit. Business payload only; the deciding admin is envelope metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderReinstated {
+    pub rider_id: RiderId,
+}

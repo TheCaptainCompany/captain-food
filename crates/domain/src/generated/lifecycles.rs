@@ -110,10 +110,6 @@ pub mod rider {
             (RiderStatus::AVAILABLE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::OFFLINE => Some(RiderStatus::OFFLINE),
             (RiderStatus::SUSPENDED, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::OFFLINE => Some(RiderStatus::OFFLINE),
             (RiderStatus::AVAILABLE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::ON_DELIVERY => Some(RiderStatus::ON_DELIVERY),
-            (RiderStatus::OFFLINE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
-            (RiderStatus::AVAILABLE, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
-            (RiderStatus::ON_DELIVERY, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
-            (RiderStatus::SUSPENDED, DomainEvent::RiderStatusChanged(e)) if e.status == RiderStatus::SUSPENDED => Some(RiderStatus::SUSPENDED),
             _ => None,
         }
     }

@@ -715,6 +715,19 @@ fixtures:
   riderStatusChanged:
     type: { $ref: 'events.yaml#/RiderStatusChanged' }
     data: { riderId: "rider-1", status: "AVAILABLE" }
+  # #639 part C step 4-i (ADR-20260904-081527 §5): decidedAt/effectiveAt are both server-stamped
+  # from `now` (RestrictionTakesEffectWhenDecided — V0 stamps effectiveAt == decidedAt). Round 2
+  # item 9 (farley, reviewer, beck): this comment previously said both dates were OMITTED from
+  # `data:` (the DeliveryPickedUp.at precedent) — wrong as written, both ARE in the fixture below:
+  # `TestRiderRestricted` passes an explicit `at:` to the `when:` block (see that test), so the
+  # handler's `now` matches the literal timestamps this fixture asserts, rather than the fixture
+  # comparing against whatever the clock happens to read.
+  riderRestricted:
+    type: { $ref: 'events.yaml#/RiderRestricted' }
+    data: { riderId: "rider-1", ground: "IDENTITY_MISMATCH", decidedAt: "2026-01-06T12:00:00Z", effectiveAt: "2026-01-06T12:00:00Z" }
+  riderReinstated:
+    type: { $ref: 'events.yaml#/RiderReinstated' }
+    data: { riderId: "rider-1" }
 
   # --- Order conversations (#129) ---
   conversationOpened:
@@ -4077,6 +4090,86 @@ tests:
       data: { riderId: "rider-1", status: "ON_DELIVERY" }
     thrown:
       - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }
+
+  # --- Rider standing: the human-only doors (#639 part C step 4-i, ADR-20260904-081527) -----------
+  TestRiderRestricted:
+    name: "An admin restricts a rider, citing a closed ground"
+    rules:
+      - { $ref: 'rules.yaml#/RiderRestrictionLifecycle' }
+      - { $ref: 'rules.yaml#/RestrictionTakesEffectWhenDecided' }
+      - { $ref: 'rules.yaml#/RiderStandingIsAGrant' }
+      - { $ref: 'rules.yaml#/RestrictRiderIsAHumanAct' }
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/RestrictRider' }
+      data: { riderId: "rider-1", ground: "IDENTITY_MISMATCH" }
+      at: "2026-01-06T12:00:00Z"
+    then:
+      - { $ref: '#/fixtures/riderRestricted' }
+
+  TestRiderReinstated:
+    name: "An admin reinstates a previously restricted rider"
+    rules: [{ $ref: 'rules.yaml#/RiderRestrictionLifecycle' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+      - { $ref: '#/fixtures/riderRestricted' }
+    when:
+      type: { $ref: 'commands.yaml#/ReinstateRider' }
+      data: { riderId: "rider-1" }
+    then:
+      - { $ref: '#/fixtures/riderReinstated' }
+
+  TestRestrictAlreadyRestrictedRiderIsRejected:
+    name: "Restricting an already-restricted rider is rejected — a second ground needs a reinstatement first"
+    rules: [{ $ref: 'rules.yaml#/RiderRestrictionLifecycle' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+      - { $ref: '#/fixtures/riderRestricted' }
+    when:
+      type: { $ref: 'commands.yaml#/RestrictRider' }
+      data: { riderId: "rider-1", ground: "ACCOUNT_COMPROMISE" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderAlreadyRestricted' }
+
+  TestReinstateUnrestrictedRiderIsRejected:
+    name: "Reinstating an unrestricted rider is rejected"
+    rules: [{ $ref: 'rules.yaml#/RiderRestrictionLifecycle' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+    when:
+      type: { $ref: 'commands.yaml#/ReinstateRider' }
+      data: { riderId: "rider-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderNotRestricted' }
+
+  TestRestrictUnknownRiderIsRejected:
+    name: "Restricting an unknown rider is rejected"
+    rules: [{ $ref: 'rules.yaml#/RiderRestrictionLifecycle' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RestrictRider' }
+      data: { riderId: "rider-404", ground: "IDENTITY_MISMATCH" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderNotFound' }
+
+  TestRestrictedRiderCannotGoAvailable:
+    name: "A restricted rider's ChangeRiderStatus to AVAILABLE is rejected (the aggregate's own belt)"
+    rules: [{ $ref: 'rules.yaml#/RiderAvailabilityNeverSpellsRestriction' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given:
+      - { $ref: '#/fixtures/riderRegistered' }
+      - { $ref: '#/fixtures/riderRestricted' }
+    when:
+      type: { $ref: 'commands.yaml#/ChangeRiderStatus' }
+      data: { riderId: "rider-1", status: "AVAILABLE" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderAccessRestricted' }
 
   # ----------------------- PlaceOrderProcess (error guards) ----------
   TestPaymentAuthorizationOrphanIsFlagged:

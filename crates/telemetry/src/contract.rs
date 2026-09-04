@@ -325,6 +325,15 @@ pub mod metric {
     /// reason as the customer twin, so an in-request reuse can never hide an outage; only `db`
     /// fires today.
     pub const RIDER_IDENTITY_LOOKUP_SOURCE_TOTAL: &str = "rider_identity_lookup_source_total";
+    /// `rider-restriction` contract (#639 part C step 4-i, ADR-20260904-081527 §9): the first
+    /// guard-level emitter — a plain FORBIDDEN emits nothing today. Attribute `operation`, bounded
+    /// by the closed `api-operation-key` set; deliberately NO `rider_id` label — the rider goes in
+    /// the paired INFO trace event, joinable by `correlation_id` (the #748 skip-trace pattern).
+    pub const RIDER_RESTRICTED_DENIED_TOTAL: &str = "rider_restricted_denied_total";
+    /// `rider-restriction` contract: the `scope_membership_lag_positions` mirror for the Rider
+    /// projector group — while it lags, a restricted rider is still GRANTED, so "immediately" is a
+    /// measured claim only with this gauge.
+    pub const RIDER_STANDING_LAG_POSITIONS: &str = "rider_standing_lag_positions";
     /// `rider-identity` contract (#639 part C step 2c-i): the RIDER claim stamp
     /// (`identity.stamp_rider_claim`) failed -- a DEFECT counter, attribute `reason`
     /// (not_configured | claim_conflict | provider_error). The `customer_claim_stamp_failed_total`

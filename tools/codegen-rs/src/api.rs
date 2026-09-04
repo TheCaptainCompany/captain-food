@@ -62,6 +62,10 @@ pub(crate) struct ApiQuery {
     pub(crate) slice: String,
     /// `argsExactlyOneOf:` — `None` for the (vast) majority of queries.
     pub(crate) exactly_one_of: Option<ExactlyOneOf>,
+    /// `whileRestricted: [ROLE]` (#639 part C step 4-i, ADR-20260904-081527 §4): the carve-out —
+    /// a SUBSET of `roles:` admitted even while the caller's standing is RESTRICTED. Empty when
+    /// the key is absent (fail-closed by absence lives in the emitter, never the author's memory).
+    pub(crate) while_restricted: Vec<String>,
 }
 pub(crate) struct ApiMutation {
     pub(crate) name: String,
@@ -74,6 +78,9 @@ pub(crate) struct ApiMutation {
     /// properties the resolver INJECTS from the caller's `ReadScope` at the seam — never a
     /// client-suppliable input. `(property name, source)` pairs, declaration order.
     pub(crate) derived: Vec<(String, String)>,
+    /// `whileRestricted: [ROLE]` (#639 part C step 4-i, ADR-20260904-081527 §4) — see
+    /// `ApiQuery::while_restricted`.
+    pub(crate) while_restricted: Vec<String>,
 }
 pub(crate) struct Api {
     pub(crate) types: Vec<ApiType>,
@@ -85,7 +92,7 @@ pub(crate) struct Api {
     pub(crate) inputs: Vec<(String, Vec<ApiField>)>,
 }
 
-pub(crate) const DIRECTIVES: &str = "directive @auth(requires: [UserType!]!) on FIELD_DEFINITION\ndirective @public on FIELD_DEFINITION\ndirective @command(name: String!) on FIELD_DEFINITION\ndirective @reads(views: [String!]!) on FIELD_DEFINITION";
+pub(crate) const DIRECTIVES: &str = "directive @auth(requires: [UserType!]!) on FIELD_DEFINITION\ndirective @public on FIELD_DEFINITION\ndirective @command(name: String!) on FIELD_DEFINITION\ndirective @reads(views: [String!]!) on FIELD_DEFINITION\ndirective @whileRestricted(roles: [UserType!]!) on FIELD_DEFINITION";
 
 pub(crate) fn pascal(s: &str) -> String {
     let mut c = s.chars();
@@ -228,6 +235,7 @@ pub(crate) fn parse_api(model: &Model) -> Api {
                 args: name_list(d.get("of")),
                 throws: d.get("throws").map(ref_or_name).unwrap_or_default(),
             }),
+            while_restricted: string_list(q.get("whileRestricted")),
         }
     };
     let mut queries = Vec::new();
@@ -258,6 +266,7 @@ pub(crate) fn parse_api(model: &Model) -> Api {
                     slice: mu.get("slice").and_then(|x| x.as_str()).unwrap_or("V0").to_string(),
                     payload: field_map(mu.get("payload")),
                     derived: derived_map(mu.get("derived")),
+                    while_restricted: string_list(mu.get("whileRestricted")),
                 });
             }
         }
@@ -644,6 +653,17 @@ pub(crate) fn auth_directive(roles: &[String]) -> String {
     }
 }
 
+/// `@whileRestricted(roles: [ROLE])` (#639 part C step 4-i, ADR-20260904-081527 §4): the standing
+/// carve-out, siblings `@auth`. Omitted when the key is absent — fail-closed by absence lives here,
+/// never in the author's memory.
+pub(crate) fn while_restricted_directive(roles: &[String]) -> String {
+    if roles.is_empty() {
+        String::new()
+    } else {
+        format!(" @whileRestricted(roles: [{}])", roles.join(", "))
+    }
+}
+
 pub(crate) fn query_block(api: &Api) -> String {
     let fields: Vec<String> = api
         .queries
@@ -661,7 +681,15 @@ pub(crate) fn query_block(api: &Api) -> String {
             } else {
                 format!(" @reads(views: [{}])", q.reads.iter().map(|v| format!("\"{}\"", v)).collect::<Vec<_>>().join(", "))
             };
-            format!("  {}{}: {} {}{}", q.name, arg_str, ret, auth_directive(&q.roles), reads)
+            format!(
+                "  {}{}: {} {}{}{}",
+                q.name,
+                arg_str,
+                ret,
+                auth_directive(&q.roles),
+                reads,
+                while_restricted_directive(&q.while_restricted)
+            )
         })
         .collect();
     format!("type Query {{\n{}\n}}", fields.join("\n"))
@@ -675,8 +703,12 @@ pub(crate) fn mutation_block(api: &Api) -> String {
         .iter()
         .map(|m| {
             format!(
-                "  {}(input: {}Input!, metadata: MetadataInput): MutationAcceptance! {} @command(name: \"{}\")",
-                m.name, m.command, auth_directive(&m.roles), m.command
+                "  {}(input: {}Input!, metadata: MetadataInput): MutationAcceptance! {} @command(name: \"{}\"){}",
+                m.name,
+                m.command,
+                auth_directive(&m.roles),
+                m.command,
+                while_restricted_directive(&m.while_restricted)
             )
         })
         .collect();

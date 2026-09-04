@@ -8,8 +8,8 @@
 
 use serde_json::json;
 
-use domain::generated::commands::{AcceptOrder, CancelOrderByCustomer, CancelOrderByRestaurant, ChangeRiderStatus, MarkOrderDelivered, MarkOrderReady, RejectOrder, StartPreparation, UpdateDeliveryStatus};
-use domain::generated::events::{DomainEvent, DeliveryStatusUpdated, OrderAcceptedByRestaurant, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderDelivered, OrderMarkedReady, OrderPreparationStarted, OrderRejectedByRestaurant, RiderStatusChanged};
+use domain::generated::commands::{AcceptOrder, CancelOrderByCustomer, CancelOrderByRestaurant, MarkOrderDelivered, MarkOrderReady, RejectOrder, StartPreparation, UpdateDeliveryStatus};
+use domain::generated::events::{DomainEvent, DeliveryStatusUpdated, OrderAcceptedByRestaurant, OrderCancelledByCustomer, OrderCancelledByRestaurant, OrderDelivered, OrderMarkedReady, OrderPreparationStarted, OrderRejectedByRestaurant};
 use domain::shared::errors::DomainError;
 
 use crate::commands::{
@@ -154,25 +154,6 @@ pub async fn cancel_order_by_restaurant(
         return Err(invalid_order_status(&cmd.order_id, state.status));
     }
     Repository::new(store).save(&order_stream(&cmd.order_id), version, &[event], actor).await.map(|_| ())
-}
-
-/// Handle `commands.yaml#/ChangeRiderStatus` → emit `events.yaml#/RiderStatusChanged` — require + guard + append over
-/// the declared machine (`domain::rider::lifecycle::transition`); an illegal move rejects through the
-/// aggregate's seam (specs/actors.yaml#/Rider/lifecycle).
-pub async fn change_rider_status(
-    store: &dyn EventStore,
-    cmd: ChangeRiderStatus,
-    actor: &Actor,
-) -> Result<(), DomainError> {
-    let (state, version) = require_rider(store, &cmd.rider_id).await?;
-    let event = DomainEvent::RiderStatusChanged(RiderStatusChanged {
-        rider_id: cmd.rider_id,
-        status: cmd.status,
-    });
-    if domain::rider::lifecycle::transition(state.status, &event).is_none() {
-        return Err(reject("InvalidRiderStatusTransition", json!({ "riderId": cmd.rider_id, "currentStatus": state.status, "targetStatus": cmd.status })));
-    }
-    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
 }
 
 /// Handle `commands.yaml#/UpdateDeliveryStatus` → emit `events.yaml#/DeliveryStatusUpdated` — require + guard + append over

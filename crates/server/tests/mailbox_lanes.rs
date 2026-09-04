@@ -153,6 +153,9 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             order_conversations: Arc::new(PgOrderConversationRepository::new(pool.clone())),
             customers: Arc::new(PgCustomerRepository::new(pool.clone())),
             deliveries: Arc::new(PgDeliveryRepository::new(pool.clone())),
+            rider_restrictions: Arc::new(
+                infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
+            ),
             refunds: Arc::new(PgRefundQueueRepository::new(pool.clone())),
             delivery_satisfaction: Arc::new(PgDeliverySatisfactionRepository::new(pool.clone())),
             delivery_partner_availabilities: Arc::new(PgDeliveryPartnerAvailabilityRepository::new(

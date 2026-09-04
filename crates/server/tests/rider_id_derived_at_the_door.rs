@@ -201,7 +201,7 @@ async fn the_seam_injects_riderid_into_the_enqueued_payload() {
         .body(axum::body::Body::from(json!({ "query": accept_delivery_mutation() }).to_string()))
         .expect("request builds");
 
-    let response = router(RiderIdentityResolution::Resolved(RiderId(rider_id)), mem.clone())
+    let response = router(RiderIdentityResolution::Resolved((RiderId(rider_id), domain::generated::scalars::RiderStanding::ACTIVE)), mem.clone())
         .await
         .oneshot(request)
         .await
@@ -355,4 +355,74 @@ async fn a_smuggled_riderid_is_refused_by_schema_validation_inline_and_via_varia
         "expected async-graphql's own unknown-field refusal on the variables leg -- got verbatim: {message}"
     );
     assert!(mem.entries().is_empty(), "a validation-refused document must never enqueue -- got: {message}");
+}
+
+/// #639 part C step 4-i (ADR-20260904-081527 §6): `ChangeRiderStatus.status` is
+/// `RiderAvailabilityTarget` (OFFLINE/AVAILABLE/ON_DELIVERY), NOT the stored `RiderStatus` —
+/// `SUSPENDED` is unspellable at this door BY THE ENUM ITSELF, so async-graphql's own document
+/// validation refuses BEFORE the role guard or any resolver runs, on EITHER leg (inline literal,
+/// GraphQL variables), UNIFORMLY across every role (no `extensions.code` at all — the #865 trap:
+/// a static-validation refusal is indistinguishable from a role guard's FORBIDDEN only by the
+/// ABSENCE of a code, so this test asserts that absence explicitly rather than assuming it).
+/// Structure-sensitive by design: the closed enum IS the policy.
+#[tokio::test]
+async fn a_suspended_status_is_unspellable_on_change_rider_status_inline_and_via_variables() {
+    let acting = |role: server::graphql_acl::RequestRole| {
+        server::Principal::role_binding(role, "suspended-unspellable-test".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+            .acting_role(role)
+    };
+
+    // Leg 1 -- inline literal, RIDER (the door's own role).
+    let mem = Arc::new(MemMailbox::default());
+    let schema = schema_over(mem.clone());
+    let inline = r#"mutation { changeRiderStatus(input: { status: SUSPENDED }) { messageId } }"#;
+    let resp = schema
+        .execute(async_graphql::Request::new(inline).data(acting(server::graphql_acl::RequestRole::Rider)))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected exactly the validation refusal: {:?}", resp.errors);
+    let message = resp.errors[0].message.clone();
+    assert!(
+        message.contains("SUSPENDED"),
+        "expected async-graphql's own unknown-enum-value refusal naming the value -- got verbatim: {message}"
+    );
+    assert!(
+        resp.errors[0].extensions.is_none(),
+        "a STATIC validation refusal carries no extensions.code at all -- got: {:?}",
+        resp.errors[0]
+    );
+    assert!(mem.entries().is_empty(), "a validation-refused document must never enqueue -- got: {message}");
+
+    // Leg 2 -- via variables.
+    let mem = Arc::new(MemMailbox::default());
+    let schema = schema_over(mem.clone());
+    let via_vars = "mutation($input: ChangeRiderStatusInput!) { changeRiderStatus(input: $input) { messageId } }";
+    let variables = async_graphql::Variables::from_json(json!({ "input": { "status": "SUSPENDED" } }));
+    let resp = schema
+        .execute(
+            async_graphql::Request::new(via_vars)
+                .variables(variables)
+                .data(acting(server::graphql_acl::RequestRole::Rider)),
+        )
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected exactly the validation refusal: {:?}", resp.errors);
+    let message = resp.errors[0].message.clone();
+    assert!(
+        message.contains("SUSPENDED"),
+        "expected async-graphql's own unknown-enum-value refusal on the variables leg -- got verbatim: {message}"
+    );
+    assert!(mem.entries().is_empty(), "a validation-refused document must never enqueue -- got: {message}");
+
+    // UNIFORM across roles: the refusal is the same for a role this door does not even list
+    // (RESTAURANT) -- proving it is the ENUM, never the role guard, that refuses.
+    let mem = Arc::new(MemMailbox::default());
+    let schema = schema_over(mem.clone());
+    let resp = schema
+        .execute(async_graphql::Request::new(inline).data(acting(server::graphql_acl::RequestRole::Restaurant)))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected exactly the validation refusal: {:?}", resp.errors);
+    assert!(
+        resp.errors[0].extensions.is_none(),
+        "still no extensions.code for a role this door does not list -- got: {:?}",
+        resp.errors[0]
+    );
 }

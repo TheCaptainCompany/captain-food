@@ -247,12 +247,40 @@ UpdateRiderInfo:
 
 
 ChangeRiderStatus:
-  description: "Change a rider's availability/lifecycle status."
+  description: >
+    Change a rider's own availability. The rider's target is `RiderAvailabilityTarget` (#639 part C
+    step 4-i, ADR-20260904-081527 §6) — narrower than the stored RiderStatus so SUSPENDED cannot be
+    spelled through this door; admin restriction/reinstatement goes through RestrictRider /
+    ReinstateRider instead.
   type: object
   properties:
     riderId: { $ref: 'scalars.yaml#/RiderId' }
-    status: { $ref: 'scalars.yaml#/RiderStatus' }
+    status: { $ref: 'scalars.yaml#/RiderAvailabilityTarget' }
   required: [riderId, status]
+
+
+# --- Rider standing: the human-only doors (#639 part C step 4-i, ADR-20260904-081527 §6) ----------
+# A human admin decides; no process manager may ever `send` these (validator `pm-sends-human-only-command`)
+# and their `receives:` entries carry `requires: acting: { ADMIN: any }` with no EXTERNAL key.
+
+RestrictRider:
+  description: >
+    An admin restricts a rider's access, citing one of the closed grounds (#639 part C step 4-i,
+    ADR-20260904-014136, ADR-20260904-081527 §5). NO dates on the input, NO free text: the handler
+    stamps `decidedAt = effectiveAt = now` from the clock port — an admin-typed date would be a
+    backdating vector inside the Art. 11 log.
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    ground: { $ref: 'scalars.yaml#/RiderRestrictionGround' }
+  required: [riderId, ground]
+
+ReinstateRider:
+  description: "An admin reinstates a previously restricted rider (#639 part C step 4-i, ADR-20260904-081527 §6) — a new fact, never a row edit; rollback of a wrong restriction is a fresh ReinstateRider."
+  type: object
+  properties:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  required: [riderId]
 
 
 # --- Rider sign-in door (#639 part C step 2c-i, PROP-20260831-180622 build-order row 2c) ---------

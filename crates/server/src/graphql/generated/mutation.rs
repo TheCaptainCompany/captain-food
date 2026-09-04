@@ -29,7 +29,7 @@ pub struct MutationRoot;
 
 #[async_graphql::Object(name = "Mutation")]
 impl MutationRoot {
-    #[graphql(name = "createCatalog", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "createCatalog", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"createCatalog\"))", visible = "visible_restaurant_account_admin")]
     async fn create_catalog(&self, ctx: &async_graphql::Context<'_>, input: CreateCatalogInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -102,7 +102,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "configureCatalogSlug", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "configureCatalogSlug", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"configureCatalogSlug\"))", visible = "visible_restaurant_account_admin")]
     async fn configure_catalog_slug(&self, ctx: &async_graphql::Context<'_>, input: ConfigureCatalogSlugInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -175,7 +175,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "addProduct", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "addProduct", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"addProduct\"))", visible = "visible_restaurant_account_admin")]
     async fn add_product(&self, ctx: &async_graphql::Context<'_>, input: AddProductInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -248,7 +248,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateProduct", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "updateProduct", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"updateProduct\"))", visible = "visible_restaurant_account_admin")]
     async fn update_product(&self, ctx: &async_graphql::Context<'_>, input: UpdateProductInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -321,7 +321,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "removeProduct", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "removeProduct", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"removeProduct\"))", visible = "visible_restaurant_account_admin")]
     async fn remove_product(&self, ctx: &async_graphql::Context<'_>, input: RemoveProductInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -394,7 +394,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "addCatalogCategory", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "addCatalogCategory", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"addCatalogCategory\"))", visible = "visible_restaurant_account_admin")]
     async fn add_catalog_category(&self, ctx: &async_graphql::Context<'_>, input: AddCatalogCategoryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -467,7 +467,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateCatalogCategory", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "updateCatalogCategory", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"updateCatalogCategory\"))", visible = "visible_restaurant_account_admin")]
     async fn update_catalog_category(&self, ctx: &async_graphql::Context<'_>, input: UpdateCatalogCategoryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -540,7 +540,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "removeCatalogCategory", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "removeCatalogCategory", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"removeCatalogCategory\"))", visible = "visible_restaurant_account_admin")]
     async fn remove_catalog_category(&self, ctx: &async_graphql::Context<'_>, input: RemoveCatalogCategoryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -613,7 +613,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "addOptionList", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "addOptionList", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"addOptionList\"))", visible = "visible_restaurant_account_admin")]
     async fn add_option_list(&self, ctx: &async_graphql::Context<'_>, input: AddOptionListInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -686,7 +686,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateOptionList", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "updateOptionList", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"updateOptionList\"))", visible = "visible_restaurant_account_admin")]
     async fn update_option_list(&self, ctx: &async_graphql::Context<'_>, input: UpdateOptionListInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -759,7 +759,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "removeOptionList", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "removeOptionList", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"removeOptionList\"))", visible = "visible_restaurant_account_admin")]
     async fn remove_option_list(&self, ctx: &async_graphql::Context<'_>, input: RemoveOptionListInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -832,7 +832,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateOfferStock", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "updateOfferStock", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"updateOfferStock\"))", visible = "visible_restaurant_account_admin")]
     async fn update_offer_stock(&self, ctx: &async_graphql::Context<'_>, input: UpdateOfferStockInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -905,7 +905,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "importCatalog", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN_EXTERNAL)", visible = "visible_restaurant_account_admin_external")]
+    #[graphql(name = "importCatalog", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"importCatalog\"))", visible = "visible_restaurant_account_admin_external")]
     async fn import_catalog(&self, ctx: &async_graphql::Context<'_>, input: ImportCatalogInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -978,7 +978,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requeueMailboxMessage", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "requeueMailboxMessage", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"requeueMailboxMessage\"))", visible = "visible_admin")]
     async fn requeue_mailbox_message(&self, ctx: &async_graphql::Context<'_>, input: RequeueMailboxMessageInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1051,7 +1051,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "openConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "openConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[], \"openConversation\"))", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn open_conversation(&self, ctx: &async_graphql::Context<'_>, input: OpenConversationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1124,7 +1124,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "postMessage", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "postMessage", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[], \"postMessage\"))", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn post_message(&self, ctx: &async_graphql::Context<'_>, input: PostMessageInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1197,7 +1197,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "recordMessageTranslation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "recordMessageTranslation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[], \"recordMessageTranslation\"))", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn record_message_translation(&self, ctx: &async_graphql::Context<'_>, input: RecordMessageTranslationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1270,7 +1270,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "escalateToAdmin", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "escalateToAdmin", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[], \"escalateToAdmin\"))", visible = "visible_restaurant_account_restaurant_rider_admin")]
     async fn escalate_to_admin(&self, ctx: &async_graphql::Context<'_>, input: EscalateToAdminInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1343,7 +1343,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "muteParticipant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "muteParticipant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"muteParticipant\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn mute_participant(&self, ctx: &async_graphql::Context<'_>, input: MuteParticipantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1416,7 +1416,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "unmuteParticipant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "unmuteParticipant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"unmuteParticipant\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn unmute_participant(&self, ctx: &async_graphql::Context<'_>, input: UnmuteParticipantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1489,7 +1489,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requestPhoneVerification", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
+    #[graphql(name = "requestPhoneVerification", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER).and(StandingGuard::new(&[], \"requestPhoneVerification\"))", visible = "visible_public_customer")]
     async fn request_phone_verification(&self, ctx: &async_graphql::Context<'_>, input: RequestPhoneVerificationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1563,7 +1563,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "verifyPhone", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
+    #[graphql(name = "verifyPhone", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER).and(StandingGuard::new(&[], \"verifyPhone\"))", visible = "visible_public_customer")]
     async fn verify_phone(&self, ctx: &async_graphql::Context<'_>, input: VerifyPhoneInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1636,7 +1636,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requestEmailVerification", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "requestEmailVerification", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"requestEmailVerification\"))", visible = "visible_customer")]
     async fn request_email_verification(&self, ctx: &async_graphql::Context<'_>, input: RequestEmailVerificationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1709,7 +1709,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "confirmEmailVerification", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "confirmEmailVerification", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"confirmEmailVerification\"))", visible = "visible_customer")]
     async fn confirm_email_verification(&self, ctx: &async_graphql::Context<'_>, input: ConfirmEmailVerificationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1782,7 +1782,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requestPhoneChange", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "requestPhoneChange", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"requestPhoneChange\"))", visible = "visible_customer")]
     async fn request_phone_change(&self, ctx: &async_graphql::Context<'_>, input: RequestPhoneChangeInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1855,7 +1855,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "confirmPhoneChange", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "confirmPhoneChange", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"confirmPhoneChange\"))", visible = "visible_customer")]
     async fn confirm_phone_change(&self, ctx: &async_graphql::Context<'_>, input: ConfirmPhoneChangeInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -1928,7 +1928,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "changeLanguage", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "changeLanguage", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"changeLanguage\"))", visible = "visible_customer")]
     async fn change_language(&self, ctx: &async_graphql::Context<'_>, input: ChangeLanguageInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2001,7 +2001,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "markRestaurantAsFavorite", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "markRestaurantAsFavorite", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"markRestaurantAsFavorite\"))", visible = "visible_customer")]
     async fn mark_restaurant_as_favorite(&self, ctx: &async_graphql::Context<'_>, input: MarkRestaurantAsFavoriteInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2074,7 +2074,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "unmarkRestaurantAsFavorite", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "unmarkRestaurantAsFavorite", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"unmarkRestaurantAsFavorite\"))", visible = "visible_customer")]
     async fn unmark_restaurant_as_favorite(&self, ctx: &async_graphql::Context<'_>, input: UnmarkRestaurantAsFavoriteInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2147,7 +2147,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateCustomerInfo", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "updateCustomerInfo", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"updateCustomerInfo\"))", visible = "visible_customer")]
     async fn update_customer_info(&self, ctx: &async_graphql::Context<'_>, input: UpdateCustomerInfoInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2220,7 +2220,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "setCustomerPreferences", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "setCustomerPreferences", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"setCustomerPreferences\"))", visible = "visible_customer")]
     async fn set_customer_preferences(&self, ctx: &async_graphql::Context<'_>, input: SetCustomerPreferencesInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2293,7 +2293,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "setCustomerAddress", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "setCustomerAddress", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"setCustomerAddress\"))", visible = "visible_customer")]
     async fn set_customer_address(&self, ctx: &async_graphql::Context<'_>, input: SetCustomerAddressInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2366,7 +2366,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "removeCustomerAddress", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "removeCustomerAddress", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"removeCustomerAddress\"))", visible = "visible_customer")]
     async fn remove_customer_address(&self, ctx: &async_graphql::Context<'_>, input: RemoveCustomerAddressInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2439,7 +2439,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "setCustomerPaymentMethod", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "setCustomerPaymentMethod", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"setCustomerPaymentMethod\"))", visible = "visible_customer")]
     async fn set_customer_payment_method(&self, ctx: &async_graphql::Context<'_>, input: SetCustomerPaymentMethodInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2512,7 +2512,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requestErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "requestErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"requestErasure\"))", visible = "visible_customer")]
     async fn request_erasure(&self, ctx: &async_graphql::Context<'_>, input: RequestCustomerErasureInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2585,7 +2585,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "confirmErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "confirmErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"confirmErasure\"))", visible = "visible_customer")]
     async fn confirm_erasure(&self, ctx: &async_graphql::Context<'_>, input: ConfirmCustomerErasureInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2658,7 +2658,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "cancelErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "cancelErasure", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"cancelErasure\"))", visible = "visible_customer")]
     async fn cancel_erasure(&self, ctx: &async_graphql::Context<'_>, input: CancelCustomerErasureInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2731,7 +2731,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "changeRiderStatus", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "changeRiderStatus", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"changeRiderStatus\"))", visible = "visible_rider")]
     async fn change_rider_status(&self, ctx: &async_graphql::Context<'_>, input: ChangeRiderStatusInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2745,7 +2745,7 @@ impl MutationRoot {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
         let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
-        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+        let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = __derived_scope else {
             return Err(forbidden_error());
         };
         payload_json["riderId"] = serde_json::json!(__derived_id.0);
@@ -2809,7 +2809,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "acceptDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "acceptDelivery", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"acceptDelivery\"))", visible = "visible_rider")]
     async fn accept_delivery(&self, ctx: &async_graphql::Context<'_>, input: AcceptDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2823,7 +2823,7 @@ impl MutationRoot {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
         let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
-        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+        let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = __derived_scope else {
             return Err(forbidden_error());
         };
         payload_json["riderId"] = serde_json::json!(__derived_id.0);
@@ -2887,7 +2887,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "confirmPickup", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "confirmPickup", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"confirmPickup\"))", visible = "visible_rider")]
     async fn confirm_pickup(&self, ctx: &async_graphql::Context<'_>, input: ConfirmPickupInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2901,7 +2901,7 @@ impl MutationRoot {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
         let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
-        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+        let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = __derived_scope else {
             return Err(forbidden_error());
         };
         payload_json["riderId"] = serde_json::json!(__derived_id.0);
@@ -2965,7 +2965,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "completeDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "completeDelivery", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"completeDelivery\"))", visible = "visible_rider")]
     async fn complete_delivery(&self, ctx: &async_graphql::Context<'_>, input: CompleteDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2979,7 +2979,7 @@ impl MutationRoot {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
         let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
-        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+        let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = __derived_scope else {
             return Err(forbidden_error());
         };
         payload_json["riderId"] = serde_json::json!(__derived_id.0);
@@ -3043,7 +3043,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "cancelDelivery", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "cancelDelivery", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"cancelDelivery\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn cancel_delivery(&self, ctx: &async_graphql::Context<'_>, input: CancelDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3116,7 +3116,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "escalateDelivery", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    #[graphql(name = "escalateDelivery", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"escalateDelivery\"))", visible = "visible_restaurant_admin")]
     async fn escalate_delivery(&self, ctx: &async_graphql::Context<'_>, input: EscalateDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3189,7 +3189,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "reportDeliveryIssue", guard = "RoleGuard::new(ALLOW_RIDER_ADMIN)", visible = "visible_rider_admin")]
+    #[graphql(name = "reportDeliveryIssue", guard = "RoleGuard::new(ALLOW_RIDER_ADMIN).and(StandingGuard::new(&[RequestRole::Rider], \"reportDeliveryIssue\"))", visible = "visible_rider_admin")]
     async fn report_delivery_issue(&self, ctx: &async_graphql::Context<'_>, input: ReportDeliveryIssueInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3202,7 +3202,7 @@ impl MutationRoot {
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
-        if let Some(application::queries::ReadScope::Rider(__derived_id)) = ctx.data_opt::<application::queries::ReadScope>() {
+        if let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = ctx.data_opt::<application::queries::ReadScope>() {
             payload_json["riderId"] = serde_json::json!(__derived_id.0);
         }
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
@@ -3265,7 +3265,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "resolveDeliveryIssue", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "resolveDeliveryIssue", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"resolveDeliveryIssue\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn resolve_delivery_issue(&self, ctx: &async_graphql::Context<'_>, input: ResolveDeliveryIssueInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3338,7 +3338,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "declineDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "declineDelivery", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"declineDelivery\"))", visible = "visible_rider")]
     async fn decline_delivery(&self, ctx: &async_graphql::Context<'_>, input: DeclineDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3352,7 +3352,7 @@ impl MutationRoot {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
         let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
-        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+        let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = __derived_scope else {
             return Err(forbidden_error());
         };
         payload_json["riderId"] = serde_json::json!(__derived_id.0);
@@ -3416,7 +3416,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "handBackDelivery", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "handBackDelivery", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[RequestRole::Rider], \"handBackDelivery\"))", visible = "visible_rider")]
     async fn hand_back_delivery(&self, ctx: &async_graphql::Context<'_>, input: HandBackDeliveryInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3430,7 +3430,7 @@ impl MutationRoot {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
         let mut payload_json = command_payload(&input)?;
         let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
-        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+        let Some(application::queries::ReadScope::Rider { id: __derived_id, .. }) = __derived_scope else {
             return Err(forbidden_error());
         };
         payload_json["riderId"] = serde_json::json!(__derived_id.0);
@@ -3494,7 +3494,153 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "registerDeliveryPartnerAvailability", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "restrictRider", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"restrictRider\"))", visible = "visible_admin")]
+    async fn restrict_rider(&self, ctx: &async_graphql::Context<'_>, input: RestrictRiderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        // command.receive (SERVER). Opened before any fallible work so an input that fails to
+        // deserialize still leaves a span naming the command that was attempted.
+        let __receive = telemetry::spans::command_receive(
+            "RestrictRider",
+            crate::graphql::acl::request_role(ctx).api_name(),
+            telemetry::CHANNEL_GRAPHQL,
+        );
+        let __rx = __receive.clone();
+        async move {
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        let mut payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::RestrictRider = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("riderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("RestrictRider: identity property 'riderId' missing or not a uuid -- unaddressable"))?;
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RiderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = client_rider::RiderClient::new(mailbox, actor_id);
+        let __envelope = actor_client::mailbox::Envelope {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
+        };
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            actor_client::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("RestrictRider");
+                return Err(conflict_error(env.message_id));
+            }
+            actor_client::EnqueueOutcome::Deduplicated(status) => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            actor_client::EnqueueOutcome::Enqueued => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
+        .instrument(__receive)
+        .await
+    }
+    #[graphql(name = "reinstateRider", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"reinstateRider\"))", visible = "visible_admin")]
+    async fn reinstate_rider(&self, ctx: &async_graphql::Context<'_>, input: ReinstateRiderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
+        // command.receive (SERVER). Opened before any fallible work so an input that fails to
+        // deserialize still leaves a span naming the command that was attempted.
+        let __receive = telemetry::spans::command_receive(
+            "ReinstateRider",
+            crate::graphql::acl::request_role(ctx).api_name(),
+            telemetry::CHANNEL_GRAPHQL,
+        );
+        let __rx = __receive.clone();
+        async move {
+        let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
+        let mut payload_json = command_payload(&input)?;
+        // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
+        // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
+        let cmd: domain::generated::commands::ReinstateRider = serde_json::from_value(payload_json.clone())
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let env = request_envelope(ctx, &metadata);
+        // run_identity: both ids are mandatory in every contract and both may be server-generated.
+        telemetry::spans::record_envelope(&__rx, &env.message_id.to_string(), &env.correlation_id.to_string());
+        let actor_id = payload_json.get("riderId").and_then(|v| v.as_str()).and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or_else(|| async_graphql::Error::new("ReinstateRider: identity property 'riderId' missing or not a uuid -- unaddressable"))?;
+        // The TYPED DOOR (#284 slice 2, PROP-20260728-152752 §2.1): the generated RiderClient
+        // assembles the mailbox row through the SAME shared constructors the worker-channel
+        // enqueue uses (lane, partition, kind, payload hash), so the GraphQL door can never
+        // drift from any other door and no resolver builds a mailbox entry inline.
+        let __client = client_rider::RiderClient::new(mailbox, actor_id);
+        let __envelope = actor_client::mailbox::Envelope {
+            message_id: env.message_id,
+            correlation_id: env.correlation_id,
+            cause_id: env.cause_id,
+            session_id: env.session_id,
+            trace_id: env.trace_id.clone(),
+            user_id: env.user_id,
+            user_type: env.user_type.clone(),
+            channel: "GRAPHQL".into(),
+        };
+        // command.journal (INTERNAL) — the typed send IS the durable acceptance now; the
+        // span keeps its contract name (the acceptance contract is unchanged, ADR-20260720-015500).
+        let __journal = telemetry::spans::command_journal(&env.message_id.to_string());
+        let __outcome = __client.send(cmd, __envelope).instrument(__journal.clone()).await.map_err(domain_error)?;
+        match __outcome {
+            actor_client::EnqueueOutcome::PayloadConflict(_) => {
+                // A reused messageId with a DIFFERENT payload is a client bug, and the only
+                // acceptance outcome the contract does NOT count as success.
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::CONFLICT);
+                telemetry::meters::acceptance::sync_conflict("ReinstateRider");
+                return Err(conflict_error(env.message_id));
+            }
+            actor_client::EnqueueOutcome::Deduplicated(status) => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::DUPLICATE);
+                let _ = telemetry::spans::command_dispatch(
+                    &env.message_id.to_string(),
+                    telemetry::dispatch_outcome::DUPLICATE_SKIPPED,
+                );
+                telemetry::meters::acceptance::duplicate(telemetry::CHANNEL_GRAPHQL);
+                return Ok(acceptance(&env, mailbox_status_api(status), true));
+            }
+            actor_client::EnqueueOutcome::Enqueued => {
+                telemetry::spans::record_journal_status(&__journal, telemetry::journal_status::RECEIVED);
+            }
+        }
+        // command.dispatch (INTERNAL): ENQUEUED — the mailbox worker owns delivery and completion
+        // (its StatusBusObserver publishes the terminal transition post-commit).
+        let _ = telemetry::spans::command_dispatch(
+            &env.message_id.to_string(),
+            telemetry::dispatch_outcome::ENQUEUED,
+        );
+        telemetry::meters::acceptance::accepted(telemetry::CHANNEL_GRAPHQL);
+        Ok(acceptance(&env, OperationStatus::PENDING, false))
+        }
+        .instrument(__receive)
+        .await
+    }
+    #[graphql(name = "registerDeliveryPartnerAvailability", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"registerDeliveryPartnerAvailability\"))", visible = "visible_admin_external")]
     async fn register_delivery_partner_availability(&self, ctx: &async_graphql::Context<'_>, input: RegisterDeliveryPartnerAvailabilityInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3567,7 +3713,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "approveDeliveryPartnerAvailability", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "approveDeliveryPartnerAvailability", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"approveDeliveryPartnerAvailability\"))", visible = "visible_admin")]
     async fn approve_delivery_partner_availability(&self, ctx: &async_graphql::Context<'_>, input: ApproveDeliveryPartnerAvailabilityInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3640,7 +3786,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "revokeDeliveryPartnerAvailability", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "revokeDeliveryPartnerAvailability", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"revokeDeliveryPartnerAvailability\"))", visible = "visible_admin_external")]
     async fn revoke_delivery_partner_availability(&self, ctx: &async_graphql::Context<'_>, input: RevokeDeliveryPartnerAvailabilityInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3713,7 +3859,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requestRiderSignInCode", guard = "RoleGuard::new(ALLOW_PUBLIC)", visible = "visible_public")]
+    #[graphql(name = "requestRiderSignInCode", guard = "RoleGuard::new(ALLOW_PUBLIC).and(StandingGuard::new(&[], \"requestRiderSignInCode\"))", visible = "visible_public")]
     async fn request_rider_sign_in_code(&self, ctx: &async_graphql::Context<'_>, input: RequestRiderSignInCodeInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3787,7 +3933,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "confirmRiderSignIn", guard = "RoleGuard::new(ALLOW_PUBLIC)", visible = "visible_public")]
+    #[graphql(name = "confirmRiderSignIn", guard = "RoleGuard::new(ALLOW_PUBLIC).and(StandingGuard::new(&[], \"confirmRiderSignIn\"))", visible = "visible_public")]
     async fn confirm_rider_sign_in(&self, ctx: &async_graphql::Context<'_>, input: ConfirmRiderSignInInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3861,7 +4007,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "registerRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "registerRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"registerRestaurantAccount\"))", visible = "visible_restaurant_account_admin")]
     async fn register_restaurant_account(&self, ctx: &async_graphql::Context<'_>, input: RegisterRestaurantAccountInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -3934,7 +4080,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "updateRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"updateRestaurantAccount\"))", visible = "visible_restaurant_account_admin")]
     async fn update_restaurant_account(&self, ctx: &async_graphql::Context<'_>, input: UpdateRestaurantAccountInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4007,7 +4153,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "deleteRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "deleteRestaurantAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"deleteRestaurantAccount\"))", visible = "visible_restaurant_account_admin")]
     async fn delete_restaurant_account(&self, ctx: &async_graphql::Context<'_>, input: DeleteRestaurantAccountInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4080,7 +4226,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "registerRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN_EXTERNAL)", visible = "visible_restaurant_account_admin_external")]
+    #[graphql(name = "registerRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"registerRestaurant\"))", visible = "visible_restaurant_account_admin_external")]
     async fn register_restaurant(&self, ctx: &async_graphql::Context<'_>, input: RegisterRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4154,7 +4300,7 @@ impl MutationRoot {
         .await
     }
     /// Choose (or change) the restaurant's storefront address — the {slug}.captain.food host (ADR-20260728-011344). Issued during onboarding after ownership is verified and before activation, and again later from the back office to rename. The aggregate decides which fact it is; a rename keeps the previous address resolving via a 301, and re-submitting the current address is an idempotent no-op.
-    #[graphql(name = "configureRestaurantSlug", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "configureRestaurantSlug", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"configureRestaurantSlug\"))", visible = "visible_restaurant_account_admin")]
     async fn configure_restaurant_slug(&self, ctx: &async_graphql::Context<'_>, input: ConfigureRestaurantSlugInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4227,7 +4373,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "activateRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "activateRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"activateRestaurant\"))", visible = "visible_restaurant_account_admin")]
     async fn activate_restaurant(&self, ctx: &async_graphql::Context<'_>, input: ActivateRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4300,7 +4446,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "updateRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"updateRestaurant\"))", visible = "visible_restaurant_account_admin")]
     async fn update_restaurant(&self, ctx: &async_graphql::Context<'_>, input: UpdateRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4373,7 +4519,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "deactivateRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "deactivateRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"deactivateRestaurant\"))", visible = "visible_restaurant_account_admin")]
     async fn deactivate_restaurant(&self, ctx: &async_graphql::Context<'_>, input: DeactivateRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4446,7 +4592,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "removeRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "removeRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"removeRestaurant\"))", visible = "visible_restaurant_account_admin")]
     async fn remove_restaurant(&self, ctx: &async_graphql::Context<'_>, input: RemoveRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4519,7 +4665,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "changeOrderAcceptanceMode", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "changeOrderAcceptanceMode", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"changeOrderAcceptanceMode\"))", visible = "visible_restaurant_account_restaurant")]
     async fn change_order_acceptance_mode(&self, ctx: &async_graphql::Context<'_>, input: ChangeOrderAcceptanceModeInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4592,7 +4738,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "updateRestaurantGoogleBusinessProfile", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "updateRestaurantGoogleBusinessProfile", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"updateRestaurantGoogleBusinessProfile\"))", visible = "visible_admin_external")]
     async fn update_restaurant_google_business_profile(&self, ctx: &async_graphql::Context<'_>, input: UpdateRestaurantGoogleBusinessProfileInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4665,7 +4811,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "markRestaurantClosed", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "markRestaurantClosed", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"markRestaurantClosed\"))", visible = "visible_admin_external")]
     async fn mark_restaurant_closed(&self, ctx: &async_graphql::Context<'_>, input: MarkRestaurantClosedInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4738,7 +4884,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "claimRestaurantListing", guard = "RoleGuard::new(ALLOW_PUBLIC_RESTAURANT_ACCOUNT)", visible = "visible_public_restaurant_account")]
+    #[graphql(name = "claimRestaurantListing", guard = "RoleGuard::new(ALLOW_PUBLIC_RESTAURANT_ACCOUNT).and(StandingGuard::new(&[], \"claimRestaurantListing\"))", visible = "visible_public_restaurant_account")]
     async fn claim_restaurant_listing(&self, ctx: &async_graphql::Context<'_>, input: ClaimRestaurantListingInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4811,7 +4957,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "optOutRestaurantListing", guard = "RoleGuard::new(ALLOW_PUBLIC_RESTAURANT_ACCOUNT)", visible = "visible_public_restaurant_account")]
+    #[graphql(name = "optOutRestaurantListing", guard = "RoleGuard::new(ALLOW_PUBLIC_RESTAURANT_ACCOUNT).and(StandingGuard::new(&[], \"optOutRestaurantListing\"))", visible = "visible_public_restaurant_account")]
     async fn opt_out_restaurant_listing(&self, ctx: &async_graphql::Context<'_>, input: OptOutRestaurantListingInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4884,7 +5030,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "changeRestaurantListingStatus", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "changeRestaurantListingStatus", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"changeRestaurantListingStatus\"))", visible = "visible_admin")]
     async fn change_restaurant_listing_status(&self, ctx: &async_graphql::Context<'_>, input: ChangeRestaurantListingStatusInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -4957,7 +5103,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "configureGbpOrderLink", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "configureGbpOrderLink", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"configureGbpOrderLink\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn configure_gbp_order_link(&self, ctx: &async_graphql::Context<'_>, input: ConfigureGoogleBusinessProfileOrderLinkInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5030,7 +5176,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "verifyGbpOrderLink", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "verifyGbpOrderLink", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"verifyGbpOrderLink\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn verify_gbp_order_link(&self, ctx: &async_graphql::Context<'_>, input: VerifyGoogleBusinessProfileOrderLinkInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5103,7 +5249,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "recordProspectContact", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "recordProspectContact", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"recordProspectContact\"))", visible = "visible_admin_external")]
     async fn record_prospect_contact(&self, ctx: &async_graphql::Context<'_>, input: RecordProspectContactInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5176,7 +5322,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "markProspectCold", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "markProspectCold", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"markProspectCold\"))", visible = "visible_admin_external")]
     async fn mark_prospect_cold(&self, ctx: &async_graphql::Context<'_>, input: MarkProspectColdInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5249,7 +5395,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "recordProspectReply", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "recordProspectReply", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"recordProspectReply\"))", visible = "visible_admin_external")]
     async fn record_prospect_reply(&self, ctx: &async_graphql::Context<'_>, input: RecordProspectReplyInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5541,7 +5687,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "placeOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "placeOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"placeOrder\"))", visible = "visible_customer")]
     async fn place_order(&self, ctx: &async_graphql::Context<'_>, input: PlaceOrderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5614,7 +5760,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "acceptOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "acceptOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"acceptOrder\"))", visible = "visible_restaurant_account_restaurant")]
     async fn accept_order(&self, ctx: &async_graphql::Context<'_>, input: AcceptOrderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5687,7 +5833,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "rejectOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "rejectOrder", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"rejectOrder\"))", visible = "visible_restaurant_account_restaurant")]
     async fn reject_order(&self, ctx: &async_graphql::Context<'_>, input: RejectOrderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5760,7 +5906,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "startPreparation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "startPreparation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"startPreparation\"))", visible = "visible_restaurant_account_restaurant")]
     async fn start_preparation(&self, ctx: &async_graphql::Context<'_>, input: StartPreparationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5833,7 +5979,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "markOrderReady", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "markOrderReady", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"markOrderReady\"))", visible = "visible_restaurant_account_restaurant")]
     async fn mark_order_ready(&self, ctx: &async_graphql::Context<'_>, input: MarkOrderReadyInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5906,7 +6052,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "markOrderDelivered", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER)", visible = "visible_restaurant_account_restaurant_rider")]
+    #[graphql(name = "markOrderDelivered", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER).and(StandingGuard::new(&[], \"markOrderDelivered\"))", visible = "visible_restaurant_account_restaurant_rider")]
     async fn mark_order_delivered(&self, ctx: &async_graphql::Context<'_>, input: MarkOrderDeliveredInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -5979,7 +6125,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "cancelOrderByCustomer", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "cancelOrderByCustomer", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"cancelOrderByCustomer\"))", visible = "visible_customer")]
     async fn cancel_order_by_customer(&self, ctx: &async_graphql::Context<'_>, input: CancelOrderByCustomerInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6052,7 +6198,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "cancelOrderByRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "cancelOrderByRestaurant", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"cancelOrderByRestaurant\"))", visible = "visible_restaurant_account_restaurant")]
     async fn cancel_order_by_restaurant(&self, ctx: &async_graphql::Context<'_>, input: CancelOrderByRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6125,7 +6271,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "rateOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "rateOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"rateOrder\"))", visible = "visible_customer")]
     async fn rate_order(&self, ctx: &async_graphql::Context<'_>, input: RateOrderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6198,7 +6344,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "rateRestaurant", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "rateRestaurant", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"rateRestaurant\"))", visible = "visible_customer")]
     async fn rate_restaurant(&self, ctx: &async_graphql::Context<'_>, input: RateRestaurantInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6271,7 +6417,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "recordDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "recordDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"recordDeliverySatisfaction\"))", visible = "visible_customer")]
     async fn record_delivery_satisfaction(&self, ctx: &async_graphql::Context<'_>, input: RecordDeliverySatisfactionInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6344,7 +6490,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "tipOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_customer_restaurant_account_restaurant")]
+    #[graphql(name = "tipOrder", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"tipOrder\"))", visible = "visible_customer_restaurant_account_restaurant")]
     async fn tip_order(&self, ctx: &async_graphql::Context<'_>, input: TipOrderInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6417,7 +6563,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "requestRefund", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "requestRefund", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"requestRefund\"))", visible = "visible_customer")]
     async fn request_refund(&self, ctx: &async_graphql::Context<'_>, input: RequestRefundInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6490,7 +6636,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "openReclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "openReclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"openReclamation\"))", visible = "visible_customer")]
     async fn open_reclamation(&self, ctx: &async_graphql::Context<'_>, input: OpenReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6563,7 +6709,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "resolveReclamation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "resolveReclamation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"resolveReclamation\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn resolve_reclamation(&self, ctx: &async_graphql::Context<'_>, input: ResolveReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6636,7 +6782,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "rejectReclamation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "rejectReclamation", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"rejectReclamation\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn reject_reclamation(&self, ctx: &async_graphql::Context<'_>, input: RejectReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6709,7 +6855,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "reopenReclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "reopenReclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"reopenReclamation\"))", visible = "visible_customer")]
     async fn reopen_reclamation(&self, ctx: &async_graphql::Context<'_>, input: ReopenReclamationInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6782,7 +6928,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "attachReclamationEvidence", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "attachReclamationEvidence", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"attachReclamationEvidence\"))", visible = "visible_customer")]
     async fn attach_reclamation_evidence(&self, ctx: &async_graphql::Context<'_>, input: AttachReclamationEvidenceInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6855,7 +7001,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "approveRefund", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    #[graphql(name = "approveRefund", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"approveRefund\"))", visible = "visible_restaurant_admin")]
     async fn approve_refund(&self, ctx: &async_graphql::Context<'_>, input: ApproveRefundInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -6928,7 +7074,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "denyRefund", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    #[graphql(name = "denyRefund", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"denyRefund\"))", visible = "visible_restaurant_admin")]
     async fn deny_refund(&self, ctx: &async_graphql::Context<'_>, input: DenyRefundInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -7234,7 +7380,7 @@ fn internal_error() -> async_graphql::Error {
 /// absent context in a direct schema execution) -- refused BEFORE the mailbox is ever touched,
 /// never a Public default that enqueues. errors.yaml cross-cutting `Forbidden`, P-10 extensions shape
 /// (mirrors `conflict_error` exactly).
-fn forbidden_error() -> async_graphql::Error {
+pub(crate) fn forbidden_error() -> async_graphql::Error {
     use async_graphql::ErrorExtensions;
     let def = domain::generated::errors::FORBIDDEN;
     async_graphql::Error::new(def.message_en).extend_with(|_, ext| ext.set("code", def.code))

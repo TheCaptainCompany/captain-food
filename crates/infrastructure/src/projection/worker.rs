@@ -23,7 +23,7 @@ use std::time::Duration;
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
     project_order_conversation, project_order_tracking, project_prospection_pipeline,
-    project_restaurant, project_rider, project_slug_alias, Envelope,
+    project_restaurant, project_rider, project_rider_restriction, project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
@@ -34,6 +34,7 @@ use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
 use application::projectors::rider::RiderProjector;
+use application::projectors::rider_restriction::RiderRestrictionProjector;
 use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
@@ -48,7 +49,7 @@ use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
-    rider_store, scope_membership_store, slug_alias_store,
+    rider_restriction_store, rider_store, scope_membership_store, slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -140,9 +141,13 @@ enum ReadModelProjector {
     OrderConversation,
     CustomerCreditBalance,
     /// The rider identity read model (#639 part A): the `auth_ref -> rider_id` bridge
-    /// ADR-20260818-004646 puts in our Postgres rather than in the provider's claims. A plain
-    /// single-stream fold with no computed column — `RiderCompute` is empty.
+    /// ADR-20260818-004646 puts in our Postgres rather than in the provider's claims. `standing`
+    /// (#639 part C step 4-i) is the one computed column — `RiderCompute::standing`.
     Rider,
+    /// The restriction attribution read model (#639 part C step 4-i, ADR-20260904-081527 §2):
+    /// ground/decidedAt/effectiveAt/reinstatedAt, the source of `myStanding`. Same stream (`Rider-`)
+    /// as [`Self::Rider`], same checkpoint — the Restaurant/ProspectionPipeline precedent.
+    RiderRestriction,
     /// Keyed by the SUPERSEDED slug from the event payload, not by an aggregate id — one row per
     /// rename, so a restaurant renamed N times leaves N rows on the same stream.
     SlugAlias,
@@ -217,6 +222,14 @@ impl ReadModelProjector {
                 let state = rider_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_rider(&RiderProjector, state, env) {
                     rider_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                }
+            }
+            Self::RiderRestriction => {
+                let id = RiderId(aggregate_uuid_of(env, "Rider-", "riderId")?);
+                let state =
+                    rider_restriction_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                if let Some(next) = project_rider_restriction(&RiderRestrictionProjector, state, env) {
+                    rider_restriction_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::Catalog => {
@@ -445,6 +458,24 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "Rider",
         stream_prefixes: &["Rider-"],
         projectors: &[ReadModelProjector::Rider],
+        scope: "delivery",
+    },
+    // Round 2 item 7 (dba, young — a migration-class defect, #639 part C step 4-i): `RiderRestriction`
+    // is born by THIS migration, weeks after the `Rider` checkpoint above first advanced — folding
+    // it under that already-advanced checkpoint means a rider registered before this migration NEVER
+    // gets a row (the checkpoint never rewinds to replay their `RiderRegistered`), so a LATER
+    // `RiderRestricted` on that same stream is silently dropped by the projector's own
+    // `let mut row = state?;` short-circuit: the door closes, `myStanding` shows `restriction: null`,
+    // the notice has no ground. Its OWN checkpoint, its OWN group — the #424 lesson the comment above
+    // already states for exactly this shape — starting at 0 (a group with no `projection_checkpoint`
+    // row starts there for free): the whole `Rider-` log replays through THIS projector alone, so a
+    // table born after the log is backfilled by replay rather than a migration-time copy. The lag
+    // gauge stays on the `"Rider"` checkpoint (unchanged — `RiderRestriction`'s own replay lag is not
+    // this contract's subject).
+    ProjectorGroup {
+        checkpoint: "RiderRestriction",
+        stream_prefixes: &["Rider-"],
+        projectors: &[ReadModelProjector::RiderRestriction],
         scope: "delivery",
     },
     ProjectorGroup {
@@ -794,6 +825,19 @@ impl ProjectionWorker {
             // pending batch length is a lower bound while draining, and an exact 0 when caught up.
             if group.checkpoint == "ScopeMembership" {
                 telemetry::meters::read_authorization::lag_positions(pending.len() as i64);
+            }
+            // `rider-restriction` contract (#639 part C step 4-i, ADR-20260904-081527 §9): the
+            // `scope_membership_lag_positions` mirror — while the Rider projector lags, a
+            // restricted rider is still GRANTED, so "immediately" is a measured claim only with
+            // this gauge. Round 2 item 6(b) (dba, farley): "0 when caught up" was FALSE as
+            // written — this loop returns on a short page and the idle gate below never
+            // re-records, so an idle platform exports the PRE-DRAIN page length until the log next
+            // moves. True shape: the pending page length at each scan — a lower bound capped at
+            // `batch_size` while draining, re-recorded only when the log moves, 0 only on the
+            // first scan that finds nothing. Pre-existing, shared `drain_group` behaviour (not
+            // fixed here — architect-owned issue).
+            if group.checkpoint == "Rider" {
+                telemetry::meters::rider_restriction::lag(pending.len() as i64);
             }
             if pending.is_empty() {
                 return Ok(());

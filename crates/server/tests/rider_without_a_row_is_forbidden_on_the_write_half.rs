@@ -211,12 +211,19 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
         .await,
     );
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "a seam outage never widens: {message}");
+    // #639 part C step 4-i: a seam outage never reaches the StandingGuard either — refused AS
+    // PUBLIC by RoleGuard first, exactly like NoMapping, never a RESTRICTED-flavoured message.
+    assert_eq!(
+        message,
+        "forbidden: role PUBLIC is not authorized for this operation (allowed: RIDER)",
+        "a lookup failure denies as PUBLIC, never as a restricted rider — got: {message}"
+    );
 
     // A ROW: the SAME token, the SAME request, and the guard passes — the resolver runs and fails
     // on the mailbox this schema does not carry. This is the control that keeps the two refusals
     // above honest: the rider path is not blanket-refused, the seam's outcome decides.
     let (message, code) = first_error(
-        &post_as_rider(&jwt, ACCEPT_DELIVERY, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
+        &post_as_rider(&jwt, ACCEPT_DELIVERY, RiderIdentityResolution::Resolved((RiderId(uuid::Uuid::from_u128(0x600D)), domain::generated::scalars::RiderStanding::ACTIVE)))
             .await,
     );
     assert_ne!(
@@ -246,7 +253,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_report_delivery_issue()
     );
     // The control: a resolved row passes the guard (and fails on the absent mailbox, past it).
     let (message, code) = first_error(
-        &post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
+        &post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::Resolved((RiderId(uuid::Uuid::from_u128(0x600D)), domain::generated::scalars::RiderStanding::ACTIVE)))
             .await,
     );
     assert_ne!(code.as_deref(), Some("FORBIDDEN"), "a resolved rider acts as RIDER — got: {message}");
@@ -268,7 +275,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_hand_back_delivery() {
     );
     // The control: a resolved row passes the guard (and fails on the absent mailbox, past it).
     let (message, code) = first_error(
-        &post_as_rider(&jwt, HAND_BACK_DELIVERY, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
+        &post_as_rider(&jwt, HAND_BACK_DELIVERY, RiderIdentityResolution::Resolved((RiderId(uuid::Uuid::from_u128(0x600D)), domain::generated::scalars::RiderStanding::ACTIVE)))
             .await,
     );
     assert_ne!(code.as_deref(), Some("FORBIDDEN"), "a resolved rider acts as RIDER — got: {message}");
