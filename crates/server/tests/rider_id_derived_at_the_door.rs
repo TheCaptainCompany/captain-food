@@ -137,8 +137,8 @@ impl application::queries::SlugReservationRepository for AlwaysFreeSlugs {
 /// The production router: the real `graphql_routes` behind the real JWT verifier, the rider seam
 /// scripted to `outcome`, over a `MemMailbox`-backed write side — the harness this test exists to
 /// combine (see the module doc).
-async fn router(outcome: RiderIdentityResolution, mailbox: Arc<dyn actor_client::mailbox::Mailbox>) -> axum::Router {
-    let schema = server::graphql_schema::build_schema(
+fn schema_over(mailbox: Arc<dyn actor_client::mailbox::Mailbox>) -> server::graphql_schema::CaptainSchema {
+    server::graphql_schema::build_schema(
         None,
         Some(server::graphql_schema::WriteDeps {
             event_store: Arc::new(UntouchableEventStore),
@@ -154,7 +154,11 @@ async fn router(outcome: RiderIdentityResolution, mailbox: Arc<dyn actor_client:
             slug_reservations: Arc::new(AlwaysFreeSlugs),
         }),
         None,
-    );
+    )
+}
+
+async fn router(outcome: RiderIdentityResolution, mailbox: Arc<dyn actor_client::mailbox::Mailbox>) -> axum::Router {
+    let schema = schema_over(mailbox);
     server::graphql_routes(
         schema,
         server::TenantLookup(None),
@@ -248,4 +252,61 @@ async fn no_resolved_rider_scope_enqueues_nothing() {
     let code = body["errors"][0]["extensions"]["code"].as_str().map(str::to_string);
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row -> the role guard refuses: {body}");
     assert!(mem.entries().is_empty(), "a refused caller must enqueue nothing at all");
+}
+
+/// The smuggled-field mutant: a client posts `riderId` alongside the well-formed
+/// `deliveryJobId`, BOTH inline in the query text and via GraphQL `variables`. Executed through
+/// `schema.execute` directly (never `Input::parse`, whose serde derive silently IGNORES unknown
+/// keys and would let this smuggling through unnoticed) — `AcceptDeliveryInput` no longer
+/// declares the field at all (#865), so async-graphql's OWN document validation refuses BEFORE
+/// the role guard or any resolver code runs, on EITHER leg, and nothing is ever enqueued.
+#[tokio::test]
+async fn a_smuggled_riderid_is_refused_by_schema_validation_inline_and_via_variables() {
+    let acting = |role: server::graphql_acl::RequestRole| {
+        server::Principal::role_binding(role, "smuggle-test".to_string(), Some(uuid::Uuid::from_u128(0x639)))
+            .acting_role(role)
+    };
+
+    // Leg 1 -- inline literal.
+    let mem = Arc::new(MemMailbox::default());
+    let schema = schema_over(mem.clone());
+    let inline = r#"mutation { acceptDelivery(input: {
+        deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+        riderId: "00000000-0000-0000-0000-000000000bad"
+    }) { messageId } }"#;
+    let resp = schema
+        .execute(async_graphql::Request::new(inline).data(acting(server::graphql_acl::RequestRole::Rider)))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected exactly the validation refusal: {:?}", resp.errors);
+    let message = resp.errors[0].message.clone();
+    assert!(
+        message.contains("riderId") && message.contains("AcceptDeliveryInput"),
+        "expected async-graphql's own unknown-field refusal naming both -- got verbatim: {message}"
+    );
+    assert!(mem.entries().is_empty(), "a validation-refused document must never enqueue -- got: {message}");
+
+    // Leg 2 -- via variables.
+    let mem = Arc::new(MemMailbox::default());
+    let schema = schema_over(mem.clone());
+    let via_vars = "mutation($input: AcceptDeliveryInput!) { acceptDelivery(input: $input) { messageId } }";
+    let variables = async_graphql::Variables::from_json(json!({
+        "input": {
+            "deliveryJobId": "00000000-0000-0000-0000-00000000000d",
+            "riderId": "00000000-0000-0000-0000-000000000bad"
+        }
+    }));
+    let resp = schema
+        .execute(
+            async_graphql::Request::new(via_vars)
+                .variables(variables)
+                .data(acting(server::graphql_acl::RequestRole::Rider)),
+        )
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected exactly the validation refusal: {:?}", resp.errors);
+    let message = resp.errors[0].message.clone();
+    assert!(
+        message.contains("riderId"),
+        "expected async-graphql's own unknown-field refusal on the variables leg -- got verbatim: {message}"
+    );
+    assert!(mem.entries().is_empty(), "a validation-refused document must never enqueue -- got: {message}");
 }
