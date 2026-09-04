@@ -928,3 +928,32 @@ it?* If the answer names the founder and no `decision queue` row is open, there 
 — merge. A founder decision is owed only for a genuine option space, an external/legal action or
 an admin-gated provisioning, and it is asked as a queue row with options and a recommendation,
 never as a PR left ready-for-review.
+
+## The register-check hook gates every write-capable agent, `architect` included — and a briefing card is a coordinator diff that can be wrong at HEAD (2026-09-04)
+
+Two findings from the #639 part C step 3 briefing:
+
+1. **`architect` carries `Write`/`Edit`, so a lens consult sent to it is GATED** by the
+   `PreToolUse` register-check hook even when the prompt says "read-only": the dispatch must carry
+   the `Register check:` trail lines like an executor card. Twelve lenses launched in one message
+   went through; the architect's did not, and the fan-out lost one round-trip. Put the trail on
+   every card, whoever receives it — it is cheap and never wrong.
+2. **A card's option grading is a coordinator claim, and six lenses independently falsified one**
+   ("reuse `UnassignDeliveryFromPartner` — additive, GREEN"): the handler refuses a rider-held job,
+   the lifecycle table has no edge, the rule names the partner path. The briefing did its job — the
+   defect was banked before any code — but the antecedent rule
+   ([ADR-20260817-105845](../../adr/ADR-20260817-105845-a-dispatch-card-may-not-state-a-derived-number-without-its-antecedents.md))
+   applies to a *classification* as much as to a number: a card that grades an option GREEN names
+   the handler line and the lifecycle row it read, or marks the grade `UNVERIFIED`. The card also
+   attributed the step-4 carve-out to the wrong ADR (the grounds ADR, which never mentions it);
+   the architect caught it. Both are card defects, attribution: card, not roster width.
+
+The same briefing produced the first team decision by consent under
+[TEAM-DECIDES-OPTION-SPACES](../../decisions/TEAM-DECIDES-OPTION-SPACES.yaml)
+([ADR-20260904-015903](../../adr/ADR-20260904-015903-the-custody-doors-are-a-new-fact-a-rider-hands-a-job-back-with-the-food-s-whereabouts-and-the-read-models-fold-it.md)):
+thirteen answers, no lens naming a harm in the option taken, the two genuine splits (derive the
+food question vs ask it; OUT_FOR_DELIVERY in or out) resolved by the safer custody outcome and
+written into the ADR's Alternatives with the lens that held each side. Cost of the full-roster
+briefing: about 55 minutes wall-clock, all thirteen in parallel — cheaper than the round the
+falsified GREEN would have cost an executor.
+
