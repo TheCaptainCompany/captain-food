@@ -33,7 +33,7 @@ use application::queries::{
     PricingPolicyReadRepository, ProspectionReadRepository, ReadScope, RefundReadRepository,
     RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
-use domain::generated::scalars::{RiderId, RiderStanding};
+use domain::generated::scalars::{EmailAddress, RiderId, RiderStanding};
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCartRepository, PgCatalogRepository, PgCustomerRepository, PgDeliveryRepository,
@@ -213,7 +213,10 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             customer_credit,
             mailbox_lanes,
             service_window_horizon: Default::default(),
-            support_contact: None,
+            // #882 R2 addendum item 13: every OTHER fixture in the corpus threads `None` here —
+            // this is the ONE walk that actually reads `myStanding.contestContact` back, so it is
+            // the walk that must prove the configured value reaches the wire.
+            support_contact: Some(EmailAddress("support@captain.food".to_string())),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,
@@ -447,7 +450,7 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     // #639 part C step 4-ii (ADR-20260904-124600 §4/§5, card D): both dates non-null (the notice
     // shows BOTH even though V0 stamps them equal, ADR-081527 §5) and `heldDelivery` answers
     // through the NEW `held_by_rider` port (#879).
-    let my_standing = "query { myStanding { standing restriction { ground decidedAt effectiveAt } heldDelivery { id status } } }";
+    let my_standing = "query { myStanding { standing restriction { ground decidedAt effectiveAt } heldDelivery { id status } contestContact } }";
     let resp = schema
         .execute(async_graphql::Request::new(my_standing).data(acting(RequestRole::Rider)).data(restricted.clone()))
         .await;
@@ -459,6 +462,10 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     assert_ne!(data["myStanding"]["restriction"]["effectiveAt"], serde_json::Value::Null, "effectiveAt must be folded: {data:?}");
     assert_eq!(data["myStanding"]["heldDelivery"]["status"], "ASSIGNED");
     assert_eq!(data["myStanding"]["heldDelivery"]["id"], job_id.to_string());
+    // #882 R2 addendum item 13: `support_contact` threaded `Some(..)` through `ReadDeps` above —
+    // every other fixture in the corpus passes `None`, which never proves the binding reaches
+    // `myStanding.contestContact` at all.
+    assert_eq!(data["myStanding"]["contestContact"], "support@captain.food", "the configured SUPPORT_CONTACT must reach the wire: {data:?}");
 
     // 10) reinstateRider as ADMIN.
     let reinstate = format!(r#"mutation {{ reinstateRider(input: {{ riderId: "{rider_id}" }}) {{ messageId operationStatus }} }}"#);

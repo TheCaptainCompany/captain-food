@@ -515,6 +515,10 @@ mod tests {
     fn gated_rider_screens_name_the_door_and_nothing_else_does() {
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/"), Some("/sign-in"));
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/jobs/o-1"), Some("/sign-in"));
+        // #882 R2 addendum item 12: the `restricted` screen ITSELF is `requires_auth: true` with
+        // `unauthenticated: { navigate: /sign-in }` — a signed-out rider bounced here (an
+        // impossible state in practice, but the door names it all the same) resolves the SAME way.
+        assert_eq!(unauthenticated_redirect("riders.captain.food", "/restricted"), Some("/sign-in"));
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/sign-in"), None);
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/nope"), None);
         assert_eq!(unauthenticated_redirect("chez-test.captain.food", "/orders"), None);

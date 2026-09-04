@@ -69,6 +69,9 @@ rider.issue.pending:       { messages: { en: "Reported ✓ — the restaurant is
 # keeping every word either side. `en` is a faithful English rendering, not counsel-reviewed.
 rider.restricted.title:              { messages: { en: "Your access is restricted.", fr: "Votre accès est restreint." } }
 rider.restricted.no_more_jobs:       { messages: { en: "You will no longer receive deliveries.", fr: "Vous ne recevrez plus de courses." } }
+# #882 R2 item 2: a reinstated (ACTIVE) rider reaching /restricted (back-navigation, a stale $reload)
+# must never read the restricted notice — ADR-20260904-081527 §7 verbatim.
+rider.restricted.reinstated:         { messages: { en: "Your access has been restored.", fr: "Votre accès est rétabli." } }
 rider.restricted.ground_label:       { messages: { en: "Ground", fr: "Motif" } }
 rider.restricted.ground.rider_requested.lead:                { messages: { en: "At your request. You asked for your access to be restricted. To restore it, write to ", fr: "À votre demande. Vous avez demandé la restriction de votre accès. Pour le rétablir, écrivez à " } }
 rider.restricted.ground.rider_requested.trail:                { messages: { en: ".", fr: "." } }

@@ -53,7 +53,7 @@ types:
       heldDelivery: { $ref: '#/types/DeliveryJob', nullable: true }
       # #639 part C step 4-ii (ADR-20260904-124600 §4): the `/restricted` screen's ONE binding for
       # "how to contest" (ADR-20260904-014136 §6(ii)) — the `SUPPORT_CONTACT` configuration value,
-      # bound ONCE here (the 2c refusal-screen precedent, `crates/server/src/lib.rs:618-628,954`)
+      # bound ONCE here (the 2c refusal-screen precedent, `crates/server/src/lib.rs`)
       # so no translation string hard-codes the address. Nullable: the dev-only unconfigured case
       # (staging/production require it) renders the footer's leading/trailing sentence with no
       # address rather than a hard 500.

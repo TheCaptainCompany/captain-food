@@ -12998,12 +12998,7 @@ _Surface_ **`rider.yaml`**
 ┌──────────────────────────────────────────┐
 │ Your access is restricted.               │
 ├──────────────────────────────────────────┤
-│ back_button_header — Your access is res… │
-│ page_header — Your access is restricted. │
-│ text                                     │
 │ conditional_section                      │
-│ conditional_section                      │
-│ row                                      │
 └──────────────────────────────────────────┘
 ```
 
@@ -13424,6 +13419,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-issue-pending"></a>`rider.issue.pending` | — | Reported ✓ — the restaurant is being told… | Signalé ✓ — le restaurant est prévenu… |
 | <a id="translation-rider-restricted-title"></a>`rider.restricted.title` | — | Your access is restricted. | Votre accès est restreint. |
 | <a id="translation-rider-restricted-no_more_jobs"></a>`rider.restricted.no_more_jobs` | — | You will no longer receive deliveries. | Vous ne recevrez plus de courses. |
+| <a id="translation-rider-restricted-reinstated"></a>`rider.restricted.reinstated` | — | Your access has been restored. | Votre accès est rétabli. |
 | <a id="translation-rider-restricted-ground_label"></a>`rider.restricted.ground_label` | — | Ground | Motif |
 | <a id="translation-rider-restricted-ground-rider_requested-lead"></a>`rider.restricted.ground.rider_requested.lead` | — | At your request. You asked for your access to be restricted. To restore it, write to  | À votre demande. Vous avez demandé la restriction de votre accès. Pour le rétablir, écrivez à  |
 | <a id="translation-rider-restricted-ground-rider_requested-trail"></a>`rider.restricted.ground.rider_requested.trail` | — | . | . |

@@ -1651,6 +1651,10 @@
     "en": "You will no longer receive deliveries.",
     "fr": "Vous ne recevrez plus de courses."
   },
+  "rider.restricted.reinstated": {
+    "en": "Your access has been restored.",
+    "fr": "Votre accès est rétabli."
+  },
   "rider.restricted.title": {
     "en": "Your access is restricted.",
     "fr": "Votre accès est restreint."

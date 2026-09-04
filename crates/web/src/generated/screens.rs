@@ -897,8 +897,8 @@ pub mod rider {
             Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.job.handback_instruction_title")), ("visible_when", PropValue::Text("delivery.foodLocation == 'WITH_RIDER'"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.job.handback_done_body")), ("visible_when", PropValue::Text("delivery.foodLocation in ['NOT_COLLECTED', 'RETURNED_TO_RESTAURANT']"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("handback_back_to_jobs_btn")), ("label", PropValue::I18n("rider.job.back_to_jobs")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("delivery.foodLocation in ['NOT_COLLECTED', 'RETURNED_TO_RESTAURANT']")), ("action.type", PropValue::Text("navigate")), ("action.route", PropValue::Text("/"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("map_pin")), ("label", PropValue::I18n("rider.job.pickup")), ("value", PropValue::Binding("delivery.pickupAddress"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("home")), ("label", PropValue::I18n("rider.job.dropoff")), ("value", PropValue::Binding("delivery.dropoffAddress")), ("visible_when", PropValue::Text("delivery.foodLocation == null"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("map_pin")), ("label", PropValue::I18n("rider.job.pickup")), ("value", PropValue::Binding("delivery.pickupAddress | format_address"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("home")), ("label", PropValue::I18n("rider.job.dropoff")), ("value", PropValue::Binding("delivery.dropoffAddress | format_address")), ("visible_when", PropValue::Text("delivery.foodLocation == null"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("store")), ("label", PropValue::I18n("rider.job.restaurant")), ("value", PropValue::Binding("delivery.restaurant.displayName"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StickyBottomBar, props: &[("visible_when", PropValue::Text("delivery.foodLocation == null"))], children: &[
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("confirm_pickup_btn")), ("label", PropValue::I18n("rider.job.picked_up")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("confirm_pickup")), ("action.variables.deliveryJobId", PropValue::Binding("delivery.id"))], children: &[], branches: &[] },
@@ -920,54 +920,60 @@ pub mod rider {
             restricted_route: None,
             while_restricted: true,
             tree: &[
-            Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.restricted.title"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.title"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.no_more_jobs"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_attribution")), ("condition", PropValue::Text("standing.restriction != null"))], children: &[], branches: &[("if_true", &[
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground_label"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_rider_requested")), ("visible_when", PropValue::Text("standing.restriction.ground == 'RIDER_REQUESTED'"))], children: &[
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.rider_requested.lead"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_notice_or_reinstated")), ("condition", PropValue::Text("standing.standing == 'RESTRICTED'"))], children: &[], branches: &[("if_true", &[
+                Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.restricted.title"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.title"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.no_more_jobs"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_attribution")), ("condition", PropValue::Text("standing.restriction != null"))], children: &[], branches: &[("if_true", &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground_label"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_rider_requested")), ("visible_when", PropValue::Text("standing.restriction.ground == 'RIDER_REQUESTED'"))], children: &[
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.rider_requested.lead"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.rider_requested.trail"))], children: &[], branches: &[] }
+                    ], branches: &[] },
+                    Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_eligibility_document_lapsed")), ("visible_when", PropValue::Text("standing.restriction.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'"))], children: &[
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.eligibility_document_lapsed.lead"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.eligibility_document_lapsed.trail"))], children: &[], branches: &[] }
+                    ], branches: &[] },
+                    Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_identity_mismatch")), ("visible_when", PropValue::Text("standing.restriction.ground == 'IDENTITY_MISMATCH'"))], children: &[
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.identity_mismatch.lead"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.identity_mismatch.trail"))], children: &[], branches: &[] }
+                    ], branches: &[] },
+                    Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_account_compromise")), ("visible_when", PropValue::Text("standing.restriction.ground == 'ACCOUNT_COMPROMISE'"))], children: &[
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.account_compromise.lead"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.account_compromise.trail"))], children: &[], branches: &[] }
+                    ], branches: &[] },
+                    Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_unrecognised")), ("visible_when", PropValue::Text("standing.restriction.ground == null"))], children: &[
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.unrecognised.lead"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                        Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.unrecognised.trail"))], children: &[], branches: &[] }
+                    ], branches: &[] },
+                    Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("calendar")), ("label", PropValue::I18n("rider.restricted.decided_at_label")), ("value", PropValue::Binding("standing.restriction.decidedAt | format_datetime"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("calendar")), ("label", PropValue::I18n("rider.restricted.effective_at_label")), ("value", PropValue::Binding("standing.restriction.effectiveAt | format_datetime"))], children: &[], branches: &[] }
+                ] as &[Node]), ("if_false", &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.details_pending"))], children: &[], branches: &[] }
+                ] as &[Node])] },
+                Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_held_job")), ("condition", PropValue::Text("standing.heldDelivery != null"))], children: &[], branches: &[("if_true", &[
+                    Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.held_title"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("store")), ("label", PropValue::I18n("rider.job.restaurant")), ("value", PropValue::Binding("standing.heldDelivery.restaurant.displayName"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("map_pin")), ("label", PropValue::I18n("rider.job.pickup")), ("value", PropValue::Binding("standing.heldDelivery.pickupAddress | format_address"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.held_instruction")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation == null"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restricted_cannot_continue_btn")), ("label", PropValue::I18n("rider.issue.exit.hand_back")), ("variant", PropValue::Text("outline")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation == null")), ("action.type", PropValue::Text("open_bottom_sheet")), ("action.sheet_id", PropValue::Text("rider_restricted_handback_sheet"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.held_after")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation != null"))], children: &[], branches: &[] }
+                ] as &[Node])] },
+                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_contest"))], children: &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.contest.lead"))], children: &[], branches: &[] },
                     Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.rider_requested.trail"))], children: &[], branches: &[] }
-                ], branches: &[] },
-                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_eligibility_document_lapsed")), ("visible_when", PropValue::Text("standing.restriction.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'"))], children: &[
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.eligibility_document_lapsed.lead"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.eligibility_document_lapsed.trail"))], children: &[], branches: &[] }
-                ], branches: &[] },
-                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_identity_mismatch")), ("visible_when", PropValue::Text("standing.restriction.ground == 'IDENTITY_MISMATCH'"))], children: &[
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.identity_mismatch.lead"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.identity_mismatch.trail"))], children: &[], branches: &[] }
-                ], branches: &[] },
-                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_account_compromise")), ("visible_when", PropValue::Text("standing.restriction.ground == 'ACCOUNT_COMPROMISE'"))], children: &[
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.account_compromise.lead"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.account_compromise.trail"))], children: &[], branches: &[] }
-                ], branches: &[] },
-                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_unrecognised")), ("visible_when", PropValue::Text("standing.restriction.ground == null"))], children: &[
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.unrecognised.lead"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
-                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.unrecognised.trail"))], children: &[], branches: &[] }
-                ], branches: &[] },
-                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("calendar")), ("label", PropValue::I18n("rider.restricted.decided_at_label")), ("value", PropValue::Binding("standing.restriction.decidedAt | format_datetime"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("calendar")), ("label", PropValue::I18n("rider.restricted.effective_at_label")), ("value", PropValue::Binding("standing.restriction.effectiveAt | format_datetime"))], children: &[], branches: &[] }
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.contest.trail"))], children: &[], branches: &[] }
+                ], branches: &[] }
             ] as &[Node]), ("if_false", &[
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.details_pending"))], children: &[], branches: &[] }
-            ] as &[Node])] },
-            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_held_job")), ("condition", PropValue::Text("standing.heldDelivery != null"))], children: &[], branches: &[("if_true", &[
-                Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.held_title"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("store")), ("label", PropValue::I18n("rider.job.restaurant")), ("value", PropValue::Binding("standing.heldDelivery.restaurant.displayName"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("map_pin")), ("label", PropValue::I18n("rider.job.pickup")), ("value", PropValue::Binding("standing.heldDelivery.pickupAddress"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.held_instruction")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation == null"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restricted_cannot_continue_btn")), ("label", PropValue::I18n("rider.issue.exit.hand_back")), ("variant", PropValue::Text("outline")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation == null")), ("action.type", PropValue::Text("open_bottom_sheet")), ("action.sheet_id", PropValue::Text("rider_restricted_handback_sheet"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.held_after")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation != null"))], children: &[], branches: &[] }
-            ] as &[Node])] },
-            Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_contest"))], children: &[
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.contest.lead"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.contest.trail"))], children: &[], branches: &[] }
-            ], branches: &[] }
+                Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.restricted.reinstated"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.reinstated"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restricted_reinstated_back_to_jobs_btn")), ("label", PropValue::I18n("rider.job.back_to_jobs")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("navigate")), ("action.route", PropValue::Text("/"))], children: &[], branches: &[] }
+            ] as &[Node])] }
         ],
         },
     ];

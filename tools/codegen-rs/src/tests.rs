@@ -16750,6 +16750,35 @@ if_true:
             "a branch-only `order.restaurant.displayName` binding must sub-select the nav edge: {nav:?}"
         );
     }
+
+    /// #882 round-2 item 1a — the SAME defect class one level deeper: `standing.heldDelivery` is
+    /// a DECLARED PROPERTY of `RiderStandingInfo` (not itself a nav edge), so the OLD walk's
+    /// `prop_node(...).is_some() { continue }` stopped there and never sub-selected `restaurant`
+    /// nested INSIDE it — `StandingMine`'s selection carried `heldDelivery { …declared props… }`
+    /// with no `restaurant`, and the held-job card's restaurant name rendered empty in production
+    /// even though the §25 validator approved the binding. Real corpus, not a plant: `rider.yaml`'s
+    /// held-job card already binds `standing.heldDelivery.restaurant.displayName`.
+    #[test]
+    fn a_nav_edge_nested_inside_a_declared_property_is_sub_selected_under_that_property() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let (resolvers, _) = collect_web_data_layer(&model);
+        let sel = resolvers
+            .iter()
+            .find(|r| r.key == "standing.mine")
+            .and_then(|r| r.selection.clone())
+            .unwrap_or_else(|| panic!("resolver standing.mine has a selection"));
+        assert!(
+            sel.contains("heldDelivery { restaurant { displayName } }") || {
+                // Order-independent: the edge must be nested INSIDE `heldDelivery`'s own braces,
+                // not merely present anywhere in the document (which would also match a top-level
+                // `heldDelivery { restaurant { … } }` splice landing textually elsewhere).
+                let at = sel.find("heldDelivery {").unwrap_or(usize::MAX);
+                at != usize::MAX && sel[at..].contains("restaurant { displayName }")
+            },
+            "StandingMine's selection must sub-select `restaurant {{ displayName }}` UNDER `heldDelivery`: {sel}"
+        );
+    }
 }
 
 /// §2f-bis — `legalRetention:` and the deletion/retention gate (PROP-20260829-150752 §3.4).

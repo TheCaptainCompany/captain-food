@@ -231,9 +231,12 @@ CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
   `for_action: <action>` is where that action's REJECTED verdict renders, in the caller's language
   (the server localizes `Operation.message` from the row's typed context). Bindings support `|
   filter` suffixes on `{{ path | filter }}` (`crates/web/src/renderer.rs::binding_text`):
-  `format_currency` (Money objects) and, since 4-ii, `format_datetime` (a UTC instant string →
-  Europe/Paris, `fr` — "4 sept. 2026, 14:02"; the event/read model keep the UTC instant, this is
-  presentation-only).
+  `format_currency` (Money objects), `format_datetime` (a UTC instant string → Europe/Paris,
+  `fr` — "4 sept. 2026, 14:02"; the event/read model keep the UTC instant, this is presentation-
+  only) and `format_address` (an `Address` object → one display line, "12 rue de la Paix, 37000
+  Tours" — `line2` only when present, `country` never shown, V0 is Tours-only): an object bound
+  with NO filter falls through to `format_currency`'s Money-shaped read and silently renders "" —
+  the 4-ii round-2 defect this third filter closes (#882).
 - **specs/translations.yaml** (ADR-0033; sidecars ADR-20260722-101500) — SHARED UI i18n catalog,
   errors.yaml-style (dotted keys + typed `params` + `messages.en`/`fr`) for cross-surface
   strings (`common.*`) + future backend text; surface-specific strings live in co-located

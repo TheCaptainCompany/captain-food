@@ -297,6 +297,33 @@ pub(crate) fn collect_screen_nav_selections(
     let prop_node = |ty: &str, field: &str| -> Option<Value> {
         api_types?.get(ty)?.get("properties")?.get(field).cloned()
     };
+    // The bound leaf on a nav edge's target type: a scalar leaf selects by name; an object-typed
+    // leaf expands through the SAME `selection_fields` walk the base selection uses (bounded
+    // depth, cycle-guarded), so the two shapes cannot drift. `None` means nothing selectable
+    // survived — the caller omits the whole binding rather than emit an unexecutable bare object
+    // field (shared by both the direct `root.edge.leaf` case and the nested
+    // `root.property.edge.leaf` case below, #882 R2 item 1a).
+    let leaf_part = |target: &str, leaf: &str, depth: usize| -> Option<String> {
+        let node = prop_node(target, leaf)?;
+        let unwrapped = if node.get("type").and_then(|t| t.as_str()) == Some("array") {
+            node.get("items").cloned().unwrap_or(node.clone())
+        } else {
+            node.clone()
+        };
+        match unwrapped.get("$ref").and_then(|r| r.as_str()) {
+            None => Some(leaf.to_string()),
+            Some(rf) => match ref_target_file(rf, "api.yaml").as_deref() {
+                Some("scalars.yaml") | None => Some(leaf.to_string()),
+                Some(f) => match resolve_ref(model, rf, "api.yaml") {
+                    Some(t) if t.get("properties").is_some() => {
+                        let mut path_guard = vec![selection_ref_key(rf, "api.yaml")?];
+                        selection_fields(model, t, f, depth, &mut path_guard).map(|sub| format!("{leaf} {sub}"))
+                    }
+                    _ => Some(leaf.to_string()),
+                },
+            },
+        }
+    };
 
     let mut surfaces: Vec<&String> = model.defs.keys().filter(|k| k.starts_with("screens/")).collect();
     surfaces.sort();
@@ -330,8 +357,40 @@ pub(crate) fn collect_screen_nav_selections(
                 if segs.len() < 2 {
                     continue; // a nav USE is `root.edge.field…` — anything shorter is property land
                 }
-                if prop_node(type_name, segs[0]).is_some() {
-                    continue; // a declared property — the base selection already fetches it
+                if let Some(pnode) = prop_node(type_name, segs[0]) {
+                    // A declared property — the base selection already fetches ITS OWN declared
+                    // properties. But it never reaches a nav edge nested ONE level inside that
+                    // property (an edge is FK-derived, not in `properties`, so the base walk's
+                    // property-only recursion cannot see it either — #882 R2 item 1a,
+                    // `standing.heldDelivery.restaurant.displayName`: `heldDelivery` IS a declared
+                    // property of `RiderStandingInfo`, so the OLD code stopped here and the widget
+                    // rendered blank). Splice the edge under the PROPERTY's own field name —
+                    // GraphQL merges repeated selections on one field, so this composes with the
+                    // base walk's `heldDelivery { …declared props… }` rather than fighting it.
+                    if segs.len() == 3 {
+                        let unwrapped = if pnode.get("type").and_then(|t| t.as_str()) == Some("array") {
+                            pnode.get("items").cloned().unwrap_or(pnode.clone())
+                        } else {
+                            pnode.clone()
+                        };
+                        let Some(prop_rf) = unwrapped.get("$ref").and_then(|r| r.as_str()) else { continue };
+                        if ref_target_file(prop_rf, "api.yaml").as_deref() == Some("scalars.yaml") {
+                            continue; // a scalar property has no nav edges to nest
+                        }
+                        let Some(prop_type) = parse_ref(prop_rf).and_then(|p| p.path.last().cloned()) else { continue };
+                        let Some(nf2) = nav
+                            .get(prop_type.as_str())
+                            .and_then(|nfs| nfs.iter().find(|n| n.field == segs[1] && !n.list))
+                        else {
+                            continue; // segs[1] is not a nav edge on the property's type either
+                        };
+                        // depth-3: one level consumed by the property, one by the edge, matching
+                        // the direct-edge case's depth-2 (root consumes one, edge consumes one).
+                        let Some(part) = leaf_part(&nf2.target, segs[2], SELECTION_MAX_DEPTH - 3) else { continue };
+                        let nested = format!("{} {{ {} }}", nf2.field, part);
+                        out.entry(query.clone()).or_default().entry(segs[0].to_string()).or_default().insert(nested);
+                    }
+                    continue;
                 }
                 let Some(nf) = nav
                     .get(type_name.as_str())
@@ -339,38 +398,7 @@ pub(crate) fn collect_screen_nav_selections(
                 else {
                     continue; // not an edge either — §25's error, not a fetch concern
                 };
-                // The bound field on the edge's target type: a leaf selects by name; an object
-                // property expands through the SAME `selection_fields` walk the base selection
-                // uses (bounded depth, cycle-guarded) so the two shapes cannot drift.
-                let Some(node) = prop_node(&nf.target, segs[1]) else { continue };
-                let unwrapped = if node.get("type").and_then(|t| t.as_str()) == Some("array") {
-                    node.get("items").cloned().unwrap_or(node.clone())
-                } else {
-                    node.clone()
-                };
-                let part = match unwrapped.get("$ref").and_then(|r| r.as_str()) {
-                    None => segs[1].to_string(),
-                    Some(rf) => {
-                        let file = ref_target_file(rf, "api.yaml");
-                        match file.as_deref() {
-                            Some("scalars.yaml") | None => segs[1].to_string(),
-                            Some(f) => match resolve_ref(model, rf, "api.yaml") {
-                                Some(target) if target.get("properties").is_some() => {
-                                    let mut path_guard = match selection_ref_key(rf, "api.yaml") {
-                                        Some(k) => vec![k],
-                                        None => continue,
-                                    };
-                                    match selection_fields(model, target, f, SELECTION_MAX_DEPTH - 2, &mut path_guard)
-                                    {
-                                        Some(sub) => format!("{} {}", segs[1], sub),
-                                        None => continue, // nothing selectable — omit, never emit bare
-                                    }
-                                }
-                                _ => segs[1].to_string(),
-                            },
-                        }
-                    }
-                };
+                let Some(part) = leaf_part(&nf.target, segs[1], SELECTION_MAX_DEPTH - 2) else { continue };
                 out.entry(query.clone()).or_default().entry(nf.field.clone()).or_default().insert(part);
             }
         }
