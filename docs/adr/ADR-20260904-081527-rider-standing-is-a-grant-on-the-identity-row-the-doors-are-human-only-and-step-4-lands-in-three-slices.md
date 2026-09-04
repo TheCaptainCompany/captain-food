@@ -173,8 +173,11 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
    envelope); (ii) the `receives:` entries carry `requires: acting: { ADMIN: any }` with no
    `EXTERNAL` key, and a new validator rule `pm-sends-human-only-command` makes a `processmanager.yaml`
    that `sends` such a command a `make validate` ERROR — today a PM `send` of `RestrictRider`
-   validates clean, which is the mutant; (iii) a codegen test that no PM inbox `emits`
-   `RiderRestricted`. `ChangeRiderStatus.status` gets its own scalar **`RiderAvailabilityTarget
+   validates clean, which is the mutant; (iii) a companion validator rule
+   `pm-emits-human-only-event` (round 3, #639 part C step 4-i) makes a `processmanager.yaml`
+   `receives[].emits:` of `RiderRestricted`/`RiderReinstated` a `make validate` ERROR too — no PM
+   inbox may declare producing the RESULT of a human decision directly, bypassing the door that
+   `pm-sends-human-only-command` guards. `ChangeRiderStatus.status` gets its own scalar **`RiderAvailabilityTarget
    { OFFLINE, AVAILABLE, ON_DELIVERY }`** — one name, one scalar; the event keeps `RiderStatus` —
    so `SUSPENDED` is a GraphQL validation error at the door, not a handler check; the four
    `→ SUSPENDED` entry edges leave the lifecycle, `SUSPENDED → OFFLINE` stays as the exit for
@@ -292,7 +295,11 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
     **no `RestrictRider` runs on a production rider before 4-ii merges** — should production
     resume first, the door goes behind a refuse-at-door activation before the resume. Rollback of
     a wrong restriction is `ReinstateRider`, a new fact, never a row edit; the legacy `SUSPENDED`
-    rows are never turned into `RiderRestricted` with a fabricated ground.
+    rows are never turned into `RiderRestricted` with a fabricated ground. **A separate, BINARY
+    rollback** (deploying an older build, round 3 item 5, farley): after any binary rollback, reset
+    the `Rider` checkpoint on roll-forward — a `RiderRestricted` appended in the new-binary window
+    and skipped by the old, single-group arrangement's checkpoint is otherwise a standing GRANT,
+    silently, for exactly the rider it was meant to deny.
 12. **The durable notice is owed before the first production restriction, as its own issue.** The
     screen is pull-shaped: a rider who does not open the app is not *"provided"* a statement on the
     effective day, and step 5 cuts the socket. The rider record holds a phone and the OVHcloud SMS

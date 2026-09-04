@@ -234,8 +234,9 @@ Rider:
         - { $ref: 'errors.yaml#/RiderAccessRestricted' }
     # The human-only doors (#639 part C step 4-i, ADR-20260904-081527 §6, §8): `requires: acting:
     # { ADMIN: any }` — no EXTERNAL key, so no partner ACL can ever reach these; the validator rule
-    # `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of either an ERROR, and a
-    # codegen test asserts no PM inbox `emits` RiderRestricted.
+    # `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of either an ERROR, and
+    # the validator rule `pm-emits-human-only-event` makes a `receives[].emits:` of RiderRestricted
+    # (or RiderReinstated) an ERROR too — no PM inbox may declare either.
     - message: { $ref: 'commands.yaml#/RestrictRider' }
       requires:
         acting:

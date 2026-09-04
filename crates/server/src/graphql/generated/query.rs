@@ -173,7 +173,7 @@ impl QueryRoot {
             .ok_or_else(|| async_graphql::Error::new("delivery references an unknown restaurant"))?;
         Ok(Some(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon)))))
     }
-    /// The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any).
+    /// The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any). `Rider.standing` and `RiderRestriction` advance under TWO SEPARATE projector checkpoints (round 3 item 4, #639 part C step 4-i), so `standing: RESTRICTED` with `restriction: null` is a possible one-tick transient between the two catching up — a client renders that combination as "ground pending", never as an error or a stale-looking blank.
     #[graphql(name = "myStanding", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[RequestRole::Rider], \"myStanding\"))", visible = "visible_rider")]
     async fn my_standing(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<RiderStandingInfo> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded

@@ -1415,9 +1415,69 @@ pub(crate) fn validate(model: &Model) -> Report {
                 ));
             }
         }
+        // error-exemption-unjustified (#639 part C step 4-i round 3 item 1, ADR-0032):
+        // `noTestFixturePossible: true` must be DERIVED, never a bare per-item opt-in -- a hand-
+        // typed boolean any future error could set to silently escape a BLOCKING gate. The flag is
+        // legal ONLY on an error thrown (`throws:`) by a `receives:` entry whose COMMAND has at
+        // least one property whose scalar declares `readOnlyCatchAll` -- the one structural class
+        // (docs/claude/dsl.md "readOnlyCatchAll") a `tests.yaml` fixture can never spell, because
+        // the catch-all variant is excluded from the scalar's own `enum:` by construction
+        // (`test-invalid-enum-value` would reject the literal before a `thrown:` could even be
+        // asserted). Every other error must earn its coverage through `tests.yaml`, no exceptions.
+        fn command_has_catchall_property(model: &Model, command_name: &str) -> bool {
+            let Some(cmd) = model.defs.get("commands.yaml").and_then(|c| c.get(command_name)) else {
+                return false;
+            };
+            let Some(props) = cmd.get("properties").and_then(|p| p.as_mapping()) else {
+                return false;
+            };
+            props.values().any(|prop| {
+                prop.get("$ref")
+                    .and_then(|x| x.as_str())
+                    .and_then(|r| resolve_ref(model, r, "commands.yaml"))
+                    .is_some_and(|target| target.get("readOnlyCatchAll").is_some())
+            })
+        }
+        if let Some(Value::Mapping(errors_map)) = model.defs.get("errors.yaml") {
+            for (ek, edef) in errors_map {
+                let Some(ename) = ek.as_str() else { continue };
+                let exempt = edef.get("noTestFixturePossible").and_then(|v| v.as_bool()).unwrap_or(false);
+                if !exempt {
+                    continue;
+                }
+                // ALL, never ANY: an error co-thrown by even ONE ordinary command (no
+                // catch-all-bearing property) can be triggered through a normal path, so
+                // `tests.yaml` owes it real coverage -- co-occurrence on a SHARED throws: list with
+                // a catch-all command is not the same claim as "this error's only cause IS the
+                // catch-all decode". `RiderNotFound` is the corpus's own proof: RestrictRider
+                // throws it too (RestrictRider.ground IS catch-all-bearing), but UpdateRiderInfo/
+                // ChangeRiderStatus/ReinstateRider also throw it and carry no catch-all property at
+                // all, so it stays coverable and the flag would be wrong on it.
+                let throwing_entries: Vec<&InboxEntry> =
+                    inbox_entries.iter().filter(|e| e.is_command && e.throws.contains(ename)).collect();
+                let justified = !throwing_entries.is_empty()
+                    && throwing_entries.iter().all(|e| command_has_catchall_property(model, &e.message));
+                if !justified {
+                    issues.push(err(
+                        "error-exemption-unjustified",
+                        format!("errors.yaml/{}", ename),
+                        format!(
+                            "'{}' declares `noTestFixturePossible: true` but is not thrown by any command \
+                             whose properties include a `readOnlyCatchAll`-bearing scalar -- the exemption is \
+                             legal only for the catch-all class (#639 part C step 4-i round 3 item 1); a \
+                             hand-typed opt-in for any other error would silently escape `test-uncovered-error`, \
+                             a BLOCKING gate (ADR-0032).",
+                            ename
+                        ),
+                    ));
+                }
+            }
+        }
+
         for er in &t_throwable_errors {
             if !used_errors.contains(er) {
-                // #639 part C step 4-i round 2 item 5: an error whose ONLY trigger is a
+                // #639 part C step 4-i round 2 item 5 (round 3 item 1 derives the flag's legality
+                // above, `error-exemption-unjustified`): an error whose ONLY trigger is a
                 // readOnlyCatchAll decode value is structurally unspellable in any tests.yaml
                 // fixture (`test-invalid-enum-value` rejects the literal before a `thrown:` could
                 // even be asserted) -- errors.yaml may mark the item `noTestFixturePossible: true`

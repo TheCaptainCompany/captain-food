@@ -163,8 +163,16 @@ impl Guard for StandingGuard {
             return Ok(());
         }
         telemetry::meters::rider_restriction::denied(self.operation);
-        let correlation_id =
-            ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0.to_string()).unwrap_or_default();
+        // Round 3 item 2 (obs, reviewer): the NIL uuid, not an empty string, for an absent
+        // correlation id — the `generated/query.rs` shape (#451) — because `business.correlation_id`
+        // is `required: true`: an empty string is a value that satisfies the presence check while
+        // meaning nothing, the nil uuid says exactly "no request context" the same way it does on
+        // every other span in this file's family.
+        let correlation_id = ctx
+            .data_opt::<crate::graphql::session::RequestCorrelationId>()
+            .map(|c| c.0)
+            .unwrap_or(uuid::Uuid::nil())
+            .to_string();
         // Round 2 item 6(a): a REAL span now (never just a bare event) — the `rider-restriction`
         // contract's declared `business.operation`/`business.correlation_id` attributes are
         // genuinely populated here, and `rider_id` rides the #748 skip-trace pattern as a nested

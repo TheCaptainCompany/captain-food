@@ -59,7 +59,9 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > neither denied lint fired; 7m02s on the final from-clean run after `rm -rf target` cleared a
 > disk-pressure incident, see the operational-learnings paragraph below) · DB-gated (`DATABASE_URL` to a live
 > local Postgres, `DB_TESTS_REQUIRED=1`): `make test-crates` full workspace suite, isolated database
-> (`cf639`, the shared-Postgres collision below) — **1649 passed, 0 failed** (the 4 new tests below
+> (`cf639`, the shared-Postgres collision below) — **1649 passed, 0 failed, as of `72ed93ab`**
+> (round 2 landed 3 more atop this figure, round 3 none — see PR #875's later commits for the
+> current count) (the 4 new tests below
 > included) · `rider_projection.rs` — **7 passed**
 > (5 new: the standing fold, the legacy-SUSPENDED non-restriction, the replay-in-place mutant, the
 > unknown-ground tolerant decode, the pre-migration DEFAULT backfill); `rider_restricted_is_refused_on_the_write_half.rs`
@@ -96,7 +98,7 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > that decode fine through the TYPED behaviour-test harness but fail a real Postgres
 > JSONB→struct decode (`UUID parsing failed: invalid character: found 'o' at 0`) — substitute
 > real UUIDs for any UUID-scalar field before reusing a `tests.yaml` fixture verbatim in a
-> raw-event-append DB-gated test. Landed as two new rules in
+> raw-event-append DB-gated test. Landed in
 > [gates.md](../claude/sessions/gates.md) (item (3) and (4) above) in the same change.
 >
 > **Eight mutants, verbatim reds, all reverted (the codebase is currently GREEN)**:

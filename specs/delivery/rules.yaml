@@ -77,7 +77,7 @@ RestrictionTakesEffectWhenDecided:
   description: "V0: `effectiveAt == decidedAt`, both server-set, never in the past -- no admin-typed date, no clock term in the grant predicate (RIDER-REVOCATION-TTL, ADR-20260810-231300). The future scheduled form is designed, not shipped (#639 part C step 4-i, ADR-20260904-081527 §5)."
 
 RestrictRiderIsAHumanAct:
-  description: "RestrictRider/ReinstateRider are `roles: [ADMIN]` with `requires: acting: { ADMIN: any }` and no EXTERNAL key; no process manager may `send` either (validator `pm-sends-human-only-command`) and no PM inbox `emits` RiderRestricted (#639 part C step 4-i, ADR-20260904-081527 §6/§8)."
+  description: "RestrictRider/ReinstateRider are `roles: [ADMIN]` with `requires: acting: { ADMIN: any }` and no EXTERNAL key; no process manager may `send` either (validator `pm-sends-human-only-command`) and no PM inbox `emits` RiderRestricted (validator `pm-emits-human-only-event`) (#639 part C step 4-i, ADR-20260904-081527 §6/§8)."
 
 RiderAvailabilityNeverSpellsRestriction:
   description: "ChangeRiderStatus takes RiderAvailabilityTarget (OFFLINE/AVAILABLE/ON_DELIVERY) — SUSPENDED is unspellable at this door — and a restricted rider's ChangeRiderStatus -> AVAILABLE is rejected RiderAccessRestricted (#639 part C step 4-i, ADR-20260904-081527 §6)."

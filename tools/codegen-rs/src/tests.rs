@@ -18769,6 +18769,7 @@ mod while_restricted_gate {
             "api-while-restricted-mutation-derives-actor",
             "pm-sends-human-only-command",
             "pm-emits-human-only-event",
+            "error-exemption-unjustified",
         ] {
             let h = hits(&model, rule);
             assert!(h.is_empty(), "{rule}: {h:?}");
@@ -18873,6 +18874,43 @@ mod while_restricted_gate {
             .push(Value::Mapping(ev_ref));
         let h = hits(&model, "pm-emits-human-only-event");
         assert!(!h.is_empty(), "planting `emits: RiderRestricted` on a process manager must be refused: {h:?}");
+    }
+
+    fn error_mut<'a>(model: &'a mut Model, name: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut("errors.yaml")
+            .and_then(|v| v.get_mut(name))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("errors.yaml/{name} exists"))
+    }
+
+    /// Round-3 item 1(ii): `noTestFixturePossible: true` planted on `RiderNotFound` -- a error
+    /// thrown by ordinary commands with no `readOnlyCatchAll`-bearing property anywhere in their
+    /// input -- must be refused. Proves the flag cannot be hand-typed onto an arbitrary error to
+    /// escape `test-uncovered-error`.
+    #[test]
+    fn a_hand_typed_exemption_on_an_ordinary_error_is_refused() {
+        let mut model = real_model();
+        error_mut(&mut model, "RiderNotFound")
+            .insert(Value::from("noTestFixturePossible"), Value::from(true));
+        let h = hits(&model, "error-exemption-unjustified");
+        assert!(!h.is_empty(), "planting noTestFixturePossible on RiderNotFound must be refused: {h:?}");
+    }
+
+    /// Round-3 item 1(ii): removing the flag from `RiderRestrictionGroundUnrecognised` (the ONE
+    /// legitimate use, a command whose `ground` property's scalar declares `readOnlyCatchAll`)
+    /// must fall back to `test-uncovered-error` -- proving the exemption is load-bearing (the gate
+    /// still runs once the flag is gone) rather than the error being coverable some other way.
+    #[test]
+    fn removing_the_justified_exemption_falls_back_to_test_uncovered_error() {
+        let mut model = real_model();
+        error_mut(&mut model, "RiderRestrictionGroundUnrecognised").remove(Value::from("noTestFixturePossible"));
+        let h = hits(&model, "test-uncovered-error");
+        assert!(
+            h.iter().any(|m| m.contains("RiderRestrictionGroundUnrecognised")),
+            "removing the flag must surface test-uncovered-error again: {h:?}"
+        );
     }
 }
 

@@ -83,7 +83,7 @@ queries:
   # `ReadScope::Rider.id` — never the JWT `sub` (#869) — so the /restricted screen (4-ii) bootstraps
   # with no `orderId` in hand.
   myStanding:
-    description: "The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any)."
+    description: "The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any). `Rider.standing` and `RiderRestriction` advance under TWO SEPARATE projector checkpoints (round 3 item 4, #639 part C step 4-i), so `standing: RESTRICTED` with `restriction: null` is a possible one-tick transient between the two catching up — a client renders that combination as \"ground pending\", never as an error or a stale-looking blank."
     returns: { $ref: '#/types/RiderStandingInfo' }
     roles: [RIDER]
     whileRestricted: [RIDER]

@@ -103,6 +103,29 @@ invent a state the type does not have) — the exemption is a declared list the 
 consults by name, never a silent absence read as "must be fine". Validated in
 `tools/codegen-rs/src/validate/lifecycles.rs`.
 
+## `noTestFixturePossible:` — a DERIVED exemption from `test-uncovered-error` (#639 part C step 4-i round 3, ADR-0032)
+
+`noTestFixturePossible: true` is an optional key on an `errors.yaml` item. It exempts that error
+from the BLOCKING `test-uncovered-error` gate (§7c, ADR-0032: every throwable error needs a
+`tests.yaml` case asserting it in a `thrown:`) — but the flag is never a bare per-item opt-in a
+future error could set to escape the gate silently. It is **DERIVED**, checked by its own ERROR-level
+validator rule, `error-exemption-unjustified`
+(`tools/codegen-rs/src/validate/core.rs`): the flag is legal **only** when the error is thrown
+(`throws:`) by at least one `receives:` entry, and **every** `receives:` entry that throws it names a
+command with at least one property whose scalar declares `readOnlyCatchAll` (see above) — ALL, never
+ANY: an error co-thrown alongside a catch-all-bearing command by even ONE *other*, ordinary command
+is still coverable through a normal `tests.yaml` fixture and owes it real coverage; co-occurrence on
+a shared `throws:` list is not the same claim as "this error's only cause IS the catch-all decode".
+This is the exact class `readOnlyCatchAll` exists for: the catch-all variant is excluded from the
+scalar's own `enum:` by construction, so a `tests.yaml` fixture spelling it fails
+`test-invalid-enum-value` before a `thrown:` could even be asserted — the error is structurally
+unspellable through the door, not merely un-covered by oversight. A flag that passes derivation still
+needs a real proof: the error stays pinned by a named Rust unit test constructing the raw command
+from JSON (never a typed literal of the catch-all variant, and never `tests.yaml`). First and only
+use today: `errors.yaml#/RiderRestrictionGroundUnrecognised`, thrown solely by `RestrictRider`
+(`ground` declares `readOnlyCatchAll: UNRECOGNISED`), pinned by
+`crates/application/src/commands.rs::restrict_rider_unrecognised_ground_tests`.
+
 ## `whileRestricted:` — the standing carve-out grammar (#639 part C step 4-i, ADR-20260904-081527 §4)
 
 `whileRestricted: [ROLE]` is an optional key on an `api.yaml` query or mutation: a SUBSET of the
@@ -131,7 +154,10 @@ standing) stay orthogonal.
 A companion validator, `pm-sends-human-only-command`
 (`tools/codegen-rs/src/validate/pm_human_only.rs`), makes it an ERROR for any `processmanager.yaml`
 `sends:` to name a command whose `actors.yaml` `requires: acting` carries no `EXTERNAL` key — no
-saga may impersonate the human such a door requires.
+saga may impersonate the human such a door requires. Its EMITS complement, `pm-emits-human-only-event`
+(same file, round 3, #639 part C step 4-i), makes it an ERROR for any `processmanager.yaml`
+`receives[].emits:` to name an event produced only by such a command's door — no saga may declare
+producing the RESULT of a human decision directly, bypassing the door the `sends:` rule guards.
 
 ## `readOnlyCatchAll:` — a decode-tolerant enum variant (#639 part C step 4-i, ADR-20260904-081527 §3)
 

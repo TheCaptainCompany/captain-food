@@ -1917,7 +1917,7 @@ pub async fn reinstate_rider(store: &dyn EventStore, cmd: ReinstateRider, actor:
 // ================================================================================================
 #[cfg(test)]
 mod restrict_rider_unrecognised_ground_tests {
-    use super::{reject, restrict_rider, rejection_code};
+    use super::{restrict_rider, rejection_code};
     use crate::behaviour_support::actor;
     use crate::process_managers::test_support::MemStore;
     use domain::generated::commands::RestrictRider;
@@ -1938,9 +1938,12 @@ mod restrict_rider_unrecognised_ground_tests {
         let err = restrict_rider(&store, cmd, &actor(), chrono::Utc::now()).await.unwrap_err();
         assert_eq!(rejection_code(&err), Some("RiderRestrictionGroundUnrecognised"));
 
-        // The same rejection shape `reject()` builds everywhere else in this file (RiderId context).
-        let expected = reject("RiderRestrictionGroundUnrecognised", serde_json::json!({ "riderId": RiderId(rider_id) }));
-        assert_eq!(rejection_code(&expected), rejection_code(&err));
+        // Round 3 item 7 (beck): the rejection carries the SAME `riderId` context every other
+        // `reject()` call in this file builds (never a tautological code-vs-itself comparison).
+        let domain::shared::errors::DomainError::Rejected { context, .. } = &err else {
+            panic!("restrict_rider must build a typed Rejected error, got: {err:?}");
+        };
+        assert_eq!(context, &serde_json::json!({ "riderId": RiderId(rider_id) }));
     }
 }
 

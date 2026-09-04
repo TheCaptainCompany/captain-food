@@ -9266,7 +9266,7 @@ The delivery job of an order (tracking); owning customer, the restaurant/admin, 
 <a id="query-mystanding"></a>
 #### 🔎 Query: `myStanding`
 
-The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any).
+The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any). `Rider.standing` and `RiderRestriction` advance under TWO SEPARATE projector checkpoints (round 3 item 4, #639 part C step 4-i), so `standing: RESTRICTED` with `restriction: null` is a possible one-tick transient between the two catching up — a client renders that combination as "ground pending", never as an error or a stale-looking blank.
 
 - **Input**: _(none)_
 - **Returns**: [🧩 `RiderStandingInfo`](#type-riderstandinginfo) · **reads** [🗄️ `RiderRestriction`](#view-riderrestriction), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
@@ -10651,7 +10651,7 @@ _V0: `effectiveAt == decidedAt`, both server-set, never in the past -- no admin-
 <a id="rule-restrictriderisahumanact"></a>
 #### 📐 Rule: `RestrictRiderIsAHumanAct`
 
-_RestrictRider/ReinstateRider are `roles: [ADMIN]` with `requires: acting: { ADMIN: any }` and no EXTERNAL key; no process manager may `send` either (validator `pm-sends-human-only-command`) and no PM inbox `emits` RiderRestricted (#639 part C step 4-i, ADR-20260904-081527 §6/§8)._
+_RestrictRider/ReinstateRider are `roles: [ADMIN]` with `requires: acting: { ADMIN: any }` and no EXTERNAL key; no process manager may `send` either (validator `pm-sends-human-only-command`) and no PM inbox `emits` RiderRestricted (validator `pm-emits-human-only-event`) (#639 part C step 4-i, ADR-20260904-081527 §6/§8)._
 
 - **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted)
 

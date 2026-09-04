@@ -682,6 +682,11 @@ rider-restriction:
   criticality: high
   workflow:
     surface: graphql   # StandingGuard runs at the gateway boundary — no single command/saga/aggregate
+    # Round 3 item 4 (graphql, dba, young, reviewer, obs): `Rider.standing` (the `"Rider"`
+    # checkpoint) and `RiderRestriction` (its OWN checkpoint, round 2 item 7) advance
+    # INDEPENDENTLY, so `myStanding` can legitimately answer `standing: RESTRICTED` with
+    # `restriction: null` for the one tick between them — not a bug, a client-visible transient
+    # ("ground pending"), never rendered as an error.
 
   run_identity:
     - { name: correlation_id, source: "request.correlation_id", required: true }
@@ -715,14 +720,15 @@ rider-restriction:
     # as written (`drain_group` returns on a short page and the idle gate never re-records, so an
     # idle platform exports the pre-drain page length until the log next moves). True shape: the
     # pending page length at each scan — a lower bound capped at `batch_size` while draining,
-    # RE-RECORDED only when the log moves, and 0 only on the first scan that finds nothing. This is
-    # `drain_group`'s own shared, pre-existing behaviour (mirrored by `scope_membership_lag_positions`
-    # and `read_authorization::lag_positions` too) — not fixed here (architect-owned issue).
+    # RE-RECORDED only when the log moves, and 0 on every empty scan (each tick after the log
+    # moved). This is `drain_group`'s own shared, pre-existing behaviour (mirrored by
+    # `scope_membership_lag_positions` and `read_authorization::lag_positions` too) — not fixed
+    # here (architect-owned issue).
     - { name: "rider_standing_lag_positions", type: gauge, attributes: [] }
 
   status_rules:
     success:
-      required_spans: []   # no spans on this contract
+      required_spans: []   # opened only on a denial
 
   latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
   error_budget: { max_error_rate_pct: 0.1 }
