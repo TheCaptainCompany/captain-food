@@ -6153,35 +6153,81 @@ Catalog:
         assert!(hit.message.contains("restaurantId"), "{}", hit.message);
     }
 
+    /// Recursively find the FIRST `action: { type: <action_type>, … }` node anywhere under
+    /// `node` (screens are arbitrarily nested sections/sheets), returning the `action` mapping
+    /// itself so a test can mutate its `variables`. Mirrors the validator's own recursive screen
+    /// walk (`collect_screen_actions`) but for MUTATION rather than collection.
+    fn find_action_mut<'a>(node: &'a mut Value, action_type: &str) -> Option<&'a mut serde_yaml::Mapping> {
+        match node {
+            Value::Mapping(m) => {
+                let is_target =
+                    m.get("action").and_then(|a| a.get("type")).and_then(|t| t.as_str()) == Some(action_type);
+                if is_target {
+                    return m.get_mut("action").and_then(|a| a.as_mapping_mut());
+                }
+                for (_, v) in m.iter_mut() {
+                    if let Some(found) = find_action_mut(v, action_type) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            Value::Sequence(s) => {
+                for v in s.iter_mut() {
+                    if let Some(found) = find_action_mut(v, action_type) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     #[test]
     fn screen_actions_do_not_pass_undeclared_command_inputs() {
         // The write-side mirror of `resolver-unknown-arg`: a variable naming no property of the
         // command is dropped on the floor, while the spec reads as though the input were wired.
-        // The rider's Accept button is the case that earned it -- it passes `orderId`, which
-        // AcceptDelivery does not declare, and supplies neither of its required inputs.
+        // The rider's Accept button USED TO BE the real-corpus case that earned this rule (it
+        // passed `orderId`, which AcceptDelivery does not declare) -- #865 rebound it to
+        // `deliveryJobId` (the command's real, previously-missing required input), so the real
+        // corpus is clean now and the rule is proven on a PLANTED mutant instead.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        assert!(
+            !validate(&model).issues.iter().any(|i| i.rule == "action-unknown-input" && i.location.contains("accept_delivery")),
+            "the real corpus is clean since #865 rebound accept_delivery to deliveryJobId"
+        );
+
+        // RED: plant `orderId` back onto the accept_delivery action's variables.
         let mut model = load_model(&root.join("specs")).expect("load real specs");
+        let rider = model.defs.get_mut("screens/rider.yaml").expect("rider.yaml loads");
+        find_action_mut(rider, "accept_delivery")
+            .expect("accept_delivery action exists")
+            .entry(Value::from("variables"))
+            .or_insert_with(|| Value::Mapping(serde_yaml::Mapping::new()))
+            .as_mapping_mut()
+            .expect("variables is a mapping")
+            .insert(Value::from("orderId"), Value::from("{{ delivery.orderId }}"));
         assert!(
             validate(&model).issues.iter().any(|i| i.rule == "action-unknown-input"
                 && i.location.contains("accept_delivery")
                 && i.message.contains("orderId")),
-            "the rider accept action passes an undeclared `orderId` and must be flagged"
+            "an undeclared `orderId` variable must be flagged"
         );
 
-        // RED-to-GREEN: declaring `orderId` on AcceptDelivery clears exactly that finding, proving
-        // the rule reads the command rather than pattern-matching the variable name.
-        model
-            .defs
-            .get_mut("commands.yaml")
-            .and_then(|v| v.get_mut("AcceptDelivery"))
-            .and_then(|v| v.get_mut("properties"))
+        // GREEN: removing it clears exactly that finding, proving the rule reads the command
+        // rather than pattern-matching the variable name.
+        let rider = model.defs.get_mut("screens/rider.yaml").expect("rider.yaml loads");
+        find_action_mut(rider, "accept_delivery")
+            .expect("accept_delivery action exists")
+            .get_mut("variables")
             .and_then(|v| v.as_mapping_mut())
-            .expect("AcceptDelivery declares properties")
-            .insert(Value::from("orderId"), Value::from("placeholder"));
+            .expect("variables is a mapping")
+            .remove(Value::from("orderId"));
         assert!(
-            !validate(&model).issues.iter().any(|i| i.rule == "action-unknown-input"
-                && i.location.contains("accept_delivery")),
-            "declaring the property must clear the finding"
+            !validate(&model).issues.iter().any(|i| i.rule == "action-unknown-input" && i.location.contains("accept_delivery")),
+            "removing the undeclared variable must clear the finding"
         );
     }
 
