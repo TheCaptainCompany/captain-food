@@ -56,9 +56,11 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > --bin generate` — **409 passed, 0 failed** (new: `while_restricted_gate` module, 6 tests) ·
 > `cargo clippy -p server -p application -p infrastructure -p domain -p telemetry --all-targets --
 > -D clippy::disallowed-methods -D clippy::mistyped_literal_suffixes` — **exit 0** (warnings present,
-> neither denied lint fired), **31s** · DB-gated (`DATABASE_URL` to a live local Postgres,
-> `DB_TESTS_REQUIRED=1`): `make test-crates` full workspace suite, isolated database (`cf639`, the
-> shared-Postgres collision below) — **1645 passed, 0 failed** · `rider_projection.rs` — **7 passed**
+> neither denied lint fired; 7m02s on the final from-clean run after `rm -rf target` cleared a
+> disk-pressure incident, see the operational-learnings note) · DB-gated (`DATABASE_URL` to a live
+> local Postgres, `DB_TESTS_REQUIRED=1`): `make test-crates` full workspace suite, isolated database
+> (`cf639`, the shared-Postgres collision below) — **1649 passed, 0 failed** (the 4 new tests below
+> included) · `rider_projection.rs` — **7 passed**
 > (5 new: the standing fold, the legacy-SUSPENDED non-restriction, the replay-in-place mutant, the
 > unknown-ground tolerant decode, the pre-migration DEFAULT backfill); `rider_restricted_is_refused_on_the_write_half.rs`
 > (NEW) — **2 passed**; `rider_id_derived_at_the_door.rs` — **5 passed** (1 new: the SUSPENDED
