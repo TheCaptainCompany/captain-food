@@ -746,12 +746,12 @@ one carved query `myStanding`; **both dates** (ADR-20260904-014136 §6(ii)); the
 |   |                                                          |   |
 |   |  Rapportez la commande au restaurant.                    |   |
 |   |         [ Je ne peux pas continuer ]                     |   |
-|   |            -> rider_handback_sheet (handBackDelivery)    |   |
+|   |   -> rider_restricted_handback_sheet (standing.heldDelivery) |   |
 |   +----------------------------------------------------------+   |
 |                                                                  |
 |   Vous pouvez contester cette decision et demander son           |
-|   reexamen par une personne : support@captain.food               |
-|                                  [ copier l'adresse ]            |
+|   reexamen par une personne : <SUPPORT_CONTACT, bound once>       |
+|   (selectable text -- no copy button: a control with no listener) |
 +------------------------------------------------------------------+
 ```
 
