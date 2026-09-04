@@ -194,3 +194,94 @@ async fn delivery_lifecycle_events_serve_the_three_read_queries() {
     assert!(j.delivered_at.is_some(), "delivered_at set by DeliveryStatusUpdated=DELIVERED");
     assert!(j.rider_id.is_none(), "partner delivery carries no independent rider id");
 }
+
+/// #639 part C step 3-i (ADR-20260904-015903 §Decision 3/4): the issue door tells the restaurant
+/// THROUGH THE READ MODEL — `View_DeliveryJob.open_issue_kind` folds `DeliveryIssueReported.kind`
+/// and `DeliveryIssueResolved` clears it (the `derive:` grammar's explicit `null`). The view is a
+/// projection-on-read (no projector to run): appending the facts is the whole write side.
+///
+/// RED with no runtime change (#861's stand-in): the column does not exist in the APPLIED DDL,
+/// because `views.generated.sql` is applied by nothing — the test bed replays the real migration
+/// chain, so a regenerated view that never became a migration leaves this red. It stays red when
+/// the column is declared but the hand-written `CREATE OR REPLACE VIEW` migration (and its
+/// `include_str!` chain entry) is missing.
+#[tokio::test]
+async fn a_reported_issue_shows_on_the_board_and_a_resolution_clears_it() {
+    let Some(db) = crate::common::TestDb::acquire("delivery_read_model_issue").await else { return };
+    let pool = db.pool();
+
+    let (restaurant, order, job, rider) =
+        (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let t0 = Utc::now() - Duration::minutes(20);
+    let stream = format!("DeliveryJob-{job}");
+
+    append_event(
+        &pool,
+        &stream,
+        1,
+        "DeliveryRequested",
+        serde_json::json!({
+            "deliveryJobId": job, "orderId": order, "restaurantId": restaurant,
+            "pickup": address("1 rue de la Paix"), "dropoff": address("2 avenue Grammont"),
+        }),
+        t0,
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        2,
+        "DeliveryAcceptedByRider",
+        serde_json::json!({ "deliveryJobId": job, "orderId": order, "riderId": rider }),
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        3,
+        "DeliveryIssueReported",
+        serde_json::json!({ "deliveryJobId": job, "riderId": rider, "kind": "CUSTOMER_UNREACHABLE" }),
+        t0 + Duration::minutes(12),
+    )
+    .await;
+
+    let open_issue = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT open_issue_kind FROM view_deliveryjob WHERE delivery_job_id = $1",
+        )
+        .bind(job)
+        .fetch_one(&pool)
+        .await
+        .expect("View_DeliveryJob carries open_issue_kind (the 3-i view migration)")
+    };
+
+    assert_eq!(
+        open_issue(pool.clone()).await.as_deref(),
+        Some("CUSTOMER_UNREACHABLE"),
+        "the board must read the reported kind — a report nobody is told about is §7.2 again"
+    );
+
+    // The restaurant acknowledges it: the open issue clears (the fold's explicit `null` arm).
+    append_event(
+        &pool,
+        &stream,
+        4,
+        "DeliveryIssueResolved",
+        serde_json::json!({ "deliveryJobId": job, "resolution": "REASSIGNED" }),
+        t0 + Duration::minutes(15),
+    )
+    .await;
+    assert_eq!(
+        open_issue(pool.clone()).await,
+        None,
+        "DeliveryIssueResolved must clear open_issue_kind (derive: null → THEN NULL)"
+    );
+
+    // And the rest of the row is untouched by the issue facts: status stays ASSIGNED, the rider
+    // stays — 3-i never moves status (rules.yaml#/DeliveryIssueLifecycle).
+    let repo = PgDeliveryRepository::new(pool.clone());
+    let row = repo.by_order(OrderId(order)).await.expect("by_order").expect("row");
+    assert_eq!(row.status, DeliveryStatus::ASSIGNED);
+    assert_eq!(row.rider_id, Some(RiderId(rider)));
+}
