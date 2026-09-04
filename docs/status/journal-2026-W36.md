@@ -5,8 +5,10 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > **2026-09-04 — #639 part C step 3-ii, PR #870: review round 2 fixes (still draft, HOLD: human).**
 > Presentation on `3103dc42` (round 1's green hand-back): reviewer FAIL, checkpoint STOPs from
 > observability, ux and legal; vernon and young PASS on their own concerns. Round 2 of the 3-round
-> ceiling. `git diff --stat 3103dc42..HEAD`: 36 files changed, 501 insertions(+), 208 deletions(-)
-> (measured mid-fix, before the final gate commits below add their own small deltas).
+> ceiling. `git diff --stat 3103dc42..HEAD`: 41 files changed, 657 insertions(+), 210 deletions(-)
+> (final, three commits: the round-2 fix itself, the docs-only no-op merge of `origin/main` at
+> `cb13d171`, and one more `OrderTrackingRow` fixture site the DB gate caught that the earlier
+> `--lib` builds did not reach — `crates/server/tests/graphql_subscriptions.rs`).
 >
 > **BLOCKING, all fixed:**
 > 1. **The `Un problème` sheet rendered nothing after a chip pick** — `issue_exit.value` is a FORM
@@ -117,7 +119,17 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > - `make rust`'s own `check-drift` step read RED against `HEAD` on the first pass for the ordinary
 >   reason (this round's entire diff was still uncommitted) — committed, then re-ran clean (see the
 >   commit this entry lands in).
-> - DB suite: pending, this commit's own gate pass (recorded in the PR comment, not duplicated here).
+> - `bash tools/db-preflight.sh && DATABASE_URL=… DB_TESTS_REQUIRED=1 make test-crates`: full GREEN,
+>   205/205 `test result: ok` blocks, 0 failed anywhere, no `DB-GATED SUITES SKIPPED` line —
+>   07:40:43Z to 07:44:33Z, 3m 50s. Caught ONE more hand-written `OrderTrackingRow` fixture site
+>   (`crates/server/tests/graphql_subscriptions.rs`) the earlier `--lib`-only builds never reached
+>   (integration test binaries are not part of `--lib`); fixed in a follow-on commit.
+> - `cargo clippy -p web -p application -p infrastructure -p server -p domain -p captain-food-codegen
+>   --all-targets -- -D clippy::disallowed-methods` (the CI `lint` job's exact incantation, narrowed
+>   to touched crates for disk): 0 errors, 42.84s.
+> - `make rust` (the full validate+build+generate+diff+link-check gate): 07:36:24Z to 07:37:54Z,
+>   1m 30s, 0 errors, `check-drift` clean against the committed tree, link-check 8417 links / 458
+>   files, 0 broken.
 >
 > **Honest after-state, board card facts (item 8's own ask)**: the restaurant backoffice's pinned
 > `delivery_handback_card` (`restaurant_backoffice.yaml`) is SPEC-COMPLETE but its screen's OWN read
