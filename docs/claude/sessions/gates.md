@@ -1003,3 +1003,33 @@ is itself the argument: **a list that grows has no business stating its own leng
   environment (`ID="$ID" python3 - <<'PYEOF'`). Inspect `git diff` of every file such a script
   touched before trusting the assert that failed.
 
+## 19d. What the first lower-tier executor run (#864) taught the test bed
+
+- **A stored-shape change to an event a hand-folded aggregate constructs in its own `#[cfg(test)]`
+  block breaks COMPILATION of `crates/domain`, and only `make test-crates` sees it** — `make rust`
+  builds `tools/codegen-rs` only, so two full `make rust` passes stayed green while
+  `crates/domain/src/delivery_job.rs`'s fixture literals (`DeliveryIssueReported { issue: … }` with
+  no `kind`) were broken; the second `test-crates` run caught it. Before declaring a spec diff on an
+  event "safe", `grep -rn '<EventName> {' crates/domain/src/` and name the fixture files on the
+  card as expected structure reds.
+- **`crates/infrastructure/src/persistence/enum_sql.rs`'s per-enum `EnumText` impl is NOT
+  generated**: a new scalar used as a `View_*` TEXT column needs a manual `enum_text!(...)` line or
+  `infrastructure` fails to compile with `the trait bound … EnumText is not satisfied` — caught by
+  `cargo check -p infrastructure` / `test-crates`, never by `make validate` or `make rust`. A card
+  adding a nullable-enum view column names this file.
+- **`CREATE OR REPLACE VIEW` cannot insert a column before the emitter-trailing
+  `created_at`/`updated_at` pair** ("cannot change name of view column"): a view migration that adds
+  a column is `DROP VIEW IF EXISTS` + `CREATE VIEW` copied from the regenerated
+  `views.generated.sql`; precedent `migrations/20260730043100…`. Cite it on the card.
+- **A background gate chain's trailing housekeeping (an `ls` on a receipt file that legitimately does
+  not exist) makes the wrapper report a non-zero exit while every gate inside exited 0.** Read the
+  per-gate `exit=` lines in the log, never the wrapper's own status.
+- **`serde_yaml::Mapping::get` takes a `Value` key, not `&str`** — build `Value::String("from".into())`
+  in a validator's mapping walk; the type error is opaque until known.
+- **A coordinator docs push can turn `main` red for every open PR**: `tests::decision_ask_and_citations::gates_md_does_not_state_the_length_of_a_list_it_introduces`
+  reads THIS file and refuses a heading that states the count of the list it introduces ("Five
+  more…"). A docs-only edit under `docs/claude/sessions/` is read by codegen tests: run
+  `cargo test --manifest-path tools/codegen-rs/Cargo.toml --bin generate` (≈1 min) before pushing
+  it, or the next PR's merge ref inherits the red. Cost on 2026-09-04: one CI `build-test` red on
+  #864 attributed to the branch until the reviewer read the log.
+

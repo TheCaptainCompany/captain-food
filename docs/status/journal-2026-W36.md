@@ -194,6 +194,36 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > and friends), verified by `git diff --stat` naming only `tools/codegen-rs/**`, `specs/**`,
 > `crates/*/generated/**` and `crates/server/tests/**`.
 
+> **2026-09-04 — #864 merged: the first lower-tier executor PR passed its first reviewer pass; #865
+> briefed and claimed.** Step 3-i (`3b2614dc`, squash): the reviewer's ONE pass on `3b3a787a` returned
+> PASS with no BLOCKING finding attributable to the PR — **first-round PASS tally under
+> ADR-20260904-013450 §Decision 5: 1 of 1** (numerator/denominator as the ADR defines them; window
+> 10 PRs or 14 days from 2026-09-04). Triage: three NON-BLOCKING fixed in the PR (a `sheet.data`
+> binding the runtime cannot resolve; a gate never seen red — `view-derive-null-not-nullable` — given
+> its mutant; a metric named `DeliveryIssueRate` in two records that is `DeliveryIssue` /
+> `delivery_issue_rate`), two filed ([#865](https://github.com/TheCaptainCompany/captain-food/issues/865)
+> every rider write control is unsubmittable — `riderId` has no source on the rider surface, four
+> wide since #92, the 3-i `[Refuser]` made it five; [#866](https://github.com/TheCaptainCompany/captain-food/issues/866)
+> the `ratio` sub-grammar is not closed). The reviewer's reading of the tier: the diff is not
+> different in kind from #835–#854; what slipped is exactly holub's two classes — record accuracy
+> (an impossible green-SHA line, a metric name that does not exist, a relative link that broke a
+> gate) and one borderline fail-closed call resolved by accepting a warning rather than stopping.
+> **One CI red was the coordinator's**: a `gates.md` heading pushed to `main` ("Five more…") tripped
+> the codegen test that forbids a heading stating the length of its list, and #864's merge ref
+> inherited it — fixed on `main` (`b373901e`), rule in gates.md §19d. **#865 briefed** to five lenses
+> (a recorded decision, PROP-171500 D2, no option space; compact roster): consent on one input type
+> with `riderId` deleted and derived at the door from `ReadScope::Rider`, six mutations including
+> `changeRiderStatus` narrowed to `[RIDER]` (ADMIN's lifecycle path is step 4's `RestrictRider`),
+> ADMIN reports with the key absent. **Three card defects banked, attribution: card** — three of the
+> four rider controls also pass `orderId` and miss `deliveryJobId` (farley, from the validator log);
+> `changeRiderStatus` is a sixth rider-facing `riderId` input (beck); "the aggregate compare stays the
+> authority" is true for pickup and completion only — accept, decline, report and the status toggle
+> have no compare, so the seam is their only guard (vernon, farley), and the "actor-side
+> `requires.acting`" the card cited does not exist for riders (#144). Claimed as
+> [PR #867](https://github.com/TheCaptainCompany/captain-food/pull/867), executor on `sonnet`,
+> sequenced BEFORE 3-ii so `handBackDelivery` is born with a source. Adjacent, filed nowhere yet
+> (goes with #865's hand-back): `myDeliveries` still derives the rider from the claim, not the seam.
+
 > **2026-09-04 — #639 part C step 3-i landed on the branch: the issue doors, and the read model that tells the restaurant** ([PR #864 "#639 part C step 3-i: the issue doors (report, resolve, decline) and the read model that tells the restaurant"](https://github.com/TheCaptainCompany/captain-food/pull/864), `HOLD: human`, **executor tier: sonnet** — the first lower-tier PR under ADR-20260904-013450). Under [ADR-20260904-015903](../adr/ADR-20260904-015903-the-custody-doors-are-a-new-fact-a-rider-hands-a-job-back-with-the-food-s-whereabouts-and-the-read-models-fold-it.md) §4–§6. **Red first**: red SHA `c1417d46` (the fold test failed against the APPLIED DDL with Postgres 42703 `column "open_issue_kind" does not exist` — #861's stand-in, exactly as the card predicted; the two validator modules and the ACL/seam tests red beside it), green SHA `7b524d5f`; `git diff --stat c1417d46..7b524d5f`: 54 files changed, 1413 insertions(+), 105 deletions(-). **Per-gate wall-clock**: rust-build ~1s (cached in the final bundled run), rust-test ~80s (component sample; bundled below), validate ~1s, check-drift ~3s, test-crates 5m48s (348s), total 29m (1740s, run start to last gate). **The named mutant** (delete the `DeliveryIssueResolved: null` derive arm → regenerate → the migration re-copied from the regenerated SQL): the projection test went RED on its SECOND assertion (`assertion `left == right` failed: DeliveryIssueResolved must clear open_issue_kind (derive: null -> THEN NULL)
   left: Some("CUSTOMER_UNREACHABLE")
  right: None`) — and note the mutant reaches the test ONLY through the re-copy, because the applied DDL is the hand-written migration, not `views.generated.sql`: that gap is #861, observed live. **Warning surface**: `action-missing-required-input` 10→11 (`declineDelivery` requires `riderId`; the rider surface has no rider-identity root — the same hole accept/confirm/complete already sit in), `command-no-mutation` 11→8, `event-not-projected` 6→4; baseline refreshed in the same commit. **Card defects banked**: (1) the card says "run the projector" for `View_DeliveryJob` — it is a projection-on-read VIEW, there is no projector, appending the facts is the whole write side; (2) "a bare YAML null without the explicit form is an error" — a YAML `null` IS the explicit form the card's own A.5 spells, and serde cannot tell `key: null` from `key:`, so the test pins the class that was actually silent (any unrecognised arm value: a mapping without `from`, a number…) as `view-derive-value-unknown`, plus `view-derive-null-not-nullable`; (3) `CREATE OR REPLACE VIEW` alone cannot land the column — the emitter trails `created_at`/`updated_at`, so the migration must `DROP VIEW IF EXISTS` first (the 20260730043100 precedent); (4) the card's `reportDeliveryIssue { …, riderId, … }` binding cannot be sourced on the rider surface (verified: the resolvers are `deliveries.mine`/`delivery.byOrder`, `DeliveryJob` carries no `riderId`) — omitted (nullable on the command), banked as an adjacent finding. **Adjacent, for the architect (not fixed)**: the rider surface has no identity root, so every rider mutation that takes `riderId` from the payload is only partly wired from a screen; the ratio sub-grammar of `value:` is unvalidated below the op name (#484's machinery); `origin/main` moved to `d9e2e088` during the run (docs/claude/sessions.md) — not rebased, per protocol. Next: 3-ii.
