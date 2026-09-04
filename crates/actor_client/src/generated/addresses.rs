@@ -50,6 +50,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "EscalateDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "EscalateToAdmin" => Some(("Conversation", Some("orderId"), 5)),
         "GrantCustomerCredit" => Some(("CustomerCredit", Some("customerId"), 5)),
+        "HandBackDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "ImportCatalog" => Some(("Catalog", Some("catalogId"), 5)),
         "MarkOrderDelivered" => Some(("Order", Some("orderId"), 5)),
         "MarkOrderReady" => Some(("Order", Some("orderId"), 5)),

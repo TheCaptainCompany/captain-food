@@ -195,7 +195,13 @@ pub fn wire() -> HealthDto {
 /// `View_DeliveryJob` read repository SELECTs `open_issue_kind` on every `delivery` /
 /// `myDeliveries` / `restaurantDeliveries` read, so a build without the recreated view would fail
 /// every delivery read with `column "open_issue_kind" does not exist` (42703).
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904021500;
+///
+/// `20260904090000` = `ordertracking_delivery_handed_back` (#639 part C step 3-ii, review round 2
+/// on #870): the `OrderTrackingProjector` upserts `delivery_handed_back` on EVERY row it writes
+/// (`order_tracking_store::upsert`'s full 39-column list), so a build without the column would fail
+/// every Order-group projection with `column "delivery_handed_back" does not exist` (42703) — the
+/// whole customer tracking read model would stop updating, not just the handback banner.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904090000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -1245,6 +1251,16 @@ pub async fn router() -> Router {
                     infrastructure::mailbox::spawn_birth_gap_watch(
                         pool.clone(),
                         std::time::Duration::from_secs(30),
+                    );
+                    // #639 part C step 3-ii (ADR-20260904-015903 §8): THE CUSTODY-HANDBACK
+                    // dead-man's switch — "a rider handed a job back and nobody re-offered it".
+                    // UNCONDITIONAL, same reason as the two switches above: the gauge reads 0 on a
+                    // healthy system, so the only way to know it works is to have watched it work
+                    // before the day it is needed. Non-fenced (ADR-20260904-015903 §10) — beside
+                    // the offer-timeout worker below, never inside the fenced mailbox handler.
+                    infrastructure::spawn_delivery_handback_watch(
+                        pool.clone(),
+                        infrastructure::delivery_handback_watch::default_sweep_interval(),
                     );
 
                     // (The startup Stripe-fact backfill runs INLINE before the saga runner

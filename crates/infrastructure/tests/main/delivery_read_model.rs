@@ -9,8 +9,12 @@
 use application::queries::DeliveryReadRepository as _;
 use chrono::{Duration, Utc};
 use domain::generated::scalars::{DeliveryProvider, DeliveryStatus, OrderId, RestaurantId, RiderId};
-use infrastructure::PgDeliveryRepository;
+use infrastructure::{PgDeliveryRepository, ProjectionWorker};
 use sqlx::PgPool;
+
+fn money(cents: i64) -> serde_json::Value {
+    serde_json::json!({ "amountCents": cents, "currency": "EUR" })
+}
 
 async fn append_event(
     pool: &PgPool,
@@ -284,4 +288,229 @@ async fn a_reported_issue_shows_on_the_board_and_a_resolution_clears_it() {
     let row = repo.by_order(OrderId(order)).await.expect("by_order").expect("row");
     assert_eq!(row.status, DeliveryStatus::ASSIGNED);
     assert_eq!(row.rider_id, Some(RiderId(rider)));
+}
+
+/// #639 part C step 3-ii (ADR-20260904-015903 §1-3): a handback moves BOTH read models in the same
+/// slice — `View_DeliveryJob` (projection-on-read, no worker) AND `OrderTracking` (materialized,
+/// `ProjectionWorker`, hand-written `Compute` hook). RED with no runtime change until the migration
+/// lands: `food_location`/`handed_back_at` do not exist in the APPLIED DDL.
+#[tokio::test]
+async fn a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirror() {
+    let Some(db) = crate::common::TestDb::acquire("delivery_read_model_handback").await else { return };
+    let pool = db.pool();
+
+    let (restaurant, order, job, rider1, rider2) = (
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+    );
+    let t0 = Utc::now() - Duration::minutes(20);
+    let stream = format!("DeliveryJob-{job}");
+    let order_stream = format!("Order-{order}");
+
+    // The customer's order, so an OrderTracking mirror row exists to assert against.
+    append_event(
+        &pool,
+        &order_stream,
+        1,
+        "OrderPlaced",
+        serde_json::json!({
+            "orderId": order, "ref": "CF-0639", "restaurantId": restaurant,
+            "customerId": uuid::Uuid::new_v4(),
+            "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
+            "serviceType": "DELIVERY",
+            "items": [{ "offerId": uuid::Uuid::new_v4(), "name": "Margherita", "quantity": 1, "unitPrice": money(980), "lineTotal": money(980) }],
+            "totalAmount": money(1580),
+            "breakdown": {
+                "articles": money(980), "delivery": money(400), "serviceFee": money(200),
+                "total": money(1580), "restaurantContribution": money(160),
+                "restaurantPayout": money(820), "riderPayout": money(400), "captainNet": money(360)
+            },
+            "paymentIntentId": "pi_639",
+        }),
+        t0,
+    )
+    .await;
+
+    append_event(
+        &pool,
+        &stream,
+        1,
+        "DeliveryRequested",
+        serde_json::json!({
+            "deliveryJobId": job, "orderId": order, "restaurantId": restaurant,
+            "pickup": address("1 rue de la Paix"), "dropoff": address("2 avenue Grammont"),
+        }),
+        t0,
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        2,
+        "DeliveryAcceptedByRider",
+        serde_json::json!({ "deliveryJobId": job, "orderId": order, "riderId": rider1 }),
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        3,
+        "DeliveryPickedUp",
+        serde_json::json!({ "deliveryJobId": job, "orderId": order, "riderId": rider1 }),
+        t0 + Duration::minutes(5),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream,
+        4,
+        "DeliveryHandedBackByRider",
+        serde_json::json!({ "deliveryJobId": job, "orderId": order, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
+        t0 + Duration::minutes(9),
+    )
+    .await;
+
+    let repo = PgDeliveryRepository::new(pool.clone());
+    let row = repo.by_order(OrderId(order)).await.expect("by_order").expect("row exists");
+    assert_eq!(row.status, DeliveryStatus::PENDING, "PENDING unless WITH_RIDER — this is RETURNED_TO_RESTAURANT");
+    assert_eq!(row.rider_id, None, "the fold-reset proof: rider_id clears on a handback");
+    assert_eq!(row.provider, None, "provider clears too — the job is unassigned again");
+    assert_eq!(
+        row.food_location.map(|f| format!("{f:?}")).as_deref(),
+        Some("RETURNED_TO_RESTAURANT"),
+        "the custody fact itself"
+    );
+    assert!(row.handed_back_at.is_some());
+
+    // The old rider no longer holds it: the ASSIGNED-filtered view excludes it. A DIFFERENT rider
+    // sees it in the available pool (PENDING filter includes it) — a second courier CAN pick it up.
+    let old_riders_assigned = repo.for_rider(RiderId(rider1), Some(DeliveryStatus::ASSIGNED)).await.expect("for_rider");
+    assert!(
+        !old_riders_assigned.iter().any(|j| j.delivery_job_id.0 == job),
+        "the old rider's ASSIGNED view must not list a job it handed back"
+    );
+    let new_riders_pool = repo.for_rider(RiderId(rider2), Some(DeliveryStatus::PENDING)).await.expect("for_rider");
+    assert!(
+        new_riders_pool.iter().any(|j| j.delivery_job_id.0 == job),
+        "a different rider's available pool must offer the re-offered job"
+    );
+    // Review round 2 on #870, correcting an earlier claim: `for_rider`'s own WHERE clause is
+    // `(rider_id = $1 OR (status = 'PENDING' AND rider_id IS NULL))` — the SECOND arm is every
+    // rider's pool, unfiltered by identity. So the UNFILTERED myDeliveries shape (`status: None`,
+    // the actual GraphQL query's default) does NOT drop this job for the OLD rider either — it is
+    // TRUE only for a job that goes FAILED (WITH_RIDER; see the twin below), never for PENDING. What
+    // the fold actually proves is `rider_id IS NULL`: the row is unattributed, not gone.
+    let old_riders_unfiltered = repo.for_rider(RiderId(rider1), None).await.expect("for_rider (unfiltered myDeliveries)");
+    let old_riders_view_of_job = old_riders_unfiltered
+        .iter()
+        .find(|j| j.delivery_job_id.0 == job)
+        .expect("the handed-back PENDING job is still visible in the OLD rider's unfiltered myDeliveries — it is everyone's pool now, not gone");
+    assert_eq!(old_riders_view_of_job.rider_id, None, "unattributed, not the old rider's — that is the actual guarantee, not absence");
+
+    // The customer's OrderTracking mirror (application-layer projector, hand-written Compute hook —
+    // NOT the derive: grammar, since this column is Complex-classified, `OrderTrackingCompute::
+    // delivery_status`/`courier`): delivery_status PENDING, courier reset to null.
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (handback slice)");
+    let (delivery_status, courier, delivery_handed_back): (Option<String>, Option<serde_json::Value>, bool) =
+        sqlx::query_as("SELECT delivery_status, courier, delivery_handed_back FROM ordertracking WHERE order_id = $1")
+            .bind(order)
+            .fetch_one(&pool)
+            .await
+            .expect("order tracking row");
+    assert_eq!(delivery_status.as_deref(), Some("PENDING"), "the customer's mirror moves too");
+    assert!(courier.is_none(), "courier resets — the job is unassigned again");
+    assert!(delivery_handed_back, "review round 2 on #870: the banner's own flag, set on ANY handback regardless of foodLocation");
+
+    // The WITH_RIDER twin: from PICKED_UP, WITH_RIDER fails the job closed rather than re-offer it.
+    // Review round 2 on #870 (young: a mutant collapsing the Compute arm to PENDING survived):
+    // this twin now also carries an OrderPlaced (so its OrderTracking mirror row exists) and asserts
+    // `delivery_status = FAILED` there too — the two READ MODELS (View_DeliveryJob's projection-on-read
+    // `row2.status` below, and OrderTracking's materialized `Compute` hook) must agree, and only
+    // asserting the former let a Compute-arm regression through silently.
+    let job2 = uuid::Uuid::new_v4();
+    let stream2 = format!("DeliveryJob-{job2}");
+    let order2 = uuid::Uuid::new_v4();
+    let order2_stream = format!("Order-{order2}");
+    append_event(
+        &pool,
+        &order2_stream,
+        1,
+        "OrderPlaced",
+        serde_json::json!({
+            "orderId": order2, "ref": "CF-0639B", "restaurantId": restaurant,
+            "customerId": uuid::Uuid::new_v4(),
+            "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
+            "serviceType": "DELIVERY",
+            "items": [{ "offerId": uuid::Uuid::new_v4(), "name": "Margherita", "quantity": 1, "unitPrice": money(980), "lineTotal": money(980) }],
+            "totalAmount": money(1580),
+            "breakdown": {
+                "articles": money(980), "delivery": money(400), "serviceFee": money(200),
+                "total": money(1580), "restaurantContribution": money(160),
+                "restaurantPayout": money(820), "riderPayout": money(400), "captainNet": money(360)
+            },
+            "paymentIntentId": "pi_639b",
+        }),
+        t0,
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream2,
+        1,
+        "DeliveryRequested",
+        serde_json::json!({
+            "deliveryJobId": job2, "orderId": order2, "restaurantId": restaurant,
+            "pickup": address("1 rue de la Paix"), "dropoff": address("5 rue Nationale"),
+        }),
+        t0,
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream2,
+        2,
+        "DeliveryAcceptedByRider",
+        serde_json::json!({ "deliveryJobId": job2, "orderId": order2, "riderId": rider1 }),
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream2,
+        3,
+        "DeliveryPickedUp",
+        serde_json::json!({ "deliveryJobId": job2, "orderId": order2, "riderId": rider1 }),
+        t0 + Duration::minutes(5),
+    )
+    .await;
+    append_event(
+        &pool,
+        &stream2,
+        4,
+        "DeliveryHandedBackByRider",
+        serde_json::json!({ "deliveryJobId": job2, "orderId": order2, "riderId": rider1, "foodLocation": "WITH_RIDER" }),
+        t0 + Duration::minutes(9),
+    )
+    .await;
+    let row2 = repo.by_order(OrderId(order2)).await.expect("by_order").expect("row exists");
+    assert_eq!(row2.status, DeliveryStatus::FAILED, "WITH_RIDER fails closed — never re-offered while the food is still in a restricted rider's bag");
+    assert_eq!(row2.rider_id, None);
+    assert_eq!(
+        row2.food_location.map(|f| format!("{f:?}")).as_deref(),
+        Some("WITH_RIDER")
+    );
+
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (WITH_RIDER twin)");
+    let (delivery_status2, delivery_handed_back2): (Option<String>, bool) =
+        sqlx::query_as("SELECT delivery_status, delivery_handed_back FROM ordertracking WHERE order_id = $1")
+            .bind(order2)
+            .fetch_one(&pool)
+            .await
+            .expect("order tracking row (WITH_RIDER twin)");
+    assert_eq!(delivery_status2.as_deref(), Some("FAILED"), "the customer's mirror agrees with the board: WITH_RIDER fails closed here too");
+    assert!(delivery_handed_back2, "the banner's flag is set regardless of which foodLocation the handback carries");
 }

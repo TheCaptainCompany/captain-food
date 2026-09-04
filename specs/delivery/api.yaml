@@ -26,6 +26,10 @@ types:
       # #639 part C step 3-i: the open issue's kind, folded from DeliveryIssueReported and cleared
       # by DeliveryIssueResolved — the board's pinned card and the rider's "Problème signalé" chip.
       openIssue: { $ref: 'scalars.yaml#/DeliveryIssueKind', nullable: true }
+      # #639 part C step 3-ii: where the food is, folded from DeliveryHandedBackByRider — the
+      # board's pinned handback card headline and the customer tracking banner's predicate.
+      foodLocation: { $ref: 'scalars.yaml#/FoodCustody', nullable: true }
+      handedBackAt: { type: string, format: date-time, nullable: true }
 
 
   DeliveryPartnerAvailability:
@@ -148,6 +152,15 @@ mutations:
   declineDelivery:
     command: { $ref: 'commands.yaml#/DeclineDelivery' }
     roles: [RIDER]   # refuse a PENDING offer; the job stays PENDING and re-offerable (a fold no-op)
+    derived: { riderId: rider }
+    slice: V0
+
+  # #639 part C step 3-ii, ADR-20260904-015903 §1/§5/§6: the second door in the restricted-rider's
+  # carve-out (with reportDeliveryIssue, 3-i) — revocation of ACCESS is not release of CUSTODY. The
+  # input never carries riderId (#865 grammar): the resolver injects it from ReadScope::Rider.
+  handBackDelivery:
+    command: { $ref: 'commands.yaml#/HandBackDelivery' }
+    roles: [RIDER]
     derived: { riderId: rider }
     slice: V0
 

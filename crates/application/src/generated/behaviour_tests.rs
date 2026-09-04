@@ -547,6 +547,11 @@ fn fx_delivery_accepted_by_rider() -> DomainEvent {
     DomainEvent::DeliveryAcceptedByRider(evs::DeliveryAcceptedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")) })
 }
 
+/// tests.yaml#/fixtures/deliveryAcceptedByRider2 — events.yaml#/DeliveryAcceptedByRider
+fn fx_delivery_accepted_by_rider2() -> DomainEvent {
+    DomainEvent::DeliveryAcceptedByRider(evs::DeliveryAcceptedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-2")) })
+}
+
 /// tests.yaml#/fixtures/deliveryPickedUp — events.yaml#/DeliveryPickedUp
 fn fx_delivery_picked_up() -> DomainEvent {
     DomainEvent::DeliveryPickedUp(evs::DeliveryPickedUp { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), at: None })
@@ -605,6 +610,21 @@ fn fx_delivery_unassigned_from_partner() -> DomainEvent {
 /// tests.yaml#/fixtures/deliveryDeclinedByRider — events.yaml#/DeliveryDeclinedByRider
 fn fx_delivery_declined_by_rider() -> DomainEvent {
     DomainEvent::DeliveryDeclinedByRider(evs::DeliveryDeclinedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), reason: Some("Too far".to_string()) })
+}
+
+/// tests.yaml#/fixtures/deliveryHandedBackNotCollected — events.yaml#/DeliveryHandedBackByRider
+fn fx_delivery_handed_back_not_collected() -> DomainEvent {
+    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::NOT_COLLECTED })
+}
+
+/// tests.yaml#/fixtures/deliveryHandedBackReturnedToRestaurant — events.yaml#/DeliveryHandedBackByRider
+fn fx_delivery_handed_back_returned_to_restaurant() -> DomainEvent {
+    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::RETURNED_TO_RESTAURANT })
+}
+
+/// tests.yaml#/fixtures/deliveryHandedBackWithRider — events.yaml#/DeliveryHandedBackByRider
+fn fx_delivery_handed_back_with_rider() -> DomainEvent {
+    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::WITH_RIDER })
 }
 
 /// tests.yaml#/fixtures/deliveryIssueReported — events.yaml#/DeliveryIssueReported
@@ -3988,6 +4008,160 @@ async fn test_delivery_declined_by_rider() {
     bed.assert_appended("TestDeliveryDeclinedByRider", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_declined_by_rider()),
     ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryHandedBackFromAssigned — "The assigned rider hands the job back before pickup; it returns PENDING (NOT_COLLECTED)"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_delivery_handed_back_from_assigned() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::NOT_COLLECTED };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryHandedBackFromAssigned: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryHandedBackFromAssigned", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_handed_back_not_collected()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryHandedBackFromPickedUpReturned — "A rider who collected hands the job back to the restaurant; it returns PENDING (re-offerable)"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_delivery_handed_back_from_picked_up_returned() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::RETURNED_TO_RESTAURANT };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryHandedBackFromPickedUpReturned: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryHandedBackFromPickedUpReturned", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_handed_back_returned_to_restaurant()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryHandedBackFromPickedUpWithRider — "A rider still holding the food hands the job back; it FAILS rather than re-offer"
+/// rules: DeliveryHandBackKeepsCustodyHonest, HandBackIsNeverALever
+#[tokio::test]
+async fn test_delivery_handed_back_from_picked_up_with_rider() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::WITH_RIDER };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryHandedBackFromPickedUpWithRider: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryHandedBackFromPickedUpWithRider", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_handed_back_with_rider()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryReofferedAfterHandBack — "A job handed back is accepted again by a different rider"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_delivery_reoffered_after_hand_back() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up(), fx_delivery_handed_back_returned_to_restaurant()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::AcceptDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-2")) };
+    let result = crate::commands::accept_delivery(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestDeliveryReofferedAfterHandBack: the spec expects acceptance");
+    bed.assert_appended("TestDeliveryReofferedAfterHandBack", &before, &[
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_accepted_by_rider2()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestHandBackDeliveryRejectsRiderMismatch — "A rider who does not hold the job cannot hand it back"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_hand_back_delivery_rejects_rider_mismatch() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-2")), food_location: sc::FoodCustody::NOT_COLLECTED };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestHandBackDeliveryRejectsRiderMismatch: the spec expects a typed rejection");
+    support::assert_thrown("TestHandBackDeliveryRejectsRiderMismatch", &err, &["DeliveryAlreadyAssigned"]);
+    bed.assert_appended("TestHandBackDeliveryRejectsRiderMismatch", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestHandBackDeliveryRejectsPendingJob — "A PENDING job (never assigned) cannot be handed back"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_hand_back_delivery_rejects_pending_job() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::NOT_COLLECTED };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestHandBackDeliveryRejectsPendingJob: the spec expects a typed rejection");
+    support::assert_thrown("TestHandBackDeliveryRejectsPendingJob", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestHandBackDeliveryRejectsPendingJob", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestHandBackDeliveryRejectsDeliveredJob — "A DELIVERED job cannot be handed back"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_hand_back_delivery_rejects_delivered_job() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up(), fx_delivery_completed()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::RETURNED_TO_RESTAURANT };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestHandBackDeliveryRejectsDeliveredJob: the spec expects a typed rejection");
+    support::assert_thrown("TestHandBackDeliveryRejectsDeliveredJob", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestHandBackDeliveryRejectsDeliveredJob", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestHandBackDeliveryRejectsAssignedWithRider — "From ASSIGNED, foodLocation WITH_RIDER is refused — the rider never picked up yet"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_hand_back_delivery_rejects_assigned_with_rider() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::WITH_RIDER };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestHandBackDeliveryRejectsAssignedWithRider: the spec expects a typed rejection");
+    support::assert_thrown("TestHandBackDeliveryRejectsAssignedWithRider", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestHandBackDeliveryRejectsAssignedWithRider", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestHandBackDeliveryRejectsPartnerHeldJob — "A partner-held job cannot be handed back — UnassignDeliveryFromPartner is that door"
+/// rules: DeliveryHandBackKeepsCustodyHonest
+#[tokio::test]
+async fn test_hand_back_delivery_rejects_partner_held_job() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_partner()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::HandBackDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::NOT_COLLECTED };
+    let result = crate::commands::hand_back_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestHandBackDeliveryRejectsPartnerHeldJob: the spec expects a typed rejection");
+    support::assert_thrown("TestHandBackDeliveryRejectsPartnerHeldJob", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestHandBackDeliveryRejectsPartnerHeldJob", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestUnassignDeliveryFromPartnerRejectsRiderHeldJob — "A rider-accepted job cannot be unassigned as if it were partner-held"
+/// rules: DeliveryPartnerAssignmentLifecycle
+#[tokio::test]
+async fn test_unassign_delivery_from_partner_rejects_rider_held_job() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::UnassignDeliveryFromPartner { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), reason: Some("Re-offering to another channel".to_string()) };
+    let result = crate::commands::unassign_delivery_from_partner(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestUnassignDeliveryFromPartnerRejectsRiderHeldJob: the spec expects a typed rejection");
+    support::assert_thrown("TestUnassignDeliveryFromPartnerRejectsRiderHeldJob", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestUnassignDeliveryFromPartnerRejectsRiderHeldJob", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestDeliveryIssueReported — "An issue is reported by kind on a non-delivered job; the job's status does not move"

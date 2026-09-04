@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3658,
+  "recordedAt": "2026-09-04T07:47:32.053Z",
+  "branch": "639-staff-auth-custody-handback",
+  "note": "review round 2 on #870: sheet router fix, banner predicate fix (new column+migration+emitter template patch), observability contract fixes, 5 non-blocking items, three gates (validate/make rust/DB test-crates), clippy narrowed"
+}

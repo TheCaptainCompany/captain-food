@@ -759,6 +759,10 @@ pub struct DeliveryJob {
     pub delivered_at: Option<chrono::DateTime<chrono::Utc>>,
     #[graphql(name = "openIssue")]
     pub open_issue: Option<DeliveryIssueKind>,
+    #[graphql(name = "foodLocation")]
+    pub food_location: Option<FoodCustody>,
+    #[graphql(name = "handedBackAt")]
+    pub handed_back_at: Option<chrono::DateTime<chrono::Utc>>,
     #[graphql(name = "order")]
     pub order: Order,
     #[graphql(name = "restaurant")]
@@ -983,6 +987,8 @@ pub struct Order {
     pub courier: Option<Courier>,
     #[graphql(name = "estimatedDropoffAt")]
     pub estimated_dropoff_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "deliveryHandedBack")]
+    pub delivery_handed_back: bool,
     #[graphql(name = "ratedAt")]
     pub rated_at: Option<chrono::DateTime<chrono::Utc>>,
     #[graphql(name = "deliveryJobs", guard = "super::acl::RoleGuard::new(super::acl::ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "super::acl::visible_restaurant_account_restaurant_rider_admin")]
@@ -1323,6 +1329,7 @@ impl From<(OrderTrackingRow, Restaurant)> for Order {
             delivery_status: row.delivery_status.map(Into::into),
             courier: row.courier.and_then(|v| serde_json::from_value(v).ok()),
             estimated_dropoff_at: row.estimated_dropoff_at,
+            delivery_handed_back: row.delivery_handed_back,
             rated_at: row.rated_at,
             delivery_jobs: Vec::new(),
             restaurant,
@@ -1387,6 +1394,8 @@ impl From<(DeliveryJobRow, OrderTrackingRow, Restaurant)> for DeliveryJob {
             picked_up_at: row.picked_up_at,
             delivered_at: row.delivered_at,
             open_issue: row.open_issue_kind.map(Into::into),
+            food_location: row.food_location.map(Into::into),
+            handed_back_at: row.handed_back_at,
             order: (order, restaurant.clone()).into(),
             restaurant,
         }

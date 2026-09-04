@@ -457,6 +457,45 @@ pub mod birth_gap {
     }
 }
 
+/// `custody-handback` contract (#639 part C step 3-ii, ADR-20260904-015903 §8) — mirrors
+/// [`birth_gap`]'s shape for the ONE class here: a delivery job whose latest lifecycle fact is a
+/// handback (`DeliveryHandedBackByRider`) with no LATER acceptance re-offering it. No `reason`
+/// attribute (unlike `birth_gap`'s three-member set) — there is exactly one thing this gauge
+/// answers. Emitted by `crates/infrastructure/src/integrations/delivery_handback_watch.rs`, a
+/// non-fenced timer worker beside `delivery_offer_timeout_worker`.
+pub mod custody_handback {
+    use super::*;
+
+    fn unreassigned_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_gauge(metric::DELIVERY_HANDED_BACK_UNREASSIGNED_AGE_SECONDS)
+                .with_unit("s")
+                .build()
+        })
+    }
+
+    fn sweep_heartbeat_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::DELIVERY_HANDBACK_SWEEP_HEARTBEAT_TOTAL).build())
+    }
+
+    /// `delivery_handed_back_unreassigned_age_seconds` — the age of the OLDEST stranded handback,
+    /// **0 when the class is empty**. Called on EVERY tick, empty population included — the same
+    /// defect class ADR-20260810-231300 names: a monitor that fires only when a signal arrives
+    /// goes quiet exactly when it should scream.
+    pub fn unreassigned_age(age_seconds: i64) {
+        unreassigned_gauge().record(age_seconds, &[]);
+    }
+
+    /// `delivery_handback_sweep_heartbeat_total` — one COMPLETED sweep. Called LAST, so it can
+    /// never certify a pass that failed halfway.
+    pub fn sweep_completed() {
+        sweep_heartbeat_counter().add(1, &[]);
+    }
+}
+
 /// Technical + BAM metrics for the `read-authorization` contract (#144).
 pub mod read_authorization {
     use opentelemetry::metrics::Gauge;

@@ -236,6 +236,25 @@ screens:
           - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.other' },                variant: warning, visible_when: "delivery.openIssue == 'OTHER'" }
           - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.body' } }
           - { type: button, id: issue_seen_btn, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.seen' }, variant: primary, action: { type: open_bottom_sheet, sheet_id: issue_resolution_sheet } }
+      # #639 part C step 3-ii: a handed-back job (`foodLocation` set) renders its OWN pinned card,
+      # headlined by where the food physically is — orthogonal to the issue card above (a job can
+      # carry either, both, or neither). [Réattribuer]/[Je livre moi-même] are the SAME per-item
+      # buttons the section below already binds (escalate_delivery/mark_order_delivered) — reused,
+      # not duplicated. [Vu] reuses the issue-resolution sheet, but ONLY when an issue is actually
+      # open (`openIssue != null`): this card's own confirm flow dispatches `handBackDelivery`
+      # alone (the ADR's "report + hand back" sequencing has no chaining primitive in this DSL yet,
+      # see rider.yaml's `job_detail` gap note), so a pinned card from a PURE handback carries
+      # nothing for `resolveDeliveryIssue` to acknowledge and stays pinned until reassignment
+      # (`foodLocation` resets to null) rather than show a control that would always fail.
+      - type: conditional_section
+        id: delivery_handback_card
+        visible_when: "delivery.foodLocation != null"
+        content:
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.handback.with_rider' },    variant: danger,  visible_when: "delivery.foodLocation == 'WITH_RIDER'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.handback.returned' },      variant: warning, visible_when: "delivery.foodLocation == 'RETURNED_TO_RESTAURANT'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.handback.not_collected' }, variant: warning, visible_when: "delivery.foodLocation == 'NOT_COLLECTED'" }
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.handback.body' } }
+          - { type: button, id: handback_seen_btn, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.seen' }, variant: outline, visible_when: "delivery.openIssue != null", action: { type: open_bottom_sheet, sheet_id: issue_resolution_sheet } }
       - type: order_list
         items: "{{ deliveries }}"
         item_type: order_card

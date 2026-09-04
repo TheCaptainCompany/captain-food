@@ -319,6 +319,22 @@
     "en": "Escalate dispatch",
     "fr": "Escalader la course"
   },
+  "back.deliveries.handback.body": {
+    "en": "The rider handed this delivery back. Reassign it or deliver it yourself.",
+    "fr": "Le livreur a rendu cette course. Réattribuez-la ou livrez-la vous-même."
+  },
+  "back.deliveries.handback.not_collected": {
+    "en": "Handed back — never collected",
+    "fr": "Course rendue — commande non retirée"
+  },
+  "back.deliveries.handback.returned": {
+    "en": "Handed back — at the restaurant",
+    "fr": "Course rendue — commande au restaurant"
+  },
+  "back.deliveries.handback.with_rider": {
+    "en": "Handed back — still with the rider",
+    "fr": "Course rendue — commande chez le livreur"
+  },
   "back.deliveries.issue.body": {
     "en": "The rider reported a problem on this delivery. Acknowledge it and say what happens next.",
     "fr": "Le livreur a signalé un problème sur cette course. Prenez-en acte et indiquez la suite."
@@ -1167,6 +1183,10 @@
     "en": "{count} items · {total}",
     "fr": "{count} articles · {total}"
   },
+  "order.delivery_reassigning": {
+    "en": "Your delivery will not arrive at the time shown. The restaurant has been told. We will keep you posted here.",
+    "fr": "La livraison n'arrivera pas à l'heure indiquée. Le restaurant est prévenu. Nous vous tiendrons informé ici."
+  },
   "order.empty.body": {
     "en": "Your order history will appear here.",
     "fr": "Votre historique de commandes apparaîtra ici."
@@ -1419,13 +1439,33 @@
     "en": "Tell the restaurant",
     "fr": "Prévenir le restaurant"
   },
+  "rider.issue.custody.returned": {
+    "en": "I gave it back to the restaurant",
+    "fr": "Je l'ai rendue au restaurant"
+  },
+  "rider.issue.custody.with_rider": {
+    "en": "I still have it",
+    "fr": "Je l'ai encore"
+  },
+  "rider.issue.custody_label": {
+    "en": "Where is the order",
+    "fr": "Où est la commande"
+  },
   "rider.issue.exit.continue": {
     "en": "I carry on, but…",
     "fr": "Je continue, mais…"
   },
+  "rider.issue.exit.hand_back": {
+    "en": "I cannot continue",
+    "fr": "Je ne peux pas continuer"
+  },
   "rider.issue.exit_label": {
     "en": "What happens next",
     "fr": "Et ensuite"
+  },
+  "rider.issue.handback_pending": {
+    "en": "Handing back…",
+    "fr": "En cours…"
   },
   "rider.issue.kind.address_not_found": {
     "en": "Address not found",
@@ -1467,6 +1507,10 @@
     "en": "A problem with this delivery",
     "fr": "Un problème sur cette course"
   },
+  "rider.job.back_to_jobs": {
+    "en": "Back to deliveries",
+    "fr": "Retour aux courses"
+  },
   "rider.job.delivered": {
     "en": "Delivered",
     "fr": "Livrée"
@@ -1474,6 +1518,14 @@
   "rider.job.dropoff": {
     "en": "Drop-off",
     "fr": "Livraison"
+  },
+  "rider.job.handback_done_body": {
+    "en": "Order handed back. The restaurant is reassigning it.",
+    "fr": "Course rendue. Le restaurant réattribue."
+  },
+  "rider.job.handback_instruction_title": {
+    "en": "Take the order back",
+    "fr": "Rapportez la commande"
   },
   "rider.job.issue_reported": {
     "en": "Issue reported",

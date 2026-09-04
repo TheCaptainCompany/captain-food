@@ -2434,6 +2434,35 @@ impl From<DeliveryIssueResolution> for ds::DeliveryIssueResolution {
     }
 }
 
+/// Where a delivery job's food physically is at the moment a rider hands the job back (#639 part C step 3-ii). Drives the custody-keyed lifecycle: RETURNED_TO_RESTAURANT re-offers (PENDING), WITH_RIDER fails closed (FAILED) rather than risk a second courier taking food the first one still holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum FoodCustody {
+    #[graphql(name = "NOT_COLLECTED")]
+    NOT_COLLECTED,
+    #[graphql(name = "RETURNED_TO_RESTAURANT")]
+    RETURNED_TO_RESTAURANT,
+    #[graphql(name = "WITH_RIDER")]
+    WITH_RIDER,
+}
+impl From<ds::FoodCustody> for FoodCustody {
+    fn from(v: ds::FoodCustody) -> Self {
+        match v {
+            ds::FoodCustody::NOT_COLLECTED => Self::NOT_COLLECTED,
+            ds::FoodCustody::RETURNED_TO_RESTAURANT => Self::RETURNED_TO_RESTAURANT,
+            ds::FoodCustody::WITH_RIDER => Self::WITH_RIDER,
+        }
+    }
+}
+impl From<FoodCustody> for ds::FoodCustody {
+    fn from(v: FoodCustody) -> Self {
+        match v {
+            FoodCustody::NOT_COLLECTED => Self::NOT_COLLECTED,
+            FoodCustody::RETURNED_TO_RESTAURANT => Self::RETURNED_TO_RESTAURANT,
+            FoodCustody::WITH_RIDER => Self::WITH_RIDER,
+        }
+    }
+}
+
 /// Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryChannelKey(pub String);

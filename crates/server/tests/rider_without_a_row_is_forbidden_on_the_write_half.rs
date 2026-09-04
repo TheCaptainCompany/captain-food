@@ -136,6 +136,15 @@ const REPORT_DELIVERY_ISSUE: &str = r#"mutation {
   }) { messageId }
 }"#;
 
+/// #639 part C step 3-ii: the handback door — `handBackDelivery` is `[RIDER]`. `riderId` is
+/// `derived: { riderId: rider }` too (#865): this literal carries no such field.
+const HAND_BACK_DELIVERY: &str = r#"mutation {
+  handBackDelivery(input: {
+    deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+    foodLocation: NOT_COLLECTED
+  }) { messageId }
+}"#;
+
 /// One real request through the edge: `POST /rider/graphql` with the bearer token, the response
 /// body as JSON.
 async fn post_as_rider(jwt: &str, query: &str, outcome: RiderIdentityResolution) -> Value {
@@ -226,7 +235,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
 /// a door only a rider the seam resolved can knock on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_rider_token_with_no_rider_row_is_forbidden_on_report_delivery_issue() {
-    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x639_31));
+    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x6393_1));
     let (message, code) =
         first_error(&post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::NoMapping).await);
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row ⇒ the guard refuses — got: {message}");
@@ -238,6 +247,28 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_report_delivery_issue()
     // The control: a resolved row passes the guard (and fails on the absent mailbox, past it).
     let (message, code) = first_error(
         &post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
+            .await,
+    );
+    assert_ne!(code.as_deref(), Some("FORBIDDEN"), "a resolved rider acts as RIDER — got: {message}");
+}
+
+/// The handback door (#639 part C step 3-ii): the same bare RIDER JWT with no row is refused AS
+/// PUBLIC on `handBackDelivery` — revocation of ACCESS is not release of CUSTODY (ADR-20260830-234532),
+/// but this door only opens for a rider the seam actually resolved, same as every other write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rider_token_with_no_rider_row_is_forbidden_on_hand_back_delivery() {
+    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x6393_2));
+    let (message, code) =
+        first_error(&post_as_rider(&jwt, HAND_BACK_DELIVERY, RiderIdentityResolution::NoMapping).await);
+    assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row ⇒ the guard refuses — got: {message}");
+    assert_eq!(
+        message,
+        "forbidden: role PUBLIC is not authorized for this operation (allowed: RIDER)",
+        "and refused AS PUBLIC, against the door's own literal roles list"
+    );
+    // The control: a resolved row passes the guard (and fails on the absent mailbox, past it).
+    let (message, code) = first_error(
+        &post_as_rider(&jwt, HAND_BACK_DELIVERY, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
             .await,
     );
     assert_ne!(code.as_deref(), Some("FORBIDDEN"), "a resolved rider acts as RIDER — got: {message}");

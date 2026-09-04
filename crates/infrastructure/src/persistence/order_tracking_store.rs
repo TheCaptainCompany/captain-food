@@ -1,4 +1,4 @@
-//! The 38-column `ordertracking` table ↔ [`OrderTrackingRow`] mapping, both directions — shared by the
+//! The 39-column `ordertracking` table ↔ [`OrderTrackingRow`] mapping, both directions — shared by the
 //! read repository (decode) and the projection worker (load current state + upsert the folded row).
 //!
 //! Column conventions (ADR-0037/0040): `status`/`service_type`/`uber_basis`/`rider_thumb`/
@@ -27,7 +27,7 @@ pub(crate) const COLUMNS: &str = "order_id, ref, restaurant_id, customer_id, sta
      estimated_ready_at, placed_at, status_changed_at, payment_intent_id, payment_status, restaurant_stars, \
      rating_comment, rider_thumb, delivery_timeliness, rider_tip_cents, restaurant_tip_cents, \
      captain_tip_cents, rated_at, \
-     delivery_status, courier, estimated_dropoff_at, created_at, updated_at";
+     delivery_status, courier, estimated_dropoff_at, delivery_handed_back, created_at, updated_at";
 
 /// Normalize a nullable jsonb: a JSON `null` in the column (or in the row) means "no value".
 fn opt_json(v: Option<serde_json::Value>) -> Option<serde_json::Value> {
@@ -90,6 +90,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<OrderTrackingRow, DomainError> {
         delivery_status: opt_from_text(row.try_get("delivery_status").map_err(db_err)?)?,
         courier: opt_json(row.try_get("courier").map_err(db_err)?),
         estimated_dropoff_at: row.try_get("estimated_dropoff_at").map_err(db_err)?,
+        delivery_handed_back: row.try_get("delivery_handed_back").map_err(db_err)?,
         created_at: row.try_get("created_at").map_err(db_err)?,
         updated_at: row.try_get("updated_at").map_err(db_err)?,
     })
@@ -102,12 +103,12 @@ pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: OrderId) -> Result<Option
     row.as_ref().map(decode).transpose()
 }
 
-/// Write the folded row: `INSERT … ON CONFLICT (order_id) DO UPDATE` over all 37 columns.
+/// Write the folded row: `INSERT … ON CONFLICT (order_id) DO UPDATE` over all 38 columns.
 pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &OrderTrackingRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO ordertracking ({COLUMNS}) VALUES \
          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,\
-          $25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) \
+          $25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40) \
          ON CONFLICT (order_id) DO UPDATE SET \
          ref = EXCLUDED.ref, \
          restaurant_id = EXCLUDED.restaurant_id, \
@@ -145,6 +146,7 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &OrderTrackingRow) -> 
          delivery_status = EXCLUDED.delivery_status, \
          courier = EXCLUDED.courier, \
          estimated_dropoff_at = EXCLUDED.estimated_dropoff_at, \
+         delivery_handed_back = EXCLUDED.delivery_handed_back, \
          created_at = EXCLUDED.created_at, \
          updated_at = EXCLUDED.updated_at"
     );
@@ -186,6 +188,7 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &OrderTrackingRow) -> 
         .bind(opt_to_text(&row.delivery_status))
         .bind(opt_json(row.courier.clone()))
         .bind(row.estimated_dropoff_at)
+        .bind(row.delivery_handed_back)
         .bind(row.created_at)
         .bind(row.updated_at)
         .execute(exec)

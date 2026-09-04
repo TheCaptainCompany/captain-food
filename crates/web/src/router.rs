@@ -648,7 +648,12 @@ mod tests {
             let html = render_path_with(&fake, "chez-test.captain.food", path, locale, None)
                 .await
                 .expect("the confirmation route renders").html;
-            assert_eq!(fake.call_count(), 1, "the page must READ the order it is about: {locale}");
+            assert_eq!(
+                fake.call_count(),
+                1,
+                "review round 2 on #870: ONE read now -- the handback signal rides the SAME \
+                 `order` value (`deliveryHandedBack`), no separate `delivery.byOrder` call: {locale}"
+            );
             assert!(html.contains(sentence), "{locale}: no human status sentence in {html}");
             assert!(html.contains("data-status=\"ACCEPTED\""), "{locale}: {html}");
             assert!(

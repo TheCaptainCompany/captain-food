@@ -105,6 +105,72 @@ projections:
         set: { $ref: '#/projections/DeliveryIssue/measures/resolvedAt' }
         from: { envelope: occurredAt }
 
+  # #639 part C step 3-ii (ADR-20260904-015903 §8): one row per DELIVERY JOB, keyed like DeliveryIssue
+  # (birth-seeded, so the denominator for the rate below is every RIDER-ACCEPTED job, read off
+  # `assignedAt` being set — not every job, since a partner-fulfilled or never-accepted job can never
+  # be handed back). `assignedAt`/`reassignedAt` share one fold source (DeliveryAcceptedByRider,
+  # "latest wins"): before any handback they are identical (the one acceptance); once a handback has
+  # landed, the NEXT acceptance event is strictly later in the stream and overwrites both, so
+  # `reassignedAt` always reads as "the acceptance that followed the last handback" while
+  # `handedBackAt` stays put until then — exactly the pair `time_to_reassign_ms` needs. `outcomeAt` is
+  # ANY terminal fact (delivered, cancelled, or dispatch-failed) — "does the customer still get that
+  # food" reads outcomeAt against foodLocation/handedBackAt.
+  DeliveryHandback:
+    description: >
+      One row per delivery job: when a rider accepted it, picked it up, handed it back and where the
+      food was, when it was reassigned, and its eventual outcome. When a rider hands a job back, does
+      the customer still get that food, and how often at the dinner peak? `riderId` is job
+      ATTRIBUTION only (which rider held the job) — no `metrics:` over this projection may `groupBy`
+      `riderId`: a per-rider handback rate is the performance-and-behaviour ground counsel's own gate
+      refused before counsel (rules.yaml#/HandBackIsNeverALever, ADR-20260904-014136 §3).
+    grain: ENTITY
+    key:
+      - from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' }
+    measures:
+      restaurantId: { type: set, of: { $ref: 'events.yaml#/DeliveryRequested/properties/restaurantId' } }
+      riderId:      { type: set, of: { $ref: 'events.yaml#/DeliveryAcceptedByRider/properties/riderId' } }
+      foodLocation: { type: set, of: { $ref: 'events.yaml#/DeliveryHandedBackByRider/properties/foodLocation' } }
+      assignedAt:   { type: set, of: { envelope: occurredAt } }
+      pickedUpAt:   { type: set, of: { envelope: occurredAt } }
+      handedBackAt: { type: set, of: { envelope: occurredAt } }
+      reassignedAt: { type: set, of: { envelope: occurredAt } }
+      outcomeAt:    { type: set, of: { envelope: occurredAt } }
+      daypart:      { type: set, of: { envelope: occurredAt, bucket: DAYPART } }
+    fold:
+      - on: { $ref: 'events.yaml#/DeliveryRequested' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/restaurantId' }
+        from: { $ref: 'events.yaml#/DeliveryRequested/properties/restaurantId' }
+      - on: { $ref: 'events.yaml#/DeliveryRequested' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/daypart' }
+        from: { envelope: occurredAt, bucket: DAYPART }
+      - on: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/riderId' }
+        from: { $ref: 'events.yaml#/DeliveryAcceptedByRider/properties/riderId' }
+      - on: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/assignedAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/reassignedAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryPickedUp' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/pickedUpAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/foodLocation' }
+        from: { $ref: 'events.yaml#/DeliveryHandedBackByRider/properties/foodLocation' }
+      - on: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/handedBackAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryCompleted' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/outcomeAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryCancelled' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/outcomeAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+        set: { $ref: '#/projections/DeliveryHandback/measures/outcomeAt' }
+        from: { envelope: occurredAt }
+
 metrics:
   # THE FLIP'S DATA SET (#167, PR #586 checkpoint — business lens, binding): the
   # ENFORCE_ACCEPTANCE_TIMEOUT TTL must be chosen FROM this distribution, per restaurant and per
@@ -150,3 +216,37 @@ metrics:
         # of the group. A job reported twice counts once — the fold keeps the latest kind.
         numerator:   { rowsWhereSet: { $ref: '#/projections/DeliveryIssue/measures/kind' } }
         denominator: { countRows: {} }
+
+  # #639 part C step 3-ii: the same activity's second metric — the paid-order-nobody-is-told-about
+  # failure mode, read from the fold. `exposedAs:` stays ABSENT (#484's emitters do not exist).
+  handback_rate:
+    question: >
+      When a rider hands a job back, does the customer still get that food, and how often at the
+      dinner peak?
+    activity: { $ref: 'stories.yaml#/rider/activities/Deliver' }
+    over: { $ref: '#/projections/DeliveryHandback' }
+    groupBy:
+      - { $ref: '#/projections/DeliveryHandback/measures/daypart' }
+      - { $ref: '#/projections/DeliveryHandback/measures/restaurantId' }
+    value:
+      ratio:
+        # Numerator: rows with a handback; denominator: rider-ACCEPTED jobs (assignedAt set) — a
+        # never-accepted or partner-fulfilled job can never be handed back, so it is not the base.
+        numerator:   { rowsWhereSet: { $ref: '#/projections/DeliveryHandback/measures/handedBackAt' } }
+        denominator: { rowsWhereSet: { $ref: '#/projections/DeliveryHandback/measures/assignedAt' } }
+
+  time_to_reassign_ms:
+    question: >
+      Once a rider hands a job back, how long until the customer's order is reassigned — p50/p90/p99,
+      by daypart? (Rows never reassigned are excluded — the numerator of `handback_rate` minus this
+      one's population is the still-stranded count the dead-man gauge watches operationally.)
+    activity: { $ref: 'stories.yaml#/rider/activities/Deliver' }
+    over: { $ref: '#/projections/DeliveryHandback' }
+    groupBy:
+      - { $ref: '#/projections/DeliveryHandback/measures/daypart' }
+    value:
+      percentiles:
+        levels: [50, 90, 99]
+        ofDurationMs:
+          start: { $ref: '#/projections/DeliveryHandback/measures/handedBackAt' }
+          end:   { $ref: '#/projections/DeliveryHandback/measures/reassignedAt' }

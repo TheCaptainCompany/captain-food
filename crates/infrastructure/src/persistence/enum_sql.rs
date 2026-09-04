@@ -10,7 +10,7 @@
 use domain::generated::scalars::{
     CartStatus, CityAvailabilityStatus, ComparisonBasis,
     CuisineCategory, DeliveryDispatchProcessStatus, DeliveryIssueKind, DeliveryProvider,
-    DeliveryStatus, DeliveryTimeliness, GbpLinkStatus,
+    DeliveryStatus, DeliveryTimeliness, FoodCustody, GbpLinkStatus,
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     PrincipalKind, ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
@@ -81,6 +81,8 @@ enum_text!(DeliveryIssueKind {
     VEHICLE_OR_INJURY,
     OTHER,
 });
+// #639 part C step 3-ii: FoodCustody — View_DeliveryJob.food_location.
+enum_text!(FoodCustody { NOT_COLLECTED, RETURNED_TO_RESTAURANT, WITH_RIDER });
 enum_text!(RiderStatus { OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED });
 enum_text!(InboundMessageStatus {
     SCHEDULED,

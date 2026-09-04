@@ -81,7 +81,7 @@ use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
     AcceptDelivery, AddCartLine, BindCartToCustomer, CancelDelivery,
     ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
-    PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction,
+    HandBackDelivery, PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction,
     RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder,
     UnassignDeliveryFromPartner, UpdateRiderInfo,
 };
@@ -89,7 +89,8 @@ use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
     CartBoundToCustomer, CartLineAdded, CartLineQuantityChanged, CartLineRemoved, CartStarted,
     DeliveryAcceptedByRider, DeliveryCancelled, DeliveryCompleted,
-    DeliveryDeclinedByRider, DeliveryEscalationRequested, DeliveryIssueReported, DeliveryIssueResolved,
+    DeliveryDeclinedByRider, DeliveryEscalationRequested, DeliveryHandedBackByRider,
+    DeliveryIssueReported, DeliveryIssueResolved,
     DeliveryPickedUp, DeliverySatisfactionRecorded,
     DeliveryUnassignedFromPartner, OrderPlaced, OrderRated, OrderTipped, PaymentIntentCreated,
     RefundRequested, RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
@@ -1526,6 +1527,54 @@ pub async fn escalate_delivery(
         .save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor)
         .await
         .map(|_| ())
+}
+
+/// Handle `commands.yaml#/HandBackDelivery` → emit `events.yaml#/DeliveryHandedBackByRider` (#639
+/// part C step 3-ii, ADR-20260904-015903 §1-2, rules.yaml#/DeliveryHandBackKeepsCustodyHonest). The
+/// assigned rider hands a held job back, stating where the food is. Checks, in order (each maps to
+/// the negative it distinguishes):
+///   1. a partner-held job is refused here — `UnassignDeliveryFromPartner` is that door, not this
+///      one — BEFORE the rider check, so it never reads as a rider mismatch;
+///   2. a status this door does not admit (PENDING/DELIVERED/CANCELLED/FAILED) — checked before the
+///      rider match so a never-assigned or already-terminal job reads InvalidDeliveryStatus, never
+///      "someone else holds it";
+///   3. a caller who does not hold THIS job → `DeliveryAlreadyAssigned` (the rider-mismatch case);
+///   4. the declared custody-keyed lifecycle (actors.yaml#/DeliveryJob/lifecycle) enforces the
+///      foodLocation/status consistency: from ASSIGNED foodLocation must be NOT_COLLECTED; from
+///      PICKED_UP/OUT_FOR_DELIVERY it must not be.
+pub async fn hand_back_delivery(
+    store: &dyn EventStore,
+    cmd: HandBackDelivery,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_delivery_job(store, &cmd.delivery_job_id).await?;
+    if state.partner_ref.is_some() {
+        return Err(invalid_delivery_status(&cmd.delivery_job_id, state.status, DeliveryStatus::ASSIGNED));
+    }
+    if !matches!(
+        state.status,
+        DeliveryStatus::ASSIGNED | DeliveryStatus::PICKED_UP | DeliveryStatus::OUT_FOR_DELIVERY
+    ) {
+        return Err(invalid_delivery_status(&cmd.delivery_job_id, state.status, DeliveryStatus::ASSIGNED));
+    }
+    if state.rider_id != Some(cmd.rider_id) {
+        return Err(reject(
+            "DeliveryAlreadyAssigned",
+            json!({ "deliveryJobId": cmd.delivery_job_id }),
+        ));
+    }
+    let event = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
+        delivery_job_id: cmd.delivery_job_id,
+        // From the folded birth fact, never from the client (D-QW1 option b) — the field that lets
+        // the customer's OrderTracking row fold this fact (confirm_pickup's precedent).
+        order_id: state.order_id,
+        rider_id: cmd.rider_id,
+        food_location: cmd.food_location,
+    });
+    if domain::delivery_job::lifecycle::transition(state.status, &event).is_none() {
+        return Err(invalid_delivery_status(&cmd.delivery_job_id, state.status, DeliveryStatus::ASSIGNED));
+    }
+    Repository::new(store).save(&delivery_job_stream(&cmd.delivery_job_id), version, &[event], actor).await.map(|_| ())
 }
 
 // ================================================================================================

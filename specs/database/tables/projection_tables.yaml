@@ -742,9 +742,11 @@ OrderTracking:
     - { $ref: 'events.yaml#/DeliveryStatusUpdated' }
     - { $ref: 'events.yaml#/DeliveryCompleted' }
     - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+    - { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
   rules:
     - "`payment_status` is folded from the Stripe payment facts."
     - "`delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob."
+    - "A handback (DeliveryHandedBackByRider, #639 part C step 3-ii) mirrors View_DeliveryJob's custody-keyed status arm: `delivery_status` moves to PENDING unless foodLocation is WITH_RIDER (then FAILED), and `courier` resets to null. `delivery_handed_back` (review round 2 on #870) is the SEPARATE flag the customer tracking banner actually reads: true on the handback, reset to false by the next DeliveryAcceptedByRider/DeliveryAcceptedByPartner — never a comparison against `order.status`, because no OrderStatus producer ever emits OUT_FOR_DELIVERY."
     - "Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating."
     - "`delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction."
     - "`*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals."
@@ -934,20 +936,29 @@ OrderTracking:
         - { $ref: 'events.yaml#/DeliveryStatusUpdated' }
         - { $ref: 'events.yaml#/DeliveryCompleted' }
         - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+        - { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
       nullable: true
-      note: "Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryPickedUp mirrors PICKED_UP on the rider path (the partner path reports it via DeliveryStatusUpdated); DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556)."
+      note: "Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryPickedUp mirrors PICKED_UP on the rider path (the partner path reports it via DeliveryStatusUpdated); DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556); DeliveryHandedBackByRider mirrors View_DeliveryJob's custody-keyed arm (PENDING unless WITH_RIDER, then FAILED — #639 part C step 3-ii)."
     courier:
       type: jsonb
       from:
         - { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
+        - { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
       nullable: true
-      note: "Assigned Courier { displayName, phone?, riderId? } once accepted; null before."
+      note: "Assigned Courier { displayName, phone?, riderId? } once accepted; null before, and RESET to null by a handback (#639 part C step 3-ii — the job is unassigned again)."
     estimated_dropoff_at:
       type: timestamptz
       from: [{ $ref: 'events.yaml#/DeliveryAcceptedByPartner/properties/estimatedDropoffAt' }]
       nullable: true
       note: "Partner-reported ETA to the customer; null when unknown."
+    delivery_handed_back:
+      type: boolean
+      from:
+        - { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+        - { $ref: 'events.yaml#/DeliveryAcceptedByPartner' }
+        - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
+      note: "#639 part C step 3-ii, review round 2 on #870: true from DeliveryHandedBackByRider, RESET to false by the next DeliveryAcceptedByRider/DeliveryAcceptedByPartner (a re-offer accepted); defaults false. Lives ON this row (not a separate delivery read) so the PUSHED Order frame carries it. The tracking screen's banner reads THIS flag directly — never `status == 'OUT_FOR_DELIVERY'` (no OrderStatus producer emits that token) — which also correctly covers the from-ASSIGNED NOT_COLLECTED case, where the order is only READY."
 
 OrderConversation:
   projector: app   # message timeline appended + PUBLIC/INTERNAL split + order-status fold = application logic

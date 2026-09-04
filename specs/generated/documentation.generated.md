@@ -182,6 +182,7 @@ A courier who delivers orders from restaurants to customers.
 |  | TrackDelivery | [🔎 `delivery`](#query-delivery) |
 |  | DeclineDelivery | [✏️ `declineDelivery`](#mutation-declinedelivery) |
 |  | ReportDeliveryIssue | [✏️ `reportDeliveryIssue`](#mutation-reportdeliveryissue) |
+|  | HandBackDelivery | [✏️ `handBackDelivery`](#mutation-handbackdelivery) |
 
 <a id="story-admin"></a>
 ### 🎬 `admin` · 🛠️ `ADMIN` · 🗣️ `fr-FR`
@@ -3506,6 +3507,7 @@ An order with its tracking status and payment state.
 | <a id="type-order--deliverystatus"></a>`deliveryStatus` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | ⬜ |
 | <a id="type-order--courier"></a>`courier` | [📦 `Courier`](#entity-courier) | ⬜ |
 | <a id="type-order--estimateddropoffat"></a>`estimatedDropoffAt` | `string` _date-time_ | ⬜ |
+| <a id="type-order--deliveryhandedback"></a>`deliveryHandedBack` | `boolean` | ✅ |
 | <a id="type-order--ratedat"></a>`ratedAt` | `string` _date-time_ | ⬜ |
 
 <a id="type-deliverysatisfaction"></a>
@@ -4208,8 +4210,8 @@ sequenceDiagram
 
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0
 - **Note**: The single canonical Order read model. Folds the Order lifecycle + Stripe payment facts (secondary source). Serves every order query — by id (`order`), by customer (history) and by restaurant+status (back-office queue) — via the indexes below; there is no separate per-persona order projection. 
-- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
-- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Rules**: `payment_status` is folded from the Stripe payment facts. `delivery_status`/`courier`/`estimated_dropoff_at` mirror the order's DeliveryJob (correlated by order_id) so the customer's order view shows live delivery progress (ADR-0031); the full operational board is View_DeliveryJob. A handback (DeliveryHandedBackByRider, #639 part C step 3-ii) mirrors View_DeliveryJob's custody-keyed status arm: `delivery_status` moves to PENDING unless foodLocation is WITH_RIDER (then FAILED), and `courier` resets to null. `delivery_handed_back` (review round 2 on #870) is the SEPARATE flag the customer tracking banner actually reads: true on the handback, reset to false by the next DeliveryAcceptedByRider/DeliveryAcceptedByPartner — never a comparison against `order.status`, because no OrderStatus producer ever emits OUT_FOR_DELIVERY. Rating columns are populated from OrderRated (rider_thumb), RestaurantRated (restaurant_stars + comment); null until the customer acts. The restaurant reads restaurant_stars/comment to see its rating. `delivery_timeliness` is the customer's post-delivery delay verdict (DeliverySatisfactionRecorded; #62); null until answered — the client hides the survey once set. The restaurant-facing aggregate is View_DeliverySatisfaction. `*_tip_cents` sum OrderTipped.tips by recipient (customer AND restaurant tippers combined; ADR-012); separate from the core split, Captain 0% skim; feed per-recipient Open-Collective totals. `uber_*` columns are the estimated Uber Eats comparison for the pedagogical receipt (ADR-0025), COMPUTED by the projection from breakdown.articles + the restaurant's cuisine_category → UberEstimationPolicy.price_coefficient + UberSplitPolicy. uber_total = coefficient·articles + avg_delivery_fee + platform fee; uber_restaurant = coefficient·articles·(1−uber_commission_pct/100); uber_rider ≈ rider_base_cents (per-km omitted, distance not modelled); uber_platform = uber_total − uber_restaurant − uber_rider. All null when the restaurant has no cuisine_category. uber_basis is ESTIMATED in V0 (REAL when opted-in + HubRise Uber prices — deferred). Contrast against the exact Captain split (restaurant_payout/rider_payout/captain_net).
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `OrderAcceptedByRestaurant`](#event-orderacceptedbyrestaurant), [⚡ `OrderPreparationStarted`](#event-orderpreparationstarted), [⚡ `OrderMarkedReady`](#event-ordermarkedready), [⚡ `OrderDelivered`](#event-orderdelivered), [⚡ `OrderRejectedByRestaurant`](#event-orderrejectedbyrestaurant), [⚡ `OrderCancelledByCustomer`](#event-ordercancelledbycustomer), [⚡ `OrderCancelledByRestaurant`](#event-ordercancelledbyrestaurant), [⚡ `OrderAcceptanceTimedOut`](#event-orderacceptancetimedout), [⚡ `PaymentCaptured`](#event-paymentcaptured), [⚡ `PaymentReleased`](#event-paymentreleased), [⚡ `PaymentRefunded`](#event-paymentrefunded), [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -4247,9 +4249,10 @@ sequenceDiagram
 | `restaurant_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==RESTAURANT].amount; null if none. |
 | `captain_tip_cents` | [🔤 `MoneyCents`](#scalar-moneycents) | [⚡ `OrderTipped`.`tips`](#event-ordertipped--tips) | nullable | Σ OrderTipped.tips[recipient==CAPTAIN].amount; null if none. |
 | `rated_at` | `timestamptz` | [⚡ `OrderRated`](#event-orderrated), [⚡ `RestaurantRated`](#event-restaurantrated), [⚡ `DeliverySatisfactionRecorded`](#event-deliverysatisfactionrecorded), [⚡ `OrderTipped`](#event-ordertipped) | nullable | Occurrence time of the latest rating/tip/survey event. |
-| `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryPickedUp mirrors PICKED_UP on the rider path (the partner path reports it via DeliveryStatusUpdated); DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556). |
-| `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before. |
+| `delivery_status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | nullable | Mirror of the order's DeliveryJob status (correlated by order_id); null for COLLECTION / before dispatch. DeliveryPickedUp mirrors PICKED_UP on the rider path (the partner path reports it via DeliveryStatusUpdated); DeliveryDispatchFailed (offer cap exhausted) mirrors FAILED (ADR-20260720-004556); DeliveryHandedBackByRider mirrors View_DeliveryJob's custody-keyed arm (PENDING unless WITH_RIDER, then FAILED — #639 part C step 3-ii). |
+| `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | nullable | Assigned Courier { displayName, phone?, riderId? } once accepted; null before, and RESET to null by a handback (#639 part C step 3-ii — the job is unassigned again). |
 | `estimated_dropoff_at` | `timestamptz` | [⚡ `DeliveryAcceptedByPartner`.`estimatedDropoffAt`](#event-deliveryacceptedbypartner--estimateddropoffat) | nullable | Partner-reported ETA to the customer; null when unknown. |
+| `delivery_handed_back` | `boolean` | [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider) | — | #639 part C step 3-ii, review round 2 on #870: true from DeliveryHandedBackByRider, RESET to false by the next DeliveryAcceptedByRider/DeliveryAcceptedByPartner (a re-offer accepted); defaults false. Lives ON this row (not a separate delivery read) so the PUSHED Order frame carries it. The tracking screen's banner reads THIS flag directly — never `status == 'OUT_FOR_DELIVERY'` (no OrderStatus producer emits that token) — which also correctly covers the from-ASSIGNED NOT_COLLECTED case, where the order is only READY. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -9246,7 +9249,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(17)_
+### 🧰 API operations _(18)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -9339,6 +9342,13 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Roles**: RIDER · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-handbackdelivery"></a>
+#### ✏️ Mutation: `handBackDelivery`
+
+- **Command**: [📩 `HandBackDelivery`](#command-handbackdelivery) → handled by [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Roles**: RIDER · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="mutation-registerdeliverypartneravailability"></a>
 #### ✏️ Mutation: `registerDeliveryPartnerAvailability`
 
@@ -9399,6 +9409,8 @@ One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves
 | <a id="type-deliveryjob--pickedupat"></a>`pickedUpAt` | `string` _date-time_ | ⬜ |
 | <a id="type-deliveryjob--deliveredat"></a>`deliveredAt` | `string` _date-time_ | ⬜ |
 | <a id="type-deliveryjob--openissue"></a>`openIssue` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | ⬜ |
+| <a id="type-deliveryjob--foodlocation"></a>`foodLocation` | [🔤 `FoodCustody`](#scalar-foodcustody) | ⬜ |
+| <a id="type-deliveryjob--handedbackat"></a>`handedBackAt` | `string` _date-time_ | ⬜ |
 
 <a id="type-deliverypartneravailability"></a>
 #### 🧩 Type: `DeliveryPartnerAvailability`
@@ -9451,6 +9463,7 @@ _🧩 aggregate_ — One delivery of an order (bounded context: delivery). Born 
 | [📩 `CompleteDelivery`](#command-completedelivery) | [⚡ `DeliveryCompleted`](#event-deliverycompleted) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `CancelDelivery`](#command-canceldelivery) | [⚡ `DeliveryCancelled`](#event-deliverycancelled) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `EscalateDelivery`](#command-escalatedelivery) | [⚡ `DeliveryEscalationRequested`](#event-deliveryescalationrequested) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound) |
+| [📩 `HandBackDelivery`](#command-handbackdelivery) | [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned) |
 | [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue) | [⚡ `DeliveryIssueReported`](#event-deliveryissuereported) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue) | [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
 | [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus) | [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus) |
@@ -9487,6 +9500,11 @@ stateDiagram-v2
   ASSIGNED --> FAILED : DeliveryStatusUpdated(status)
   PICKED_UP --> FAILED : DeliveryStatusUpdated(status)
   OUT_FOR_DELIVERY --> FAILED : DeliveryStatusUpdated(status)
+  ASSIGNED --> PENDING : DeliveryHandedBackByRider(foodLocation=NOT_COLLECTED)
+  PICKED_UP --> PENDING : DeliveryHandedBackByRider(foodLocation=RETURNED_TO_RESTAURANT)
+  OUT_FOR_DELIVERY --> PENDING : DeliveryHandedBackByRider(foodLocation=RETURNED_TO_RESTAURANT)
+  PICKED_UP --> FAILED : DeliveryHandedBackByRider(foodLocation=WITH_RIDER)
+  OUT_FOR_DELIVERY --> FAILED : DeliveryHandedBackByRider(foodLocation=WITH_RIDER)
   DELIVERED --> [*]
   CANCELLED --> [*]
 ```
@@ -9621,17 +9639,17 @@ sequenceDiagram
 #### 🗄️ View: `View_DeliveryJob`
 
 - **Source**: [🎭 `DeliveryJob`](#actor-deliveryjob) · 🛶 V0
-- **Rules**: `open_issue_kind` is the kind of the latest DeliveryIssueReported and NULL once a DeliveryIssueResolved follows it (the `derive:` grammar's explicit `null` arm) — the read side of the issue door: the restaurant is told through this column (#639 part C step 3-i, ADR-20260904-015903 §3). Neither issue fact moves `status` or `rider_id`. `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
-- **Fed by**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `DeliveryIssueReported`](#event-deliveryissuereported), [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved)
+- **Rules**: `open_issue_kind` is the kind of the latest DeliveryIssueReported and NULL once a DeliveryIssueResolved follows it (the `derive:` grammar's explicit `null` arm) — the read side of the issue door: the restaurant is told through this column (#639 part C step 3-i, ADR-20260904-015903 §3). Neither issue fact moves `status` or `rider_id`. `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556) / DeliveryHandedBackByRider — PENDING when foodLocation is NOT_COLLECTED or RETURNED_TO_RESTAURANT, FAILED when WITH_RIDER (the custody-keyed `derive: { from, map }` grammar, #639 part C step 3-ii, ADR-20260904-015903 §3). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts, and RESET to NULL by a handback (the `derive:` grammar's explicit `null` arm) — the job is no longer assigned to anyone until re-accepted. `rider_id` is likewise RESET to NULL by a handback — `TestDeliveryReofferedAfterHandBack` is the fold-reset proof: a second rider can accept the job right after. `food_location`/`handed_back_at` are the custody fact itself: set by DeliveryHandedBackByRider (#639 part C step 3-ii) and cleared back to NULL by the NEXT acceptance (rider or partner) — a stale handback marker must not survive a re-offer.
+- **Fed by**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `DeliveryIssueReported`](#event-deliveryissuereported), [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
 | `delivery_job_id` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) _(derived)_ | [⚡ `DeliveryRequested`.`deliveryJobId`](#event-deliveryrequested--deliveryjobid) | PK |  |
 | `order_id` | [🔤 `OrderId`](#scalar-orderid) _(derived)_ → [🗄️ `OrderTracking`](#view-ordertracking) | [⚡ `DeliveryRequested`.`orderId`](#event-deliveryrequested--orderid) | index |  |
 | `restaurant_id` | [🔤 `RestaurantId`](#scalar-restaurantid) _(derived)_ → [🗄️ `Restaurant`](#view-restaurant) | [⚡ `DeliveryRequested`.`restaurantId`](#event-deliveryrequested--restaurantid) | — |  |
-| `status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status (DeliveryDispatchFailed → FAILED, the offer-cap exhaustion). |
-| `provider` | [🔤 `DeliveryProvider`](#scalar-deliveryprovider) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING. |
-| `rider_id` | [🔤 `RiderId`](#scalar-riderid) | [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid) | nullable | Set for an independent-rider delivery; null for a partner delivery. |
+| `status` | [🔤 `DeliveryStatus`](#scalar-deliverystatus) | [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | — | Derived from the lifecycle event type / DeliveryStatusUpdated.status (DeliveryDispatchFailed → FAILED, the offer-cap exhaustion) / DeliveryHandedBackByRider.foodLocation (PENDING unless WITH_RIDER, then FAILED). |
+| `provider` | [🔤 `DeliveryProvider`](#scalar-deliveryprovider) | [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | nullable | INDEPENDENT (rider accepted) or PARTNER (partner accepted); null while PENDING, and RESET to null by a handback (#639 part C step 3-ii — the job is unassigned again). |
+| `rider_id` | [🔤 `RiderId`](#scalar-riderid) | [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | nullable | Set for an independent-rider delivery; null for a partner delivery, and RESET to null by a handback (#639 part C step 3-ii — `TestDeliveryReofferedAfterHandBack` is the fold-reset proof). |
 | `courier` | `jsonb` | [⚡ `DeliveryAcceptedByPartner`.`courier`](#event-deliveryacceptedbypartner--courier) | nullable | Courier { displayName, phone?, riderId? }; from the partner on acceptance (independent rider is in rider_id). |
 | `partner_ref` | [🔤 `ExternalReference`](#scalar-externalreference) | [⚡ `DeliveryAcceptedByPartner`.`partnerRef`](#event-deliveryacceptedbypartner--partnerref) | nullable | Partner-side delivery id; idempotent key for inbound updates. |
 | `pickup_address` | `jsonb` | [⚡ `DeliveryRequested`.`pickup`](#event-deliveryrequested--pickup) | — |  |
@@ -9643,6 +9661,8 @@ sequenceDiagram
 | `delivered_at` | `timestamptz` | [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | nullable | Set on DeliveryCompleted or DeliveryStatusUpdated=DELIVERED (conditional occurrence). |
 | `last_partner_rejection` | `text` | [⚡ `DeliveryRejectedByPartner`.`reason`](#event-deliveryrejectedbypartner--reason) | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected. |
 | `open_issue_kind` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | [⚡ `DeliveryIssueReported`](#event-deliveryissuereported), [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved) | nullable | Kind of the OPEN delivery issue: set by DeliveryIssueReported.kind, cleared (NULL) by DeliveryIssueResolved; null when none is open or the report predates the kind (#639 part C step 3-i). |
+| `food_location` | [🔤 `FoodCustody`](#scalar-foodcustody) | [⚡ `DeliveryHandedBackByRider`.`foodLocation`](#event-deliveryhandedbackbyrider--foodlocation), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner) | nullable | Where the food is, set by a handback (DeliveryHandedBackByRider.foodLocation) — the board's pinned card headline and the customer tracking banner's predicate; RESET to null by the next acceptance (rider or partner) so a stale handback marker never survives a re-offer (#639 part C step 3-ii). |
+| `handed_back_at` | `timestamptz` | [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) | nullable | Occurrence time of the latest handback (envelope occurredAt); null until one occurs (#639 part C step 3-ii). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -9684,7 +9704,7 @@ sequenceDiagram
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(18)_
+### 📩 Commands _(19)_
 
 <a id="command-acceptdelivery"></a>
 #### 📩 Command: `AcceptDelivery`
@@ -9801,6 +9821,21 @@ Acknowledge and close a reported delivery issue with a closed RESOLUTION kind an
 | <a id="command-resolvedeliveryissue--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="command-resolvedeliveryissue--resolution"></a>`resolution` | [🔤 `DeliveryIssueResolution`](#scalar-deliveryissueresolution) | ✅ |  |
 | <a id="command-resolvedeliveryissue--note"></a>`note` | `string` | ⬜ | Optional note — facts only; same erasure scope as the report's note. |
+
+<a id="command-handbackdelivery"></a>
+#### 📩 Command: `HandBackDelivery`
+
+The assigned rider hands a held job back with the food's whereabouts (#639 part C step 3-ii, ADR-20260904-015903 §1-2). All three fields required, NO free-text `reason` (legal: the narrative the restriction ADR made unspellable would re-enter by the side door). riderId is asserted equal to the job's rider_id (as ConfirmPickup does); a partner-held job is refused (UnassignDeliveryFromPartner is that door). From ASSIGNED, foodLocation MUST be NOT_COLLECTED (the rider is not at the restaurant); from PICKED_UP/OUT_FOR_DELIVERY it MUST NOT be NOT_COLLECTED. The GraphQL surface derives riderId from ReadScope::Rider (#865 grammar) — the input on the wire never carries it.
+
+- **Dispatched by**: [✏️ `handBackDelivery`](#mutation-handbackdelivery) · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Emits**: [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
+- **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-handbackdelivery--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="command-handbackdelivery--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
+| <a id="command-handbackdelivery--foodlocation"></a>`foodLocation` | [🔤 `FoodCustody`](#scalar-foodcustody) | ✅ |  |
 
 <a id="command-updatedeliverystatus"></a>
 #### 📩 Command: `UpdateDeliveryStatus`
@@ -9949,7 +9984,7 @@ Verify the SMS OTP with the auth provider, then IDENTIFY the rider: the proved a
 | <a id="command-confirmridersignin--nationalnumber"></a>`nationalNumber` | [🔤 `NationalPhoneNumber`](#scalar-nationalphonenumber) | ✅ |  |
 | <a id="command-confirmridersignin--code"></a>`code` | [🔤 `OtpCode`](#scalar-otpcode) | ✅ |  |
 
-### ⚡ Events _(21)_
+### ⚡ Events _(22)_
 
 <a id="event-deliveryrequested"></a>
 #### ⚡ Event: `DeliveryRequested`
@@ -10156,6 +10191,22 @@ An independent rider declined a pending delivery job (stays PENDING, re-offerabl
 | <a id="event-deliverydeclinedbyrider--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-deliverydeclinedbyrider--reason"></a>`reason` | `string` | ⬜ |  |
 
+<a id="event-deliveryhandedbackbyrider"></a>
+#### ⚡ Event: `DeliveryHandedBackByRider`
+
+A rider holding a delivery job handed it back, stating where the food physically is (#639 part C step 3-ii, ADR-20260904-015903 §1-2). Business payload only — the actor is envelope metadata (`domain_events.user_id`). From ASSIGNED the job returns to PENDING (foodLocation NOT_COLLECTED, derived — the rider never picked up); from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT re-offers the job (PENDING) and WITH_RIDER fails it closed (FAILED — a PENDING job whose food is in a restricted rider's bag would be re-offered, which is an oversell). `orderId` rides the fact (D-QW1 option b, ADR-20260808-234907, folded from the aggregate's own state — the command does not carry it): the OrderTracking projector keys every DeliveryJob-stream fact by payload `orderId`, so an event without one is invisible to the customer's mirror (found live: the `delivery_status`/`courier` reset never reached `ordertracking` — every other rider-authored fact on this stream, DeliveryAcceptedByRider/DeliveryPickedUp/DeliveryCompleted, already carries it).
+
+- **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob), [🗄️ `OrderTracking`](#view-ordertracking)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-deliveryhandedbackbyrider--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
+| <a id="event-deliveryhandedbackbyrider--orderid"></a>`orderId` | [🔤 `OrderId`](#scalar-orderid) | ✅ |  |
+| <a id="event-deliveryhandedbackbyrider--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
+| <a id="event-deliveryhandedbackbyrider--foodlocation"></a>`foodLocation` | [🔤 `FoodCustody`](#scalar-foodcustody) | ✅ |  |
+
 <a id="event-deliveryissuereported"></a>
 #### ⚡ Event: `DeliveryIssueReported`
 
@@ -10279,7 +10330,7 @@ A rider's availability/lifecycle status changed.
 | <a id="event-riderstatuschanged--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-riderstatuschanged--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### 🔤 Scalars _(11)_
+### 🔤 Scalars _(12)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10290,6 +10341,7 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-deliveryprovider"></a>🔤 `DeliveryProvider` | enum (PARTNER \| INDEPENDENT) | Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider). |
 | <a id="scalar-deliveryissuekind"></a>🔤 `DeliveryIssueKind` | enum (ADDRESS_NOT_FOUND \| CUSTOMER_UNREACHABLE \| RESTAURANT_NOT_READY \| FOOD_DAMAGED \| VEHICLE_OR_INJURY \| OTHER) | The closed set of reasons a rider (or ops) reports an issue on a delivery job — one tap on the rider sheet; the restaurant board headlines the card with it. OTHER is the only kind that expects a note (#639 part C step 3-i). |
 | <a id="scalar-deliveryissueresolution"></a>🔤 `DeliveryIssueResolution` | enum (REASSIGNED \| DELIVERED_BY_RESTAURANT \| CANCELLED \| OTHER) | The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue. |
+| <a id="scalar-foodcustody"></a>🔤 `FoodCustody` | enum (NOT_COLLECTED \| RETURNED_TO_RESTAURANT \| WITH_RIDER) | Where a delivery job's food physically is at the moment a rider hands the job back (#639 part C step 3-ii). Drives the custody-keyed lifecycle: RETURNED_TO_RESTAURANT re-offers (PENDING), WITH_RIDER fails closed (FAILED) rather than risk a second courier taking food the first one still holds. |
 | <a id="scalar-deliverychannelkey"></a>🔤 `DeliveryChannelKey` | string `^[a-z0-9]+(?:_[a-z0-9]+)*$` | Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60). |
 | <a id="scalar-deliverypartnerregistrationid"></a>🔤 `DeliveryPartnerRegistrationId` | string _uuid_ | A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration. |
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
@@ -10299,9 +10351,9 @@ A rider's availability/lifecycle status changed.
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
-| <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `EscalateDelivery`](#command-escalatedelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
-| <a id="error-invaliddeliverystatus"></a>⛔ `InvalidDeliveryStatus` | The delivery job is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the delivery is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
-| <a id="error-deliveryalreadyassigned"></a>⛔ `DeliveryAlreadyAssigned` | The delivery job has already been accepted by a courier/rider. | 🇬🇧 This delivery has already been taken. | 🇫🇷 Cette livraison a déjà été prise en charge. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-deliveryjobnotfound"></a>⛔ `DeliveryJobNotFound` | No delivery job with this id. | 🇬🇧 Delivery job not found. | 🇫🇷 Livraison introuvable. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `EscalateDelivery`](#command-escalatedelivery), [📩 `HandBackDelivery`](#command-handbackdelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-invaliddeliverystatus"></a>⛔ `InvalidDeliveryStatus` | The delivery job is not in a status that allows this transition. | 🇬🇧 This action is not allowed while the delivery is '{currentStatus}'. | 🇫🇷 Cette action n'est pas autorisée tant que la livraison est '{currentStatus}'. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `ConfirmPickup`](#command-confirmpickup), [📩 `CompleteDelivery`](#command-completedelivery), [📩 `CancelDelivery`](#command-canceldelivery), [📩 `HandBackDelivery`](#command-handbackdelivery), [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue), [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue), [📩 `UpdateDeliveryStatus`](#command-updatedeliverystatus), [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner), [📩 `DeclineDelivery`](#command-declinedelivery) |
+| <a id="error-deliveryalreadyassigned"></a>⛔ `DeliveryAlreadyAssigned` | The delivery job has already been accepted by a courier/rider. | 🇬🇧 This delivery has already been taken. | 🇫🇷 Cette livraison a déjà été prise en charge. | [📩 `AcceptDelivery`](#command-acceptdelivery), [📩 `HandBackDelivery`](#command-handbackdelivery), [📩 `DeclineDelivery`](#command-declinedelivery) |
 | <a id="error-deliverypartneravailabilityalreadyrequested"></a>⛔ `DeliveryPartnerAvailabilityAlreadyRequested` | A registration with this id already exists (idempotent self-registration guard). | 🇬🇧 This availability registration already exists. | 🇫🇷 Cette demande de disponibilité existe déjà. | [📩 `RegisterDeliveryPartnerAvailability`](#command-registerdeliverypartneravailability) |
 | <a id="error-deliverypartneravailabilitynotfound"></a>⛔ `DeliveryPartnerAvailabilityNotFound` | No delivery-partner availability registration with this id. | 🇬🇧 Availability registration not found. | 🇫🇷 Demande de disponibilité introuvable. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability), [📩 `RevokeDeliveryPartnerAvailability`](#command-revokedeliverypartneravailability) |
 | <a id="error-deliverypartneravailabilitynotpending"></a>⛔ `DeliveryPartnerAvailabilityNotPending` | The availability registration is not PENDING, so it cannot be approved. | 🇬🇧 This availability registration is not awaiting review. | 🇫🇷 Cette demande de disponibilité n'est pas en attente de validation. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) |
@@ -10313,7 +10365,7 @@ A rider's availability/lifecycle status changed.
 | <a id="error-ridersigninrequiressession"></a>⛔ `RiderSignInRequiresSession` | The sign-in confirmation arrived with no `X-SESSION-ID` (the independent review of #852, B1). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId -- which travels in spans and logs. So the door refuses BEFORE the OTP is spent (the code stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's, not the rider's (the SDUI client always sends the header, so a rider never sees this). The `AuthSessionStore` port's both-`None` claim is untouched -- that is another channel's contract; this door simply never parks without an owner.  | 🇬🇧 Sign-in needs a browser session. Reload the page and try again. | 🇫🇷 La connexion nécessite une session de navigation. Rechargez la page et réessayez. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 | <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 
-### 📐 Business rules _(20)_
+### 📐 Business rules _(22)_
 
 <a id="rule-readydeliveryordertriggersdispatch"></a>
 #### 📐 Rule: `ReadyDeliveryOrderTriggersDispatch`
@@ -10397,7 +10449,7 @@ _The order is closed (OrderDelivered) when the partner reports DELIVERED or an i
 
 _A delivery job ASSIGNED to a partner (by the partner's acceptance — the only assignment path) can be unassigned to be re-offered, and partner-reported status changes apply only as valid transitions._
 
-- **Verified by**: [🧪 `TestDeliveryJobRecordsPartnerStatusReport`](#test-testdeliveryjobrecordspartnerstatusreport), [🧪 `TestDeliveryUnassignedFromPartner`](#test-testdeliveryunassignedfrompartner)
+- **Verified by**: [🧪 `TestDeliveryJobRecordsPartnerStatusReport`](#test-testdeliveryjobrecordspartnerstatusreport), [🧪 `TestDeliveryUnassignedFromPartner`](#test-testdeliveryunassignedfrompartner), [🧪 `TestUnassignDeliveryFromPartnerRejectsRiderHeldJob`](#test-testunassigndeliveryfrompartnerrejectsriderheldjob)
 
 <a id="rule-deliverydeclinekeepsjobpending"></a>
 #### 📐 Rule: `DeliveryDeclineKeepsJobPending`
@@ -10412,6 +10464,20 @@ _An independent rider may decline a pending delivery job; the job stays PENDING 
 _A delivery issue is reported on a non-delivered job by its closed kind (DeliveryIssueKind — one tap, an optional bounded note only for the facts) and NEVER moves the job's status or its rider; it is told to the restaurant through the read model (View_DeliveryJob.open_issue_kind) and later resolved with a closed DeliveryIssueResolution by whoever was told — resolving with nothing open, or reporting on a DELIVERED job, is rejected (#639 part C step 3-i, ADR-20260904-015903 §4)._
 
 - **Verified by**: [🧪 `TestDeliveryIssueReported`](#test-testdeliveryissuereported), [🧪 `TestDeliveryIssueReportOnDeliveredJobIsRejected`](#test-testdeliveryissuereportondeliveredjobisrejected), [🧪 `TestDeliveryIssueResolved`](#test-testdeliveryissueresolved), [🧪 `TestDeliveryIssueResolveWithoutOpenIssueIsRejected`](#test-testdeliveryissueresolvewithoutopenissueisrejected)
+
+<a id="rule-deliveryhandbackkeepscustodyhonest"></a>
+#### 📐 Rule: `DeliveryHandBackKeepsCustodyHonest`
+
+_A rider holding a delivery job (ASSIGNED, PICKED_UP or OUT_FOR_DELIVERY) may hand it back stating where the food is: from ASSIGNED it returns PENDING (foodLocation NOT_COLLECTED, derived); from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT returns it PENDING (re-offerable) and WITH_RIDER fails it closed (FAILED — never re-offered while a restricted rider's bag still holds the food, which would be an oversell); a rider who does not hold the job (rider mismatch) is rejected DeliveryAlreadyAssigned, a job not in one of those three statuses is rejected InvalidDeliveryStatus, and a partner-held job is rejected InvalidDeliveryStatus (UnassignDeliveryFromPartner is that door, not this one) (#639 part C step 3-ii, ADR-20260904-015903 §1-2)._
+
+- **Verified by**: [🧪 `TestDeliveryHandedBackFromAssigned`](#test-testdeliveryhandedbackfromassigned), [🧪 `TestDeliveryHandedBackFromPickedUpReturned`](#test-testdeliveryhandedbackfrompickedupreturned), [🧪 `TestDeliveryHandedBackFromPickedUpWithRider`](#test-testdeliveryhandedbackfrompickedupwithrider), [🧪 `TestDeliveryReofferedAfterHandBack`](#test-testdeliveryreofferedafterhandback), [🧪 `TestHandBackDeliveryRejectsRiderMismatch`](#test-testhandbackdeliveryrejectsridermismatch), [🧪 `TestHandBackDeliveryRejectsPendingJob`](#test-testhandbackdeliveryrejectspendingjob), [🧪 `TestHandBackDeliveryRejectsDeliveredJob`](#test-testhandbackdeliveryrejectsdeliveredjob), [🧪 `TestHandBackDeliveryRejectsAssignedWithRider`](#test-testhandbackdeliveryrejectsassignedwithrider), [🧪 `TestHandBackDeliveryRejectsPartnerHeldJob`](#test-testhandbackdeliveryrejectspartnerheldjob)
+
+<a id="rule-handbackisneveralever"></a>
+#### 📐 Rule: `HandBackIsNeverALever`
+
+_DeliveryHandedBackByRider is a custody fact for the read side ONLY: no dispatchability, ranking or restriction fold reads it — a handback changes what the board and the customer are told, never who gets offered a job, in what order, or whether a rider may act (#639 part C step 3-ii, ADR-20260904-015903 §9). The same holds for the `DeliveryHandback` business-metrics projection (specs/business_metrics.yaml): its `riderId` measure is job ATTRIBUTION only (which rider held the job), never a `groupBy` dimension — no `metrics:` may group a handback rate by `riderId`, because a per-rider handback rate IS the performance-and-behaviour ground counsel's own gate refused before counsel (ADR-20260904-014136 §3): the right to refuse a proposal without penalty and the subordination criterion make a stored decline/handback-keyed ground the strongest requalification exhibit obtainable._
+
+- **Verified by**: [🧪 `TestDeliveryHandedBackFromPickedUpWithRider`](#test-testdeliveryhandedbackfrompickedupwithrider)
 
 <a id="rule-deliverypartnerselfregisterscityavailability"></a>
 #### 📐 Rule: `DeliveryPartnerSelfRegistersCityAvailability`
@@ -10710,6 +10776,106 @@ _An independent rider declines a pending job; it stays PENDING and re-offerable_
 - **When**: [📩 `DeclineDelivery`](#command-declinedelivery)
 - **Then**: [⚡ `DeliveryDeclinedByRider`](#event-deliverydeclinedbyrider)
 - **Verifies**: [📐 `DeliveryDeclineKeepsJobPending`](#rule-deliverydeclinekeepsjobpending)
+
+<a id="test-testdeliveryhandedbackfromassigned"></a>
+#### 🧪 Test: `TestDeliveryHandedBackFromAssigned`
+
+_The assigned rider hands the job back before pickup; it returns PENDING (NOT_COLLECTED)_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Then**: [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testdeliveryhandedbackfrompickedupreturned"></a>
+#### 🧪 Test: `TestDeliveryHandedBackFromPickedUpReturned`
+
+_A rider who collected hands the job back to the restaurant; it returns PENDING (re-offerable)_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Then**: [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testdeliveryhandedbackfrompickedupwithrider"></a>
+#### 🧪 Test: `TestDeliveryHandedBackFromPickedUpWithRider`
+
+_A rider still holding the food hands the job back; it FAILS rather than re-offer_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Then**: [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest), [📐 `HandBackIsNeverALever`](#rule-handbackisneveralever)
+
+<a id="test-testdeliveryreofferedafterhandback"></a>
+#### 🧪 Test: `TestDeliveryReofferedAfterHandBack`
+
+_A job handed back is accepted again by a different rider_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider)
+- **When**: [📩 `AcceptDelivery`](#command-acceptdelivery)
+- **Then**: [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testhandbackdeliveryrejectsridermismatch"></a>
+#### 🧪 Test: `TestHandBackDeliveryRejectsRiderMismatch`
+
+_A rider who does not hold the job cannot hand it back_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Thrown**: [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testhandbackdeliveryrejectspendingjob"></a>
+#### 🧪 Test: `TestHandBackDeliveryRejectsPendingJob`
+
+_A PENDING job (never assigned) cannot be handed back_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testhandbackdeliveryrejectsdeliveredjob"></a>
+#### 🧪 Test: `TestHandBackDeliveryRejectsDeliveredJob`
+
+_A DELIVERED job cannot be handed back_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testhandbackdeliveryrejectsassignedwithrider"></a>
+#### 🧪 Test: `TestHandBackDeliveryRejectsAssignedWithRider`
+
+_From ASSIGNED, foodLocation WITH_RIDER is refused — the rider never picked up yet_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testhandbackdeliveryrejectspartnerheldjob"></a>
+#### 🧪 Test: `TestHandBackDeliveryRejectsPartnerHeldJob`
+
+_A partner-held job cannot be handed back — UnassignDeliveryFromPartner is that door_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner)
+- **When**: [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryHandBackKeepsCustodyHonest`](#rule-deliveryhandbackkeepscustodyhonest)
+
+<a id="test-testunassigndeliveryfrompartnerrejectsriderheldjob"></a>
+#### 🧪 Test: `TestUnassignDeliveryFromPartnerRejectsRiderHeldJob`
+
+_A rider-accepted job cannot be unassigned as if it were partner-held_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `UnassignDeliveryFromPartner`](#command-unassigndeliveryfrompartner)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryPartnerAssignmentLifecycle`](#rule-deliverypartnerassignmentlifecycle)
 
 <a id="test-testdeliveryissuereported"></a>
 #### 🧪 Test: `TestDeliveryIssueReported`
@@ -11015,7 +11181,7 @@ _Closes the order when an independent rider completes the delivery_
 - **Then**: [⚡ `OrderDelivered`](#event-orderdelivered)
 - **Verifies**: [📐 `OrderClosedOnDeliveryCompletion`](#rule-orderclosedondeliverycompletion)
 
-### 📡 Observability _(1)_
+### 📡 Observability _(2)_
 
 <a id="obs-delivery-dispatch-strategy"></a>
 #### 📡 Contract: `delivery-dispatch-strategy`
@@ -11047,6 +11213,35 @@ _criticality: **high**_
 - **Metrics**: `delivery_dispatch_duration_ms` _(histogram)_, `delivery_offer_timeout_ms` _(histogram)_ · **Business metrics**: `delivery_offers_total` _(counter)_, `delivery_dispatch_failed_total` _(counter)_, `delivery_self_dispatched_total` _(counter)_
 - **Status rules**: success ⇐ spans [`event.consume.trigger`, `dispatch.resolve_strategy`, `event.store.append`]
 - **SLOs**: p95 ≤ 800ms · p99 ≤ 2000ms · error rate ≤ 2%
+
+<a id="obs-custody-handback"></a>
+#### 📡 Contract: `custody-handback`
+
+_criticality: **high**_
+
+- **Workflow**:  · command [📩 `HandBackDelivery`](#command-handbackdelivery)
+- **Emits**: [⚡ `DeliveryHandedBackByRider`](#event-deliveryhandedbackbyrider) · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `command.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+| `delivery_job_id` | `domain.aggregate_id` | ✅ | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) |
+| `command_type` | `command.type` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `command.receive` | `SERVER` | ✅ | — | `business.command_type`*, `business.actor`* |
+| `command.validate` | `INTERNAL` | ✅ | — | `business.validation_status`* |
+| `event.store.append` | `INTERNAL` | ✅ | — | `business.event_type`*, `business.stream_id`* |
+
+- **Metrics**: `delivery_handed_back_unreassigned_age_seconds` _(gauge)_, `delivery_handback_sweep_heartbeat_total` _(counter)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans [`command.receive`, `command.validate`, `event.store.append`]
+- **SLOs**: p95 ≤ —ms · p99 ≤ —ms · error rate ≤ —%
 
 <a id="sec-ctx-cross-cutting"></a>
 ## 🔲 7. cross-cutting
@@ -12014,6 +12209,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 │ «staff_topbar»                           │
 │ page_header — Delivery board             │
 │ conditional_section                      │
+│ conditional_section                      │
 │ order_list                               │
 │ section                                  │
 │ «staff_nav»                              │
@@ -12304,6 +12500,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 ├──────────────────────────────────────────┤
 │ order_status_hero                        │
 │ eta_bar — Estimated arrival              │
+│ text                                     │
 │ order_items_summary                      │
 │ order_id_row — Order ID                  │
 │ section                                  │
@@ -12518,6 +12715,9 @@ _Surface_ **`rider.yaml`**
 │ back_button_header — Delivery            │
 │ status_chip                              │
 │ badge                                    │
+│ page_header — Take the order back        │
+│ text                                     │
+│ button — Back to deliveries              │
 │ info_row — Pickup                        │
 │ info_row — Drop-off                      │
 │ info_row — Restaurant                    │
@@ -12531,9 +12731,11 @@ _Surface_ **`rider.yaml`**
 | write | `confirm_pickup` | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 | write | `complete_delivery` | [✏️ `completeDelivery`](#mutation-completedelivery) |
 | write | `report_delivery_issue` | [✏️ `reportDeliveryIssue`](#mutation-reportdeliveryissue) |
+| write | `hand_back_delivery` | [✏️ `handBackDelivery`](#mutation-handbackdelivery) |
 
 **Gaps**
 - ⚠️ Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant.
+- ⚠️ The handback after-state's 'Rapportez la commande' instruction (#639 part C step 3-ii) names no external-navigation control: no `ClientEffect`/action kind for opening a maps app exists anywhere in this DSL (`navigate` is the SDUI's own internal route change, not GPS). The pickup address is shown as the biggest element instead (page_header); a real turn-by-turn deep link is a follow-on, not invented here as a dead control.
 
 _Surface_ **`system.yaml`**
 
@@ -12638,6 +12840,10 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-deliveries-issue-resolution-other"></a>`back.deliveries.issue.resolution.other` | — | Other | Autre |
 | <a id="translation-back-deliveries-issue-note_prompt"></a>`back.deliveries.issue.note_prompt` | — | The facts, without describing anyone | Les faits, sans décrire des personnes |
 | <a id="translation-back-deliveries-issue-confirm"></a>`back.deliveries.issue.confirm` | — | Confirm | Confirmer |
+| <a id="translation-back-deliveries-handback-with_rider"></a>`back.deliveries.handback.with_rider` | — | Handed back — still with the rider | Course rendue — commande chez le livreur |
+| <a id="translation-back-deliveries-handback-returned"></a>`back.deliveries.handback.returned` | — | Handed back — at the restaurant | Course rendue — commande au restaurant |
+| <a id="translation-back-deliveries-handback-not_collected"></a>`back.deliveries.handback.not_collected` | — | Handed back — never collected | Course rendue — commande non retirée |
+| <a id="translation-back-deliveries-handback-body"></a>`back.deliveries.handback.body` | — | The rider handed this delivery back. Reassign it or deliver it yourself. | Le livreur a rendu cette course. Réattribuez-la ou livrez-la vous-même. |
 | <a id="translation-back-refunds-title"></a>`back.refunds.title` | — | Refund requests | Demandes de remboursement |
 | <a id="translation-back-refunds-approve"></a>`back.refunds.approve` | — | Approve refund | Approuver le remboursement |
 | <a id="translation-back-refunds-deny"></a>`back.refunds.deny` | — | Deny refund | Refuser le remboursement |
@@ -12819,6 +13025,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-order-status-acceptance_timed_out-title"></a>`order.status.acceptance_timed_out.title` | — | The restaurant didn't respond in time | Le restaurant n'a pas répondu à temps |
 | <a id="translation-order-status-acceptance_timed_out-body"></a>`order.status.acceptance_timed_out.body` | — | Your order was cancelled automatically and the hold on your card is being released — you were never charged. | Votre commande a été annulée automatiquement et l'empreinte sur votre carte est en cours de libération — vous n'avez jamais été débité. |
 | <a id="translation-order-eta"></a>`order.eta` | — | Estimated arrival | Arrivée estimée |
+| <a id="translation-order-delivery_reassigning"></a>`order.delivery_reassigning` | — | Your delivery will not arrive at the time shown. The restaurant has been told. We will keep you posted here. | La livraison n'arrivera pas à l'heure indiquée. Le restaurant est prévenu. Nous vous tiendrons informé ici. |
 | <a id="translation-order-id_label"></a>`order.id_label` | — | Order ID | N° de commande |
 | <a id="translation-order-rate"></a>`order.rate` | — | Rate your order | Évaluer la commande |
 | <a id="translation-order-reorder"></a>`order.reorder` | — | Reorder | Recommander |
@@ -12914,9 +13121,17 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-job-delivered"></a>`rider.job.delivered` | — | Delivered | Livrée |
 | <a id="translation-rider-job-problem"></a>`rider.job.problem` | — | A problem | Un problème |
 | <a id="translation-rider-job-issue_reported"></a>`rider.job.issue_reported` | — | Issue reported | Problème signalé |
+| <a id="translation-rider-job-handback_instruction_title"></a>`rider.job.handback_instruction_title` | — | Take the order back | Rapportez la commande |
+| <a id="translation-rider-job-handback_done_body"></a>`rider.job.handback_done_body` | — | Order handed back. The restaurant is reassigning it. | Course rendue. Le restaurant réattribue. |
+| <a id="translation-rider-job-back_to_jobs"></a>`rider.job.back_to_jobs` | — | Back to deliveries | Retour aux courses |
 | <a id="translation-rider-issue-title"></a>`rider.issue.title` | — | A problem with this delivery | Un problème sur cette course |
 | <a id="translation-rider-issue-exit_label"></a>`rider.issue.exit_label` | — | What happens next | Et ensuite |
 | <a id="translation-rider-issue-exit-continue"></a>`rider.issue.exit.continue` | — | I carry on, but… | Je continue, mais… |
+| <a id="translation-rider-issue-exit-hand_back"></a>`rider.issue.exit.hand_back` | — | I cannot continue | Je ne peux pas continuer |
+| <a id="translation-rider-issue-custody_label"></a>`rider.issue.custody_label` | — | Where is the order | Où est la commande |
+| <a id="translation-rider-issue-custody-with_rider"></a>`rider.issue.custody.with_rider` | — | I still have it | Je l'ai encore |
+| <a id="translation-rider-issue-custody-returned"></a>`rider.issue.custody.returned` | — | I gave it back to the restaurant | Je l'ai rendue au restaurant |
+| <a id="translation-rider-issue-handback_pending"></a>`rider.issue.handback_pending` | — | Handing back… | En cours… |
 | <a id="translation-rider-issue-kind_label"></a>`rider.issue.kind_label` | — | What is wrong | Quel est le problème |
 | <a id="translation-rider-issue-kind-address_not_found"></a>`rider.issue.kind.address_not_found` | — | Address not found | Adresse introuvable |
 | <a id="translation-rider-issue-kind-customer_unreachable"></a>`rider.issue.kind.customer_unreachable` | — | Customer unreachable | Client injoignable |

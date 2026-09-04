@@ -408,6 +408,7 @@ mod tests {
             delivery_status: None,
             courier: None,
             estimated_dropoff_at: None,
+            delivery_handed_back: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

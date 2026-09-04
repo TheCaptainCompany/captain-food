@@ -21,6 +21,7 @@
 //! partner.
 
 pub mod delivery_gateway;
+pub mod delivery_handback_watch;
 pub mod delivery_offer_timeout_worker;
 pub mod google;
 pub mod payments;

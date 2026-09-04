@@ -2,6 +2,264 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #639 part C step 3-ii, PR #870: review round 2 fixes (still draft, HOLD: human).**
+> Presentation on `3103dc42` (round 1's green hand-back): reviewer FAIL, checkpoint STOPs from
+> observability, ux and legal; vernon and young PASS on their own concerns. Round 2 of the 3-round
+> ceiling. `git diff --stat 3103dc42..HEAD`: 41 files changed, 657 insertions(+), 210 deletions(-)
+> (final, three commits: the round-2 fix itself, the docs-only no-op merge of `origin/main` at
+> `cb13d171`, and one more `OrderTrackingRow` fixture site the DB gate caught that the earlier
+> `--lib` builds did not reach — `crates/server/tests/graphql_subscriptions.rs`).
+>
+> **BLOCKING, all fixed:**
+> 1. **The `Un problème` sheet rendered nothing after a chip pick** — `issue_exit.value` is a FORM
+>    FIELD; `RenderContext::lookup` (`renderer.rs:145-152`) reads resolver data only, `visible_when`
+>    fails CLOSED (`renderer.rs:704-706`), and `interact.rs` never re-evaluates conditions after a
+>    chip pick — so neither exit's content ever appeared (3-i's report door REGRESSED along with
+>    3-ii's handback door). Fixed by splitting `rider_issue_sheet` into a ROUTER (two buttons, each
+>    `open_bottom_sheet` — a real SDUI edge, not a form-field condition) and two content sheets
+>    (`rider_report_sheet`, `rider_handback_sheet`) gated only by `delivery.status` (resolver data,
+>    which DOES evaluate). Handback confirm relabelled to `rider.issue.confirm` ("Prévenir le
+>    restaurant") — the WITH_RIDER card's rider has just said they did NOT return the food, so
+>    "Rendre la commande" was a false promise; the now-orphaned `rider.issue.handback_confirm`
+>    translation key removed (`translation-key-unused` would else error). New web test
+>    (`renderer.rs::the_issue_router_and_its_two_child_sheets_render_their_confirm_controls`) renders
+>    `job_detail` for ASSIGNED and PICKED_UP and asserts both confirm controls present, food cards
+>    absent on ASSIGNED (derive, never ask — ADR-20260904-015903 §2).
+> 2. **The customer banner could never render and never refreshed.** (a) predicate keyed on
+>    `order.status == 'OUT_FOR_DELIVERY'`, a token NO OrderStatus producer emits
+>    (`projectors/order_tracking.rs` yields PLACED/ACCEPTED/PREPARING/READY/DELIVERED/REJECTED/
+>    CANCELLED_*; `specs/ordering/actors.yaml`'s own lifecycle comment says OUT_FOR_DELIVERY is a
+>    "read-side presentation status" nothing actually derives). (b) it read a SEPARATE
+>    `TrackingState.delivery` (`delivery.byOrder`) refreshed only by `load()`; the PUSH path
+>    (`apply`, the primary transport, ADR-20260810-231300) replaced `order` only and never touched
+>    it. (c) no test rendered it. (d) the copy promised a remedy nobody performs ("nous
+>    réattribuons la livraison" — #860's re-offer PM step is fenced, nothing runs it — and "votre
+>    commande est bien préparée", false on the WITH_RIDER card). Fixed: `OrderTracking` gains
+>    `delivery_handed_back` (bool, default false) — set true by `DeliveryHandedBackByRider`, reset
+>    false by `DeliveryAcceptedByRider`/`DeliveryAcceptedByPartner` — folded by the hand-written
+>    `OrderTrackingCompute::delivery_handed_back` (Complex-classified, same as `delivery_status`/
+>    `courier`), exposed additively as `Order.deliveryHandedBack`, which the pushed `Order` frame now
+>    carries because it rides the SAME row. Banner predicate is `order.deliveryHandedBack == true` —
+>    NO status term, so it correctly fires on the from-ASSIGNED NOT_COLLECTED case too (the order is
+>    only READY there). `TrackingState.delivery` and the second resolver call dropped entirely (7
+>    `Ok(json!({ "delivery": null }))` fixture entries + 2 `delivery: None` struct literals removed);
+>    `restaurant_frontoffice.yaml`'s `data_requirements` drops `delivery.byOrder` (nothing consumes
+>    it now). Copy replaced, both languages, facts only: *"La livraison n'arrivera pas à l'heure
+>    indiquée. Le restaurant est prévenu. Nous vous tiendrons informé ici."* / EN equivalent. Three
+>    new `tracking.rs` tests: flag-true replaces the bar + facts-only copy (PREPARING AND READY, the
+>    latter proving no status dependency); flag-false/absent leaves the ETA alone; a PUSHED frame
+>    (`apply`, no `load()` call) flips the render. **Migration** `20260904090000_ordertracking_
+>    delivery_handed_back.sql` (`ALTER TABLE ... ADD COLUMN ... DEFAULT false` + a checkpoint rewind
+>    to backfill any pre-migration handback), chain entry in `common.rs`, `REQUIRED_SCHEMA_VERSION`
+>    → `20260904090000`. **RED-first, as asked**: inverted `delivery_reassigning` to a hardcoded
+>    `false`, ran `cargo test -p web --lib tracking::tests::the_handback_flag_replaces` —
+>    `panicked at crates/web/src/tracking.rs:906:9` (the ETA-bar-absent assertion on the
+>    PREPARING+flag-true case) — reverted (`sed` round-trip, `git diff` on `tracking.rs` stayed at
+>    the same +/- count as before the probe), reconfirmed GREEN.
+>    **A codegen gap found live, not by inspection**: the `Order::from((row, Restaurant))` conversion
+>    in `crates/server/src/graphql/generated/types.rs` is emitted from a HAND-WRITTEN string template
+>    in `tools/codegen-rs/src/emit/server_graphql.rs` (not mechanically derived from the row's column
+>    list) — the new field landed on the `Order` struct and the `OrderTrackingCompute` trait but not
+>    in this template, so the workspace failed to compile (`E0063: missing field
+>    delivery_handed_back`) until the template itself was patched. `cargo build --workspace` is what
+>    caught it; `cargo run … --specs specs` (validate/generate alone) does not compile Rust and saw
+>    nothing wrong.
+> 3. **`custody-handback` observability contract**: (a) `business.food_location` was `required: true`
+>    on `command.validate` with a comment claiming middleware stamps it — no span construction site
+>    anywhere carries it (the only emit site is the fenced `inbox.rs`, and the fact already lives on
+>    the event + `View_DeliveryJob.food_location`); removed the attribute and the claim. (b)
+>    `max_age_seconds: 300` claimed `derived_from: DELIVERY_OFFER_MAX_TTL_SECONDS`, whose declared
+>    default is 900 (`specs/delivery/configuration.yaml`, and the worker's own doc comment already
+>    said 900) — corrected to 900. (c) "no later acceptance re-offering it" → "no later acceptance or
+>    cancellation" (a FAILED WITH_RIDER job and an acknowledged PENDING one both keep ageing until
+>    cancelled).
+>
+> **NON-BLOCKING, all fixed in this round:**
+> 4. `delivery_read_model.rs`'s WITH_RIDER twin gained its own `OrderPlaced` (so it has an
+>    OrderTracking mirror row) and now asserts `ordertracking.delivery_status = FAILED` +
+>    `delivery_handed_back = true` there too — a mutant collapsing the Compute arm to PENDING/ASSIGNED
+>    used to survive because only `View_DeliveryJob`'s projection-on-read side was checked.
+> 5. `custody_handback_metric.rs`: the reassigned job's handback is now aged 3600s (OLDER than the
+>    stranded job's 1800s, was previously left at its natural ~1680s wall-clock age — close enough to
+>    1800s that a mutant collapsing "no later acceptance" to "any handback exists" could survive on a
+>    `MAX()` that happened to still read close to 1800). Doc comment corrected: it now names the
+>    POSITIVE CONTROL (not the recovery assertion) as the mutant's primary witness, matching what the
+>    aging fix actually makes true.
+> 6. **The `for_rider` / myDeliveries claim**: `for_rider`'s own WHERE clause is `(rider_id = $1 OR
+>    (status = 'PENDING' AND rider_id IS NULL))` — the second arm is EVERY rider's pool, unfiltered by
+>    identity, so an unfiltered myDeliveries call does NOT drop a PENDING handed-back job for the old
+>    rider (only true for FAILED/WITH_RIDER). Added an explicit unfiltered `for_rider(rider1, None)`
+>    assertion proving what actually holds: the row is still visible, `rider_id` is `None` — the
+>    guarantee is unattribution, not absence.
+> 7. `tools/codegen-rs/src/tests.rs`'s handback-lever grep test watched only the event name; a
+>    ranking could read the custody influence via `food_location`/`handed_back_at`/`FoodCustody`/
+>    `DeliveryHandback` without ever spelling `DeliveryHandedBackByRider`. Now watches all five tokens
+>    across all four allowlisted files. `HandBackIsNeverALever` and the `DeliveryHandback` business-
+>    metrics projection both gained a sentence: `riderId` is job ATTRIBUTION only, never a `groupBy`
+>    dimension — a per-rider handback rate is the performance-and-behaviour ground counsel's own gate
+>    refused before counsel (ADR-20260904-014136 §3).
+> 8. This entry.
+>
+> **Gates, this round** (wall-clock, observed in-session; disk swept — `rm -rf target/debug/
+> incremental` — before each heavy one):
+> - `cargo run --manifest-path tools/codegen-rs/Cargo.toml -- --specs specs` (validate+generate): run
+>   3 times as fixes landed (the emitter-template fix needed its own regenerate); each run 0 errors,
+>   the pre-existing warning set unchanged in shape (`obs-technical-error-unreachable`/
+>   `obs-metric-no-emitter` — untouched, no baseline refresh needed), ~15-20s each.
+> - `cargo build --workspace`: 1m 16s clean AFTER the `E0063` round (5 hand-written
+>   `OrderTrackingRow` fixture sites: `behaviour_support.rs`, `delivery_dispatch/tests.rs`,
+>   `payment_settlement.rs`, `reclamation.rs`, `refund.rs`) and the emitter-template fix.
+> - `cargo test -p web --lib`: 151/151 (0.20s) — includes the new sheet-router test, the three new
+>   banner tests, and `router.rs`'s confirmation-page test corrected from asserting 2 reads to 1.
+> - `cargo test -p domain -p application --lib`: 403/403 + 81/81 (0.06s + 0.01s combined).
+> - `cargo test --workspace --lib --exclude codegen-rs`: every crate green, 0 failed (server,
+>   infrastructure lib, actor_runtime, shared_types, core, telemetry, db_test_gate, etc.).
+> - `cargo test --manifest-path tools/codegen-rs/Cargo.toml`: 403/403, 66.59s (includes the widened
+>   watched-tokens test).
+> - `make rust`'s own `check-drift` step read RED against `HEAD` on the first pass for the ordinary
+>   reason (this round's entire diff was still uncommitted) — committed, then re-ran clean (see the
+>   commit this entry lands in).
+> - `bash tools/db-preflight.sh && DATABASE_URL=… DB_TESTS_REQUIRED=1 make test-crates`: full GREEN,
+>   205/205 `test result: ok` blocks, 0 failed anywhere, no `DB-GATED SUITES SKIPPED` line —
+>   07:40:43Z to 07:44:33Z, 3m 50s. Caught ONE more hand-written `OrderTrackingRow` fixture site
+>   (`crates/server/tests/graphql_subscriptions.rs`) the earlier `--lib`-only builds never reached
+>   (integration test binaries are not part of `--lib`); fixed in a follow-on commit.
+> - `cargo clippy -p web -p application -p infrastructure -p server -p domain -p captain-food-codegen
+>   --all-targets -- -D clippy::disallowed-methods` (the CI `lint` job's exact incantation, narrowed
+>   to touched crates for disk): 0 errors, 42.84s.
+> - `make rust` (the full validate+build+generate+diff+link-check gate): 07:36:24Z to 07:37:54Z,
+>   1m 30s, 0 errors, `check-drift` clean against the committed tree, link-check 8417 links / 458
+>   files, 0 broken.
+>
+> **Honest after-state, board card facts (item 8's own ask)**: the restaurant backoffice's pinned
+> `delivery_handback_card` (`restaurant_backoffice.yaml`) is SPEC-COMPLETE but its screen's OWN read
+> (`deliveries.byRestaurant` on `deliveries_board`) is `skipped_reads` per #745 — `restaurantId` is
+> an identity fact the paint loop has no source for yet (#749/#750 land the sourcing). The card
+> therefore does NOT render in production today; it is spec-declared, structurally unreachable. The
+> ONLY things that actually tell anyone about a stranded handback right now are (1) the fold itself
+> (`View_DeliveryJob`'s custody-keyed status, correctly PENDING/FAILED and re-offerable) and (2) the
+> `delivery_handed_back_unreassigned_age_seconds` dead-man gauge this same PR's earlier round wired.
+> No human sees a UI signal until #749/#750.
+>
+> **HOLD: human stands** as round 1 recorded — legal/stored-event surface, PR stays in draft for the
+> TEAM's independent reviewer pass; never marked ready, never auto-merge armed, by this executor, at
+> any point.
+> Executor tier: **sonnet**. Base verified before any code: `git rev-parse HEAD` = `3d20b729`
+> (the claim commit), `HEAD~1` = `origin/main` = `5b2d3da0`. Scope per the card, approved by
+> ADR-20260904-015903 (ADR-20260810-221840 covers the spec diff): `FoodCustody` scalar,
+> `HandBackDelivery` command (`derived: { riderId: rider }`), `DeliveryHandedBackByRider` event,
+> the lifecycle `via:`+`when:` grammar extension (no existing grammar could key a transition off a
+> non-status field; extended rather than adding a second event), the view `derive: { from, map }`
+> grammar extension, two new rules, `handBackDelivery` mutation, rider sheet second exit + job
+> after-state, board pinned card, customer tracking banner, `custody-handback` observability
+> contract, the ONE fenced arm in `crates/infrastructure/src/inbox.rs`, the non-fenced
+> `delivery_handback_watch.rs` dead-man worker.
+>
+> **Commits, in order** (spec 05:07 `e3833c54` → handler/fold/fence/worker 05:28 `201c3a0e` →
+> migration+ACL/no-row/rule/dead-man tests+records 05:38 `fa9c34d9` → three bug-fix rounds below).
+>
+> **Three bugs found live by the mob's own gates, none by inspection** — a broader
+> `cargo test -p domain -p application` sanity run beyond the specific named tests surfaced the
+> first pair; `make test-crates`'s web suite surfaced the third:
+> 1. **`DeliveryHandedBackByRider` was missing `orderId`** (D-QW1 option b, ADR-20260808-234907):
+>    `ProjectionWorker`'s non-`"Order-"`-stream keying (`payload_uuid_of(env, "orderId")`) silently
+>    skipped the event as "not poison" — the customer's OrderTracking mirror never moved. Added
+>    `orderId` (required, folded from aggregate state, never client input) to the event, the
+>    handler, every fixture.
+> 2. **`OrderTrackingCompute::delivery_status`/`courier` declared the event in `fedBy` but the
+>    hand-written Compute hook never got the match arms** — the spec promised a feed the Rust
+>    never implemented. Added them.
+> 3. **`emit/sql.rs`'s new `DeriveVal::Payload` arm emitted an uncast `payload->>'field'`** (TEXT);
+>    in the `status`/`rider_id` CASE ladders mixed with cast branches, Postgres infers the WHOLE
+>    column TEXT, breaking `rider_id = $1::uuid` downstream with "operator does not exist: text =
+>    uuid". Routed through `payload_extract`/`pg_cast` like every other derive arm; patched the
+>    already-written migration's `rider_id` CASE branch with the matching `::uuid` cast.
+>    `TestDeliveryReofferedAfterHandBack`'s `then:` referenced the SAME fixture as its own `given:`
+>    (rider-1), so it could never prove a SECOND rider took the job — added `deliveryAcceptedByRider2`.
+>    Commit `c51b8051` (05:59). Also restored a "3-ii claimed" journal entry this session's own
+>    earlier edit had dropped from the top of this file — diffed the working copy against
+>    `origin/main`, confirmed every OTHER line byte-identical, restored — commit `26801e1e` (06:01).
+> 4. **`rider.yaml`'s handback chips used compound `visible_when` (`a == 'X' && (b == 'Y' ||
+>    b == 'Z')`)** — `crates/web/src/condition.rs`'s grammar is deliberately corpus-exact, no
+>    `&&`/`||`/parens, and says so in its own module doc;
+>    `condition::tests::every_generated_condition_parses` reds loudly. Rewrote as nested
+>    `conditional_section`s (the corpus's own pattern, already used in `restaurant_backoffice.yaml`)
+>    and collapsed one `||` into the grammar's `in [...]` form. Separately, `TrackingState::load()`
+>    now issues a SECOND transport call (`delivery.byOrder`) alongside `order.byId`; three
+>    FakeTransport-scripted tests still scripted one response per pull and panicked on "unscripted
+>    call". Fixed all four. `cargo test -p web --lib`: 144 passed/4 failed → 148/0. Commit
+>    `d095283e` (06:15).
+>
+> **Gates, this session's continuation** (wall-clock approximate, observed in-session):
+> - `make rust` (build+test+validate+generate+diff+link-check): run 4 times as fixes landed, RED on
+>   `check-drift` twice for the ordinary reason (real uncommitted work, not generator drift —
+>   `git status --short` showed only hand-written files each time), **final run clean, 0 errors**,
+>   `warning-baseline.json` unchanged in shape from what `fa9c34d9` already committed
+>   (`obs-technical-error-unreachable` 12→13, accepted; `obs-metric-no-emitter` held at 46,
+>   untouched as the card requires) — ~06:20Z GREEN.
+> - `bash tools/db-preflight.sh && DATABASE_URL=… DB_TESTS_REQUIRED=1 make test-crates`: the
+>   `ci-repro` cluster's `postmaster.pid` was stale (postmaster dead, per environment.md's known
+>   recovery shape) and its port was in fact held by the machine's OTHER live cluster
+>   (`/var/lib/postgresql/16/main`, port 5432) — used that cluster directly, `createdb
+>   cf639handback`, dropped after. **Two full runs** (before and after commit `d095283e`'s web
+>   fixes): first run GREEN on everything except the (not-yet-fixed) web suite; **final run fully
+>   GREEN** — `infrastructure`'s `tests/main/main.rs` 101/101, `custody_handback_metric` 2/2,
+>   `delivery_read_model` (incl. `a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirror`),
+>   `server`'s ACL/subscriptions/write-path suites, `web` 148/148, workspace total 0 failed, 0
+>   `error:` lines, no `DB-GATED SUITES SKIPPED` line anywhere in either run's log — disk dropped to
+>   3.4G/91% mid-run (23G target dir) but held stable through to completion, no sweep needed beyond
+>   the two-command pre-gate one.
+>
+> **Three named mutants, run against the GREEN tree above, each seen RED then reverted to a
+> byte-identical diff (confirmed via `diff`) and reconfirmed GREEN**:
+> 1. **The handler never compares `riderId`** — `if false && state.rider_id != Some(cmd.rider_id)`
+>    in `commands.rs::hand_back_delivery`. `cargo test -p application --lib
+>    generated::behaviour_tests::test_hand_back_delivery_rejects_rider_mismatch`:
+>    `` panicked at crates/application/src/generated/behaviour_tests.rs:4087:22: TestHandBackDeliveryRejectsRiderMismatch: the spec expects a typed rejection: () ``.
+>    Reverted, `git diff` empty, GREEN.
+> 2. **The handback row dropped from `status.derive`** — mutated `View_DeliveryJob`'s
+>    `DeliveryHandedBackByRider` status map to `{NOT_COLLECTED: ASSIGNED, RETURNED_TO_RESTAURANT:
+>    ASSIGNED, WITH_RIDER: ASSIGNED}` (a handback that no longer moves status), hand-patched the
+>    already-written migration's matching CASE branch the same way (spec `derive:` regenerates
+>    `views.generated.sql`, never the hand-written migration), ran against a fresh `cf639mutant2`
+>    DB: `` panicked at crates/infrastructure/tests/main/delivery_read_model.rs:379:5: assertion `left == right` failed: PENDING unless WITH_RIDER — this is RETURNED_TO_RESTAURANT  left: ASSIGNED  right: PENDING ``.
+>    Reverted both files, `diff` byte-identical on the migration, `make generate` clean, GREEN.
+> 3. **The observability "no later acceptance" predicate** — `delivery_handback_watch.rs`'s
+>    `UNREASSIGNED_SQL` WHERE clause narrowed from `food_location IS NOT NULL AND status IN
+>    ('PENDING','FAILED')` to `handed_back_at IS NOT NULL` (the naive "does a handback exist"
+>    reading the test's own doc comment names — `handed_back_at` has no reset arm in `derive:`,
+>    unlike `food_location`/`status`, so it stays set forever once a handback lands). Against a
+>    fresh `cf639mutant3` DB the mutant was killed, but by the **recovery** assertion rather than
+>    the positive-control one the test's doc comment names — the stranded job's manually-aged 1800s
+>    still dominated the `MAX()` over the (uncorrected) reassigned job's near-zero raw age, so
+>    part (b) passed regardless; the fold only diverged once the FORMERLY-stranded job was itself
+>    reassigned and its own age should have dropped to 0 but the mutant kept counting it:
+>    `` panicked at crates/infrastructure/tests/custody_handback_metric.rs:206:5: assertion `left == right` failed: a gauge nobody can close an incident on is not a gauge  left: [({}, 1800.0)]  right: [({}, 0.0)] ``.
+>    Reverted, `diff` byte-identical, GREEN. **Filed as an adjacent finding for the PR body**: the
+>    test's own doc comment over-attributes which assertion catches this specific mutant shape.
+>
+> **Fence self-check**: `git diff --name-only origin/main -- crates/infrastructure/src/inbox.rs`
+> (plus every plausible mailbox/lease/fencing/event-store sibling path tried) prints exactly
+> `crates/infrastructure/src/inbox.rs`; `git diff origin/main -- crates/infrastructure/src/inbox.rs
+> | grep -c '^+[^+]'` = 1. **Flagged**: no file anywhere in the repo enumerates a canonical "seven
+> fence paths" list — this check was built from first principles (every file plausibly fenced by
+> the isolation programme, #780/#783/ADR-20260830-183000) rather than a citable source; the
+> architect should record the canonical list once, so the next card can cite it instead of
+> re-deriving it.
+>
+> **Record**: `docs/SPEC-LOG.md`, `docs/STATUS.md`, `docs/proposals/PROP-20260831-180622-…` row 3
+> (LANDED, `custody-door` Concern checked) already landed in `fa9c34d9`. This entry is the
+> continuation session's own record. **HOLD: human** stands as the card names — legal/stored-event
+> surface (`domain_events` payload shape, fold semantics, a migration) — PR stays in draft for the
+> TEAM's independent reviewer pass; **never marked ready, never auto-merge armed, by this
+> executor, at any point**. `on_success` has no mutation-chaining primitive: `hand_back_delivery`
+> ships alone on both confirm buttons; the ADR's "report + hand back" two-Tells sequencing is
+> unwired and flagged in the PR body, not invented here. Issue #860's `deferred:` block for the
+> re-offer PM leg: the grammar's `receives_deferred_grammar` machinery is same-actor only (checked
+> `tools/codegen-rs/src/validate/core.rs`'s `receives_deferred_grammar` tests) and #860 is a
+> DIFFERENT actor's (`DeliveryDispatchProcess`) future step, so it cannot carry the deferral here —
+> noted as a PR body comment instead, per the card's own fallback.
+
 > **2026-09-04 — #867 merged after a second round; the rider's controls have a source; 3-ii claimed.**
 > [PR #867](https://github.com/TheCaptainCompany/captain-food/pull/867) (`5b2d3da0`, squash) executes
 > PROP-171500 D2 for riders: `derived: { riderId: rider }` on six mutations (including

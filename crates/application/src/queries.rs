@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use domain::generated::entities::{Money, OptionList, Product};
 use domain::generated::scalars::{
     CartId, CatalogItemAvailability, CityAvailabilityStatus, CityId, CuisineCategory, CurrencyCode,
-    CustomerId, DeliveryChannelKey, DeliveryDissatisfactionReason, DeliveryIssueKind, DeliveryJobId, DeliveryPartnerName,
+    CustomerId, DeliveryChannelKey, DeliveryDissatisfactionReason, DeliveryIssueKind, DeliveryJobId, FoodCustody, DeliveryPartnerName,
     DeliveryPartnerRegistrationId, DeliveryProvider, DeliveryStatus, DeliveryTimeliness, EmailAddress,
     ExternalReference, OfferId, OfferName,
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
@@ -489,6 +489,11 @@ pub struct DeliveryJobRow {
     /// `DeliveryIssueReported.kind`, cleared by `DeliveryIssueResolved`; `None` when nothing is
     /// open — the column through which the restaurant is told.
     pub open_issue_kind: Option<DeliveryIssueKind>,
+    /// Where the food is, set by a handback (#639 part C step 3-ii); reset to `None` by the next
+    /// acceptance — the board's pinned card headline and the customer tracking banner's predicate.
+    pub food_location: Option<FoodCustody>,
+    /// Occurrence time of the latest handback (envelope `occurredAt`); `None` until one occurs.
+    pub handed_back_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Read port over the `View_DeliveryJob` read model (ADR-0031/0039). Backs the `delivery` /

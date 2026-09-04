@@ -36,6 +36,7 @@ impl sealed::Sealed for domain::generated::commands::CompleteDelivery {}
 impl sealed::Sealed for domain::generated::commands::ConfirmPickup {}
 impl sealed::Sealed for domain::generated::commands::DeclineDelivery {}
 impl sealed::Sealed for domain::generated::commands::EscalateDelivery {}
+impl sealed::Sealed for domain::generated::commands::HandBackDelivery {}
 impl sealed::Sealed for domain::generated::commands::ReportDeliveryIssue {}
 impl sealed::Sealed for domain::generated::commands::ResolveDeliveryIssue {}
 impl sealed::Sealed for domain::generated::commands::UnassignDeliveryFromPartner {}
@@ -77,6 +78,10 @@ impl DeliveryJobCommand for domain::generated::commands::DeclineDelivery {
 
 impl DeliveryJobCommand for domain::generated::commands::EscalateDelivery {
     const MESSAGE_TYPE: &'static str = "EscalateDelivery";
+}
+
+impl DeliveryJobCommand for domain::generated::commands::HandBackDelivery {
+    const MESSAGE_TYPE: &'static str = "HandBackDelivery";
 }
 
 impl DeliveryJobCommand for domain::generated::commands::ReportDeliveryIssue {
