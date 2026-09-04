@@ -18600,4 +18600,24 @@ mod derive_null_gate {
             .iter()
             .any(|i| i.rule == "view-derive-value-unknown" && matches!(i.level, Level::Error)));
     }
+
+    /// A `null` arm is only legal on a NULLABLE column — resetting a NOT NULL column would panic at
+    /// generation, which is later than here. Planted: a `null` arm on `View_DeliveryJob.status`
+    /// (declared with no `nullable: true`) — an ERROR by name, never a generation-time panic.
+    #[test]
+    fn a_null_arm_on_a_non_nullable_column_is_refused_by_name() {
+        let mut model = real_model();
+        derive_mut(&mut model, "View_DeliveryJob", "status")
+            .insert(Value::from("DeliveryIssueReported"), Value::Null);
+        let h = hits(&model, "view-derive-null-not-nullable");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(
+            h[0].contains("View_DeliveryJob") && h[0].contains("status") && h[0].contains("DeliveryIssueReported"),
+            "{h:?}"
+        );
+        assert!(validate(&model)
+            .issues
+            .iter()
+            .any(|i| i.rule == "view-derive-null-not-nullable" && matches!(i.level, Level::Error)));
+    }
 }

@@ -141,7 +141,7 @@ bottom_sheets:
         full_width: true
         action:
           type: resolve_delivery_issue
-          variables: { deliveryJobId: "{{ sheet.data.deliveryJobId }}", resolution: "{{ issue_resolution.value }}", note: "{{ issue_resolution_note.value }}" }
+          variables: { deliveryJobId: "{{ delivery.id }}", resolution: "{{ issue_resolution.value }}", note: "{{ issue_resolution_note.value }}" }
           on_success: [{ type: close_sheet }]
       - { type: inline_error, id: resolve_issue_error, for_action: resolve_delivery_issue }
 
@@ -235,7 +235,7 @@ screens:
           - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.vehicle_or_injury' },    variant: warning, visible_when: "delivery.openIssue == 'VEHICLE_OR_INJURY'" }
           - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.other' },                variant: warning, visible_when: "delivery.openIssue == 'OTHER'" }
           - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.body' } }
-          - { type: button, id: issue_seen_btn, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.seen' }, variant: primary, action: { type: open_bottom_sheet, sheet_id: issue_resolution_sheet, data: { deliveryJobId: "{{ delivery.id }}" } } }
+          - { type: button, id: issue_seen_btn, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.seen' }, variant: primary, action: { type: open_bottom_sheet, sheet_id: issue_resolution_sheet } }
       - type: order_list
         items: "{{ deliveries }}"
         item_type: order_card
