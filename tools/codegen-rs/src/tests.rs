@@ -16249,6 +16249,12 @@ mod screen_binding_gate {
             ("screens/restaurant_frontoffice.yaml", "cart", "cart.restaurant.displayNamez", "displayNamez"),
             ("screens/restaurant_frontoffice.yaml", "order_tracking", "order.totalAmountz", "totalAmountz"),
             ("screens/rider.yaml", "job_detail", "delivery.restaurant.displayNamez", "displayNamez"),
+            // #639 part C step 4-ii (ADR-20260904-124600 §4/§5): the `/restricted` screen's OWN
+            // resolver root (`standing.mine` -> `RiderStandingInfo`, never `myStanding.*` —
+            // ADR-124600's own corrected card defect) walked THROUGH `heldDelivery` (typed
+            // `DeliveryJob`) to the SAME FK-derived nav edge `job_detail`'s plant above pins — the
+            // walk over `RiderStandingInfo -> DeliveryJob` the card's own D section names.
+            ("screens/rider.yaml", "restricted", "standing.heldDelivery.restaurant.displayNamez", "displayNamez"),
         ];
         for (file, screen, binding, _) in &plants {
             plant_typo(&mut model, file, screen, binding);
@@ -16333,6 +16339,9 @@ mod screen_roles_gate {
             "screen-graphql-role-requires-anonymous",
             "screen-graphql-role-refused-operation",
             "screen-unauthenticated-route-unknown",
+            // #639 part C step 4-ii (ADR-20260904-124600 §2): the `unauthenticated:` twin.
+            "screen-restricted-route-unknown",
+            "screen-restricted-binds-uncarved-op",
         ] {
             assert!(hits(&model, rule).is_empty(), "{rule} must be clean on the real corpus: {:?}", hits(&model, rule));
         }
@@ -16409,6 +16418,77 @@ mod screen_roles_gate {
         let found = hits(&model, "screen-unauthenticated-route-unknown");
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].contains("screens/jobs"), "{found:?}");
+    }
+
+    // ── #639 part C step 4-ii (ADR-20260904-124600 §2) — `restricted:` / `while_restricted:` ──────
+
+    /// `restricted:` must name a `while_restricted: true` route of the same file that carries no
+    /// `restricted:` of its own — a route outside the closed door set, `/sign-in`, is refused by
+    /// name (it is PUBLIC, `requires_auth: false`, and declares no `while_restricted:`).
+    #[test]
+    fn the_restricted_bounce_must_name_a_while_restricted_route_of_the_same_file() {
+        let mut model = real_model();
+        let mut rs = serde_yaml::Mapping::new();
+        rs.insert(Value::from("type"), Value::from("navigate"));
+        rs.insert(Value::from("route"), Value::from("/sign-in"));
+        screen_mut(&mut model, "screens/rider.yaml", "jobs").insert(Value::from("restricted"), Value::Mapping(rs));
+        let found = hits(&model, "screen-restricted-route-unknown");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("screens/jobs"), "{found:?}");
+    }
+
+    /// Card mutant M7-adjacent (beck's checkpoint): planting `restricted: /jobs/:orderId` on `jobs`
+    /// makes `job_detail` a `restricted:` TARGET with no `while_restricted: true` of its own —
+    /// BOTH the route-unknown clause (the target lacks the flag) AND the uncarved-op clause fire
+    /// (`job_detail` binds `confirmPickup`/`completeDelivery`, neither `whileRestricted:`).
+    #[test]
+    fn a_restricted_target_naming_job_detail_hits_both_clauses_on_its_uncarved_operations() {
+        let mut model = real_model();
+        let mut rs = serde_yaml::Mapping::new();
+        rs.insert(Value::from("type"), Value::from("navigate"));
+        rs.insert(Value::from("route"), Value::from("/jobs/:orderId"));
+        screen_mut(&mut model, "screens/rider.yaml", "jobs").insert(Value::from("restricted"), Value::Mapping(rs));
+        let route_unknown = hits(&model, "screen-restricted-route-unknown");
+        assert_eq!(route_unknown.len(), 1, "{route_unknown:?}");
+        assert!(route_unknown[0].contains("screens/jobs"), "{route_unknown:?}");
+        let uncarved = hits(&model, "screen-restricted-binds-uncarved-op");
+        assert!(uncarved.iter().any(|h| h.contains("screens/job_detail") && h.contains("confirmPickup")), "{uncarved:?}");
+        assert!(uncarved.iter().any(|h| h.contains("screens/job_detail") && h.contains("completeDelivery")), "{uncarved:?}");
+    }
+
+    /// Card mutant M7 (beck): mounting `rider_topbar` on `/restricted` fires the uncarved-op
+    /// clause naming `changeRiderStatus` — ONE hit, because `bound_operations`' component walk
+    /// already expands `{ component: rider_topbar }` and discovers its online toggle
+    /// (`rider_toggle_online` -> `changeRiderStatus`, never `whileRestricted:`); no SECOND
+    /// mechanism exists for "never mounts rider_topbar" (the module docs' own claim, pinned here).
+    #[test]
+    fn mounting_the_topbar_on_restricted_fires_the_uncarved_op_clause_naming_change_rider_status() {
+        let mut model = real_model();
+        let mut topbar_ref = serde_yaml::Mapping::new();
+        topbar_ref.insert(Value::from("component"), Value::from("rider_topbar"));
+        screen_mut(&mut model, "screens/rider.yaml", "restricted")
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restricted screen declares components")
+            .push(Value::Mapping(topbar_ref));
+        let uncarved = hits(&model, "screen-restricted-binds-uncarved-op");
+        assert_eq!(uncarved.len(), 1, "{uncarved:?}");
+        assert!(uncarved[0].contains("screens/restricted") && uncarved[0].contains("changeRiderStatus"), "{uncarved:?}");
+    }
+
+    /// `while_restricted: true` is not itself an error — the real `/restricted` screen already
+    /// carries it and is proven green by
+    /// `the_real_corpus_is_clean_and_the_rider_door_is_the_one_declared_transport_role`. What
+    /// fires is an UNCARVED bound operation: declaring the flag on a screen that binds one (any
+    /// screen with a bound mutation carrying no `whileRestricted:`, `jobs`'
+    /// `accept_delivery` -> `acceptDelivery` among them) is refused by name.
+    #[test]
+    fn while_restricted_on_a_screen_with_an_uncarved_bound_mutation_is_refused_by_name() {
+        let mut model = real_model();
+        screen_mut(&mut model, "screens/rider.yaml", "jobs")
+            .insert(Value::from("while_restricted"), Value::from(true));
+        let uncarved = hits(&model, "screen-restricted-binds-uncarved-op");
+        assert!(uncarved.iter().any(|h| h.contains("screens/jobs") && h.contains("acceptDelivery")), "{uncarved:?}");
     }
 
     /// The general audience form (`screen.roles ⊆ ∩(roles of every bound operation)`) is a

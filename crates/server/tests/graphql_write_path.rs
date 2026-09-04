@@ -256,6 +256,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             mailbox_lanes,
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
+        support_contact: None,
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,

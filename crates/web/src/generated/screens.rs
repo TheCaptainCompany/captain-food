@@ -66,6 +66,17 @@ pub struct Screen {
     /// cookie-less document GET there, the client navigates there on a 401 from its role path.
     /// `None` = the pre-2c-ii behaviour (customer surfaces: the auth sheet over the screen).
     pub unauthenticated_route: Option<&'static str>,
+    /// The route a rider bounces to on a REFUSED read/Tell carrying `extensions.reason ==
+    /// RIDER_RESTRICTED` (`restricted: { type: navigate, route }`, #639 part C step 4-ii,
+    /// ADR-20260904-124600 §2) — the `unauthenticated:` twin, keyed on the server's own standing
+    /// signal instead of a missing session. `None` on every screen that declares no bounce (the
+    /// `/restricted` screen itself carries none — validator rule `screen-restricted-route-unknown`).
+    pub restricted_route: Option<&'static str>,
+    /// True on a screen a RESTRICTED rider may still reach without bouncing (`while_restricted:
+    /// true`, #639 4-ii): the `/restricted` screen itself. Validator rule
+    /// `screen-restricted-binds-uncarved-op` proves such a screen binds only `whileRestricted:`
+    /// operations for its role and never mounts `rider_topbar`.
+    pub while_restricted: bool,
     pub tree: &'static [Node],
 }
 
@@ -96,6 +107,8 @@ pub mod captain_frontoffice {
             skipped_reads: &[ResolverKey::CategoriesAll],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -130,6 +143,8 @@ pub mod captain_frontoffice {
             skipped_reads: &[ResolverKey::CategoriesAll],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -161,6 +176,8 @@ pub mod captain_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("partner.header"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::HeroSection, props: &[("image", PropValue::Text("/assets/partner-hero.jpg")), ("title", PropValue::I18n("partner.hero_title")), ("body", PropValue::I18n("partner.hero_body"))], children: &[], branches: &[] },
@@ -212,6 +229,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -242,6 +261,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[ResolverKey::DeliveriesByRestaurant],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -284,6 +305,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -309,6 +332,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[ResolverKey::SatisfactionByRestaurant],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -331,6 +356,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -375,6 +402,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -398,6 +427,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -431,6 +462,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[ResolverKey::RestaurantLocations],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -463,6 +496,8 @@ pub mod restaurant_backoffice {
             skipped_reads: &[ResolverKey::RestaurantLocations],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -512,6 +547,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("sticky", PropValue::Text("true")), ("right_slot.0.type", PropValue::Text("icon_button")), ("right_slot.0.icon", PropValue::Text("share")), ("right_slot.0.action.type", PropValue::Text("share")), ("right_slot.0.action.url", PropValue::Binding("canonical_url")), ("right_slot.1.type", PropValue::Text("icon_button")), ("right_slot.1.icon", PropValue::Text("heart")), ("right_slot.1.active_when", PropValue::Text("is_favorited")), ("right_slot.1.action.type", PropValue::Text("toggle_favorite")), ("right_slot.1.action.restaurant_id", PropValue::Binding("restaurant.id"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("restaurant_info"))], children: &[
@@ -537,6 +574,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("cart.title")), ("subtitle", PropValue::Binding("cart.restaurant.displayName"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::CartLines, props: &[("items", PropValue::Binding("cart.lines")), ("item_template.type", PropValue::Text("cart_line_row")), ("item_template.quantity_stepper.min", PropValue::Text("0")), ("item_template.quantity_stepper.on_change.type", PropValue::Text("change_cart_line_quantity")), ("item_template.quantity_stepper.on_change.line_id", PropValue::Binding("line.id")), ("item_template.quantity_stepper.on_change.quantity", PropValue::Binding("new_quantity"))], children: &[], branches: &[] },
@@ -558,6 +597,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[ResolverKey::PaymentStatusByOrder],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[],
         },
         Screen {
@@ -570,6 +611,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[],
         },
         Screen {
@@ -582,6 +625,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -605,6 +650,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("conversation.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("conversation.status"))], children: &[], branches: &[] },
@@ -627,6 +674,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("claim.open.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::InfoRow, props: &[("label", PropValue::I18n("claim.order_ref")), ("value", PropValue::Binding("order.id"))], children: &[], branches: &[] },
@@ -647,6 +696,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -669,6 +720,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("claim.detail.title")), ("sticky", PropValue::Text("true"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("reclamation.status"))], children: &[], branches: &[] },
@@ -699,6 +752,8 @@ pub mod restaurant_frontoffice {
             skipped_reads: &[ResolverKey::FavoritesMine],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -764,7 +819,7 @@ pub mod restaurant_frontoffice {
     ];
 }
 
-/// `specs/screens/rider.yaml` — 3 screen(s).
+/// `specs/screens/rider.yaml` — 4 screen(s).
 pub mod rider {
     use super::*;
 
@@ -779,6 +834,8 @@ pub mod rider {
             skipped_reads: &[],
             graphql_role: Some("PUBLIC"),
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("rider_sign_in_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/sign-in"))], children: &[], branches: &[] },
@@ -804,6 +861,8 @@ pub mod rider {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: Some("/sign-in"),
+            restricted_route: Some("/restricted"),
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("rider_topbar"))], children: &[
                 Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
@@ -829,6 +888,8 @@ pub mod rider {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: Some("/sign-in"),
+            restricted_route: Some("/restricted"),
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.job.title"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::StatusChip, props: &[("status", PropValue::Binding("delivery.status"))], children: &[], branches: &[] },
@@ -843,6 +904,69 @@ pub mod rider {
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("confirm_pickup_btn")), ("label", PropValue::I18n("rider.job.picked_up")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("confirm_pickup")), ("action.variables.deliveryJobId", PropValue::Binding("delivery.id"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("complete_delivery_btn")), ("label", PropValue::I18n("rider.job.delivered")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("complete_delivery")), ("action.variables.deliveryJobId", PropValue::Binding("delivery.id"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("report_issue_open_btn")), ("label", PropValue::I18n("rider.job.problem")), ("variant", PropValue::Text("outline")), ("full_width", PropValue::Text("true")), ("min_height", PropValue::Text("56")), ("action.type", PropValue::Text("open_bottom_sheet")), ("action.sheet_id", PropValue::Text("rider_issue_sheet"))], children: &[], branches: &[] }
+            ], branches: &[] }
+        ],
+        },
+        Screen {
+            id: "restricted",
+            route: "/restricted",
+            roles: &["RIDER"],
+            requires_auth: true,
+            sdui: true,
+            data_requirements: &[ResolverKey::StandingMine],
+            skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: Some("/sign-in"),
+            restricted_route: None,
+            while_restricted: true,
+            tree: &[
+            Node { kind: ComponentKind::BackButtonHeader, props: &[("title", PropValue::I18n("rider.restricted.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.no_more_jobs"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_attribution")), ("condition", PropValue::Text("standing.restriction != null"))], children: &[], branches: &[("if_true", &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground_label"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_rider_requested")), ("visible_when", PropValue::Text("standing.restriction.ground == 'RIDER_REQUESTED'"))], children: &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.rider_requested.lead"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.rider_requested.trail"))], children: &[], branches: &[] }
+                ], branches: &[] },
+                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_eligibility_document_lapsed")), ("visible_when", PropValue::Text("standing.restriction.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'"))], children: &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.eligibility_document_lapsed.lead"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.eligibility_document_lapsed.trail"))], children: &[], branches: &[] }
+                ], branches: &[] },
+                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_identity_mismatch")), ("visible_when", PropValue::Text("standing.restriction.ground == 'IDENTITY_MISMATCH'"))], children: &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.identity_mismatch.lead"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.identity_mismatch.trail"))], children: &[], branches: &[] }
+                ], branches: &[] },
+                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_account_compromise")), ("visible_when", PropValue::Text("standing.restriction.ground == 'ACCOUNT_COMPROMISE'"))], children: &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.account_compromise.lead"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.account_compromise.trail"))], children: &[], branches: &[] }
+                ], branches: &[] },
+                Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_ground_unrecognised")), ("visible_when", PropValue::Text("standing.restriction.ground == null"))], children: &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.unrecognised.lead"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.ground.unrecognised.trail"))], children: &[], branches: &[] }
+                ], branches: &[] },
+                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("calendar")), ("label", PropValue::I18n("rider.restricted.decided_at_label")), ("value", PropValue::Binding("standing.restriction.decidedAt | format_datetime"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("calendar")), ("label", PropValue::I18n("rider.restricted.effective_at_label")), ("value", PropValue::Binding("standing.restriction.effectiveAt | format_datetime"))], children: &[], branches: &[] }
+            ] as &[Node]), ("if_false", &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.details_pending"))], children: &[], branches: &[] }
+            ] as &[Node])] },
+            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restricted_held_job")), ("condition", PropValue::Text("standing.heldDelivery != null"))], children: &[], branches: &[("if_true", &[
+                Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("rider.restricted.held_title"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("store")), ("label", PropValue::I18n("rider.job.restaurant")), ("value", PropValue::Binding("standing.heldDelivery.restaurant.displayName"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InfoRow, props: &[("icon", PropValue::Text("map_pin")), ("label", PropValue::I18n("rider.job.pickup")), ("value", PropValue::Binding("standing.heldDelivery.pickupAddress"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.held_instruction")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation == null"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restricted_cannot_continue_btn")), ("label", PropValue::I18n("rider.issue.exit.hand_back")), ("variant", PropValue::Text("outline")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation == null")), ("action.type", PropValue::Text("open_bottom_sheet")), ("action.sheet_id", PropValue::Text("rider_restricted_handback_sheet"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.held_after")), ("visible_when", PropValue::Text("standing.heldDelivery.foodLocation != null"))], children: &[], branches: &[] }
+            ] as &[Node])] },
+            Node { kind: ComponentKind::Row, props: &[("id", PropValue::Text("restricted_contest"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.contest.lead"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("standing.contestContact"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.restricted.contest.trail"))], children: &[], branches: &[] }
             ], branches: &[] }
         ],
         },
@@ -869,6 +993,13 @@ pub mod rider {
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("hand_back_delivery_assigned_btn")), ("label", PropValue::I18n("rider.issue.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("delivery.status == 'ASSIGNED'")), ("action.type", PropValue::Text("hand_back_delivery")), ("action.variables.deliveryJobId", PropValue::Binding("delivery.id")), ("action.variables.foodLocation", PropValue::Text("NOT_COLLECTED")), ("action.loading_label", PropValue::I18n("rider.issue.handback_pending")), ("action.on_success.0.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("hand_back_delivery_error")), ("for_action", PropValue::Text("hand_back_delivery"))], children: &[], branches: &[] }
             ], branches: &[] } },
+        Sheet { id: "rider_restricted_handback_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("rider_restricted_handback_sheet")), ("title", PropValue::I18n("rider.issue.exit.hand_back"))], children: &[
+                Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("restricted_handback_location")), ("label", PropValue::I18n("rider.issue.custody_label")), ("single_select", PropValue::Text("true")), ("visible_when", PropValue::Text("standing.heldDelivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']")), ("options.0.value", PropValue::Text("WITH_RIDER")), ("options.0.label", PropValue::I18n("rider.issue.custody.with_rider")), ("options.1.value", PropValue::Text("RETURNED_TO_RESTAURANT")), ("options.1.label", PropValue::I18n("rider.issue.custody.returned"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restricted_hand_back_delivery_picked_up_btn")), ("label", PropValue::I18n("rider.issue.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("standing.heldDelivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']")), ("action.type", PropValue::Text("hand_back_delivery")), ("action.variables.deliveryJobId", PropValue::Binding("standing.heldDelivery.id")), ("action.variables.foodLocation", PropValue::Binding("restricted_handback_location.value")), ("action.loading_label", PropValue::I18n("rider.issue.handback_pending")), ("action.on_success.0.type", PropValue::Text("close_sheet")), ("action.on_success.1.type", PropValue::Text("navigate")), ("action.on_success.1.route", PropValue::Text("$reload"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restricted_hand_back_delivery_assigned_btn")), ("label", PropValue::I18n("rider.issue.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("standing.heldDelivery.status == 'ASSIGNED'")), ("action.type", PropValue::Text("hand_back_delivery")), ("action.variables.deliveryJobId", PropValue::Binding("standing.heldDelivery.id")), ("action.variables.foodLocation", PropValue::Text("NOT_COLLECTED")), ("action.loading_label", PropValue::I18n("rider.issue.handback_pending")), ("action.on_success.0.type", PropValue::Text("close_sheet")), ("action.on_success.1.type", PropValue::Text("navigate")), ("action.on_success.1.route", PropValue::Text("$reload"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("restricted_hand_back_delivery_error")), ("for_action", PropValue::Text("hand_back_delivery"))], children: &[], branches: &[] }
+            ], branches: &[] } },
         Sheet { id: "rider_code_sheet", node:
             Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("rider_code_sheet")), ("title", PropValue::I18n("rider.sign_in.code_title")), ("drag_to_close", PropValue::Text("false"))], children: &[
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("rider.sign_in.code_body"))], children: &[], branches: &[] },
@@ -894,6 +1025,8 @@ pub mod system {
             skipped_reads: &[],
             graphql_role: None,
             unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
             tree: &[
             Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("mailbox.title")), ("subtitle", PropValue::I18n("mailbox.subtitle"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("lanes")), ("title", PropValue::I18n("mailbox.lanes"))], children: &[

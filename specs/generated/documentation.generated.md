@@ -9450,6 +9450,7 @@ The calling rider's own standing (#639 part C step 4-i) — ACTIVE/RESTRICTED, t
 | <a id="type-riderstandinginfo--standing"></a>`standing` | [🔤 `RiderStanding`](#scalar-riderstanding) | ✅ |
 | <a id="type-riderstandinginfo--restriction"></a>`restriction` | [🧩 `RiderRestrictionInfo`](#type-riderrestrictioninfo) | ⬜ |
 | <a id="type-riderstandinginfo--helddelivery"></a>`heldDelivery` | [🧩 `DeliveryJob`](#type-deliveryjob) | ⬜ |
+| <a id="type-riderstandinginfo--contestcontact"></a>`contestContact` | [🔤 `EmailAddress`](#scalar-emailaddress) | ⬜ |
 
 <a id="type-deliverypartneravailability"></a>
 #### 🧩 Type: `DeliveryPartnerAvailability`
@@ -12990,6 +12991,32 @@ _Surface_ **`rider.yaml`**
 - ⚠️ Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant.
 - ⚠️ The handback after-state's 'Rapportez la commande' instruction (#639 part C step 3-ii) names no external-navigation control: no `ClientEffect`/action kind for opening a maps app exists anywhere in this DSL (`navigate` is the SDUI's own internal route change, not GPS). The pickup address is shown as the biggest element instead (page_header); a real turn-by-turn deep link is a follow-on, not invented here as a dead control.
 
+<a id="screen-restricted"></a>
+### 📱 `restricted` · `/restricted` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Your access is restricted.               │
+├──────────────────────────────────────────┤
+│ back_button_header — Your access is res… │
+│ page_header — Your access is restricted. │
+│ text                                     │
+│ conditional_section                      │
+│ conditional_section                      │
+│ row                                      │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `standing.mine` | [🔎 `myStanding`](#query-mystanding) |
+| write | `hand_back_delivery` | [✏️ `handBackDelivery`](#mutation-handbackdelivery) |
+
+**Gaps**
+- ⚠️ The restaurant's phone on the held-job card (#717): DeliveryJob carries no phone field, same declared gap as job_detail's contact row.
+- ⚠️ The copy-to-clipboard control on the contact address (#872): `copy_to_clipboard` is a declared ActionKey with no listener (`crates/web/src/executor.rs:405,545`, `interact.rs:227,516`) — the address is plain selectable text instead, per ADR-20260904-124600 §4 ('no copy button — a declared action with no listener is the control that does nothing, on a legal surface').
+- ⚠️ The document-GET bounce (ADR-20260904-081527 §11, amended by ADR-20260904-124600 §3): the page GET makes zero Postgres reads today; a restricted rider who opens a fresh tab sees the ordinary shell until the client's own `standing.mine` read answers. Rides with step 5's socket re-resolution (one resolver, three callers).
+
 _Surface_ **`system.yaml`**
 
 <a id="screen-mailbox_lanes"></a>
@@ -13395,6 +13422,27 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-issue-note_prompt"></a>`rider.issue.note_prompt` | — | The facts, without describing anyone | Les faits, sans décrire des personnes |
 | <a id="translation-rider-issue-confirm"></a>`rider.issue.confirm` | — | Tell the restaurant | Prévenir le restaurant |
 | <a id="translation-rider-issue-pending"></a>`rider.issue.pending` | — | Reported ✓ — the restaurant is being told… | Signalé ✓ — le restaurant est prévenu… |
+| <a id="translation-rider-restricted-title"></a>`rider.restricted.title` | — | Your access is restricted. | Votre accès est restreint. |
+| <a id="translation-rider-restricted-no_more_jobs"></a>`rider.restricted.no_more_jobs` | — | You will no longer receive deliveries. | Vous ne recevrez plus de courses. |
+| <a id="translation-rider-restricted-ground_label"></a>`rider.restricted.ground_label` | — | Ground | Motif |
+| <a id="translation-rider-restricted-ground-rider_requested-lead"></a>`rider.restricted.ground.rider_requested.lead` | — | At your request. You asked for your access to be restricted. To restore it, write to  | À votre demande. Vous avez demandé la restriction de votre accès. Pour le rétablir, écrivez à  |
+| <a id="translation-rider-restricted-ground-rider_requested-trail"></a>`rider.restricted.ground.rider_requested.trail` | — | . | . |
+| <a id="translation-rider-restricted-ground-eligibility_document_lapsed-lead"></a>`rider.restricted.ground.eligibility_document_lapsed.lead` | — | Expired document. A document required to deliver is no longer valid. Send a valid document to  | Justificatif expiré. Un document obligatoire pour livrer n'est plus valide. Transmettez un justificatif en cours de validité à  |
+| <a id="translation-rider-restricted-ground-eligibility_document_lapsed-trail"></a>`rider.restricted.ground.eligibility_document_lapsed.trail` | — |  to restore access. |  pour rétablir l'accès. |
+| <a id="translation-rider-restricted-ground-identity_mismatch-lead"></a>`rider.restricted.ground.identity_mismatch.lead` | — | Identity mismatch. The signed-in identity does not match the person verified at registration. Contact  | Identité non concordante. L'identité connectée ne correspond pas à la personne vérifiée à l'inscription. Contactez  |
+| <a id="translation-rider-restricted-ground-identity_mismatch-trail"></a>`rider.restricted.ground.identity_mismatch.trail` | — |  to clarify the situation. |  pour clarifier la situation. |
+| <a id="translation-rider-restricted-ground-account_compromise-lead"></a>`rider.restricted.ground.account_compromise.lead` | — | Account security. We have reason to believe your account was used by someone else; access is restricted to protect you. Contact  | Sécurité du compte. Nous avons des raisons de penser que votre compte a été utilisé par un tiers ; l'accès est restreint pour vous protéger. Contactez  |
+| <a id="translation-rider-restricted-ground-account_compromise-trail"></a>`rider.restricted.ground.account_compromise.trail` | — |  to restore it. |  pour le rétablir. |
+| <a id="translation-rider-restricted-ground-unrecognised-lead"></a>`rider.restricted.ground.unrecognised.lead` | — | Ground not recognised — contact  | Motif non reconnu — contactez  |
+| <a id="translation-rider-restricted-ground-unrecognised-trail"></a>`rider.restricted.ground.unrecognised.trail` | — | . | . |
+| <a id="translation-rider-restricted-decided_at_label"></a>`rider.restricted.decided_at_label` | — | Decided on | Décidé le |
+| <a id="translation-rider-restricted-effective_at_label"></a>`rider.restricted.effective_at_label` | — | Effective since | Effectif depuis |
+| <a id="translation-rider-restricted-details_pending"></a>`rider.restricted.details_pending` | — | Restriction details not yet available. | Détails de la restriction pas encore disponibles. |
+| <a id="translation-rider-restricted-contest-lead"></a>`rider.restricted.contest.lead` | — | You can contest this decision and ask for it to be reviewed by a person:  | Vous pouvez contester cette décision et demander son réexamen par une personne :  |
+| <a id="translation-rider-restricted-contest-trail"></a>`rider.restricted.contest.trail` | — | . | . |
+| <a id="translation-rider-restricted-held_title"></a>`rider.restricted.held_title` | — | You still have an order | Vous avez encore une commande |
+| <a id="translation-rider-restricted-held_instruction"></a>`rider.restricted.held_instruction` | — | Take the order back to the restaurant. | Rapportez la commande au restaurant. |
+| <a id="translation-rider-restricted-held_after"></a>`rider.restricted.held_after` | — | Order handed back. The restaurant has been told. | Course rendue. Le restaurant est prévenu. |
 | <a id="translation-mailbox-title"></a>`mailbox.title` | — | Actor mailbox | Boîte aux lettres des acteurs |
 | <a id="translation-mailbox-subtitle"></a>`mailbox.subtitle` | — | One lane per (actor type, partition) — leases, checkpoints and backlog. | Une voie par (type d'acteur, partition) — baux, points de contrôle et arriéré. |
 | <a id="translation-mailbox-lanes"></a>`mailbox.lanes` | — | Lanes | Voies |

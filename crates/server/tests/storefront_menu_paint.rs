@@ -254,6 +254,12 @@ impl application::queries::DeliveryReadRepository for Empty {
     ) -> Result<Vec<application::queries::DeliveryJobRow>, DomainError> {
         Ok(vec![])
     }
+    async fn held_by_rider(
+        &self,
+        _r: ds::RiderId,
+    ) -> Result<Option<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(None)
+    }
     async fn by_restaurant(
         &self,
         _r: ds::RestaurantId,
@@ -376,6 +382,7 @@ fn schema() -> CaptainSchema {
             customer_credit: Arc::new(Empty),
             mailbox_lanes: Arc::new(Empty),
             service_window_horizon: Default::default(),
+            support_contact: None,
         }),
         None,
         None,

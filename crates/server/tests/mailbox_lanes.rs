@@ -166,6 +166,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             mailbox_lanes: Arc::new(PgMailboxLaneRepository::new(pool.clone())),
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
+        support_contact: None,
         }),
         None,
         None,

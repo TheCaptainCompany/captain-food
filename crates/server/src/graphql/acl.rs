@@ -182,9 +182,17 @@ impl Guard for StandingGuard {
         span.in_scope(|| {
             tracing::info!(rider_id = %id.0, "rider.standing.denied");
         });
+        // #639 part C step 4-ii (ADR-20260904-124600 §1): the ADDITIVE discriminator beside the
+        // UNCHANGED `code: FORBIDDEN` — the shared `shared_types::RIDER_RESTRICTED` constant, never
+        // a hand-copied literal, so the client's bounce decision (`crates/web/src/bounce.rs`) and
+        // this guard can never drift. `RoleGuard::check` sets no `reason` — that asymmetry is what
+        // lets the client key its bounce on the SERVER's own signal instead of on a bare FORBIDDEN.
         Err(async_graphql::Error::new(
             "forbidden: your access is restricted".to_string(),
         )
-        .extend_with(|_, e| e.set("code", "FORBIDDEN")))
+        .extend_with(|_, e| {
+            e.set("code", "FORBIDDEN");
+            e.set("reason", shared_types::RIDER_RESTRICTED);
+        }))
     }
 }

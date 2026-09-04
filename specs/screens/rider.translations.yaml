@@ -59,3 +59,32 @@ rider.issue.kind.other:                { messages: { en: "Other", fr: "Autre" } 
 rider.issue.note_prompt:   { messages: { en: "The facts, without describing anyone", fr: "Les faits, sans décrire des personnes" } }
 rider.issue.confirm:       { messages: { en: "Tell the restaurant", fr: "Prévenir le restaurant" } }
 rider.issue.pending:       { messages: { en: "Reported ✓ — the restaurant is being told…", fr: "Signalé ✓ — le restaurant est prévenu…" } }
+
+# ── the restricted notice (#639 part C step 4-ii, ADR-20260904-124600 §4/§5) ─────────────────
+# The five ground leaves (`ground.{rider_requested, eligibility_document_lapsed, identity_mismatch,
+# account_compromise, unrecognised}`) and the footer are counsel-reviewable copy, proposed not
+# cleared (ADR-20260904-081527 §7): the `fr` sentence is VERBATIM from that record. Each carries
+# the support address, and no translation string hard-codes it (ADR-014136 §6(ii)) — every one is
+# split at "support@captain.food" into `.lead` + the bound `standing.contestContact` + `.trail`,
+# keeping every word either side. `en` is a faithful English rendering, not counsel-reviewed.
+rider.restricted.title:              { messages: { en: "Your access is restricted.", fr: "Votre accès est restreint." } }
+rider.restricted.no_more_jobs:       { messages: { en: "You will no longer receive deliveries.", fr: "Vous ne recevrez plus de courses." } }
+rider.restricted.ground_label:       { messages: { en: "Ground", fr: "Motif" } }
+rider.restricted.ground.rider_requested.lead:                { messages: { en: "At your request. You asked for your access to be restricted. To restore it, write to ", fr: "À votre demande. Vous avez demandé la restriction de votre accès. Pour le rétablir, écrivez à " } }
+rider.restricted.ground.rider_requested.trail:                { messages: { en: ".", fr: "." } }
+rider.restricted.ground.eligibility_document_lapsed.lead:     { messages: { en: "Expired document. A document required to deliver is no longer valid. Send a valid document to ", fr: "Justificatif expiré. Un document obligatoire pour livrer n'est plus valide. Transmettez un justificatif en cours de validité à " } }
+rider.restricted.ground.eligibility_document_lapsed.trail:    { messages: { en: " to restore access.", fr: " pour rétablir l'accès." } }
+rider.restricted.ground.identity_mismatch.lead:                { messages: { en: "Identity mismatch. The signed-in identity does not match the person verified at registration. Contact ", fr: "Identité non concordante. L'identité connectée ne correspond pas à la personne vérifiée à l'inscription. Contactez " } }
+rider.restricted.ground.identity_mismatch.trail:                { messages: { en: " to clarify the situation.", fr: " pour clarifier la situation." } }
+rider.restricted.ground.account_compromise.lead:               { messages: { en: "Account security. We have reason to believe your account was used by someone else; access is restricted to protect you. Contact ", fr: "Sécurité du compte. Nous avons des raisons de penser que votre compte a été utilisé par un tiers ; l'accès est restreint pour vous protéger. Contactez " } }
+rider.restricted.ground.account_compromise.trail:               { messages: { en: " to restore it.", fr: " pour le rétablir." } }
+rider.restricted.ground.unrecognised.lead:                      { messages: { en: "Ground not recognised — contact ", fr: "Motif non reconnu — contactez " } }
+rider.restricted.ground.unrecognised.trail:                      { messages: { en: ".", fr: "." } }
+rider.restricted.decided_at_label:   { messages: { en: "Decided on", fr: "Décidé le" } }
+rider.restricted.effective_at_label: { messages: { en: "Effective since", fr: "Effectif depuis" } }
+rider.restricted.details_pending:    { messages: { en: "Restriction details not yet available.", fr: "Détails de la restriction pas encore disponibles." } }
+rider.restricted.contest.lead:       { messages: { en: "You can contest this decision and ask for it to be reviewed by a person: ", fr: "Vous pouvez contester cette décision et demander son réexamen par une personne : " } }
+rider.restricted.contest.trail:      { messages: { en: ".", fr: "." } }
+rider.restricted.held_title:         { messages: { en: "You still have an order", fr: "Vous avez encore une commande" } }
+rider.restricted.held_instruction:   { messages: { en: "Take the order back to the restaurant.", fr: "Rapportez la commande au restaurant." } }
+rider.restricted.held_after:         { messages: { en: "Order handed back. The restaurant has been told.", fr: "Course rendue. Le restaurant est prévenu." } }

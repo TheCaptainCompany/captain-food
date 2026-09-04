@@ -54,6 +54,13 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
     // wall stays the `/auth/sms-hook` route, which the monolith still hosts.
     let (config, _) = crate::generated::config::Config::resolve();
     let sms_guard = Some(crate::sms_send_guard(&pool, &config));
+    // #639 part C step 4-ii (ADR-20260904-124600 §4): the SAME `SUPPORT_CONTACT` parse the
+    // monolith's `router()` does — a subgraph bin serves the same resolvers over the same
+    // configuration, no logic fork (#385 D8).
+    let support_contact: Option<domain::generated::scalars::EmailAddress> =
+        Some(config.support_contact.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| domain::generated::scalars::EmailAddress(s.to_string()));
     let di = crate::build_graphql_di(
         &pool,
         &event_bus,
@@ -63,6 +70,7 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
         crate::graphql::service_clock::ServiceWindowHorizon::from_seconds(
             config.service_window_validity_horizon_seconds,
         ),
+        support_contact,
     );
     // IDENT-1 Phase A (#641, ADR-20260818-004646): the SAME gate-then-stabilize choice the
     // monolith makes, over the SAME `customers` repository -- a subgraph bin serves the identical

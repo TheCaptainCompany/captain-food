@@ -421,6 +421,10 @@ pub fn build_graphql_di(
     // RSO-1: the service-window validity horizon (SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS), read
     // from the caller's Config ONCE — a parameter, so every bin passes its own configured value.
     service_window_horizon: graphql::service_clock::ServiceWindowHorizon,
+    // #639 part C step 4-ii (ADR-20260904-124600 §4): `SUPPORT_CONTACT`, resolved ONCE by the
+    // caller (the SAME parse the rider sign-in door already does) — a parameter, like
+    // `service_window_horizon`, so every bin passes its own configured value.
+    support_contact: Option<domain::generated::scalars::EmailAddress>,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -487,6 +491,7 @@ pub fn build_graphql_di(
         customer_credit,
         mailbox_lanes,
         service_window_horizon,
+        support_contact,
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -688,6 +693,7 @@ pub async fn router() -> Router {
                     graphql::service_clock::ServiceWindowHorizon::from_seconds(
                         config.service_window_validity_horizon_seconds,
                     ),
+                    support_contact.clone(),
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already

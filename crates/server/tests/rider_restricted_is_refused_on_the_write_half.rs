@@ -161,14 +161,16 @@ async fn post_as_rider(jwt: &str, query: &str, outcome: RiderIdentityResolution)
     serde_json::from_slice(&bytes).expect("a GraphQL response body")
 }
 
-/// The first error of a GraphQL response as `(message, extensions.code)`, or `None` when the
-/// response carries no error (a data-only response — never expected here, since every schema in
-/// this file carries no mailbox/read repos).
-fn first_error(body: &Value) -> Option<(String, Option<String>)> {
+/// The first error of a GraphQL response as `(message, extensions.code, extensions.reason)`, or
+/// `None` when the response carries no error (a data-only response — never expected here, since
+/// every schema in this file carries no mailbox/read repos). `reason` is #639 4-ii
+/// (ADR-20260904-124600 §1): present only on a `StandingGuard` refusal, absent on `RoleGuard`'s.
+fn first_error(body: &Value) -> Option<(String, Option<String>, Option<String>)> {
     let err = body["errors"].as_array().and_then(|errors| errors.first())?;
     Some((
         err["message"].as_str().unwrap_or_default().to_string(),
         err["extensions"]["code"].as_str().map(str::to_string),
+        err["extensions"]["reason"].as_str().map(str::to_string),
     ))
 }
 
@@ -184,7 +186,7 @@ async fn a_restricted_rider_with_a_fresh_token_is_refused_on_accept_delivery() {
 
     // RESTRICTED: the StandingGuard refuses — acceptDelivery carries no `whileRestricted:`.
     let body = post_as_rider(&jwt, ACCEPT_DELIVERY, resolved(rider_id, RiderStanding::RESTRICTED)).await;
-    let (message, code) = first_error(&body).expect("a restricted rider must be refused");
+    let (message, code, reason) = first_error(&body).expect("a restricted rider must be refused");
     assert_eq!(
         code.as_deref(),
         Some("FORBIDDEN"),
@@ -195,11 +197,18 @@ async fn a_restricted_rider_with_a_fresh_token_is_refused_on_accept_delivery() {
         "forbidden: your access is restricted",
         "and the standing guard's own message, distinct from the role guard's — got: {message}"
     );
+    // #639 4-ii (ADR-20260904-124600 §1): the ADDITIVE reason the client bounce decision keys on —
+    // the shared `shared_types::RIDER_RESTRICTED` constant, never a hand-copied literal.
+    assert_eq!(
+        reason.as_deref(),
+        Some(shared_types::RIDER_RESTRICTED),
+        "a standing refusal must carry the reason extension — got: {reason:?}"
+    );
 
     // THE CONTROL: the SAME token, the SAME request, ACTIVE standing — not FORBIDDEN. Proves the
     // refusal above is the standing guard's, not a blanket refusal of every rider on this door.
     let body = post_as_rider(&jwt, ACCEPT_DELIVERY, resolved(rider_id, RiderStanding::ACTIVE)).await;
-    if let Some((message, code)) = first_error(&body) {
+    if let Some((message, code, _reason)) = first_error(&body) {
         assert_ne!(
             code.as_deref(),
             Some("FORBIDDEN"),
@@ -227,7 +236,7 @@ async fn the_carve_out_admits_exactly_my_standing_delivery_report_issue_and_hand
         let sub = uuid::Uuid::new_v4();
         let jwt = bare_rider_jwt(sub);
         let body = post_as_rider(&jwt, query, outcome()).await;
-        if let Some((message, code)) = first_error(&body) {
+        if let Some((message, code, _reason)) = first_error(&body) {
             assert_ne!(
                 code.as_deref(),
                 Some("FORBIDDEN"),
@@ -245,7 +254,7 @@ async fn the_carve_out_admits_exactly_my_standing_delivery_report_issue_and_hand
         let sub = uuid::Uuid::new_v4();
         let jwt = bare_rider_jwt(sub);
         let body = post_as_rider(&jwt, query, outcome()).await;
-        let (message, code) = first_error(&body).unwrap_or_else(|| panic!("{name} must be refused for a RESTRICTED rider"));
+        let (message, code, reason) = first_error(&body).unwrap_or_else(|| panic!("{name} must be refused for a RESTRICTED rider"));
         assert_eq!(
             code.as_deref(),
             Some("FORBIDDEN"),
@@ -255,6 +264,11 @@ async fn the_carve_out_admits_exactly_my_standing_delivery_report_issue_and_hand
             message,
             "forbidden: your access is restricted",
             "{name}: the standing guard's own message — got: {message}"
+        );
+        assert_eq!(
+            reason.as_deref(),
+            Some(shared_types::RIDER_RESTRICTED),
+            "{name}: a standing refusal must carry the reason extension — got: {reason:?}"
         );
     }
 }

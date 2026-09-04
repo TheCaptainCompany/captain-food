@@ -372,6 +372,12 @@ impl application::queries::DeliveryReadRepository for Empty {
     ) -> Result<Vec<application::queries::DeliveryJobRow>, DomainError> {
         Ok(vec![])
     }
+    async fn held_by_rider(
+        &self,
+        _r: ds::RiderId,
+    ) -> Result<Option<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(None)
+    }
     async fn by_restaurant(
         &self,
         _r: ds::RestaurantId,
@@ -484,6 +490,7 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
             mailbox_lanes: Arc::new(Empty),
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
+        support_contact: None,
         }),
         None,
         None,
@@ -944,6 +951,7 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
             mailbox_lanes: Arc::new(Empty),
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
+        support_contact: None,
         }),
         None,
         None,
