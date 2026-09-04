@@ -39,6 +39,8 @@ const COMPOSITION: &[(&str, &str, &str)] = &[
     ("query", "myDeliveries", "delivery"),
     ("query", "restaurantDeliveries", "delivery"),
     ("query", "deliveryPartnerAvailabilities", "delivery"),
+    ("query", "riders", "delivery"),
+    ("query", "rider", "delivery"),
     ("query", "favoriteRestaurants", "network"),
     ("query", "restaurants", "network"),
     ("query", "restaurant", "network"),

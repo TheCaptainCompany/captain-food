@@ -246,6 +246,9 @@ Rider:
         - { $ref: 'errors.yaml#/RiderNotFound' }
         - { $ref: 'errors.yaml#/RiderAlreadyRestricted' }
         - { $ref: 'errors.yaml#/RiderRestrictionGroundUnrecognised' }
+        # #639 part C step 4-iii-A (ADR-20260904-152807 §7): the release gate, checked FIRST —
+        # before the store is even read (`require_rider` never runs when the door is closed).
+        - { $ref: 'errors.yaml#/RiderRestrictionDoorClosed' }
     - message: { $ref: 'commands.yaml#/ReinstateRider' }
       requires:
         acting:

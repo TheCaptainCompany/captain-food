@@ -205,7 +205,9 @@ A platform operator who onboards accounts and oversees the platform.
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 | 🧭 **Prospection** | ReviewPipeline | [🔎 `prospectionPipeline`](#query-prospectionpipeline) |
 |  | LogReply | [✏️ `recordProspectReply`](#mutation-recordprospectreply) |
-| 🧭 **ManageRiderStanding** | RestrictRider | [✏️ `restrictRider`](#mutation-restrictrider) |
+| 🧭 **ManageRiderStanding** | ViewRiders | [🔎 `riders`](#query-riders) |
+|  | ViewRider | [🔎 `rider`](#query-rider) |
+|  | RestrictRider | [✏️ `restrictRider`](#mutation-restrictrider) |
 |  | ReinstateRider | [✏️ `reinstateRider`](#mutation-reinstaterider) |
 | 🧭 **ArbitrateRefunds** | ReviewPendingRefunds | [🔎 `pendingRefunds`](#query-pendingrefunds) |
 |  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
@@ -1427,12 +1429,11 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(26)_
+### 🔤 Scalars _(24)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
-| <a id="scalar-pagelimit"></a>🔤 `PageLimit` | integer | Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.  |
 | <a id="scalar-cuisinecategory"></a>🔤 `CuisineCategory` | enum (FAST_FOOD \| PIZZA \| TRADITIONAL \| BISTRONOMIC \| FOOD_TRUCK) | A restaurant's SINGLE primary/representative cuisine bucket, used only to select ONE Uber Eats mark-up coefficient in View_UberEstimationPolicy (ADR-0024): FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35. NOT for discovery — a restaurant may belong to several cuisines for browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because the estimate needs a single coefficient.  |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
 | <a id="scalar-userid"></a>🔤 `UserId` | string _uuid_ |  |
@@ -1444,7 +1445,6 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-weburl"></a>🔤 `WebUrl` | string `^https?://` | An http(s) URL — restaurant website or the Google Business Profile 'Order online' link. |
 | <a id="scalar-restaurantlegalname"></a>🔤 `RestaurantLegalName` | string | Legal entity name used for invoices and contracts. Example: 'SARL CHEZ MARCO', 'TOKYO SUSHI RESTAURATION SAS'.  |
 | <a id="scalar-restaurantdescription"></a>🔤 `RestaurantDescription` | string | Free-text presentation of a restaurant LOCATION, shown on the storefront and the discovery card. Dedicated scalar rather than a reuse of ProductDescription — same shape today, different subject (one name = one scalar), so the two can diverge without a migration.  |
-| <a id="scalar-pageoffset"></a>🔤 `PageOffset` | integer | Rows to skip before the page for a paginated list query (#113). Absent = 0. |
 | <a id="scalar-marginpercent"></a>🔤 `MarginPercent` | number | A restaurant's food margin (%), input to the proportional Captain service fee (ADR-0016/0017): the restaurant's variable contribution scales with clamp((margin−55)/(70−55),0,1). Example: 62.0.  |
 | <a id="scalar-weekday"></a>🔤 `Weekday` | enum (MONDAY \| TUESDAY \| WEDNESDAY \| THURSDAY \| FRIDAY \| SATURDAY \| SUNDAY) |  |
 | <a id="scalar-timeofday"></a>🔤 `TimeOfDay` | string `^([01][0-9]|2[0-3]):[0-5][0-9]$` | Local time of day, HH:mm (HubRise opening_hours format). |
@@ -9252,7 +9252,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(21)_
+### 🧰 API operations _(23)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -9290,6 +9290,24 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Input**: 🧩 `DeliveryPartnerAvailabilitiesQueryInput` — `cityId?`: [🔤 `CityId`](#scalar-cityid), `channel?`: [🔤 `DeliveryChannelKey`](#scalar-deliverychannelkey), `status?`: [🔤 `CityAvailabilityStatus`](#scalar-cityavailabilitystatus)
 - **Returns**: [🧩 `DeliveryPartnerAvailability`](#type-deliverypartneravailability) (list) · **reads** [🗄️ `View_DeliveryPartnerAvailability`](#view-view_deliverypartneravailability)
 - **Roles**: EXTERNAL, ADMIN · **slice** V1
+
+<a id="query-riders"></a>
+#### 🔎 Query: `riders`
+
+The admin rider roster (#639 part C step 4-iii-A): every rider, ordered riders-holding-a-job first, then RESTRICTED, then ACTIVE, each group by displayName then riderId — a fixed contract order, no orderBy in V0. limit clamps to 200 server-side; offset absent = 0.
+
+- **Input**: 🧩 `RidersQueryInput` — `limit?`: [🔤 `PageLimit`](#scalar-pagelimit), `offset?`: [🔤 `PageOffset`](#scalar-pageoffset)
+- **Returns**: [🧩 `RiderRosterEntry`](#type-riderrosterentry) (list) · **reads** [🗄️ `RiderRoster`](#view-riderroster), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Roles**: ADMIN · **slice** V0
+
+<a id="query-rider"></a>
+#### 🔎 Query: `rider`
+
+One rider's roster row (#639 part C step 4-iii-A): the admin detail behind `/system/riders/:riderId` — identity, availability, the platform's grant and, read fresh at query time, the job the rider currently holds custody of. Unknown riderId resolves null, never an existence error.
+
+- **Input**: 🧩 `RiderQueryInput!` — `riderId`: [🔤 `RiderId`](#scalar-riderid)
+- **Returns**: [🧩 `RiderRosterEntry`](#type-riderrosterentry) · **reads** [🗄️ `RiderRoster`](#view-riderroster), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Roles**: ADMIN · **slice** V0
 
 <a id="mutation-changeriderstatus"></a>
 #### ✏️ Mutation: `changeRiderStatus`
@@ -9410,7 +9428,7 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Roles**: PUBLIC · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-### 🧩 Output types _(3)_
+### 🧩 Output types _(4)_
 
 <a id="type-deliveryjob"></a>
 #### 🧩 Type: `DeliveryJob`
@@ -9451,6 +9469,27 @@ The calling rider's own standing (#639 part C step 4-i) — ACTIVE/RESTRICTED, t
 | <a id="type-riderstandinginfo--restriction"></a>`restriction` | [🧩 `RiderRestrictionInfo`](#type-riderrestrictioninfo) | ⬜ |
 | <a id="type-riderstandinginfo--helddelivery"></a>`heldDelivery` | [🧩 `DeliveryJob`](#type-deliveryjob) | ⬜ |
 | <a id="type-riderstandinginfo--contestcontact"></a>`contestContact` | [🔤 `EmailAddress`](#scalar-emailaddress) | ⬜ |
+
+<a id="type-riderrosterentry"></a>
+#### 🧩 Type: `RiderRosterEntry`
+
+One row of the admin rider roster (#639 part C step 4-iii-A): identity, availability, the platform's grant and, read fresh at query time, the job the rider currently holds custody of (if any).
+
+- **Read model**: [🗄️ `RiderRoster`](#view-riderroster), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-riderrosterentry--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |
+| <a id="type-riderrosterentry--displayname"></a>`displayName` | `string` | ✅ |
+| <a id="type-riderrosterentry--phone"></a>`phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) | ✅ |
+| <a id="type-riderrosterentry--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |
+| <a id="type-riderrosterentry--standing"></a>`standing` | [🔤 `RiderStanding`](#scalar-riderstanding) | ✅ |
+| <a id="type-riderrosterentry--ground"></a>`ground` | [🔤 `RiderRestrictionGround`](#scalar-riderrestrictionground) | ⬜ |
+| <a id="type-riderrosterentry--decidedat"></a>`decidedAt` | `string` _date-time_ | ⬜ |
+| <a id="type-riderrosterentry--effectiveat"></a>`effectiveAt` | `string` _date-time_ | ⬜ |
+| <a id="type-riderrosterentry--reinstatedat"></a>`reinstatedAt` | `string` _date-time_ | ⬜ |
+| <a id="type-riderrosterentry--helddelivery"></a>`heldDelivery` | [🧩 `DeliveryJob`](#type-deliveryjob) | ⬜ |
+| <a id="type-riderrosterentry--restrictiondooropen"></a>`restrictionDoorOpen` | `boolean` | ✅ |
 
 <a id="type-deliverypartneravailability"></a>
 #### 🧩 Type: `DeliveryPartnerAvailability`
@@ -9559,7 +9598,7 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 | [📩 `RegisterRider`](#command-registerrider) | [⚡ `RiderRegistered`](#event-riderregistered) | [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered), [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound) |
 | [📩 `UpdateRiderInfo`](#command-updateriderinfo) | [⚡ `RiderInfoUpdated`](#event-riderinfoupdated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
 | [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition), [⛔ `RiderAccessRestricted`](#error-rideraccessrestricted) |
-| [📩 `RestrictRider`](#command-restrictrider) | [⚡ `RiderRestricted`](#event-riderrestricted) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted), [⛔ `RiderRestrictionGroundUnrecognised`](#error-riderrestrictiongroundunrecognised) |
+| [📩 `RestrictRider`](#command-restrictrider) | [⚡ `RiderRestricted`](#event-riderrestricted) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted), [⛔ `RiderRestrictionGroundUnrecognised`](#error-riderrestrictiongroundunrecognised), [⛔ `RiderRestrictionDoorClosed`](#error-riderrestrictiondoorclosed) |
 | [📩 `ReinstateRider`](#command-reinstaterider) | [⚡ `RiderReinstated`](#event-riderreinstated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderNotRestricted`](#error-ridernotrestricted) |
 | [📩 `RequestRiderSignInCode`](#command-requestridersignincode) | _Delegate to the auth provider: send an SMS OTP, REFUSING when the send guards say so. Never consults the rider read model (no enumeration oracle). No event._ | [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted) |
 | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) | _Refuse a request carrying no session to own the parked credential (RiderSignInRequiresSession) BEFORE the OTP is spent; verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `RiderSignInRequiresSession`](#error-ridersigninrequiressession) |
@@ -9671,7 +9710,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(4)_
+### 🗄️ Views (read models) _(5)_
 
 <a id="view-view_deliveryjob"></a>
 #### 🗄️ View: `View_DeliveryJob`
@@ -9759,6 +9798,28 @@ sequenceDiagram
 | `decided_at` | `timestamptz` | [⚡ `RiderRestricted`.`decidedAt`](#event-riderrestricted--decidedat) | nullable |  |
 | `effective_at` | `timestamptz` | [⚡ `RiderRestricted`.`effectiveAt`](#event-riderrestricted--effectiveat) | nullable |  |
 | `reinstated_at` | `timestamptz` | [⚡ `RiderReinstated`](#event-riderreinstated) | nullable | The occurred_at of the LATEST RiderReinstated fact for this rider (an occurrence timestamp, no payload field) -- history, not a live 'currently reinstated' flag: `standing` is the field that answers whether the rider is restricted right now; this column simply stops being the freshest fact once a later RiderRestricted follows it. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-riderroster"></a>
+#### 🗄️ View: `RiderRoster`
+
+- **Source**: [🎭 `Rider`](#actor-rider) · 🛶 V0
+- **Note**: The admin triage/detail read model (#639 part C step 4-iii-A, ADR-20260904-152807 §1): name, phone, availability and the platform grant (standing/ground/decidedAt/effectiveAt/reinstatedAt) for EVERY rider, one row per rider. NOT `internal` — this table IS the `riders`/`rider` GraphQL `reads` target, ADMIN-only at the door. The held delivery job is deliberately NOT a column here (ADR §2, "one custody truth, read at query time — never a folded column"): the DETAIL reads `held_by_rider(rider_id)` fresh at query time and the LIST joins the page's rider ids to held statuses in one set-based query, both through `DeliveryReadRepository`, never a second fold of the custody lifecycle `View_DeliveryJob` already derives. 
+- **Rules**: Keyed on `riderId` (grain: the rider, not the restriction fact) — the same 'what is true of this rider right now' grain as `RiderRestriction`, upserted in place; the Art. 11 LOG lives in `domain_events`, immutable, never here. NO `auth_ref` column, ever — a rule line, not merely an omission, so a future edit that reaches for the identity bridge here is refused at review: this table answers WHO to show an admin, never WHO a session resolves to. A test asserts the column does not exist (`SELECT auth_ref FROM rider_roster` errors). NEVER a folded `heldDeliveryJobId`/`heldStatus` column (ADR §2): the held job is a SEPARATE fold (`View_DeliveryJob`, its own checkpoint over `Order-`/`Payment-`/`DeliveryJob-` streams) that would drift from this table's own `Rider-` replay on a rebuild and answer differently from the `held_by_rider`/`held_by_riders` ports — one custody truth, read fresh at query time, never two. Own checkpoint group `"RiderRoster"` from 0 (never a prefix under the already-advanced `Rider` or `RiderRestriction` checkpoints — the #424 lesson, generalised a second time): a table born after the log is backfilled by replay, never a migration-time copy. Rebuild by resetting the `RiderRoster` checkpoint. No CHECK constraint (`DbFaultPolicy::Skip` semantics, the 4-i `RiderRestriction` reasoning): a stray value fails the ONE row's projection rather than halting the whole group. `standing` is a MECHANICAL `derive:` literal map (`RiderRegistered` → `ACTIVE`, `RiderRestricted` → `RESTRICTED`, `RiderReinstated` → `ACTIVE`) — unlike `Rider.standing`/`RiderRestriction.standing`, which are hand-written `Compute` hooks that preserve the PRIOR value on the creating arm (a checkpoint-reset replay-in-place over an existing row without a TRUNCATE, which those two tables' own rebuild rule forbids). `RiderRoster`'s rebuild is by checkpoint reset AND truncate together (`a_from_zero_replay_yields_the_same_roster_rows`, a full drain from position 0), so chronological event replay alone reproduces the correct end state and the mechanical map is sufficient — a deliberate simplification, not an oversight; a rebuild that resets ONLY this checkpoint without truncating the table would re-grant every restricted rider ACTIVE for the length of the drain, which is why the rule above is TRUNCATE-together, never checkpoint-only.
+- **Fed by**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderInfoUpdated`](#event-riderinfoupdated), [⚡ `RiderStatusChanged`](#event-riderstatuschanged), [⚡ `RiderRestricted`](#event-riderrestricted), [⚡ `RiderReinstated`](#event-riderreinstated)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `rider_id` | [🔤 `RiderId`](#scalar-riderid) _(derived)_ | [⚡ `RiderRegistered`.`riderId`](#event-riderregistered--riderid) | PK |  |
+| `display_name` | `text` _(derived)_ | [⚡ `RiderRegistered`.`displayName`](#event-riderregistered--displayname), [⚡ `RiderInfoUpdated`.`displayName`](#event-riderinfoupdated--displayname) | — | Mirrors `Rider.display_name` — NOT NULL (RiderRegistered always initialises it; RiderInfoUpdated overwrites it only when it carries one, the partial-update convention). |
+| `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RiderRegistered`.`phone`](#event-riderregistered--phone), [⚡ `RiderInfoUpdated`.`phone`](#event-riderinfoupdated--phone) | — | Mirrors `Rider.phone` — a profile attribute, never a lookup key (no unique constraint, no index — French mobile numbers are recycled, the `Rider.phone` rule's reasoning applies identically here). |
+| `status` | [🔤 `RiderStatus`](#scalar-riderstatus) _(derived)_ | [⚡ `RiderRegistered`.`status`](#event-riderregistered--status), [⚡ `RiderStatusChanged`.`status`](#event-riderstatuschanged--status) | — | Availability/lifecycle status, straight off the payload of whichever event wrote last — mirrors `Rider.status` exactly; the LEGACY `SUSPENDED` value decodes and renders (never as an authorization signal, never as `standing`). |
+| `standing` | [🔤 `RiderStanding`](#scalar-riderstanding) | [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderRestricted`](#event-riderrestricted), [⚡ `RiderReinstated`](#event-riderreinstated) | — | The platform's grant (ACTIVE/RESTRICTED), mechanically derived — see the table rule above for why this column is `derive:` here while `Rider.standing`/`RiderRestriction.standing` are hand-written. |
+| `ground` | [🔤 `RiderRestrictionGround`](#scalar-riderrestrictionground) | [⚡ `RiderRestricted`.`ground`](#event-riderrestricted--ground) | nullable | Null before any restriction and untouched by RiderReinstated (the attribution stays for admin/counsel history until the next RiderRestricted overwrites it) — mirrors `RiderRestriction.ground`. |
+| `decided_at` | `timestamptz` | [⚡ `RiderRestricted`.`decidedAt`](#event-riderrestricted--decidedat) | nullable | Mirrors `RiderRestriction.decided_at` — a timestamptz VALUE column parsed from the RFC3339 payload string, hence a hand-written `Compute` hook (the generator's own `type_derived`-timestamptz-excludes-ScalarLatest rule), not `derive:`. |
+| `effective_at` | `timestamptz` | [⚡ `RiderRestricted`.`effectiveAt`](#event-riderrestricted--effectiveat) | nullable | Mirrors `RiderRestriction.effective_at` — same parsed-string reasoning as `decided_at`. |
+| `reinstated_at` | `timestamptz` | [⚡ `RiderReinstated`](#event-riderreinstated) | nullable | The occurred_at of the LATEST RiderReinstated fact (an occurrence timestamp, no payload field) — mirrors `RiderRestriction.reinstated_at` exactly; history, not a live flag. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -10019,7 +10080,7 @@ An admin restricts a rider's access, citing one of the closed grounds (#639 part
 
 - **Dispatched by**: [✏️ `restrictRider`](#mutation-restrictrider) · **handled by** [🎭 `Rider`](#actor-rider)
 - **Emits**: [⚡ `RiderRestricted`](#event-riderrestricted)
-- **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted), [⛔ `RiderRestrictionGroundUnrecognised`](#error-riderrestrictiongroundunrecognised)
+- **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted), [⛔ `RiderRestrictionGroundUnrecognised`](#error-riderrestrictiongroundunrecognised), [⛔ `RiderRestrictionDoorClosed`](#error-riderrestrictiondoorclosed)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10376,7 +10437,7 @@ An independent Captain rider registered (linked to the auth provider user).
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction)
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction), [🗄️ `RiderRoster`](#view-riderroster)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10393,7 +10454,7 @@ One or more editable rider profile fields changed.
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Rider`](#view-rider)
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRoster`](#view-riderroster)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10408,7 +10469,7 @@ A rider's availability/lifecycle status changed.
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Rider`](#view-rider)
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRoster`](#view-riderroster)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10422,7 +10483,7 @@ An admin restricted a rider's access, citing one of the closed grounds (ADR-2026
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction)
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction), [🗄️ `RiderRoster`](#view-riderroster)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10438,7 +10499,7 @@ A previously restricted rider was reinstated by an admin (#639 part C step 4-i, 
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction)
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction), [🗄️ `RiderRoster`](#view-riderroster)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10464,7 +10525,7 @@ A previously restricted rider was reinstated by an admin (#639 part C step 4-i, 
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
 | <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(17)_
+### ⛔ Errors _(18)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10483,6 +10544,7 @@ A previously restricted rider was reinstated by an admin (#639 part C step 4-i, 
 | <a id="error-rideralreadyrestricted"></a>⛔ `RiderAlreadyRestricted` | The rider is already restricted (#639 part C step 4-i) — restrict only an unrestricted rider; a second ground needs a reinstatement first (the Art. 11 log is never overwritten). | 🇬🇧 This rider is already restricted. | 🇫🇷 Ce livreur est déjà restreint. | [📩 `RestrictRider`](#command-restrictrider) |
 | <a id="error-ridernotrestricted"></a>⛔ `RiderNotRestricted` | The rider is not currently restricted (#639 part C step 4-i) — reinstate only a restricted rider. | 🇬🇧 This rider is not restricted. | 🇫🇷 Ce livreur n'est pas restreint. | [📩 `ReinstateRider`](#command-reinstaterider) |
 | <a id="error-rideraccessrestricted"></a>⛔ `RiderAccessRestricted` | The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus. | 🇬🇧 Your access is restricted, so you cannot go available for deliveries. | 🇫🇷 Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
+| <a id="error-riderrestrictiondoorclosed"></a>⛔ `RiderRestrictionDoorClosed` | The restrict door is closed by RUN_RIDER_RESTRICTION_DOOR (#639 part C step 4-iii-A, ADR-20260904-152807 §7) — a declared, supervisable refusal while the release preconditions (docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml) are still open, never a silent no-op. | 🇬🇧 Restricting riders is not yet enabled in this environment. | 🇫🇷 La restriction des livreurs n'est pas encore activée dans cet environnement. | [📩 `RestrictRider`](#command-restrictrider) |
 | <a id="error-riderrestrictiongroundunrecognised"></a>⛔ `RiderRestrictionGroundUnrecognised` | restrictRider's `ground` decoded as the read-only catch-all (#639 part C step 4-i round 2, item 5 -- ADR-20260904-081527 §3) — unspellable at the GraphQL door already (RiderRestrictionGround excludes UNRECOGNISED on write, ADR-20260803-234035), so this is the HANDLER's own belt against a caller that bypasses the door entirely (a hypothetical future direct command-bus caller, never a real GraphQL client). No `tests.yaml` fixture can spell it — the same unspellable shape as ChangeRiderStatus/SUSPENDED — so this is pinned by a Rust unit test constructing the raw command from JSON, not a behaviour-test case. | 🇬🇧 That restriction ground is not recognised. | 🇫🇷 Ce motif de restriction n'est pas reconnu. | [📩 `RestrictRider`](#command-restrictrider) |
 | <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 
@@ -10640,7 +10702,7 @@ _The seam admits a RIDER-role operation iff the identity row's `standing` is ACT
 
 _Restrict only an unrestricted rider (RiderAlreadyRestricted otherwise); reinstate only a restricted one (RiderNotRestricted otherwise); a second ground needs a reinstatement first -- the Art. 11 log is never overwritten (#639 part C step 4-i, ADR-20260904-081527 §Enforced-by, ADR-20260904-014136)._
 
-- **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted), [🧪 `TestRiderReinstated`](#test-testriderreinstated), [🧪 `TestRestrictAlreadyRestrictedRiderIsRejected`](#test-testrestrictalreadyrestrictedriderisrejected), [🧪 `TestReinstateUnrestrictedRiderIsRejected`](#test-testreinstateunrestrictedriderisrejected), [🧪 `TestRestrictUnknownRiderIsRejected`](#test-testrestrictunknownriderisrejected)
+- **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted), [🧪 `TestRestrictRiderDoorClosed`](#test-testrestrictriderdoorclosed), [🧪 `TestRiderReinstated`](#test-testriderreinstated), [🧪 `TestRestrictAlreadyRestrictedRiderIsRejected`](#test-testrestrictalreadyrestrictedriderisrejected), [🧪 `TestReinstateUnrestrictedRiderIsRejected`](#test-testreinstateunrestrictedriderisrejected), [🧪 `TestRestrictUnknownRiderIsRejected`](#test-testrestrictunknownriderisrejected)
 
 <a id="rule-restrictiontakeseffectwhendecided"></a>
 #### 📐 Rule: `RestrictionTakesEffectWhenDecided`
@@ -11244,6 +11306,16 @@ _An admin restricts a rider, citing a closed ground_
 - **When**: [📩 `RestrictRider`](#command-restrictrider)
 - **Then**: [⚡ `RiderRestricted`](#event-riderrestricted)
 - **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle), [📐 `RestrictionTakesEffectWhenDecided`](#rule-restrictiontakeseffectwhendecided), [📐 `RiderStandingIsAGrant`](#rule-riderstandingisagrant), [📐 `RestrictRiderIsAHumanAct`](#rule-restrictriderisahumanact)
+
+<a id="test-testrestrictriderdoorclosed"></a>
+#### 🧪 Test: `TestRestrictRiderDoorClosed`
+
+_restrictRider is refused by the door key while it is OFF (the production default), before the store is even read_
+
+- **Given**: _(none)_
+- **When**: [📩 `RestrictRider`](#command-restrictrider)
+- **Thrown**: [⛔ `RiderRestrictionDoorClosed`](#error-riderrestrictiondoorclosed)
+- **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle)
 
 <a id="test-testriderreinstated"></a>
 #### 🧪 Test: `TestRiderReinstated`
@@ -11852,7 +11924,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(63)_
+### 🔤 Scalars _(65)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -11881,6 +11953,8 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-locale"></a>🔤 `Locale` | string `^[a-z]{2}-[A-Z]{2}$` | i18n culture code, language-REGION (BCP 47 / .NET CultureInfo). Example: 'fr-FR', 'en-US'. Drives the UI language AND the display of dates, times and numbers (paired with TimeZone for the zone).  |
 | <a id="scalar-currencycode"></a>🔤 `CurrencyCode` | string `^[A-Z]{3}$` | ISO 4217 currency code. Example: 'EUR'. |
 | <a id="scalar-retryafterseconds"></a>🔤 `RetryAfterSeconds` | integer | How long the caller must wait before the same request can succeed, in seconds — the SERVER's own remaining backoff window, never a client guess (#516). Carried by the `RateLimited` rejection so a screen can render an honest countdown instead of inventing one. ABSENT means the rejection has no useful countdown to offer (a daily ceiling — counting down to tomorrow is not information), never "retry immediately".  |
+| <a id="scalar-pagelimit"></a>🔤 `PageLimit` | integer | Requested page size for a paginated list query (#113). The server CLAMPS it to a per-query maximum (restaurants: 200) — asking for more returns the maximum, never an error. Absent = the query's default page size.  |
+| <a id="scalar-pageoffset"></a>🔤 `PageOffset` | integer | Rows to skip before the page for a paginated list query (#113). Absent = 0. |
 | <a id="scalar-taxratepercent"></a>🔤 `TaxRatePercent` | number | Percentage tax rate. Example: 10.0 for 10%. |
 | <a id="scalar-quantity"></a>🔤 `Quantity` | number | Stock quantity in units. Decimals allowed to match HubRise inventory. 0 means out of stock.  |
 | <a id="scalar-customerdisplayname"></a>🔤 `CustomerDisplayName` | string |  |
@@ -13034,6 +13108,53 @@ _Surface_ **`system.yaml`**
 | read | `mailbox.poisoned` | [🔎 `poisonedMailboxMessages`](#query-poisonedmailboxmessages) |
 | write | `requeue_mailbox_message` | [✏️ `requeueMailboxMessage`](#mutation-requeuemailboxmessage) |
 
+<a id="screen-riders"></a>
+### 📱 `riders` · `/system/riders` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Riders                                   │
+├──────────────────────────────────────────┤
+│ page_header — Riders                     │
+│ list                                     │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `riders.all` | [🔎 `riders`](#query-riders) |
+
+**Gaps**
+- ⚠️ The System host is not routed today (crates/server/src/hosts.rs `HostRoute::System`) and `specs/screens/system.yaml` declares no `requires_auth`/`unauthenticated:` door — the mailbox supervision screen has the same status. This screen is DARK: declared and asserted by dedicated render tests, reachable from a browser only once step 6's magic-link admin door + System host routing land (ADR-20260904-152807 §9, the RIDER-RESTRICTION-PRECONDITIONS row).
+- ⚠️ The restaurant's name behind a held job is not shown on the roster (ADR §4): `heldDelivery`'s client selection deliberately does not select `restaurant { displayName }` — a delivery -> network navigation hop the D8 binding-walk gate cannot see today.
+
+<a id="screen-rider_detail"></a>
+### 📱 `rider_detail` · `/system/riders/:riderId` · 📱 SDUI
+
+```
+┌──────────────────────────────────────────┐
+│ Rider detail                             │
+├──────────────────────────────────────────┤
+│ page_header — Rider detail               │
+│ conditional_section                      │
+│ section — Access                         │
+│ section — Phone                          │
+│ section — Availability                   │
+│ conditional_section                      │
+│ button — Lift the restriction            │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `rider.byId` | [🔎 `rider`](#query-rider) |
+| write | `reinstate_rider` | [✏️ `reinstateRider`](#mutation-reinstaterider) |
+| write | `restrict_rider` | [✏️ `restrictRider`](#mutation-restrictrider) |
+
+**Gaps**
+- ⚠️ The System host is not routed today and no admin door exists — see the `riders` screen's own gap note (ADR-20260904-152807 §9); this screen is DARK for the same reason.
+- ⚠️ The one-tick window after `$reload` in which the detail may still render "Restreindre l'acces" (the two projector checkpoints, `RiderRoster` and the write side, catch up independently) is accepted, not hidden: a second submit in that window is answered by the mutation's own `RiderAlreadyRestricted`, surfaced in `inline_error`, never a second event.
+
 <a id="sec-translations"></a>
 ## 🌐 Translations
 
@@ -13465,6 +13586,42 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-mailbox-poisoned-requeue"></a>`mailbox.poisoned.requeue` | — | Requeue | Remettre en file |
 | <a id="translation-mailbox-poisoned-empty-title"></a>`mailbox.poisoned.empty.title` | — | No poisoned rows | Aucune ligne empoisonnée |
 | <a id="translation-mailbox-poisoned-empty-body"></a>`mailbox.poisoned.empty.body` | — | Nothing has failed at the delivery-attempts cap. This is the healthy state. | Rien n'a échoué au plafond de tentatives de livraison. C'est l'état sain. |
+| <a id="translation-roster-title"></a>`roster.title` | — | Riders | Livreurs |
+| <a id="translation-roster-subtitle"></a>`roster.subtitle` | — | Triage: riders holding a job first, then restricted, then active. | Triage : livreurs tenant une commande d'abord, puis restreints, puis actifs. |
+| <a id="translation-roster-list-name"></a>`roster.list.name` | — | Name | Nom |
+| <a id="translation-roster-detail-title"></a>`roster.detail.title` | — | Rider detail | Détail du livreur |
+| <a id="translation-roster-empty-title"></a>`roster.empty.title` | — | No riders | Aucun livreur |
+| <a id="translation-roster-empty-body"></a>`roster.empty.body` | — | No rider has registered yet. | Aucun livreur ne s'est encore inscrit. |
+| <a id="translation-roster-standing-restricted"></a>`roster.standing.restricted` | — | Restricted | Restreint |
+| <a id="translation-roster-standing-active"></a>`roster.standing.active` | — | Active | Actif |
+| <a id="translation-roster-access_label"></a>`roster.access_label` | — | Access | Accès |
+| <a id="translation-roster-status-offline"></a>`roster.status.offline` | — | Offline | Hors ligne |
+| <a id="translation-roster-status-available"></a>`roster.status.available` | — | Available | Disponible |
+| <a id="translation-roster-status-on_delivery"></a>`roster.status.on_delivery` | — | On delivery | En course |
+| <a id="translation-roster-status-suspended_legacy"></a>`roster.status.suspended_legacy` | — | Suspended (legacy status) | Suspendu (ancien statut) |
+| <a id="translation-roster-availability_label"></a>`roster.availability_label` | — | Availability | Disponibilité |
+| <a id="translation-roster-held-assigned"></a>`roster.held.assigned` | — | Assigned | Assignée |
+| <a id="translation-roster-held-picked_up"></a>`roster.held.picked_up` | — | Picked up | Récupérée |
+| <a id="translation-roster-held-out_for_delivery"></a>`roster.held.out_for_delivery` | — | Out for delivery | En livraison |
+| <a id="translation-roster-food_location-with_rider"></a>`roster.food_location.with_rider` | — | With the rider | Chez le livreur |
+| <a id="translation-roster-food_location-returned_to_restaurant"></a>`roster.food_location.returned_to_restaurant` | — | Returned to the restaurant | Retournée au restaurant |
+| <a id="translation-roster-food_location-not_collected"></a>`roster.food_location.not_collected` | — | Not collected | Non récupérée |
+| <a id="translation-roster-pickup_label"></a>`roster.pickup_label` | — | Pickup | Récupération |
+| <a id="translation-roster-ground-rider_requested"></a>`roster.ground.rider_requested` | — | At the rider's request | À la demande du rider |
+| <a id="translation-roster-ground-eligibility_document_lapsed"></a>`roster.ground.eligibility_document_lapsed` | — | Eligibility document lapsed | Justificatif expiré |
+| <a id="translation-roster-ground-identity_mismatch"></a>`roster.ground.identity_mismatch` | — | Identity mismatch | Identité non concordante |
+| <a id="translation-roster-ground-account_compromise"></a>`roster.ground.account_compromise` | — | Account compromise | Compte compromis |
+| <a id="translation-roster-effective_since"></a>`roster.effective_since` | — | Effective since | Effectif depuis |
+| <a id="translation-roster-phone_label"></a>`roster.phone_label` | — | Phone | Téléphone |
+| <a id="translation-roster-restrict-open"></a>`roster.restrict.open` | — | Restrict access | Restreindre l'accès |
+| <a id="translation-roster-reinstate-action"></a>`roster.reinstate.action` | — | Lift the restriction | Lever la restriction |
+| <a id="translation-roster-restrict-holds_job"></a>`roster.restrict.holds_job` | — | Holds an order — collected. The restriction does not take it away. | Tient une commande — récupérée. La restriction ne la lui retire pas. |
+| <a id="translation-roster-restrict-consequence"></a>`roster.restrict.consequence` | — | Will no longer receive runs; keeps access to finish or return the run in progress. | Ne recevra plus de courses ; garde l'accès pour terminer ou rendre la course en cours. |
+| <a id="translation-roster-restrict-ground_label"></a>`roster.restrict.ground_label` | — | Ground | Motif |
+| <a id="translation-roster-restrict-effective_now"></a>`roster.restrict.effective_now` | — | Effective: now | Effectif : maintenant |
+| <a id="translation-roster-restrict-notice"></a>`roster.restrict.notice` | — | The rider is told in the app the next time they open it. | Le rider est informé dans l'application à sa prochaine ouverture. |
+| <a id="translation-roster-restrict-rider_requested_procedure"></a>`roster.restrict.rider_requested_procedure` | — | Keep the rider's message (procedure). | Conservez le message du rider (procédure). |
+| <a id="translation-roster-restrict-confirm"></a>`roster.restrict.confirm` | — | Restrict access now | Restreindre l'accès maintenant |
 | <a id="translation-common-nav-home"></a>`common.nav.home` | — | Home | Accueil |
 | <a id="translation-common-nav-search"></a>`common.nav.search` | — | Search | Recherche |
 | <a id="translation-common-nav-orders"></a>`common.nav.orders` | — | Orders | Commandes |

@@ -218,6 +218,12 @@ impl application::queries::DeliveryReadRepository for Empty {
     ) -> Result<Option<application::queries::DeliveryJobRow>, DomainError> {
         Ok(None)
     }
+    async fn held_by_riders(
+        &self,
+        _r: &[ds::RiderId],
+    ) -> Result<Vec<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(vec![])
+    }
     async fn by_restaurant(
         &self,
         _r: ds::RestaurantId,
@@ -232,6 +238,18 @@ impl application::queries::RiderRestrictionReadRepository for Empty {
         &self,
         _r: ds::RiderId,
     ) -> Result<Option<application::queries::RiderRestrictionRow>, DomainError> {
+        Ok(None)
+    }
+}
+#[async_trait]
+impl application::queries::RiderRosterReadRepository for Empty {
+    async fn all(&self) -> Result<Vec<application::queries::RiderRosterRow>, DomainError> {
+        Ok(vec![])
+    }
+    async fn by_id(
+        &self,
+        _r: ds::RiderId,
+    ) -> Result<Option<application::queries::RiderRosterRow>, DomainError> {
         Ok(None)
     }
 }
@@ -434,6 +452,12 @@ impl application::queries::DeliveryReadRepository for InMemoryDeliveries {
     ) -> Result<Option<application::queries::DeliveryJobRow>, DomainError> {
         Ok(None)
     }
+    async fn held_by_riders(
+        &self,
+        _r: &[ds::RiderId],
+    ) -> Result<Vec<application::queries::DeliveryJobRow>, DomainError> {
+        Ok(vec![])
+    }
     async fn by_restaurant(
         &self,
         _r: ds::RestaurantId,
@@ -499,6 +523,7 @@ fn schema_over_with_deliveries(
             customers: Arc::new(Empty),
             deliveries,
             rider_restrictions: Arc::new(Empty),
+            rider_roster: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -508,6 +533,7 @@ fn schema_over_with_deliveries(
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
         support_contact: None,
+        run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         }),
         None,
         Some(bus),
@@ -1268,6 +1294,7 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
             customers: Arc::new(Empty),
             deliveries: Arc::new(InMemoryDeliveries(Arc::new(Mutex::new(None)))),
             rider_restrictions: Arc::new(Empty),
+            rider_roster: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -1277,6 +1304,7 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
         support_contact: None,
+        run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         }),
         None,
         None,

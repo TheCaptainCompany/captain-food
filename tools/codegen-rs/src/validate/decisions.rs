@@ -2136,3 +2136,54 @@ pub(crate) fn validate_dispatch_card_rows(
     }
     issues
 }
+
+// ─── decision-row-open-key-must-be-off (#639 part C step 4-iii-A, ADR-20260904-152807 §7) ────────
+//
+// A release gate as a MECHANISM, not prose: `configuration.yaml` keys may bind themselves to a
+// decision row via `decisionRow: <KEY>` (`tools/codegen-rs/src/config.rs::ConfigKey::decision_row`)
+// — the row and the key, bound EXPLICITLY, so the two can never disagree unreconciled again. The
+// `RUN_SIRENE_WORKER` lesson (`PUBLISH-PRECONDITIONS`): its prose said the worker was STOPPED
+// while `deploy.production` said `"true"`, and nothing executable ever compared the two. While the
+// named row's `status` is `open`, the key's `deploy.production` value must be exactly `"false"`;
+// once the row is `decided` (or any other closed status), this rule is silent — the flip to a
+// non-`"false"` production value IS the recorded decision that closes the row.
+
+/// #639 part C step 4-iii-A. `rows` are the parsed `docs/decisions/*.yaml` corpus; every
+/// `decisionRow:`-bearing configuration key is checked against it.
+pub(crate) fn validate_decision_row_gated_config_keys(
+    model: &Model,
+    rows: &[DecisionRow],
+    issues: &mut Vec<Issue>,
+) {
+    let by_stem: BTreeMap<&str, &DecisionRow> = rows.iter().map(|r| (r.stem.as_str(), r)).collect();
+    for k in parse_config_keys(model) {
+        let Some(row_key) = &k.decision_row else { continue };
+        let at = format!("configuration.yaml/{}", k.name);
+        let Some(row) = by_stem.get(row_key.as_str()) else {
+            issues.push(err(
+                "decision-row-open-key-must-be-off",
+                at,
+                format!(
+                    "`decisionRow: {row_key}` names no declared row (docs/decisions/{row_key}.yaml) — a key cannot gate on a row that does not exist."
+                ),
+            ));
+            continue;
+        };
+        if row.get("status") == Some("open") {
+            let prod = k.deploy.get("production").map(String::as_str);
+            if prod != Some("false") {
+                issues.push(err(
+                    "decision-row-open-key-must-be-off",
+                    at,
+                    format!(
+                        "the row `{row_key}` is still `open`, so `{}`'s `deploy.production` must be exactly \"false\" — got {:?}. \
+                         The RUN_SIRENE_WORKER lesson (PUBLISH-PRECONDITIONS): prose said STOPPED while the deploy value said `true`, \
+                         unreconciled — this key and its row must never disagree silently again. Flipping the value is the SEPARATE \
+                         recorded decision that closes the row (gate-then-stabilize).",
+                        k.name, prod
+                    ),
+                ));
+            }
+        }
+    }
+}

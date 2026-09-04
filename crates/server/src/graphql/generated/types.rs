@@ -795,6 +795,34 @@ pub struct RiderStandingInfo {
     pub contest_contact: Option<EmailAddress>,
 }
 
+/// One row of the admin rider roster (#639 part C step 4-iii-A): identity, availability, the platform's grant and, read fresh at query time, the job the rider currently holds custody of (if any).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderRosterEntry {
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+    #[graphql(name = "displayName")]
+    pub display_name: String,
+    #[graphql(name = "phone")]
+    pub phone: PhoneNumber,
+    #[graphql(name = "status")]
+    pub status: RiderStatus,
+    #[graphql(name = "standing")]
+    pub standing: RiderStanding,
+    #[graphql(name = "ground")]
+    pub ground: Option<RiderRestrictionGround>,
+    #[graphql(name = "decidedAt")]
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "effectiveAt")]
+    pub effective_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "reinstatedAt")]
+    pub reinstated_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "heldDelivery")]
+    pub held_delivery: Option<DeliveryJob>,
+    #[graphql(name = "restrictionDoorOpen")]
+    pub restriction_door_open: bool,
+}
+
 /// A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]

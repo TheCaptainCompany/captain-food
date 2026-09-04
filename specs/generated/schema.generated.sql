@@ -412,6 +412,22 @@ CREATE TABLE RiderRestriction (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE RiderRoster (
+  rider_id UUID PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  status TEXT NOT NULL,
+  standing TEXT NOT NULL,
+  ground TEXT,
+  decided_at TIMESTAMPTZ,
+  effective_at TIMESTAMPTZ,
+  reinstated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON RiderRoster (display_name, rider_id);
+CREATE INDEX ON RiderRoster (standing);
+
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,

@@ -291,8 +291,10 @@ admin:
         ReviewPipeline: { $ref: 'api.yaml#/queries/prospectionPipeline' }
         LogReply: { $ref: 'api.yaml#/mutations/recordProspectReply' }
     ManageRiderStanding:
-      description: As an admin, I restrict a rider's access on a closed ground when a legal/eligibility fact requires it, and reinstate one once it is resolved — a human decision, never automated (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527).
+      description: As an admin, I restrict a rider's access on a closed ground when a legal/eligibility fact requires it, and reinstate one once it is resolved — a human decision, never automated (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527; the roster/detail reads, #639 part C step 4-iii-A, ADR-20260904-152807).
       steps:
+        ViewRiders: { $ref: 'api.yaml#/queries/riders' }   # the triage roster (/system/riders)
+        ViewRider: { $ref: 'api.yaml#/queries/rider' }     # one rider's detail (/system/riders/:riderId)
         RestrictRider: { $ref: 'api.yaml#/mutations/restrictRider' }
         ReinstateRider: { $ref: 'api.yaml#/mutations/reinstateRider' }
     ArbitrateRefunds:

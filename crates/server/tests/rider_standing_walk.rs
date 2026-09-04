@@ -102,10 +102,19 @@ async fn append_event(pool: &PgPool, stream_name: &str, version: i32, event_type
 
 /// The production delivery side (mirrors `graphql_write_path.rs::spawn_mailbox_workers`).
 fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
+    spawn_mailbox_workers_with_door(pool, bus, true)
+}
+
+/// #639 part C step 4-iii-A (ADR-20260904-152807 §7): the SAME composition, parameterised on the
+/// restrict door's release gate — the walk's main leg runs it ON (door open, `restrictRider`
+/// reaches the store); a second, independent worker fleet built with the key OFF proves the typed
+/// refusal end to end, through the real router, never a unit-test shortcut.
+fn spawn_mailbox_workers_with_door(pool: &PgPool, bus: actor_client::OperationStatusBus, run_rider_restriction_door: bool) {
     let deps = infrastructure::generated::command_router::CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
+        run_rider_restriction_door,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
@@ -168,6 +177,9 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
     let rider_restrictions: Arc<dyn application::queries::RiderRestrictionReadRepository> = Arc::new(
         infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
     );
+    let rider_roster: Arc<dyn application::queries::RiderRosterReadRepository> = Arc::new(
+        infrastructure::persistence::rider_roster_store::PgRiderRosterRepository::new(pool.clone()),
+    );
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
@@ -206,6 +218,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             customers,
             deliveries,
             rider_restrictions,
+            rider_roster,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -217,6 +230,9 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             // this is the ONE walk that actually reads `myStanding.contestContact` back, so it is
             // the walk that must prove the configured value reaches the wire.
             support_contact: Some(EmailAddress("support@captain.food".to_string())),
+            // #639 part C step 4-iii-A: ON, matching the write door above -- this walk's
+            // `riders`/`rider` assertions exercise `restrictionDoorOpen: true`.
+            run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(true),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,
@@ -467,6 +483,40 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     // `myStanding.contestContact` at all.
     assert_eq!(data["myStanding"]["contestContact"], "support@captain.food", "the configured SUPPORT_CONTACT must reach the wire: {data:?}");
 
+    // 9b) rider(riderId) as ADMIN (#639 part C step 4-iii-A): reads RESTRICTED + ground +
+    //     heldDelivery { id status }, the admin detail's own composition.
+    let rider_detail = format!(
+        r#"query {{ rider(input: {{ riderId: "{rider_id}" }}) {{ riderId standing ground heldDelivery {{ id status }} restrictionDoorOpen }} }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(rider_detail.clone()).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "rider (ADMIN) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["rider"]["standing"], "RESTRICTED");
+    assert_eq!(data["rider"]["ground"], "RIDER_REQUESTED");
+    assert_eq!(data["rider"]["heldDelivery"]["id"], job_id.to_string());
+    assert_eq!(data["rider"]["heldDelivery"]["status"], "ASSIGNED");
+    assert_eq!(data["rider"]["restrictionDoorOpen"], true, "the walk's ReadDeps carries the door ON");
+
+    // 9c) riders as ADMIN (#639 part C step 4-iii-A, ADR-20260904-152807 §2/§4): the ONE rider this
+    //     walk registered is held AND restricted, so it lands in the FIRST (held) group regardless
+    //     of standing — the contract order's own precedence.
+    let riders_q = "query { riders { riderId standing heldDelivery { id } } }";
+    let resp = schema.execute(async_graphql::Request::new(riders_q).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "riders (ADMIN) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let list = data["riders"].as_array().expect("riders array");
+    assert_eq!(list[0]["riderId"], rider_id.to_string(), "the held rider must lead the list: {list:?}");
+    assert_eq!(list[0]["standing"], "RESTRICTED");
+    assert_eq!(list[0]["heldDelivery"]["id"], job_id.to_string());
+
+    // 9d) riders as RIDER: FORBIDDEN, synchronously — the ACL door admits ADMIN only.
+    let resp = schema
+        .execute(async_graphql::Request::new(riders_q).data(acting(RequestRole::Rider)).data(restricted.clone()))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected FORBIDDEN on riders as RIDER: {:?}", resp.errors);
+    let ext = resp.errors[0].extensions.as_ref().expect("extensions");
+    assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("FORBIDDEN")), "wrong code: {resp:?}");
+
     // 10) reinstateRider as ADMIN.
     let reinstate = format!(r#"mutation {{ reinstateRider(input: {{ riderId: "{rider_id}" }}) {{ messageId operationStatus }} }}"#);
     let resp = schema.execute(async_graphql::Request::new(reinstate).data(acting(RequestRole::Admin))).await;
@@ -491,6 +541,15 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     let data = resp.data.into_json().expect("json");
     assert_eq!(data["myStanding"]["standing"], "ACTIVE");
     assert_eq!(data["myStanding"]["restriction"], serde_json::Value::Null, "a reinstated rider's own standing answer must carry no restriction attribution: {data:?}");
+
+    // 10c) rider(riderId) as ADMIN after reinstatement: ACTIVE, but `heldDelivery` STAYS present —
+    //      reinstatement releases the ACCESS restriction, never the CUSTODY the rider still holds
+    //      (ADR-20260904-152807 §2: one custody truth, read at query time, never a folded column).
+    let resp = schema.execute(async_graphql::Request::new(rider_detail).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "rider (ADMIN, post-reinstate) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["rider"]["standing"], "ACTIVE");
+    assert_eq!(data["rider"]["heldDelivery"]["id"], job_id.to_string(), "custody is not released by reinstatement: {data:?}");
 
     // 11) acceptDelivery as the reinstated (ACTIVE) rider: the GUARD reopens — the mutation reaches
     //     the business layer again (PENDING, never a synchronous FORBIDDEN); the eventual REJECTED
@@ -554,4 +613,88 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
         serde_json::Value::Null,
         "held_by_rider must narrow to nothing once handed back: {data:?}"
     );
+}
+
+/// #639 part C step 4-iii-A (ADR-20260904-152807 §7): the door-OFF leg, through the REAL router —
+/// a SEPARATE fleet (its own registered rider) rather than a second worker racing the main walk's
+/// lanes, so the two never contend over the same mailbox rows. Two assertions in one pass: (1) the
+/// write door refuses `restrictRider` with the typed `RiderRestrictionDoorClosed` while OFF, before
+/// the store is even touched; (2) the named mutant — a rider ALREADY RESTRICTED (seeded by a raw
+/// fact, never through the closed door) is STILL refused by `StandingGuard` with the key OFF: the
+/// key never reaches the read side.
+#[tokio::test]
+async fn the_restrict_door_refuses_while_closed_and_the_read_guard_never_consults_it() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("rider_standing_walk_door_closed") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers_with_door(&pool, status_bus.clone(), false);
+    let schema = schema_over(&pool, status_bus);
+
+    // An ACTIVE rider, seeded directly (no public registration mutation, #639 part C step 2c-i).
+    let rider_id = uuid::Uuid::new_v4();
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        1,
+        "RiderRegistered",
+        json!({
+            "riderId": rider_id, "authRef": "auth-door-closed-1", "displayName": "Door Closed Rider",
+            "phone": "+33611113333", "status": "OFFLINE"
+        }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (rider birth)");
+
+    // (1) restrictRider with the door OFF: REJECTED, typed, before any RiderRestricted exists.
+    let restrict = format!(
+        r#"mutation {{ restrictRider(input: {{ riderId: "{rider_id}", ground: RIDER_REQUESTED }}) {{ messageId operationStatus }} }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(restrict).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "restrictRider (door OFF) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let message_id = data["restrictRider"]["messageId"].as_str().unwrap().to_string();
+    let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
+    assert_eq!(op["status"], "REJECTED", "restrictRider (door OFF) operation: {op:?}");
+    assert_eq!(op["errorCode"], "RiderRestrictionDoorClosed", "the typed refusal: {op:?}");
+
+    // (2) the named mutant: seed RiderRestricted as a raw fact (bypassing the closed door
+    //     entirely, exactly as a from-zero replay or a direct store append would), fold it, and
+    //     prove the READ guard still refuses — the key never touches `StandingGuard`.
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        2,
+        "RiderRestricted",
+        json!({
+            "riderId": rider_id, "ground": "IDENTITY_MISMATCH",
+            "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z"
+        }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restricted fact)");
+
+    let restricted = ReadScope::Rider { id: RiderId(rider_id), standing: RiderStanding::RESTRICTED };
+    let my_standing = "query { myStanding { standing } }";
+    let resp = schema
+        .execute(async_graphql::Request::new(my_standing).data(acting(RequestRole::Rider)).data(restricted.clone()))
+        .await;
+    assert!(resp.errors.is_empty(), "myStanding (door OFF, restricted) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["myStanding"]["standing"], "RESTRICTED", "the read side folded the fact regardless of the write door: {data:?}");
+
+    // A door-gated door key must never widen a READ-side guard: `myDeliveries` (a whileRestricted
+    // carve-out door) stays reachable, but an UN-carved write door (`changeRiderStatus` ->
+    // AVAILABLE) must still be refused for this restricted rider -- the guard's OWN authority,
+    // never delegated to the write door's release key.
+    let change_status = r#"mutation { changeRiderStatus(input: { status: AVAILABLE }) { messageId operationStatus } }"#;
+    let resp = schema
+        .execute(async_graphql::Request::new(change_status).data(acting(RequestRole::Rider)).data(restricted))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected the synchronous FORBIDDEN even with the restrict door OFF: {:?}", resp.errors);
+    let ext = resp.errors[0].extensions.as_ref().expect("extensions");
+    assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("FORBIDDEN")), "wrong code: {resp:?}");
 }

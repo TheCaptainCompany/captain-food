@@ -1703,6 +1703,150 @@
     "en": "Captain Rider",
     "fr": "Captain Rider"
   },
+  "roster.access_label": {
+    "en": "Access",
+    "fr": "Accès"
+  },
+  "roster.availability_label": {
+    "en": "Availability",
+    "fr": "Disponibilité"
+  },
+  "roster.detail.title": {
+    "en": "Rider detail",
+    "fr": "Détail du livreur"
+  },
+  "roster.effective_since": {
+    "en": "Effective since",
+    "fr": "Effectif depuis"
+  },
+  "roster.empty.body": {
+    "en": "No rider has registered yet.",
+    "fr": "Aucun livreur ne s'est encore inscrit."
+  },
+  "roster.empty.title": {
+    "en": "No riders",
+    "fr": "Aucun livreur"
+  },
+  "roster.food_location.not_collected": {
+    "en": "Not collected",
+    "fr": "Non récupérée"
+  },
+  "roster.food_location.returned_to_restaurant": {
+    "en": "Returned to the restaurant",
+    "fr": "Retournée au restaurant"
+  },
+  "roster.food_location.with_rider": {
+    "en": "With the rider",
+    "fr": "Chez le livreur"
+  },
+  "roster.ground.account_compromise": {
+    "en": "Account compromise",
+    "fr": "Compte compromis"
+  },
+  "roster.ground.eligibility_document_lapsed": {
+    "en": "Eligibility document lapsed",
+    "fr": "Justificatif expiré"
+  },
+  "roster.ground.identity_mismatch": {
+    "en": "Identity mismatch",
+    "fr": "Identité non concordante"
+  },
+  "roster.ground.rider_requested": {
+    "en": "At the rider's request",
+    "fr": "À la demande du rider"
+  },
+  "roster.held.assigned": {
+    "en": "Assigned",
+    "fr": "Assignée"
+  },
+  "roster.held.out_for_delivery": {
+    "en": "Out for delivery",
+    "fr": "En livraison"
+  },
+  "roster.held.picked_up": {
+    "en": "Picked up",
+    "fr": "Récupérée"
+  },
+  "roster.list.name": {
+    "en": "Name",
+    "fr": "Nom"
+  },
+  "roster.phone_label": {
+    "en": "Phone",
+    "fr": "Téléphone"
+  },
+  "roster.pickup_label": {
+    "en": "Pickup",
+    "fr": "Récupération"
+  },
+  "roster.reinstate.action": {
+    "en": "Lift the restriction",
+    "fr": "Lever la restriction"
+  },
+  "roster.restrict.confirm": {
+    "en": "Restrict access now",
+    "fr": "Restreindre l'accès maintenant"
+  },
+  "roster.restrict.consequence": {
+    "en": "Will no longer receive runs; keeps access to finish or return the run in progress.",
+    "fr": "Ne recevra plus de courses ; garde l'accès pour terminer ou rendre la course en cours."
+  },
+  "roster.restrict.effective_now": {
+    "en": "Effective: now",
+    "fr": "Effectif : maintenant"
+  },
+  "roster.restrict.ground_label": {
+    "en": "Ground",
+    "fr": "Motif"
+  },
+  "roster.restrict.holds_job": {
+    "en": "Holds an order — collected. The restriction does not take it away.",
+    "fr": "Tient une commande — récupérée. La restriction ne la lui retire pas."
+  },
+  "roster.restrict.notice": {
+    "en": "The rider is told in the app the next time they open it.",
+    "fr": "Le rider est informé dans l'application à sa prochaine ouverture."
+  },
+  "roster.restrict.open": {
+    "en": "Restrict access",
+    "fr": "Restreindre l'accès"
+  },
+  "roster.restrict.rider_requested_procedure": {
+    "en": "Keep the rider's message (procedure).",
+    "fr": "Conservez le message du rider (procédure)."
+  },
+  "roster.standing.active": {
+    "en": "Active",
+    "fr": "Actif"
+  },
+  "roster.standing.restricted": {
+    "en": "Restricted",
+    "fr": "Restreint"
+  },
+  "roster.status.available": {
+    "en": "Available",
+    "fr": "Disponible"
+  },
+  "roster.status.offline": {
+    "en": "Offline",
+    "fr": "Hors ligne"
+  },
+  "roster.status.on_delivery": {
+    "en": "On delivery",
+    "fr": "En course"
+  },
+  "roster.status.suspended_legacy": {
+    "en": "Suspended (legacy status)",
+    "fr": "Suspendu (ancien statut)"
+  },
+  "roster.subtitle": {
+    "en": "Triage: riders holding a job first, then restricted, then active.",
+    "fr": "Triage : livreurs tenant une commande d'abord, puis restreints, puis actifs."
+  },
+  "roster.title": {
+    "en": "Riders",
+    "fr": "Livreurs"
+  },
   "search.dishes": {
     "en": "Dishes",
     "fr": "Plats"

@@ -208,6 +208,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
                 false,
             ),
         },
+        // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's release gate —
+        // same ENV-GATED posture as the rest of this fn, same default (OFF) as the spec.
+        run_rider_restriction_door: env_flag("RUN_RIDER_RESTRICTION_DOOR", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone

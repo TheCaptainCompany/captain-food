@@ -812,7 +812,7 @@ pub mod restaurant_frontoffice {
                 Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("rating_tags")), ("label", PropValue::I18n("rating.tags_label")), ("options.0", PropValue::I18n("rating.tag.taste")), ("options.1", PropValue::I18n("rating.tag.portions")), ("options.2", PropValue::I18n("rating.tag.fast")), ("options.3", PropValue::I18n("rating.tag.accurate")), ("options.4", PropValue::I18n("rating.tag.packaging"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::TextArea, props: &[("id", PropValue::Text("rating_comment")), ("placeholder", PropValue::I18n("rating.comment_placeholder")), ("max_length", PropValue::Text("300"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("delivery_timeliness")), ("label", PropValue::I18n("rating.delivery_question")), ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")), ("single_select", PropValue::Text("true")), ("options.0.value", PropValue::Text("ON_TIME")), ("options.0.label", PropValue::I18n("rating.delivery.on_time")), ("options.1.value", PropValue::Text("ACCEPTABLE_DELAY")), ("options.1.label", PropValue::I18n("rating.delivery.acceptable")), ("options.2.value", PropValue::Text("TOO_LATE")), ("options.2.label", PropValue::I18n("rating.delivery.too_late")), ("on_change.type", PropValue::Text("record_delivery_satisfaction")), ("on_change.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("on_change.variables.restaurantId", PropValue::Binding("order.restaurantId")), ("on_change.variables.timeliness", PropValue::Binding("delivery_timeliness.value"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::TipAmountSelector, props: &[("id", PropValue::Text("courier_tip")), ("title", PropValue::I18n("tip.title")), ("subtitle", PropValue::I18n("tip.subtitle")), ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")), ("presets_cents.0", PropValue::Text("100")), ("presets_cents.1", PropValue::Text("200")), ("presets_cents.2", PropValue::Text("300")), ("presets_cents.3", PropValue::Text("500")), ("custom_label", PropValue::I18n("tip.custom")), ("action.type", PropValue::Text("tip_order")), ("action.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("action.variables.restaurantId", PropValue::Binding("order.restaurantId")), ("action.variables.tips.0.recipient", PropValue::Binding("order.tipRecipient")), ("action.variables.tips.0.amount.amountCents", PropValue::Binding("courier_tip.value")), ("action.variables.tips.0.amount.currency", PropValue::Binding("order.currency")), ("action.on_success.0.type", PropValue::Text("show_toast")), ("action.on_success.0.variant", PropValue::Text("success")), ("action.on_success.0.message", PropValue::I18n("tip.thanks"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::TipAmountSelector, props: &[("id", PropValue::Text("courier_tip")), ("title", PropValue::I18n("tip.title")), ("subtitle", PropValue::I18n("tip.subtitle")), ("visible_when", PropValue::Text("order.serviceType == 'DELIVERY'")), ("presets_cents.0", PropValue::Text("100")), ("presets_cents.1", PropValue::Text("200")), ("presets_cents.2", PropValue::Text("300")), ("presets_cents.3", PropValue::Text("500")), ("custom_label", PropValue::I18n("tip.custom")), ("action.type", PropValue::Text("tip_order")), ("action.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("action.variables.restaurantId", PropValue::Binding("order.restaurantId")), ("action.variables.tips.0.recipient", PropValue::Text("RIDER")), ("action.variables.tips.0.amount.amountCents", PropValue::Binding("courier_tip.value")), ("action.variables.tips.0.amount.currency", PropValue::Binding("order.totalAmount.currency")), ("action.on_success.0.type", PropValue::Text("show_toast")), ("action.on_success.0.variant", PropValue::Text("success")), ("action.on_success.0.message", PropValue::I18n("tip.thanks"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::TextArea, props: &[("id", PropValue::Text("delivery_reason")), ("placeholder", PropValue::I18n("rating.delivery.reason_ph")), ("max_length", PropValue::Text("300")), ("visible_when", PropValue::Text("delivery_timeliness.value == 'TOO_LATE'"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Button, props: &[("label", PropValue::I18n("common.action.submit")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("rate_order")), ("action.variables.orderId", PropValue::Binding("sheet.data.orderId")), ("action.variables.rating", PropValue::Binding("restaurant_rating.value")), ("action.variables.tags", PropValue::Binding("rating_tags.selected")), ("action.variables.comment", PropValue::Binding("rating_comment.value")), ("action.on_success.0.type", PropValue::Text("close_sheet")), ("action.on_success.1.type", PropValue::Text("show_toast")), ("action.on_success.1.variant", PropValue::Text("success")), ("action.on_success.1.message", PropValue::I18n("rating.thanks"))], children: &[], branches: &[] }
             ], branches: &[] } },
@@ -1016,7 +1016,7 @@ pub mod rider {
     ];
 }
 
-/// `specs/screens/system.yaml` — 1 screen(s).
+/// `specs/screens/system.yaml` — 3 screen(s).
 pub mod system {
     use super::*;
 
@@ -1047,8 +1047,90 @@ pub mod system {
             ], branches: &[] }
         ],
         },
+        Screen {
+            id: "riders",
+            route: "/system/riders",
+            roles: &["ADMIN"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[ResolverKey::RidersAll],
+            skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("roster.title")), ("subtitle", PropValue::I18n("roster.subtitle"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("rider_list")), ("items", PropValue::Binding("riders")), ("empty_state.icon", PropValue::Text("users")), ("empty_state.title", PropValue::I18n("roster.empty.title")), ("empty_state.body", PropValue::I18n("roster.empty.body")), ("item_action.type", PropValue::Text("navigate")), ("item_action.route", PropValue::Text("/system/riders/{{ item.riderId }}")), ("item_components.0.type", PropValue::Text("info_row")), ("item_components.0.label", PropValue::I18n("roster.list.name")), ("item_components.0.value", PropValue::Binding("item.displayName")), ("item_components.1.type", PropValue::Text("badge")), ("item_components.1.text", PropValue::I18n("roster.standing.restricted")), ("item_components.1.variant", PropValue::Text("warning")), ("item_components.1.visible_when", PropValue::Text("item.standing == 'RESTRICTED'")), ("item_components.2.type", PropValue::Text("badge")), ("item_components.2.text", PropValue::I18n("roster.standing.active")), ("item_components.2.variant", PropValue::Text("outline")), ("item_components.2.visible_when", PropValue::Text("item.standing == 'ACTIVE'")), ("item_components.3.type", PropValue::Text("badge")), ("item_components.3.text", PropValue::I18n("roster.held.assigned")), ("item_components.3.variant", PropValue::Text("info")), ("item_components.3.visible_when", PropValue::Text("item.heldDelivery.status == 'ASSIGNED'")), ("item_components.4.type", PropValue::Text("badge")), ("item_components.4.text", PropValue::I18n("roster.held.picked_up")), ("item_components.4.variant", PropValue::Text("info")), ("item_components.4.visible_when", PropValue::Text("item.heldDelivery.status == 'PICKED_UP'")), ("item_components.5.type", PropValue::Text("badge")), ("item_components.5.text", PropValue::I18n("roster.held.out_for_delivery")), ("item_components.5.variant", PropValue::Text("info")), ("item_components.5.visible_when", PropValue::Text("item.heldDelivery.status == 'OUT_FOR_DELIVERY'")), ("item_components.6.type", PropValue::Text("info_row")), ("item_components.6.label", PropValue::I18n("roster.pickup_label")), ("item_components.6.value", PropValue::Binding("item.heldDelivery.pickupAddress | format_address")), ("item_components.6.visible_when", PropValue::Text("item.heldDelivery != null"))], children: &[], branches: &[] }
+        ],
+        },
+        Screen {
+            id: "rider_detail",
+            route: "/system/riders/:riderId",
+            roles: &["ADMIN"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[ResolverKey::RiderById],
+            skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("roster.detail.title")), ("subtitle", PropValue::Binding("rider.displayName"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("detail_held_job")), ("condition", PropValue::Text("rider.heldDelivery != null"))], children: &[], branches: &[("if_true", &[
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.held.assigned")), ("variant", PropValue::Text("info")), ("visible_when", PropValue::Text("rider.heldDelivery.status == 'ASSIGNED'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.held.picked_up")), ("variant", PropValue::Text("info")), ("visible_when", PropValue::Text("rider.heldDelivery.status == 'PICKED_UP'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.held.out_for_delivery")), ("variant", PropValue::Text("info")), ("visible_when", PropValue::Text("rider.heldDelivery.status == 'OUT_FOR_DELIVERY'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.food_location.with_rider")), ("variant", PropValue::Text("danger")), ("visible_when", PropValue::Text("rider.heldDelivery.foodLocation == 'WITH_RIDER'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.food_location.returned_to_restaurant")), ("variant", PropValue::Text("warning")), ("visible_when", PropValue::Text("rider.heldDelivery.foodLocation == 'RETURNED_TO_RESTAURANT'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.food_location.not_collected")), ("variant", PropValue::Text("warning")), ("visible_when", PropValue::Text("rider.heldDelivery.foodLocation == 'NOT_COLLECTED'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InfoRow, props: &[("label", PropValue::I18n("roster.pickup_label")), ("value", PropValue::Binding("rider.heldDelivery.pickupAddress | format_address"))], children: &[], branches: &[] }
+            ] as &[Node])] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("detail_access")), ("title", PropValue::I18n("roster.access_label"))], children: &[
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.standing.restricted")), ("variant", PropValue::Text("warning")), ("visible_when", PropValue::Text("rider.standing == 'RESTRICTED'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.standing.active")), ("variant", PropValue::Text("outline")), ("visible_when", PropValue::Text("rider.standing == 'ACTIVE'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.ground.rider_requested")), ("visible_when", PropValue::Text("rider.ground == 'RIDER_REQUESTED'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.ground.eligibility_document_lapsed")), ("visible_when", PropValue::Text("rider.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.ground.identity_mismatch")), ("visible_when", PropValue::Text("rider.ground == 'IDENTITY_MISMATCH'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.ground.account_compromise")), ("visible_when", PropValue::Text("rider.ground == 'ACCOUNT_COMPROMISE'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InfoRow, props: &[("label", PropValue::I18n("roster.effective_since")), ("value", PropValue::Binding("rider.effectiveAt | format_datetime")), ("visible_when", PropValue::Text("rider.effectiveAt != null"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("detail_phone")), ("title", PropValue::I18n("roster.phone_label"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("rider.phone"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("rider_phone_call_btn")), ("label", PropValue::I18n("roster.phone_label")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("phone_call")), ("action.phone", PropValue::Binding("rider.phone"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("detail_availability")), ("title", PropValue::I18n("roster.availability_label"))], children: &[
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.status.offline")), ("variant", PropValue::Text("outline")), ("visible_when", PropValue::Text("rider.status == 'OFFLINE'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.status.available")), ("variant", PropValue::Text("success")), ("visible_when", PropValue::Text("rider.status == 'AVAILABLE'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.status.on_delivery")), ("variant", PropValue::Text("info")), ("visible_when", PropValue::Text("rider.status == 'ON_DELIVERY'"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.status.suspended_legacy")), ("variant", PropValue::Text("warning")), ("visible_when", PropValue::Text("rider.status == 'SUSPENDED'"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("detail_restrict_gate")), ("condition", PropValue::Text("rider.standing == 'ACTIVE'"))], children: &[], branches: &[("if_true", &[
+                Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("detail_restrict_door_gate")), ("condition", PropValue::Text("rider.restrictionDoorOpen"))], children: &[], branches: &[("if_true", &[
+                    Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("rider_restrict_open_btn")), ("label", PropValue::I18n("roster.restrict.open")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("open_bottom_sheet")), ("action.sheet_id", PropValue::Text("restrict_rider_sheet"))], children: &[], branches: &[] }
+                ] as &[Node])] }
+            ] as &[Node])] },
+            Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("rider_reinstate_btn")), ("label", PropValue::I18n("roster.reinstate.action")), ("variant", PropValue::Text("outline")), ("full_width", PropValue::Text("true")), ("visible_when", PropValue::Text("rider.standing == 'RESTRICTED'")), ("action.type", PropValue::Text("reinstate_rider")), ("action.variables.riderId", PropValue::Binding("rider.riderId")), ("action.on_success.0.type", PropValue::Text("navigate")), ("action.on_success.0.route", PropValue::Text("$reload"))], children: &[], branches: &[] }
+        ],
+        },
     ];
 
     pub const SHEETS: &[Sheet] = &[
+        Sheet { id: "restrict_rider_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("restrict_rider_sheet")), ("title", PropValue::Binding("rider.displayName"))], children: &[
+                Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restrict_holds_job")), ("condition", PropValue::Text("rider.heldDelivery != null"))], children: &[], branches: &[("if_true", &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.restrict.holds_job"))], children: &[], branches: &[] }
+                ] as &[Node])] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.restrict.consequence"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("ground")), ("label", PropValue::I18n("roster.restrict.ground_label")), ("single_select", PropValue::Text("true")), ("options.0.value", PropValue::Text("RIDER_REQUESTED")), ("options.0.label", PropValue::I18n("roster.ground.rider_requested")), ("options.1.value", PropValue::Text("ELIGIBILITY_DOCUMENT_LAPSED")), ("options.1.label", PropValue::I18n("roster.ground.eligibility_document_lapsed")), ("options.2.value", PropValue::Text("IDENTITY_MISMATCH")), ("options.2.label", PropValue::I18n("roster.ground.identity_mismatch")), ("options.3.value", PropValue::Text("ACCOUNT_COMPROMISE")), ("options.3.label", PropValue::I18n("roster.ground.account_compromise"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.restrict.effective_now"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.restrict.notice"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::ConditionalSection, props: &[("id", PropValue::Text("restrict_rider_requested_procedure")), ("condition", PropValue::Text("ground.value == 'RIDER_REQUESTED'"))], children: &[], branches: &[("if_true", &[
+                    Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("roster.restrict.rider_requested_procedure"))], children: &[], branches: &[] }
+                ] as &[Node])] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("restrict_rider_confirm_btn")), ("label", PropValue::I18n("roster.restrict.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("restrict_rider")), ("action.variables.riderId", PropValue::Binding("rider.riderId")), ("action.variables.ground", PropValue::Binding("ground.value")), ("action.on_success.0.type", PropValue::Text("close_sheet")), ("action.on_success.1.type", PropValue::Text("navigate")), ("action.on_success.1.route", PropValue::Text("$reload"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("restrict_rider_error")), ("for_action", PropValue::Text("restrict_rider"))], children: &[], branches: &[] }
+            ], branches: &[] } },
     ];
 }

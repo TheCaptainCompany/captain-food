@@ -185,6 +185,15 @@ pub(crate) fn simple_path_regex() -> regex::Regex {
 /// whose root a `data_requirements` resolver actually feeds, must resolve on the api type that
 /// resolver's query returns. Anything outside that shape (loop variables, UI/form state, bare
 /// roots, expressions) is left unchecked — the declared honest boundary in the module doc.
+///
+/// `doc` (the whole screens FILE, #639 part C step 4-iii-A) extends the SAME walk to every bottom
+/// sheet reachable from this screen (`screen_roles::reachable_sheets`, the SAME reachability
+/// `screen_roles.rs`'s §26 walk already derives): a sheet opened from a detail route reads that
+/// route's own resolver roots (`restrict_rider_sheet` reads `rider.*`, exactly like the screen that
+/// opens it), so the roots computed above apply unchanged — only the SUBTREE walked grows. Issues
+/// found inside a sheet report as `screen-sheet-binding-unknown` (a distinct code from the
+/// screen-body `screen-binding-unknown-field`, #468) — before this rule a `{{ rider.riderld }}`
+/// typo in a sheet passed `make validate` and would dispatch the Art. 11 act with an empty id.
 pub(crate) fn check_screen_bindings(
     model: &Model,
     issues: &mut Vec<Issue>,
@@ -193,6 +202,7 @@ pub(crate) fn check_screen_bindings(
     screen: &Value,
     resolvers: Option<&serde_yaml::Mapping>,
     nav: &HashMap<String, Vec<NavField>>,
+    doc: Option<&Value>,
 ) {
     let data_requirements: Vec<String> = screen
         .get("data_requirements")
@@ -205,28 +215,41 @@ pub(crate) fn check_screen_bindings(
     }
     let mustache = regex::Regex::new(r"\{\{([^{}]+)\}\}").unwrap();
     let simple = simple_path_regex();
-    let mut bindings: Vec<(String, String)> = Vec::new();
-    collect_template_bindings(screen, "", &mustache, &mut bindings);
-    for (loc, expr) in bindings {
-        let path = expr.split('|').next().unwrap_or("").trim();
-        if !simple.is_match(path) {
-            continue;
+
+    let check = |issues: &mut Vec<Issue>, node: &Value, loc_prefix: &str, rule: &'static str| {
+        let mut bindings: Vec<(String, String)> = Vec::new();
+        collect_template_bindings(node, "", &mustache, &mut bindings);
+        for (loc, expr) in bindings {
+            let path = expr.split('|').next().unwrap_or("").trim();
+            if !simple.is_match(path) {
+                continue;
+            }
+            let mut segs = path.split('.');
+            let root = segs.next().unwrap_or("");
+            let Some((type_name, _query)) = roots.get(root) else { continue };
+            let rest: Vec<&str> = segs.collect();
+            if let Some((unknown, at_type)) = first_unknown_segment(model, nav, type_name, "api.yaml", &rest) {
+                issues.push(err(
+                    rule,
+                    format!("{}/screens/{}{}{}", sfkey, sid, loc_prefix, loc),
+                    format!(
+                        "binding '{{{{ {} }}}}' walks '{}', which type '{}' (root '{}': {}) declares neither \
+                         as a property nor as an FK-derived navigation field — the widget renders empty \
+                         while the spec reads as though it were bound (#468).",
+                        path, unknown, at_type, root, type_name
+                    ),
+                ));
+            }
         }
-        let mut segs = path.split('.');
-        let root = segs.next().unwrap_or("");
-        let Some((type_name, _query)) = roots.get(root) else { continue };
-        let rest: Vec<&str> = segs.collect();
-        if let Some((unknown, at_type)) = first_unknown_segment(model, nav, type_name, "api.yaml", &rest) {
-            issues.push(err(
-                "screen-binding-unknown-field",
-                format!("{}/screens/{}{}", sfkey, sid, loc),
-                format!(
-                    "binding '{{{{ {} }}}}' walks '{}', which type '{}' (root '{}': {}) declares neither \
-                     as a property nor as an FK-derived navigation field — the widget renders empty \
-                     while the spec reads as though it were bound (#468).",
-                    path, unknown, at_type, root, type_name
-                ),
-            ));
+    };
+
+    check(issues, screen, "", "screen-binding-unknown-field");
+
+    if let Some(doc) = doc {
+        let sheets_map = doc.get("bottom_sheets").and_then(|v| v.as_mapping());
+        for sheet_id in super::screen_roles::reachable_sheets(doc, screen) {
+            let Some(def) = sheets_map.and_then(|m| m.get(Value::String(sheet_id.clone()))) else { continue };
+            check(issues, def, &format!("/sheets/{sheet_id}"), "screen-sheet-binding-unknown");
         }
     }
 }

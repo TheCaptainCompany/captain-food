@@ -9023,6 +9023,7 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
         } else {
             BTreeMap::new()
         },
+        decision_row: None,
     };
     let keys = vec![
         key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source

@@ -37,6 +37,9 @@ pub use crate::generated::rows::RiderRow;
 /// The restriction attribution read model (#639 part C step 4-i, ADR-20260904-081527 §2) — the
 /// source of `myStanding`.
 pub use crate::generated::rows::RiderRestrictionRow;
+/// The admin's rider roster (#639 part C step 4-iii-A, ADR-20260904-152807 §1) — the source of
+/// `riders`/`rider`.
+pub use crate::generated::rows::RiderRosterRow;
 
 /// Optional filters for public restaurant discovery — mirrors the `restaurants` query args in api.yaml.
 /// V0 applies a subset (the rest are accepted and ignored until the read model backs them).
@@ -426,6 +429,19 @@ pub trait RiderRestrictionReadRepository: Send + Sync {
     async fn by_rider_id(&self, rider_id: RiderId) -> Result<Option<RiderRestrictionRow>, DomainError>;
 }
 
+/// Read port over the `RiderRoster` table (#639 part C step 4-iii-A, ADR-20260904-152807 §1/§4) —
+/// the admin's `riders`/`rider` queries. `all` returns EVERY row, `ORDER BY display_name,
+/// rider_id` (the composite index, #113): the admin roster is a rider POPULATION (tens/hundreds of
+/// rows), not an order log, so the resolver reads it whole and folds the held-first/restricted-
+/// first contract order and the page boundary in Rust over that one read (ADR §2 — the page
+/// boundary must not split "held first" across pages, so the held set is computed for ALL rider
+/// ids before paging).
+#[async_trait]
+pub trait RiderRosterReadRepository: Send + Sync {
+    async fn all(&self) -> Result<Vec<RiderRosterRow>, DomainError>;
+    async fn by_id(&self, rider_id: RiderId) -> Result<Option<RiderRosterRow>, DomainError>;
+}
+
 /// Optional filters for the order list — mirrors the `orders` query args in api.yaml
 /// (`customerId` / `restaurantId` / `status`); ownership/scope is enforced server-side.
 #[derive(Debug, Clone, Default)]
@@ -529,6 +545,11 @@ pub trait DeliveryReadRepository: Send + Sync {
     /// server-side by SQL rather than `for_rider(..).find(..)` over the rider's whole history plus
     /// the unassigned PENDING pool — the `/restricted` screen's per-paint read.
     async fn held_by_rider(&self, rider_id: RiderId) -> Result<Option<DeliveryJobRow>, DomainError>;
+    /// The held job (if any) of EACH rider in `rider_ids`, in ONE set-based query
+    /// (`WHERE rider_id = ANY($1) AND status IN (...)`), never N per-row reads (#639 part C step
+    /// 4-iii-A, ADR-20260904-152807 §2/§4) — the admin roster's held-first ordering needs the held
+    /// set for the WHOLE page's candidate ids before the contract order can be applied.
+    async fn held_by_riders(&self, rider_ids: &[RiderId]) -> Result<Vec<DeliveryJobRow>, DomainError>;
     /// A restaurant's delivery board, honouring the optional status filter, newest first.
     async fn by_restaurant(
         &self,

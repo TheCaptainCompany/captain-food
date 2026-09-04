@@ -128,6 +128,30 @@ impl DeliveryReadRepository for PgDeliveryRepository {
         row.as_ref().map(decode).transpose()
     }
 
+    /// #639 part C step 4-iii-A (ADR-20260904-152807 §2/§4, #885): the SET-BASED narrow —
+    /// `rider_id = ANY($1) AND status IN (ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY)`, ONE query for
+    /// the whole candidate id list, never `held_by_rider` called once per rider (the admin roster's
+    /// held-first order needs the held set for every rider before it can page).
+    async fn held_by_riders(&self, rider_ids: &[RiderId]) -> Result<Vec<DeliveryJobRow>, DomainError> {
+        if rider_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<uuid::Uuid> = rider_ids.iter().map(|r| r.0).collect();
+        let sql = format!(
+            "SELECT {COLUMNS} FROM {VIEW} WHERE rider_id = ANY($1) AND status IN ($2, $3, $4) \
+             ORDER BY requested_at DESC"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(&ids)
+            .bind(DeliveryStatus::ASSIGNED.to_text())
+            .bind(DeliveryStatus::PICKED_UP.to_text())
+            .bind(DeliveryStatus::OUT_FOR_DELIVERY.to_text())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?;
+        rows.iter().map(decode).collect()
+    }
+
     async fn by_restaurant(
         &self,
         restaurant_id: RestaurantId,

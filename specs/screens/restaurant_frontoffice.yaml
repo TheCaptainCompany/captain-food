@@ -287,7 +287,13 @@ bottom_sheets:
         custom_label: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.custom' }
         action:
           type: tip_order
-          variables: { orderId: "{{ sheet.data.orderId }}", restaurantId: "{{ order.restaurantId }}", tips: [{ recipient: "{{ order.tipRecipient }}", amount: { amountCents: "{{ courier_tip.value }}", currency: "{{ order.currency }}" } }] }
+          # `recipient: RIDER` is a fixed literal, not a binding — this widget is specifically the
+          # COURIER tip (id `courier_tip`, tip.title/tip.subtitle); `TipRecipient`'s other two
+          # values (RESTAURANT, CAPTAIN) have no control on this screen. `order.totalAmount.currency`
+          # (never a bare `order.currency`, which `Order` does not declare — found by
+          # `screen-sheet-binding-unknown`, #639 part C step 4-iii-A) is the SAME nested-Money path
+          # the refund amount picker uses elsewhere in this file.
+          variables: { orderId: "{{ sheet.data.orderId }}", restaurantId: "{{ order.restaurantId }}", tips: [{ recipient: RIDER, amount: { amountCents: "{{ courier_tip.value }}", currency: "{{ order.totalAmount.currency }}" } }] }
           on_success:
             - { type: show_toast, variant: success, message: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.thanks' } }
       - { type: text_area, id: delivery_reason, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.reason_ph' }, max_length: 300, visible_when: "delivery_timeliness.value == 'TOO_LATE'" }

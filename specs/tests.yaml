@@ -4106,8 +4106,28 @@ tests:
       type: { $ref: 'commands.yaml#/RestrictRider' }
       data: { riderId: "rider-1", ground: "IDENTITY_MISMATCH" }
       at: "2026-01-06T12:00:00Z"
+      # #639 part C step 4-iii-A (ADR-20260904-152807 §7): the door defaults OFF (RUN_SIRENE_WORKER
+      # lesson), so every OTHER RestrictRider path must gate it ON explicitly to exercise its OWN
+      # assertion rather than the door's — TestRestrictRiderDoorClosed below is the OFF leg.
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR' }
     then:
       - { $ref: '#/fixtures/riderRestricted' }
+
+  # #639 part C step 4-iii-A (ADR-20260904-152807 §7): the release gate as a mechanism — no
+  # `gates:` here, so the door sits at its SPEC DEFAULT (OFF), and the handler refuses BEFORE
+  # `require_rider` ever runs (`given: []`, an unregistered riderId — the door check is the FIRST
+  # thing the handler does, so no seeded row is needed to prove it).
+  TestRestrictRiderDoorClosed:
+    name: "restrictRider is refused by the door key while it is OFF (the production default), before the store is even read"
+    rules: [{ $ref: 'rules.yaml#/RiderRestrictionLifecycle' }]
+    actor: { $ref: 'actors.yaml#/Rider' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RestrictRider' }
+      data: { riderId: "rider-1", ground: "IDENTITY_MISMATCH" }
+    thrown:
+      - { $ref: 'errors.yaml#/RiderRestrictionDoorClosed' }
 
   TestRiderReinstated:
     name: "An admin reinstates a previously restricted rider"
@@ -4132,6 +4152,8 @@ tests:
     when:
       type: { $ref: 'commands.yaml#/RestrictRider' }
       data: { riderId: "rider-1", ground: "ACCOUNT_COMPROMISE" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR' }
     thrown:
       - { $ref: 'errors.yaml#/RiderAlreadyRestricted' }
 
@@ -4155,6 +4177,8 @@ tests:
     when:
       type: { $ref: 'commands.yaml#/RestrictRider' }
       data: { riderId: "rider-404", ground: "IDENTITY_MISMATCH" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR' }
     thrown:
       - { $ref: 'errors.yaml#/RiderNotFound' }
 

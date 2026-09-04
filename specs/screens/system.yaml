@@ -36,6 +36,12 @@ app_types: [web]   # ops tooling is web-only; no mobile shell planned
 resolvers:
   mailbox.lanes: { query: { $ref: 'api.yaml#/queries/mailboxLanes' } }
   mailbox.poisoned: { query: { $ref: 'api.yaml#/queries/poisonedMailboxMessages' } }
+  # #639 part C step 4-iii-A (ADR-20260904-152807 §3-5): the admin roster triage + detail. `all`'s
+  # second segment is all-lowercase, so BOTH `riders` and the reversed `all_riders` are valid
+  # binding roots (renderer.rs#resolver_aliases); `byId`'s second segment carries uppercase, so
+  # only the first-segment root `rider` is valid — the detail's own bindings use `rider.*`.
+  riders.all: { query: { $ref: 'api.yaml#/queries/riders' } }
+  rider.byId: { query: { $ref: 'api.yaml#/queries/rider' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA LAYER — ACTIONS. Navigation + refresh, plus the FIRST lane intervention (#315,
@@ -46,6 +52,63 @@ actions:
   navigate: { kind: client }
   refresh:  { kind: client, note: "Re-runs the screen's data_requirements; no mutation involved." }
   requeue_mailbox_message: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requeueMailboxMessage' }, note: "Operator recovery of a cap-poisoned row after fixing the cause (#315); acceptance-first — poll operationStatus with the returned messageId, then refresh." }
+  # #639 part C step 4-iii-A: the roster/detail's own client + mutation actions.
+  open_bottom_sheet: { kind: client }
+  close_sheet: { kind: client }
+  # `phone_call` redeclares the shared client kind IDENTICALLY to
+  # `restaurant_backoffice.yaml`/`restaurant_frontoffice.yaml` (the union rule) — declared THERE,
+  # never used; this is the first screen that actually binds it (the admin detail's tel: control).
+  phone_call: { kind: client }
+  restrict_rider: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/restrictRider' }, note: "The Art. 11(5) human decision (ADR-20260904-081527/-014136, ADR-20260904-152807 §6-7); acceptance-first." }
+  reinstate_rider: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/reinstateRider' }, note: "A direct Tell, no sheet, no ground, no free text (ADR-20260904-152807 §5); acceptance-first." }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BOTTOM SHEETS — the admin's restriction act (#639 part C step 4-iii-A, ADR-20260904-152807 §6).
+# ──────────────────────────────────────────────────────────────────────────────
+bottom_sheets:
+  # Opened from `rider_detail`; reads `rider.*` (that screen's own resolver root, `rider.byId`).
+  restrict_rider_sheet:
+    id: restrict_rider_sheet
+    type: bottom_sheet
+    title: "{{ rider.displayName }}"
+    sections:
+      - type: conditional_section
+        id: restrict_holds_job
+        condition: "rider.heldDelivery != null"
+        if_true:
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.holds_job' } }
+      - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.consequence' } }
+      # The closed four (#639 part C step 4-i, ADR-20260904-014136) — NO catch-all chip, NO
+      # preselection, NO free text, NO `disabled_when` (ADR §6): an empty ground is the
+      # mutation's own typed rejection, surfaced by `inline_error` below.
+      - type: chip_multi_select
+        id: ground
+        label: { $ref: 'system.translations.yaml#/roster.restrict.ground_label' }
+        single_select: true
+        options:
+          - { value: RIDER_REQUESTED,             label: { $ref: 'system.translations.yaml#/roster.ground.rider_requested' } }
+          - { value: ELIGIBILITY_DOCUMENT_LAPSED,  label: { $ref: 'system.translations.yaml#/roster.ground.eligibility_document_lapsed' } }
+          - { value: IDENTITY_MISMATCH,            label: { $ref: 'system.translations.yaml#/roster.ground.identity_mismatch' } }
+          - { value: ACCOUNT_COMPROMISE,           label: { $ref: 'system.translations.yaml#/roster.ground.account_compromise' } }
+      - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.effective_now' } }
+      - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.notice' } }
+      - type: conditional_section
+        id: restrict_rider_requested_procedure
+        condition: "ground.value == 'RIDER_REQUESTED'"
+        if_true:
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.rider_requested_procedure' } }
+      - type: button
+        id: restrict_rider_confirm_btn
+        label: { $ref: 'system.translations.yaml#/roster.restrict.confirm' }
+        variant: primary
+        full_width: true
+        action:
+          type: restrict_rider
+          # EXACTLY these two variables (ADR §6) — no dates, no free text: the handler stamps
+          # decidedAt/effectiveAt itself.
+          variables: { riderId: "{{ rider.riderId }}", ground: "{{ ground.value }}" }
+          on_success: [{ type: close_sheet }, { type: navigate, route: "$reload" }]
+      - { type: inline_error, id: restrict_rider_error, for_action: restrict_rider }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
@@ -112,6 +175,108 @@ screens:
         title: { $ref: 'system.translations.yaml#/mailbox.guide.title' }
         content:
           - { type: text, value: { $ref: 'system.translations.yaml#/mailbox.guide.body' } }
+
+  # SCREEN 2 — Rider roster (triage, #639 part C step 4-iii-A, ADR-20260904-152807 §5). The
+  # system host is NOT routed and no admin door exists today (§9): this screen ships DARK,
+  # declared/rendered/asserted natively; reachable through the System host + step 6's magic-link
+  # door, both owed by step 6 — the walk exercises it through GraphQL as ADMIN.
+  - id: riders
+    roles: [ADMIN]
+    route: "/system/riders"
+    title: { $ref: 'system.translations.yaml#/roster.title' }
+    sdui: true
+    data_requirements: [riders.all]
+    gaps:
+      - "The System host is not routed today (crates/server/src/hosts.rs `HostRoute::System`) and `specs/screens/system.yaml` declares no `requires_auth`/`unauthenticated:` door — the mailbox supervision screen has the same status. This screen is DARK: declared and asserted by dedicated render tests, reachable from a browser only once step 6's magic-link admin door + System host routing land (ADR-20260904-152807 §9, the RIDER-RESTRICTION-PRECONDITIONS row)."
+      - "The restaurant's name behind a held job is not shown on the roster (ADR §4): `heldDelivery`'s client selection deliberately does not select `restaurant { displayName }` — a delivery -> network navigation hop the D8 binding-walk gate cannot see today."
+    components:
+      - { type: page_header, title: { $ref: 'system.translations.yaml#/roster.title' }, subtitle: { $ref: 'system.translations.yaml#/roster.subtitle' } }
+      - type: list
+        id: rider_list
+        items: "{{ riders }}"
+        empty_state: { icon: users, title: { $ref: 'system.translations.yaml#/roster.empty.title' }, body: { $ref: 'system.translations.yaml#/roster.empty.body' } }
+        item_action: { type: navigate, route: "/system/riders/{{ item.riderId }}" }
+        item_components:
+          - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.list.name' }, value: "{{ item.displayName }}" }
+          # Access — ONE badge per enum value, fixed variant, per-row `visible_when` (never
+          # `variant_when`, dormant at HEAD per ADR §5).
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.standing.restricted' }, variant: warning, visible_when: "item.standing == 'RESTRICTED'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.standing.active' },     variant: outline, visible_when: "item.standing == 'ACTIVE'" }
+          # The held-job stage — three values, held_by_rider/held_by_riders' own narrowing.
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.assigned' },         variant: info, visible_when: "item.heldDelivery.status == 'ASSIGNED'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.picked_up' },        variant: info, visible_when: "item.heldDelivery.status == 'PICKED_UP'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.out_for_delivery' }, variant: info, visible_when: "item.heldDelivery.status == 'OUT_FOR_DELIVERY'" }
+          - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.pickup_label' }, value: "{{ item.heldDelivery.pickupAddress | format_address }}", visible_when: "item.heldDelivery != null" }
+
+  # SCREEN 3 — Rider detail (#639 part C step 4-iii-A, ADR-20260904-152807 §5-7). DARK, same
+  # posture as SCREEN 2 (§9).
+  - id: rider_detail
+    roles: [ADMIN]
+    route: "/system/riders/:riderId"
+    title: { $ref: 'system.translations.yaml#/roster.detail.title' }
+    sdui: true
+    data_requirements: [rider.byId]
+    actions_used: [restrict_rider, reinstate_rider, phone_call, open_bottom_sheet]
+    gaps:
+      - "The System host is not routed today and no admin door exists — see the `riders` screen's own gap note (ADR-20260904-152807 §9); this screen is DARK for the same reason."
+      - "The one-tick window after `$reload` in which the detail may still render \"Restreindre l'acces\" (the two projector checkpoints, `RiderRoster` and the write side, catch up independently) is accepted, not hidden: a second submit in that window is answered by the mutation's own `RiderAlreadyRestricted`, surfaced in `inline_error`, never a second event."
+    components:
+      - { type: page_header, title: { $ref: 'system.translations.yaml#/roster.detail.title' }, subtitle: "{{ rider.displayName }}" }
+      # (1) The held job — stage + foodLocation badges + pickup address, only when held.
+      - type: conditional_section
+        id: detail_held_job
+        condition: "rider.heldDelivery != null"
+        if_true:
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.assigned' },         variant: info, visible_when: "rider.heldDelivery.status == 'ASSIGNED'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.picked_up' },        variant: info, visible_when: "rider.heldDelivery.status == 'PICKED_UP'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.held.out_for_delivery' }, variant: info, visible_when: "rider.heldDelivery.status == 'OUT_FOR_DELIVERY'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.food_location.with_rider' },             variant: danger,  visible_when: "rider.heldDelivery.foodLocation == 'WITH_RIDER'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.food_location.returned_to_restaurant' }, variant: warning, visible_when: "rider.heldDelivery.foodLocation == 'RETURNED_TO_RESTAURANT'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.food_location.not_collected' },          variant: warning, visible_when: "rider.heldDelivery.foodLocation == 'NOT_COLLECTED'" }
+          - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.pickup_label' }, value: "{{ rider.heldDelivery.pickupAddress | format_address }}" }
+      # (2) Access — standing + ground rows + effective-since.
+      - type: section
+        id: detail_access
+        title: { $ref: 'system.translations.yaml#/roster.access_label' }
+        content:
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.standing.restricted' }, variant: warning, visible_when: "rider.standing == 'RESTRICTED'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.standing.active' },     variant: outline, visible_when: "rider.standing == 'ACTIVE'" }
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.rider_requested' },             visible_when: "rider.ground == 'RIDER_REQUESTED'" }
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.eligibility_document_lapsed' }, visible_when: "rider.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'" }
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.identity_mismatch' },           visible_when: "rider.ground == 'IDENTITY_MISMATCH'" }
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.account_compromise' },          visible_when: "rider.ground == 'ACCOUNT_COMPROMISE'" }
+          - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.effective_since' }, value: "{{ rider.effectiveAt | format_datetime }}", visible_when: "rider.effectiveAt != null" }
+      # (3) Phone — a `phone_call` action (SUPPORT-CONTACT decided the RIDER's route to support;
+      #     the register is silent on ops calling a rider — ux/business call it legitimate, legal
+      #     notes purpose limitation; ADR §5).
+      - type: section
+        id: detail_phone
+        title: { $ref: 'system.translations.yaml#/roster.phone_label' }
+        content:
+          - { type: text, value: "{{ rider.phone }}" }
+          - { type: button, id: rider_phone_call_btn, label: { $ref: 'system.translations.yaml#/roster.phone_label' }, variant: outline, action: { type: phone_call, phone: "{{ rider.phone }}" } }
+      # (4) Availability — one badge per RiderStatus value, incl. the LEGACY SUSPENDED value:
+      #     always shown as its OWN badge, never hidden, never rendered as Restreint.
+      - type: section
+        id: detail_availability
+        title: { $ref: 'system.translations.yaml#/roster.availability_label' }
+        content:
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.status.offline' },          variant: outline, visible_when: "rider.status == 'OFFLINE'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.status.available' },        variant: success, visible_when: "rider.status == 'AVAILABLE'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.status.on_delivery' },      variant: info,    visible_when: "rider.status == 'ON_DELIVERY'" }
+          - { type: badge, text: { $ref: 'system.translations.yaml#/roster.status.suspended_legacy' }, variant: warning, visible_when: "rider.status == 'SUSPENDED'" }
+      # Controls — "Restreindre l'acces" gated on ACTIVE AND the door open (no `&&`: nested
+      # `conditional_section`s, ADR §7); "Lever la restriction" is a direct Tell.
+      - type: conditional_section
+        id: detail_restrict_gate
+        condition: "rider.standing == 'ACTIVE'"
+        if_true:
+          - type: conditional_section
+            id: detail_restrict_door_gate
+            condition: "rider.restrictionDoorOpen"
+            if_true:
+              - { type: button, id: rider_restrict_open_btn, label: { $ref: 'system.translations.yaml#/roster.restrict.open' }, variant: primary, full_width: true, action: { type: open_bottom_sheet, sheet_id: restrict_rider_sheet } }
+      - { type: button, id: rider_reinstate_btn, label: { $ref: 'system.translations.yaml#/roster.reinstate.action' }, variant: outline, full_width: true, visible_when: "rider.standing == 'RESTRICTED'", action: { type: reinstate_rider, variables: { riderId: "{{ rider.riderId }}" }, on_success: [{ type: navigate, route: "$reload" }] } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PERFORMANCE & ACCESSIBILITY (contracts — ops surface, same floor as customer)

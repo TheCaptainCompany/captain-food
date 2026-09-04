@@ -2053,7 +2053,7 @@ pub(crate) fn validate(model: &Model) -> Report {
                     // model, wired full-strength by #717 after the corpus was cleaned): every simple
                     // dotted binding whose root a data_requirement feeds must name real fields on
                     // the api type that resolver's query returns.
-                    check_screen_bindings(model, &mut issues, sfkey, &sid, s, resolvers, &nav);
+                    check_screen_bindings(model, &mut issues, sfkey, &sid, s, resolvers, &nav, cs);
                     // Read fulfillability + `skipped_reads` declarations (§25b, #745): a required
                     // arg with no paint-time source is a read that fails on EVERY paint — it must
                     // be declared (and the runtime skips it before network), and a declaration a

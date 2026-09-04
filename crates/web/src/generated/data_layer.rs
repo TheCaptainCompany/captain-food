@@ -47,6 +47,8 @@ pub enum ResolverKey {
     StandingMine,
     MailboxLanes,
     MailboxPoisoned,
+    RidersAll,
+    RiderById,
 }
 
 impl ResolverKey {
@@ -85,6 +87,8 @@ impl ResolverKey {
         ResolverKey::StandingMine,
         ResolverKey::MailboxLanes,
         ResolverKey::MailboxPoisoned,
+        ResolverKey::RidersAll,
+        ResolverKey::RiderById,
     ];
 
     /// The spec key (dotted) this resolver is declared under — 1:1 with the DSL.
@@ -123,6 +127,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => "standing.mine",
             ResolverKey::MailboxLanes => "mailbox.lanes",
             ResolverKey::MailboxPoisoned => "mailbox.poisoned",
+            ResolverKey::RidersAll => "riders.all",
+            ResolverKey::RiderById => "rider.byId",
         }
     }
 
@@ -162,6 +168,8 @@ impl ResolverKey {
             "standing.mine" => Some(ResolverKey::StandingMine),
             "mailbox.lanes" => Some(ResolverKey::MailboxLanes),
             "mailbox.poisoned" => Some(ResolverKey::MailboxPoisoned),
+            "riders.all" => Some(ResolverKey::RidersAll),
+            "rider.byId" => Some(ResolverKey::RiderById),
             _ => None,
         }
     }
@@ -202,6 +210,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => Some("myStanding"),
             ResolverKey::MailboxLanes => Some("mailboxLanes"),
             ResolverKey::MailboxPoisoned => Some("poisonedMailboxMessages"),
+            ResolverKey::RidersAll => Some("riders"),
+            ResolverKey::RiderById => Some("rider"),
         }
     }
 
@@ -243,6 +253,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => None,
             ResolverKey::MailboxLanes => None,
             ResolverKey::MailboxPoisoned => Some("PoisonedMailboxMessagesQueryInput"),
+            ResolverKey::RidersAll => Some("RidersQueryInput"),
+            ResolverKey::RiderById => Some("RiderQueryInput"),
         }
     }
 
@@ -284,6 +296,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => Some("{ standing restriction { ground decidedAt effectiveAt } heldDelivery { id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt openIssue foodLocation handedBackAt } contestContact heldDelivery { restaurant { displayName } } }"),
             ResolverKey::MailboxLanes => Some("{ actorType partition ownershipVersion claimedBy leaseUntil checkpoint pending scheduled oldestPendingAt retryingAttempts poisoned registration }"),
             ResolverKey::MailboxPoisoned => Some("{ messageId actorType partition messageType attempts errorCode correlationId receivedAt completedAt }"),
+            ResolverKey::RidersAll => Some("{ riderId displayName phone status standing ground decidedAt effectiveAt reinstatedAt heldDelivery { id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt openIssue foodLocation handedBackAt } restrictionDoorOpen }"),
+            ResolverKey::RiderById => Some("{ riderId displayName phone status standing ground decidedAt effectiveAt reinstatedAt heldDelivery { id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt openIssue foodLocation handedBackAt } restrictionDoorOpen }"),
         }
     }
 
@@ -323,6 +337,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => &[],
             ResolverKey::MailboxLanes => &[],
             ResolverKey::MailboxPoisoned => &[],
+            ResolverKey::RidersAll => &[],
+            ResolverKey::RiderById => &[],
         }
     }
 
@@ -362,6 +378,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => None,
             ResolverKey::MailboxLanes => None,
             ResolverKey::MailboxPoisoned => None,
+            ResolverKey::RidersAll => None,
+            ResolverKey::RiderById => None,
         }
     }
 
@@ -404,6 +422,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => &["RIDER"],
             ResolverKey::MailboxLanes => &["ADMIN"],
             ResolverKey::MailboxPoisoned => &["ADMIN"],
+            ResolverKey::RidersAll => &["ADMIN"],
+            ResolverKey::RiderById => &["ADMIN"],
         }
     }
 
@@ -444,6 +464,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => &[],
             ResolverKey::MailboxLanes => &[],
             ResolverKey::MailboxPoisoned => &[],
+            ResolverKey::RidersAll => &[],
+            ResolverKey::RiderById => &["riderId"],
         }
     }
 
@@ -486,6 +508,8 @@ impl ResolverKey {
             ResolverKey::StandingMine => None,
             ResolverKey::MailboxLanes => None,
             ResolverKey::MailboxPoisoned => match param { "actorType" | "mailboxActorType" => Some("actorType"), "limit" | "pageLimit" => Some("limit"), _ => None },
+            ResolverKey::RidersAll => match param { "limit" | "pageLimit" => Some("limit"), "offset" | "pageOffset" => Some("offset"), _ => None },
+            ResolverKey::RiderById => match param { "riderId" => Some("riderId"), _ => None },
         }
     }
 }
@@ -574,6 +598,8 @@ pub enum ActionKey {
     ConfirmRiderSignIn,
     Refresh,
     RequeueMailboxMessage,
+    RestrictRider,
+    ReinstateRider,
 }
 
 impl ActionKey {
@@ -638,6 +664,8 @@ impl ActionKey {
         ActionKey::ConfirmRiderSignIn,
         ActionKey::Refresh,
         ActionKey::RequeueMailboxMessage,
+        ActionKey::RestrictRider,
+        ActionKey::ReinstateRider,
     ];
 
     /// The spec key this action is declared under — 1:1 with the DSL.
@@ -702,6 +730,8 @@ impl ActionKey {
             ActionKey::ConfirmRiderSignIn => "confirm_rider_sign_in",
             ActionKey::Refresh => "refresh",
             ActionKey::RequeueMailboxMessage => "requeue_mailbox_message",
+            ActionKey::RestrictRider => "restrict_rider",
+            ActionKey::ReinstateRider => "reinstate_rider",
         }
     }
 
@@ -767,6 +797,8 @@ impl ActionKey {
             "confirm_rider_sign_in" => Some(ActionKey::ConfirmRiderSignIn),
             "refresh" => Some(ActionKey::Refresh),
             "requeue_mailbox_message" => Some(ActionKey::RequeueMailboxMessage),
+            "restrict_rider" => Some(ActionKey::RestrictRider),
+            "reinstate_rider" => Some(ActionKey::ReinstateRider),
             _ => None,
         }
     }
@@ -833,6 +865,8 @@ impl ActionKey {
             ActionKey::ConfirmRiderSignIn => ActionKind::Mutation,
             ActionKey::Refresh => ActionKind::Client,
             ActionKey::RequeueMailboxMessage => ActionKind::Mutation,
+            ActionKey::RestrictRider => ActionKind::Mutation,
+            ActionKey::ReinstateRider => ActionKind::Mutation,
         }
     }
 
@@ -898,6 +932,8 @@ impl ActionKey {
             ActionKey::ConfirmRiderSignIn => Some("confirmRiderSignIn"),
             ActionKey::Refresh => None,
             ActionKey::RequeueMailboxMessage => Some("requeueMailboxMessage"),
+            ActionKey::RestrictRider => Some("restrictRider"),
+            ActionKey::ReinstateRider => Some("reinstateRider"),
         }
     }
 
@@ -965,6 +1001,8 @@ impl ActionKey {
             ActionKey::ConfirmRiderSignIn => Some("ConfirmRiderSignInInput"),
             ActionKey::Refresh => None,
             ActionKey::RequeueMailboxMessage => Some("RequeueMailboxMessageInput"),
+            ActionKey::RestrictRider => Some("RestrictRiderInput"),
+            ActionKey::ReinstateRider => Some("ReinstateRiderInput"),
         }
     }
 
@@ -1030,6 +1068,8 @@ impl ActionKey {
             ActionKey::ConfirmRiderSignIn => None,
             ActionKey::Refresh => None,
             ActionKey::RequeueMailboxMessage => None,
+            ActionKey::RestrictRider => None,
+            ActionKey::ReinstateRider => None,
         }
     }
 }

@@ -657,6 +657,21 @@ impl From<PageLimit> for ds::PageLimit {
     }
 }
 
+/// Rows to skip before the page for a paginated list query (#113). Absent = 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct PageOffset(pub i64);
+async_graphql::scalar!(PageOffset, "PageOffset", "Rows to skip before the page for a paginated list query (#113). Absent = 0.");
+impl From<ds::PageOffset> for PageOffset {
+    fn from(v: ds::PageOffset) -> Self {
+        Self(v.0)
+    }
+}
+impl From<PageOffset> for ds::PageOffset {
+    fn from(v: PageOffset) -> Self {
+        Self(v.0)
+    }
+}
+
 /// Percentage tax rate. Example: 10.0 for 10%.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct TaxRatePercent(pub f64);
@@ -2754,21 +2769,6 @@ impl From<ds::RestaurantDescription> for RestaurantDescription {
 }
 impl From<RestaurantDescription> for ds::RestaurantDescription {
     fn from(v: RestaurantDescription) -> Self {
-        Self(v.0)
-    }
-}
-
-/// Rows to skip before the page for a paginated list query (#113). Absent = 0.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub struct PageOffset(pub i64);
-async_graphql::scalar!(PageOffset, "PageOffset", "Rows to skip before the page for a paginated list query (#113). Absent = 0.");
-impl From<ds::PageOffset> for PageOffset {
-    fn from(v: ds::PageOffset) -> Self {
-        Self(v.0)
-    }
-}
-impl From<PageOffset> for ds::PageOffset {
-    fn from(v: PageOffset) -> Self {
         Self(v.0)
     }
 }

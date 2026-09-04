@@ -104,6 +104,22 @@ pub struct RiderRestrictionRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The admin triage/detail read model (#639 part C step 4-iii-A, ADR-20260904-152807 §1): name, phone, availability and the platform grant (standing/ground/decidedAt/effectiveAt/reinstatedAt) for EVERY rider, one row per rider. NOT `internal` — this table IS the `riders`/`rider` GraphQL `reads` target, ADMIN-only at the door. The held delivery job is deliberately NOT a column here (ADR §2, "one custody truth, read at query time — never a folded column"): the DETAIL reads `held_by_rider(rider_id)` fresh at query time and the LIST joins the page's rider ids to held statuses in one set-based query, both through `DeliveryReadRepository`, never a second fold of the custody lifecycle `View_DeliveryJob` already derives. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiderRosterRow {
+    pub rider_id: RiderId,
+    pub display_name: String,
+    pub phone: PhoneNumber,
+    pub status: RiderStatus,
+    pub standing: RiderStanding,
+    pub ground: Option<RiderRestrictionGround>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub effective_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub reinstated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatalogRow {
     pub catalog_id: CatalogId,

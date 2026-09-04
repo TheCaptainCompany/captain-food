@@ -591,6 +591,103 @@ RiderRestriction:
       from: [{ $ref: 'events.yaml#/RiderReinstated' }]
       note: "The occurred_at of the LATEST RiderReinstated fact for this rider (an occurrence timestamp, no payload field) -- history, not a live 'currently reinstated' flag: `standing` is the field that answers whether the rider is restricted right now; this column simply stops being the freshest fact once a later RiderRestricted follows it."
 
+# #639 part C step 4-iii-A (ADR-20260904-152807 §1, §3): the admin's roster of every rider — the
+# `riders`/`rider` GraphQL queries (`/system/riders`, `/system/riders/:riderId`). A NEW table,
+# never a widening of `RiderRestriction` (refused, §1: it reverses that table's landed rule and
+# makes a table named for one concept carry another) and never a widening of `Rider` (`internal:
+# true` stays — one reader class, the identity bridge). Fed by the FIVE rider events only, own
+# `ProjectorGroup` checkpoint `"RiderRoster"` from 0 — the `RiderRestriction` precedent generalised
+# one table further. NEVER `auth_ref`: this table answers WHO to show an admin and WHETHER the
+# platform grants them anything, never how a session resolves to a rider (that stays exclusively on
+# `Rider`, the identity bridge's own reader class).
+RiderRoster:
+  projector: app
+  aggregate: Rider
+  slice: V0
+  database: { $ref: 'database/databases.yaml#/read_common' }
+  note: >
+    The admin triage/detail read model (#639 part C step 4-iii-A, ADR-20260904-152807 §1): name,
+    phone, availability and the platform grant (standing/ground/decidedAt/effectiveAt/reinstatedAt)
+    for EVERY rider, one row per rider. NOT `internal` — this table IS the `riders`/`rider`
+    GraphQL `reads` target, ADMIN-only at the door. The held delivery job is deliberately NOT a
+    column here (ADR §2, "one custody truth, read at query time — never a folded column"): the
+    DETAIL reads `held_by_rider(rider_id)` fresh at query time and the LIST joins the page's rider
+    ids to held statuses in one set-based query, both through `DeliveryReadRepository`, never a
+    second fold of the custody lifecycle `View_DeliveryJob` already derives.
+  fedBy:
+    - { $ref: 'events.yaml#/RiderRegistered' }
+    - { $ref: 'events.yaml#/RiderInfoUpdated' }
+    - { $ref: 'events.yaml#/RiderStatusChanged' }
+    - { $ref: 'events.yaml#/RiderRestricted' }
+    - { $ref: 'events.yaml#/RiderReinstated' }
+  rules:
+    - "Keyed on `riderId` (grain: the rider, not the restriction fact) — the same 'what is true of this rider right now' grain as `RiderRestriction`, upserted in place; the Art. 11 LOG lives in `domain_events`, immutable, never here."
+    - "NO `auth_ref` column, ever — a rule line, not merely an omission, so a future edit that reaches for the identity bridge here is refused at review: this table answers WHO to show an admin, never WHO a session resolves to. A test asserts the column does not exist (`SELECT auth_ref FROM rider_roster` errors)."
+    - "NEVER a folded `heldDeliveryJobId`/`heldStatus` column (ADR §2): the held job is a SEPARATE fold (`View_DeliveryJob`, its own checkpoint over `Order-`/`Payment-`/`DeliveryJob-` streams) that would drift from this table's own `Rider-` replay on a rebuild and answer differently from the `held_by_rider`/`held_by_riders` ports — one custody truth, read fresh at query time, never two."
+    - "Own checkpoint group `\"RiderRoster\"` from 0 (never a prefix under the already-advanced `Rider` or `RiderRestriction` checkpoints — the #424 lesson, generalised a second time): a table born after the log is backfilled by replay, never a migration-time copy. Rebuild by resetting the `RiderRoster` checkpoint."
+    - "No CHECK constraint (`DbFaultPolicy::Skip` semantics, the 4-i `RiderRestriction` reasoning): a stray value fails the ONE row's projection rather than halting the whole group."
+    - "`standing` is a MECHANICAL `derive:` literal map (`RiderRegistered` → `ACTIVE`, `RiderRestricted` → `RESTRICTED`, `RiderReinstated` → `ACTIVE`) — unlike `Rider.standing`/`RiderRestriction.standing`, which are hand-written `Compute` hooks that preserve the PRIOR value on the creating arm (a checkpoint-reset replay-in-place over an existing row without a TRUNCATE, which those two tables' own rebuild rule forbids). `RiderRoster`'s rebuild is by checkpoint reset AND truncate together (`a_from_zero_replay_yields_the_same_roster_rows`, a full drain from position 0), so chronological event replay alone reproduces the correct end state and the mechanical map is sufficient — a deliberate simplification, not an oversight; a rebuild that resets ONLY this checkpoint without truncating the table would re-grant every restricted rider ACTIVE for the length of the drain, which is why the rule above is TRUNCATE-together, never checkpoint-only."
+  indexes:
+    - [display_name, rider_id]   # the LIST's declared page order: display_name, then rider_id
+    # A partial index (`WHERE standing = 'RESTRICTED'`) is what the RESTRICTED-first triage read
+    # wants, but the `indexes:` grammar (tools/codegen-rs/src/emit/sql.rs) emits only whole-column
+    # btree indexes — no `WHERE` clause is expressible. Declared PLAIN instead, said so here: the
+    # RESTRICTED population is small (a rider base, not an order log), so a plain index still
+    # serves the `standing = 'RESTRICTED'` predicate the list's held-first/restricted-first order
+    # and the (future, slice B) gauge both filter on; a partial index is a follow-up once the
+    # grammar can express one.
+    - [standing]
+  columns:
+    rider_id:
+      from: [{ $ref: 'events.yaml#/RiderRegistered/properties/riderId' }]
+      pk: true
+    display_name:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/displayName' }
+        - { $ref: 'events.yaml#/RiderInfoUpdated/properties/displayName' }
+      note: "Mirrors `Rider.display_name` — NOT NULL (RiderRegistered always initialises it; RiderInfoUpdated overwrites it only when it carries one, the partial-update convention)."
+    phone:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/phone' }
+        - { $ref: 'events.yaml#/RiderInfoUpdated/properties/phone' }
+      note: "Mirrors `Rider.phone` — a profile attribute, never a lookup key (no unique constraint, no index — French mobile numbers are recycled, the `Rider.phone` rule's reasoning applies identically here)."
+    status:
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered/properties/status' }
+        - { $ref: 'events.yaml#/RiderStatusChanged/properties/status' }
+      note: "Availability/lifecycle status, straight off the payload of whichever event wrote last — mirrors `Rider.status` exactly; the LEGACY `SUSPENDED` value decodes and renders (never as an authorization signal, never as `standing`)."
+    standing:
+      type: { $ref: 'scalars.yaml#/RiderStanding' }
+      derive:
+        RiderRegistered: ACTIVE
+        RiderRestricted: RESTRICTED
+        RiderReinstated: ACTIVE
+      from:
+        - { $ref: 'events.yaml#/RiderRegistered' }
+        - { $ref: 'events.yaml#/RiderRestricted' }
+        - { $ref: 'events.yaml#/RiderReinstated' }
+      note: "The platform's grant (ACTIVE/RESTRICTED), mechanically derived — see the table rule above for why this column is `derive:` here while `Rider.standing`/`RiderRestriction.standing` are hand-written."
+    ground:
+      type: { $ref: 'scalars.yaml#/RiderRestrictionGround' }
+      nullable: true
+      from: [{ $ref: 'events.yaml#/RiderRestricted/properties/ground' }]
+      note: "Null before any restriction and untouched by RiderReinstated (the attribution stays for admin/counsel history until the next RiderRestricted overwrites it) — mirrors `RiderRestriction.ground`."
+    decided_at:
+      type: timestamptz
+      nullable: true
+      from: [{ $ref: 'events.yaml#/RiderRestricted/properties/decidedAt' }]
+      note: "Mirrors `RiderRestriction.decided_at` — a timestamptz VALUE column parsed from the RFC3339 payload string, hence a hand-written `Compute` hook (the generator's own `type_derived`-timestamptz-excludes-ScalarLatest rule), not `derive:`."
+    effective_at:
+      type: timestamptz
+      nullable: true
+      from: [{ $ref: 'events.yaml#/RiderRestricted/properties/effectiveAt' }]
+      note: "Mirrors `RiderRestriction.effective_at` — same parsed-string reasoning as `decided_at`."
+    reinstated_at:
+      type: timestamptz
+      nullable: true
+      from: [{ $ref: 'events.yaml#/RiderReinstated' }]
+      note: "The occurred_at of the LATEST RiderReinstated fact (an occurrence timestamp, no payload field) — mirrors `RiderRestriction.reinstated_at` exactly; history, not a live flag."
+
 Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog

@@ -98,6 +98,14 @@ fn main() {
         dec_issues.extend(validate_decision_rows(&dec_rows, &legacy_keys, &|id| {
             record_resolves(id, &corpus)
         }));
+        // #639 part C step 4-iii-A (ADR-20260904-152807 §7): a `decisionRow:`-gated configuration
+        // key's production value must stay `"false"` while its row is `open` — the release gate as
+        // a mechanism, never trusted prose (the RUN_SIRENE_WORKER lesson).
+        dec_issues.extend({
+            let mut v = Vec::new();
+            validate_decision_row_gated_config_keys(&model, &dec_rows, &mut v);
+            v
+        });
         // §22b — the committed index region must equal the fold over the source rows (founder
         // requirement 12): caught at VALIDATE time with the clearer message; check-drift stays
         // the outer net and compares the same bytes via the same emit function. CHECK MODE ONLY,

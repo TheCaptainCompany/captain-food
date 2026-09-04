@@ -303,6 +303,100 @@ impl QueryRoot {
         let rows = repo.list(filter).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(DeliveryPartnerAvailability::from).collect())
     }
+    /// The admin rider roster (#639 part C step 4-iii-A): every rider, ordered riders-holding-a-job first, then RESTRICTED, then ACTIVE, each group by displayName then riderId — a fixed contract order, no orderBy in V0. limit clamps to 200 server-side; offset absent = 0.
+    #[graphql(name = "riders", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"riders\"))", visible = "visible_admin")]
+    async fn riders(&self, ctx: &async_graphql::Context<'_>, input: Option<RidersQueryInput>) -> async_graphql::Result<Vec<RiderRosterEntry>> {
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
+        let roster = ctx.data::<std::sync::Arc<dyn application::queries::RiderRosterReadRepository>>()?;
+        let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
+        let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let restriction_door_open = ctx.data::<crate::graphql::schema::RunRiderRestrictionDoor>()?.0;
+        let limit = input.as_ref().and_then(|i| i.limit).map(|v| v.0).filter(|l| *l > 0).unwrap_or(50).min(200) as usize;
+        let offset = input.and_then(|i| i.offset).map(|v| v.0).filter(|o| *o >= 0).unwrap_or(0) as usize;
+        // The ORDER is the contract (riders holding a job first, then RESTRICTED, then ACTIVE, each
+        // by displayName then riderId) and must not be split across a page boundary, so the held
+        // set is computed for the WHOLE roster BEFORE paging -- tens/hundreds of rows, the honest
+        // cost of a rider POPULATION, never an order log (ADR-20260904-152807 SS2/SS4).
+        let rows = roster.all().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let all_ids: Vec<domain::generated::scalars::RiderId> = rows.iter().map(|r| r.rider_id).collect();
+        let held_rows = deliveries.held_by_riders(&all_ids).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let held_by: std::collections::HashMap<domain::generated::scalars::RiderId, application::queries::DeliveryJobRow> =
+            held_rows.into_iter().filter_map(|j| j.rider_id.map(|r| (r, j))).collect();
+        let mut held_group = Vec::new();
+        let mut restricted_group = Vec::new();
+        let mut active_group = Vec::new();
+        for row in rows {
+            if held_by.contains_key(&row.rider_id) {
+                held_group.push(row);
+            } else if row.standing == domain::generated::scalars::RiderStanding::RESTRICTED {
+                restricted_group.push(row);
+            } else {
+                active_group.push(row);
+            }
+        }
+        held_group.extend(restricted_group);
+        held_group.extend(active_group);
+        let mut out = Vec::new();
+        for row in held_group.into_iter().skip(offset).take(limit) {
+            let mut held_delivery = None;
+            if let Some(job) = held_by.get(&row.rider_id).cloned() {
+                if let Some(order) = orders.by_id(job.order_id, &application::queries::ReadScope::System).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                    if let Some(restaurant) = restaurants.by_id(job.restaurant_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                        held_delivery = Some(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon))));
+                    }
+                }
+            }
+            out.push(RiderRosterEntry {
+                rider_id: row.rider_id.into(),
+                display_name: row.display_name,
+                phone: row.phone.into(),
+                status: row.status.into(),
+                standing: row.standing.into(),
+                ground: row.ground.and_then(super::scalars::rider_restriction_ground_from_domain),
+                decided_at: row.decided_at,
+                effective_at: row.effective_at,
+                reinstated_at: row.reinstated_at,
+                held_delivery,
+                restriction_door_open,
+            });
+        }
+        Ok(out)
+    }
+    /// One rider's roster row (#639 part C step 4-iii-A): the admin detail behind `/system/riders/:riderId` — identity, availability, the platform's grant and, read fresh at query time, the job the rider currently holds custody of. Unknown riderId resolves null, never an existence error.
+    #[graphql(name = "rider", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"rider\"))", visible = "visible_admin")]
+    async fn rider(&self, ctx: &async_graphql::Context<'_>, input: RiderQueryInput) -> async_graphql::Result<Option<RiderRosterEntry>> {
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
+        let roster = ctx.data::<std::sync::Arc<dyn application::queries::RiderRosterReadRepository>>()?;
+        let Some(row) = roster.by_id(input.rider_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))? else {
+            return Ok(None);
+        };
+        let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
+        let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let mut held_delivery = None;
+        if let Some(job) = deliveries.held_by_rider(row.rider_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+            if let Some(order) = orders.by_id(job.order_id, &application::queries::ReadScope::System).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                if let Some(restaurant) = restaurants.by_id(job.restaurant_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                    held_delivery = Some(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon))));
+                }
+            }
+        }
+        let restriction_door_open = ctx.data::<crate::graphql::schema::RunRiderRestrictionDoor>()?.0;
+        Ok(Some(RiderRosterEntry {
+            rider_id: row.rider_id.into(),
+            display_name: row.display_name,
+            phone: row.phone.into(),
+            status: row.status.into(),
+            standing: row.standing.into(),
+            ground: row.ground.and_then(super::scalars::rider_restriction_ground_from_domain),
+            decided_at: row.decided_at,
+            effective_at: row.effective_at,
+            reinstated_at: row.reinstated_at,
+            held_delivery,
+            restriction_door_open,
+        }))
+    }
     /// The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
     #[graphql(name = "favoriteRestaurants", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"favoriteRestaurants\"))", visible = "visible_customer")]
     async fn favorite_restaurants(&self, ctx: &async_graphql::Context<'_>, input: FavoriteRestaurantsQueryInput) -> async_graphql::Result<Vec<Restaurant>> {

@@ -129,6 +129,10 @@ pub struct RetryAfterSeconds(pub i64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PageLimit(pub i64);
 
+/// Rows to skip before the page for a paginated list query (#113). Absent = 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct PageOffset(pub i64);
+
 /// Percentage tax rate. Example: 10.0 for 10%.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct TaxRatePercent(pub f64);

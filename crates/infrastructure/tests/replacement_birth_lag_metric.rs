@@ -117,6 +117,7 @@ fn order_deps(pool: &PgPool) -> CommandDeps {
         // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
+        run_rider_restriction_door: false,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(PgAuthSubjectReservationRepository::new(pool.clone())),

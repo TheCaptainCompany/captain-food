@@ -36,3 +36,59 @@ mailbox.poisoned.received:    { messages: { en: "Received at", fr: "Reçu à" } 
 mailbox.poisoned.requeue:     { messages: { en: "Requeue", fr: "Remettre en file" } }
 mailbox.poisoned.empty.title: { messages: { en: "No poisoned rows", fr: "Aucune ligne empoisonnée" } }
 mailbox.poisoned.empty.body:  { messages: { en: "Nothing has failed at the delivery-attempts cap. This is the healthy state.", fr: "Rien n'a échoué au plafond de tentatives de livraison. C'est l'état sain." } }
+
+# ── rider roster (#639 part C step 4-iii-A, ADR-20260904-152807 §5-6) ────────────────────────
+# Never `rider.restrict.*` — one letter from the rider's OWN `rider.restricted.*` block
+# (specs/screens/rider.translations.yaml) would be a copy-paste hazard between the two surfaces.
+roster.title:              { messages: { en: "Riders", fr: "Livreurs" } }
+roster.subtitle:           { messages: { en: "Triage: riders holding a job first, then restricted, then active.", fr: "Triage : livreurs tenant une commande d'abord, puis restreints, puis actifs." } }
+roster.list.name:          { messages: { en: "Name", fr: "Nom" } }
+roster.detail.title:       { messages: { en: "Rider detail", fr: "Détail du livreur" } }
+roster.empty.title:        { messages: { en: "No riders", fr: "Aucun livreur" } }
+roster.empty.body:         { messages: { en: "No rider has registered yet.", fr: "Aucun livreur ne s'est encore inscrit." } }
+
+# Access (standing) — the ONLY two badges the LIST shows besides the held-job stage.
+roster.standing.restricted: { messages: { en: "Restricted", fr: "Restreint" } }
+roster.standing.active:     { messages: { en: "Active", fr: "Actif" } }
+roster.access_label:        { messages: { en: "Access", fr: "Accès" } }
+
+# Availability (RiderStatus) — DETAIL only; SUSPENDED is the retired legacy value (ADR-20260904-014136
+# §4/§6), never rendered as a standing/access badge and never hidden.
+roster.status.offline:          { messages: { en: "Offline", fr: "Hors ligne" } }
+roster.status.available:        { messages: { en: "Available", fr: "Disponible" } }
+roster.status.on_delivery:      { messages: { en: "On delivery", fr: "En course" } }
+roster.status.suspended_legacy: { messages: { en: "Suspended (legacy status)", fr: "Suspendu (ancien statut)" } }
+roster.availability_label:      { messages: { en: "Availability", fr: "Disponibilité" } }
+
+# The held job — stage badges (LIST + DETAIL, `held_by_rider`/`held_by_riders`' own narrowing:
+# ASSIGNED/PICKED_UP/OUT_FOR_DELIVERY, never the other DeliveryStatus values) and, DETAIL only,
+# the foodLocation badges (a handback's custody fact, #639 part C step 3-ii).
+roster.held.assigned:              { messages: { en: "Assigned", fr: "Assignée" } }
+roster.held.picked_up:             { messages: { en: "Picked up", fr: "Récupérée" } }
+roster.held.out_for_delivery:      { messages: { en: "Out for delivery", fr: "En livraison" } }
+roster.food_location.with_rider:            { messages: { en: "With the rider", fr: "Chez le livreur" } }
+roster.food_location.returned_to_restaurant: { messages: { en: "Returned to the restaurant", fr: "Retournée au restaurant" } }
+roster.food_location.not_collected:         { messages: { en: "Not collected", fr: "Non récupérée" } }
+roster.pickup_label:               { messages: { en: "Pickup", fr: "Récupération" } }
+
+# The grounds — the SAME closed four the rider's own notice names, with the admin's OWN nouns
+# (ADR §6: labels name the FACT, not a claim).
+roster.ground.rider_requested:              { messages: { en: "At the rider's request", fr: "À la demande du rider" } }
+roster.ground.eligibility_document_lapsed:  { messages: { en: "Eligibility document lapsed", fr: "Justificatif expiré" } }
+roster.ground.identity_mismatch:            { messages: { en: "Identity mismatch", fr: "Identité non concordante" } }
+roster.ground.account_compromise:           { messages: { en: "Account compromise", fr: "Compte compromis" } }
+roster.effective_since:                     { messages: { en: "Effective since", fr: "Effectif depuis" } }
+roster.phone_label:                         { messages: { en: "Phone", fr: "Téléphone" } }
+
+# The two controls.
+roster.restrict.open:      { messages: { en: "Restrict access", fr: "Restreindre l'accès" } }
+roster.reinstate.action:   { messages: { en: "Lift the restriction", fr: "Lever la restriction" } }
+
+# The sheet (`restrict_rider_sheet`).
+roster.restrict.holds_job:   { messages: { en: "Holds an order — collected. The restriction does not take it away.", fr: "Tient une commande — récupérée. La restriction ne la lui retire pas." } }
+roster.restrict.consequence: { messages: { en: "Will no longer receive runs; keeps access to finish or return the run in progress.", fr: "Ne recevra plus de courses ; garde l'accès pour terminer ou rendre la course en cours." } }
+roster.restrict.ground_label: { messages: { en: "Ground", fr: "Motif" } }
+roster.restrict.effective_now: { messages: { en: "Effective: now", fr: "Effectif : maintenant" } }
+roster.restrict.notice:      { messages: { en: "The rider is told in the app the next time they open it.", fr: "Le rider est informé dans l'application à sa prochaine ouverture." } }
+roster.restrict.rider_requested_procedure: { messages: { en: "Keep the rider's message (procedure).", fr: "Conservez le message du rider (procédure)." } }
+roster.restrict.confirm:     { messages: { en: "Restrict access now", fr: "Restreindre l'accès maintenant" } }

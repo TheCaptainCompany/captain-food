@@ -1366,6 +1366,22 @@ pub struct DeliveryPartnerAvailabilitiesQueryInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
+pub struct RidersQueryInput {
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+    #[graphql(name = "offset")]
+    pub offset: Option<PageOffset>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderQueryInput {
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
 pub struct FavoriteRestaurantsQueryInput {
     #[graphql(name = "customerId")]
     pub customer_id: CustomerId,

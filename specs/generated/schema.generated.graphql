@@ -49,6 +49,7 @@ scalar CurrencyCode
 scalar MoneyCents
 scalar RetryAfterSeconds
 scalar PageLimit
+scalar PageOffset
 scalar TaxRatePercent
 scalar Quantity
 scalar CustomerDisplayName
@@ -101,7 +102,6 @@ scalar GoogleRating
 scalar WebUrl
 scalar RestaurantLegalName
 scalar RestaurantDescription
-scalar PageOffset
 scalar MarginPercent
 scalar TimeOfDay
 scalar ProspectionScore
@@ -892,6 +892,20 @@ type RiderStandingInfo {
   restriction: RiderRestrictionInfo
   heldDelivery: DeliveryJob
   contestContact: EmailAddress
+}
+
+type RiderRosterEntry {
+  riderId: RiderId!
+  displayName: String!
+  phone: PhoneNumber!
+  status: RiderStatus!
+  standing: RiderStanding!
+  ground: RiderRestrictionGround
+  decidedAt: DateTime
+  effectiveAt: DateTime
+  reinstatedAt: DateTime
+  heldDelivery: DeliveryJob
+  restrictionDoorOpen: Boolean!
 }
 
 type DeliveryPartnerAvailability {
@@ -1759,6 +1773,15 @@ input DeliveryPartnerAvailabilitiesQueryInput {
   status: CityAvailabilityStatus
 }
 
+input RidersQueryInput {
+  limit: PageLimit
+  offset: PageOffset
+}
+
+input RiderQueryInput {
+  riderId: RiderId!
+}
+
 input FavoriteRestaurantsQueryInput {
   customerId: CustomerId!
 }
@@ -1989,6 +2012,8 @@ type Query {
   myDeliveries(input: MyDeliveriesQueryInput): [DeliveryJob!]! @auth(requires: [RIDER]) @reads(views: ["View_DeliveryJob"])
   restaurantDeliveries(input: RestaurantDeliveriesQueryInput!): [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT]) @reads(views: ["View_DeliveryJob"])
   deliveryPartnerAvailabilities(input: DeliveryPartnerAvailabilitiesQueryInput): [DeliveryPartnerAvailability!]! @auth(requires: [EXTERNAL, ADMIN]) @reads(views: ["View_DeliveryPartnerAvailability"])
+  riders(input: RidersQueryInput): [RiderRosterEntry!]! @auth(requires: [ADMIN]) @reads(views: ["RiderRoster", "View_DeliveryJob"])
+  rider(input: RiderQueryInput!): RiderRosterEntry @auth(requires: [ADMIN]) @reads(views: ["RiderRoster", "View_DeliveryJob"])
   favoriteRestaurants(input: FavoriteRestaurantsQueryInput!): [Restaurant!]! @auth(requires: [CUSTOMER]) @reads(views: ["Restaurant"])
   restaurants(input: RestaurantsQueryInput): [Restaurant!]! @public @reads(views: ["Restaurant"])
   restaurant(input: RestaurantQueryInput!): Restaurant @public @reads(views: ["Restaurant"])

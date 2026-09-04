@@ -59,6 +59,35 @@ types:
       # address rather than a hard 500.
       contestContact: { $ref: 'scalars.yaml#/EmailAddress', nullable: true }
 
+  # #639 part C step 4-iii-A (ADR-20260904-152807 §1/§4): the admin's roster row — `riders`'s triage
+  # list and `rider`'s detail. `riderId`/`displayName`/`phone`/`status`/`standing` non-null (the
+  # write path justifies them, `RiderRoster` always carries them); `ground`/`decidedAt`/
+  # `effectiveAt`/`reinstatedAt` nullable (absent before any restriction, exactly `RiderRestrictionInfo`'s
+  # own nullability). `heldDelivery` is the EXISTING `DeliveryJob` type, never a narrower one — read
+  # fresh at query time (`held_by_rider`/`held_by_riders`), never a folded column on `RiderRoster`
+  # (ADR §2). The client selection under `heldDelivery` takes stage/`foodLocation`/`pickupAddress`
+  # and deliberately does NOT select `restaurant { displayName }` — a delivery -> network nav hop the
+  # binding-walk gate cannot see; the restaurant's name on the roster is a declared screen gap.
+  RiderRosterEntry:
+    description: "One row of the admin rider roster (#639 part C step 4-iii-A): identity, availability, the platform's grant and, read fresh at query time, the job the rider currently holds custody of (if any)."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/RiderRoster' }, { $ref: 'database/projection_views.yaml#/View_DeliveryJob' }]
+    properties:
+      riderId: { $ref: 'scalars.yaml#/RiderId' }
+      displayName: { type: string }
+      phone: { $ref: 'scalars.yaml#/PhoneNumber' }
+      status: { $ref: 'scalars.yaml#/RiderStatus' }
+      standing: { $ref: 'scalars.yaml#/RiderStanding' }
+      ground: { $ref: 'scalars.yaml#/RiderRestrictionGround', nullable: true }
+      decidedAt: { type: string, format: date-time, nullable: true }
+      effectiveAt: { type: string, format: date-time, nullable: true }
+      reinstatedAt: { type: string, format: date-time, nullable: true }
+      heldDelivery: { $ref: '#/types/DeliveryJob', nullable: true }
+      # Filled at the resolver from `configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR` (§7, the
+      # `contestContact` threading precedent) — never a screen-side guess: the door key is the ONE
+      # source of truth for whether "Restreindre l'acces" may be pressed at all.
+      restrictionDoorOpen: { type: boolean }
+
+
   DeliveryPartnerAvailability:
     description: "A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue."
     reads: [{ $ref: 'database/projection_views.yaml#/View_DeliveryPartnerAvailability' }]
@@ -127,6 +156,28 @@ queries:
     returns: { $ref: '#/types/DeliveryPartnerAvailability', array: true }
     roles: [EXTERNAL, ADMIN]
     slice: V1
+
+  # #639 part C step 4-iii-A (ADR-20260904-152807 §3-4): the admin roster triage — `/system/riders`.
+  # ORDER IS THE CONTRACT, not an argument: riders holding a job first, then RESTRICTED, then
+  # ACTIVE, each group by `displayName` then `riderId` — the SDUI has no list sort, so no `orderBy`
+  # exists in V0. `limit`/`offset` clamp exactly like `restaurants` (limit clamps to 200 server-side,
+  # offset absent = 0) — the SAME promoted `PageOffset`/`PageLimit` scalars.
+  riders:
+    description: "The admin rider roster (#639 part C step 4-iii-A): every rider, ordered riders-holding-a-job first, then RESTRICTED, then ACTIVE, each group by displayName then riderId — a fixed contract order, no orderBy in V0. limit clamps to 200 server-side; offset absent = 0."
+    args:
+      limit: { $ref: 'scalars.yaml#/PageLimit' }
+      offset: { $ref: 'scalars.yaml#/PageOffset' }
+    returns: { $ref: '#/types/RiderRosterEntry', array: true }
+    roles: [ADMIN]
+    slice: V0
+
+  rider:
+    description: "One rider's roster row (#639 part C step 4-iii-A): the admin detail behind `/system/riders/:riderId` — identity, availability, the platform's grant and, read fresh at query time, the job the rider currently holds custody of. Unknown riderId resolves null, never an existence error."
+    args:
+      riderId: { $ref: 'scalars.yaml#/RiderId', required: true }
+    returns: { $ref: '#/types/RiderRosterEntry', nullable: true }
+    roles: [ADMIN]
+    slice: V0
 
 mutations:
 
