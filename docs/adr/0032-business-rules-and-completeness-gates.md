@@ -29,6 +29,13 @@ spec silently drift:
 3. **Completeness is now BLOCKING (promoted warning→error):** `test-uncovered-message`,
    `test-uncovered-event`, `test-uncovered-error` are **errors** — every actor message, emitted event and
    throwable error must be exercised by a test.
+   **Amended 2026-09-04 (PR #875, #639 part C step 4-i)**: an error that a `tests.yaml` fixture
+   CANNOT spell by construction — today only the rejection of a `readOnlyCatchAll` decode, which no
+   closed-enum fixture can carry — is exercised by a named Rust test instead, under a declared
+   `noTestFixturePossible: true` on the `errors.yaml` item whose legality the validator DERIVES
+   (`error-exemption-unjustified`: every command throwing it carries a `readOnlyCatchAll` scalar);
+   the gate is neither weakened nor bypassed — `test-uncovered-error` still fires the moment the flag
+   is removed. Grammar: `docs/claude/dsl.md` § `noTestFixturePossible:`.
 4. **Story completeness (new, error):** `op-uncovered-by-story` — every `api.yaml` mutation and query must
    be referenced by ≥1 story step, so the whole API surface anchors to a persona use case. Subscriptions
    are exempt (the story step model carries only query/mutation; a subscription is a transport variant of a

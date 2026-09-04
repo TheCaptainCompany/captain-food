@@ -2,6 +2,42 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #875 merged: step 4-i of part C is complete — a restriction bites on the next
+> request, and the doors are human-only.** [PR #875](https://github.com/TheCaptainCompany/captain-food/pull/875)
+> (`690430cc`, squash), a lower-tier run of three rounds — the ceiling (ADR-20260826-084500).
+> **Round 1** (reviewer + eight declared lenses): nine BLOCKING items, all small — the §6(iii)
+> codegen test claimed by the rules text but not written; `myStanding.restriction` rendered after
+> reinstatement; one word (*revocation*); the real Postgres resolver never driven against a RESTRICTED
+> row; the ADR §3 handler belt documented but absent; a declared span nothing constructed and a false
+> "0 when caught up" claim; **`RiderRestriction` born without replay** (folded under the already-advanced
+> `Rider` checkpoint, so a pre-migration rider's restriction was silently dropped — a card defect: the
+> card said "own checkpoint" for 4-iii's roster table and not for this one); the ADR §2 mechanism
+> sentence (the executor was right, the record was amended); the journal citing a note that was not
+> there. **Round 2**: seven PASS, the reviewer STOP on one new item — `noTestFixturePossible: true` as a
+> bare per-item boolean exempting an ERROR-level ADR-0032 gate; five lenses had it non-blocking with the
+> same tightening, the coordinator took the reviewer's reading (an underived exemption of a blocking
+> gate is a gate weakening inside the PR). **Round 3**: the flag is DERIVED by `error-exemption-unjustified`,
+> ALL-quantified — the executor's first ANY cut came back green under its own red-first test because
+> `RiderNotFound` is co-thrown by ordinary commands, and it tightened the rule in the direction of its
+> intent; reviewer PASS; ready + auto-merge as one step. Two executor deviations accepted by every
+> lens: a REAL `rider.standing.denied` span (the hard `obs-no-spans` gate honoured, not routed around)
+> and the derived exemption. **Lower-tier tally: first-round PASS 1 of 4** (#864 PASS, #867 FAIL→PASS,
+> #870 FAIL→PASS, #875 FAIL→FAIL→PASS; rounds 1/2/2/3). **Attribution**: the missing §6(iii) test and
+> the handler belt are executor depth misses against explicit ADR lines; the checkpoint group is a card
+> defect; the lag-gauge claim is an invited-lens depth miss (observability and dba both own it); the
+> `drain_group` early return is the one finding no lens named — banked as roster width and now an
+> issue. Filed: [#876](https://github.com/TheCaptainCompany/captain-food/issues/876) lag gauges never
+> read 0 (architect-owned), [#877](https://github.com/TheCaptainCompany/captain-food/issues/877) the
+> bam fold's `riderId` grain, [#878](https://github.com/TheCaptainCompany/captain-food/issues/878)
+> handler-side actor check before #358, [#879](https://github.com/TheCaptainCompany/captain-food/issues/879)
+> five small follow-ups, [#880](https://github.com/TheCaptainCompany/captain-food/issues/880) ~35 span
+> declarations with no constructor (UNVERIFIED count until the test is committed),
+> [#881](https://github.com/TheCaptainCompany/captain-food/issues/881) the denial's classification and
+> `causedBy:`. What the three rounds cost: one card defect and two executor depth misses became eleven
+> fixes and a new validator rule; what they bought: the seam's real read is tested, a from-zero rebuild
+> re-grants nobody AND backfills the attribution, and a gate exemption is now derivable. Next: 4-ii (the
+> restricted rider is told), briefed to the full roster — a legal surface.
+
 > **2026-09-04 — #639 part C step 4-i, PR #875: rider standing lands (still draft, HOLD: human).**
 > Base `3498fa04` (the empty claim commit) on `origin/main` `d4e02d26` (the commit introducing
 > [ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md)).
