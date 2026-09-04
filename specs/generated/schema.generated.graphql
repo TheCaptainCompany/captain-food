@@ -1273,24 +1273,32 @@ input CancelCustomerErasureInput {
   erasureRequestId: ErasureRequestId!
 }
 
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
 input ChangeRiderStatusInput {
-  riderId: RiderId!
   status: RiderStatus!
 }
 
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
 input AcceptDeliveryInput {
   deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
 }
 
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
 input ConfirmPickupInput {
   deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
 }
 
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
 input CompleteDeliveryInput {
   deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
 }
 
 input CancelDeliveryInput {
@@ -1303,9 +1311,11 @@ input EscalateDeliveryInput {
   reason: String
 }
 
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
 input ReportDeliveryIssueInput {
   deliveryJobId: DeliveryJobId!
-  riderId: RiderId
   kind: DeliveryIssueKind!
   issue: String
 }
@@ -1316,9 +1326,11 @@ input ResolveDeliveryIssueInput {
   note: String
 }
 
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
 input DeclineDeliveryInput {
   deliveryJobId: DeliveryJobId!
-  riderId: RiderId!
   reason: String
 }
 
@@ -1981,7 +1993,7 @@ type Mutation {
   requestErasure(input: RequestCustomerErasureInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "RequestCustomerErasure")
   confirmErasure(input: ConfirmCustomerErasureInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "ConfirmCustomerErasure")
   cancelErasure(input: CancelCustomerErasureInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [CUSTOMER]) @command(name: "CancelCustomerErasure")
-  changeRiderStatus(input: ChangeRiderStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ChangeRiderStatus")
+  changeRiderStatus(input: ChangeRiderStatusInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ChangeRiderStatus")
   acceptDelivery(input: AcceptDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "AcceptDelivery")
   confirmPickup(input: ConfirmPickupInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "ConfirmPickup")
   completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")

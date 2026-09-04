@@ -491,44 +491,36 @@ pub struct CancelCustomerErasureInput {
     pub erasure_request_id: ErasureRequestId,
 }
 
-/// Change a rider's availability/lifecycle status.
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRiderStatusInput {
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
     #[graphql(name = "status")]
     pub status: RiderStatus,
 }
 
-/// An independent Captain rider accepts a pending delivery job.
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptDeliveryInput {
     #[graphql(name = "deliveryJobId")]
     pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
 }
 
-/// The assigned rider confirms they collected the order from the restaurant.
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmPickupInput {
     #[graphql(name = "deliveryJobId")]
     pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
 }
 
-/// The assigned rider marks the delivery complete (handed to the customer).
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteDeliveryInput {
     #[graphql(name = "deliveryJobId")]
     pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
 }
 
 /// Restaurant/admin cancels a delivery job before it completes.
@@ -551,14 +543,12 @@ pub struct EscalateDeliveryInput {
     pub reason: Option<String>,
 }
 
-/// Report an issue on a delivery job (rider/support) by its closed KIND, with an optional bounded note (#639 part C step 3-i, ADR-20260904-015903 §4 — the D2 controlled-enum-plus-note pattern). The report never moves the job's status; it tells the restaurant through the read model.
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportDeliveryIssueInput {
     #[graphql(name = "deliveryJobId")]
     pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: Option<RiderId>,
     #[graphql(name = "kind")]
     pub kind: DeliveryIssueKind,
     /// Optional note — facts only, no description of persons (prompted on the rider sheet as such); personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000).
@@ -579,14 +569,12 @@ pub struct ResolveDeliveryIssueInput {
     pub note: Option<String>,
 }
 
-/// An independent rider declines a pending delivery job (it stays PENDING, re-offerable).
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct DeclineDeliveryInput {
     #[graphql(name = "deliveryJobId")]
     pub delivery_job_id: DeliveryJobId,
-    #[graphql(name = "riderId")]
-    pub rider_id: RiderId,
     #[graphql(name = "reason")]
     pub reason: Option<String>,
 }

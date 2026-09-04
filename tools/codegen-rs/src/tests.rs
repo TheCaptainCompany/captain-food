@@ -18533,6 +18533,128 @@ mod api_operation_key_gate {
     }
 }
 
+// ─── §28 — mutation `derived:` properties are server-injected, never client input (#865) ────────
+mod api_derived_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn op_mut<'a>(model: &'a mut Model, section: &str, name: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut("api.yaml")
+            .and_then(|v| v.get_mut(section))
+            .and_then(|v| v.get_mut(name))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("api.yaml/{section}/{name} exists"))
+    }
+
+    fn hits(m: &Model, rule: &str) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == rule)
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The real tree is clean on all three `api-derived-*` rules — the six mutations #865 declared
+    /// `derived:` on all name a real command property, `$ref` exactly `scalars.yaml#/RiderId`, and
+    /// (where required) narrow `roles:` to exactly `[RIDER]`.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let model = real_model();
+        for rule in ["api-derived-field-unknown", "api-derived-type-mismatch", "api-derived-role-mismatch"] {
+            let h = hits(&model, rule);
+            assert!(h.is_empty(), "{rule}: {h:?}");
+        }
+    }
+
+    /// RED on a derived key naming no property of the command at all — the mutant swaps `riderId`
+    /// (a real `AcceptDelivery` property) for `customerId` (not one).
+    #[test]
+    fn a_derived_key_absent_from_the_command_is_unknown() {
+        let mut model = real_model();
+        let derived = op_mut(&mut model, "mutations", "acceptDelivery")
+            .entry(Value::from("derived"))
+            .or_insert_with(|| Value::Mapping(serde_yaml::Mapping::new()))
+            .as_mapping_mut()
+            .expect("derived is a mapping");
+        derived.clear();
+        derived.insert(Value::from("customerId"), Value::from("rider"));
+        let h = hits(&model, "api-derived-field-unknown");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(h[0].contains("acceptDelivery") && h[0].contains("customerId"), "{h:?}");
+        assert!(validate(&model)
+            .issues
+            .iter()
+            .any(|i| i.rule == "api-derived-field-unknown" && matches!(i.level, Level::Error)));
+    }
+
+    /// RED on a derived source the closed set does not recognize — `restaurant` names no scalar,
+    /// so the property (`riderId`, a real `AcceptDelivery` property carrying `scalars.yaml#/RiderId`)
+    /// can never match it. Also proves an unrecognized source is a TYPE mismatch, not silently legal.
+    #[test]
+    fn an_unrecognized_derived_source_is_a_type_mismatch() {
+        let mut model = real_model();
+        let derived = op_mut(&mut model, "mutations", "acceptDelivery")
+            .get_mut("derived")
+            .and_then(|v| v.as_mapping_mut())
+            .expect("acceptDelivery already declares derived: { riderId: rider }");
+        derived.clear();
+        derived.insert(Value::from("riderId"), Value::from("restaurant"));
+        let h = hits(&model, "api-derived-type-mismatch");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(h[0].contains("acceptDelivery") && h[0].contains("riderId") && h[0].contains("restaurant"), "{h:?}");
+        // The mutant must not ALSO trip the unrelated rules — riderId is still a real property
+        // (field-unknown silent) and `roles:` is untouched (role-mismatch silent, since the actual
+        // scalar mismatch, not a roles problem, is what is wrong here).
+        assert!(hits(&model, "api-derived-field-unknown").is_empty());
+        assert!(hits(&model, "api-derived-role-mismatch").is_empty());
+    }
+
+    /// RED on a REQUIRED derived property (`changeRiderStatus`'s `riderId`) whose `roles:` is not
+    /// EXACTLY `[RIDER]` — the mutant widens back to the pre-#865 `[RIDER, ADMIN]`, the exact shape
+    /// ADR-20260904-014136 §Decision 6(i) says belongs to `RestrictRider` instead.
+    #[test]
+    fn a_required_derived_property_forces_its_roles_exactly() {
+        let mut model = real_model();
+        let op = op_mut(&mut model, "mutations", "changeRiderStatus");
+        op.insert(Value::from("roles"), Value::Sequence(vec![Value::from("RIDER"), Value::from("ADMIN")]));
+        let h = hits(&model, "api-derived-role-mismatch");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(h[0].contains("changeRiderStatus") && h[0].contains("riderId"), "{h:?}");
+        assert!(validate(&model)
+            .issues
+            .iter()
+            .any(|i| i.rule == "api-derived-role-mismatch" && matches!(i.level, Level::Error)));
+    }
+
+    /// A NULLABLE derived property (`reportDeliveryIssue`'s `riderId`, not in `required:`) imposes
+    /// NO roles constraint — `[RIDER, ADMIN]` stays legal, the resolver simply omits the key on the
+    /// ADMIN path. Proves the rule is keyed on `required:`, not merely "this property is derived".
+    #[test]
+    fn a_nullable_derived_property_admits_a_wider_roles_list() {
+        let model = real_model();
+        // reportDeliveryIssue already ships `derived: { riderId: rider }`, riderId NULLABLE, roles
+        // [RIDER, ADMIN] -- the real corpus proves this directly (the_real_corpus_is_clean), this
+        // test names WHY: riderId is not in ReportDeliveryIssue's `required:`.
+        let required = model
+            .defs
+            .get("commands.yaml")
+            .and_then(|v| v.get("ReportDeliveryIssue"))
+            .and_then(|v| v.get("required"))
+            .and_then(|v| v.as_sequence())
+            .map(|s| s.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert!(!required.contains(&"riderId"), "riderId must stay OUT of ReportDeliveryIssue's required: {required:?}");
+        assert!(hits(&model, "api-derived-role-mismatch").is_empty());
+    }
+}
+
 // ─── `derive:` gains an explicit `null` arm (#639 part C step 3-i, ADR-20260904-015903 §3) ──────
 mod derive_null_gate {
     use super::super::*;

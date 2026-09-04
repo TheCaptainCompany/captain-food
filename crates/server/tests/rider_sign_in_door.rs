@@ -560,10 +560,11 @@ async fn the_code_request_answers_identically_for_a_rider_and_a_stranger() {
 
 // ─── (e) end to end: the issued credential opens the rider door ──────────────────────────────────
 
+// #865: `riderId` carries no field on `AcceptDeliveryInput` any more (`derived: { riderId: rider
+// }`) — the seam this door resolves supplies it, never the literal.
 const ACCEPT_DELIVERY: &str = r#"mutation {
   acceptDelivery(input: {
-    deliveryJobId: "00000000-0000-0000-0000-00000000000d",
-    riderId: "00000000-0000-0000-0000-00000000600d"
+    deliveryJobId: "00000000-0000-0000-0000-00000000000d"
   }) { messageId }
 }"#;
 
@@ -592,8 +593,10 @@ async fn the_token_the_rider_stamp_writes_opens_the_rider_door_once_the_seam_res
     let sub = uuid::Uuid::from_u128(0x639_2C);
     let jwt = jwt_of_the_rider_stamp(sub);
 
-    // THE DOOR OPENS: the seam answers a row, the guard passes, the resolver runs (and then fails on
-    // the payload's unknown job -- past the guard, which is the point).
+    // THE DOOR OPENS: the seam answers a row, the guard passes, the resolver runs -- injecting
+    // `riderId` from the SAME resolved `ReadScope::Rider` (#865) and enqueuing on this door's real
+    // mailbox. Whether that lands PENDING or fails on something downstream is not the point; not
+    // FORBIDDEN is.
     let resolved = door(ScriptedIdentity::default(), ScriptedRiders::default(),
         RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D)))).await;
     let (message, code) = post_as_rider(&resolved, &jwt).await;
