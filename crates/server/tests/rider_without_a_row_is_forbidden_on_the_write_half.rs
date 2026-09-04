@@ -235,7 +235,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
 /// a door only a rider the seam resolved can knock on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_rider_token_with_no_rider_row_is_forbidden_on_report_delivery_issue() {
-    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x639_31));
+    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x6393_1));
     let (message, code) =
         first_error(&post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::NoMapping).await);
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row ⇒ the guard refuses — got: {message}");
@@ -257,7 +257,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_report_delivery_issue()
 /// but this door only opens for a rider the seam actually resolved, same as every other write.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_rider_token_with_no_rider_row_is_forbidden_on_hand_back_delivery() {
-    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x639_32));
+    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x6393_2));
     let (message, code) =
         first_error(&post_as_rider(&jwt, HAND_BACK_DELIVERY, RiderIdentityResolution::NoMapping).await);
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row ⇒ the guard refuses — got: {message}");
