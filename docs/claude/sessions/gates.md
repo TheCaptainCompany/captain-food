@@ -1003,6 +1003,11 @@ is itself the argument: **a list that grows has no business stating its own leng
   environment (`ID="$ID" python3 - <<'PYEOF'`). Inspect `git diff` of every file such a script
   touched before trusting the assert that failed.
 
+- **Never gate a push on `grep -c`.** `grep -c '\[error\]'` prints the count and exits 0 when it
+  finds matches, so `(make generate | grep -c '\[error\]') && git push` pushes a red tree; the
+  2026-09-04 docs push put `main` red on `decision-file-unparseable` for five minutes. Gate on
+  `! grep -q '\[error\]'` (or read `$?` of the gate itself), and let the chain stop.
+
 ## 19d. What the first lower-tier executor run (#864) taught the test bed
 
 - **A stored-shape change to an event a hand-folded aggregate constructs in its own `#[cfg(test)]`

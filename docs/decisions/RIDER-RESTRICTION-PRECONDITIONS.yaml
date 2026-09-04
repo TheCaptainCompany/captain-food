@@ -1,0 +1,27 @@
+key: RIDER-RESTRICTION-PRECONDITIONS
+status: open
+question: 'What must exist before the restrict door (`restrictRider`) is opened in production, now that
+  step 4-iii binds it to an admin screen? Three preconditions are named: an ADMIN can reach `/system/riders` from a browser (the System host serves the SDUI shell and an admin sign-in door exists -- today `system.captain.food` renders a static line and no admin door exists; the door rides step 6''s magic link); the SMS notice to the restricted
+  rider (#874, the Art. 11(3) statement is otherwise pull-shaped) and an alert route named for the
+  dead-man gauge `rider_restricted_holding_job_age_seconds` (a restricted rider holding food is
+  PAGE-class and the repo has no route wiring). Flipping `RUN_RIDER_RESTRICTION_DOOR` to true in
+  production is the decision that closes this row.'
+owner: team
+opened: '2026-09-04'
+capacity: team
+register: docs/adr/ADR-20260904-152807-the-admin-s-hands-one-custody-truth-read-at-query-time-a-door-that-refuses-until-the-notice-exists-and-two-slices.md
+evidence: 'ADR-20260904-081527 §12 made the SMS notice a blocker "before any production RestrictRider"
+  as prose, and §11 said "should production resume first, the door goes behind a refuse-at-door
+  activation" -- nothing executable refused anything. The RUN_SIRENE_WORKER precedent (PUBLISH-PRECONDITIONS)
+  shows why a key alone is not enough: its prose said STOPPED while its deploy value said true, unreconciled.
+  So this row names the key AND the preconditions, and a codegen test refuses a production value other
+  than "false" while the row is open. Production is suspended (ADR-20260817-105844) and the rider
+  population is zero; that is a fact, not an invariant -- the resume is one Argo sync.'
+note: 'The key is consumed at the WRITE door only: restrictRider OFF returns the typed refusal
+  RiderRestrictionDoorClosed; reinstateRider is never gated; the read guard (StandingGuard) never reads
+  the key -- a restricted rider is refused with the key OFF (a test). The admin screen hides "Restreindre
+  l''acces" while the door is closed. Closing this row: the admin can reach the screen (step 6), #874 merged, an alert route named in
+  specs/observability.yaml for the gauge, then a recorded decision flips deploy.production to "true"
+  (gate-then-stabilize, ADR-20260808-144738) and this row moves to decided. Consulted at the 4-iii
+  briefing: legal-specialist (the row + the key + the test), farley (the key at the write door),
+  architect (the gap named), observability-agent (the route as a precondition).'

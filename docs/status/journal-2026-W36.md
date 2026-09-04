@@ -2,6 +2,32 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — Step 4-iii (the admin's hands) decided by the team in two slices; the release gate
+> becomes a mechanism; the system surface is found unreachable.** [ADR-20260904-152807](../adr/ADR-20260904-152807-the-admin-s-hands-one-custody-truth-read-at-query-time-a-door-that-refuses-until-the-notice-exists-and-two-slices.md), full
+> mob (13 lenses). Unanimous on a new `RiderRoster` table (own group, never `auth_ref`; extending
+> `RiderRestriction` would reverse its landed rule). The one split — fold the held job into the roster
+> (dba, business, graphql: a view over the log serves no index, so per-row reads and a 30-second sweep
+> are the wrong cost at peak) versus read it at query time (vernon, young, architect, holub, farley:
+> two folds of the custody lifecycle under two checkpoints drift, the 4-ii divergence) — took the safer
+> option on the legal surface: one custody truth, the detail reads `held_by_rider`, the list one
+> set-based join per page, the gauge driven from the restricted set; #883's table conversion is the
+> cost's owner, the `EXPLAIN` rides the PR. Two slices: A the roster, the queries (ordered by the
+> contract — held first, then RESTRICTED), the triage list, the detail with the four facts and a
+> `phone_call` (the register is silent on ops calling a rider), the sheet (fact-named chips, no
+> preselection, no free text, no SMS claim before #874), the write-door key
+> `RUN_RIDER_RESTRICTION_DOOR` with the open row
+> [RIDER-RESTRICTION-PRECONDITIONS](../decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml) and a codegen
+> test that refuses a production value other than false while the row is open (the `RUN_SIRENE_WORKER`
+> lesson); B the dead-man on the 3-ii tick anchored on `effective_at`, its threshold `UNVERIFIED
+> input`, the measure `heldJobAtDecision`. **Found at the briefing (beck)**: `system.captain.food`
+> renders a static line, `Surface` has no `System` variant and no admin sign-in door exists — the
+> mailbox supervision screen has never been reachable from a browser; slice A ships dark and "an ADMIN
+> can reach `/system/riders`" joins the preconditions row, owed by step 6's magic-link door. Card
+> defects banked: the worker path, the nav-depth gap listed as open, option (b) presented as live,
+> `PageOffset`'s scope, reachability assumed. Counsel packet gains Q6–Q8. Operational: a docs push
+> went red on main for five minutes because a `&&` chain gated on `grep -c`, which exits 0 when it
+> finds errors — gate a push on `! grep -q '\[error\]'`, never on a count (gates.md §19c).
+
 > **2026-09-04 — #882 merged: step 4-ii of part C is complete; the restricted rider is told.**
 > [PR #882](https://github.com/TheCaptainCompany/captain-food/pull/882) (`55ff1111`, squash), two
 > rounds on the lower tier. **Presentation pass on `ed4ca073`**: reviewer PASS, legal PASS, evans PASS,
