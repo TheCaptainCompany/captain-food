@@ -963,6 +963,7 @@ type Order {
   deliveryStatus: DeliveryStatus
   courier: Courier
   estimatedDropoffAt: DateTime
+  deliveryHandedBack: Boolean!
   ratedAt: DateTime
   deliveryJobs: [DeliveryJob!]! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN])
   restaurant: Restaurant!

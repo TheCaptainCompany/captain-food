@@ -544,7 +544,10 @@ screens:
     sdui: false
     sdui_reason: "Realtime GraphQL subscription + order state machine — a static React page."
     requires_auth: true
-    data_requirements: [order.byId, delivery.byOrder]
+    # Review round 2 on #870: `delivery.byOrder` dropped — the handback signal
+    # (`order.deliveryHandedBack`) now rides the SAME `order.byId` read (and the pushed
+    # subscription frame), so a second resolver call here would fetch data nothing consumes.
+    data_requirements: [order.byId]
     subscription: { $ref: 'api.yaml#/subscriptions/orderStatusChanged' }
     actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
@@ -571,14 +574,18 @@ screens:
           # #167: the restaurant did not respond in time — release-not-refund register: the hold
           # is released, the customer was never charged; no promised bank date.
           CANCELLED_BY_TIMEOUT:    { icon: clock_x,  title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.body' } }
-      # #639 part C step 3-ii (ADR-20260904-015903 §7): while OUT_FOR_DELIVERY, a delivery job that
-      # is PENDING or FAILED (a handback with no re-offer yet — `delivery.byOrder`, CUSTOMER-admitted)
-      # REPLACES this bar with a re-dispatch notice, never a blank slot and never a counting-down ETA
-      # that will never arrive. `sdui: false`: this screen is a bespoke Leptos page, so the actual
-      # replacement renders in `crates/web/src/tracking.rs`, not the generic SDUI renderer — this
-      # `visible_when` documents the same predicate the hand-written code applies.
-      - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY'] && !(order.status == 'OUT_FOR_DELIVERY' && delivery.status in ['PENDING','FAILED'])", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
-      - { type: text, id: delivery_reassigning_banner, value: { $ref: 'restaurant_frontoffice.translations.yaml#/order.delivery_reassigning' }, visible_when: "order.status == 'OUT_FOR_DELIVERY' && delivery.status in ['PENDING','FAILED']" }
+      # #639 part C step 3-ii (ADR-20260904-015903 §7), review round 2 on #870: a rider handback
+      # with no re-offer yet REPLACES this bar with a re-dispatch notice, never a blank slot and
+      # never a counting-down ETA that will never arrive. The predicate is `order.deliveryHandedBack`
+      # ONLY — no `order.status` term: no OrderStatus producer ever emits `OUT_FOR_DELIVERY`
+      # (`specs/ordering/actors.yaml`'s own lifecycle comment says so), and the from-ASSIGNED
+      # NOT_COLLECTED case leaves the order at READY, not OUT_FOR_DELIVERY, and must still fire.
+      # `sdui: false`: this screen is a bespoke Leptos page (its generated tree is EMPTY, per
+      # `emit/web.rs`'s own doc comment — nothing here is actually parsed as a condition), so the
+      # real replacement renders in `crates/web/src/tracking.rs`; this text documents the same
+      # predicate the hand-written code applies, kept in sync by hand.
+      - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY'] and order.deliveryHandedBack is not true", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
+      - { type: text, id: delivery_reassigning_banner, value: { $ref: 'restaurant_frontoffice.translations.yaml#/order.delivery_reassigning' }, visible_when: "order.deliveryHandedBack is true" }
       - { type: order_items_summary, lines: "{{ order.items }}", total: "{{ order.totalAmount | format_currency }}" }
       - { type: order_id_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.id_label' }, value: "{{ order.id }}", action: { type: copy_to_clipboard } }
       - type: section

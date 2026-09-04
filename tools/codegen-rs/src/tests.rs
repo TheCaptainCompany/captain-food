@@ -18823,6 +18823,12 @@ mod derive_null_gate {
     /// scan on purpose: the handler (`commands.rs`), the fold (`delivery_job.rs`) and the dead-man
     /// watch (`delivery_handback_watch.rs`, an operational read, never a dispatch decision) all
     /// legitimately name the event and must NOT trip this.
+    ///
+    /// Review round 2 on #870 (young): the event NAME was the only watched token — a ranking could
+    /// read the CUSTODY FACT without ever spelling `DeliveryHandedBackByRider`: the derived column
+    /// (`food_location`, `handed_back_at`), the scalar it carries (`FoodCustody`), or the read
+    /// projection built over it (`DeliveryHandback`) all let the same influence in by a side door.
+    /// Watching all five closes that.
     #[test]
     fn no_dispatch_ranking_or_restriction_fold_reads_the_handback_event() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
@@ -18832,17 +18838,23 @@ mod derive_null_gate {
             "crates/infrastructure/src/persistence/referential.rs",
             "crates/infrastructure/src/integrations/delivery_offer_timeout_worker.rs",
         ];
+        let forbidden_tokens =
+            ["DeliveryHandedBackByRider", "food_location", "handed_back_at", "FoodCustody", "DeliveryHandback"];
         for path in watched {
             let full = root.join(path);
             let Ok(src) = std::fs::read_to_string(&full) else {
                 panic!("{path} must exist for this rule to watch it — a moved/renamed dispatch file needs this list updated in the same change");
             };
-            assert!(
-                !src.contains("DeliveryHandedBackByRider"),
-                "{path} must never read DeliveryHandedBackByRider -- a handback is a read-side \
-                 fact only (rules.yaml#/HandBackIsNeverALever); if this file legitimately needs it \
-                 now, that is the rule's own violation, not this test's to relax"
-            );
+            for token in forbidden_tokens {
+                assert!(
+                    !src.contains(token),
+                    "{path} must never read {token} -- a handback is a read-side fact only \
+                     (rules.yaml#/HandBackIsNeverALever); the custody column, its scalar and its \
+                     projection are the SAME influence as the event by another name; if this file \
+                     legitimately needs it now, that is the rule's own violation, not this test's \
+                     to relax"
+                );
+            }
         }
     }
 }

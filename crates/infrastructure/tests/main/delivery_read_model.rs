@@ -386,8 +386,8 @@ async fn a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirr
     );
     assert!(row.handed_back_at.is_some());
 
-    // The old rider no longer holds it (ASSIGNED filter excludes it); a DIFFERENT rider sees it in
-    // the available pool (PENDING filter includes it) — a second courier CAN pick it up.
+    // The old rider no longer holds it: the ASSIGNED-filtered view excludes it. A DIFFERENT rider
+    // sees it in the available pool (PENDING filter includes it) — a second courier CAN pick it up.
     let old_riders_assigned = repo.for_rider(RiderId(rider1), Some(DeliveryStatus::ASSIGNED)).await.expect("for_rider");
     assert!(
         !old_riders_assigned.iter().any(|j| j.delivery_job_id.0 == job),
@@ -398,24 +398,65 @@ async fn a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirr
         new_riders_pool.iter().any(|j| j.delivery_job_id.0 == job),
         "a different rider's available pool must offer the re-offered job"
     );
+    // Review round 2 on #870, correcting an earlier claim: `for_rider`'s own WHERE clause is
+    // `(rider_id = $1 OR (status = 'PENDING' AND rider_id IS NULL))` — the SECOND arm is every
+    // rider's pool, unfiltered by identity. So the UNFILTERED myDeliveries shape (`status: None`,
+    // the actual GraphQL query's default) does NOT drop this job for the OLD rider either — it is
+    // TRUE only for a job that goes FAILED (WITH_RIDER; see the twin below), never for PENDING. What
+    // the fold actually proves is `rider_id IS NULL`: the row is unattributed, not gone.
+    let old_riders_unfiltered = repo.for_rider(RiderId(rider1), None).await.expect("for_rider (unfiltered myDeliveries)");
+    let old_riders_view_of_job = old_riders_unfiltered
+        .iter()
+        .find(|j| j.delivery_job_id.0 == job)
+        .expect("the handed-back PENDING job is still visible in the OLD rider's unfiltered myDeliveries — it is everyone's pool now, not gone");
+    assert_eq!(old_riders_view_of_job.rider_id, None, "unattributed, not the old rider's — that is the actual guarantee, not absence");
 
     // The customer's OrderTracking mirror (application-layer projector, hand-written Compute hook —
     // NOT the derive: grammar, since this column is Complex-classified, `OrderTrackingCompute::
     // delivery_status`/`courier`): delivery_status PENDING, courier reset to null.
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (handback slice)");
-    let (delivery_status, courier): (Option<String>, Option<serde_json::Value>) =
-        sqlx::query_as("SELECT delivery_status, courier FROM ordertracking WHERE order_id = $1")
+    let (delivery_status, courier, delivery_handed_back): (Option<String>, Option<serde_json::Value>, bool) =
+        sqlx::query_as("SELECT delivery_status, courier, delivery_handed_back FROM ordertracking WHERE order_id = $1")
             .bind(order)
             .fetch_one(&pool)
             .await
             .expect("order tracking row");
     assert_eq!(delivery_status.as_deref(), Some("PENDING"), "the customer's mirror moves too");
     assert!(courier.is_none(), "courier resets — the job is unassigned again");
+    assert!(delivery_handed_back, "review round 2 on #870: the banner's own flag, set on ANY handback regardless of foodLocation");
 
     // The WITH_RIDER twin: from PICKED_UP, WITH_RIDER fails the job closed rather than re-offer it.
+    // Review round 2 on #870 (young: a mutant collapsing the Compute arm to PENDING survived):
+    // this twin now also carries an OrderPlaced (so its OrderTracking mirror row exists) and asserts
+    // `delivery_status = FAILED` there too — the two READ MODELS (View_DeliveryJob's projection-on-read
+    // `row2.status` below, and OrderTracking's materialized `Compute` hook) must agree, and only
+    // asserting the former let a Compute-arm regression through silently.
     let job2 = uuid::Uuid::new_v4();
     let stream2 = format!("DeliveryJob-{job2}");
     let order2 = uuid::Uuid::new_v4();
+    let order2_stream = format!("Order-{order2}");
+    append_event(
+        &pool,
+        &order2_stream,
+        1,
+        "OrderPlaced",
+        serde_json::json!({
+            "orderId": order2, "ref": "CF-0639B", "restaurantId": restaurant,
+            "customerId": uuid::Uuid::new_v4(),
+            "customerContact": { "displayName": "Léa", "phone": "+33612345678" },
+            "serviceType": "DELIVERY",
+            "items": [{ "offerId": uuid::Uuid::new_v4(), "name": "Margherita", "quantity": 1, "unitPrice": money(980), "lineTotal": money(980) }],
+            "totalAmount": money(1580),
+            "breakdown": {
+                "articles": money(980), "delivery": money(400), "serviceFee": money(200),
+                "total": money(1580), "restaurantContribution": money(160),
+                "restaurantPayout": money(820), "riderPayout": money(400), "captainNet": money(360)
+            },
+            "paymentIntentId": "pi_639b",
+        }),
+        t0,
+    )
+    .await;
     append_event(
         &pool,
         &stream2,
@@ -462,4 +503,14 @@ async fn a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirr
         row2.food_location.map(|f| format!("{f:?}")).as_deref(),
         Some("WITH_RIDER")
     );
+
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (WITH_RIDER twin)");
+    let (delivery_status2, delivery_handed_back2): (Option<String>, bool) =
+        sqlx::query_as("SELECT delivery_status, delivery_handed_back FROM ordertracking WHERE order_id = $1")
+            .bind(order2)
+            .fetch_one(&pool)
+            .await
+            .expect("order tracking row (WITH_RIDER twin)");
+    assert_eq!(delivery_status2.as_deref(), Some("FAILED"), "the customer's mirror agrees with the board: WITH_RIDER fails closed here too");
+    assert!(delivery_handed_back2, "the banner's flag is set regardless of which foodLocation the handback carries");
 }

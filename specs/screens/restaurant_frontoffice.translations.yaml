@@ -173,10 +173,15 @@ order.status.cancelled.body:  { messages: { en: "If your card was already charge
 order.status.acceptance_timed_out.title: { messages: { en: "The restaurant didn't respond in time", fr: "Le restaurant n'a pas répondu à temps" } }
 order.status.acceptance_timed_out.body:  { messages: { en: "Your order was cancelled automatically and the hold on your card is being released — you were never charged.", fr: "Votre commande a été annulée automatiquement et l'empreinte sur votre carte est en cours de libération — vous n'avez jamais été débité." } }
 order.eta:        { messages: { en: "Estimated arrival", fr: "Arrivée estimée" } }
-# #639 part C step 3-ii (ADR-20260904-015903 §7): REPLACES the ETA bar while the delivery is
-# PENDING/FAILED and the order is still OUT_FOR_DELIVERY — never blank, never counting down to
-# nothing.
-order.delivery_reassigning: { messages: { en: "Your order is ready — we are reassigning the delivery. New estimate coming.", fr: "Votre commande est bien préparée — nous réattribuons la livraison. Nouvelle estimation en cours." } }
+# #639 part C step 3-ii (ADR-20260904-015903 §7): REPLACES the ETA bar while `deliveryHandedBack`
+# is true — never blank, never counting down to nothing. Review round 2 on #870 (legal): the
+# ORIGINAL copy promised a remedy nobody performs — "we are reassigning the delivery" / "new
+# estimate coming" (no re-offer runs yet, #860 is fenced) and "your order is ready" (false on the
+# WITH_RIDER card, where the food never left the rider and the restaurant may not have prepared a
+# replacement). Facts only now, no promise the product cannot keep: the delay is stated, the
+# restaurant's notification is stated (true — the fold IS the notification, #745), and "here" is
+# where the customer will learn more, without naming a mechanism or a time.
+order.delivery_reassigning: { messages: { en: "Your delivery will not arrive at the time shown. The restaurant has been told. We will keep you posted here.", fr: "La livraison n'arrivera pas à l'heure indiquée. Le restaurant est prévenu. Nous vous tiendrons informé ici." } }
 order.id_label:   { messages: { en: "Order ID", fr: "N° de commande" } }
 order.rate:       { messages: { en: "Rate your order", fr: "Évaluer la commande" } }
 order.reorder:    { messages: { en: "Reorder", fr: "Recommander" } }

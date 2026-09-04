@@ -310,6 +310,7 @@ pub trait OrderTrackingCompute {
     fn delivery_status(&self, prev: Option<&OrderTrackingRow>, env: &Envelope) -> Option<DeliveryStatus>;
     fn courier(&self, prev: Option<&OrderTrackingRow>, env: &Envelope) -> Option<serde_json::Value>;
     fn estimated_dropoff_at(&self, prev: Option<&OrderTrackingRow>, env: &Envelope) -> Option<chrono::DateTime<chrono::Utc>>;
+    fn delivery_handed_back(&self, prev: Option<&OrderTrackingRow>, env: &Envelope) -> bool;
 }
 
 pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<OrderTrackingRow>, env: &Envelope) -> Option<OrderTrackingRow> {
@@ -353,6 +354,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
             delivery_status: c.delivery_status(state.as_ref(), env),
             courier: c.courier(state.as_ref(), env),
             estimated_dropoff_at: c.estimated_dropoff_at(state.as_ref(), env),
+            delivery_handed_back: c.delivery_handed_back(state.as_ref(), env),
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
@@ -371,13 +373,13 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
         DomainEvent::RestaurantRated(e) => { let mut row = state?; row.restaurant_stars = Some(e.stars.clone()); row.rating_comment = e.comment.clone(); row.rated_at = Some(env.occurred_at); Some(row) },
         DomainEvent::DeliverySatisfactionRecorded(e) => { let mut row = state?; row.delivery_timeliness = Some(e.timeliness.clone()); row.rated_at = Some(env.occurred_at); Some(row) },
         DomainEvent::OrderTipped(_) => { let mut row = state?; row.rated_at = Some(env.occurred_at); let v = c.rider_tip_cents(Some(&row), env); row.rider_tip_cents = v; let v = c.restaurant_tip_cents(Some(&row), env); row.restaurant_tip_cents = v; let v = c.captain_tip_cents(Some(&row), env); row.captain_tip_cents = v; Some(row) },
-        DomainEvent::DeliveryAcceptedByPartner(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; let v = c.estimated_dropoff_at(Some(&row), env); row.estimated_dropoff_at = v; Some(row) },
-        DomainEvent::DeliveryAcceptedByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; Some(row) },
+        DomainEvent::DeliveryAcceptedByPartner(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; let v = c.estimated_dropoff_at(Some(&row), env); row.estimated_dropoff_at = v; let v = c.delivery_handed_back(Some(&row), env); row.delivery_handed_back = v; Some(row) },
+        DomainEvent::DeliveryAcceptedByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; let v = c.delivery_handed_back(Some(&row), env); row.delivery_handed_back = v; Some(row) },
         DomainEvent::DeliveryPickedUp(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryStatusUpdated(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryCompleted(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryDispatchFailed(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
-        DomainEvent::DeliveryHandedBackByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; Some(row) },
+        DomainEvent::DeliveryHandedBackByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; let v = c.delivery_handed_back(Some(&row), env); row.delivery_handed_back = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

@@ -11,14 +11,21 @@
 //! **What is asserted (beck's zero-healthy suite, the same shape as #608):**
 //! - **presence** — an empty population still emits ONE point (this gauge carries no attributes,
 //!   unlike the birth-gap's `reason` set) at 0.
-//! - **a VALUE-DERIVED positive control** — a stranded handback (no later acceptance) at a
-//!   distinct age must make the gauge read that age.
+//! - **a VALUE-DERIVED positive control, DELIBERATELY MIS-ORDERED (review round 2 on #870,
+//!   young)** — a stranded job (no later acceptance) at 1800s AND a re-assigned job whose handback
+//!   is aged OLDER, at 3600s. If the "no later acceptance" predicate degraded to "does a handback
+//!   exist on this job" (the named mutant below), the gauge would report the re-assigned job's
+//!   3600s — the OLDER of the two — not the stranded job's 1800s, and the assertion would read the
+//!   wrong number. Ages that happened to be close (the ORIGINAL shape of this test, both jobs'
+//!   handbacks landing within seconds of each other in wall-clock terms) let the mutant survive:
+//!   a max-of-two that differs by under a second can round to the same reported value either way.
+//!   The ordering is the plant now, not just the SQL's own predicate.
 //! - **the NAMED mutant: delete the "no later acceptance" predicate** — a job handed back and then
-//!   RE-ASSIGNED (a later `DeliveryAcceptedByRider`) must read as NOT stranded (0), because
+//!   RE-ASSIGNED (a later `DeliveryAcceptedByRider`) must read as NOT stranded, because
 //!   `food_location`/`status` reset on the next acceptance (the same `derive: null` fold this
-//!   gauge's own SQL leans on). A predicate that only checked "does a handback exist on this job"
-//!   would count it and this control would fail — this IS the plant, in the sense that the SQL
-//!   itself embodies the predicate and the test proves it discriminates.
+//!   gauge's own SQL leans on). Caught DIRECTLY by the positive control above (its age is the
+//!   discriminant); recovery below is a second, independent proof on the SAME job rather than the
+//!   mutant's primary witness.
 //! - **repetition** — a second tick over the unchanged state must re-emit.
 //! - **recovery** — reassigning the stranded job must bring the gauge back to 0 on the next tick.
 //!
@@ -165,6 +172,18 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
         t0 + Duration::minutes(2),
     )
     .await;
+    // Aged OLDER than the stranded job's 1800s (see the module doc): a mutant that drops the "no
+    // later acceptance" predicate would report THIS job's age instead, and 3600 != 1800 fails loudly
+    // where two nearly-equal ages would not have.
+    sqlx::query(
+        "UPDATE domain_events SET occurred_at = now() - make_interval(secs => $1) \
+         WHERE stream_name = $2 AND event_type = 'DeliveryHandedBackByRider'",
+    )
+    .bind(3600.0_f64)
+    .bind(format!("DeliveryJob-{job_reassigned}"))
+    .execute(&pool)
+    .await
+    .expect("age the reassigned job's handback OLDER than the stranded one");
     append_event(
         &pool,
         &format!("DeliveryJob-{job_reassigned}"),

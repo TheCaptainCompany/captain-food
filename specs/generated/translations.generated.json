@@ -1184,8 +1184,8 @@
     "fr": "{count} articles · {total}"
   },
   "order.delivery_reassigning": {
-    "en": "Your order is ready — we are reassigning the delivery. New estimate coming.",
-    "fr": "Votre commande est bien préparée — nous réattribuons la livraison. Nouvelle estimation en cours."
+    "en": "Your delivery will not arrive at the time shown. The restaurant has been told. We will keep you posted here.",
+    "fr": "La livraison n'arrivera pas à l'heure indiquée. Le restaurant est prévenu. Nous vous tiendrons informé ici."
   },
   "order.empty.body": {
     "en": "Your order history will appear here.",
@@ -1462,10 +1462,6 @@
   "rider.issue.exit_label": {
     "en": "What happens next",
     "fr": "Et ensuite"
-  },
-  "rider.issue.handback_confirm": {
-    "en": "Hand back the order",
-    "fr": "Rendre la commande"
   },
   "rider.issue.handback_pending": {
     "en": "Handing back…",

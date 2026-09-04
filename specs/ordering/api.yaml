@@ -58,6 +58,7 @@ types:
       deliveryStatus: { $ref: 'scalars.yaml#/DeliveryStatus', nullable: true }   # live delivery progress (ADR-0031); null for COLLECTION / before dispatch
       courier: { $ref: 'entities.yaml#/Courier', nullable: true }                # assigned courier once accepted
       estimatedDropoffAt: { type: string, format: date-time, nullable: true }    # partner-reported ETA
+      deliveryHandedBack: { type: boolean }   # #639 part C step 3-ii, review round 2 on #870: true from DeliveryHandedBackByRider until the next DeliveryAcceptedByRider/DeliveryAcceptedByPartner reset — ON the order mirror (not a separate delivery read) so the PUSHED Order frame carries it; the tracking screen's banner reads THIS, never `status == OUT_FOR_DELIVERY` (no OrderStatus producer ever emits that token)
       ratedAt: { type: string, format: date-time, nullable: true }
 
   DeliverySatisfaction:

@@ -48,7 +48,6 @@ rider.issue.exit.hand_back: { messages: { en: "I cannot continue", fr: "Je ne pe
 rider.issue.custody_label: { messages: { en: "Where is the order", fr: "Où est la commande" } }
 rider.issue.custody.with_rider: { messages: { en: "I still have it", fr: "Je l'ai encore" } }
 rider.issue.custody.returned: { messages: { en: "I gave it back to the restaurant", fr: "Je l'ai rendue au restaurant" } }
-rider.issue.handback_confirm: { messages: { en: "Hand back the order", fr: "Rendre la commande" } }
 rider.issue.handback_pending: { messages: { en: "Handing back…", fr: "En cours…" } }
 rider.issue.kind_label:    { messages: { en: "What is wrong", fr: "Quel est le problème" } }
 rider.issue.kind.address_not_found:    { messages: { en: "Address not found", fr: "Adresse introuvable" } }

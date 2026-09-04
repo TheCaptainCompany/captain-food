@@ -1665,6 +1665,55 @@ mod tests {
         assert!(html.contains("data-empty=\"true\""));
     }
 
+    /// Review round 2 on #870: `rider_issue_sheet` used to nest its real content behind
+    /// `issue_exit.value` — a FORM FIELD `visible_when`. `RenderContext::lookup` reads resolver
+    /// data only, so the condition always evaluated to nothing, `visible_when` fails CLOSED, and
+    /// `interact.rs` never re-evaluates conditions after a chip pick: neither exit's content ever
+    /// rendered. Fixed by splitting `rider_issue_sheet` into a ROUTER (two `open_bottom_sheet`
+    /// buttons — a real SDUI edge, not a form-field condition) and two content sheets
+    /// (`rider_report_sheet`, `rider_handback_sheet`) whose own gates are RESOLVER data
+    /// (`delivery.status`), which `lookup` DOES serve at paint. This test renders `job_detail` (the
+    /// only screen reaching these sheets) and asserts every confirm control is actually present in
+    /// the DOM, plus the ASSIGNED-status food-cards-absent case the ADR's "derive, don't ask" rule
+    /// (§2) requires.
+    #[test]
+    fn the_issue_router_and_its_two_child_sheets_render_their_confirm_controls() {
+        let screen = Surface::Rider.screens().iter().find(|s| s.id == "job_detail").unwrap();
+        let delivery = |status: &str| {
+            json!({
+                "id": "d-1",
+                "status": status,
+                "pickupAddress": "12 rue de la Paix",
+                "dropoffAddress": "4 avenue Foch",
+                "foodLocation": null,
+                "openIssue": null,
+                "restaurant": { "displayName": "Chez Test" },
+            })
+        };
+
+        // ASSIGNED — the rider never picked up: `foodLocation` is DERIVED (NOT_COLLECTED), so the
+        // handback sheet must ask NOTHING — the food cards (`handback_location`) must be ABSENT.
+        let mut c = ctx();
+        c.insert_resolved("delivery.byOrder", delivery("ASSIGNED"));
+        let html = render_screen_html(screen, Surface::Rider.sheets(), c);
+        assert!(html.contains("data-sheet=\"rider_report_sheet\""), "router: continue exit missing -- {html}");
+        assert!(html.contains("data-sheet=\"rider_handback_sheet\""), "router: hand-back exit missing -- {html}");
+        assert!(html.contains("data-chip-group=\"issue_kind\""), "report sheet: kind chips missing -- {html}");
+        assert!(html.contains("data-action=\"report_delivery_issue\""), "report sheet: confirm missing -- {html}");
+        assert!(html.contains("data-action=\"hand_back_delivery\""), "handback sheet: confirm missing on ASSIGNED -- {html}");
+        assert!(
+            !html.contains("data-chip-group=\"handback_location\""),
+            "ASSIGNED: food cards must be absent (derived, never asked) -- {html}"
+        );
+
+        // PICKED_UP — collected: the food cards ask WITH_RIDER vs RETURNED_TO_RESTAURANT.
+        let mut c2 = ctx();
+        c2.insert_resolved("delivery.byOrder", delivery("PICKED_UP"));
+        let html2 = render_screen_html(screen, Surface::Rider.sheets(), c2);
+        assert!(html2.contains("data-chip-group=\"handback_location\""), "PICKED_UP: food cards missing -- {html2}");
+        assert!(html2.contains("data-action=\"hand_back_delivery\""), "handback sheet: confirm missing on PICKED_UP -- {html2}");
+    }
+
     /// #167 (PR #586 ux STOP): the timed-out treatment is a PER-CARD render, never an
     /// unconditional banner. Absent when no bound order holds CANCELLED_BY_TIMEOUT; present
     /// exactly on the timed-out card when one does.

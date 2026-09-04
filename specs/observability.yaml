@@ -1425,8 +1425,8 @@ delivery-dispatch-strategy:
 # nothing automatically re-offering it — a counter that fires on the handback and goes quiet during
 # the stranding is the ADR-20260810-231300 defect class (a monitor that can only fire when a signal
 # ARRIVES goes quiet exactly when it should scream). THE QUESTION IT ANSWERS: is there a customer
-# whose food a rider handed back, with no later acceptance re-offering it, and for how long has that
-# been true? ZEROS ARE THE CONTRACT: the gauge is 0 EVERY sweep when nothing is stranded, and the
+# whose food a rider handed back, with no later acceptance or cancellation resolving it, and for how
+# long has that been true? ZEROS ARE THE CONTRACT: the gauge is 0 EVERY sweep when nothing is stranded, and the
 # heartbeat increments only after a COMPLETE sweep — an absent series must never read as "nothing
 # stranded". Emitted by a NON-FENCED timer worker beside `delivery_offer_timeout_worker.rs`
 # (`delivery_handback_watch.rs`), never inside the fenced mailbox handler. KNOWN GAP, repeated
@@ -1449,9 +1449,12 @@ custody-handback:
     - { name: command_type, source: "command.type", required: true }
 
   # The existing command middleware spans (no new instrumentation surface) — same three as
-  # reclamation-sla. `business.food_location` is stamped by the SAME middleware from the command's
-  # own payload (a closed enum, never free text — no span attribute anywhere on this workflow ever
-  # carries the rider's words; there are none to carry, HandBackDelivery has no `reason`).
+  # reclamation-sla. Review round 2 on #870: `business.food_location` was claimed HERE as a
+  # `command.validate` attribute the middleware stamps from the command payload, but the ONLY emit
+  # site for this workflow's spans is the fenced `inbox.rs` handler — no middleware anywhere stamps
+  # per-command payload fields onto `command.validate`, and the fact already lives on the event
+  # itself (`DeliveryHandedBackByRider.foodLocation`) and on `View_DeliveryJob.food_location` — so
+  # the attribute is removed rather than left `required: true` and unrecorded.
   spans:
     - name: "command.receive"
       kind: SERVER
@@ -1464,7 +1467,6 @@ custody-handback:
       required: true
       attributes:
         - { key: "business.validation_status", type: string, required: true }   # accepted | rejected (InvalidDeliveryStatus / DeliveryAlreadyAssigned / DeliveryJobNotFound)
-        - { key: "business.food_location", type: string, required: true }       # NOT_COLLECTED | RETURNED_TO_RESTAURANT | WITH_RIDER
     - name: "event.store.append"
       kind: INTERNAL
       required: true
@@ -1473,14 +1475,20 @@ custody-handback:
         - { key: "business.stream_id", type: string, required: true }
 
   metrics:
-    # Age of the OLDEST job whose latest lifecycle fact is a handback with no later acceptance
-    # (DeliveryAcceptedByRider/DeliveryAcceptedByPartner) — the re-offer that never came. Emitted
+    # Age of the OLDEST job whose latest lifecycle fact is a handback with no later acceptance or
+    # cancellation (DeliveryAcceptedByRider/DeliveryAcceptedByPartner) — the re-offer that never
+    # came. A FAILED WITH_RIDER job and an acknowledged PENDING one both keep ageing here until an
+    # acceptance lands or the job is cancelled — a handback alone never clears this gauge. Emitted
     # EVERY sweep, 0 included, by the non-fenced `delivery_handback_watch.rs` worker.
     - name: "delivery_handed_back_unreassigned_age_seconds"
       type: gauge
       attributes: []
       thresholds:
-        - max_age_seconds: 300   # the offer TTL: past it, a re-offer window has already been missed
+        # The offer TTL, review round 2 on #870: this WAS 300, mismatched against the referenced
+        # key's own declared default (900, `specs/delivery/configuration.yaml`) and against the
+        # worker's own doc comment (also 900) — `derived_from` names the antecedent, so the number
+        # here must actually equal it.
+        - max_age_seconds: 900
           derived_from:
             - { $ref: 'configuration.yaml#/keys/DELIVERY_OFFER_MAX_TTL_SECONDS' }
     # The sweep's own LIVENESS — incremented once per COMPLETED sweep, never before. Same shape and

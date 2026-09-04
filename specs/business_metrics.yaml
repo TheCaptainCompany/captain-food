@@ -119,7 +119,10 @@ projections:
     description: >
       One row per delivery job: when a rider accepted it, picked it up, handed it back and where the
       food was, when it was reassigned, and its eventual outcome. When a rider hands a job back, does
-      the customer still get that food, and how often at the dinner peak?
+      the customer still get that food, and how often at the dinner peak? `riderId` is job
+      ATTRIBUTION only (which rider held the job) — no `metrics:` over this projection may `groupBy`
+      `riderId`: a per-rider handback rate is the performance-and-behaviour ground counsel's own gate
+      refused before counsel (rules.yaml#/HandBackIsNeverALever, ADR-20260904-014136 §3).
     grain: ENTITY
     key:
       - from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' }

@@ -192,6 +192,19 @@ impl OrderTrackingCompute for OrderTrackingProjector {
             _ => prev.and_then(|r| r.estimated_dropoff_at),
         }
     }
+
+    /// #639 part C step 3-ii, review round 2 on #870: the customer tracking banner's OWN flag —
+    /// true from a handback, RESET to false by the next acceptance (a re-offer accepted). Lives ON
+    /// this row (not a separate `delivery.byOrder` read) so the pushed `Order` frame carries it, and
+    /// the banner predicate never has to compare `order.status` (no OrderStatus producer ever emits
+    /// OUT_FOR_DELIVERY).
+    fn delivery_handed_back(&self, prev: Option<&OrderTrackingRow>, env: &Envelope) -> bool {
+        match &env.event {
+            DomainEvent::DeliveryHandedBackByRider(_) => true,
+            DomainEvent::DeliveryAcceptedByPartner(_) | DomainEvent::DeliveryAcceptedByRider(_) => false,
+            _ => prev.is_some_and(|r| r.delivery_handed_back),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -154,6 +154,7 @@ pub struct OrderTrackingRow {
     pub delivery_status: Option<DeliveryStatus>,
     pub courier: Option<serde_json::Value>,
     pub estimated_dropoff_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub delivery_handed_back: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

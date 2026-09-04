@@ -462,6 +462,7 @@ CREATE TABLE OrderTracking (
   delivery_status TEXT,
   courier JSONB,
   estimated_dropoff_at TIMESTAMPTZ,
+  delivery_handed_back BOOLEAN NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );

@@ -77,15 +77,13 @@ impl OrderRead {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackingState {
     pub order_id: Uuid,
-    /// What the `order.byId` read said — see [`OrderRead`].
+    /// What the `order.byId` read said — see [`OrderRead`]. The custody-handback signal
+    /// (`order.deliveryHandedBack`, #639 part C step 3-ii, review round 2 on #870) lives ON this
+    /// value now — see [`Self::delivery_handed_back`] — not on a separate `delivery.byOrder` read:
+    /// a SEPARATE query was refreshed only by [`Self::load`], never by the pushed subscription
+    /// frame ([`Self::apply`] replaces `order` only), so the banner could go stale and never
+    /// self-correct on the primary transport (ADR-20260810-231300).
     pub order: OrderRead,
-    /// The order's DeliveryJob, when one exists (`delivery.byOrder`, #639 part C step 3-ii,
-    /// ADR-20260904-015903 §7) — `None` for COLLECTION orders, an unresolved/failed/absent read, or
-    /// simply before dispatch. Collapsed to a plain `Option` (unlike [`OrderRead`]'s three-way
-    /// split): the banner this feeds only ever ACTS on a positive PENDING/FAILED signal, so any
-    /// read that is not a clean answer safely falls back to the ordinary `eta_bar` — never a lie
-    /// about the order itself, which is what [`OrderRead`]'s split exists to prevent.
-    pub delivery: Option<Value>,
     /// The PAID context (#758, ADR-20260829-230418): the client still holds an OPEN `PlaceOrder`
     /// intent for THIS order (`pending::holds_place_order` — the persisted `DispatchHandle`
     /// record). Once `ROUTE_ORDER_BIRTH_THROUGH_LANE` flips, the birth rides the Order lane and
@@ -98,7 +96,17 @@ pub struct TrackingState {
 
 impl TrackingState {
     pub fn new(order_id: Uuid) -> Self {
-        Self { order_id, order: OrderRead::Unresolved, delivery: None, birth_pending: false }
+        Self { order_id, order: OrderRead::Unresolved, birth_pending: false }
+    }
+
+    /// The customer tracking banner's own flag (#639 part C step 3-ii, review round 2 on #870):
+    /// `order.deliveryHandedBack`, folded onto the SAME row the rest of the order rides — the
+    /// pushed `Order` frame carries it, so this needs no separate read and no `order.status`
+    /// comparison (no OrderStatus producer ever emits `OUT_FOR_DELIVERY`; the from-ASSIGNED
+    /// NOT_COLLECTED case leaves the order at READY, and this still fires correctly). `false` for
+    /// every state that is not a clean `Present` read — never a lie the order itself did not say.
+    pub fn delivery_handed_back(&self) -> bool {
+        self.order.value().and_then(|o| o.get("deliveryHandedBack")).and_then(Value::as_bool).unwrap_or(false)
     }
 
     /// Mark the paid context — see [`Self::birth_pending`]. Builder-shaped so every constructor
@@ -124,8 +132,7 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v.clone()),
         };
-        let delivery = data.get("delivery").filter(|v| !v.is_null()).cloned();
-        Self { order_id, order, delivery, birth_pending: false }
+        Self { order_id, order, birth_pending: false }
     }
 
     /// Build from a full [`RenderContext`] (#472) — the [`from_resolved`](Self::from_resolved)
@@ -141,11 +148,13 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v),
         };
-        let delivery = ctx.binding_json("delivery").filter(|v| !v.is_null());
-        Self { order_id, order, delivery, birth_pending: false }
+        Self { order_id, order, birth_pending: false }
     }
 
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.
+    /// #639 part C step 3-ii, review round 2 on #870: the handback signal (`deliveryHandedBack`)
+    /// travels ON this same `order` read now — no second resolver call, and it re-syncs on the
+    /// PUSH path too ([`Self::apply`] replaces the whole `order` value on every pushed frame).
     pub async fn load(&mut self, transport: &dyn Transport) -> Result<(), ResolverError> {
         let mut vars = Map::new();
         vars.insert("id".into(), json!(self.order_id));
@@ -159,15 +168,6 @@ impl TrackingState {
             }
         } else {
             self.order = OrderRead::Present(order);
-        }
-        // #639 part C step 3-ii: re-synced on every reconnect alongside the order, same push-first
-        // philosophy — a handback that lands WHILE the customer is watching must replace the ETA
-        // without a page reload. A failed/null read here is silently absorbed (see the field doc):
-        // it can only ever turn the banner OFF, never fabricate a stranded-food claim.
-        let mut delivery_vars = Map::new();
-        delivery_vars.insert("orderId".into(), json!(self.order_id));
-        if let Ok(delivery) = execute_resolver(transport, ResolverKey::DeliveryByOrder, delivery_vars).await {
-            self.delivery = (!delivery.is_null()).then_some(delivery);
         }
         Ok(())
     }
@@ -390,14 +390,12 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
         .and_then(|o| o.get("estimatedReadyAt"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    // #639 part C step 3-ii (ADR-20260904-015903 §7): a delivery job the fold has moved to
-    // PENDING/FAILED (a handback with no re-offer yet, custody-keyed status) while the ORDER is
-    // still OUT_FOR_DELIVERY REPLACES the ETA bar — never blank, never a countdown to an arrival
-    // that will not happen at that pace.
-    let delivery_status =
-        state.delivery.as_ref().and_then(|d| d.get("status")).and_then(Value::as_str).map(str::to_string);
-    let delivery_reassigning = status.as_deref() == Some("OUT_FOR_DELIVERY")
-        && matches!(delivery_status.as_deref(), Some("PENDING" | "FAILED"));
+    // #639 part C step 3-ii (ADR-20260904-015903 §7), review round 2 on #870: a rider handback with
+    // no re-offer yet REPLACES the ETA bar — never blank, never a countdown to an arrival that will
+    // not happen at that pace. Reads `order.deliveryHandedBack` directly — no `order.status`
+    // comparison (no OrderStatus producer ever emits `OUT_FOR_DELIVERY`; the from-ASSIGNED
+    // NOT_COLLECTED case leaves the order at READY, not OUT_FOR_DELIVERY, and must still fire).
+    let delivery_reassigning = state.delivery_handed_back();
     let show_eta =
         matches!(status.as_deref(), Some("ACCEPTED" | "PREPARING" | "OUT_FOR_DELIVERY")) && !delivery_reassigning;
     let delivered = status.as_deref() == Some("DELIVERED");
@@ -528,9 +526,7 @@ mod tests {
         let id = Uuid::now_v7();
         let fake = FakeTransport::scripted(vec![
             Ok(json!({ "order": order("PLACED", "2026-07-23T12:00:00Z") })),
-            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": null })),
-            Ok(json!({ "delivery": null })),
         ]);
         let mut state = TrackingState::new(id);
         state.load(&fake).await.unwrap();
@@ -793,11 +789,8 @@ mod tests {
         let id = Uuid::now_v7();
         let fake = FakeTransport::scripted(vec![
             Ok(json!({ "order": null })),
-            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": null })),
-            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": order("PLACED", "2026-08-29T19:00:00Z") })),
-            Ok(json!({ "delivery": null })),
         ]);
         let mut state = TrackingState::new(id).with_birth_pending(true);
         let born = state
@@ -806,16 +799,11 @@ mod tests {
             .expect("the re-check pulls cleanly");
         assert!(born, "the third pull found the born order");
         assert_eq!(state.status(), Some("PLACED"));
-        assert_eq!(fake.call_count(), 6, "stops at the first Present, not at the bound (2 calls/pull: order + delivery)");
+        assert_eq!(fake.call_count(), 3, "stops at the first Present, not at the bound (1 call/pull, #870 round 2 dropped the second)");
 
         // Exhaustion: the bound is respected (an unscripted call would panic the fake), the
         // state stays the honest Absent, and the caller's render still keys on birth_pending.
-        let fake = FakeTransport::scripted(vec![
-            Ok(json!({ "order": null })),
-            Ok(json!({ "delivery": null })),
-            Ok(json!({ "order": null })),
-            Ok(json!({ "delivery": null })),
-        ]);
+        let fake = FakeTransport::scripted(vec![Ok(json!({ "order": null })), Ok(json!({ "order": null }))]);
         let mut state = TrackingState::new(id).with_birth_pending(true);
         let born = state
             .load_until_present(&fake, 2, std::time::Duration::ZERO)
@@ -823,7 +811,7 @@ mod tests {
             .expect("exhaustion is not an error");
         assert!(!born, "the bound ran out before a birth");
         assert_eq!(state.order, OrderRead::Absent, "the read DID answer — Absent, honestly");
-        assert_eq!(fake.call_count(), 4, "BOUNDED: exactly max_attempts pulls, never a loop (2 calls/pull)");
+        assert_eq!(fake.call_count(), 2, "BOUNDED: exactly max_attempts pulls, never a loop (1 call/pull)");
     }
 
     /// #420: the hero renders WORDS. It used to emit `data-i18n` on empty elements and nothing
@@ -850,7 +838,7 @@ mod tests {
             // was never read renders no claim at all; that is
             // `an_unanswered_read_never_tells_a_customer_their_order_was_not_found`.
             let answered_null =
-                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, delivery: None, birth_pending: false };
+                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false };
             let html = render_tracking_html(answered_null, locale);
             assert!(html.contains(not_found), "{locale}: {html}");
             assert!(!html.contains("[order.not_found]"), "{html}");
@@ -885,11 +873,96 @@ mod tests {
         // The two empty states are DIFFERENT (#427): a read that answered null is UNKNOWN; a read
         // that never answered makes no claim.
         let html = render_tracking_html(
-            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, delivery: None, birth_pending: false },
+            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false },
             "fr",
         );
         assert!(html.contains("data-status=\"UNKNOWN\""));
         let html = render_tracking_html(TrackingState::new(Uuid::now_v7()), "fr");
         assert!(html.contains("data-status=\"PENDING\""));
+    }
+
+    /// Review round 2 on #870 (ux + legal + reviewer FAIL): the banner used to key on
+    /// `order.status == 'OUT_FOR_DELIVERY'` (a status no projector ever produces) and read a
+    /// SEPARATE `delivery.byOrder` query the push path never refreshed. Now it reads
+    /// `order.deliveryHandedBack` — folded onto the SAME `order` value — directly, with NO
+    /// `order.status` term at all: this proves it independently of which status the order happens
+    /// to carry, including the from-ASSIGNED case (READY, never OUT_FOR_DELIVERY).
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn the_handback_flag_replaces_the_eta_bar_with_facts_only_copy_never_a_promised_remedy() {
+        let with_flag = |status: &str, flag: bool| {
+            json!({
+                "id": "order-1", "status": status, "statusChangedAt": "2026-09-04T19:30:00Z",
+                "estimatedReadyAt": "2026-09-04T19:45:00Z",
+                "items": [{ "offerId": "o1" }],
+                "deliveryHandedBack": flag,
+            })
+        };
+
+        // Flag TRUE on an ETA-eligible status (PREPARING): the banner REPLACES the ETA bar.
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(with_flag("PREPARING", true)));
+        let html = render_tracking_html(state, "fr");
+        assert!(html.contains("id=\"delivery_reassigning_banner\""), "the banner must render: {html}");
+        assert!(!html.contains("data-c=\"eta_bar\""), "the ETA bar must be REPLACED, not shown alongside: {html}");
+        // Legal: facts only, no promised remedy the product does not perform.
+        assert!(html.contains("Le restaurant est prévenu"), "the facts-only copy: {html}");
+        assert!(!html.contains("réattribuons"), "no promised reassignment (#860 is fenced, nothing runs it): {html}");
+        assert!(!html.contains("bien préparée"), "no 'your order is ready' claim -- false on WITH_RIDER: {html}");
+
+        // Flag TRUE on READY (the from-ASSIGNED NOT_COLLECTED case: the order never reaches
+        // OUT_FOR_DELIVERY at all) -- the banner fires anyway, because it never compares status.
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(with_flag("READY", true)));
+        let html = render_tracking_html(state, "fr");
+        assert!(html.contains("id=\"delivery_reassigning_banner\""), "READY + handed back must still show the banner: {html}");
+
+        // Flag FALSE (still ASSIGNED, no handback yet) on an ETA-eligible status: the ETA stays,
+        // no banner.
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(with_flag("PREPARING", false)));
+        let html = render_tracking_html(state, "fr");
+        assert!(html.contains("data-c=\"eta_bar\""), "flag false: the ETA stays: {html}");
+        assert!(!html.contains("id=\"delivery_reassigning_banner\""), "flag false: no banner: {html}");
+
+        // Flag ABSENT entirely (PENDING-before-acceptance -- a delivery selection that predates
+        // this field, or a job never even offered yet): defaults false, same as explicit false.
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(json!({
+            "id": "order-1", "status": "PREPARING", "statusChangedAt": "2026-09-04T19:30:00Z",
+            "estimatedReadyAt": "2026-09-04T19:45:00Z",
+            "items": [{ "offerId": "o1" }],
+        })));
+        let html = render_tracking_html(state, "fr");
+        assert!(html.contains("data-c=\"eta_bar\""), "flag absent: defaults false, the ETA stays: {html}");
+        assert!(!html.contains("id=\"delivery_reassigning_banner\""), "flag absent: no banner: {html}");
+    }
+
+    /// Review round 2 on #870: the banner must flip on the PUSH path with no `load()` call at all —
+    /// `apply` replaces the whole `order` value on every pushed `orderStatusChanged` frame, and the
+    /// flag rides that same value, so a handback landing WHILE the customer is watching must not
+    /// need a page reload.
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn a_pushed_order_frame_flips_the_banner_with_no_load_call() {
+        let mut state = TrackingState::new(Uuid::now_v7());
+        state.apply(&SubscriptionEvent::Next(json!({
+            "id": "order-1", "status": "PREPARING", "statusChangedAt": "2026-09-04T19:30:00Z",
+            "estimatedReadyAt": "2026-09-04T19:45:00Z", "items": [], "deliveryHandedBack": false,
+        })));
+        assert!(!state.delivery_handed_back());
+        let html = render_tracking_html(state.clone(), "fr");
+        assert!(html.contains("data-c=\"eta_bar\""), "{html}");
+        assert!(!html.contains("id=\"delivery_reassigning_banner\""), "{html}");
+
+        // A LATER pushed frame (never a `load()` call) flips the flag true.
+        state.apply(&SubscriptionEvent::Next(json!({
+            "id": "order-1", "status": "PREPARING", "statusChangedAt": "2026-09-04T19:35:00Z",
+            "estimatedReadyAt": "2026-09-04T19:45:00Z", "items": [], "deliveryHandedBack": true,
+        })));
+        assert!(state.delivery_handed_back());
+        let html = render_tracking_html(state, "fr");
+        assert!(!html.contains("data-c=\"eta_bar\""), "the push flipped it without any load(): {html}");
+        assert!(html.contains("id=\"delivery_reassigning_banner\""), "{html}");
     }
 }
