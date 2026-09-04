@@ -106,6 +106,10 @@ opened on the write side alone re-creates §7.2 with a nicer button. The fold is
    into the SDL beside `@auth`, fail-closed by absence. The restricted rider's set is
    `{delivery (by orderId), reportDeliveryIssue, handBackDelivery}` — the query is in it, or the
    only live control on the page has no data.
+   **Amended 2026-09-04 by [ADR-20260904-081527](ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §4 (team consent, step-4 briefing)**: the set is
+   `{ myStanding, delivery, reportDeliveryIssue, handBackDelivery }` — `myStanding` added (the
+   held job's `orderId` is otherwise unreachable), `myDeliveries` refused (it returns the PENDING
+   pool), and operations with `roles:` omitted are unaffected by restriction by construction.
 7. **One control, two exits** (ux-designer): `job_detail` gets a secondary *"Un problème"* beside
    the primary; one sheet that ROUTES — two buttons, *"Je continue, mais…"* opening the report
    sheet (3-i's kind chips, note, confirm) and *"Je ne peux pas continuer"* opening the handback
@@ -147,6 +151,9 @@ opened on the write side alone re-creates §7.2 with a nicer button. The fold is
     `status/in-progress` except #639; no open PR touches a fenced path. The fence otherwise stands.
     The executor's self-check: `git diff --name-only origin/main -- <fence globs>` returns only
     `inbox.rs`, with one added line.
+    **Amended 2026-09-04 by [ADR-20260904-081527](ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §8**: "exactly one" was the count standing in for the
+    rule — the fence admits ONE additive arm PER NEW `receives:` entry, E0004-forced, and the fence
+    globs are named there in one place.
 11. **Two slices, both `HOLD: human`, both on the lower executor tier**: **3-i** the issue doors
     (D2 pattern, the three additive mutations, the issue fold + migration + `DeriveVal::Null`,
     the sheet's report-only path, the board's issue card, the closed-key rule, the story steps,

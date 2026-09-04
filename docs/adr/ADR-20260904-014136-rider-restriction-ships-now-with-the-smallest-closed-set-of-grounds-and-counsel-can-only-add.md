@@ -10,6 +10,10 @@ Records a founder decision; `Consulted:` block below. **Realized by part C step 
 this record); the Concern is rewritten to this ruling in the same change and stays unchecked until
 step 4 lands the set.
 
+**Note (2026-09-04, [ADR-20260904-081527](ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §7)**: the scalar this record cites as `RevocationGround` (the
+proposal's name at the time) is built as **`RiderRestrictionGround`** — a naming refinement before
+anything is stored; the four values and every rule below are unchanged.
+
 **Relates**: [PUBLISH-PRECONDITIONS](../decisions/PUBLISH-PRECONDITIONS.yaml) (open, counsel —
 carries the founder's timing *"After product on production workibg"*), [RIDER-REVOCATION-TTL](../decisions/RIDER-REVOCATION-TTL.yaml)
 (decided: a restriction bites on the next request),

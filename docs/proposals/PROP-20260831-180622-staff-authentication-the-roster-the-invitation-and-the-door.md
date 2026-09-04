@@ -34,7 +34,7 @@
 - **Concerns** (a proposal cannot move to `Approved` while one is unchecked):
   - [ ] **public-graph-limits**: `limit_depth` / `limit_complexity` occur **nowhere** in `specs/**` or `crates/**`. Part C adds unauthenticated write entry points to `/public/graphql`. Either the limits land in the same slice, or the decision to ship without them is recorded with its reason.
   - [ ] **kernel-change**: [PRINCIPALS-MEMBER](../decisions/PRINCIPALS-MEMBER.yaml) is **decided** (2026-08-31, [ADR-20260831-220559](../adr/ADR-20260831-220559-the-person-is-a-principalkind-not-an-eighth-usertype.md), landed in [PR #835 "#639 part C step 1: the person is a `PrincipalKind`, not an eighth `UserType`"](https://github.com/TheCaptainCompany/captain-food/pull/835)), and §3/§2 have their answer for three of its four parts: the person is a `PrincipalKind`, `UserType` does **not** widen (an eighth value would mint an eighth `/{path}/graphql` surface), `ScopeType` is untouched. **The box stays unchecked** — checking it is a separate act, and the fourth part is not built: `requires.acting`'s membership semantics are stated but consumed by nothing (zero `requires:` blocks exist in any `specs/*/api.yaml`; [#636](https://github.com/TheCaptainCompany/captain-food/issues/636) owns the emitter), so §5's membership predicate still has no compiler to compile to.
-  - [ ] **revocation-grounds**: the closed `RevocationGround` vocabulary is the highest-value item in the rider slice and it is a legal surface. **Ruled 2026-09-04** ([ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md), founder: *"build step 4 now with the smallest closed set naming no work-performance ground; counsel can only add"*): step 4 ships **four grounds naming the FACT the platform observed** (`RIDER_REQUESTED`, `ELIGIBILITY_DOCUMENT_LAPSED`, `IDENTITY_MISMATCH`, `ACCOUNT_COMPROMISE` — the legal lens's proposal, not clearance), refuses every performance or behaviour ground and any catch-all, and is **additive-only** (a value is never removed — a regretted one is made unspellable at the command door, the `SUSPENDED` move; readers deploy first). Counsel's review comes under the [PUBLISH-PRECONDITIONS](../decisions/PUBLISH-PRECONDITIONS.yaml) timing and may only add. The Directive (EU) 2024/2831 duties on the event, the notice and the review path are that ADR's §Decision 6; the review path is [#858](https://github.com/TheCaptainCompany/captain-food/issues/858). [REVOKED-COLLEAGUE-NOTICE](../decisions/REVOKED-COLLEAGUE-NOTICE.yaml) is a different instrument and stays counsel-owned. **Discharges when step 4 lands the set.**
+  - [ ] **revocation-grounds**: the closed `RiderRestrictionGround` (né `RevocationGround`) vocabulary is the highest-value item in the rider slice and it is a legal surface. **Ruled 2026-09-04** ([ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md), founder: *"build step 4 now with the smallest closed set naming no work-performance ground; counsel can only add"*): step 4 ships **four grounds naming the FACT the platform observed** (`RIDER_REQUESTED`, `ELIGIBILITY_DOCUMENT_LAPSED`, `IDENTITY_MISMATCH`, `ACCOUNT_COMPROMISE` — the legal lens's proposal, not clearance), refuses every performance or behaviour ground and any catch-all, and is **additive-only** (a value is never removed — a regretted one is made unspellable at the command door, the `SUSPENDED` move; readers deploy first). Counsel's review comes under the [PUBLISH-PRECONDITIONS](../decisions/PUBLISH-PRECONDITIONS.yaml) timing and may only add. The Directive (EU) 2024/2831 duties on the event, the notice and the review path are that ADR's §Decision 6; the review path is [#858](https://github.com/TheCaptainCompany/captain-food/issues/858). [REVOKED-COLLEAGUE-NOTICE](../decisions/REVOKED-COLLEAGUE-NOTICE.yaml) is a different instrument and stays counsel-owned. **Discharges when step 4 lands the set.**
   - [x] **custody-door**: `DeclineDelivery`, `ReportDeliveryIssue` and `ResolveDeliveryIssue` have **no API operation**. Until they do, a revoked rider holding paid, cooked food has no way to hand it back — and the test that would prove otherwise cannot be written. **Discharged 2026-09-04**: all four now have one — `declineDelivery`/`reportDeliveryIssue`/`resolveDeliveryIssue` landed in 3-i ([PR #864](https://github.com/TheCaptainCompany/captain-food/pull/864)), `handBackDelivery` — the door that actually returns the food, §7.2 — in 3-ii ([PR #870](https://github.com/TheCaptainCompany/captain-food/pull/870)). The step-4 restriction predicate's carve-out (§6) now has doors to name.
   - [x] **one-subject-one-role**: the provider replaces the `captain_food` claim object **wholesale**, and each stamper writes the whole object (`stamp_put_body` → `{role: CUSTOMER, customer_id}`, `stamp_rider_put_body` → `{role: RIDER}`), so stamping RIDER on a subject that already carries `customer_id` would **erase the customer claim** — a rider who also orders dinner is unrepresentable (§1, §2). Registered 2026-09-03 by [PR #852 "#639 part C step 2c-i: the hardcoded RIDER stamper and the identify-only rider sign-in mutations"](https://github.com/TheCaptainCompany/captain-food/pull/852). **Decided 2026-09-04** ([ADR-20260904-014135](../adr/ADR-20260904-014135-one-subject-may-hold-several-roles-the-claim-carries-a-role-set-and-the-path-picks-the-one-that-acts.md), founder: *"final vision: one claim, one binding per role; own issue after step 6; refusal stands until then"*): the claim carries a **role SET** and no id for any role (ADR-20260818-004646 read forward), the `/{role}/graphql` path picks the one that acts, `domain_events.user_type` stays the path role; additive producer + tolerant reader, one write, readers deploy first. Built by [#857](https://github.com/TheCaptainCompany/captain-food/issues/857) **after step 6**; until then `confirmRiderSignIn` **refuses** such a subject with the typed, translated `AuthSubjectHoldsAnotherRole` — fail closed, counted as `rider_claim_stamp_failed_total{reason="claim_conflict"}` — and the customer stamper is unchanged.
 
@@ -156,7 +156,7 @@ concept, and two axes on the membership — **scope** and **authority**.
 | `RestaurantInvitationId` | `specs/network/` | One invitation, client-minted. | See §3 — this is the fork. |
 | `AccessEvidence` | `specs/network/` | The closed discriminator on the ONE grant act: `CAPTAIN_ONBOARDING \| GOOGLE_BUSINESS_PROFILE \| OWNER_DECLARATION \| MEMBER_INVITATION`. | Four sibling commands would be four write paths into the table every read-authorization predicate resolves against, each with its own guard to get wrong. |
 | `MemberAuthority` | `specs/network/` | The authority axis: `ADMINISTRATOR \| OPERATOR`. | **Provenance test** (`evans`): *could a colleague invited on a Tuesday hold this value?* `ADMINISTRATOR` — yes. `OPERATOR` — yes. **`OWNER` — no**, which is exactly why `OWNER` is provenance masquerading as authority. Ownership, when it matters, is `AccessEvidence`. |
-| `RevocationGround` | `specs/delivery/` | The closed ground of a rider restriction. | A free-text field lets an ops person type *"suspendu pour avoir refusé trois courses"* into a log we cannot rewrite; French case law treats the power to sanction as a criterion of *lien de subordination*, and a ground keyed on declining jobs is the strongest requalification evidence obtainable. A closed enum makes that sentence **unspellable**, and the enum becomes the one page counsel reviews instead of a code audit. **Contents are a Concern, not a recommendation.** |
+| `RiderRestrictionGround` | `specs/delivery/` | The closed ground of a rider restriction (named `RevocationGround` until the step-4 briefing: "revocation" already means a partner's availability and a `ScopeMembership` grant — `evans`). | A free-text field lets an ops person type *"suspendu pour avoir refusé trois courses"* into a log we cannot rewrite; French case law treats the power to sanction as a criterion of *lien de subordination*, and a ground keyed on declining jobs is the strongest requalification evidence obtainable. A closed enum makes that sentence **unspellable**, and the enum becomes the one page counsel reviews instead of a code audit. **Contents are a Concern, not a recommendation.** |
 
 `RESTAURANT` stays a legal `UserType` value forever. `MEMBER` is added to `PrincipalKind` — a NEW
 scalar with no stored history, so it costs no upcaster and no re-attribution. Whether `UserType`
@@ -420,19 +420,39 @@ already hold, and has nothing to compensate.
 
 ### 6.3 Rider restriction (`specs/delivery/`)
 
+Ruled 2026-09-04 by [ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) (team consent, thirteen lenses).
+
 | Message | Emits | Payload |
 |---|---|---|
-| `RestrictRider` | `RiderRestricted` | `riderId`, `ground` (`RevocationGround`), `decidedAt`, `effectiveAt` |
+| `RestrictRider` (input: `riderId`, `ground` — nothing else) | `RiderRestricted` | `riderId`, `ground` (`RiderRestrictionGround`), `decidedAt`, `effectiveAt` — both **server-set** |
 | `ReinstateRider` | `RiderReinstated` | `riderId` |
 
 **NEW event types, not a version of `RiderStatusChanged`** — the store has no version column, so a
-reshape is not expressible; a new type is. `RiderStatus::SUSPENDED` **stays in the enum** as
-legacy-parseable (removing it would break `from_text` on rows that exist) and is made **unspellable
-at the command door**: `ChangeRiderStatus` no longer accepts it. Availability is the rider's fact;
-restriction is the platform's — different payloads, different authoring actors.
+reshape is not expressible; a new type is. Availability is the rider's fact; restriction is the
+platform's — different payloads, different authoring actors, and **one word: restriction** (never
+*suspension*, never *réintégrer*). `RiderStatus::SUSPENDED` **stays in the enum** as
+legacy-parseable and is made **unspellable at the command door**: `ChangeRiderStatus.status`
+becomes its own scalar `RiderAvailabilityTarget { OFFLINE, AVAILABLE, ON_DELIVERY }`, the four
+`→ SUSPENDED` entry edges leave the lifecycle and `SUSPENDED → OFFLINE` stays as the exit for
+legacy rows.
 
-`decidedAt ≠ effectiveAt` is in the payload because `legal-specialist` grades it a blocker, not a
-nicety.
+The restriction is a **fact in state** on the `Rider` aggregate (`restriction: Option<…>` beside
+the availability machine, never a second `lifecycle:`): restrict only an unrestricted rider,
+reinstate only a restricted one, a second ground needs a reinstatement first — the Art. 11 log is
+never overwritten. `RestrictRider` is **human-only**: `roles: [ADMIN]`, `requires: acting:
+{ ADMIN: any }`, and a validator ERROR for any process manager that `sends` it.
+
+`decidedAt` and `effectiveAt` are both in the payload because `legal-specialist` grades the
+distinction a blocker: the Art. 11(3) statement deadline anchors on `effectiveAt`. **In V0 both are
+stamped by the handler with the same server instant** (an admin-typed `decidedAt` is a backdating
+vector; the SDUI has no date-time input). The future `effectiveAt` — permitted for
+`ELIGIBILITY_DOCUMENT_LAPSED` / `RIDER_REQUESTED`, refused forever for the two protective grounds —
+is designed as a **scheduled fact appended by a due-row worker**, never a clock term in the seam's
+grant predicate ([ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §5).
+
+`RiderRestrictionGround` carries a read-only catch-all `UNRECOGNISED` (`#[serde(other)]`) that the
+command door, the wire and OTLP cannot spell: without it an unknown stored ground fails the whole
+stream load AND is skipped by the projector with the checkpoint advancing — a stale grant.
 
 ### 6.4 Read models, and the rule that keeps them from becoming oracles
 
@@ -445,7 +465,7 @@ Rebuild recipes are **per table and they are opposites** — state each one wher
 | Table | Rebuild | Why |
 |---|---|---|
 | `ScopeMembership` | `DELETE` + checkpoint reset + full replay | Set-shaped: one event grants/revokes N rows. A stale row **grants** — a silent breach — so the projector errs toward deleting, and a rebuild must start from empty. |
-| `Rider` | Checkpoint reset, **never** `TRUNCATE` | Upsert keyed on `rider_id` with one creating arm, so a from-zero replay rewrites every row in place and no rider is denied mid-rebuild. `TRUNCATE` + replay fails every rider closed to Public for the length of the drain: the fleet cannot sign in. |
+| `Rider` | Checkpoint reset, **never** `TRUNCATE` | Upsert keyed on `rider_id` with one creating arm, so a from-zero replay rewrites every row in place and no rider is denied mid-rebuild. `TRUNCATE` + replay fails every rider closed to Public for the length of the drain: the fleet cannot sign in. **Step 4 adds `standing` (grant-shaped, NOT NULL) and the creating arm never writes it** — otherwise the same replay re-grants every restricted rider for the drain ([ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §2). |
 | `Member` (new, the staff bridge) | Checkpoint reset, never `TRUNCATE` | Same shape as `Rider`, same reason. |
 | `member_subject_reservations` (new) | **Not rebuildable — do not replay it** | A reservation table is not a projection: nothing replays into it, and a rebuild would not reproduce it. It is domain-owned write state whose whole content is a `UNIQUE` constraint plus enough provenance to explain a rejection. |
 
@@ -697,36 +717,47 @@ would be a control that renders and does nothing). `SUPPORT_CONTACT` is a **requ
 key with no default**, so the surface cannot boot without a value; the key does not exist yet and
 lands with this screen.
 
-### 8.6 The restricted rider — `riders.captain.food`
+### 8.6 The restricted rider — `riders.captain.food/restricted`
 
-Not in the card's list, and it is the screen §7.2 exists for.
+Not in the card's list, and it is the screen §7.2 exists for. Rewritten 2026-09-04 at the step-4
+briefing ([ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §7, §11 — `ux-designer`, `legal-specialist`, `evans`): a **dedicated screen**
+reached by a server-side `restricted: { navigate }` bounce (the SDUI has no negation grammar and
+no `rider.*` context, and a control that renders but is denied is a false signifier), fed by the
+one carved query `myStanding`; **both dates** (ADR-20260904-014136 §6(ii)); the word is
+*restreint*; the one control opens the existing handback sheet on this screen (its variables from
+`myStanding.heldDelivery` — no second screen, no chaining) and promises only the handback.
 
 ```
 +------------------------------------------------------------------+
 |  [Captain.Food Rider]                                  (hors ligne)|
 +------------------------------------------------------------------+
 |                                                                  |
-|   Votre acces est suspendu.                                      |
+|   Votre acces est restreint.                                     |
 |   Vous ne recevrez plus de courses.                              |
 |                                                                  |
-|   Motif : <RevocationGround, traduit>                            |
-|   Effectif depuis : 31 aout 2026, 19:42                          |
+|   Motif : <RiderRestrictionGround, traduit — le FAIT observe>    |
+|   Decide le : 4 sept. 2026, 14:02                                |
+|   Effectif depuis : 4 sept. 2026, 14:02                          |
 |                                                                  |
 |   +----------------------------------------------------------+   |
 |   |  VOUS AVEZ ENCORE UNE COMMANDE                           |   |
 |   |  Pizza Roma -> 14 rue Nationale                          |   |
 |   |                                                          |   |
 |   |  Rapportez la commande au restaurant.                    |   |
-|   |         [ Signaler et rendre la commande ]               |   |
-|   |            -> reportDeliveryIssue + handback             |   |
+|   |         [ Je ne peux pas continuer ]                     |   |
+|   |            -> rider_handback_sheet (handBackDelivery)    |   |
 |   +----------------------------------------------------------+   |
 |                                                                  |
-|   Contester : support@captain.food                               |
+|   Vous pouvez contester cette decision et demander son           |
+|   reexamen par une personne : support@captain.food               |
+|                                  [ copier l'adresse ]            |
 +------------------------------------------------------------------+
 ```
 
 The **only live control** on this screen is the one that returns the food. Everything else is gone,
-because everything else is denied on the next request.
+because everything else is denied on the next request — and the one Tell still confirms, because
+`operationStatus` / `operationStatusChanged` carry no `roles:` and are unaffected by restriction.
+No response deadline is printed until #858 makes one true.
 
 ---
 
@@ -913,21 +944,22 @@ sequenceDiagram
         participant RTBL as Rider read model (auth_ref to rider_id)
     end
 
-    OPS->>AGQL: mutation restrictRider {riderId, ground, decidedAt, effectiveAt}
+    OPS->>AGQL: mutation restrictRider {riderId, ground} - decidedAt and effectiveAt are server-set
     AGQL->>R: command via the lane
     R-->>REPO: save(RiderRestricted) - a NEW type, never RiderStatusChanged
     REPO->>PG: append
-    PG-->>RTBL: fold - the restriction is a TERM in the derivation, not a status column read
+    PG-->>RTBL: fold - standing RESTRICTED, a grant-shaped TERM in the derivation, never the status column
     RIDER->>RGQL: query myDeliveries
     RGQL->>SEAM: resolve
-    SEAM->>RTBL: auth_ref to rider_id, plus the restriction term
-    SEAM-->>RGQL: denied on the next request
+    SEAM->>RTBL: auth_ref to (rider_id, standing) - one read
+    SEAM-->>RGQL: FORBIDDEN on the next request (not carved)
+    RIDER->>RGQL: query myStanding - carved: the notice and the held job
     WS->>SEAM: re-derive per pushed payload - the socket delivers nothing
     Note over WS: terminating the socket is owed too, and no test in this repo can reach it today - no WS client in dev-deps
-    RIDER->>RGQL: mutation reportDeliveryIssue + hand the job back
+    RIDER->>RGQL: mutation handBackDelivery (and reportDeliveryIssue) - carved
     Note over RGQL: CARVED OUT of the restriction predicate - revocation of ACCESS is not release of CUSTODY
     RGQL->>JOB: command via the lane
-    JOB-->>REPO: save(DeliveryIssueReported)
+    JOB-->>REPO: save(DeliveryHandedBackByRider)
     REPO->>PG: append
     Note over JOB,PG: without this door a paid, cooked order is stranded and nobody is told - the worst failure mode there is, arriving through the security feature
 ```
@@ -976,7 +1008,7 @@ worked around.
 | 2 | ✅ **LANDED** in two halves — **2a** the `(principal_kind, auth_subject)` reservation table (#794 copy job, [PR #846 "#639 part C step 2a: the `(principal_kind, auth_subject)` reservation table"](https://github.com/TheCaptainCompany/captain-food/pull/846)); **2b** the `auth_ref → rider_id` resolver at the request seam, the §10 pair (seen red first, both halves; the *try-Postgres-else-claim* shape seen passing (a) and failing (b) exactly as predicted), its WS-seam mirror, the `rider-identity` observability contract, the recursive `role_injection_gate` walk and the duplicate-`authRef` classification test ([PR #849 "#639 part C step 2b: the auth_ref -> rider_id resolver at the request seam"](https://github.com/TheCaptainCompany/captain-food/pull/849)). **Rider sign-in door**: `Identity::Rider` now holds the subject and nothing else — `ProductClaims` parses no rider field, so binding the claim is unspellable — and the RIDER seam is Postgres on every request with no `Claim` arm (§10). | 1 for the scalar; part A landed the `Rider` **projection** (the read side of the door), 2a the **reservation** (the write-side invariant) — the earlier note *"part A already landed the table"* conflated the two ([#848](https://github.com/TheCaptainCompany/captain-food/issues/848) item 4) | HOLD: human (identity surface) |
 | 2c | ✅ **LANDED** in two halves (**2c-i** [PR #852](https://github.com/TheCaptainCompany/captain-food/pull/852), **2c-ii** [PR #854 "#639 part C step 2c-ii: the rider sign-in screen, and the per-screen public graph (R1) that makes it reachable"](https://github.com/TheCaptainCompany/captain-food/pull/854)). **The rider sign-in door — the CREDENTIAL** (2b built the seam that resolves a `role: RIDER` token; nothing on the platform issued one). **2c-i backend** ([PR #852 "#639 part C step 2c-i: the hardcoded RIDER stamper and the identify-only rider sign-in mutations"](https://github.com/TheCaptainCompany/captain-food/pull/852)): the SECOND hardcoded stamper `identity.stamp_rider_claim` (`{ role: RIDER }` and nothing else — no id; a distinct function and port method, never a parameter on the customer's), the identify-only `roles: [PUBLIC]` pair `requestRiderSignInCode` / `confirmRiderSignIn` (§5's staff pair transposed to the phone factor: the code request never consults the rider read model, the confirmation identifies through the 2b bridge and REFUSES an unknown phone — it registers nobody — then stamps and parks the post-stamp session for `POST /auth/session`), `SUPPORT_CONTACT` declared as a required key with no default, the OTP vocabulary promoted to `specs/common/` (thrown by two doors now), and the **one-subject-one-role** Concern registered above. **2c-ii renderer** (PR #854): R1 landed as the screen property **`graphql_role`** (validator §26: admitted by the screen's `roles`, `PUBLIC` only with `requires_auth: false`, admitted by EVERY operation the screen binds — an ERROR, seen RED), `Surface::role_for(screen)` selecting the transport; the `sign_in` screen (`/sign-in`), `unauthenticated: { navigate }` on the gated screens (server 302 + client 401 leg), refusals inline in the caller's language (`Operation.message` localized at read time). A rider signs in end to end from the app. | 2b; **2c-ii depends on FORK 3 = R1 (founder, 2026-08-31)** | HOLD: human (token issuance, identity surface) |
 | 3 | **The custody doors** — ruled 2026-09-04 by the team, [ADR-20260904-015903](../adr/ADR-20260904-015903-the-custody-doors-are-a-new-fact-a-rider-hands-a-job-back-with-the-food-s-whereabouts-and-the-read-models-fold-it.md) (thirteen lenses; option (c), a NEW fact; the card's "GREEN once additive" was false at HEAD — the partner unassign refuses a rider-held job and every read model folds no release, so the fold is slice content). **3-i, the issue doors** — ✅ **LANDED** ([PR #864 "#639 part C step 3-i: the issue doors (report, resolve, decline) and the read model that tells the restaurant"](https://github.com/TheCaptainCompany/captain-food/pull/864)): `DeliveryIssueKind` + a 300-char note on `ReportDeliveryIssue` (the D2 pattern, ADR-20260808-171056), `DeliveryIssueResolution` + note on `ResolveDeliveryIssue`; additive mutations `reportDeliveryIssue` [RIDER, ADMIN], `resolveDeliveryIssue` [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN], `declineDelivery` [RIDER]; `View_DeliveryJob.open_issue_kind` folded from Reported/Resolved (a hand-written `CREATE OR REPLACE VIEW` migration + the `include_str!` chain — [#861](https://github.com/TheCaptainCompany/captain-food/issues/861); the `derive:` grammar gains an explicit `null`); the rider `job_detail` "Un problème" control and `rider_issue_sheet` report-only path; the board's issue card acknowledged by `resolveDeliveryIssue`; validator `api-operation-key` (closed key set, step 4's seam); story steps under `Deliver` and `TrackDeliveries`; the `DeliveryIssue` projection + `delivery_issue_rate` metric on `Deliver`. **3-ii, the handback** — ✅ **LANDED** ([PR #870 "#639 part C step 3-ii: the handback — a rider hands a job back with the food's whereabouts, the read models fold it"](https://github.com/TheCaptainCompany/captain-food/pull/870)): `HandBackDelivery { deliveryJobId, riderId, foodLocation: FoodCustody }` → `DeliveryHandedBackByRider` — `handBackDelivery` declares `derived: { riderId: rider }` from birth (#865 closed the seam that makes this the default shape for every rider-identity mutation, not a follow-up retrofit); ASSIGNED → PENDING (`NOT_COLLECTED`, derived), PICKED_UP/OUT_FOR_DELIVERY → PENDING with `RETURNED_TO_RESTAURANT`, → **FAILED** with `WITH_RIDER` (never re-offer food in a restricted rider's bag); no free-text reason; `riderId` asserted against the job; rules `DeliveryHandBackKeepsCustodyHonest` + `HandBackIsNeverALever`; **one** additive arm in the fenced `inbox.rs` (antecedent in the ADR §10); `View_DeliveryJob` custody fold (`rider_id`/`provider` reset, `food_location`, `handed_back_at`) + `OrderTracking` arm; the sheet's second exit, the board's pinned handback card, the tracking banner; the dead-man gauge `delivery_handed_back_unreassigned_age_seconds` and its non-fenced worker; the `DeliveryHandback` fold. **The lifecycle `via:` grammar and the view `derive:` grammar were both extended** (an optional `when:` sibling on `via:`; a `{ from, map }` form on `derive:`) — neither existed before this PR, both needed because `foodLocation` is not the aggregate's/column's own status scalar. **Not wired, flagged for the reviewer**: the ADR's "report + hand back" two-Tells sequencing from one control — the SDUI `on_success` grammar has no mutation-chaining primitive; the confirm button dispatches `handBackDelivery` alone. The re-offer PM step is [#860](https://github.com/TheCaptainCompany/captain-food/issues/860); the customer remedy [#862](https://github.com/TheCaptainCompany/captain-food/issues/862); the erasure list [#863](https://github.com/TheCaptainCompany/captain-food/issues/863). | 2, **2c** (a custody door is untestable end to end without a rider who can sign in) | **HOLD: human, both halves** (stored shapes: `DeliveryIssueReported` gains `kind`; a new event type; a view migration) |
-| 4 | **Rider restriction**: `RiderRestricted` / `RiderReinstated`, `RevocationGround` closed set — **the four grounds of [ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md) §Decision 2, additive-only, never removed** — the restriction as a **term in the derivation** keyed on the FACT never on the ground's value (an unknown ground is not dispatchable by construction; a read-only catch-all variant the command door cannot spell keeps the stream loadable), the per-operation carve-out, `SUSPENDED` unspellable at the door, **`RestrictRider` unspellable for a system or process-manager principal** (a human decides, Art. 11(5)), and the rider screen showing ground, `decidedAt`, `effectiveAt`, `SUPPORT_CONTACT` and how to contest (the four `fr` strings are counsel-reviewable copy). The Art. 11(3)–(4) review path is [#858](https://github.com/TheCaptainCompany/captain-food/issues/858), after this step. | 2, **2c** (revocation is untestable end to end without a rider who can sign in), 3 (the carve-out has nothing to carve out without 3); the **revocation-grounds** Concern is ruled (2026-09-04) and discharges when this lands | HOLD: human (stored shapes, legal surface) |
+| 4 | **Rider restriction** — ruled 2026-09-04 by the team, [ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) (thirteen lenses), under [ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md)'s four grounds. Three slices, one train: **4-i — the fact, the standing and the doors**: `RiderStanding { ACTIVE, RESTRICTED }` grant-shaped NOT NULL on the `Rider` identity row (the creating arm never writes it), `ReadScope::Rider { id, standing }`, `RiderRestrictionGround` + read-only catch-all, `RestrictRider` / `ReinstateRider` human-only (`roles: [ADMIN]`, `requires: acting`, PM `sends` an ERROR), `decidedAt == effectiveAt` server-set in V0 (the scheduled form designed, shipped later), `SUSPENDED` unspellable via `RiderAvailabilityTarget`, the `whileRestricted` grammar + `StandingGuard` + three validator rules, the set `{ myStanding, delivery, reportDeliveryIssue, handBackDelivery }`, the `RiderRestriction` read model, `ManageRiderStanding` + its fold, the two `inbox.rs` arms, `business.standing` + `rider_restricted_denied_total` + `rider_standing_lag_positions`. **4-ii — the restricted rider is told**: the `/restricted` screen with the `restricted:` bounce, both dates, the four `fr` strings + footer (counsel-reviewable copy), the handback sheet on the screen, `screen-restricted-binds-uncarved-op`. **4-iii — the admin's hands**: a roster read model (never `auth_ref`), `riders` / `rider(riderId)` `[ADMIN]`, the `riders` list + `rider_detail` + restrict sheet (four chips) + *Lever la restriction*, `rider_restricted_holding_job_age_seconds`, `heldJobAtEffectiveAt`. **4-ii lands before 4-iii; no production `RestrictRider` before 4-ii.** The SMS notice is its own issue, a blocker before the first production restriction. The Art. 11(3)–(4) review path is [#858](https://github.com/TheCaptainCompany/captain-food/issues/858). | 2, **2c**, 3 (the carve-out has nothing to carve out without 3); the **revocation-grounds** Concern discharges when 4-i lands the set | HOLD: human (stored shapes, legal surface) ×3, lower executor tier |
 | 5 | **Socket termination** on the restriction fact. | 4; a WS client dev-dependency | HOLD: human (runtime) |
 | 6 | **Staff roster**: the two aggregates, `GrantRestaurantAccess` + `AccessEvidence`, the roster query with pagination, the five screens, the R1 per-screen role (shared with 2c-ii), `SUPPORT_CONTACT` (declared by 2c-i) printed on the refusal screen. | 1, 2c-ii for R1, and the **public-graph-limits** Concern | HOLD: human (identity, Tours-facing) |
 | 7 | **`ClaimRestaurantListing.accountId` deprecation**: deprecate → ignore → remove. **Never in the PR that adds the grant path.** | 6 | HOLD: human (non-additive, stored shape) |
@@ -1017,7 +1049,7 @@ ADR, a spec change or an explicit "won't fix".
    index's pk being the membership stream id is worth one two-aggregate accept step.
 2. **`MemberAuthority`'s values** (§2.1). `ADMINISTRATOR` / `OPERATOR` pass the provenance test; the
    set may want a third. `evans`.
-3. **`RevocationGround`'s contents** — ruled 2026-09-04 by
+3. **`RiderRestrictionGround`'s contents** (né `RevocationGround`) — ruled 2026-09-04 by
    [ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md):
    the smallest set naming no work-performance ground, additive-only; counsel may only add.
 4. **Does `UserType` widen at all**, or does `PrincipalKind` absorb the whole change?
@@ -1027,6 +1059,9 @@ ADR, a spec change or an explicit "won't fix".
    moment `Rider` declares one, this is owed in the same change.
 6. **How long may a restricted rider stand on the pavement believing they are still working?**
    Push-shaped, not TTL-shaped, and not answered by "next request".
+   **Assigned** ([ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §12, §9): the SMS notice (own issue, before the first production
+   restriction) and step 5's socket, with §7.1's 7b (re-derive per pushed payload) assigned to
+   step 5 beside 7a.
 7. **Whether the magic-link request is a mutation or a transport route** (§5). This proposal picks the
    mutation for symmetry; the transport route is defensible and cheaper on the public graph.
 

@@ -2,6 +2,29 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — Step 4 (rider restriction) decided by the team: standing is a GRANT on the identity
+> row, the doors are human-only, three slices in one train.**
+> [ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md),
+> full mob (13 lenses, `HOLD: human`). Two genuine splits resolved by the option that keeps the seam a
+> pure, clock-free, replay-neutral fold: (a) a future `effectiveAt` — six lenses refuse a clock term in
+> the grant predicate, business wants it for a lapsed document, legal permits it per ground — V0 stamps
+> `decidedAt == effectiveAt` server-side and the scheduled form is DESIGNED (a due-row worker appending
+> the fact, permitted for LAPSED/REQUESTED, refused forever for the protective two); (b) whether the
+> `RiderRegistered` projector arm may write `standing` — dba's construction wins (the creating arm never
+> writes it, so a checkpoint-reset rebuild re-grants nobody), young's bounded-window alternative
+> refused. Also: `ReadScope::Rider { id, standing }` struct variant (compiler-first over the smaller
+> witness), the set `{ myStanding, delivery, reportDeliveryIssue, handBackDelivery }` (`myDeliveries`
+> refused — it returns the PENDING pool; `myStanding` added, amending ADR-20260904-015903 §6), the
+> read-only catch-all makes the revoke UNSKIPPABLE by the projector (verified: a fold fault skips and
+> advances the checkpoint, a stale grant), `RevocationGround` renamed `RiderRestrictionGround` before
+> anything is stored, one word *restriction* (never *suspendu*, never *réintégrer*), the four `fr`
+> strings as counsel-reviewable copy, ADR-015903 §10's "exactly one arm" amended to *one additive arm
+> per new `receives:` entry* with the fence globs named in one place, `RestrictRider` human-only in
+> three layers (a PM `sends` of it validates clean today — the mutant). **Card defects banked**: the
+> two-column `Rider` claim and "email/SMS" (card); three lenses reporting the pre-squash tip
+> `df451998` as `main` (invited-lens depth miss); none roster width. PROP §6.3, §6.4, §8.6, §11 row 4
+> rewritten (4-i / 4-ii / 4-iii). Next: claim 4-i, dispatch on the lower tier.
+
 > **2026-09-04 — #870 merged: step 3 of part C is complete; the rider hands a job back and the
 > customer is told.** [PR #870](https://github.com/TheCaptainCompany/captain-food/pull/870)
 > (`6cf74887`, squash), a two-hour lower-tier run plus a round 2. **Presentation pass**: reviewer FAIL,
