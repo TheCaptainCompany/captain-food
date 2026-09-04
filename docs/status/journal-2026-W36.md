@@ -2,6 +2,62 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #865 PR #867 review round 2: BLOCKING fixed, six non-blocking findings applied.**
+> The reviewer's ONE blocking finding: the REQUIRED-derived fail-closed branch
+> (`let Some(ReadScope::Rider(__derived_id)) = __derived_scope else { return Err(forbidden_error())
+> }`) had NO test reaching it — `no_resolved_rider_scope_enqueues_nothing` uses `NoMapping`, refused
+> by the `RoleGuard` as PUBLIC one step earlier; `graphql_acl.rs`'s `declineDelivery` control errors
+> on `ctx.data::<Mailbox>()?` one line before the injection block, in a schema with no mailbox at
+> all. New test `a_rider_bound_caller_with_no_readscope_in_context_is_refused_by_the_derived_seam_itself`
+> (binds `ActingRole::Rider` directly through `schema.execute`, no HTTP transport, so no
+> `ReadScope` is ever inserted) closes it. **Seen RED first**, verbatim: temporarily mutated
+> `derived_injection_block`'s `required` arm to inject a nil UUID instead of erroring, regenerated
+> `mutation.rs`, ran the new test alone —
+> `` thread '...' panicked at crates/server/tests/rider_id_derived_at_the_door.rs:291:5: assertion
+> `left == right` failed: expected exactly the derived seam's own refusal: []  left: 0 right: 1 ``
+> (i.e. the mutant enqueued silently, 0 errors where 1 was expected) — then reverted the emitter and
+> regenerated again (`git diff` on `mutation.rs` came back empty, confirming the revert was exact)
+> before writing the real assertion.
+>
+> **Six non-blocking findings, all applied**: (2) `graphql_acl.rs`'s `admitted()` comment and this
+> journal's own prose wrongly claimed `declineDelivery`'s `forbidden_error()` MIGHT fire in that
+> mailbox-less harness — it cannot, `ctx.data::<Mailbox>()?` fails one line before the injection
+> block runs, in every case, on every mutation, in that schema; both corrected. Added the missing
+> `payload_hash` assertion `the_seam_injects_riderid_into_the_enqueued_payload` claimed to have.
+> (3) new validator test `a_recognized_source_on_the_wrong_scalar_is_a_type_mismatch` (`derived: {
+> deliveryJobId: rider }` — a real property, a recognized source, the WRONG scalar — the primary
+> branch the existing `an_unrecognized_derived_source_is_a_type_mismatch` test does not cover);
+> fixed the un-interpolated `'{source}'` string literal in `validate/api_derived.rs` (it was never
+> passed through `format!`, so the fallback message printed the literal braces, never the actual
+> source). (4) `emit_server_inputs`'s derived-property description now APPENDS to the command's own
+> description instead of replacing it — the six `InputObject`s had lost their "An independent
+> Captain rider accepts a pending delivery job." etc. (5) the dispatch card's wrong citation
+> (`ADR-20260904-014135`) replaced everywhere it landed — `validate/api_derived.rs`,
+> `derived_injection_block`'s doc comment, `specs/delivery/api.yaml:89`, the test file header, and
+> the SPEC-LOG row — with the correct record: [#849 "#639 part C step 2b: the auth_ref -> rider_id
+> resolver at the request seam"](https://github.com/TheCaptainCompany/captain-food/pull/849) /
+> [ADR-20260830-191457](../adr/ADR-20260830-191457-a-role-guard-takes-a-witness-and-an-unbound-caller-is-recorded-as-public.md)
+> parts A+B, realized in `crates/server/src/auth.rs::resolve_rider_scope`. (6) upgraded the ONE
+> "past the guard" assertion whose harness carries a real mailbox
+> (`rider_sign_in_door.rs`'s `the_token_the_rider_stamp_writes_opens_the_rider_door_once_the_seam_resolves_a_row`)
+> to assert the enqueued payload's `riderId` directly; the two harnesses with no mailbox
+> (`rider_without_a_row_is_forbidden_on_the_write_half.rs`'s two controls) already said so
+> accurately in their existing comments — left as is, not a claim of coverage they cannot make. (7)
+> `specs/screens/rider.yaml`'s `jobs` screen: the accept/decline buttons live in `job_list_actions`,
+> a SIBLING section of `order_list`, OUTSIDE any item scope — `{{ delivery.id }}` (and, before this
+> card, `{{ delivery.orderId }}`) never resolved there, confirmed by reading
+> `crates/web/src/renderer.rs`'s `order_card` (renders id/status/total only, no action slot) and by
+> the IDENTICAL pre-existing pattern in `restaurant_backoffice.yaml`'s `orders_queue`/`order_actions`
+> (`{{ order.id }}`, same sibling-section shape, same missing singular resolver) — this is a
+> SYSTEM-WIDE SDUI renderer/DSL gap (no item-scoped action slot exists on `order_card`, and no
+> screen declares a singular "current order/delivery" binding), not a rider.yaml-local ≤20-line
+> data-binding fix; **left as is**, reported to the coordinator to file as its own issue covering
+> both screens.
+>
+> All four gates re-run green after the round-2 changes (`make validate`, targeted
+> `cargo test -p server` on the four touched test files — 24/24 — and the full
+> `cargo test -p captain-food-codegen --bin generate` — 402/402).
+>
 > **2026-09-04 — #865 landed on the branch: `riderId` derived at the rider door from the seam,
 > deleted from the six rider-facing inputs** ([#865 "The rider surface has no rider-identity
 > root…"](https://github.com/TheCaptainCompany/captain-food/issues/865), draft PR #867,
@@ -92,10 +148,11 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > unknown job" comment — the mailbox now EXISTS in that harness, so the seam-injected command
 > actually enqueues), `graphql_acl.rs` (`the_issue_doors_admit_exactly_their_listed_paths`: literals
 > rewritten, the `admitted()` comment upgraded to name BOTH ways the resolver can fail past the
-> guard — the missing mailbox, or `declineDelivery`'s own `forbidden_error()` when this
-> schema-only harness carries no `ReadScope` — `is_forbidden` still discriminates correctly since it
-> checks the ROLE GUARD's literal `FORBIDDEN` code, distinct from the seam's PascalCase
-> `Forbidden`). **One test the full `cargo test --workspace` run caught that the narrower
+> guard — always the missing mailbox in THIS schema-only harness (`ctx.data::<Mailbox>()?` runs
+> BEFORE the derived-field injection block, so `declineDelivery`'s own `forbidden_error()` branch
+> is never reached here — round 2 review caught the comment claiming otherwise, fixed) —
+> `is_forbidden` still discriminates correctly since it checks the ROLE GUARD's literal `FORBIDDEN`
+> code, distinct from the seam's PascalCase `Forbidden`. **One test the full `cargo test --workspace` run caught that the narrower
 > `api_derived_gate`-filtered run did not**:
 > `tests::screen_actions_do_not_pass_undeclared_command_inputs` asserted the REAL corpus carried the
 > `orderId` defect this card fixes — rewritten to assert the real corpus is clean, then plant the
