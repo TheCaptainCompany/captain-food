@@ -252,6 +252,7 @@ rider:
         TrackDelivery: { $ref: 'api.yaml#/queries/delivery' }
         DeclineDelivery: { $ref: 'api.yaml#/mutations/declineDelivery' }   # refuse a PENDING offer (#639 part C step 3-i)
         ReportDeliveryIssue: { $ref: 'api.yaml#/mutations/reportDeliveryIssue' }   # "Un problème" — report by kind, the restaurant is told (#639 part C step 3-i)
+        HandBackDelivery: { $ref: 'api.yaml#/mutations/handBackDelivery' }   # "Je ne peux pas continuer" — hand a held job back with the food's whereabouts (#639 part C step 3-ii)
 
 admin:
   description: A platform operator who onboards accounts and oversees the platform.

@@ -260,6 +260,22 @@ DeliveryDeclinedByRider:
   required: [deliveryJobId, riderId]
 
 
+DeliveryHandedBackByRider:
+  description: >
+    A rider holding a delivery job handed it back, stating where the food physically is (#639 part C
+    step 3-ii, ADR-20260904-015903 §1-2). Business payload only — the actor is envelope metadata
+    (`domain_events.user_id`). From ASSIGNED the job returns to PENDING (foodLocation NOT_COLLECTED,
+    derived — the rider never picked up); from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT
+    re-offers the job (PENDING) and WITH_RIDER fails it closed (FAILED — a PENDING job whose food is
+    in a restricted rider's bag would be re-offered, which is an oversell).
+  type: object
+  properties:
+    deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+    foodLocation: { $ref: 'scalars.yaml#/FoodCustody' }
+  required: [deliveryJobId, riderId, foodLocation]
+
+
 DeliveryIssueReported:
   description: >
     An issue was reported on a delivery job (by the rider, partner, or support). #639 part C step

@@ -4,17 +4,23 @@ use crate::*;
 // Byte-identical CREATE TABLE + index DDL for every View_* (aggregate-fed or `source: reference`).
 
 /// One arm of a `status-from-event-type` derivation: for a given event type, the column's value is
-/// a literal enum value (`Lit`), extracted from that event's payload (`Payload(prop)`), or — the
-/// explicit YAML `null` (#639 part C step 3-i, ADR-20260904-015903 §3) — RESET to NULL (`Null`):
-/// the event CLEARS the column, and its type is in the CASE's event set so it wins over the last
-/// setter. Before `Null` existed a YAML null fell out of the map silently, so a "clearing" event
-/// left the previous value standing — the latent defect the ADR names, closed here together with
-/// the validator's `view-derive-value-unknown` (any other unrecognised value is an ERROR).
+/// a literal enum value (`Lit`), extracted from that event's payload (`Payload(prop)`), the explicit
+/// YAML `null` (#639 part C step 3-i, ADR-20260904-015903 §3) — RESET to NULL (`Null`): the event
+/// CLEARS the column, and its type is in the CASE's event set so it wins over the last setter —
+/// or, new with #639 part C step 3-ii (ADR-20260904-015903 §3, "the grammar extension of A.3,
+/// mirrored"), `{ from: <field>, map: { <fieldValue>: <columnValue>, … } }` (`Mapped`): the column's
+/// value depends on ANOTHER field of the SAME event, keyed through an explicit value→value map (a
+/// custody-keyed status arm cannot be a straight `Payload` copy — the field's own scalar and the
+/// column's are different enums). Before `Null` existed a YAML null fell out of the map silently, so
+/// a "clearing" event left the previous value standing — the latent defect the ADR names, closed
+/// together with the validator's `view-derive-value-unknown` (any other unrecognised value is an
+/// ERROR).
 #[derive(Clone)]
 pub(crate) enum DeriveVal {
     Lit(String),
     Payload(String),
     Null,
+    Mapped(String, Vec<(String, String)>),
 }
 pub(crate) struct SqlColumn {
     pub(crate) name: String,
@@ -165,17 +171,30 @@ pub(crate) fn sql_type(ty: &str, model: &Model) -> String {
     "TEXT".into()
 }
 
-/// The three forms a `derive:` arm value may take (a literal, `{ from: prop }`, `null`), or `None`
-/// for anything else — the ONE place the grammar is decided; the validator's
-/// `view-derive-value-unknown` rule and the emitter both read it.
+/// The four forms a `derive:` arm value may take (a literal, `{ from: prop }`, `null`, or
+/// `{ from: prop, map: {...} }`), or `None` for anything else — the ONE place the grammar is
+/// decided; the validator's `view-derive-value-unknown` rule and the emitter both read it. `map`
+/// alongside `from` selects `Mapped` over `Payload` (#639 part C step 3-ii).
 pub(crate) fn derive_val(dv: &Value) -> Option<DeriveVal> {
     match dv {
         Value::String(s) => Some(DeriveVal::Lit(s.clone())),
         Value::Null => Some(DeriveVal::Null),
-        Value::Mapping(m) => m
-            .get(Value::String("from".into()))
-            .and_then(|x| x.as_str())
-            .map(|p| DeriveVal::Payload(p.to_string())),
+        Value::Mapping(m) => {
+            let from = m.get(Value::String("from".into())).and_then(|x| x.as_str())?.to_string();
+            match m.get(Value::String("map".into())).and_then(|x| x.as_mapping()) {
+                Some(mm) => {
+                    let pairs: Vec<(String, String)> = mm
+                        .iter()
+                        .filter_map(|(k, v)| match (k.as_str(), v.as_str()) {
+                            (Some(k), Some(v)) => Some((k.to_string(), v.to_string())),
+                            _ => None,
+                        })
+                        .collect();
+                    Some(DeriveVal::Mapped(from, pairs))
+                }
+                None => Some(DeriveVal::Payload(from)),
+            }
+        }
         _ => None,
     }
 }
@@ -400,6 +419,23 @@ pub(crate) fn money_subfield(model: &Model, evt: &str, prop: &str, col_ty: &str)
     }
 }
 
+/// The scalars.yaml enum a given event PROPERTY `$ref`s — `None` when the property is absent or
+/// does not `$ref` a scalars.yaml name. Shared by the lifecycle `via`/`when` grammar
+/// (ADR-20260721-093027, extended #639 part C step 3-ii, ADR-20260904-015903 §2) and the
+/// `derive: { from, map }` grammar (§3) — both key a target off a DIFFERENT event field.
+pub(crate) fn payload_field_scalar(model: &Model, evt: &str, field: &str) -> Option<String> {
+    let node = model.defs.get("events.yaml")?.get(evt)?.get("properties")?.get(field)?;
+    let r = node.get("$ref")?.as_str()?;
+    let mut it = r.splitn(2, "#/");
+    let file = it.next()?;
+    let name = it.next()?;
+    if file == "scalars.yaml" {
+        Some(name.to_string())
+    } else {
+        None
+    }
+}
+
 /// The values of a scalars.yaml enum, in declared order — `Some` only for an enum scalar.
 pub(crate) fn enum_values(model: &Model, ty: &str) -> Option<Vec<String>> {
     model
@@ -477,6 +513,11 @@ pub(crate) fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, St
                         }
                         DeriveVal::Payload(p) => format!("e.payload->>'{}'", p),
                         DeriveVal::Null => "NULL".to_string(),
+                        DeriveVal::Mapped(field, pairs) => {
+                            let inner: Vec<String> =
+                                pairs.iter().map(|(k, v)| format!("WHEN '{}' THEN '{}'", k, v)).collect();
+                            format!("(CASE e.payload->>'{}' {} END)", field, inner.join(" "))
+                        }
                     };
                     format!("WHEN '{}' THEN {}", evt, then)
                 })

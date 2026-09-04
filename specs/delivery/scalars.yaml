@@ -59,6 +59,19 @@ DeliveryIssueResolution:
   description: "The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue."
 
 
+# --- Custody vocabulary (#639 part C step 3-ii, ADR-20260904-015903 §1 Decision 1): where the food
+# physically is when a rider hands a job back. One name = one scalar; no free-text `reason` rides
+# alongside it (legal: the narrative the restriction ADR made unspellable would re-enter by the side
+# door) — HandBackDelivery carries exactly this and nothing else.
+FoodCustody:
+  type: string
+  enum:
+    - NOT_COLLECTED          # the rider never picked up — derived from ASSIGNED, never asked
+    - RETURNED_TO_RESTAURANT # the rider physically handed the bag back to the kitchen
+    - WITH_RIDER             # the rider still has it — a re-offer would be an oversell
+  description: "Where a delivery job's food physically is at the moment a rider hands the job back (#639 part C step 3-ii). Drives the custody-keyed lifecycle: RETURNED_TO_RESTAURANT re-offers (PENDING), WITH_RIDER fails closed (FAILED) rather than risk a second courier taking food the first one still holds."
+
+
 DeliveryChannelKey:
   type: string
   pattern: "^[a-z0-9]+(?:_[a-z0-9]+)*$"

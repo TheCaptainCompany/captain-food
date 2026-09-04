@@ -132,6 +132,19 @@ pub(crate) fn emit_projectors(model: &Model) -> String {
                             if opt { "None".to_string() }
                             else { panic!("projection {}: non-nullable derive column '{}' is reset (derive: null) by its creation event '{}'", v.name, c.name, creation) }
                         }
+                        // `{ from: field, map: {...} }` (#639 part C step 3-ii, ADR-20260904-015903
+                        // §3): the column's value depends on ANOTHER field of the same event, keyed
+                        // through the declared value→value map — a nested match over that field's
+                        // OWN scalar (the validator requires it exhaustive).
+                        Some((_, DeriveVal::Mapped(field, pairs))) => {
+                            let field_scalar = payload_field_scalar(model, &creation, field).unwrap_or_default();
+                            let arms: Vec<String> = pairs
+                                .iter()
+                                .map(|(w, tv)| format!("{}::{} => {}::{},", field_scalar, w, c.ty, tv))
+                                .collect();
+                            let inner = format!("match e.{} {{ {} }}", rust_ident(&snake_field(field)), arms.join(" "));
+                            if opt { format!("Some({})", inner) } else { inner }
+                        }
                         None => {
                             if opt { "None".to_string() }
                             else { panic!("projection {}: non-nullable derive column '{}' but creation event '{}' is not in its derive map", v.name, c.name, creation) }
@@ -232,6 +245,18 @@ pub(crate) fn emit_projectors(model: &Model) -> String {
                                 DeriveVal::Null => {
                                     if !opt { panic!("projection {}: non-nullable derive column '{}' is reset (derive: null) by '{}'", v.name, c.name, ev) }
                                     "None".to_string()
+                                }
+                                // `{ from: field, map: {...} }` (#639 part C step 3-ii) — see the
+                                // creation-value arm above for the reasoning; same nested match here.
+                                DeriveVal::Mapped(field, pairs) => {
+                                    uses_e = true;
+                                    let field_scalar = payload_field_scalar(model, ev, field).unwrap_or_default();
+                                    let arms: Vec<String> = pairs
+                                        .iter()
+                                        .map(|(w, tv)| format!("{}::{} => {}::{},", field_scalar, w, c.ty, tv))
+                                        .collect();
+                                    let inner = format!("match e.{} {{ {} }}", rust_ident(&snake_field(field)), arms.join(" "));
+                                    if opt { format!("Some({})", inner) } else { inner }
                                 }
                             };
                             mech.push(format!("row.{} = {};", cid, val));

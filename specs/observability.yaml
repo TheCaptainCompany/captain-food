@@ -1418,6 +1418,85 @@ delivery-dispatch-strategy:
   error_budget: { max_error_rate_pct: 2.0 }
 
 # =====================================================================
+# custody-handback — the dead-man's switch on a handed-back job (#639 part C step 3-ii,
+# ADR-20260904-015903 §8). Mirrors the #608 shape (`payment_authorized_no_order_birth_age_seconds`
+# in `place-order`'s metrics, above): the re-offer is DeliveryDispatchProcess's job and the PM step
+# is fenced (issue #860, `deferred:`), so until it lands a handed-back job is PENDING/FAILED with
+# nothing automatically re-offering it — a counter that fires on the handback and goes quiet during
+# the stranding is the ADR-20260810-231300 defect class (a monitor that can only fire when a signal
+# ARRIVES goes quiet exactly when it should scream). THE QUESTION IT ANSWERS: is there a customer
+# whose food a rider handed back, with no later acceptance re-offering it, and for how long has that
+# been true? ZEROS ARE THE CONTRACT: the gauge is 0 EVERY sweep when nothing is stranded, and the
+# heartbeat increments only after a COMPLETE sweep — an absent series must never read as "nothing
+# stranded". Emitted by a NON-FENCED timer worker beside `delivery_offer_timeout_worker.rs`
+# (`delivery_handback_watch.rs`), never inside the fenced mailbox handler. KNOWN GAP, repeated
+# verbatim from the #608 contract: there is no alert-ROUTE wiring anywhere in this repo, so no human
+# or rota is named by any artifact — naming the route is not this contract's to do.
+# =====================================================================
+custody-handback:
+  feature: custody-handback
+  criticality: high
+  workflow:
+    aggregate: { $ref: 'actors.yaml#/DeliveryJob' }
+    command: { $ref: 'commands.yaml#/HandBackDelivery' }
+    emits:
+      - { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+
+  run_identity:
+    - { name: correlation_id, source: "command.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+    - { name: delivery_job_id, source: "domain.aggregate_id", businessKey: { $ref: 'scalars.yaml#/DeliveryJobId' }, required: true }
+    - { name: command_type, source: "command.type", required: true }
+
+  # The existing command middleware spans (no new instrumentation surface) — same three as
+  # reclamation-sla. `business.food_location` is stamped by the SAME middleware from the command's
+  # own payload (a closed enum, never free text — no span attribute anywhere on this workflow ever
+  # carries the rider's words; there are none to carry, HandBackDelivery has no `reason`).
+  spans:
+    - name: "command.receive"
+      kind: SERVER
+      required: true
+      attributes:
+        - { key: "business.command_type", type: string, required: true }
+        - { key: "business.actor", type: string, required: true }
+    - name: "command.validate"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.validation_status", type: string, required: true }   # accepted | rejected (InvalidDeliveryStatus / DeliveryAlreadyAssigned / DeliveryJobNotFound)
+        - { key: "business.food_location", type: string, required: true }       # NOT_COLLECTED | RETURNED_TO_RESTAURANT | WITH_RIDER
+    - name: "event.store.append"
+      kind: INTERNAL
+      required: true
+      attributes:
+        - { key: "business.event_type", type: string, required: true }
+        - { key: "business.stream_id", type: string, required: true }
+
+  metrics:
+    # Age of the OLDEST job whose latest lifecycle fact is a handback with no later acceptance
+    # (DeliveryAcceptedByRider/DeliveryAcceptedByPartner) — the re-offer that never came. Emitted
+    # EVERY sweep, 0 included, by the non-fenced `delivery_handback_watch.rs` worker.
+    - name: "delivery_handed_back_unreassigned_age_seconds"
+      type: gauge
+      attributes: []
+      thresholds:
+        - max_age_seconds: 300   # the offer TTL: past it, a re-offer window has already been missed
+          derived_from:
+            - { $ref: 'configuration.yaml#/keys/DELIVERY_OFFER_MAX_TTL_SECONDS' }
+    # The sweep's own LIVENESS — incremented once per COMPLETED sweep, never before. Same shape and
+    # same reason as `payment_birth_gap_sweep_heartbeat_total` / `order_lane_watch_heartbeat_total`.
+    - { name: "delivery_handback_sweep_heartbeat_total", type: counter, attributes: [] }
+
+  status_rules:
+    success:
+      required_spans: ["command.receive", "command.validate", "event.store.append"]
+      conditions: ["command.validate.business.validation_status == 'accepted'"]
+    business_rejected:
+      conditions: ["command.validate.business.validation_status == 'rejected'"]
+    technical_error:
+      any_span_errors: true
+
+# =====================================================================
 # reclamation-sla — the claim first-response SLA (epic #151, slice #160)
 # OpenReclamation -> ReclamationOpened (OPEN, the first-response clock starts) -> the staff decide it:
 #   ResolveReclamation -> ReclamationResolved | RejectReclamation -> ReclamationReoccured... (REJECTED)

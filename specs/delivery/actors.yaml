@@ -70,6 +70,18 @@ DeliveryJob:
       - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: DELIVERED, via: status }
       - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: CANCELLED, via: status }
       - { from: [PENDING, ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryStatusUpdated' }, to: FAILED, via: status }
+      # Custody-keyed handback (#639 part C step 3-ii, ADR-20260904-015903 §2): `via: foodLocation`
+      # with an explicit value→target map — the grammar extension of ADR-20260721-093027, needed
+      # because `foodLocation` $refs FoodCustody, a DIFFERENT scalar than this lifecycle's own
+      # DeliveryStatus (so the legacy `event.<via> == to` form cannot key it). Each row's `when:`
+      # is one entry of that map; three rows on ONE event, never a second event. From ASSIGNED the
+      # rider never picked up (foodLocation is derived NOT_COLLECTED, never asked, by the sheet) and
+      # the job returns PENDING; from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT re-offers
+      # (PENDING) and WITH_RIDER fails closed (FAILED — a PENDING job whose food is in a restricted
+      # rider's bag would be re-offered, which is an oversell).
+      - { from: [ASSIGNED], event: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }, to: PENDING, via: foodLocation, when: NOT_COLLECTED }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }, to: PENDING, via: foodLocation, when: RETURNED_TO_RESTAURANT }
+      - { from: [PICKED_UP, OUT_FOR_DELIVERY], event: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }, to: FAILED, via: foodLocation, when: WITH_RIDER }
     terminal: [DELIVERED, CANCELLED]
   receives:
     - message: { $ref: 'events.yaml#/DeliveryRequested' }
@@ -127,6 +139,12 @@ DeliveryJob:
       emits: [{ $ref: 'events.yaml#/DeliveryEscalationRequested' }]
       throws:
         - { $ref: 'errors.yaml#/DeliveryJobNotFound' }   # only a known job can be escalated; self-dispatch/exhaustion are the saga's concern, not thrown here (#60)
+    - message: { $ref: 'commands.yaml#/HandBackDelivery' }
+      emits: [{ $ref: 'events.yaml#/DeliveryHandedBackByRider' }]
+      throws:
+        - { $ref: 'errors.yaml#/DeliveryJobNotFound' }
+        - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }   # not ASSIGNED/PICKED_UP/OUT_FOR_DELIVERY, foodLocation/status mismatch, or a partner-held job (#639 part C step 3-ii)
+        - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }   # rider mismatch — the caller does not hold this job
     - message: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
       emits: [{ $ref: 'events.yaml#/DeliveryIssueReported' }]
       throws:

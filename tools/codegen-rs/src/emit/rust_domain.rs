@@ -1002,9 +1002,36 @@ pub(crate) fn emit_domain_lifecycles(model: &Model) -> String {
     for lc in parse_lifecycles(model) {
         let status = ref_name(&lc.status_ref).unwrap_or_default();
         let module = snake_type(&lc.aggregate);
+        // Mapped-via (`when`) fields need their OWN scalar imported too (they are not `status`'s
+        // scalar — that is the whole point of the extension, #639 part C step 3-ii). Collect once,
+        // in event-then-field declaration order, deduplicated.
+        let mut mapped_scalar_imports: Vec<String> = Vec::new();
+        for ini in &lc.initial {
+            if let (Some(ev), Some(via), Some(_)) = (ref_name(&ini.event_ref), &ini.via, &ini.when) {
+                if let Some(scalar) = payload_field_scalar(model, &ev, via) {
+                    if !mapped_scalar_imports.contains(&scalar) {
+                        mapped_scalar_imports.push(scalar);
+                    }
+                }
+            }
+        }
+        for t in &lc.transitions {
+            if let (Some(ev), Some(via), Some(_)) = (ref_name(&t.event_ref), &t.via, &t.when) {
+                if let Some(scalar) = payload_field_scalar(model, &ev, via) {
+                    if !mapped_scalar_imports.contains(&scalar) {
+                        mapped_scalar_imports.push(scalar);
+                    }
+                }
+            }
+        }
+        let extra_use = if mapped_scalar_imports.is_empty() {
+            String::new()
+        } else {
+            format!("use crate::generated::scalars::{{{}}};\n", mapped_scalar_imports.join(", "))
+        };
         out.push_str(&format!(
-            "\n/// {} lifecycle over [`{}`] (specs/actors.yaml#/{}/lifecycle).\npub mod {} {{\n    use crate::generated::events::DomainEvent;\n    use crate::generated::scalars::{};\n\n",
-            lc.aggregate, status, lc.aggregate, module, status
+            "\n/// {} lifecycle over [`{}`] (specs/actors.yaml#/{}/lifecycle).\npub mod {} {{\n    use crate::generated::events::DomainEvent;\n    use crate::generated::scalars::{};\n    {}\n",
+            lc.aggregate, status, lc.aggregate, module, status, extra_use
         ));
         let terminal: Vec<String> = lc.terminal.iter().map(|s| format!("{}::{}", status, s)).collect();
         out.push_str(&format!(
@@ -1012,6 +1039,20 @@ pub(crate) fn emit_domain_lifecycles(model: &Model) -> String {
             status,
             terminal.join(", ")
         ));
+        // A guard-clause arm for a `via` entry: no `when` = legacy direct form (the field IS the
+        // status scalar, and its value literally equals `to`); `when` = the mapped form (#639 part C
+        // step 3-ii, ADR-20260904-015903 §2) — the field is a DIFFERENT enum scalar and the arm
+        // fires when its value equals `when`, so several rows sharing one field/event and differing
+        // `when`/`to` collectively form an explicit value→target map.
+        let via_guard = |model: &Model, ev: &str, via: &str, when: &Option<String>, to: &str| -> String {
+            match when {
+                Some(w) => {
+                    let field_scalar = payload_field_scalar(model, ev, via).unwrap_or_default();
+                    format!(" if e.{} == {}::{}", snake_field(via), field_scalar, w)
+                }
+                None => format!(" if e.{} == {}::{}", snake_field(via), status, to),
+            }
+        };
         out.push_str(&format!(
             "    /// The state a birth event enters, or `None` when `event` does not birth this lifecycle.\n    pub fn initial(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
             status
@@ -1019,11 +1060,16 @@ pub(crate) fn emit_domain_lifecycles(model: &Model) -> String {
         for ini in &lc.initial {
             let ev = ref_name(&ini.event_ref).unwrap_or_default();
             match &ini.via {
-                // Event-carried birth state (dynamic, ADR-20260721-093027): the recorded fact wins.
+                Some(via) if ini.when.is_none() => {
+                    // Event-carried birth state (dynamic, ADR-20260721-093027): the recorded fact wins.
+                    out.push_str(&format!("            DomainEvent::{}(e) => Some(e.{}),\n", ev, snake_field(via)))
+                }
                 Some(via) => out.push_str(&format!(
-                    "            DomainEvent::{}(e) => Some(e.{}),\n",
+                    "            DomainEvent::{}(e){} => Some({}::{}),\n",
                     ev,
-                    snake_field(via)
+                    via_guard(model, &ev, via, &ini.when, &ini.to),
+                    status,
+                    ini.to
                 )),
                 None => out.push_str(&format!("            DomainEvent::{}(_) => Some({}::{}),\n", ev, status, ini.to)),
             }
@@ -1038,13 +1084,11 @@ pub(crate) fn emit_domain_lifecycles(model: &Model) -> String {
             for f in &t.from {
                 match &t.via {
                     Some(via) => out.push_str(&format!(
-                        "            ({}::{}, DomainEvent::{}(e)) if e.{} == {}::{} => Some({}::{}),\n",
+                        "            ({}::{}, DomainEvent::{}(e)){} => Some({}::{}),\n",
                         status,
                         f,
                         ev,
-                        snake_field(via),
-                        status,
-                        t.to,
+                        via_guard(model, &ev, via, &t.when, &t.to),
                         status,
                         t.to
                     )),
@@ -1058,24 +1102,35 @@ pub(crate) fn emit_domain_lifecycles(model: &Model) -> String {
         out.push_str("            _ => None,\n        }\n    }\n\n");
         // target: the state an event drives the machine to IRRESPECTIVE of the current state — at
         // fold time the recorded fact wins (legality was enforced at append time by `transition`).
-        // A dynamic (`via`) event's target is its carried payload field; a static event is only
-        // emitted when it has a single target across all its transitions.
+        // A direct-dynamic (`via`, no `when`) event's target is its carried payload field; a mapped
+        // (`via` + `when`) event's target is a nested match over that field's OWN scalar, built from
+        // every declared `when`/`to` pair across its transitions — #639 part C step 3-ii; a static
+        // event is only emitted when it has a single target across all its transitions. Birth
+        // events are covered by [`initial`] (consulted first by the fold), never here — mirrors the
+        // pre-existing scope of this table (transitions only).
         let mut targets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut dynamic_via: BTreeMap<String, String> = BTreeMap::new();
+        let mut mapped_via: BTreeMap<String, (String, Vec<(String, String)>)> = BTreeMap::new(); // ev -> (field, [(when, to)])
         for t in &lc.transitions {
             if let Some(ev) = ref_name(&t.event_ref) {
-                match &t.via {
-                    Some(via) => {
+                match (&t.via, &t.when) {
+                    (Some(via), Some(w)) => {
+                        let entry = mapped_via.entry(ev).or_insert_with(|| (via.clone(), Vec::new()));
+                        if !entry.1.iter().any(|(when, _)| when == w) {
+                            entry.1.push((w.clone(), t.to.clone()));
+                        }
+                    }
+                    (Some(via), None) => {
                         dynamic_via.insert(ev, via.clone());
                     }
-                    None => {
+                    (None, _) => {
                         targets.entry(ev).or_default().insert(t.to.clone());
                     }
                 }
             }
         }
         out.push_str(&format!(
-            "    /// The state `event` drives the machine to, irrespective of the current state — at fold\n    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`\n    /// for an event outside the machine (or whose target depends on the current state). A dynamic\n    /// (event-carried) target is the event's payload field.\n    pub fn target(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
+            "    /// The state `event` drives the machine to, irrespective of the current state — at fold\n    /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`\n    /// for an event outside the machine (or whose target depends on the current state). A dynamic\n    /// (event-carried) target is the event's payload field; a mapped one matches that field's own\n    /// scalar against every declared `when` (#639 part C step 3-ii).\n    pub fn target(event: &DomainEvent) -> Option<{}> {{\n        match event {{\n",
             status
         ));
         for t in &lc.transitions {
@@ -1083,6 +1138,20 @@ pub(crate) fn emit_domain_lifecycles(model: &Model) -> String {
                 Some(e) => e,
                 None => continue,
             };
+            if let Some((field, pairs)) = mapped_via.remove(&ev) {
+                let field_scalar = payload_field_scalar(model, &ev, &field).unwrap_or_default();
+                let arms: Vec<String> = pairs
+                    .iter()
+                    .map(|(w, to)| format!("{}::{} => Some({}::{}),", field_scalar, w, status, to))
+                    .collect();
+                out.push_str(&format!(
+                    "            DomainEvent::{}(e) => match e.{} {{ {} }},\n",
+                    ev,
+                    snake_field(&field),
+                    arms.join(" ")
+                ));
+                continue;
+            }
             if let Some(via) = dynamic_via.remove(&ev) {
                 // emit each dynamic event once, in declaration order
                 out.push_str(&format!("            DomainEvent::{}(e) => Some(e.{}),\n", ev, snake_field(&via)));
@@ -1111,21 +1180,23 @@ pub(crate) fn lifecycle_state_map(model: &Model) -> Vec<(String, String)> {
         .into_iter()
         .map(|lc| {
             // A dynamic (event-carried) edge is labelled `Event(field)` so the docs show which
-            // payload field names the target state (ADR-20260721-093027).
-            let label = |ev: &str, via: &Option<String>| match via {
-                Some(v) => format!("{}({})", ev, v),
-                None => ev.to_string(),
+            // payload field names the target state (ADR-20260721-093027); a MAPPED edge (`when`,
+            // #639 part C step 3-ii) also shows the value it fires on — `Event(field=when)`.
+            let label = |ev: &str, via: &Option<String>, when: &Option<String>| match (via, when) {
+                (Some(v), Some(w)) => format!("{}({}={})", ev, v, w),
+                (Some(v), None) => format!("{}({})", ev, v),
+                (None, _) => ev.to_string(),
             };
             let mut lines: Vec<String> = vec!["stateDiagram-v2".into()];
             for ini in &lc.initial {
                 lines.push(format!(
                     "  [*] --> {} : {}",
                     ini.to,
-                    label(&ref_name(&ini.event_ref).unwrap_or_default(), &ini.via)
+                    label(&ref_name(&ini.event_ref).unwrap_or_default(), &ini.via, &ini.when)
                 ));
             }
             for t in &lc.transitions {
-                let ev = label(&ref_name(&t.event_ref).unwrap_or_default(), &t.via);
+                let ev = label(&ref_name(&t.event_ref).unwrap_or_default(), &t.via, &t.when);
                 for f in &t.from {
                     lines.push(format!("  {} --> {} : {}", f, t.to, ev));
                 }
