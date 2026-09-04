@@ -8,6 +8,18 @@ description: >
 rider.title:     { messages: { en: "Captain Rider", fr: "Captain Rider" } }
 rider.go_online: { messages: { en: "Go online", fr: "Passer en ligne" } }
 
+# ── the sign-in door (#639 part C step 2c-ii) ────────────────────────────────
+rider.sign_in.title:              { messages: { en: "Rider sign-in", fr: "Connexion livreur" } }
+rider.sign_in.body:               { messages: { en: "Enter your phone number. No password: you will receive a code by SMS.", fr: "Entrez votre numéro de téléphone. Aucun mot de passe : vous recevrez un code par SMS." } }
+rider.sign_in.dialing_code_label: { messages: { en: "Country code", fr: "Indicatif" } }
+rider.sign_in.phone_label:        { messages: { en: "Phone number", fr: "Numéro de téléphone" } }
+rider.sign_in.request_code:       { messages: { en: "Send me my code", fr: "Recevoir mon code" } }
+rider.sign_in.sending:            { messages: { en: "Sending…", fr: "Envoi…" } }
+rider.sign_in.code_title:         { messages: { en: "Your code", fr: "Votre code" } }
+rider.sign_in.code_body:          { messages: { en: "Type the six digits you received by SMS.", fr: "Saisissez les six chiffres reçus par SMS." } }
+rider.sign_in.verifying:          { messages: { en: "Checking…", fr: "Vérification…" } }
+rider.sign_in.resend:             { messages: { en: "Send a new code", fr: "Renvoyer un code" } }
+
 # ── job list ─────────────────────────────────────────────────────────────────
 rider.jobs.title:       { messages: { en: "My deliveries", fr: "Mes courses" } }
 rider.jobs.accept:      { messages: { en: "Accept job", fr: "Accepter la course" } }

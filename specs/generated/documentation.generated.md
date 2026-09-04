@@ -12384,6 +12384,25 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 _Surface_ **`rider.yaml`**
 
+<a id="screen-sign_in"></a>
+### 📱 `sign_in` · `/sign-in` · 📱 SDUI · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Rider sign-in                            │
+├──────────────────────────────────────────┤
+│ sticky_header                            │
+│ page_header — Rider sign-in              │
+│ text                                     │
+│ section                                  │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `request_rider_sign_in_code` | [✏️ `requestRiderSignInCode`](#mutation-requestridersignincode) |
+| write | `confirm_rider_sign_in` | [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) |
+
 <a id="screen-jobs"></a>
 ### 📱 `jobs` · `/` · 📱 SDUI · 🔒 auth
 
@@ -12769,6 +12788,16 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-claim-reopen-reason_ph"></a>`claim.reopen.reason_ph` | — | Why are you reopening? (optional) | Pourquoi rouvrez-vous ? (facultatif) |
 | <a id="translation-rider-title"></a>`rider.title` | — | Captain Rider | Captain Rider |
 | <a id="translation-rider-go_online"></a>`rider.go_online` | — | Go online | Passer en ligne |
+| <a id="translation-rider-sign_in-title"></a>`rider.sign_in.title` | — | Rider sign-in | Connexion livreur |
+| <a id="translation-rider-sign_in-body"></a>`rider.sign_in.body` | — | Enter your phone number. No password: you will receive a code by SMS. | Entrez votre numéro de téléphone. Aucun mot de passe : vous recevrez un code par SMS. |
+| <a id="translation-rider-sign_in-dialing_code_label"></a>`rider.sign_in.dialing_code_label` | — | Country code | Indicatif |
+| <a id="translation-rider-sign_in-phone_label"></a>`rider.sign_in.phone_label` | — | Phone number | Numéro de téléphone |
+| <a id="translation-rider-sign_in-request_code"></a>`rider.sign_in.request_code` | — | Send me my code | Recevoir mon code |
+| <a id="translation-rider-sign_in-sending"></a>`rider.sign_in.sending` | — | Sending… | Envoi… |
+| <a id="translation-rider-sign_in-code_title"></a>`rider.sign_in.code_title` | — | Your code | Votre code |
+| <a id="translation-rider-sign_in-code_body"></a>`rider.sign_in.code_body` | — | Type the six digits you received by SMS. | Saisissez les six chiffres reçus par SMS. |
+| <a id="translation-rider-sign_in-verifying"></a>`rider.sign_in.verifying` | — | Checking… | Vérification… |
+| <a id="translation-rider-sign_in-resend"></a>`rider.sign_in.resend` | — | Send a new code | Renvoyer un code |
 | <a id="translation-rider-jobs-title"></a>`rider.jobs.title` | — | My deliveries | Mes courses |
 | <a id="translation-rider-jobs-accept"></a>`rider.jobs.accept` | — | Accept job | Accepter la course |
 | <a id="translation-rider-jobs-empty-title"></a>`rider.jobs.empty.title` | — | No deliveries | Aucune course |

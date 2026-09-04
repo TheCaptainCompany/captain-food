@@ -62,6 +62,20 @@ impl Surface {
         }
     }
 
+    /// The role path THIS screen's transports address (R1, #639 part C step 2c-ii,
+    /// PROP-20260831-180622 §5 FORK 3 — founder-decided): the screen's declared `graphql_role:`
+    /// when it has one, else the surface's own [`Surface::role`]. One screen on a staff host may
+    /// speak to `/public/graphql` — the rider sign-in door — while the rest of the surface keeps
+    /// its role. Validator §26 proves a declared role is admitted by every operation the screen
+    /// binds, so this can never select a role-refused transport. The default is what every
+    /// pre-R1 screen keeps, byte-identically.
+    pub fn role_for(&self, screen: &Screen) -> Role {
+        screen
+            .graphql_role
+            .and_then(Role::from_user_type)
+            .unwrap_or_else(|| self.role())
+    }
+
     /// The storefront tenant slug when this host is a `{slug}.{root}` storefront (any
     /// [`AUDIENCE_SPACE_ROOTS`] root — the production apex or dev's `.localhost`, #755).
     /// Excludes every ADR-0036 reserved audience label (`live`/`restos`/`riders`/`system`/`api`),
@@ -97,6 +111,22 @@ pub fn audience_label(host: &str) -> Option<&str> {
         .iter()
         .find_map(|root| host.strip_suffix(root)?.strip_suffix('.'))
         .filter(|label| !label.is_empty())
+}
+
+/// The door a `requires_auth` screen bounces an UNAUTHENTICATED visitor to (#639 2c-ii): the
+/// screen's `unauthenticated: { type: navigate, route }` when the path names a gated screen that
+/// declares one, else `None` (no screen, an open screen, or a surface without a door — the
+/// customer surfaces keep their auth-sheet-over-the-screen pattern). Host+path resolution is the
+/// SAME authority as SSR and hydrate ([`resolve`]), so the server's 302 and the client's 401 leg
+/// cannot disagree about which screen is gated. Validator §26 proves the route names an open
+/// screen of the same surface, so a bounce can never loop.
+pub fn unauthenticated_redirect(host: &str, path: &str) -> Option<&'static str> {
+    let (_, matched) = resolve(host, path);
+    let screen = matched?.screen;
+    if !screen.requires_auth {
+        return None;
+    }
+    screen.unauthenticated_route
 }
 
 /// Resolve the serving surface from the request `Host`.
@@ -333,7 +363,8 @@ pub async fn render_path_with<T: crate::graphql::Transport + Sync>(
             vars.insert(k, v);
         }
         let result = crate::graphql::execute_resolver(transport, *resolver, vars).await;
-        match crate::graphql::classify_resolve(surface.role(), *resolver, result) {
+        // R1: the skip/failure split is judged against the role THIS screen speaks as.
+        match crate::graphql::classify_resolve(surface.role_for(matched.screen), *resolver, result) {
             ResolveOutcome::Resolved(value) => ctx.insert_resolved(resolver.as_str(), value),
             ResolveOutcome::SkippedByDesign(reason) => skipped.push(SkippedRead {
                 screen: matched.screen.id,
@@ -451,6 +482,43 @@ mod tests {
         assert_eq!(Surface::RestaurantBackoffice.role().segment(), "restaurant");
         assert_eq!(Surface::Rider.role().segment(), "rider");
         assert_eq!(Surface::RestaurantFrontoffice.role().segment(), "public");
+    }
+
+    /// R1 (#639 2c-ii): ONE screen of the rider surface speaks to `/public/graphql` — the sign-in
+    /// door — and its sibling keeps `/rider/graphql`. Through the REAL generated screen table and
+    /// the REAL `HttpTransport` construction (the endpoint the browser would POST to), not a stub.
+    #[test]
+    fn the_rider_sign_in_door_addresses_the_public_graph_and_its_siblings_do_not() {
+        use crate::graphql::HttpTransport;
+        use crate::session::SessionId;
+        let door = match_route(Surface::Rider, "/sign-in").expect("the door is routed").screen;
+        let jobs = match_route(Surface::Rider, "/").expect("the job list is routed").screen;
+        assert_eq!(door.graphql_role, Some("PUBLIC"));
+        assert_eq!(jobs.graphql_role, None, "the default is the surface's role, untouched");
+        assert!(!door.requires_auth && jobs.requires_auth);
+        let origin = "https://riders.captain.food";
+        let door_transport = HttpTransport::new(origin, Surface::Rider.role_for(door), SessionId::mint());
+        let jobs_transport = HttpTransport::new(origin, Surface::Rider.role_for(jobs), SessionId::mint());
+        assert_eq!(door_transport.endpoint(), "https://riders.captain.food/public/graphql");
+        assert_eq!(jobs_transport.endpoint(), "https://riders.captain.food/rider/graphql");
+        // Every other surface is byte-identical to before R1: no screen declares a role.
+        for surface in [Surface::CaptainFrontoffice, Surface::RestaurantFrontoffice, Surface::RestaurantBackoffice] {
+            for screen in surface.screens() {
+                assert_eq!(surface.role_for(screen), surface.role(), "{}", screen.id);
+            }
+        }
+    }
+
+    /// #639 2c-ii: the rider app's gated screens declare the door; the door and every other
+    /// surface do not — so the server's 302 and the client's 401 leg both resolve the same way.
+    #[test]
+    fn gated_rider_screens_name_the_door_and_nothing_else_does() {
+        assert_eq!(unauthenticated_redirect("riders.captain.food", "/"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("riders.captain.food", "/jobs/o-1"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("riders.captain.food", "/sign-in"), None);
+        assert_eq!(unauthenticated_redirect("riders.captain.food", "/nope"), None);
+        assert_eq!(unauthenticated_redirect("chez-test.captain.food", "/orders"), None);
+        assert_eq!(unauthenticated_redirect("restos.captain.food", "/"), None);
     }
 
     #[test]

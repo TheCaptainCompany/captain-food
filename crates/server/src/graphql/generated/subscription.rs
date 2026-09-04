@@ -53,6 +53,7 @@ impl SubscriptionRoot {
         let mut watch = status_door
             .watch(wanted)
             .ok_or_else(|| async_graphql::Error::new("operationStatusChanged: the status door carries no response stream"))?;
+        let locale = super::mutation::request_locale(ctx);
         Ok(async_stream::stream! {
             use domain::generated::scalars::InboundMessageStatus as M;
             // Snapshot-first (#242 Runtime D): the acceptance already inserted the row on
@@ -66,7 +67,7 @@ impl SubscriptionRoot {
             }
             {
                 let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
-                yield Ok(super::mutation::operation_from_mailbox(&row));
+                yield Ok(super::mutation::operation_from_mailbox(&row, locale));
                 if terminal {
                     return;
                 }
@@ -75,6 +76,20 @@ impl SubscriptionRoot {
                 match watch.next().await {
                     Some(actor_client::OperationWatchEvent::Update(update)) => {
                         let terminal = !matches!(update.status, M::RECEIVED | M::SCHEDULED);
+                        // A terminal REJECTED/FAILED push carries the bus's English summary; the
+                        // durable row carries the typed context, so re-read it and localize
+                        // exactly as the poll leg does (#639 2c-ii) — the row is the pull truth,
+                        // but ONLY once it says so: a bus frame can be observed before the row's
+                        // completion is (the subscriptions suite scripts exactly that), and a
+                        // still-open row must never turn a terminal push back into PENDING.
+                        if terminal && update.error_code.is_some() {
+                            if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
+                                if !matches!(row.status, M::RECEIVED | M::SCHEDULED) {
+                                    yield Ok(super::mutation::operation_from_mailbox(&row, locale));
+                                    break;
+                                }
+                            }
+                        }
                         yield Ok(Operation {
                             message_id: MessageId(update.message_id),
                             correlation_id: CorrelationId(update.correlation_id),
@@ -91,7 +106,7 @@ impl SubscriptionRoot {
                     Some(actor_client::OperationWatchEvent::Lagged) => {
                         if let Ok(Some(row)) = status_door.get_operation_status(wanted).await {
                             let terminal = !matches!(row.status, M::RECEIVED | M::SCHEDULED);
-                            yield Ok(super::mutation::operation_from_mailbox(&row));
+                            yield Ok(super::mutation::operation_from_mailbox(&row, locale));
                             if terminal {
                                 break;
                             }

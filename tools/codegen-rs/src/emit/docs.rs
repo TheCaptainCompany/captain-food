@@ -672,7 +672,12 @@ pub(crate) fn emit_documentation(model: &Model) -> String {
             let route = s.get("route").and_then(|x| x.as_str()).unwrap_or("");
             let title = { let t = s.get("title").map(|v| t_text(v)).unwrap_or_default(); if t.is_empty() { id.to_string() } else { t } };
             let sdui_badge = if s.get("sdui").and_then(|x| x.as_bool()) == Some(false) { format!("🚫 not SDUI{}", s.get("sdui_reason").and_then(|x| x.as_str()).map(|r| format!(" — {}", r)).unwrap_or_default()) } else { "📱 SDUI".to_string() };
-            let auth = if s.get("requires_auth").and_then(|x| x.as_bool()) == Some(true) { " · 🔒 auth" } else { "" };
+            let auth = if s.get("requires_auth").and_then(|x| x.as_bool()) == Some(true) { " · 🔒 auth".to_string() } else { String::new() };
+            // R1 (#639 2c-ii): a screen that speaks to another role's graph says so.
+            let auth = match s.get("graphql_role").and_then(|x| x.as_str()) {
+                Some(role) => format!("{auth} · ⇄ /{}/graphql", role.to_ascii_lowercase().replace('_', "-")),
+                None => auth,
+            };
             let mut rows: Vec<Vec<String>> = Vec::new();
             for rn in s.get("data_requirements").and_then(|x| x.as_sequence()).map(|s| s.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default() {
                 let r = resolvers.and_then(|m| m.get(rn.as_str()));

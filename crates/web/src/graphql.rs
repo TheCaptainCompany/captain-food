@@ -50,6 +50,23 @@ impl Role {
         }
     }
 
+    /// The inverse of [`Role::user_type`] (#639 2c-ii, R1): the role a screen's `graphql_role:`
+    /// token names. `None` for a token outside the closed set — unreachable for generated screen
+    /// tables (validator §26 refuses it), kept total so a caller must fall back explicitly.
+    pub fn from_user_type(token: &str) -> Option<Role> {
+        [
+            Role::Public,
+            Role::Customer,
+            Role::RestaurantAccount,
+            Role::Restaurant,
+            Role::Rider,
+            Role::Admin,
+            Role::External,
+        ]
+        .into_iter()
+        .find(|r| r.user_type() == token)
+    }
+
     /// The `scalars.yaml#/UserType` token this role path carries (#472) — the vocabulary
     /// `ResolverKey::roles()` (api.yaml `roles:`, verbatim) speaks. Mirrors `segment()`'s
     /// mirror-honesty rule: one closed set, spelled once.

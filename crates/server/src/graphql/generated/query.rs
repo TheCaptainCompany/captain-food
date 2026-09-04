@@ -105,7 +105,7 @@ impl QueryRoot {
             if !super::mutation::mailbox_operation_owned(ctx, &row) {
                 return Ok(None);
             }
-            return Ok(Some(super::mutation::operation_from_mailbox(&row)));
+            return Ok(Some(super::mutation::operation_from_mailbox(&row, super::mutation::request_locale(ctx))));
         }
         Ok(None)
     }

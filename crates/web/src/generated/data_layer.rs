@@ -554,6 +554,8 @@ pub enum ActionKey {
     ConfirmPickup,
     CompleteDelivery,
     RiderToggleOnline,
+    RequestRiderSignInCode,
+    ConfirmRiderSignIn,
     Refresh,
     RequeueMailboxMessage,
 }
@@ -612,6 +614,8 @@ impl ActionKey {
         ActionKey::ConfirmPickup,
         ActionKey::CompleteDelivery,
         ActionKey::RiderToggleOnline,
+        ActionKey::RequestRiderSignInCode,
+        ActionKey::ConfirmRiderSignIn,
         ActionKey::Refresh,
         ActionKey::RequeueMailboxMessage,
     ];
@@ -670,6 +674,8 @@ impl ActionKey {
             ActionKey::ConfirmPickup => "confirm_pickup",
             ActionKey::CompleteDelivery => "complete_delivery",
             ActionKey::RiderToggleOnline => "rider_toggle_online",
+            ActionKey::RequestRiderSignInCode => "request_rider_sign_in_code",
+            ActionKey::ConfirmRiderSignIn => "confirm_rider_sign_in",
             ActionKey::Refresh => "refresh",
             ActionKey::RequeueMailboxMessage => "requeue_mailbox_message",
         }
@@ -729,6 +735,8 @@ impl ActionKey {
             "confirm_pickup" => Some(ActionKey::ConfirmPickup),
             "complete_delivery" => Some(ActionKey::CompleteDelivery),
             "rider_toggle_online" => Some(ActionKey::RiderToggleOnline),
+            "request_rider_sign_in_code" => Some(ActionKey::RequestRiderSignInCode),
+            "confirm_rider_sign_in" => Some(ActionKey::ConfirmRiderSignIn),
             "refresh" => Some(ActionKey::Refresh),
             "requeue_mailbox_message" => Some(ActionKey::RequeueMailboxMessage),
             _ => None,
@@ -789,6 +797,8 @@ impl ActionKey {
             ActionKey::ConfirmPickup => ActionKind::Mutation,
             ActionKey::CompleteDelivery => ActionKind::Mutation,
             ActionKey::RiderToggleOnline => ActionKind::Mutation,
+            ActionKey::RequestRiderSignInCode => ActionKind::Mutation,
+            ActionKey::ConfirmRiderSignIn => ActionKind::Mutation,
             ActionKey::Refresh => ActionKind::Client,
             ActionKey::RequeueMailboxMessage => ActionKind::Mutation,
         }
@@ -848,6 +858,8 @@ impl ActionKey {
             ActionKey::ConfirmPickup => Some("confirmPickup"),
             ActionKey::CompleteDelivery => Some("completeDelivery"),
             ActionKey::RiderToggleOnline => Some("changeRiderStatus"),
+            ActionKey::RequestRiderSignInCode => Some("requestRiderSignInCode"),
+            ActionKey::ConfirmRiderSignIn => Some("confirmRiderSignIn"),
             ActionKey::Refresh => None,
             ActionKey::RequeueMailboxMessage => Some("requeueMailboxMessage"),
         }
@@ -909,6 +921,8 @@ impl ActionKey {
             ActionKey::ConfirmPickup => Some("ConfirmPickupInput"),
             ActionKey::CompleteDelivery => Some("CompleteDeliveryInput"),
             ActionKey::RiderToggleOnline => Some("ChangeRiderStatusInput"),
+            ActionKey::RequestRiderSignInCode => Some("RequestRiderSignInCodeInput"),
+            ActionKey::ConfirmRiderSignIn => Some("ConfirmRiderSignInInput"),
             ActionKey::Refresh => None,
             ActionKey::RequeueMailboxMessage => Some("RequeueMailboxMessageInput"),
         }
@@ -968,6 +982,8 @@ impl ActionKey {
             ActionKey::ConfirmPickup => None,
             ActionKey::CompleteDelivery => None,
             ActionKey::RiderToggleOnline => None,
+            ActionKey::RequestRiderSignInCode => None,
+            ActionKey::ConfirmRiderSignIn => None,
             ActionKey::Refresh => None,
             ActionKey::RequeueMailboxMessage => None,
         }

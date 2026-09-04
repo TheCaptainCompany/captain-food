@@ -168,6 +168,13 @@ spec:
     - host: "riders.captain.food"
       http:
         paths:
+          - path: /public/graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-public
+                port:
+                  name: http
           - path: /rider/graphql
             pathType: Prefix
             backend:

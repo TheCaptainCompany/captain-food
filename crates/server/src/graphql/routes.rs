@@ -179,6 +179,9 @@ async fn graphql_handler(
     // absent on the marketplace). Tenant-scoped reads take it from the context, so no operation can
     // accept the tenant as a client argument and none can forget to be bounded by it.
     let tenant = crate::graphql::tenant::resolve_tenant(&headers, &tenants).await;
+    // The caller's LOCALE (#639 2c-ii): `Operation.message` is presentation, derived at read time
+    // from the row's typed error context in the language the caller asked for.
+    let locale = crate::graphql::locale::RequestLocale::from_headers(&headers);
     let resp: GraphQLResponse = schema
         .execute(
             req.into_inner()
@@ -193,7 +196,8 @@ async fn graphql_handler(
                 .data(correlation)
                 .data(request_now)
                 .data(scope)
-                .data(tenant),
+                .data(tenant)
+                .data(locale),
         )
         .await
         .into();
@@ -365,6 +369,9 @@ async fn graphql_get(
                     .map_err(|_| async_graphql::Error::new("invalid X-SESSION-ID (must be a UUID)"))?;
                 data.insert(session);
                 data.insert(crate::graphql::session::trace_context(&headers));
+                // The socket's LOCALE, from the upgrade request — the push leg of
+                // `operationStatusChanged` localizes exactly as the poll leg (#639 2c-ii).
+                data.insert(crate::graphql::locale::RequestLocale::from_headers(&headers));
                 Ok(data)
             })
             .serve()

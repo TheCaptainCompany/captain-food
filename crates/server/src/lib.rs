@@ -87,6 +87,9 @@ mod hosts;
 /// execute the schema under a specific role (the HTTP layer injects it from the URL path).
 pub use graphql::acl as graphql_acl;
 pub use graphql::session as graphql_session;
+/// The request locale for human-readable GraphQL text (#639 2c-ii) -- injectable by a
+/// schema-level test exactly as the transport injects it.
+pub use graphql::locale as graphql_locale;
 /// The request's TENANT seam (#469), re-exported for the same reason as the session seam: a test
 /// that executes the schema directly must supply the datum the HTTP edge resolves from the `Host`.
 pub use graphql::tenant as graphql_tenant;

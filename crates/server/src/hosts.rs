@@ -66,6 +66,15 @@ pub async fn host_root(
     if let Some(redirect) = path_addressed_redirect(uri.path()) {
         return redirect;
     }
+    // No session, gated screen, a declared door (#639 part C step 2c-ii): a document GET that
+    // carries no auth cookie for a `requires_auth` screen whose surface declares
+    // `unauthenticated: { navigate }` is 302'd to the door BEFORE any render — no shell, no
+    // role-refused read, no flash. Cookie PRESENCE is the signal here (its validity is the
+    // GraphQL path's business: a stale cookie renders the shell and the client's 401 leg bounces).
+    let has_auth_cookie = cookie_value(&headers, crate::auth::AUTH_COOKIE).is_some();
+    if let Some(redirect) = unauthenticated_bounce(has_auth_cookie, raw, uri.path()) {
+        return redirect;
+    }
     match classify_host(raw) {
         HostRoute::Tenant(slug) => tenant_page(&lookup, &ssr, &slug, raw, uri.path(), locale).await,
         other => render(other, &ssr, raw, uri.path(), locale).await,
@@ -184,6 +193,17 @@ async fn tenant_page(
     Html(claim_landing(slug)).into_response()
 }
 
+/// The 302 to a surface's declared door (#639 2c-ii) — `None` when the visitor has a session
+/// cookie, the path names no screen, the screen is open, or the surface declares no door (the
+/// customer surfaces: their gated screens keep the auth-sheet-over-the-screen pattern).
+fn unauthenticated_bounce(has_auth_cookie: bool, raw_host: &str, path: &str) -> Option<Response> {
+    if has_auth_cookie {
+        return None;
+    }
+    let route = web::router::unauthenticated_redirect(raw_host, path)?;
+    Some((StatusCode::FOUND, [(header::LOCATION, route.to_string())]).into_response())
+}
+
 /// The retired path-addressed storefront (`/r/{slug}`, #749 — founder directive 2026-08-29,
 /// verbatim: *"I don't want to have /r/<slug> possible we already have it in the
 /// <slug>.captain.food"*): the HOST is the tenant selector, so the path form is gone from the
@@ -249,6 +269,27 @@ fn text(body: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
+    /// #639 2c-ii: the rider app's gated screens bounce a cookie-less document GET to the door;
+    /// a cookie (any) renders; an open screen never bounces; the customer surfaces are untouched.
+    #[test]
+    fn a_cookieless_get_on_a_gated_rider_screen_is_sent_to_the_door() {
+        use axum::http::StatusCode;
+        let bounce = |cookie: bool, host: &str, path: &str| {
+            super::unauthenticated_bounce(cookie, host, path).map(|r| {
+                (
+                    r.status(),
+                    r.headers().get(axum::http::header::LOCATION).and_then(|v| v.to_str().ok()).map(str::to_string),
+                )
+            })
+        };
+        assert_eq!(bounce(false, "riders.captain.food", "/"), Some((StatusCode::FOUND, Some("/sign-in".into()))));
+        assert_eq!(bounce(false, "riders.captain.food", "/jobs/abc"), Some((StatusCode::FOUND, Some("/sign-in".into()))));
+        assert_eq!(bounce(true, "riders.captain.food", "/"), None, "a session cookie renders");
+        assert_eq!(bounce(false, "riders.captain.food", "/sign-in"), None, "the door itself never bounces");
+        assert_eq!(bounce(false, "riders.captain.food", "/nope"), None, "no screen, no bounce (404 downstream)");
+        assert_eq!(bounce(false, "chez-test.captain.food", "/orders"), None, "customer surfaces keep their sheet");
+    }
+
     use super::*;
     use application::queries::{RestaurantFilter, RestaurantRow};
     use async_trait::async_trait;

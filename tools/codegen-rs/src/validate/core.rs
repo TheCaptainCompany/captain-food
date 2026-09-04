@@ -1952,6 +1952,13 @@ pub(crate) fn validate(model: &Model) -> Report {
                     // be declared (and the runtime skips it before network), and a declaration a
                     // new source falsifies is itself an error (the dead-man's proof).
                     check_screen_fulfillability(model, &mut issues, sfkey, &sid, s, resolvers);
+                    // §26 (#639 2c-ii): a declared `graphql_role` (R1) must be admitted by the
+                    // screen's own roles and by EVERY operation the screen binds — a role-refused
+                    // control is skipped silently at runtime; and the general audience form as a
+                    // ratcheted warning. Plus the `unauthenticated:` bounce target.
+                    if let Some(doc) = cs {
+                        check_screen_roles(model, &mut issues, sfkey, &sid, s, doc, &user_type_set);
+                    }
                     // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
                     // ADR-0032-style bidirectional completeness). The defect class this kills
                     // forever: the map keyed a bare `CANCELLED` that matched NO enum member, so

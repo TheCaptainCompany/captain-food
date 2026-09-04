@@ -118,7 +118,17 @@ CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
   `system.yaml`. Each file: screens + a `resolvers` allowlist (reads → api.yaml queries by $ref)
   + an `actions` allowlist (writes → api.yaml mutations by $ref); screens declare `roles`
   (⊆ UserType) and files declare `app_types`. The validator proves the API answers the UI; UI
-  needs the API lacks are explicit `gaps`; `sdui: false` marks non-SDUI screens.
+  needs the API lacks are explicit `gaps`; `sdui: false` marks non-SDUI screens. **R1** (#639
+  part C 2c-ii, PROP-20260831-180622 §5): a screen may declare `graphql_role: <UserType>` to address
+  `/{role}/graphql` instead of its surface's role (the rider sign-in door speaks to
+  `/public/graphql`); validator §26 refuses the declaration unless the role is one of the screen's
+  `roles`, `PUBLIC` comes with `requires_auth: false`, and EVERY operation the screen binds (its
+  tree, its reads, the sheets it opens) admits that role — a role-refused control is a control that
+  renders and does nothing. A `requires_auth` screen may declare
+  `unauthenticated: { type: navigate, route }` naming an open route of the same file: the server
+  302s a cookie-less GET there and the client navigates there on a 401 from its role path. An
+  `inline_error` with `for_action: <action>` is where that action's REJECTED verdict renders, in
+  the caller's language (the server localizes `Operation.message` from the row's typed context).
 - **specs/translations.yaml** (ADR-0033; sidecars ADR-20260722-101500) — SHARED UI i18n catalog,
   errors.yaml-style (dotted keys + typed `params` + `messages.en`/`fr`) for cross-surface
   strings (`common.*`) + future backend text; surface-specific strings live in co-located
