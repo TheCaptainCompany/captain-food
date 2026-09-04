@@ -172,13 +172,23 @@ fn collect_status_tokens(node: &Value, out: &mut Vec<(String, String)>) {
                 }
             }
             if let Some(vw) = map.get(Value::String("visible_when".to_string())).and_then(|s| s.as_str()) {
-                if vw.trim_start().starts_with("order.status") {
-                    let mut rest = vw;
-                    while let Some(open) = rest.find('\'') {
-                        let tail = &rest[open + 1..];
-                        let Some(close) = tail.find('\'') else { break };
-                        out.push((format!("{ty}.visible_when"), tail[..close].to_string()));
-                        rest = &tail[close + 1..];
+                // Scoped to CLAUSES that themselves start with `order.status` (#639 part C step
+                // 3-ii): a compound condition legitimately mixes `order.status` with an unrelated
+                // status field on a DIFFERENT scalar (`order.status == 'OUT_FOR_DELIVERY' &&
+                // delivery.status in [...]`, the tracking banner's predicate) — scanning the WHOLE
+                // string for quoted tokens misattributed the other field's values to OrderStatus. A
+                // clause that does not itself start with `order.status` (e.g. one behind a `!(` or
+                // naming a different field) contributes nothing here, never a false positive.
+                for clause in vw.split("&&").flat_map(|c| c.split("||")) {
+                    let clause = clause.trim();
+                    if clause.starts_with("order.status") {
+                        let mut rest = clause;
+                        while let Some(open) = rest.find('\'') {
+                            let tail = &rest[open + 1..];
+                            let Some(close) = tail.find('\'') else { break };
+                            out.push((format!("{ty}.visible_when"), tail[..close].to_string()));
+                            rest = &tail[close + 1..];
+                        }
                     }
                 }
             }

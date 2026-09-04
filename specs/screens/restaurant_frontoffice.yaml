@@ -73,6 +73,11 @@ resolvers:
   carts.mine:           { query: { $ref: 'api.yaml#/queries/carts' } }
   order.byId:           { query: { $ref: 'api.yaml#/queries/order' } }
   orders.mine:          { query: { $ref: 'api.yaml#/queries/orders' } }
+  # #639 part C step 3-ii (ADR-20260904-015903 §7): the customer tracking banner reads this to
+  # replace the ETA with a re-dispatch notice while the delivery is PENDING/FAILED (query `delivery`
+  # already admits CUSTOMER). Same `:orderId` route-param same-name convention as rider.yaml's
+  # `job_detail` (router.rs's `param_args`).
+  delivery.byOrder:     { query: { $ref: 'api.yaml#/queries/delivery' } }
   me.profile:           { query: { $ref: 'api.yaml#/queries/me' } }
   favorites.mine:       { query: { $ref: 'api.yaml#/queries/favoriteRestaurants' } }
   operationStatus.byMessage: { query: { $ref: 'api.yaml#/queries/operationStatus' } }
@@ -539,7 +544,7 @@ screens:
     sdui: false
     sdui_reason: "Realtime GraphQL subscription + order state machine — a static React page."
     requires_auth: true
-    data_requirements: [order.byId]
+    data_requirements: [order.byId, delivery.byOrder]
     subscription: { $ref: 'api.yaml#/subscriptions/orderStatusChanged' }
     actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
@@ -566,7 +571,14 @@ screens:
           # #167: the restaurant did not respond in time — release-not-refund register: the hold
           # is released, the customer was never charged; no promised bank date.
           CANCELLED_BY_TIMEOUT:    { icon: clock_x,  title: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.title' }, body: { $ref: 'restaurant_frontoffice.translations.yaml#/order.status.acceptance_timed_out.body' } }
-      - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY']", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
+      # #639 part C step 3-ii (ADR-20260904-015903 §7): while OUT_FOR_DELIVERY, a delivery job that
+      # is PENDING or FAILED (a handback with no re-offer yet — `delivery.byOrder`, CUSTOMER-admitted)
+      # REPLACES this bar with a re-dispatch notice, never a blank slot and never a counting-down ETA
+      # that will never arrive. `sdui: false`: this screen is a bespoke Leptos page, so the actual
+      # replacement renders in `crates/web/src/tracking.rs`, not the generic SDUI renderer — this
+      # `visible_when` documents the same predicate the hand-written code applies.
+      - { type: eta_bar, visible_when: "order.status in ['ACCEPTED','PREPARING','OUT_FOR_DELIVERY'] && !(order.status == 'OUT_FOR_DELIVERY' && delivery.status in ['PENDING','FAILED'])", estimated_time: "{{ order.estimatedReadyAt }}", label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.eta' } }
+      - { type: text, id: delivery_reassigning_banner, value: { $ref: 'restaurant_frontoffice.translations.yaml#/order.delivery_reassigning' }, visible_when: "order.status == 'OUT_FOR_DELIVERY' && delivery.status in ['PENDING','FAILED']" }
       - { type: order_items_summary, lines: "{{ order.items }}", total: "{{ order.totalAmount | format_currency }}" }
       - { type: order_id_row, label: { $ref: 'restaurant_frontoffice.translations.yaml#/order.id_label' }, value: "{{ order.id }}", action: { type: copy_to_clipboard } }
       - type: section

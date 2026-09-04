@@ -71,6 +71,7 @@ pub enum DomainEvent {
     DeliveryStatusUpdated(DeliveryStatusUpdated),
     DeliveryUnassignedFromPartner(DeliveryUnassignedFromPartner),
     DeliveryDeclinedByRider(DeliveryDeclinedByRider),
+    DeliveryHandedBackByRider(DeliveryHandedBackByRider),
     DeliveryIssueReported(DeliveryIssueReported),
     DeliveryIssueResolved(DeliveryIssueResolved),
     DeliveryPartnerAvailabilityRequested(DeliveryPartnerAvailabilityRequested),

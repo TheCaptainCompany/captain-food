@@ -134,6 +134,15 @@ pub struct DeliveryDeclinedByRider {
     pub reason: Option<String>,
 }
 
+/// A rider holding a delivery job handed it back, stating where the food physically is (#639 part C step 3-ii, ADR-20260904-015903 §1-2). Business payload only — the actor is envelope metadata (`domain_events.user_id`). From ASSIGNED the job returns to PENDING (foodLocation NOT_COLLECTED, derived — the rider never picked up); from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT re-offers the job (PENDING) and WITH_RIDER fails it closed (FAILED — a PENDING job whose food is in a restricted rider's bag would be re-offered, which is an oversell).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryHandedBackByRider {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: RiderId,
+    pub food_location: FoodCustody,
+}
+
 /// An issue was reported on a delivery job (by the rider, partner, or support). #639 part C step 3-i (ADR-20260904-015903 §4) added the closed `kind` — NULLABLE because the shape is stored and rows appended before it carry none (additive, readers first); `issue` keeps its 1000 bound so every stored row parses, and is nullable because the command's note is optional now. No field renamed or removed. The report never moves the job's status.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

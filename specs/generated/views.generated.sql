@@ -8,14 +8,14 @@ SELECT
   (c.payload->>'deliveryJobId')::uuid AS delivery_job_id,
   (c.payload->>'orderId')::uuid AS order_id,
   (c.payload->>'restaurantId')::uuid AS restaurant_id,
-  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 'PENDING' WHEN 'DeliveryAcceptedByRider' THEN 'ASSIGNED' WHEN 'DeliveryAcceptedByPartner' THEN 'ASSIGNED' WHEN 'DeliveryPickedUp' THEN 'PICKED_UP' WHEN 'DeliveryStatusUpdated' THEN e.payload->>'status' WHEN 'DeliveryCompleted' THEN 'DELIVERED' WHEN 'DeliveryCancelled' THEN 'CANCELLED' WHEN 'DeliveryDispatchFailed' THEN 'FAILED' END FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')
+  (SELECT CASE e.event_type WHEN 'DeliveryRequested' THEN 'PENDING' WHEN 'DeliveryAcceptedByRider' THEN 'ASSIGNED' WHEN 'DeliveryAcceptedByPartner' THEN 'ASSIGNED' WHEN 'DeliveryPickedUp' THEN 'PICKED_UP' WHEN 'DeliveryStatusUpdated' THEN e.payload->>'status' WHEN 'DeliveryCompleted' THEN 'DELIVERED' WHEN 'DeliveryCancelled' THEN 'CANCELLED' WHEN 'DeliveryDispatchFailed' THEN 'FAILED' WHEN 'DeliveryHandedBackByRider' THEN (CASE e.payload->>'foodLocation' WHEN 'NOT_COLLECTED' THEN 'PENDING' WHEN 'RETURNED_TO_RESTAURANT' THEN 'PENDING' WHEN 'WITH_RIDER' THEN 'FAILED' END) END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryPickedUp', 'DeliveryStatusUpdated', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS status,
-  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' END FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS provider,
-  (SELECT (e.payload->>'riderId')::uuid FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider') AND e.payload ? 'riderId'
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN e.payload->>'riderId' WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS rider_id,
   (SELECT e.payload->'courier' FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByPartner') AND e.payload ? 'courier'
@@ -42,9 +42,14 @@ SELECT
   (SELECT CASE e.event_type WHEN 'DeliveryIssueReported' THEN e.payload->>'kind' WHEN 'DeliveryIssueResolved' THEN NULL END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryIssueReported', 'DeliveryIssueResolved')
      ORDER BY e.position DESC LIMIT 1) AS open_issue_kind,
+  (SELECT CASE e.event_type WHEN 'DeliveryHandedBackByRider' THEN e.payload->>'foodLocation' WHEN 'DeliveryAcceptedByRider' THEN NULL WHEN 'DeliveryAcceptedByPartner' THEN NULL END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryHandedBackByRider', 'DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner')
+     ORDER BY e.position DESC LIMIT 1) AS food_location,
+  (SELECT max(e.occurred_at) FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryHandedBackByRider')) AS handed_back_at,
   c.occurred_at AS created_at,
   (SELECT max(e.occurred_at) FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed', 'DeliveryIssueReported', 'DeliveryIssueResolved')) AS updated_at
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed', 'DeliveryIssueReported', 'DeliveryIssueResolved', 'DeliveryHandedBackByRider')) AS updated_at
 FROM domain_events c
 WHERE c.event_type = 'DeliveryRequested';
 

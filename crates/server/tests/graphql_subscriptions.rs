@@ -443,6 +443,8 @@ fn delivery_job_row(
         picked_up_at: None,
         delivered_at: None,
         open_issue_kind: None,
+        food_location: None,
+        handed_back_at: None,
     }
 }
 

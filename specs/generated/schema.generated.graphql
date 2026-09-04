@@ -375,6 +375,12 @@ enum DeliveryIssueResolution {
   OTHER
 }
 
+enum FoodCustody {
+  NOT_COLLECTED
+  RETURNED_TO_RESTAURANT
+  WITH_RIDER
+}
+
 enum CityAvailabilityStatus {
   PENDING
   APPROVED
@@ -850,6 +856,8 @@ type DeliveryJob {
   pickedUpAt: DateTime
   deliveredAt: DateTime
   openIssue: DeliveryIssueKind
+  foodLocation: FoodCustody
+  handedBackAt: DateTime
   order: Order!
   restaurant: Restaurant!
 }
@@ -1332,6 +1340,14 @@ input ResolveDeliveryIssueInput {
 input DeclineDeliveryInput {
   deliveryJobId: DeliveryJobId!
   reason: String
+}
+
+"""
+`riderId` is derived from the caller's RIDER identity.
+"""
+input HandBackDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  foodLocation: FoodCustody!
 }
 
 input RegisterDeliveryPartnerAvailabilityInput {
@@ -2002,6 +2018,7 @@ type Mutation {
   reportDeliveryIssue(input: ReportDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ReportDeliveryIssue")
   resolveDeliveryIssue(input: ResolveDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "ResolveDeliveryIssue")
   declineDelivery(input: DeclineDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "DeclineDelivery")
+  handBackDelivery(input: HandBackDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "HandBackDelivery")
   registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
   approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")

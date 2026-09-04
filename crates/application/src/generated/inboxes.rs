@@ -1088,6 +1088,8 @@ pub enum DeliveryJobInbox {
     DeliveryStatusUpdated(domain::generated::events::DeliveryStatusUpdated),
     /// COMMAND `EscalateDelivery`.
     EscalateDelivery(domain::generated::commands::EscalateDelivery),
+    /// COMMAND `HandBackDelivery`.
+    HandBackDelivery(domain::generated::commands::HandBackDelivery),
     /// COMMAND `ReportDeliveryIssue`.
     ReportDeliveryIssue(domain::generated::commands::ReportDeliveryIssue),
     /// COMMAND `ResolveDeliveryIssue`.
@@ -1105,7 +1107,7 @@ impl DeliveryJobInbox {
 
     /// Every message type this actor DECLARES it receives, in emission order — the
     /// operator-facing answer to "is this row's type one we know?" without constructing a value.
-    pub const DECLARED: &'static [&'static str] = &["AcceptDelivery", "CancelDelivery", "CompleteDelivery", "ConfirmPickup", "DeclineDelivery", "DeliveryAcceptedByPartner", "DeliveryDispatchFailed", "DeliveryOfferTimedOut", "DeliveryRejectedByPartner", "DeliveryRequested", "DeliveryStatusUpdated", "EscalateDelivery", "ReportDeliveryIssue", "ResolveDeliveryIssue", "UnassignDeliveryFromPartner", "UpdateDeliveryStatus"];
+    pub const DECLARED: &'static [&'static str] = &["AcceptDelivery", "CancelDelivery", "CompleteDelivery", "ConfirmPickup", "DeclineDelivery", "DeliveryAcceptedByPartner", "DeliveryDispatchFailed", "DeliveryOfferTimedOut", "DeliveryRejectedByPartner", "DeliveryRequested", "DeliveryStatusUpdated", "EscalateDelivery", "HandBackDelivery", "ReportDeliveryIssue", "ResolveDeliveryIssue", "UnassignDeliveryFromPartner", "UpdateDeliveryStatus"];
 
     /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
     /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
@@ -1251,6 +1253,13 @@ impl DeliveryJobInbox {
                     message_type: "EscalateDelivery",
                     detail: e.to_string(),
                 }),
+            "HandBackDelivery" => serde_json::from_value::<domain::generated::commands::HandBackDelivery>(payload.clone())
+                .map(Self::HandBackDelivery)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "HandBackDelivery",
+                    detail: e.to_string(),
+                }),
             "ReportDeliveryIssue" => serde_json::from_value::<domain::generated::commands::ReportDeliveryIssue>(payload.clone())
                 .map(Self::ReportDeliveryIssue)
                 .map_err(|e| InboxParseError::Payload {
@@ -1301,6 +1310,7 @@ impl DeliveryJobInbox {
             Self::DeliveryRequested(_) => "DeliveryRequested",
             Self::DeliveryStatusUpdated(_) => "DeliveryStatusUpdated",
             Self::EscalateDelivery(_) => "EscalateDelivery",
+            Self::HandBackDelivery(_) => "HandBackDelivery",
             Self::ReportDeliveryIssue(_) => "ReportDeliveryIssue",
             Self::ResolveDeliveryIssue(_) => "ResolveDeliveryIssue",
             Self::UnassignDeliveryFromPartner(_) => "UnassignDeliveryFromPartner",
@@ -1323,6 +1333,7 @@ impl DeliveryJobInbox {
             Self::DeliveryRequested(_) => InboxKind::Fact,
             Self::DeliveryStatusUpdated(_) => InboxKind::Fact,
             Self::EscalateDelivery(_) => InboxKind::Command,
+            Self::HandBackDelivery(_) => InboxKind::Command,
             Self::ReportDeliveryIssue(_) => InboxKind::Command,
             Self::ResolveDeliveryIssue(_) => InboxKind::Command,
             Self::UnassignDeliveryFromPartner(_) => InboxKind::Command,
@@ -1405,6 +1416,7 @@ impl DeliveryJobInbox {
             Self::DeliveryRequested(e) => Some(DeliveryJobFactInbox::DeliveryRequested(e)),
             Self::DeliveryStatusUpdated(e) => Some(DeliveryJobFactInbox::DeliveryStatusUpdated(e)),
             Self::EscalateDelivery(_) => None,
+            Self::HandBackDelivery(_) => None,
             Self::ReportDeliveryIssue(_) => None,
             Self::ResolveDeliveryIssue(_) => None,
             Self::UnassignDeliveryFromPartner(_) => None,

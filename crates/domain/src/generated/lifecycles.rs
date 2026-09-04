@@ -6,6 +6,7 @@
 pub mod delivery_job {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::DeliveryStatus;
+    use crate::generated::scalars::{FoodCustody};
 
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[DeliveryStatus] = &[DeliveryStatus::DELIVERED, DeliveryStatus::CANCELLED];
@@ -48,6 +49,11 @@ pub mod delivery_job {
             (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
             (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
             (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryStatusUpdated(e)) if e.status == DeliveryStatus::FAILED => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::ASSIGNED, DomainEvent::DeliveryHandedBackByRider(e)) if e.food_location == FoodCustody::NOT_COLLECTED => Some(DeliveryStatus::PENDING),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryHandedBackByRider(e)) if e.food_location == FoodCustody::RETURNED_TO_RESTAURANT => Some(DeliveryStatus::PENDING),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryHandedBackByRider(e)) if e.food_location == FoodCustody::RETURNED_TO_RESTAURANT => Some(DeliveryStatus::PENDING),
+            (DeliveryStatus::PICKED_UP, DomainEvent::DeliveryHandedBackByRider(e)) if e.food_location == FoodCustody::WITH_RIDER => Some(DeliveryStatus::FAILED),
+            (DeliveryStatus::OUT_FOR_DELIVERY, DomainEvent::DeliveryHandedBackByRider(e)) if e.food_location == FoodCustody::WITH_RIDER => Some(DeliveryStatus::FAILED),
             _ => None,
         }
     }
@@ -55,7 +61,8 @@ pub mod delivery_job {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<DeliveryStatus> {
         match event {
             DomainEvent::DeliveryAcceptedByRider(_) => Some(DeliveryStatus::ASSIGNED),
@@ -66,6 +73,7 @@ pub mod delivery_job {
             DomainEvent::DeliveryCancelled(_) => Some(DeliveryStatus::CANCELLED),
             DomainEvent::DeliveryDispatchFailed(_) => Some(DeliveryStatus::FAILED),
             DomainEvent::DeliveryStatusUpdated(e) => Some(e.status),
+            DomainEvent::DeliveryHandedBackByRider(e) => match e.food_location { FoodCustody::NOT_COLLECTED => Some(DeliveryStatus::PENDING), FoodCustody::RETURNED_TO_RESTAURANT => Some(DeliveryStatus::PENDING), FoodCustody::WITH_RIDER => Some(DeliveryStatus::FAILED), },
             _ => None,
         }
     }
@@ -80,7 +88,7 @@ pub mod delivery_job {
 pub mod rider {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::RiderStatus;
-
+    
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[RiderStatus] = &[];
 
@@ -113,7 +121,8 @@ pub mod rider {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<RiderStatus> {
         match event {
             DomainEvent::RiderStatusChanged(e) => Some(e.status),
@@ -131,7 +140,7 @@ pub mod rider {
 pub mod restaurant {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::RestaurantStatus;
-
+    
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[RestaurantStatus] = &[];
 
@@ -165,7 +174,8 @@ pub mod restaurant {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<RestaurantStatus> {
         match event {
             DomainEvent::RestaurantActivated(_) => Some(RestaurantStatus::ACTIVE),
@@ -186,7 +196,7 @@ pub mod restaurant {
 pub mod cart {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::CartStatus;
-
+    
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[CartStatus] = &[CartStatus::CHECKED_OUT];
 
@@ -211,7 +221,8 @@ pub mod cart {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<CartStatus> {
         match event {
             DomainEvent::CartCheckedOut(_) => Some(CartStatus::CHECKED_OUT),
@@ -229,7 +240,7 @@ pub mod cart {
 pub mod order {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::OrderStatus;
-
+    
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[OrderStatus] = &[OrderStatus::DELIVERED, OrderStatus::REJECTED, OrderStatus::CANCELLED_BY_CUSTOMER, OrderStatus::CANCELLED_BY_RESTAURANT, OrderStatus::CANCELLED_BY_TIMEOUT];
 
@@ -264,7 +275,8 @@ pub mod order {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<OrderStatus> {
         match event {
             DomainEvent::OrderAcceptedByRestaurant(_) => Some(OrderStatus::ACCEPTED),
@@ -289,7 +301,7 @@ pub mod order {
 pub mod reclamation {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::ReclamationStatus;
-
+    
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[ReclamationStatus] = &[];
 
@@ -317,7 +329,8 @@ pub mod reclamation {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<ReclamationStatus> {
         match event {
             DomainEvent::ReclamationResolved(_) => Some(ReclamationStatus::RESOLVED),
@@ -337,7 +350,7 @@ pub mod reclamation {
 pub mod payment {
     use crate::generated::events::DomainEvent;
     use crate::generated::scalars::PaymentStatus;
-
+    
     /// Terminal states — no outgoing transitions.
     pub const TERMINAL: &[PaymentStatus] = &[PaymentStatus::FAILED, PaymentStatus::REFUNDED, PaymentStatus::RELEASED];
 
@@ -367,7 +380,8 @@ pub mod payment {
     /// The state `event` drives the machine to, irrespective of the current state — at fold
     /// time the recorded fact wins (legality was enforced at append time by [`transition`]). `None`
     /// for an event outside the machine (or whose target depends on the current state). A dynamic
-    /// (event-carried) target is the event's payload field.
+    /// (event-carried) target is the event's payload field; a mapped one matches that field's own
+    /// scalar against every declared `when` (#639 part C step 3-ii).
     pub fn target(event: &DomainEvent) -> Option<PaymentStatus> {
         match event {
             DomainEvent::PaymentAuthorized(_) => Some(PaymentStatus::AUTHORIZED),

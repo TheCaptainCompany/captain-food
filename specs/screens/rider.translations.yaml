@@ -36,11 +36,20 @@ rider.job.picked_up: { messages: { en: "Picked up", fr: "Commande récupérée" 
 rider.job.delivered: { messages: { en: "Delivered", fr: "Livrée" } }
 rider.job.problem:   { messages: { en: "A problem", fr: "Un problème" } }
 rider.job.issue_reported: { messages: { en: "Issue reported", fr: "Problème signalé" } }
+rider.job.handback_instruction_title: { messages: { en: "Take the order back", fr: "Rapportez la commande" } }
+rider.job.handback_done_body: { messages: { en: "Order handed back. The restaurant is reassigning it.", fr: "Course rendue. Le restaurant réattribue." } }
+rider.job.back_to_jobs: { messages: { en: "Back to deliveries", fr: "Retour aux courses" } }
 
 # ── the issue sheet (#639 part C step 3-i) ───────────────────────────────────
 rider.issue.title:         { messages: { en: "A problem with this delivery", fr: "Un problème sur cette course" } }
 rider.issue.exit_label:    { messages: { en: "What happens next", fr: "Et ensuite" } }
 rider.issue.exit.continue: { messages: { en: "I carry on, but…", fr: "Je continue, mais…" } }
+rider.issue.exit.hand_back: { messages: { en: "I cannot continue", fr: "Je ne peux pas continuer" } }
+rider.issue.custody_label: { messages: { en: "Where is the order", fr: "Où est la commande" } }
+rider.issue.custody.with_rider: { messages: { en: "I still have it", fr: "Je l'ai encore" } }
+rider.issue.custody.returned: { messages: { en: "I gave it back to the restaurant", fr: "Je l'ai rendue au restaurant" } }
+rider.issue.handback_confirm: { messages: { en: "Hand back the order", fr: "Rendre la commande" } }
+rider.issue.handback_pending: { messages: { en: "Handing back…", fr: "En cours…" } }
 rider.issue.kind_label:    { messages: { en: "What is wrong", fr: "Quel est le problème" } }
 rider.issue.kind.address_not_found:    { messages: { en: "Address not found", fr: "Adresse introuvable" } }
 rider.issue.kind.customer_unreachable: { messages: { en: "Customer unreachable", fr: "Client injoignable" } }

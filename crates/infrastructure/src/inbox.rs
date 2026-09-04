@@ -321,6 +321,7 @@ async fn delivery_job(
         DeliveryJobInbox::DeliveryRequested(_) => InboxOutcome::RecordFact,
         DeliveryJobInbox::DeliveryStatusUpdated(_) => InboxOutcome::RecordFact,
         DeliveryJobInbox::EscalateDelivery(cmd) => run(async { application::commands::escalate_delivery(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+        DeliveryJobInbox::HandBackDelivery(cmd) => run(async { application::commands::hand_back_delivery(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         DeliveryJobInbox::ReportDeliveryIssue(cmd) => run(async { application::commands::report_delivery_issue(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         DeliveryJobInbox::ResolveDeliveryIssue(cmd) => run(async { application::commands::resolve_delivery_issue(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         DeliveryJobInbox::UnassignDeliveryFromPartner(cmd) => run(async { application::commands::unassign_delivery_from_partner(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,

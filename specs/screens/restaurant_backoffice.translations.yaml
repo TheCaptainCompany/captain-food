@@ -56,6 +56,11 @@ back.deliveries.issue.resolution.cancelled:               { messages: { en: "Del
 back.deliveries.issue.resolution.other:                   { messages: { en: "Other", fr: "Autre" } }
 back.deliveries.issue.note_prompt:   { messages: { en: "The facts, without describing anyone", fr: "Les faits, sans décrire des personnes" } }
 back.deliveries.issue.confirm:       { messages: { en: "Confirm", fr: "Confirmer" } }
+# #639 part C step 3-ii: the handback pinned card — headlined by where the food physically is.
+back.deliveries.handback.with_rider:             { messages: { en: "Handed back — still with the rider", fr: "Course rendue — commande chez le livreur" } }
+back.deliveries.handback.returned:               { messages: { en: "Handed back — at the restaurant", fr: "Course rendue — commande au restaurant" } }
+back.deliveries.handback.not_collected:          { messages: { en: "Handed back — never collected", fr: "Course rendue — commande non retirée" } }
+back.deliveries.handback.body:                   { messages: { en: "The rider handed this delivery back. Reassign it or deliver it yourself.", fr: "Le livreur a rendu cette course. Réattribuez-la ou livrez-la vous-même." } }
 
 # ── refund queue ─────────────────────────────────────────────────────────────
 back.refunds.title:       { messages: { en: "Refund requests", fr: "Demandes de remboursement" } }

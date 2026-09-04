@@ -29,6 +29,8 @@ pub use integrations::supabase_sms_hook;
 pub use integrations::supabase_auth::{FailClosedIdentityService, SupabaseIdentityService};
 pub use integrations::delivery_gateway::CompositeDeliveryGateway;
 pub use integrations::delivery_offer_timeout_worker::DeliveryOfferTimeoutWorker;
+pub use integrations::delivery_handback_watch;
+pub use integrations::delivery_handback_watch::spawn_delivery_handback_watch;
 pub use integrations::retention_sweep_worker::{RetentionSweepSummary, RetentionSweepWorker};
 pub use integrations::sync_sirene_worker::{SireneSyncStatus, SireneSyncSummary, SireneSyncWorker};
 pub use persistence::{

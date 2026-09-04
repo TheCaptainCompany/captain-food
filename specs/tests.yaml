@@ -666,6 +666,16 @@ fixtures:
   deliveryDeclinedByRider:
     type: { $ref: 'events.yaml#/DeliveryDeclinedByRider' }
     data: { deliveryJobId: "deliv-1", riderId: "rider-1", reason: "Too far" }
+  # #639 part C step 3-ii (ADR-20260904-015903 §1-2).
+  deliveryHandedBackNotCollected:
+    type: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+    data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "NOT_COLLECTED" }
+  deliveryHandedBackReturnedToRestaurant:
+    type: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+    data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "RETURNED_TO_RESTAURANT" }
+  deliveryHandedBackWithRider:
+    type: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
+    data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "WITH_RIDER" }
   deliveryIssueReported:
     type: { $ref: 'events.yaml#/DeliveryIssueReported' }
     data: { deliveryJobId: "deliv-1", riderId: "rider-1", kind: "CUSTOMER_UNREACHABLE", issue: "Customer unreachable at the door" }
@@ -3555,6 +3565,149 @@ tests:
       data: { deliveryJobId: "deliv-1", riderId: "rider-1", reason: "Too far" }
     then:
       - { $ref: '#/fixtures/deliveryDeclinedByRider' }
+
+  # #639 part C step 3-ii, ADR-20260904-015903 §1-2 (the custody-keyed transitions, part A.3's
+  # grammar extension). The rider never picked up: foodLocation is derived NOT_COLLECTED (the sheet
+  # asks nothing), job returns PENDING.
+  TestDeliveryHandedBackFromAssigned:
+    name: "The assigned rider hands the job back before pickup; it returns PENDING (NOT_COLLECTED)"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "NOT_COLLECTED" }
+    then:
+      - { $ref: '#/fixtures/deliveryHandedBackNotCollected' }
+
+  TestDeliveryHandedBackFromPickedUpReturned:
+    name: "A rider who collected hands the job back to the restaurant; it returns PENDING (re-offerable)"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryPickedUp' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "RETURNED_TO_RESTAURANT" }
+    then:
+      - { $ref: '#/fixtures/deliveryHandedBackReturnedToRestaurant' }
+
+  # A rider who still holds the food fails the job CLOSED (never PENDING) — re-offering it would be
+  # an oversell while a restricted rider's bag still holds the customer's food.
+  TestDeliveryHandedBackFromPickedUpWithRider:
+    name: "A rider still holding the food hands the job back; it FAILS rather than re-offer"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }, { $ref: 'rules.yaml#/HandBackIsNeverALever' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryPickedUp' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "WITH_RIDER" }
+    then:
+      - { $ref: '#/fixtures/deliveryHandedBackWithRider' }
+
+  # The fold-reset proof (ADR-20260904-015903 §3): a handback clears rider_id/assigned, so a SECOND
+  # rider can accept the re-offered job right after — the same command that would have been rejected
+  # `DeliveryAlreadyAssigned` before the handback now succeeds.
+  TestDeliveryReofferedAfterHandBack:
+    name: "A job handed back is accepted again by a different rider"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryPickedUp' }
+      - { $ref: '#/fixtures/deliveryHandedBackReturnedToRestaurant' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-2" }
+    then:
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+
+  TestHandBackDeliveryRejectsRiderMismatch:
+    name: "A rider who does not hold the job cannot hand it back"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-2", foodLocation: "NOT_COLLECTED" }
+    thrown:
+      - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
+
+  TestHandBackDeliveryRejectsPendingJob:
+    name: "A PENDING job (never assigned) cannot be handed back"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "NOT_COLLECTED" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
+  TestHandBackDeliveryRejectsDeliveredJob:
+    name: "A DELIVERED job cannot be handed back"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryPickedUp' }
+      - { $ref: '#/fixtures/deliveryCompleted' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "RETURNED_TO_RESTAURANT" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
+  TestHandBackDeliveryRejectsAssignedWithRider:
+    name: "From ASSIGNED, foodLocation WITH_RIDER is refused — the rider never picked up yet"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "WITH_RIDER" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
+  TestHandBackDeliveryRejectsPartnerHeldJob:
+    name: "A partner-held job cannot be handed back — UnassignDeliveryFromPartner is that door"
+    rules: [{ $ref: 'rules.yaml#/DeliveryHandBackKeepsCustodyHonest' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByPartner' }
+    when:
+      type: { $ref: 'commands.yaml#/HandBackDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "NOT_COLLECTED" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
+  TestUnassignDeliveryFromPartnerRejectsRiderHeldJob:
+    name: "A rider-accepted job cannot be unassigned as if it were partner-held"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPartnerAssignmentLifecycle' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/UnassignDeliveryFromPartner' }
+      data: { deliveryJobId: "deliv-1", reason: "Re-offering to another channel" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
 
   # #639 part C step 3-i (ADR-20260904-015903 §4): the report carries a closed KIND (required on
   # the command) and an optional bounded note; the status never moves.

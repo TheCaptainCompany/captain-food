@@ -1246,6 +1246,16 @@ pub async fn router() -> Router {
                         pool.clone(),
                         std::time::Duration::from_secs(30),
                     );
+                    // #639 part C step 3-ii (ADR-20260904-015903 §8): THE CUSTODY-HANDBACK
+                    // dead-man's switch — "a rider handed a job back and nobody re-offered it".
+                    // UNCONDITIONAL, same reason as the two switches above: the gauge reads 0 on a
+                    // healthy system, so the only way to know it works is to have watched it work
+                    // before the day it is needed. Non-fenced (ADR-20260904-015903 §10) — beside
+                    // the offer-timeout worker below, never inside the fenced mailbox handler.
+                    infrastructure::spawn_delivery_handback_watch(
+                        pool.clone(),
+                        infrastructure::delivery_handback_watch::default_sweep_interval(),
+                    );
 
                     // (The startup Stripe-fact backfill runs INLINE before the saga runner
                     // spawns — see the pm_backfill block above the RUN_PROCESS_MANAGERS gate.)

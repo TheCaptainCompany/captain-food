@@ -377,6 +377,7 @@ pub fn project_order_tracking<C: OrderTrackingCompute>(c: &C, state: Option<Orde
         DomainEvent::DeliveryStatusUpdated(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryCompleted(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
         DomainEvent::DeliveryDispatchFailed(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; Some(row) },
+        DomainEvent::DeliveryHandedBackByRider(_) => { let mut row = state?; let v = c.delivery_status(Some(&row), env); row.delivery_status = v; let v = c.courier(Some(&row), env); row.courier = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

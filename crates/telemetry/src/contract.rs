@@ -201,6 +201,17 @@ pub mod metric {
     /// without this counter (the `order_lane_watch_heartbeat_total` shape, same reason).
     pub const PAYMENT_BIRTH_GAP_SWEEP_HEARTBEAT_TOTAL: &str =
         "payment_birth_gap_sweep_heartbeat_total";
+    /// `custody-handback` contract (#639 part C step 3-ii, ADR-20260904-015903 §8): THE
+    /// CUSTODY-HANDBACK DEAD-MAN'S SWITCH — mirrors [`PAYMENT_AUTHORIZED_NO_ORDER_BIRTH_AGE_SECONDS`]'s
+    /// shape. The age in seconds of the OLDEST delivery job whose latest lifecycle fact is a
+    /// handback with no LATER acceptance re-offering it, 0 when the class is empty. No attributes
+    /// (unlike the birth-gap gauge's `reason` — there is exactly one class here). Emitted every
+    /// sweep by the non-fenced `delivery_handback_watch.rs`.
+    pub const DELIVERY_HANDED_BACK_UNREASSIGNED_AGE_SECONDS: &str =
+        "delivery_handed_back_unreassigned_age_seconds";
+    /// `custody-handback` contract: the sweep's own liveness, incremented once per COMPLETED sweep
+    /// — same reason as [`PAYMENT_BIRTH_GAP_SWEEP_HEARTBEAT_TOTAL`].
+    pub const DELIVERY_HANDBACK_SWEEP_HEARTBEAT_TOTAL: &str = "delivery_handback_sweep_heartbeat_total";
     /// `place-order` contract (#440): the checkout shell rendered WITHOUT a mountable payment
     /// element — a DEFECT counter (the customer_claim_stamp_failed_total pattern), attribute
     /// `reason`. A degraded render produces ZERO place-order runs (the customer cannot even try),

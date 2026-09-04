@@ -79,6 +79,13 @@ pub struct TrackingState {
     pub order_id: Uuid,
     /// What the `order.byId` read said — see [`OrderRead`].
     pub order: OrderRead,
+    /// The order's DeliveryJob, when one exists (`delivery.byOrder`, #639 part C step 3-ii,
+    /// ADR-20260904-015903 §7) — `None` for COLLECTION orders, an unresolved/failed/absent read, or
+    /// simply before dispatch. Collapsed to a plain `Option` (unlike [`OrderRead`]'s three-way
+    /// split): the banner this feeds only ever ACTS on a positive PENDING/FAILED signal, so any
+    /// read that is not a clean answer safely falls back to the ordinary `eta_bar` — never a lie
+    /// about the order itself, which is what [`OrderRead`]'s split exists to prevent.
+    pub delivery: Option<Value>,
     /// The PAID context (#758, ADR-20260829-230418): the client still holds an OPEN `PlaceOrder`
     /// intent for THIS order (`pending::holds_place_order` — the persisted `DispatchHandle`
     /// record). Once `ROUTE_ORDER_BIRTH_THROUGH_LANE` flips, the birth rides the Order lane and
@@ -91,7 +98,7 @@ pub struct TrackingState {
 
 impl TrackingState {
     pub fn new(order_id: Uuid) -> Self {
-        Self { order_id, order: OrderRead::Unresolved, birth_pending: false }
+        Self { order_id, order: OrderRead::Unresolved, delivery: None, birth_pending: false }
     }
 
     /// Mark the paid context — see [`Self::birth_pending`]. Builder-shaped so every constructor
@@ -117,7 +124,8 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v.clone()),
         };
-        Self { order_id, order, birth_pending: false }
+        let delivery = data.get("delivery").filter(|v| !v.is_null()).cloned();
+        Self { order_id, order, delivery, birth_pending: false }
     }
 
     /// Build from a full [`RenderContext`] (#472) — the [`from_resolved`](Self::from_resolved)
@@ -133,7 +141,8 @@ impl TrackingState {
             Some(Value::Null) => OrderRead::Absent,
             Some(v) => OrderRead::Present(v),
         };
-        Self { order_id, order, birth_pending: false }
+        let delivery = ctx.binding_json("delivery").filter(|v| !v.is_null());
+        Self { order_id, order, delivery, birth_pending: false }
     }
 
     /// Pull `order.byId` — the initial render AND the re-sync on every subscription (re)connect.
@@ -150,6 +159,15 @@ impl TrackingState {
             }
         } else {
             self.order = OrderRead::Present(order);
+        }
+        // #639 part C step 3-ii: re-synced on every reconnect alongside the order, same push-first
+        // philosophy — a handback that lands WHILE the customer is watching must replace the ETA
+        // without a page reload. A failed/null read here is silently absorbed (see the field doc):
+        // it can only ever turn the banner OFF, never fabricate a stranded-food claim.
+        let mut delivery_vars = Map::new();
+        delivery_vars.insert("orderId".into(), json!(self.order_id));
+        if let Ok(delivery) = execute_resolver(transport, ResolverKey::DeliveryByOrder, delivery_vars).await {
+            self.delivery = (!delivery.is_null()).then_some(delivery);
         }
         Ok(())
     }
@@ -372,7 +390,16 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
         .and_then(|o| o.get("estimatedReadyAt"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    let show_eta = matches!(status.as_deref(), Some("ACCEPTED" | "PREPARING" | "OUT_FOR_DELIVERY"));
+    // #639 part C step 3-ii (ADR-20260904-015903 §7): a delivery job the fold has moved to
+    // PENDING/FAILED (a handback with no re-offer yet, custody-keyed status) while the ORDER is
+    // still OUT_FOR_DELIVERY REPLACES the ETA bar — never blank, never a countdown to an arrival
+    // that will not happen at that pace.
+    let delivery_status =
+        state.delivery.as_ref().and_then(|d| d.get("status")).and_then(Value::as_str).map(str::to_string);
+    let delivery_reassigning = status.as_deref() == Some("OUT_FOR_DELIVERY")
+        && matches!(delivery_status.as_deref(), Some("PENDING" | "FAILED"));
+    let show_eta =
+        matches!(status.as_deref(), Some("ACCEPTED" | "PREPARING" | "OUT_FOR_DELIVERY")) && !delivery_reassigning;
     let delivered = status.as_deref() == Some("DELIVERED");
     let item_count = state
         .order
@@ -393,6 +420,7 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
     let tracking_stale = crate::i18n::resolve("order.error.tracking_stale", &locale);
     let retry = crate::i18n::resolve("common.error.retry", &locale);
     let confirming_copy = crate::i18n::resolve("order.confirming", &locale);
+    let delivery_reassigning_copy = crate::i18n::resolve("order.delivery_reassigning", &locale);
     view! {
         <main id="app" data-hydrate="order_tracking">
             {match hero {
@@ -456,6 +484,9 @@ pub fn OrderTrackingScreen(state: TrackingState, locale: String) -> impl IntoVie
             }}
             {(show_eta && eta.is_some()).then(|| view! {
                 <div data-c="eta_bar">{eta.clone().unwrap_or_default()}</div>
+            })}
+            {delivery_reassigning.then(|| view! {
+                <div data-c="text" id="delivery_reassigning_banner" data-i18n="order.delivery_reassigning">{delivery_reassigning_copy.clone()}</div>
             })}
             <div data-c="order_timeline"></div>
             <div data-c="order_items_summary" data-count=item_count.to_string()></div>
@@ -812,7 +843,7 @@ mod tests {
             // was never read renders no claim at all; that is
             // `an_unanswered_read_never_tells_a_customer_their_order_was_not_found`.
             let answered_null =
-                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false };
+                TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, delivery: None, birth_pending: false };
             let html = render_tracking_html(answered_null, locale);
             assert!(html.contains(not_found), "{locale}: {html}");
             assert!(!html.contains("[order.not_found]"), "{html}");
@@ -847,7 +878,7 @@ mod tests {
         // The two empty states are DIFFERENT (#427): a read that answered null is UNKNOWN; a read
         // that never answered makes no claim.
         let html = render_tracking_html(
-            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, birth_pending: false },
+            TrackingState { order_id: Uuid::now_v7(), order: OrderRead::Absent, delivery: None, birth_pending: false },
             "fr",
         );
         assert!(html.contains("data-status=\"UNKNOWN\""));

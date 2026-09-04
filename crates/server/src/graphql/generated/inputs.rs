@@ -580,6 +580,17 @@ pub struct DeclineDeliveryInput {
     pub reason: Option<String>,
 }
 
+/// The assigned rider hands a held job back with the food's whereabouts (#639 part C step 3-ii, ADR-20260904-015903 §1-2). All three fields required, NO free-text `reason` (legal: the narrative the restriction ADR made unspellable would re-enter by the side door). riderId is asserted equal to the job's rider_id (as ConfirmPickup does); a partner-held job is refused (UnassignDeliveryFromPartner is that door). From ASSIGNED, foodLocation MUST be NOT_COLLECTED (the rider is not at the restaurant); from PICKED_UP/OUT_FOR_DELIVERY it MUST NOT be NOT_COLLECTED. The GraphQL surface derives riderId from ReadScope::Rider (#865 grammar) — the input on the wire never carries it.
+/// `riderId` is derived from the caller's RIDER identity.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct HandBackDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "foodLocation")]
+    pub food_location: FoodCustody,
+}
+
 /// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]

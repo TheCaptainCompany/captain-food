@@ -85,6 +85,7 @@ pub const OPERATION_SCOPES: &[(&str, &str, &str)] = &[
     ("mutation", "reportDeliveryIssue", "delivery"),
     ("mutation", "resolveDeliveryIssue", "delivery"),
     ("mutation", "declineDelivery", "delivery"),
+    ("mutation", "handBackDelivery", "delivery"),
     ("mutation", "registerDeliveryPartnerAvailability", "delivery"),
     ("mutation", "approveDeliveryPartnerAvailability", "delivery"),
     ("mutation", "revokeDeliveryPartnerAvailability", "delivery"),

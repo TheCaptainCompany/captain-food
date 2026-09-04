@@ -74,6 +74,15 @@ pub struct ResolveDeliveryIssue {
     pub note: Option<String>,
 }
 
+/// The assigned rider hands a held job back with the food's whereabouts (#639 part C step 3-ii, ADR-20260904-015903 §1-2). All three fields required, NO free-text `reason` (legal: the narrative the restriction ADR made unspellable would re-enter by the side door). riderId is asserted equal to the job's rider_id (as ConfirmPickup does); a partner-held job is refused (UnassignDeliveryFromPartner is that door). From ASSIGNED, foodLocation MUST be NOT_COLLECTED (the rider is not at the restaurant); from PICKED_UP/OUT_FOR_DELIVERY it MUST NOT be NOT_COLLECTED. The GraphQL surface derives riderId from ReadScope::Rider (#865 grammar) — the input on the wire never carries it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandBackDelivery {
+    pub delivery_job_id: DeliveryJobId,
+    pub rider_id: RiderId,
+    pub food_location: FoodCustody,
+}
+
 /// Drive a delivery job's status (independent-rider path / admin correction).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

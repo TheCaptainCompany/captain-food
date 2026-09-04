@@ -95,6 +95,14 @@ fn apply(state: Option<DeliveryJobState>, event: &DomainEvent) -> Option<Deliver
         }
         DomainEvent::DeliveryIssueReported(_) => s.open_issue = true,
         DomainEvent::DeliveryIssueResolved(_) => s.open_issue = false,
+        // #639 part C step 3-ii: a handback releases the assignment — `rider_id` clears and
+        // `assigned` drops, which is the fold-reset proof `TestDeliveryReofferedAfterHandBack`
+        // needs (a second rider can accept right after). `status` already moved above, through
+        // the generated custody-keyed lifecycle table.
+        DomainEvent::DeliveryHandedBackByRider(_) => {
+            s.rider_id = None;
+            s.assigned = false;
+        }
         _ => {}
     }
     Some(s)
@@ -242,5 +250,83 @@ mod tests {
         assert!(s.open_issue);
         let s = fold(&[requested(), reported, resolved]).unwrap();
         assert!(!s.open_issue);
+    }
+
+    // #639 part C step 3-ii: the fold-reset proof — after a handback, `rider_id == None &&
+    // !assigned`, which is what lets a SECOND rider accept the re-offered job
+    // (`TestDeliveryReofferedAfterHandBack`, the projection test's server-side companion).
+    #[test]
+    fn handback_from_picked_up_returns_to_pending_and_clears_the_assignment() {
+        use crate::generated::events::{DeliveryHandedBackByRider, DeliveryPickedUp};
+        use crate::generated::scalars::FoodCustody;
+        let rider = RiderId(uuid::Uuid::nil());
+        let accept = DomainEvent::DeliveryAcceptedByRider(DeliveryAcceptedByRider {
+            delivery_job_id: job_id(),
+            order_id: order_id(),
+            rider_id: rider,
+        });
+        let picked_up = DomainEvent::DeliveryPickedUp(DeliveryPickedUp {
+            delivery_job_id: job_id(),
+            order_id: order_id(),
+            rider_id: rider,
+            at: None,
+        });
+        let handed_back = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
+            delivery_job_id: job_id(),
+            rider_id: rider,
+            food_location: FoodCustody::RETURNED_TO_RESTAURANT,
+        });
+        let s = fold(&[requested(), accept, picked_up, handed_back]).unwrap();
+        assert_eq!(s.status, DeliveryStatus::PENDING);
+        assert_eq!(s.rider_id, None);
+        assert!(!s.assigned);
+    }
+
+    #[test]
+    fn handback_with_rider_from_picked_up_fails_the_job_and_still_clears_the_assignment() {
+        use crate::generated::events::{DeliveryHandedBackByRider, DeliveryPickedUp};
+        use crate::generated::scalars::FoodCustody;
+        let rider = RiderId(uuid::Uuid::nil());
+        let accept = DomainEvent::DeliveryAcceptedByRider(DeliveryAcceptedByRider {
+            delivery_job_id: job_id(),
+            order_id: order_id(),
+            rider_id: rider,
+        });
+        let picked_up = DomainEvent::DeliveryPickedUp(DeliveryPickedUp {
+            delivery_job_id: job_id(),
+            order_id: order_id(),
+            rider_id: rider,
+            at: None,
+        });
+        let handed_back = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
+            delivery_job_id: job_id(),
+            rider_id: rider,
+            food_location: FoodCustody::WITH_RIDER,
+        });
+        let s = fold(&[requested(), accept, picked_up, handed_back]).unwrap();
+        assert_eq!(s.status, DeliveryStatus::FAILED);
+        assert_eq!(s.rider_id, None);
+        assert!(!s.assigned);
+    }
+
+    #[test]
+    fn handback_from_assigned_with_not_collected_returns_to_pending() {
+        use crate::generated::events::DeliveryHandedBackByRider;
+        use crate::generated::scalars::FoodCustody;
+        let rider = RiderId(uuid::Uuid::nil());
+        let accept = DomainEvent::DeliveryAcceptedByRider(DeliveryAcceptedByRider {
+            delivery_job_id: job_id(),
+            order_id: order_id(),
+            rider_id: rider,
+        });
+        let handed_back = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
+            delivery_job_id: job_id(),
+            rider_id: rider,
+            food_location: FoodCustody::NOT_COLLECTED,
+        });
+        let s = fold(&[requested(), accept, handed_back]).unwrap();
+        assert_eq!(s.status, DeliveryStatus::PENDING);
+        assert_eq!(s.rider_id, None);
+        assert!(!s.assigned);
     }
 }

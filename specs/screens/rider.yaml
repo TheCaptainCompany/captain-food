@@ -53,6 +53,9 @@ actions:
   # longer carries the field at all.
   report_delivery_issue: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/reportDeliveryIssue' } }
   decline_delivery:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/declineDelivery' } }
+  # The handback door (#639 part C step 3-ii, ADR-20260904-015903 §1/§7): the sheet's second exit.
+  # `riderId` is likewise DERIVED (#865) — never bound here.
+  hand_back_delivery:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/handBackDelivery' } }
   # The sign-in door (#639 part C step 2c): two identify-only `roles: [PUBLIC]` mutations, reachable
   # from this surface ONLY through the `sign_in` screen's `graphql_role: PUBLIC` (R1, PROP-20260831-180622
   # §5). The session itself never travels in a GraphQL response: `claim_session` collects it from
@@ -85,11 +88,21 @@ global_components:
 # what a screen binds).
 # ──────────────────────────────────────────────────────────────────────────────
 bottom_sheets:
-  # "Un problème" (#639 part C step 3-i; ADR-20260904-015903 §7 — one control, two exits; 3-i ships
-  # the FIRST exit only). One-tap reason chips = the six DeliveryIssueKind values; OTHER reveals a
-  # collapsed 300-char note prompted "Les faits, sans décrire des personnes" (the D2 pattern's
+  # "Un problème" (#639 part C step 3-i/3-ii; ADR-20260904-015903 §7 — one control, two exits).
+  # First choice: "Je continue, mais…" (report-only, kind chips, 3-i) or "Je ne peux pas continuer"
+  # (hand the job back, 3-ii). One-tap reason chips = the six DeliveryIssueKind values; OTHER reveals
+  # a collapsed 300-char note prompted "Les faits, sans décrire des personnes" (the D2 pattern's
   # bounded note, ADR-20260808-171056); confirm tells the restaurant through the read model. The
   # refusal lands INLINE — never a toast: the rider is never left with a dismissed sheet and no proof.
+  #
+  # The handback exit (3-ii): the food question is asked only at PICKED_UP/OUT_FOR_DELIVERY (two
+  # cards); from ASSIGNED the rider never picked up, so `foodLocation` is DERIVED NOT_COLLECTED and
+  # no question is asked — two separate confirm buttons, gated by `delivery.status`, carry the
+  # literal or the chosen value (`hand_back_delivery` dispatches a single Tell; the ADR's "report +
+  # hand back" sequencing is a follow-on — the SDUI `on_success` grammar has no mutation-chaining
+  # primitive today, and a control that renders and silently fails half its job is worse than a
+  # narrower one that fully works, CLAUDE.md — filed as an adjacent finding in the PR body). No
+  # free-text `reason` anywhere on this exit (legal: HandBackDelivery carries none).
   rider_issue_sheet:
     id: rider_issue_sheet
     type: bottom_sheet
@@ -101,10 +114,12 @@ bottom_sheets:
         single_select: true
         options:
           - { value: CONTINUE, label: { $ref: 'rider.translations.yaml#/rider.issue.exit.continue' } }
+          - { value: HAND_BACK, label: { $ref: 'rider.translations.yaml#/rider.issue.exit.hand_back' } }
       - type: chip_multi_select
         id: issue_kind
         label: { $ref: 'rider.translations.yaml#/rider.issue.kind_label' }
         single_select: true
+        visible_when: "issue_exit.value == 'CONTINUE'"
         options:
           - { value: ADDRESS_NOT_FOUND,     label: { $ref: 'rider.translations.yaml#/rider.issue.kind.address_not_found' } }
           - { value: CUSTOMER_UNREACHABLE,  label: { $ref: 'rider.translations.yaml#/rider.issue.kind.customer_unreachable' } }
@@ -112,18 +127,54 @@ bottom_sheets:
           - { value: FOOD_DAMAGED,          label: { $ref: 'rider.translations.yaml#/rider.issue.kind.food_damaged' } }
           - { value: VEHICLE_OR_INJURY,     label: { $ref: 'rider.translations.yaml#/rider.issue.kind.vehicle_or_injury' } }
           - { value: OTHER,                 label: { $ref: 'rider.translations.yaml#/rider.issue.kind.other' } }
-      - { type: text_area, id: issue_note, placeholder: { $ref: 'rider.translations.yaml#/rider.issue.note_prompt' }, max_length: 300, visible_when: "issue_kind.value == 'OTHER'" }
+      - { type: text_area, id: issue_note, placeholder: { $ref: 'rider.translations.yaml#/rider.issue.note_prompt' }, max_length: 300, visible_when: "issue_exit.value == 'CONTINUE' && issue_kind.value == 'OTHER'" }
       - type: button
         id: report_issue_btn
         label: { $ref: 'rider.translations.yaml#/rider.issue.confirm' }
         variant: primary
         full_width: true
+        visible_when: "issue_exit.value == 'CONTINUE'"
         action:
           type: report_delivery_issue
           variables: { deliveryJobId: "{{ delivery.id }}", kind: "{{ issue_kind.value }}", issue: "{{ issue_note.value }}" }
           loading_label: { $ref: 'rider.translations.yaml#/rider.issue.pending' }
           on_success: [{ type: close_sheet }]
-      - { type: inline_error, id: report_issue_error, for_action: report_delivery_issue }
+      - { type: inline_error, id: report_issue_error, for_action: report_delivery_issue, visible_when: "issue_exit.value == 'CONTINUE'" }
+      # The handback question: asked only once collected (PICKED_UP/OUT_FOR_DELIVERY) — from ASSIGNED
+      # the answer is derived (below), never asked (ADR-20260904-015903 §2 "ask the rider nothing
+      # about the food it can derive").
+      - type: chip_multi_select
+        id: handback_location
+        label: { $ref: 'rider.translations.yaml#/rider.issue.custody_label' }
+        single_select: true
+        visible_when: "issue_exit.value == 'HAND_BACK' && (delivery.status == 'PICKED_UP' || delivery.status == 'OUT_FOR_DELIVERY')"
+        options:
+          - { value: WITH_RIDER,             label: { $ref: 'rider.translations.yaml#/rider.issue.custody.with_rider' } }
+          - { value: RETURNED_TO_RESTAURANT, label: { $ref: 'rider.translations.yaml#/rider.issue.custody.returned' } }
+      - type: button
+        id: hand_back_delivery_picked_up_btn
+        label: { $ref: 'rider.translations.yaml#/rider.issue.handback_confirm' }
+        variant: primary
+        full_width: true
+        visible_when: "issue_exit.value == 'HAND_BACK' && (delivery.status == 'PICKED_UP' || delivery.status == 'OUT_FOR_DELIVERY')"
+        action:
+          type: hand_back_delivery
+          variables: { deliveryJobId: "{{ delivery.id }}", foodLocation: "{{ handback_location.value }}" }
+          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
+          on_success: [{ type: close_sheet }]
+      # From ASSIGNED: no question, foodLocation is the literal NOT_COLLECTED (derived by the sheet).
+      - type: button
+        id: hand_back_delivery_assigned_btn
+        label: { $ref: 'rider.translations.yaml#/rider.issue.handback_confirm' }
+        variant: primary
+        full_width: true
+        visible_when: "issue_exit.value == 'HAND_BACK' && delivery.status == 'ASSIGNED'"
+        action:
+          type: hand_back_delivery
+          variables: { deliveryJobId: "{{ delivery.id }}", foodLocation: "NOT_COLLECTED" }
+          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
+          on_success: [{ type: close_sheet }]
+      - { type: inline_error, id: hand_back_delivery_error, for_action: hand_back_delivery, visible_when: "issue_exit.value == 'HAND_BACK'" }
 
   rider_code_sheet:
     id: rider_code_sheet
@@ -228,24 +279,38 @@ screens:
     # #92 client guard), where `jobs` then rendered its shell with the read failed.
     unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [delivery.byOrder]
-    actions_used: [confirm_pickup, complete_delivery, report_delivery_issue, phone_call]
+    actions_used: [confirm_pickup, complete_delivery, report_delivery_issue, hand_back_delivery, phone_call]
     gaps:
       - "Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant."
+      - "The handback after-state's 'Rapportez la commande' instruction (#639 part C step 3-ii) names no external-navigation control: no `ClientEffect`/action kind for opening a maps app exists anywhere in this DSL (`navigate` is the SDUI's own internal route change, not GPS). The pickup address is shown as the biggest element instead (page_header); a real turn-by-turn deep link is a follow-on, not invented here as a dead control."
     components:
       - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.job.title' } }
       - { type: status_chip, status: "{{ delivery.status }}" }
       # #639 part C step 3-i: after a report the job STAYS (status untouched); the chip says so,
       # read from the fold's `openIssue` — the rider's proof the restaurant was told.
       - { type: badge, text: { $ref: 'rider.translations.yaml#/rider.job.issue_reported' }, variant: warning, visible_when: "delivery.openIssue != null" }
+      # #639 part C step 3-ii: the after-state, once a handback has landed (`foodLocation` set).
+      # WITH_RIDER is the biggest-element instruction screen (ADR-20260904-015903 §7); any other
+      # non-null value (RETURNED_TO_RESTAURANT, or NOT_COLLECTED from ASSIGNED) is the calmer
+      # "handed back, re-offering" state. Both replace the operational controls below — a job the
+      # fold has already moved to PENDING/FAILED and unassigned (rider_id null) is no longer this
+      # rider's to act on.
+      - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.job.handback_instruction_title' }, visible_when: "delivery.foodLocation == 'WITH_RIDER'" }
+      - { type: text, value: { $ref: 'rider.translations.yaml#/rider.job.handback_done_body' }, visible_when: "delivery.foodLocation != null && delivery.foodLocation != 'WITH_RIDER'" }
+      - { type: button, id: handback_back_to_jobs_btn, label: { $ref: 'rider.translations.yaml#/rider.job.back_to_jobs' }, variant: primary, full_width: true, visible_when: "delivery.foodLocation != null && delivery.foodLocation != 'WITH_RIDER'", action: { type: navigate, route: "/" } }
       - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress }}" }
-      - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}" }
+      - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}", visible_when: "delivery.foodLocation == null" }
       # #717: plain name row via the FK-derived navigation edge (DeliveryJob.restaurant: Restaurant!).
       # Deliberately NOT a contact row — a rebound name beside a dead call button is a false signifier.
       - { type: info_row, icon: store, label: { $ref: 'rider.translations.yaml#/rider.job.restaurant' }, value: "{{ delivery.restaurant.displayName }}" }
       - type: sticky_bottom_bar
+        # Hidden once a handback has landed (`foodLocation` set) — the after-state above replaces
+        # these, and none of them can legally succeed on a job this rider no longer holds.
+        visible_when: "delivery.foodLocation == null"
         content:
           - { type: button, id: confirm_pickup_btn,   label: { $ref: 'rider.translations.yaml#/rider.job.picked_up' }, variant: primary, full_width: true, action: { type: confirm_pickup,    variables: { deliveryJobId: "{{ delivery.id }}" } } }
           - { type: button, id: complete_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.job.delivered' }, variant: primary, full_width: true, action: { type: complete_delivery, variables: { deliveryJobId: "{{ delivery.id }}" } } }
-          # #639 part C step 3-i: the secondary "Un problème" beside the primaries (outline, full
-          # width, min 56px on-bike target) opens the issue sheet. In-app only: no call button.
+          # #639 part C step 3-i/3-ii: the secondary "Un problème" beside the primaries (outline,
+          # full width, min 56px on-bike target) opens the issue sheet — its second exit is the
+          # handback door. In-app only: no call button.
           - { type: button, id: report_issue_open_btn, label: { $ref: 'rider.translations.yaml#/rider.job.problem' }, variant: outline, full_width: true, min_height: 56, action: { type: open_bottom_sheet, sheet_id: rider_issue_sheet } }
