@@ -9,8 +9,8 @@
 
 use domain::generated::scalars::{
     CartStatus, CityAvailabilityStatus, ComparisonBasis,
-    CuisineCategory, DeliveryDispatchProcessStatus, DeliveryProvider, DeliveryStatus,
-    DeliveryTimeliness, GbpLinkStatus,
+    CuisineCategory, DeliveryDispatchProcessStatus, DeliveryIssueKind, DeliveryProvider,
+    DeliveryStatus, DeliveryTimeliness, GbpLinkStatus,
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     PrincipalKind, ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
@@ -72,6 +72,15 @@ enum_text!(DeliveryStatus {
     CANCELLED,
 });
 enum_text!(DeliveryProvider { PARTNER, INDEPENDENT });
+// #639 part C step 3-i: `View_DeliveryJob.open_issue_kind` — the closed reason of the open issue.
+enum_text!(DeliveryIssueKind {
+    ADDRESS_NOT_FOUND,
+    CUSTOMER_UNREACHABLE,
+    RESTAURANT_NOT_READY,
+    FOOD_DAMAGED,
+    VEHICLE_OR_INJURY,
+    OTHER,
+});
 enum_text!(RiderStatus { OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED });
 enum_text!(InboundMessageStatus {
     SCHEDULED,
