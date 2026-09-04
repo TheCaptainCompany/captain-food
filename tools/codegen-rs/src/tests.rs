@@ -18662,6 +18662,29 @@ mod api_derived_gate {
         assert!(hits(&model, "api-derived-role-mismatch").is_empty());
     }
 
+    /// RED on the PRIMARY type-mismatch branch: a RECOGNIZED source (`rider`, expecting
+    /// `scalars.yaml#/RiderId`) on a REAL property (`deliveryJobId`, a real `AcceptDelivery`
+    /// property, so `api-derived-field-unknown` stays silent) whose actual `$ref` is a DIFFERENT
+    /// scalar (`DeliveryJobId`) — the ordinary "wrong scalar" case, distinct from
+    /// `an_unrecognized_derived_source_is_a_type_mismatch`'s "unrecognized source" arm above.
+    #[test]
+    fn a_recognized_source_on_the_wrong_scalar_is_a_type_mismatch() {
+        let mut model = real_model();
+        let derived = op_mut(&mut model, "mutations", "acceptDelivery")
+            .get_mut("derived")
+            .and_then(|v| v.as_mapping_mut())
+            .expect("acceptDelivery already declares derived: { riderId: rider }");
+        derived.clear();
+        derived.insert(Value::from("deliveryJobId"), Value::from("rider"));
+        let h = hits(&model, "api-derived-type-mismatch");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(
+            h[0].contains("acceptDelivery") && h[0].contains("deliveryJobId") && h[0].contains("DeliveryJobId") && h[0].contains("RiderId"),
+            "{h:?}"
+        );
+        assert!(hits(&model, "api-derived-field-unknown").is_empty(), "deliveryJobId is a real property");
+    }
+
     /// RED on a REQUIRED derived property (`changeRiderStatus`'s `riderId`) whose `roles:` is not
     /// EXACTLY `[RIDER]` — the mutant widens back to the pre-#865 `[RIDER, ADMIN]`, the exact shape
     /// ADR-20260904-014136 §Decision 6(i) says belongs to `RestrictRider` instead.

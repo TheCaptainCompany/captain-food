@@ -1,4 +1,6 @@
-//! #865 — the seam-injection proof (D2, ADR-20260904-015903 §6, ADR-20260904-014135, PROP-171500):
+//! #865 — the seam-injection proof (D2, ADR-20260904-015903 §6, PROP-171500; the `ReadScope::Rider`
+//! fact realized by #849 "#639 part C step 2b" / ADR-20260830-191457 parts A+B's
+//! `auth.rs::resolve_rider_scope`):
 //! posting a well-formed `acceptDelivery(input: { deliveryJobId })` through the REAL edge — POST
 //! /rider/graphql, a verified RIDER JWT, the scripted `RiderIdentitySource` resolving a row — lands
 //! on the mailbox with `riderId` INJECTED from the caller's own `ReadScope::Rider`, never supplied
@@ -221,6 +223,12 @@ async fn the_seam_injects_riderid_into_the_enqueued_payload() {
          value the literal never carried -- payload: {payload}"
     );
     assert_eq!(payload.get("deliveryJobId").and_then(|v| v.as_str()), Some("00000000-0000-0000-0000-00000000000d"));
+    assert_eq!(
+        row.payload_hash(),
+        application::journal::payload_hash(payload),
+        "payload_hash is taken from the TYPED command AFTER injection -- a hash over the \
+         pre-injection client form (missing riderId) would not match the stored payload"
+    );
 }
 
 /// Fail-closed control: NO `ReadScope::Rider` (the seam answered `NoMapping`) enqueues NOTHING —
@@ -252,6 +260,44 @@ async fn no_resolved_rider_scope_enqueues_nothing() {
     let code = body["errors"][0]["extensions"]["code"].as_str().map(str::to_string);
     assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row -> the role guard refuses: {body}");
     assert!(mem.entries().is_empty(), "a refused caller must enqueue nothing at all");
+}
+
+/// Review round 2, BLOCKING: the REQUIRED-derived seam's OWN fail-closed branch
+/// (`let Some(ReadScope::Rider(__derived_id)) = __derived_scope else { return
+/// Err(forbidden_error()) }`) had no test that reached it. `no_resolved_rider_scope_enqueues_nothing`
+/// uses `NoMapping`, which the `RoleGuard` refuses AS PUBLIC before the resolver body ever runs —
+/// that proves the GUARD, not this branch. This test binds `ActingRole` to RIDER directly through
+/// `schema.execute` (no HTTP transport, so no `ReadScope` is ever inserted into the context at
+/// all) — the guard passes (the caller genuinely acts as RIDER), the resolver body runs, and the
+/// ONLY thing left to refuse the call is the derived seam's own `else` branch reading
+/// `ctx.data_opt::<ReadScope>() == None`. Seen RED first: temporarily mutating the emitter's
+/// `required` branch to inject a nil UUID instead of erroring (regenerated, reverted) made this
+/// test fail with `mem.entries()` non-empty and `resp.errors` empty — the exact failure this
+/// gate exists to catch. Failure text recorded verbatim in the PR/journal, not repeated here (a
+/// stale copy would drift from the current assertion).
+#[tokio::test]
+async fn a_rider_bound_caller_with_no_readscope_in_context_is_refused_by_the_derived_seam_itself() {
+    let mem = Arc::new(MemMailbox::default());
+    let schema = schema_over(mem.clone());
+    let acting = server::Principal::role_binding(
+        server::graphql_acl::RequestRole::Rider,
+        "no-scope-test".to_string(),
+        Some(uuid::Uuid::from_u128(0x639)),
+    )
+    .acting_role(server::graphql_acl::RequestRole::Rider);
+
+    let resp = schema.execute(async_graphql::Request::new(accept_delivery_mutation()).data(acting)).await;
+
+    assert_eq!(resp.errors.len(), 1, "expected exactly the derived seam's own refusal: {:?}", resp.errors);
+    let ext = resp.errors[0].extensions.as_ref().expect("extensions");
+    assert_eq!(
+        ext.get("code"),
+        Some(&async_graphql::Value::from("Forbidden")),
+        "the REQUIRED derived property's OWN fail-closed branch (errors.yaml#/Forbidden, PascalCase \
+         -- distinct from the role guard's literal FORBIDDEN, which already passed) -- got: {:?}",
+        resp.errors[0]
+    );
+    assert!(mem.entries().is_empty(), "the derived seam's fail-closed branch must enqueue nothing");
 }
 
 /// The smuggled-field mutant: a client posts `riderId` alongside the well-formed
