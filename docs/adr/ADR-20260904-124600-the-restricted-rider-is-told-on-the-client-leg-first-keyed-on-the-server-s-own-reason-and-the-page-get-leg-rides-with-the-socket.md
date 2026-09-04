@@ -82,7 +82,11 @@ renderer's 2c-ii 401-leg decision is inline in `spawn_local` and has never been 
    `requires_auth`, `unauthenticated: /sign-in`, `while_restricted: true`, NO `rider_topbar`,
    resolver key **`standing.mine: { query: myStanding }`** (every path `standing.*`). The notice's
    title, footer and contact are UNCONDITIONAL; the ground row and both date rows are gated on
-   `standing.restriction != null`; the transient row on `standing.restriction == null` reads
+   `standing.restriction != null` — **and the whole notice on `standing.standing == 'RESTRICTED'`**
+   (amended 2026-09-04 at the checkpoint by consent — reviewer, ux, farley: "unconditional" was
+   argued against the attribution lag, never against standing; a reinstated rider reloading the
+   tab must read *"Votre accès est rétabli."* with a way back to `/`, never the restricted
+   statement); the transient row on `standing.restriction == null` reads
    **"Détails de la restriction pas encore disponibles."** (key `rider.restricted.details_pending` —
    a loading state named as one; never *"en attente"*, which says the decision is undetermined).
    The five ground labels (`rider.restricted.ground.{rider_requested, eligibility_document_lapsed,
@@ -103,8 +107,11 @@ renderer's 2c-ii 401-leg decision is inline in `spawn_local` and has never been 
    `.id` — no screen-level alias grammar exists and inventing one is a second naming scheme the
    validator cannot see; both custody chips at PICKED_UP or later, the `NOT_COLLECTED` literal from
    ASSIGNED, `inline_error`; `on_success: [close_sheet, navigate "$reload"]` re-executes the
-   screen's reads (`heldDelivery` is a view over the log — correct on the next read; only
-   `standing`/`restriction` can lag). The control is gated on `standing.heldDelivery.foodLocation
+   screen's reads. **Corrected 2026-09-04 at the checkpoint (reviewer)**: `View_DeliveryJob` is
+   projector-fed (`projection_views.yaml` `fedBy`), and `on_success` fires at `Succeeded` before the
+   projector tick, so the reload CAN return the job for one tick — the control stays gated on
+   `foodLocation == null` and a second tap gets the business rejection in `inline_error`; an
+   accepted one-tick staleness, the same one `job_detail` carries. The control is gated on `standing.heldDelivery.foodLocation
    == null`; once set, the after-state text renders instead — no control is ever live on a job the
    rider no longer holds. `myStanding.heldDelivery` gains the `held_by_rider(rider_id)` port
    (#879's item) in this slice: the screen makes it a per-paint read, and the current `for_rider`
