@@ -1,0 +1,32 @@
+key: LOWER-TIER-TRIP
+status: open
+question: 'ADR-20260904-013450 §5 tripped on 2026-09-04: a `HOLD: human`-class lower-tier PR (#875, #639
+  part C step 4-i) hit the three-round ceiling. Does the founder keep the lower executor tier for the
+  `HOLD: human` class (stored event shapes, legal surfaces, migrations, the fenced runtime), narrow the
+  lower tier to GREEN/reversible work only, or revert the tier ruling outright?'
+owner: founder
+opened: '2026-09-04'
+capacity: founder
+register: docs/adr/ADR-20260904-013450-the-executor-runs-on-the-lower-model-tier-and-lenses-and-reviewers-keep-the-bigger-one.md
+evidence: 'The trip condition, verbatim from §5: "any `HOLD: human`-class lower-tier PR hits the three-round
+  ceiling before the window closes" -- #875 (lower tier, `HOLD: human`, 112 files) took rounds 1/2/3.
+  The tally at the trip: first-round PASS 1 of 4 (#864 PASS, #867 FAIL->PASS, #870 FAIL->PASS, #875
+  FAIL->FAIL->PASS), against the bigger-tier baseline of 1 of 5 the ADR recorded -- the same pass rate,
+  cheaper per run. What the three rounds of #875 were: round 1 nine small blockers (one real card defect,
+  two executor depth misses against explicit ADR lines); round 2 one reviewer finding on a gate exemption
+  the executor had invented honestly but underived; round 3 the executor tightened its own rule beyond the
+  card when its red-first test showed the loophole. Reviewer and lens time (the bigger tier) per round is
+  the cost the ADR named as the risk; it was paid three times on one PR.'
+note: 'Options with trade-offs, recommendation first (ADR-20260810-011500: a decision queue, never "shall
+  I proceed?"). (A, recommended) KEEP the lower tier for every class, and make the two failure shapes
+  structural instead of re-tiering: every ADR line that names a test or a belt becomes a red-first step on
+  the card (the two depth misses were prose-only requirements), and any new DSL grammar an executor invents
+  is a mandatory hand-back item before gates run (the underived flag) -- the tally stays at the same pass
+  rate as the bigger tier at lower cost, and the three-round ceiling did its job. (B) NARROW the lower
+  tier to GREEN/reversible work (refactors, generated artifacts, doc sweeps, additive api/screens) and
+  return `HOLD: human` slices to the bigger tier -- fewer rounds on the legal and stored-shape class,
+  at roughly the pre-ADR cost for those slices; the rider 4-ii screen (a legal surface) would be the first
+  to move back. (C) REVERT ADR-20260904-013450 -- the simplest record, forgoes the measured saving on
+  the four merged PRs. Until the founder answers, the ruling stands and dispatch continues on the lower
+  tier (§5: "nobody re-escalates a single dispatch to the bigger tier on judgment: the only route back is
+  that row"). Consulted at the 4-ii briefing: holub named the trip; no other lens objected to continuing.'

@@ -2,6 +2,27 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — Step 4-ii (the restricted rider is told) decided by the team; the lower-tier trip
+> row is queued to the founder.** [ADR-20260904-124600](../adr/ADR-20260904-124600-the-restricted-rider-is-told-on-the-client-leg-first-keyed-on-the-server-s-own-reason-and-the-page-get-leg-rides-with-the-socket.md), full mob (13 lenses, a legal surface).
+> The register had already chosen both legs (ADR-20260904-081527 §11); the roster corrected the
+> card: no machine-readable `RESTRICTED` signal exists (`StandingGuard` and `RoleGuard` both emit
+> `code: FORBIDDEN`, the web transport stringifies the errors), and the card's `myStanding.heldDelivery`
+> paths were unspellable (the alias root is `standing.*`) — **a card defect banked**: a lower-tier
+> executor would have copied it and the held-job card would have failed closed. Decided: the client leg
+> now, keyed on an additive `extensions.reason: RIDER_RESTRICTED` shared as one constant between
+> `server` and `web`, firing on refused reads AND refused Tells through one pure function seen red (the
+> 2c-ii 401 leg joins it); the document-GET leg rides with step 5's socket as one resolver with three
+> callers, its outage posture recorded (`LookupFailed` renders the shell, never a 302 to a false legal
+> statement); a second sheet bound to `standing.heldDelivery.*`; `$reload` after the Tell; the after-state
+> from `foodLocation`; a `format_datetime` renderer filter (Europe/Paris); the transient reads *"Détails
+> de la restriction pas encore disponibles."*; the address bound once from `SUPPORT_CONTACT`; no copy
+> button; the five ground labels bound explicitly; `held_by_rider` (#879's item) lands in the slice. The
+> one split (build the GET leg now — architect) took the safer option on a legal surface. **Trip**:
+> ADR-20260904-013450 §5's own wording tripped on #875 (`HOLD: human`, lower tier, three rounds) —
+> [LOWER-TIER-TRIP](../decisions/LOWER-TIER-TRIP.yaml) queued to the founder with options and a
+> recommendation (keep the tier, make the two failure shapes structural); the ruling stands meanwhile
+> and 4-ii dispatches on the lower tier. Concurrency fence: #868 (`rider_topbar`) not alongside 4-ii.
+
 > **2026-09-04 — #875 merged: step 4-i of part C is complete — a restriction bites on the next
 > request, and the doors are human-only.** [PR #875](https://github.com/TheCaptainCompany/captain-food/pull/875)
 > (`690430cc`, squash), a lower-tier run of three rounds — the ceiling (ADR-20260826-084500).

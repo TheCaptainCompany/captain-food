@@ -28,6 +28,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `CREDIT-LEG-SEQUENCING` | open | 2026-08-31 | Does the erasure credit-settlement leg ship inside #708 -- given that the refund/forfeit split first needs provenance on `CustomerCreditGranted` (a stored-event-shape change) and that `CustomerCredit-{customerId}` has no lane, so the leg would become its SECOND unlaned writer -- or does it ship after those two preconditions are met? | founder |
 | `ERASURE-PM-RESUME` | open | 2026-08-31 | How does the erasure process manager name its erasure subject when it resumes from PARKED on an order terminal fact -- a `from_read` lookup through a projection (A), `customerId` added to the four order terminal facts (B), or a PM-owned order-to-customer index in the process row (C)? | founder |
 | `PMW-4` | open | 2026-08-31 | Now that `read:` is retired, how are the two surviving projection reads SPELLED -- evans's TWO narrow kinds (`index:`/`by:` and `authority:`), or vernon's ONE differently-named kind carrying a mandatory exemption `$ref`? | team |
+| `LOWER-TIER-TRIP` | open | 2026-09-04 | ADR-20260904-013450 §5 tripped on 2026-09-04: a `HOLD: human`-class lower-tier PR (#875, #639 part C step 4-i) hit the three-round ceiling. Does the founder keep the lower executor tier for the `HOLD: human` class (stored event shapes, legal surfaces, migrations, the fenced runtime), narrow the lower tier to GREEN/reversible work only, or revert the tier ruling outright? | founder |
 | `ADR-VOLUME` | decided | 2026-08-19 | Should the team write fewer, larger ADRs? -> PROP-20260819-110442 | team |
 | `AGGREGATES-OWN-THE-FACTS` | decided | 2026-08-29 | Does the foreign-stream-append isolation subject (twelve deliver: steps still appended by process managers, plus the #595 unlaned reclamation birth) get resolved FIRST, before any new development builds on the pre-isolation shape? -> ADR-20260829-230418 | founder |
 | `CITATION-RULE-LEVEL` | decided | 2026-08-27 | Should `decision-superseded-authority` ship as a hard `make validate` ERROR, or as a ratcheted WARNING first -- and should its exemption stay an implicit magic word (`superseded` in the clause) or become an explicit marker on the citing line? -> ADR-20260827-081500 | founder |
@@ -96,7 +97,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 82 — 15 open · 62 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 83 — 16 open · 62 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 100** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

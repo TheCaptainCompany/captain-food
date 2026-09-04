@@ -729,13 +729,14 @@ one carved query `myStanding`; **both dates** (ADR-20260904-014136 §6(ii)); the
 
 ```
 +------------------------------------------------------------------+
-|  [Captain.Food Rider]                                  (hors ligne)|
+|  [Captain.Food Rider]                 (plain header, no topbar)  |
 +------------------------------------------------------------------+
 |                                                                  |
 |   Votre acces est restreint.                                     |
 |   Vous ne recevrez plus de courses.                              |
 |                                                                  |
 |   Motif : <RiderRestrictionGround, traduit — le FAIT observe>    |
+|     (ou : Details de la restriction pas encore disponibles.)     |
 |   Decide le : 4 sept. 2026, 14:02                                |
 |   Effectif depuis : 4 sept. 2026, 14:02                          |
 |                                                                  |

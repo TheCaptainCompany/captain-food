@@ -280,6 +280,12 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
     resolver data — no second screen, no chaining, the copy promises only the handback), the
     validator rule `screen-restricted-binds-uncarved-op` (a bounce target may bind only carved
     operations for its role), the renderer bounce test, the strings of §7, PROP §8.6 rewritten.
+    **Amended 2026-09-04 by [ADR-20260904-124600](ADR-20260904-124600-the-restricted-rider-is-told-on-the-client-leg-first-keyed-on-the-server-s-own-reason-and-the-page-get-leg-rides-with-the-socket.md) (team consent, the 4-ii briefing)**: the
+    document-GET bounce moves to step 5 beside the socket re-resolution (one resolver, three
+    callers; `LookupFailed` renders the shell, never a 302); the client leg is keyed on an additive
+    `extensions.reason: RIDER_RESTRICTED` (no `RESTRICTED` read error existed) and fires on a refused
+    MUTATION too; the sheet is a second sheet bound to `standing.heldDelivery.*` (the alias root —
+    `myStanding.*` above is unspellable).
     **4-iii — the admin's hands**: a roster read model (`display_name`, `phone`, `standing`,
     ground, dates, the held job and its stage — *never* `auth_ref`; `Rider` stays `internal: true`
     with its one reader class), `riders` / `rider(riderId)` `[ADMIN]`, the `riders` list with a
