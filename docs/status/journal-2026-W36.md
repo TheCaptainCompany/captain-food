@@ -11,8 +11,10 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > §6 (the closed operation-key seam) and PROP-171500 D2 (ADR-20260808-171056). **Red/green**: red
 > `be592bd0` (the six mutations still take `riderId` as a client-suppliable payload field, the
 > rider screen's accept/confirm/complete buttons pass the unknown `orderId` and miss the real
-> `deliveryJobId`), green `92708668`; `git diff --stat be592bd0..92708668`: 25 files changed, 1019
-> insertions(+), 193 deletions(-). **Per-gate wall-clock** (warm cache after an iterative session —
+> `deliveryJobId`), green `92708668` (core landing) then `a5e7032f` (final, after the records
+> commits and the E.4 mutant test added in a follow-up pass); `git diff --stat be592bd0..a5e7032f`:
+> 28 files changed, 1215 insertions(+), 194 deletions(-). **Per-gate wall-clock** (warm cache after
+> an iterative session —
 > not a cold-build figure): `make validate` <5s; `make generate` ~15-20s; `cargo build -p server
 > --tests` 1m28s; the five touched `crates/server/tests/*.rs` files run in ~1s (24/24 pass);
 > `cargo test -p captain-food-codegen` ~65s test-time (401/401 pass, after fixing one stale test —
@@ -76,7 +78,13 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > `riderId!`, so this literal — which supplies only `deliveryJobId` — would have failed GraphQL's
 > own input validation against that schema); a sibling test proves `NoMapping` enqueues NOTHING
 > (`mem.entries().is_empty()`) with `FORBIDDEN` from the ROLE GUARD (not yet reaching the new
-> derived-seam code). Three pre-existing files rewritten because the literal `riderId` they carried
+> derived-seam code); a third proves the E.4 smuggled-field mutant — through `schema.execute`
+> directly (never `Input::parse`, whose serde derive silently ignores unknown keys), `riderId`
+> posted BOTH inline and via GraphQL `variables` hits async-graphql's OWN document validation
+> before any guard or resolver runs, verbatim on both legs: `` Invalid value for argument "input",
+> unknown field "riderId" of type "AcceptDeliveryInput" `` — nothing enqueued either way (added in
+> a follow-up commit `a5e7032f` once the first pass was noticed to have missed it). Three
+> pre-existing files rewritten because the literal `riderId` they carried
 > no longer names a field at all — a client that still supplied it would fail GraphQL's OWN static
 > validation, indistinguishable by `assert_ne!(code, Some("FORBIDDEN"))` from the role guard's
 > refusal (the exact trap the card names): `rider_without_a_row_is_forbidden_on_the_write_half.rs`
