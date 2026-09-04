@@ -43,7 +43,7 @@ DeliveryDeclineKeepsJobPending:
   description: "An independent rider may decline a pending delivery job; the job stays PENDING and re-offerable."
 
 DeliveryIssueLifecycle:
-  description: "A delivery issue can be reported on a non-delivered job and later resolved."
+  description: "A delivery issue is reported on a non-delivered job by its closed kind (DeliveryIssueKind — one tap, an optional bounded note only for the facts) and NEVER moves the job's status or its rider; it is told to the restaurant through the read model (View_DeliveryJob.open_issue_kind) and later resolved with a closed DeliveryIssueResolution by whoever was told — resolving with nothing open, or reporting on a DELIVERED job, is rejected (#639 part C step 3-i, ADR-20260904-015903 §4)."
 
 
 # --- Delivery partner self-registration (#61) ---

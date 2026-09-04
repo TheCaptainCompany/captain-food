@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use domain::generated::entities::{Money, OptionList, Product};
 use domain::generated::scalars::{
     CartId, CatalogItemAvailability, CityAvailabilityStatus, CityId, CuisineCategory, CurrencyCode,
-    CustomerId, DeliveryChannelKey, DeliveryDissatisfactionReason, DeliveryJobId, DeliveryPartnerName,
+    CustomerId, DeliveryChannelKey, DeliveryDissatisfactionReason, DeliveryIssueKind, DeliveryJobId, DeliveryPartnerName,
     DeliveryPartnerRegistrationId, DeliveryProvider, DeliveryStatus, DeliveryTimeliness, EmailAddress,
     ExternalReference, OfferId, OfferName,
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
@@ -485,6 +485,10 @@ pub struct DeliveryJobRow {
     pub requested_at: chrono::DateTime<chrono::Utc>,
     pub picked_up_at: Option<chrono::DateTime<chrono::Utc>>,
     pub delivered_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The kind of the OPEN delivery issue (#639 part C step 3-i): set by
+    /// `DeliveryIssueReported.kind`, cleared by `DeliveryIssueResolved`; `None` when nothing is
+    /// open — the column through which the restaurant is told.
+    pub open_issue_kind: Option<DeliveryIssueKind>,
 }
 
 /// Read port over the `View_DeliveryJob` read model (ADR-0031/0039). Backs the `delivery` /

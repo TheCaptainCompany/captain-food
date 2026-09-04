@@ -438,6 +438,10 @@ pub(crate) fn validate(model: &Model) -> Report {
 
     // --- §19. Business-metric catalog (business_metrics.yaml, ADR-20260811-014129) --------------
     validate_business_metrics(model, &mut issues);
+    // §27 (#639 part C step 3-i): every key on an api operation is one the loader reads.
+    check_api_operation_keys(model, &mut issues);
+    // `derive:` arm values are one of three forms, and `null` only resets a nullable column.
+    check_view_derive_values(model, &mut issues);
 
     // --- 3. Coverage: derive value-objects vs commands, and orphan events ------------------------
     let mut refd_from_properties: BTreeSet<String> = BTreeSet::new();

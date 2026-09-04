@@ -68,6 +68,9 @@ actions:
   change_order_acceptance:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/changeOrderAcceptanceMode' }, note: "The pause/resume toggle in the header." }
   mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
   escalate_delivery:    { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/escalateDelivery' }, note: "Skip the current channel and advance the ranked dispatch walk (#60)." }
+  resolve_delivery_issue: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/resolveDeliveryIssue' }, note: "Acknowledge a rider's reported issue from the board's pinned card with a closed resolution (#639 part C step 3-i)." }
+  open_bottom_sheet: { kind: client }
+  close_sheet: { kind: client }
   configure_storefront_slug: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/configureRestaurantSlug' }, note: "Choose or rename the storefront host. A rename 301s the old address and keeps it reserved (ADR-20260728-011344)." }
   update_restaurant_profile: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/updateRestaurant' }, note: "The editable LOCATION fields. Replace-on-provided: an omitted field is left alone, never cleared." }
   approve_refund: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/approveRefund' } }
@@ -109,6 +112,38 @@ global_components:
       - { id: refunds,      label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.refunds' },      icon: coin,    route: "/refunds" }
       - { id: claims,       label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.claims' },       icon: life_buoy, route: "/claims" }
       - { id: satisfaction, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.nav.satisfaction' }, icon: star,    route: "/satisfaction" }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# BOTTOM SHEETS — the board's acknowledgement of a rider's reported issue (#639 part C step 3-i).
+# ──────────────────────────────────────────────────────────────────────────────
+bottom_sheets:
+  # `[Vu]` on the pinned issue card opens this: the four DeliveryIssueResolution chips + an optional
+  # bounded note; confirm = resolveDeliveryIssue, which clears `openIssue` on the row.
+  issue_resolution_sheet:
+    id: issue_resolution_sheet
+    type: bottom_sheet
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolve_title' }
+    sections:
+      - type: chip_multi_select
+        id: issue_resolution
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution_label' }
+        single_select: true
+        options:
+          - { value: REASSIGNED,              label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.reassigned' } }
+          - { value: DELIVERED_BY_RESTAURANT, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.delivered_by_restaurant' } }
+          - { value: CANCELLED,               label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.cancelled' } }
+          - { value: OTHER,                   label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.other' } }
+      - { type: text_area, id: issue_resolution_note, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.note_prompt' }, max_length: 300, visible_when: "issue_resolution.value == 'OTHER'" }
+      - type: button
+        id: resolve_issue_btn
+        label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.confirm' }
+        variant: primary
+        full_width: true
+        action:
+          type: resolve_delivery_issue
+          variables: { deliveryJobId: "{{ sheet.data.deliveryJobId }}", resolution: "{{ issue_resolution.value }}", note: "{{ issue_resolution_note.value }}" }
+          on_success: [{ type: close_sheet }]
+      - { type: inline_error, id: resolve_issue_error, for_action: resolve_delivery_issue }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
@@ -180,10 +215,27 @@ screens:
         missing_arg: { $ref: 'api.yaml#/queries/restaurantDeliveries/args/restaurantId' }
         supplied_by: none
         note: "restaurantId is the signed-in staff's own tenant — an identity fact with no paint-time source. Land #749's arg sourcing (or #750's identity-carrying transport + server-side scoping) and the dead-man rule retires this declaration."
-    actions_used: [escalate_delivery, mark_order_delivered]
+    actions_used: [escalate_delivery, mark_order_delivered, resolve_delivery_issue, open_bottom_sheet]
     components:
       - { component: staff_topbar }
       - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.title' } }
+      # #639 part C step 3-i: a job whose `openIssue` is set renders a PINNED card headlined by the
+      # kind (French label per kind — one badge per closed value, so the label is a translation and
+      # never the raw token), with `[Vu]` opening the resolution sheet. The board's read itself is
+      # in `skipped_reads` (§25b, #745): the declaration is the deliverable; the row arrives once
+      # #749's arg sourcing lands. Rendered BEFORE the list so it pins.
+      - type: conditional_section
+        id: delivery_issue_card
+        visible_when: "delivery.openIssue != null"
+        content:
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.address_not_found' },    variant: warning, visible_when: "delivery.openIssue == 'ADDRESS_NOT_FOUND'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.customer_unreachable' }, variant: warning, visible_when: "delivery.openIssue == 'CUSTOMER_UNREACHABLE'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.restaurant_not_ready' }, variant: warning, visible_when: "delivery.openIssue == 'RESTAURANT_NOT_READY'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.food_damaged' },         variant: warning, visible_when: "delivery.openIssue == 'FOOD_DAMAGED'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.vehicle_or_injury' },    variant: warning, visible_when: "delivery.openIssue == 'VEHICLE_OR_INJURY'" }
+          - { type: badge, text: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.kind.other' },                variant: warning, visible_when: "delivery.openIssue == 'OTHER'" }
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.body' } }
+          - { type: button, id: issue_seen_btn, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.seen' }, variant: primary, action: { type: open_bottom_sheet, sheet_id: issue_resolution_sheet, data: { deliveryJobId: "{{ delivery.id }}" } } }
       - type: order_list
         items: "{{ deliveries }}"
         item_type: order_card

@@ -1577,8 +1577,11 @@ pub async fn decline_delivery(
 }
 
 /// Handle `commands.yaml#/ReportDeliveryIssue` → emit `events.yaml#/DeliveryIssueReported`. Any
-/// non-DELIVERED job can report an issue (rules.yaml#/DeliveryIssueLifecycle); `reportedAt` is stamped
-/// server-side (the command carries none — the reporter states the issue, the system records when).
+/// non-DELIVERED job can report an issue (rules.yaml#/DeliveryIssueLifecycle); the report carries the
+/// closed `kind` (required on the command, nullable on the stored shape — rows appended before #639
+/// part C step 3-i carry none) and the optional bounded note; it never moves the status. `reportedAt`
+/// is stamped server-side (the command carries none — the reporter states the issue, the system
+/// records when).
 pub async fn report_delivery_issue(
     store: &dyn EventStore,
     cmd: ReportDeliveryIssue,
@@ -1595,6 +1598,7 @@ pub async fn report_delivery_issue(
     let event = DomainEvent::DeliveryIssueReported(DeliveryIssueReported {
         delivery_job_id: cmd.delivery_job_id,
         rider_id: cmd.rider_id,
+        kind: Some(cmd.kind),
         issue: cmd.issue,
         // The report TIME is envelope metadata (`domain_events.occurred_at`, ADR-0041) — never a
         // wall-clock stamp in the business payload (which would break command→event determinism).
@@ -1605,8 +1609,9 @@ pub async fn report_delivery_issue(
 
 /// Handle `commands.yaml#/ResolveDeliveryIssue` → emit `events.yaml#/DeliveryIssueResolved`. Requires
 /// a non-DELIVERED job with an OPEN issue to resolve (rules.yaml#/DeliveryIssueLifecycle; both arms
-/// reject `InvalidDeliveryStatus` — the only status error this message declares); `resolvedAt` is
-/// stamped server-side like `reportedAt`.
+/// reject `InvalidDeliveryStatus` — the only status error this message declares); the resolution is
+/// the closed `DeliveryIssueResolution` kind plus an optional bounded note (#639 part C step 3-i);
+/// `resolvedAt` is stamped server-side like `reportedAt`.
 pub async fn resolve_delivery_issue(
     store: &dyn EventStore,
     cmd: ResolveDeliveryIssue,
@@ -1634,7 +1639,8 @@ pub async fn resolve_delivery_issue(
     }
     let event = DomainEvent::DeliveryIssueResolved(DeliveryIssueResolved {
         delivery_job_id: cmd.delivery_job_id,
-        resolution: cmd.resolution,
+        resolution: Some(cmd.resolution),
+        note: cmd.note,
         // Envelope-owned time (ADR-0041) — see reported_at above.
         resolved_at: None,
     });

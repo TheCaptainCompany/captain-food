@@ -4,11 +4,17 @@ use crate::*;
 // Byte-identical CREATE TABLE + index DDL for every View_* (aggregate-fed or `source: reference`).
 
 /// One arm of a `status-from-event-type` derivation: for a given event type, the column's value is
-/// either a literal enum value (`Lit`) or extracted from that event's payload (`Payload(prop)`).
+/// a literal enum value (`Lit`), extracted from that event's payload (`Payload(prop)`), or — the
+/// explicit YAML `null` (#639 part C step 3-i, ADR-20260904-015903 §3) — RESET to NULL (`Null`):
+/// the event CLEARS the column, and its type is in the CASE's event set so it wins over the last
+/// setter. Before `Null` existed a YAML null fell out of the map silently, so a "clearing" event
+/// left the previous value standing — the latent defect the ADR names, closed here together with
+/// the validator's `view-derive-value-unknown` (any other unrecognised value is an ERROR).
 #[derive(Clone)]
 pub(crate) enum DeriveVal {
     Lit(String),
     Payload(String),
+    Null,
 }
 pub(crate) struct SqlColumn {
     pub(crate) name: String,
@@ -159,6 +165,21 @@ pub(crate) fn sql_type(ty: &str, model: &Model) -> String {
     "TEXT".into()
 }
 
+/// The three forms a `derive:` arm value may take (a literal, `{ from: prop }`, `null`), or `None`
+/// for anything else — the ONE place the grammar is decided; the validator's
+/// `view-derive-value-unknown` rule and the emitter both read it.
+pub(crate) fn derive_val(dv: &Value) -> Option<DeriveVal> {
+    match dv {
+        Value::String(s) => Some(DeriveVal::Lit(s.clone())),
+        Value::Null => Some(DeriveVal::Null),
+        Value::Mapping(m) => m
+            .get(Value::String("from".into()))
+            .and_then(|x| x.as_str())
+            .map(|p| DeriveVal::Payload(p.to_string())),
+        _ => None,
+    }
+}
+
 pub(crate) fn parse_col(name: String, col: &Value, events: &Value) -> SqlColumn {
     let from: Vec<String> = col
         .get("from")
@@ -174,17 +195,17 @@ pub(crate) fn parse_col(name: String, col: &Value, events: &Value) -> SqlColumn 
     let type_derived = !has_explicit && !ty.is_empty();
     let flag = |k: &str| col.get(k).and_then(|x| x.as_bool()) == Some(true);
     // `derive:` — an event_type → value map for status-from-event-type columns. A string value is a
-    // literal enum value; `{ from: prop }` extracts the value from that event's payload.
+    // literal enum value; `{ from: prop }` extracts the value from that event's payload; an explicit
+    // `null` RESETS the column (DeriveVal::Null). Anything else is refused by the validator
+    // (`view-derive-value-unknown`, an ERROR that aborts generation) — the skip below is the parser
+    // staying total, never a semantics: no validated corpus reaches it.
     let mut derive = Vec::new();
     if let Some(dm) = col.get("derive").and_then(|d| d.as_mapping()) {
         for (dk, dv) in dm {
             if let Some(evt) = dk.as_str() {
-                let val = match dv {
-                    Value::String(s) => DeriveVal::Lit(s.clone()),
-                    v => match v.get("from").and_then(|x| x.as_str()) {
-                        Some(p) => DeriveVal::Payload(p.to_string()),
-                        None => continue,
-                    },
+                let val = match derive_val(dv) {
+                    Some(v) => v,
+                    None => continue,
                 };
                 derive.push((evt.to_string(), val));
             }
@@ -455,6 +476,7 @@ pub(crate) fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, St
                             format!("'{}'", s)
                         }
                         DeriveVal::Payload(p) => format!("e.payload->>'{}'", p),
+                        DeriveVal::Null => "NULL".to_string(),
                     };
                     format!("WHEN '{}' THEN {}", evt, then)
                 })

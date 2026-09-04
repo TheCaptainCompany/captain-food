@@ -89,27 +89,39 @@ DeclineDelivery:
 
 
 ReportDeliveryIssue:
-  description: "Report an issue on a delivery job (rider/partner/support)."
+  description: >
+    Report an issue on a delivery job (rider/support) by its closed KIND, with an optional bounded
+    note (#639 part C step 3-i, ADR-20260904-015903 §4 — the D2 controlled-enum-plus-note pattern).
+    The report never moves the job's status; it tells the restaurant through the read model.
   type: object
   properties:
     deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
     riderId:
       $ref: 'scalars.yaml#/RiderId'
       nullable: true
+    kind: { $ref: 'scalars.yaml#/DeliveryIssueKind' }
     issue:
       type: string
-      maxLength: 1000
-  required: [deliveryJobId, issue]
+      maxLength: 300
+      nullable: true
+      description: "Optional note — facts only, no description of persons (prompted on the rider sheet as such); personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000)."
+  required: [deliveryJobId, kind]
 
 
 ResolveDeliveryIssue:
-  description: "Resolve a previously reported delivery issue."
+  description: >
+    Acknowledge and close a reported delivery issue with a closed RESOLUTION kind and an optional
+    bounded note (#639 part C step 3-i). Whoever was told acts — the reporter never closes their own
+    issue (api roles). Requires an OPEN issue on a non-DELIVERED job.
   type: object
   properties:
     deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
-    resolution:
+    resolution: { $ref: 'scalars.yaml#/DeliveryIssueResolution' }
+    note:
       type: string
-      maxLength: 1000
+      maxLength: 300
+      nullable: true
+      description: "Optional note — facts only; same erasure scope as the report's note."
   required: [deliveryJobId, resolution]
 
 

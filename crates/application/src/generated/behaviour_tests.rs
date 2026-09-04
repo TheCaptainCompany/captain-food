@@ -609,12 +609,12 @@ fn fx_delivery_declined_by_rider() -> DomainEvent {
 
 /// tests.yaml#/fixtures/deliveryIssueReported — events.yaml#/DeliveryIssueReported
 fn fx_delivery_issue_reported() -> DomainEvent {
-    DomainEvent::DeliveryIssueReported(evs::DeliveryIssueReported { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: Some(sc::RiderId(support::uid("rider-1"))), issue: "Customer unreachable at the door".to_string(), reported_at: None })
+    DomainEvent::DeliveryIssueReported(evs::DeliveryIssueReported { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: Some(sc::RiderId(support::uid("rider-1"))), kind: Some(sc::DeliveryIssueKind::CUSTOMER_UNREACHABLE), issue: Some("Customer unreachable at the door".to_string()), reported_at: None })
 }
 
 /// tests.yaml#/fixtures/deliveryIssueResolved — events.yaml#/DeliveryIssueResolved
 fn fx_delivery_issue_resolved() -> DomainEvent {
-    DomainEvent::DeliveryIssueResolved(evs::DeliveryIssueResolved { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), resolution: "Customer called back; order handed over".to_string(), resolved_at: None })
+    DomainEvent::DeliveryIssueResolved(evs::DeliveryIssueResolved { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), resolution: Some(sc::DeliveryIssueResolution::REASSIGNED), note: Some("Customer called back; order handed over".to_string()), resolved_at: None })
 }
 
 /// tests.yaml#/fixtures/deliveryPartnerAvailabilityRequested — events.yaml#/DeliveryPartnerAvailabilityRequested
@@ -3960,7 +3960,7 @@ async fn test_delivery_declined_by_rider() {
     ]);
 }
 
-/// tests.yaml#/tests/TestDeliveryIssueReported — "An issue is reported on a non-delivered job"
+/// tests.yaml#/tests/TestDeliveryIssueReported — "An issue is reported by kind on a non-delivered job; the job's status does not move"
 /// rules: DeliveryIssueLifecycle
 #[tokio::test]
 async fn test_delivery_issue_reported() {
@@ -3968,7 +3968,7 @@ async fn test_delivery_issue_reported() {
     spec_baseline(&bed).await;
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::ReportDeliveryIssue { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: Some(sc::RiderId(support::uid("rider-1"))), issue: "Customer unreachable at the door".to_string() };
+    let cmd = cmds::ReportDeliveryIssue { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: Some(sc::RiderId(support::uid("rider-1"))), kind: sc::DeliveryIssueKind::CUSTOMER_UNREACHABLE, issue: Some("Customer unreachable at the door".to_string()) };
     let result = crate::commands::report_delivery_issue(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestDeliveryIssueReported: the spec expects acceptance");
     bed.assert_appended("TestDeliveryIssueReported", &before, &[
@@ -3976,7 +3976,22 @@ async fn test_delivery_issue_reported() {
     ]);
 }
 
-/// tests.yaml#/tests/TestDeliveryIssueResolved — "A previously reported delivery issue is resolved"
+/// tests.yaml#/tests/TestDeliveryIssueReportOnDeliveredJobIsRejected — "Rejects reporting an issue on a job that is already DELIVERED"
+/// rules: DeliveryIssueLifecycle
+#[tokio::test]
+async fn test_delivery_issue_report_on_delivered_job_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up(), fx_delivery_completed()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ReportDeliveryIssue { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: Some(sc::RiderId(support::uid("rider-1"))), kind: sc::DeliveryIssueKind::FOOD_DAMAGED, issue: None };
+    let result = crate::commands::report_delivery_issue(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliveryIssueReportOnDeliveredJobIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliveryIssueReportOnDeliveredJobIsRejected", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestDeliveryIssueReportOnDeliveredJobIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDeliveryIssueResolved — "A previously reported delivery issue is resolved with a closed resolution kind"
 /// rules: DeliveryIssueLifecycle
 #[tokio::test]
 async fn test_delivery_issue_resolved() {
@@ -3984,12 +3999,42 @@ async fn test_delivery_issue_resolved() {
     spec_baseline(&bed).await;
     bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_issue_reported()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::ResolveDeliveryIssue { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), resolution: "Customer called back; order handed over".to_string() };
+    let cmd = cmds::ResolveDeliveryIssue { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), resolution: sc::DeliveryIssueResolution::REASSIGNED, note: Some("Customer called back; order handed over".to_string()) };
     let result = crate::commands::resolve_delivery_issue(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestDeliveryIssueResolved: the spec expects acceptance");
     bed.assert_appended("TestDeliveryIssueResolved", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_issue_resolved()),
     ]);
+}
+
+/// tests.yaml#/tests/TestDeliveryIssueResolveWithoutOpenIssueIsRejected — "Rejects resolving a delivery issue when none is open"
+/// rules: DeliveryIssueLifecycle
+#[tokio::test]
+async fn test_delivery_issue_resolve_without_open_issue_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ResolveDeliveryIssue { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), resolution: sc::DeliveryIssueResolution::REASSIGNED, note: None };
+    let result = crate::commands::resolve_delivery_issue(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeliveryIssueResolveWithoutOpenIssueIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeliveryIssueResolveWithoutOpenIssueIsRejected", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestDeliveryIssueResolveWithoutOpenIssueIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestDeclineDeliveryOnAssignedJobIsRejected — "Rejects declining a job another rider already holds"
+/// rules: DeliveryDeclineKeepsJobPending
+#[tokio::test]
+async fn test_decline_delivery_on_assigned_job_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::DeclineDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-2")), reason: None };
+    let result = crate::commands::decline_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestDeclineDeliveryOnAssignedJobIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestDeclineDeliveryOnAssignedJobIsRejected", &err, &["DeliveryAlreadyAssigned"]);
+    bed.assert_appended("TestDeclineDeliveryOnAssignedJobIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestDeliveryPartnerAvailabilityRequested — "A delivery partner self-registers availability to serve a city on a catalog channel"

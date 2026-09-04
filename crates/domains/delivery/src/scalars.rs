@@ -30,6 +30,28 @@ pub enum DeliveryProvider {
     INDEPENDENT,
 }
 
+/// The closed set of reasons a rider (or ops) reports an issue on a delivery job — one tap on the rider sheet; the restaurant board headlines the card with it. OTHER is the only kind that expects a note (#639 part C step 3-i).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum DeliveryIssueKind {
+    ADDRESS_NOT_FOUND,
+    CUSTOMER_UNREACHABLE,
+    RESTAURANT_NOT_READY,
+    FOOD_DAMAGED,
+    VEHICLE_OR_INJURY,
+    OTHER,
+}
+
+/// The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum DeliveryIssueResolution {
+    REASSIGNED,
+    DELIVERED_BY_RESTAURANT,
+    CANCELLED,
+    OTHER,
+}
+
 /// Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeliveryChannelKey(pub String);

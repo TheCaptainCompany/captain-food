@@ -551,6 +551,46 @@ pub struct EscalateDeliveryInput {
     pub reason: Option<String>,
 }
 
+/// Report an issue on a delivery job (rider/support) by its closed KIND, with an optional bounded note (#639 part C step 3-i, ADR-20260904-015903 §4 — the D2 controlled-enum-plus-note pattern). The report never moves the job's status; it tells the restaurant through the read model.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportDeliveryIssueInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "riderId")]
+    pub rider_id: Option<RiderId>,
+    #[graphql(name = "kind")]
+    pub kind: DeliveryIssueKind,
+    /// Optional note — facts only, no description of persons (prompted on the rider sheet as such); personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000).
+    #[graphql(name = "issue")]
+    pub issue: Option<String>,
+}
+
+/// Acknowledge and close a reported delivery issue with a closed RESOLUTION kind and an optional bounded note (#639 part C step 3-i). Whoever was told acts — the reporter never closes their own issue (api roles). Requires an OPEN issue on a non-DELIVERED job.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveDeliveryIssueInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "resolution")]
+    pub resolution: DeliveryIssueResolution,
+    /// Optional note — facts only; same erasure scope as the report's note.
+    #[graphql(name = "note")]
+    pub note: Option<String>,
+}
+
+/// An independent rider declines a pending delivery job (it stays PENDING, re-offerable).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DeclineDeliveryInput {
+    #[graphql(name = "deliveryJobId")]
+    pub delivery_job_id: DeliveryJobId,
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+    #[graphql(name = "reason")]
+    pub reason: Option<String>,
+}
+
 /// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]

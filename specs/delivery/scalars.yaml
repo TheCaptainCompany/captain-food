@@ -35,6 +35,30 @@ DeliveryProvider:
   description: "Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider)."
 
 
+# --- Delivery issue vocabulary (#639 part C step 3-i, ADR-20260904-015903 §4; the D2 pattern of
+# ADR-20260808-171056: a controlled enum + an optional bounded note, never free text alone) ---------
+DeliveryIssueKind:
+  type: string
+  enum:
+    - ADDRESS_NOT_FOUND      # the rider cannot locate the drop-off
+    - CUSTOMER_UNREACHABLE   # at the door, no answer
+    - RESTAURANT_NOT_READY   # at pickup, the order is not ready
+    - FOOD_DAMAGED           # the bag/food is not deliverable
+    - VEHICLE_OR_INJURY      # the rider cannot continue for their own reason
+    - OTHER                  # the note carries the facts (bounded, no description of persons)
+  description: "The closed set of reasons a rider (or ops) reports an issue on a delivery job — one tap on the rider sheet; the restaurant board headlines the card with it. OTHER is the only kind that expects a note (#639 part C step 3-i)."
+
+
+DeliveryIssueResolution:
+  type: string
+  enum:
+    - REASSIGNED               # the job was re-offered / another courier takes it
+    - DELIVERED_BY_RESTAURANT  # the restaurant delivered it itself
+    - CANCELLED                # the delivery was cancelled
+    - OTHER                    # the note carries the facts
+  description: "The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue."
+
+
 DeliveryChannelKey:
   type: string
   pattern: "^[a-z0-9]+(?:_[a-z0-9]+)*$"

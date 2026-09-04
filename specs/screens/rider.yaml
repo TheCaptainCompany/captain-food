@@ -43,6 +43,14 @@ actions:
   complete_delivery: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/completeDelivery' } }
   mark_order_delivered: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/markOrderDelivered' }, note: "Self-dispatch: the restaurant confirms the handover itself." }
   rider_toggle_online: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/changeRiderStatus' }, note: "The online/offline availability toggle (#95 closed the gap)." }
+  # The issue doors (#639 part C step 3-i, ADR-20260904-015903 §4/§7): report by closed kind from
+  # the job's "Un problème" sheet (report-only path; the handback exit is 3-ii), refuse a PENDING
+  # offer from the list. In-app only — no call button anywhere (SUPPORT-CONTACT: no voice leg).
+  # `riderId` is deliberately NOT bound: the rider surface has no rider-identity root to bind it
+  # from (the 2b seam resolves the caller server-side; DeliveryJob carries no riderId) — the same
+  # hole accept_delivery/confirm_pickup/complete_delivery sit in, held by the warning ratchet.
+  report_delivery_issue: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/reportDeliveryIssue' } }
+  decline_delivery:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/declineDelivery' } }
   # The sign-in door (#639 part C step 2c): two identify-only `roles: [PUBLIC]` mutations, reachable
   # from this surface ONLY through the `sign_in` screen's `graphql_role: PUBLIC` (R1, PROP-20260831-180622
   # §5). The session itself never travels in a GraphQL response: `claim_session` collects it from
@@ -75,6 +83,46 @@ global_components:
 # what a screen binds).
 # ──────────────────────────────────────────────────────────────────────────────
 bottom_sheets:
+  # "Un problème" (#639 part C step 3-i; ADR-20260904-015903 §7 — one control, two exits; 3-i ships
+  # the FIRST exit only). One-tap reason chips = the six DeliveryIssueKind values; OTHER reveals a
+  # collapsed 300-char note prompted "Les faits, sans décrire des personnes" (the D2 pattern's
+  # bounded note, ADR-20260808-171056); confirm tells the restaurant through the read model. The
+  # refusal lands INLINE — never a toast: the rider is never left with a dismissed sheet and no proof.
+  rider_issue_sheet:
+    id: rider_issue_sheet
+    type: bottom_sheet
+    title: { $ref: 'rider.translations.yaml#/rider.issue.title' }
+    sections:
+      - type: chip_multi_select
+        id: issue_exit
+        label: { $ref: 'rider.translations.yaml#/rider.issue.exit_label' }
+        single_select: true
+        options:
+          - { value: CONTINUE, label: { $ref: 'rider.translations.yaml#/rider.issue.exit.continue' } }
+      - type: chip_multi_select
+        id: issue_kind
+        label: { $ref: 'rider.translations.yaml#/rider.issue.kind_label' }
+        single_select: true
+        options:
+          - { value: ADDRESS_NOT_FOUND,     label: { $ref: 'rider.translations.yaml#/rider.issue.kind.address_not_found' } }
+          - { value: CUSTOMER_UNREACHABLE,  label: { $ref: 'rider.translations.yaml#/rider.issue.kind.customer_unreachable' } }
+          - { value: RESTAURANT_NOT_READY,  label: { $ref: 'rider.translations.yaml#/rider.issue.kind.restaurant_not_ready' } }
+          - { value: FOOD_DAMAGED,          label: { $ref: 'rider.translations.yaml#/rider.issue.kind.food_damaged' } }
+          - { value: VEHICLE_OR_INJURY,     label: { $ref: 'rider.translations.yaml#/rider.issue.kind.vehicle_or_injury' } }
+          - { value: OTHER,                 label: { $ref: 'rider.translations.yaml#/rider.issue.kind.other' } }
+      - { type: text_area, id: issue_note, placeholder: { $ref: 'rider.translations.yaml#/rider.issue.note_prompt' }, max_length: 300, visible_when: "issue_kind.value == 'OTHER'" }
+      - type: button
+        id: report_issue_btn
+        label: { $ref: 'rider.translations.yaml#/rider.issue.confirm' }
+        variant: primary
+        full_width: true
+        action:
+          type: report_delivery_issue
+          variables: { deliveryJobId: "{{ delivery.id }}", kind: "{{ issue_kind.value }}", issue: "{{ issue_note.value }}" }
+          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.pending' }
+          on_success: [{ type: close_sheet }]
+      - { type: inline_error, id: report_issue_error, for_action: report_delivery_issue }
+
   rider_code_sheet:
     id: rider_code_sheet
     type: bottom_sheet
@@ -150,7 +198,7 @@ screens:
     # reads navigates there. Before 2c-ii this screen rendered its shell with the read failed.
     unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [deliveries.mine]
-    actions_used: [accept_delivery, rider_toggle_online]
+    actions_used: [accept_delivery, decline_delivery, rider_toggle_online]
     components:
       - { component: rider_topbar }
       - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.jobs.title' } }
@@ -163,6 +211,9 @@ screens:
         id: job_list_actions
         content:
           - { type: button, label: { $ref: 'rider.translations.yaml#/rider.jobs.accept' }, variant: primary, action: { type: accept_delivery, variables: { orderId: "{{ delivery.orderId }}" } } }
+          # #639 part C step 3-i: refuse a PENDING offer (no reason field — a decline is a fold no-op).
+          - { type: button, id: decline_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.jobs.decline' }, variant: outline, visible_when: "delivery.status == 'PENDING'", action: { type: decline_delivery, variables: { deliveryJobId: "{{ delivery.id }}" } } }
+          - { type: inline_error, id: decline_delivery_error, for_action: decline_delivery }
 
   # SCREEN 2 — Job detail (the pickup→dropoff state machine + contact rows)
   - id: job_detail
@@ -175,12 +226,15 @@ screens:
     # #92 client guard), where `jobs` then rendered its shell with the read failed.
     unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [delivery.byOrder]
-    actions_used: [confirm_pickup, complete_delivery, phone_call]
+    actions_used: [confirm_pickup, complete_delivery, report_delivery_issue, phone_call]
     gaps:
       - "Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant."
     components:
       - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.job.title' } }
       - { type: status_chip, status: "{{ delivery.status }}" }
+      # #639 part C step 3-i: after a report the job STAYS (status untouched); the chip says so,
+      # read from the fold's `openIssue` — the rider's proof the restaurant was told.
+      - { type: badge, text: { $ref: 'rider.translations.yaml#/rider.job.issue_reported' }, variant: warning, visible_when: "delivery.openIssue != null" }
       - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress }}" }
       - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}" }
       # #717: plain name row via the FK-derived navigation edge (DeliveryJob.restaurant: Restaurant!).
@@ -190,3 +244,6 @@ screens:
         content:
           - { type: button, id: confirm_pickup_btn,   label: { $ref: 'rider.translations.yaml#/rider.job.picked_up' }, variant: primary, full_width: true, action: { type: confirm_pickup,    variables: { orderId: "{{ delivery.orderId }}" } } }
           - { type: button, id: complete_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.job.delivered' }, variant: primary, full_width: true, action: { type: complete_delivery, variables: { orderId: "{{ delivery.orderId }}" } } }
+          # #639 part C step 3-i: the secondary "Un problème" beside the primaries (outline, full
+          # width, min 56px on-bike target) opens the issue sheet. In-app only: no call button.
+          - { type: button, id: report_issue_open_btn, label: { $ref: 'rider.translations.yaml#/rider.job.problem' }, variant: outline, full_width: true, min_height: 56, action: { type: open_bottom_sheet, sheet_id: rider_issue_sheet } }

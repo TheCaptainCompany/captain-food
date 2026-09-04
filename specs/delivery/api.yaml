@@ -23,6 +23,9 @@ types:
       requestedAt: { type: string, format: date-time }
       pickedUpAt: { type: string, format: date-time, nullable: true }
       deliveredAt: { type: string, format: date-time, nullable: true }
+      # #639 part C step 3-i: the open issue's kind, folded from DeliveryIssueReported and cleared
+      # by DeliveryIssueResolved — the board's pinned card and the rider's "Problème signalé" chip.
+      openIssue: { $ref: 'scalars.yaml#/DeliveryIssueKind', nullable: true }
 
 
   DeliveryPartnerAvailability:
@@ -111,6 +114,24 @@ mutations:
   escalateDelivery:
     command: { $ref: 'commands.yaml#/EscalateDelivery' }
     roles: [RESTAURANT, ADMIN]   # restaurant/operator skips the current channel and advances the ranked dispatch walk (#60)
+    slice: V0
+
+  # The issue doors (#639 part C step 3-i, ADR-20260904-015903 §5) — additive, and the sets START
+  # NARROW on purpose: widening a roles list later is additive, narrowing is a break. Step 4's
+  # restricted-rider carve-out binds `reportDeliveryIssue` (with `handBackDelivery`, 3-ii).
+  reportDeliveryIssue:
+    command: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
+    roles: [RIDER, ADMIN]   # the reporter, or ops on their behalf
+    slice: V0
+
+  resolveDeliveryIssue:
+    command: { $ref: 'commands.yaml#/ResolveDeliveryIssue' }
+    roles: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]   # whoever is TOLD acts; the reporter never closes their own issue
+    slice: V0
+
+  declineDelivery:
+    command: { $ref: 'commands.yaml#/DeclineDelivery' }
+    roles: [RIDER]   # refuse a PENDING offer; the job stays PENDING and re-offerable (a fold no-op)
     slice: V0
 
 
