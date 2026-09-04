@@ -111,7 +111,8 @@ mod tests {
         DeliveryUnassignedFromPartner,
     };
     use crate::generated::scalars::{
-        AddressLine, CityName, CountryCode, DeliveryJobId, OrderId, PostalCode, RestaurantId,
+        AddressLine, CityName, CountryCode, DeliveryIssueKind, DeliveryIssueResolution, DeliveryJobId,
+        OrderId, PostalCode, RestaurantId,
     };
 
     fn job_id() -> DeliveryJobId {
@@ -227,12 +228,14 @@ mod tests {
         let reported = DomainEvent::DeliveryIssueReported(DeliveryIssueReported {
             delivery_job_id: job_id(),
             rider_id: None,
-            issue: "customer unreachable".into(),
+            kind: Some(DeliveryIssueKind::CUSTOMER_UNREACHABLE),
+            issue: Some("customer unreachable".into()),
             reported_at: None,
         });
         let resolved = DomainEvent::DeliveryIssueResolved(DeliveryIssueResolved {
             delivery_job_id: job_id(),
-            resolution: "reached by phone".into(),
+            resolution: Some(DeliveryIssueResolution::OTHER),
+            note: Some("reached by phone".into()),
             resolved_at: None,
         });
         let s = fold(&[requested(), reported.clone()]).unwrap();
