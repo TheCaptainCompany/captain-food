@@ -2,6 +2,50 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #639 part C step 4-ii ROUND 2 (PR #882, still draft): held-job facts fixed,
+> reinstated-rider false notice fixed, six one-liners, three addendum items.** Base
+> `ed4ca073` (matched). Picked up a partial uncommitted diff from a session lost to a container
+> restart mid-round; kept its item 1 work (both halves), redid/extended everything else.
+> **Item 1 (kept, extended slightly)**: `collect_screen_nav_selections` (`tools/codegen-rs/src/
+> emit/web.rs`) now splices a nav edge nested INSIDE a declared property (`heldDelivery.restaurant.
+> displayName` — `heldDelivery` is itself a declared `RiderStandingInfo` property, so the old
+> first-segment-only walk stopped there); a new `format_address` render filter (beside
+> `format_currency`/`format_datetime`) replaces every unfiltered `Address`-object binding on
+> `job_detail` and `restricted` that used to fall through to the Money-shaped formatter and render
+> "". Codegen test + render-test fixtures updated to the REAL `Address` shape. **Item 2 (new)**: the
+> WHOLE notice body, including the door's own `back_button_header`, is now one `conditional_section`
+> keyed on `standing.standing == 'RESTRICTED'` — the `if_false` branch renders
+> `rider.restricted.reinstated` ("Votre accès est rétabli.", ADR-081527 §7 verbatim) with one
+> `navigate: "/"` control. First attempt only gated the inner `page_header`/text/footer and left the
+> `back_button_header`'s title unconditional, which still said "Votre accès est restreint." for a
+> reinstated rider on the FIRST render test run — caught by the test's own positive assertion
+> (`!html.contains("restreint")`), fixed by moving the header inside both branches too. **Item 3
+> (new)**: `specs/observability.yaml#/rider-restriction` gains a comment declaring the client bounce
+> leg RESERVED (`rider.restricted.bounced`, the `sdui_degraded_render_total` convention, no OTel in
+> `web`) — comment only, `make validate`/`check-drift` unaffected. **One-liners**: both date LABELS
+> asserted (not just values, item 4); a native fixture for the second sheet's ASSIGNED arm asserting
+> the literal `NOT_COLLECTED` reaches `data-vars` (item 5); the `d-1` assertion sharpened to the
+> `data-vars` `deliveryJobId` payload (item 6) — both required matching the RENDERED (HTML-escaped,
+> `&quot;`) form, not the raw JSON string, caught by a first red on exactly that; a `[data-c="row"]`
+> flex CSS rule so the split legal sentence (three `<p data-c="text">` children) flows as one line
+> instead of stacking (item 7 — `row` already implied this for the chat compose bar, so this is a
+> general fix, not a special case); `specs/delivery/api.yaml` drops a stale line-number citation
+> (item 8); `make wasm` GREEN, 57s (item 9). **Addendum**: clippy widened to include
+> `captain-food-codegen` (item 11); a `router.rs` twin assertion that `restricted` itself declares
+> `unauthenticated: /sign-in` (item 12); `rider_standing_walk.rs` threads
+> `Some(EmailAddress("support@captain.food"))` through `ReadDeps` and asserts
+> `myStanding.contestContact` reaches the wire — every other fixture in the corpus passes `None`
+> (item 13). **Gates**: `cargo build --workspace` GREEN; `make validate` 0 errors; `make rust` GREEN
+> 95s (build+test(codegen 417)+validate+generate+link-check); DB-gated `make test-crates` GREEN
+> against an isolated `cf639r2ii` database (DB PRE-FLIGHT OK, empty skip receipt, 0 FAILED across
+> ~209 `test result: ok` blocks, incl. `the_restriction_walk_forbids_and_reopens_the_real_doors`
+> carrying the new `contestContact` assertion); `cargo clippy -p web -p server -p infrastructure -p
+> shared_types -p application -p captain-food-codegen --all-targets -D clippy::disallowed-methods -D
+> clippy::mistyped_literal_suffixes` exit 0; codegen test binary 417 passed; `make link-check` 8589
+> links, 0 broken; `make warning-baseline` run, diff clean (surface did not move). PR stays DRAFT,
+> `HOLD: human` unchanged. Full detail: hand-back at
+> `/tmp/.../handback-4ii-r2.md` per the dispatch.
+
 > **2026-09-04 — #639 part C step 4-ii landed (PR #882, draft, hand-back at green): the restricted
 > rider is told.** [ADR-20260904-124600](../adr/ADR-20260904-124600-the-restricted-rider-is-told-on-the-client-leg-first-keyed-on-the-server-s-own-reason-and-the-page-get-leg-rides-with-the-socket.md).
 > Executor tier: sonnet. Base `f00ceeec` (the empty claim commit) on `ec374f2e` == `origin/main` —
