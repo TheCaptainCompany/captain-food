@@ -6,6 +6,7 @@ description: >
   PR still in DRAFT. The ready flip and the auto-merge arming are the coordinator's step
   (ADR-20260831-183847, restoring ADR-20260810-011500 §2). Edits specs/** only under the dispatch's
   recorded approval. Does not choose its own work and never works a second item in the same run.
+model: sonnet
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
