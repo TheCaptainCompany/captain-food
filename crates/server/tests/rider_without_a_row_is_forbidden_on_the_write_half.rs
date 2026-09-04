@@ -8,11 +8,16 @@
 //!
 //! Why this test exists: as first pushed, 2b minted the `ActingRole` from `Identity::Rider`
 //! BEFORE the seam resolved, so a bare RIDER token with no row read `Public` and still ACTED as
-//! RIDER on every `ALLOW_RIDER` guard — and `AcceptDelivery` takes its target from the payload
-//! (`deliveryJobId`, `riderId`), never from the caller, so that token could enqueue an acceptance
-//! naming any rider, with `RIDER` stamped as its author in `domain_events.user_type`. That is the
-//! exact shape ADR-20260830-191457 closed for RESTAURANT (unbound => PUBLIC on both halves;
-//! ADR-20260818-101500: `Identity::Unbound` denies on the money path and never stamps a role).
+//! RIDER on every `ALLOW_RIDER` guard — and `AcceptDelivery` took its target from the CLIENT
+//! PAYLOAD (`deliveryJobId`, `riderId`), never from the caller, so that token could enqueue an
+//! acceptance naming any rider, with `RIDER` stamped as its author in `domain_events.user_type`.
+//! That is the exact shape ADR-20260830-191457 closed for RESTAURANT (unbound => PUBLIC on both
+//! halves; ADR-20260818-101500: `Identity::Unbound` denies on the money path and never stamps a
+//! role). **#865** closed the OTHER half of the same hole: `riderId` is no longer a client input
+//! at all — `AcceptDeliveryInput` carries no such field — it is `derived:` from THIS SAME seam's
+//! `ReadScope::Rider` at the resolver, so the guard below and the derived-field injection are two
+//! readings of the identical resolution: a bare token with no row is `ReadScope::Public`, which
+//! the `RoleGuard` refuses before the injection code ever runs.
 //!
 //! Seen RED against `a2fcb93f` (the HEAD the finding was raised on) before the runtime changed —
 //! the failure text is in the PR body's "Re-presentation" section.
@@ -112,23 +117,21 @@ async fn router(outcome: RiderIdentityResolution) -> axum::Router {
 }
 
 /// The one operation under test: `acceptDelivery` (`guard = RoleGuard::new(ALLOW_RIDER)`), with a
-/// well-formed input so the guard — not argument parsing — is what answers. The `riderId` in the
-/// payload is deliberately NOT anything the caller could be: it is the payload-resolved target the
-/// finding named.
+/// well-formed input so the guard — not argument parsing — is what answers. `riderId` carries no
+/// field on `AcceptDeliveryInput` at all since #865 (`derived: { riderId: rider }`): the caller's
+/// identity is read from `ReadScope`, never from this literal.
 const ACCEPT_DELIVERY: &str = r#"mutation {
   acceptDelivery(input: {
-    deliveryJobId: "00000000-0000-0000-0000-00000000000d",
-    riderId: "00000000-0000-0000-0000-000000000bad"
+    deliveryJobId: "00000000-0000-0000-0000-00000000000d"
   }) { messageId }
 }"#;
 
-/// #639 part C step 3-i: the issue door, same shape — `reportDeliveryIssue` is `[RIDER, ADMIN]`
-/// and takes its `riderId` from the payload too, so a bare RIDER token with no row could otherwise
-/// report an issue in any rider's name.
+/// #639 part C step 3-i: the issue door, same shape — `reportDeliveryIssue` is `[RIDER, ADMIN]`.
+/// `riderId` is `derived: { riderId: rider }` too (#865), NULLABLE — the resolver injects it only
+/// on the RIDER path; this literal carries no such field either.
 const REPORT_DELIVERY_ISSUE: &str = r#"mutation {
   reportDeliveryIssue(input: {
     deliveryJobId: "00000000-0000-0000-0000-00000000000d",
-    riderId: "00000000-0000-0000-0000-000000000bad",
     kind: CUSTOMER_UNREACHABLE
   }) { messageId }
 }"#;

@@ -70,6 +70,10 @@ pub(crate) struct ApiMutation {
     pub(crate) roles: Vec<String>,
     pub(crate) slice: String,
     pub(crate) payload: Vec<ApiField>,
+    /// `derived: { <commandProperty>: <source> }` (#865, ADR-20260904-015903 §6): command
+    /// properties the resolver INJECTS from the caller's `ReadScope` at the seam — never a
+    /// client-suppliable input. `(property name, source)` pairs, declaration order.
+    pub(crate) derived: Vec<(String, String)>,
 }
 pub(crate) struct Api {
     pub(crate) types: Vec<ApiType>,
@@ -161,6 +165,35 @@ pub(crate) fn nav_roles_map(v: Option<&Value>) -> Vec<(String, Vec<String>)> {
     out
 }
 
+/// api.yaml mutation `derived:` — command property name → source token (`rider`), declaration
+/// order (#865). The DSL-closed source set lives in `validate/api_derived.rs`.
+pub(crate) fn derived_map(v: Option<&Value>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(Value::Mapping(m)) = v {
+        for (k, s) in m {
+            if let (Some(prop), Some(source)) = (k.as_str(), s.as_str()) {
+                out.push((prop.to_string(), source.to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// The `<Command>Input` description for its `derived:` properties (#865) — the `argsExactlyOneOf`
+/// `one_of_doc` precedent: introspection states WHERE a server-injected id comes from, since the
+/// field itself is omitted from the SDL. Empty for a command with no derived property (the vast
+/// majority) — no behaviour change there.
+pub(crate) fn derived_doc(derived: &[(String, String)]) -> Option<String> {
+    if derived.is_empty() {
+        return None;
+    }
+    let sentences: Vec<String> = derived
+        .iter()
+        .map(|(prop, source)| format!("`{prop}` is derived from the caller's {} identity.", source.to_uppercase()))
+        .collect();
+    Some(sentences.join(" "))
+}
+
 pub(crate) fn parse_api(model: &Model) -> Api {
     let sect = |k: &str| model.defs.get("api.yaml").and_then(|v| v.get(k)).and_then(|v| v.as_mapping());
     let mut types = Vec::new();
@@ -224,6 +257,7 @@ pub(crate) fn parse_api(model: &Model) -> Api {
                     roles: string_list(mu.get("roles")),
                     slice: mu.get("slice").and_then(|x| x.as_str()).unwrap_or("V0").to_string(),
                     payload: field_map(mu.get("payload")),
+                    derived: derived_map(mu.get("derived")),
                 });
             }
         }
@@ -275,6 +309,14 @@ pub(crate) fn base_type(model: &Model, node: &Value, ctx: &str, input: bool) -> 
 }
 
 pub(crate) fn object_fields(model: &Model, def: &Value, ctx: &str, input: bool) -> Vec<String> {
+    object_fields_excluding(model, def, ctx, input, &HashSet::new())
+}
+
+/// `object_fields`, omitting the named properties entirely — the `<Command>Input` SDL for a
+/// mutation with `derived:` properties (#865): a derived property is server-injected, never a
+/// client input, so it carries no field on the GraphQL input type at all (never nullable, never
+/// present-but-ignored — `action-missing-required-input`'s companion emitter-side guarantee).
+pub(crate) fn object_fields_excluding(model: &Model, def: &Value, ctx: &str, input: bool, exclude: &HashSet<&str>) -> Vec<String> {
     let props = match def.get("properties").and_then(|p| p.as_mapping()) {
         Some(m) => m,
         None => return vec![],
@@ -290,6 +332,9 @@ pub(crate) fn object_fields(model: &Model, def: &Value, ctx: &str, input: bool) 
             Some(s) => s,
             None => continue,
         };
+        if exclude.contains(name) {
+            continue;
+        }
         if input && p.get("readOnly").and_then(|x| x.as_bool()) == Some(true) {
             continue;
         }
@@ -510,7 +555,14 @@ pub(crate) fn input_types_block(model: &Model, api: &Api) -> String {
     let mut command_inputs = Vec::new();
     for m in &api.mutations {
         if let Some(def) = model.defs.get("commands.yaml").and_then(|d| d.get(&m.command)) {
-            command_inputs.push(format!("input {}Input {{\n{}\n}}", m.command, object_fields(model, def, "commands.yaml", true).join("\n")));
+            // #865: a `derived:` property is server-injected at the resolver seam, never a client
+            // input — omitted from the SDL entirely, its provenance stated on the type description.
+            let exclude: HashSet<&str> = m.derived.iter().map(|(p, _)| p.as_str()).collect();
+            let fields = object_fields_excluding(model, def, "commands.yaml", true, &exclude);
+            let doc = derived_doc(&m.derived)
+                .map(|d| format!("\"\"\"\n{}\n\"\"\"\n", d))
+                .unwrap_or_default();
+            command_inputs.push(format!("{}input {}Input {{\n{}\n}}", doc, m.command, fields.join("\n")));
             visit_inputs(model, &m.command, "commands.yaml", &mut needed, &mut visited);
         }
     }

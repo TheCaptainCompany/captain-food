@@ -440,6 +440,8 @@ pub(crate) fn validate(model: &Model) -> Report {
     validate_business_metrics(model, &mut issues);
     // §27 (#639 part C step 3-i): every key on an api operation is one the loader reads.
     check_api_operation_keys(model, &mut issues);
+    // §28 (#865): mutation `derived:` properties are server-injected, never client input.
+    check_api_derived_fields(model, &mut issues);
     // `derive:` arm values are one of three forms, and `null` only resets a nullable column.
     check_view_derive_values(model, &mut issues);
 
@@ -1809,8 +1811,12 @@ pub(crate) fn validate(model: &Model) -> Report {
                 }
             }
             // action name → the command its mutation carries, so a component's `action.variables`
-            // can be checked against the command's REQUIRED input properties below.
+            // can be checked against the command's REQUIRED input properties below. `action_derived`
+            // rides beside it: a mutation's `derived:` properties are SERVER-injected (#865) — the
+            // screen action supplies no variable for them by construction, so they are excluded from
+            // the "unsubmittable form" check, not counted as missing.
             let mut action_command: HashMap<String, String> = HashMap::new();
+            let mut action_derived: HashMap<String, BTreeSet<String>> = HashMap::new();
             if let Some(amap) = actions {
                 for (nk, a) in amap {
                     let name = match nk.as_str() {
@@ -1821,16 +1827,18 @@ pub(crate) fn validate(model: &Model) -> Report {
                         Some(r) => r,
                         None => continue,
                     };
-                    if let Some(cmd) = model
+                    let mutation = model
                         .defs
                         .get("api.yaml")
                         .and_then(|v| v.get("mutations"))
-                        .and_then(|v| v.get(op_name(rf).as_str()))
-                        .and_then(|v| v.get("command"))
-                        .and_then(|v| v.get("$ref"))
-                        .and_then(|x| x.as_str())
-                    {
+                        .and_then(|v| v.get(op_name(rf).as_str()));
+                    if let Some(cmd) = mutation.and_then(|v| v.get("command")).and_then(|v| v.get("$ref")).and_then(|x| x.as_str()) {
                         action_command.insert(name.to_string(), op_name(cmd));
+                    }
+                    if let Some(derived) = mutation.and_then(|v| v.get("derived")).and_then(|v| v.as_mapping()) {
+                        let keys: BTreeSet<String> =
+                            derived.keys().filter_map(|k| k.as_str().map(str::to_string)).collect();
+                        action_derived.insert(name.to_string(), keys);
                     }
                     if ref_target_file(rf, sfkey).as_deref() != Some("api.yaml")
                         || !rf.contains("/mutations/")
@@ -1900,10 +1908,12 @@ pub(crate) fn validate(model: &Model) -> Report {
                                 ));
                             }
                         }
+                        let derived_keys = action_derived.get(&action_name);
                         let missing: Vec<&str> = required
                             .iter()
                             .filter_map(|r| r.as_str())
                             .filter(|r| !provided.contains(*r))
+                            .filter(|r| derived_keys.map(|d| !d.contains(*r)).unwrap_or(true))
                             .collect();
                         if !missing.is_empty() {
                             issues.push(warn(

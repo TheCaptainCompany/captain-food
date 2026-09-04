@@ -46,9 +46,11 @@ actions:
   # The issue doors (#639 part C step 3-i, ADR-20260904-015903 §4/§7): report by closed kind from
   # the job's "Un problème" sheet (report-only path; the handback exit is 3-ii), refuse a PENDING
   # offer from the list. In-app only — no call button anywhere (SUPPORT-CONTACT: no voice leg).
-  # `riderId` is deliberately NOT bound: the rider surface has no rider-identity root to bind it
-  # from (the 2b seam resolves the caller server-side; DeliveryJob carries no riderId) — the same
-  # hole accept_delivery/confirm_pickup/complete_delivery sit in, held by the warning ratchet.
+  # `riderId` is deliberately NOT bound anywhere on this surface (#865): api.yaml's `derived:`
+  # declares it DERIVED from the caller's `ReadScope::Rider` at the resolver seam — the rider
+  # surface never had a rider-identity root to bind it FROM (this comment used to say so as a gap;
+  # #865 closes it by removing the need, not by adding a root), and the generated Input type no
+  # longer carries the field at all.
   report_delivery_issue: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/reportDeliveryIssue' } }
   decline_delivery:      { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/declineDelivery' } }
   # The sign-in door (#639 part C step 2c): two identify-only `roles: [PUBLIC]` mutations, reachable
@@ -210,7 +212,7 @@ screens:
       - type: section
         id: job_list_actions
         content:
-          - { type: button, label: { $ref: 'rider.translations.yaml#/rider.jobs.accept' }, variant: primary, action: { type: accept_delivery, variables: { orderId: "{{ delivery.orderId }}" } } }
+          - { type: button, label: { $ref: 'rider.translations.yaml#/rider.jobs.accept' }, variant: primary, action: { type: accept_delivery, variables: { deliveryJobId: "{{ delivery.id }}" } } }
           # #639 part C step 3-i: refuse a PENDING offer (no reason field — a decline is a fold no-op).
           - { type: button, id: decline_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.jobs.decline' }, variant: outline, visible_when: "delivery.status == 'PENDING'", action: { type: decline_delivery, variables: { deliveryJobId: "{{ delivery.id }}" } } }
           - { type: inline_error, id: decline_delivery_error, for_action: decline_delivery }
@@ -242,8 +244,8 @@ screens:
       - { type: info_row, icon: store, label: { $ref: 'rider.translations.yaml#/rider.job.restaurant' }, value: "{{ delivery.restaurant.displayName }}" }
       - type: sticky_bottom_bar
         content:
-          - { type: button, id: confirm_pickup_btn,   label: { $ref: 'rider.translations.yaml#/rider.job.picked_up' }, variant: primary, full_width: true, action: { type: confirm_pickup,    variables: { orderId: "{{ delivery.orderId }}" } } }
-          - { type: button, id: complete_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.job.delivered' }, variant: primary, full_width: true, action: { type: complete_delivery, variables: { orderId: "{{ delivery.orderId }}" } } }
+          - { type: button, id: confirm_pickup_btn,   label: { $ref: 'rider.translations.yaml#/rider.job.picked_up' }, variant: primary, full_width: true, action: { type: confirm_pickup,    variables: { deliveryJobId: "{{ delivery.id }}" } } }
+          - { type: button, id: complete_delivery_btn, label: { $ref: 'rider.translations.yaml#/rider.job.delivered' }, variant: primary, full_width: true, action: { type: complete_delivery, variables: { deliveryJobId: "{{ delivery.id }}" } } }
           # #639 part C step 3-i: the secondary "Un problème" beside the primaries (outline, full
           # width, min 56px on-bike target) opens the issue sheet. In-app only: no call button.
           - { type: button, id: report_issue_open_btn, label: { $ref: 'rider.translations.yaml#/rider.job.problem' }, variant: outline, full_width: true, min_height: 56, action: { type: open_bottom_sheet, sheet_id: rider_issue_sheet } }

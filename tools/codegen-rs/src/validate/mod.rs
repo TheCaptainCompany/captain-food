@@ -2,6 +2,7 @@
 //! validate() (validate::core).
 
 pub(crate) mod answers; // §2g actor `answers:` blocks (PROP-20260815-142349, #582)
+pub(crate) mod api_derived; // §28 mutation `derived:` properties -- server-injected, never client input (#865)
 pub(crate) mod api_operation_keys; // §27 api operation keys are a closed set per section (#639 part C 3-i, step 4's seam)
 pub(crate) mod bins; // §15 bin topology ↔ c4-l2 containers (#382)
 pub(crate) mod business_metrics; // §19 business-metric catalog (ADR-20260811-014129, #484)
@@ -30,6 +31,7 @@ pub(crate) mod view_derive; // `derive:` arm values: literal | { from } | null, 
 pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warning-baseline.json)
 
 pub(crate) use answers::*;
+pub(crate) use api_derived::*;
 pub(crate) use api_operation_keys::*;
 pub(crate) use bins::*;
 pub(crate) use business_metrics::*;

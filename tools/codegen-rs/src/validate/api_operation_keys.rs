@@ -19,8 +19,10 @@ use crate::*;
 
 /// Keys `api.rs#parse_api`'s `parse_query` reads (queries AND subscriptions share the parser).
 const QUERY_KEYS: &[&str] = &["description", "args", "argsExactlyOneOf", "returns", "roles", "slice"];
-/// Keys `api.rs#parse_api` reads on a mutation.
-const MUTATION_KEYS: &[&str] = &["description", "command", "roles", "slice", "payload"];
+/// Keys `api.rs#parse_api` reads on a mutation. `derived` (#865, ADR-20260904-015903 §6): a
+/// command property the resolver INJECTS from the caller's `ReadScope` at the seam, never a
+/// client-suppliable input — see `validate/api_derived.rs`.
+const MUTATION_KEYS: &[&str] = &["description", "command", "roles", "slice", "payload", "derived"];
 
 /// The closed key set of one `api.yaml` section.
 fn allowed(section: &str) -> &'static [&'static str] {

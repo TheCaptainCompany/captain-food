@@ -3325,6 +3325,21 @@ async fn test_confirm_pickup() {
     ]);
 }
 
+/// tests.yaml#/tests/TestConfirmPickupByAnotherRiderIsRejected — "Rejects a pickup confirmation from a rider who is not the one assigned"
+/// rules: DeliveryPickupAndCompletionByRider
+#[tokio::test]
+async fn test_confirm_pickup_by_another_rider_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmPickup { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-2")) };
+    let result = crate::commands::confirm_pickup(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestConfirmPickupByAnotherRiderIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestConfirmPickupByAnotherRiderIsRejected", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestConfirmPickupByAnotherRiderIsRejected", &before, &[]);
+}
+
 /// tests.yaml#/tests/TestCompleteDelivery — "The assigned rider records hand-over to the customer"
 /// rules: DeliveryPickupAndCompletionByRider
 #[tokio::test]
@@ -3339,6 +3354,21 @@ async fn test_complete_delivery() {
     bed.assert_appended("TestCompleteDelivery", &before, &[
         (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_completed()),
     ]);
+}
+
+/// tests.yaml#/tests/TestCompleteDeliveryByAnotherRiderIsRejected — "Rejects a completion from a rider who is not the one assigned"
+/// rules: DeliveryPickupAndCompletionByRider
+#[tokio::test]
+async fn test_complete_delivery_by_another_rider_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("DeliveryJob-{}", support::uid("deliv-1")), vec![fx_delivery_requested(), fx_delivery_accepted_by_rider(), fx_delivery_picked_up()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::CompleteDelivery { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-2")) };
+    let result = crate::commands::complete_delivery(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestCompleteDeliveryByAnotherRiderIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestCompleteDeliveryByAnotherRiderIsRejected", &err, &["InvalidDeliveryStatus"]);
+    bed.assert_appended("TestCompleteDeliveryByAnotherRiderIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestCancelDelivery — "The restaurant cancels a pending delivery job"

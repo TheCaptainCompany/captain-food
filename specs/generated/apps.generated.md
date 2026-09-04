@@ -148,7 +148,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
-| `gateway-admin` | platform | `/admin/graphql`: routes 130 field(s) to 8 subgraph(s); 71 authorized for ADMIN | -- | -- | yes | -- | 10 | -- |
+| `gateway-admin` | platform | `/admin/graphql`: routes 130 field(s) to 8 subgraph(s); 70 authorized for ADMIN | -- | -- | yes | -- | 10 | -- |
 | `gateway-customer` | customer | `/customer/graphql`: routes 130 field(s) to 8 subgraph(s); 46 authorized for CUSTOMER | -- | -- | yes | -- | 10 | -- |
 | `gateway-external` | platform | `/external/graphql`: routes 130 field(s) to 8 subgraph(s); 10 authorized for EXTERNAL | -- | -- | yes | -- | 10 | -- |
 | `gateway-public` | customer | `/public/graphql`: routes 130 field(s) to 8 subgraph(s); 9 authorized for PUBLIC | -- | -- | yes | -- | 10 | -- |

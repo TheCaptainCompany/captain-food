@@ -41,7 +41,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::CreateCatalog = serde_json::from_value(payload_json.clone())
@@ -114,7 +114,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfigureCatalogSlug = serde_json::from_value(payload_json.clone())
@@ -187,7 +187,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AddProduct = serde_json::from_value(payload_json.clone())
@@ -260,7 +260,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateProduct = serde_json::from_value(payload_json.clone())
@@ -333,7 +333,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RemoveProduct = serde_json::from_value(payload_json.clone())
@@ -406,7 +406,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AddCatalogCategory = serde_json::from_value(payload_json.clone())
@@ -479,7 +479,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateCatalogCategory = serde_json::from_value(payload_json.clone())
@@ -552,7 +552,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RemoveCatalogCategory = serde_json::from_value(payload_json.clone())
@@ -625,7 +625,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AddOptionList = serde_json::from_value(payload_json.clone())
@@ -698,7 +698,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateOptionList = serde_json::from_value(payload_json.clone())
@@ -771,7 +771,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RemoveOptionList = serde_json::from_value(payload_json.clone())
@@ -844,7 +844,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateOfferStock = serde_json::from_value(payload_json.clone())
@@ -917,7 +917,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ImportCatalog = serde_json::from_value(payload_json.clone())
@@ -990,7 +990,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequeueMailboxMessage = serde_json::from_value(payload_json.clone())
@@ -1063,7 +1063,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::OpenConversation = serde_json::from_value(payload_json.clone())
@@ -1136,7 +1136,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::PostMessage = serde_json::from_value(payload_json.clone())
@@ -1209,7 +1209,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RecordMessageTranslation = serde_json::from_value(payload_json.clone())
@@ -1282,7 +1282,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::EscalateToAdmin = serde_json::from_value(payload_json.clone())
@@ -1355,7 +1355,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::MuteParticipant = serde_json::from_value(payload_json.clone())
@@ -1428,7 +1428,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UnmuteParticipant = serde_json::from_value(payload_json.clone())
@@ -1501,7 +1501,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequestPhoneVerification = serde_json::from_value(payload_json.clone())
@@ -1575,7 +1575,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::VerifyPhone = serde_json::from_value(payload_json.clone())
@@ -1648,7 +1648,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequestEmailVerification = serde_json::from_value(payload_json.clone())
@@ -1721,7 +1721,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfirmEmailVerification = serde_json::from_value(payload_json.clone())
@@ -1794,7 +1794,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequestPhoneChange = serde_json::from_value(payload_json.clone())
@@ -1867,7 +1867,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfirmPhoneChange = serde_json::from_value(payload_json.clone())
@@ -1940,7 +1940,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ChangeLanguage = serde_json::from_value(payload_json.clone())
@@ -2013,7 +2013,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::MarkRestaurantAsFavorite = serde_json::from_value(payload_json.clone())
@@ -2086,7 +2086,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UnmarkRestaurantAsFavorite = serde_json::from_value(payload_json.clone())
@@ -2159,7 +2159,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateCustomerInfo = serde_json::from_value(payload_json.clone())
@@ -2232,7 +2232,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::SetCustomerPreferences = serde_json::from_value(payload_json.clone())
@@ -2305,7 +2305,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::SetCustomerAddress = serde_json::from_value(payload_json.clone())
@@ -2378,7 +2378,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RemoveCustomerAddress = serde_json::from_value(payload_json.clone())
@@ -2451,7 +2451,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::SetCustomerPaymentMethod = serde_json::from_value(payload_json.clone())
@@ -2524,7 +2524,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequestCustomerErasure = serde_json::from_value(payload_json.clone())
@@ -2597,7 +2597,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfirmCustomerErasure = serde_json::from_value(payload_json.clone())
@@ -2670,7 +2670,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::CancelCustomerErasure = serde_json::from_value(payload_json.clone())
@@ -2731,7 +2731,7 @@ impl MutationRoot {
         .instrument(__receive)
         .await
     }
-    #[graphql(name = "changeRiderStatus", guard = "RoleGuard::new(ALLOW_RIDER_ADMIN)", visible = "visible_rider_admin")]
+    #[graphql(name = "changeRiderStatus", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
     async fn change_rider_status(&self, ctx: &async_graphql::Context<'_>, input: ChangeRiderStatusInput, metadata: Option<MetadataInput>) -> async_graphql::Result<MutationAcceptance> {
         // command.receive (SERVER). Opened before any fallible work so an input that fails to
         // deserialize still leaves a span naming the command that was attempted.
@@ -2743,7 +2743,12 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
+        let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
+        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+            return Err(forbidden_error());
+        };
+        payload_json["riderId"] = serde_json::json!(__derived_id.0);
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ChangeRiderStatus = serde_json::from_value(payload_json.clone())
@@ -2816,7 +2821,12 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
+        let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
+        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+            return Err(forbidden_error());
+        };
+        payload_json["riderId"] = serde_json::json!(__derived_id.0);
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AcceptDelivery = serde_json::from_value(payload_json.clone())
@@ -2889,7 +2899,12 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
+        let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
+        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+            return Err(forbidden_error());
+        };
+        payload_json["riderId"] = serde_json::json!(__derived_id.0);
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfirmPickup = serde_json::from_value(payload_json.clone())
@@ -2962,7 +2977,12 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
+        let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
+        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+            return Err(forbidden_error());
+        };
+        payload_json["riderId"] = serde_json::json!(__derived_id.0);
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::CompleteDelivery = serde_json::from_value(payload_json.clone())
@@ -3035,7 +3055,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::CancelDelivery = serde_json::from_value(payload_json.clone())
@@ -3108,7 +3128,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::EscalateDelivery = serde_json::from_value(payload_json.clone())
@@ -3181,7 +3201,10 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
+        if let Some(application::queries::ReadScope::Rider(__derived_id)) = ctx.data_opt::<application::queries::ReadScope>() {
+            payload_json["riderId"] = serde_json::json!(__derived_id.0);
+        }
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ReportDeliveryIssue = serde_json::from_value(payload_json.clone())
@@ -3254,7 +3277,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ResolveDeliveryIssue = serde_json::from_value(payload_json.clone())
@@ -3327,7 +3350,12 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
+        let __derived_scope = ctx.data_opt::<application::queries::ReadScope>();
+        let Some(application::queries::ReadScope::Rider(__derived_id)) = __derived_scope else {
+            return Err(forbidden_error());
+        };
+        payload_json["riderId"] = serde_json::json!(__derived_id.0);
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::DeclineDelivery = serde_json::from_value(payload_json.clone())
@@ -3400,7 +3428,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RegisterDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
@@ -3473,7 +3501,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ApproveDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
@@ -3546,7 +3574,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RevokeDeliveryPartnerAvailability = serde_json::from_value(payload_json.clone())
@@ -3619,7 +3647,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequestRiderSignInCode = serde_json::from_value(payload_json.clone())
@@ -3693,7 +3721,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfirmRiderSignIn = serde_json::from_value(payload_json.clone())
@@ -3767,7 +3795,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RegisterRestaurantAccount = serde_json::from_value(payload_json.clone())
@@ -3840,7 +3868,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateRestaurantAccount = serde_json::from_value(payload_json.clone())
@@ -3913,7 +3941,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::DeleteRestaurantAccount = serde_json::from_value(payload_json.clone())
@@ -3986,7 +4014,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RegisterRestaurant = serde_json::from_value(payload_json.clone())
@@ -4060,7 +4088,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfigureRestaurantSlug = serde_json::from_value(payload_json.clone())
@@ -4133,7 +4161,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ActivateRestaurant = serde_json::from_value(payload_json.clone())
@@ -4206,7 +4234,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateRestaurant = serde_json::from_value(payload_json.clone())
@@ -4279,7 +4307,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::DeactivateRestaurant = serde_json::from_value(payload_json.clone())
@@ -4352,7 +4380,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RemoveRestaurant = serde_json::from_value(payload_json.clone())
@@ -4425,7 +4453,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ChangeOrderAcceptanceMode = serde_json::from_value(payload_json.clone())
@@ -4498,7 +4526,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::UpdateRestaurantGoogleBusinessProfile = serde_json::from_value(payload_json.clone())
@@ -4571,7 +4599,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::MarkRestaurantClosed = serde_json::from_value(payload_json.clone())
@@ -4644,7 +4672,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ClaimRestaurantListing = serde_json::from_value(payload_json.clone())
@@ -4717,7 +4745,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::OptOutRestaurantListing = serde_json::from_value(payload_json.clone())
@@ -4790,7 +4818,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ChangeRestaurantListingStatus = serde_json::from_value(payload_json.clone())
@@ -4863,7 +4891,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ConfigureGoogleBusinessProfileOrderLink = serde_json::from_value(payload_json.clone())
@@ -4936,7 +4964,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::VerifyGoogleBusinessProfileOrderLink = serde_json::from_value(payload_json.clone())
@@ -5009,7 +5037,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RecordProspectContact = serde_json::from_value(payload_json.clone())
@@ -5082,7 +5110,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::MarkProspectCold = serde_json::from_value(payload_json.clone())
@@ -5155,7 +5183,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RecordProspectReply = serde_json::from_value(payload_json.clone())
@@ -5228,7 +5256,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AddCartLine = serde_json::from_value(payload_json.clone())
@@ -5301,7 +5329,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RemoveCartLine = serde_json::from_value(payload_json.clone())
@@ -5374,7 +5402,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ChangeCartLineQuantity = serde_json::from_value(payload_json.clone())
@@ -5447,7 +5475,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::PlaceOrder = serde_json::from_value(payload_json.clone())
@@ -5520,7 +5548,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AcceptOrder = serde_json::from_value(payload_json.clone())
@@ -5593,7 +5621,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RejectOrder = serde_json::from_value(payload_json.clone())
@@ -5666,7 +5694,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::StartPreparation = serde_json::from_value(payload_json.clone())
@@ -5739,7 +5767,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::MarkOrderReady = serde_json::from_value(payload_json.clone())
@@ -5812,7 +5840,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::MarkOrderDelivered = serde_json::from_value(payload_json.clone())
@@ -5885,7 +5913,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::CancelOrderByCustomer = serde_json::from_value(payload_json.clone())
@@ -5958,7 +5986,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::CancelOrderByRestaurant = serde_json::from_value(payload_json.clone())
@@ -6031,7 +6059,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RateOrder = serde_json::from_value(payload_json.clone())
@@ -6104,7 +6132,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RateRestaurant = serde_json::from_value(payload_json.clone())
@@ -6177,7 +6205,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RecordDeliverySatisfaction = serde_json::from_value(payload_json.clone())
@@ -6250,7 +6278,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::TipOrder = serde_json::from_value(payload_json.clone())
@@ -6323,7 +6351,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RequestRefund = serde_json::from_value(payload_json.clone())
@@ -6396,7 +6424,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::OpenReclamation = serde_json::from_value(payload_json.clone())
@@ -6469,7 +6497,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ResolveReclamation = serde_json::from_value(payload_json.clone())
@@ -6542,7 +6570,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::RejectReclamation = serde_json::from_value(payload_json.clone())
@@ -6615,7 +6643,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ReopenReclamation = serde_json::from_value(payload_json.clone())
@@ -6688,7 +6716,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::AttachReclamationEvidence = serde_json::from_value(payload_json.clone())
@@ -6761,7 +6789,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::ApproveRefund = serde_json::from_value(payload_json.clone())
@@ -6834,7 +6862,7 @@ impl MutationRoot {
         let __rx = __receive.clone();
         async move {
         let mailbox = ctx.data::<std::sync::Arc<dyn actor_client::mailbox::Mailbox>>()?.clone();
-        let payload_json = command_payload(&input)?;
+        let mut payload_json = command_payload(&input)?;
         // SYNC input validation (fail fast as a GraphQL error) AND the typed value the actor client
         // sends (#284 slice 2) -- the mailbox payload is the domain command's own serde form.
         let cmd: domain::generated::commands::DenyRefund = serde_json::from_value(payload_json.clone())
@@ -7119,5 +7147,17 @@ fn domain_error(e: domain::shared::errors::DomainError) -> async_graphql::Error 
 fn internal_error() -> async_graphql::Error {
     use async_graphql::ErrorExtensions;
     let def = domain::generated::errors::INTERNAL;
+    async_graphql::Error::new(def.message_en).extend_with(|_, ext| ext.set("code", def.code))
+}
+
+/// The synchronous Forbidden for a `derived:` property whose REQUIRED source scope did not resolve
+/// (#865): the caller's `roles:` already narrows to the source's role (`api-derived-role-mismatch`),
+/// so reaching here with no matching `ReadScope` means an unbound identity (no row, System, or an
+/// absent context in a direct schema execution) -- refused BEFORE the mailbox is ever touched,
+/// never a Public default that enqueues. errors.yaml cross-cutting `Forbidden`, P-10 extensions shape
+/// (mirrors `conflict_error` exactly).
+fn forbidden_error() -> async_graphql::Error {
+    use async_graphql::ErrorExtensions;
+    let def = domain::generated::errors::FORBIDDEN;
     async_graphql::Error::new(def.message_en).extend_with(|_, ext| ext.set("code", def.code))
 }

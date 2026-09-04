@@ -616,9 +616,12 @@ fn an_identified_customer_on_the_public_path_still_acts_as_public() {
 #[tokio::test]
 async fn the_issue_doors_admit_exactly_their_listed_paths() {
     let schema = schema();
+    // #865: `riderId` carries no field on either Input type any more (`derived: { riderId: rider
+    // }` on both) — a literal that still supplied it would fail GraphQL's OWN static validation
+    // for every role uniformly (no `extensions.code` at all), which `is_forbidden` cannot tell
+    // apart from the role guard's own refusal (the exact "expected-red" trap #865 records).
     const REPORT: &str = r#"mutation { reportDeliveryIssue(input: {
         deliveryJobId: "00000000-0000-0000-0000-00000000000d",
-        riderId: "00000000-0000-0000-0000-000000000001",
         kind: CUSTOMER_UNREACHABLE
     }) { messageId } }"#;
     const RESOLVE: &str = r#"mutation { resolveDeliveryIssue(input: {
@@ -626,8 +629,7 @@ async fn the_issue_doors_admit_exactly_their_listed_paths() {
         resolution: REASSIGNED
     }) { messageId } }"#;
     const DECLINE: &str = r#"mutation { declineDelivery(input: {
-        deliveryJobId: "00000000-0000-0000-0000-00000000000d",
-        riderId: "00000000-0000-0000-0000-000000000001"
+        deliveryJobId: "00000000-0000-0000-0000-00000000000d"
     }) { messageId } }"#;
 
     let forbidden = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
@@ -645,9 +647,16 @@ async fn the_issue_doors_admit_exactly_their_listed_paths() {
         async move {
             for role in roles {
                 let resp = execute_as(&schema, role, query).await;
-                // Past the guard the resolver fails on the mailbox this schema does not carry —
-                // that error is the proof the guard admitted the call.
-                assert!(!resp.errors.is_empty(), "{name}: expected the resolver's missing-dep error for {role:?}");
+                // Past the guard the resolver ALWAYS fails on `ctx.data::<Mailbox>()?` -- this
+                // schema (`build_schema(None, None, None)`) carries no mailbox at all, and that
+                // lookup runs BEFORE the derived-field injection block (#865: `command_payload`,
+                // then the injection, in that order) -- so a REQUIRED derived property's own
+                // `errors.yaml#/Forbidden` branch (`declineDelivery`'s `riderId`) is NEVER what
+                // fires here, whatever this comment used to speculate. `is_forbidden` checks the
+                // role guard's own literal `FORBIDDEN` code, so it still correctly distinguishes
+                // "the guard admitted the call" from "the guard refused" regardless of which
+                // downstream error this schema happens to produce.
+                assert!(!resp.errors.is_empty(), "{name}: expected an error past the guard for {role:?}");
                 assert!(!is_forbidden(&resp.errors[0]), "{name} must pass the guard for {role:?}: {:?}", resp.errors[0]);
             }
         }

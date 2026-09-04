@@ -9280,7 +9280,7 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 #### ✏️ Mutation: `changeRiderStatus`
 
 - **Command**: [📩 `ChangeRiderStatus`](#command-changeriderstatus) → handled by [🎭 `Rider`](#actor-rider)
-- **Roles**: RIDER, ADMIN · **slice** V0
+- **Roles**: RIDER · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-acceptdelivery"></a>
@@ -10334,7 +10334,7 @@ _A pending delivery job can be accepted by an independent rider only once._
 
 _The assigned rider confirms pickup then records hand-over, in the correct order._
 
-- **Verified by**: [🧪 `TestConfirmPickup`](#test-testconfirmpickup), [🧪 `TestCompleteDelivery`](#test-testcompletedelivery), [🧪 `TestDeliveryStatusUpdatedByCommand`](#test-testdeliverystatusupdatedbycommand)
+- **Verified by**: [🧪 `TestConfirmPickup`](#test-testconfirmpickup), [🧪 `TestConfirmPickupByAnotherRiderIsRejected`](#test-testconfirmpickupbyanotherriderisrejected), [🧪 `TestCompleteDelivery`](#test-testcompletedelivery), [🧪 `TestCompleteDeliveryByAnotherRiderIsRejected`](#test-testcompletedeliverybyanotherriderisrejected), [🧪 `TestDeliveryStatusUpdatedByCommand`](#test-testdeliverystatusupdatedbycommand)
 
 <a id="rule-deliverycancellablebeforecompletion"></a>
 #### 📐 Rule: `DeliveryCancellableBeforeCompletion`
@@ -10561,6 +10561,16 @@ _The assigned rider confirms pickup from the restaurant_
 - **Then**: [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
 - **Verifies**: [📐 `DeliveryPickupAndCompletionByRider`](#rule-deliverypickupandcompletionbyrider)
 
+<a id="test-testconfirmpickupbyanotherriderisrejected"></a>
+#### 🧪 Test: `TestConfirmPickupByAnotherRiderIsRejected`
+
+_Rejects a pickup confirmation from a rider who is not the one assigned_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `ConfirmPickup`](#command-confirmpickup)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryPickupAndCompletionByRider`](#rule-deliverypickupandcompletionbyrider)
+
 <a id="test-testcompletedelivery"></a>
 #### 🧪 Test: `TestCompleteDelivery`
 
@@ -10569,6 +10579,16 @@ _The assigned rider records hand-over to the customer_
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
 - **When**: [📩 `CompleteDelivery`](#command-completedelivery)
 - **Then**: [⚡ `DeliveryCompleted`](#event-deliverycompleted)
+- **Verifies**: [📐 `DeliveryPickupAndCompletionByRider`](#rule-deliverypickupandcompletionbyrider)
+
+<a id="test-testcompletedeliverybyanotherriderisrejected"></a>
+#### 🧪 Test: `TestCompleteDeliveryByAnotherRiderIsRejected`
+
+_Rejects a completion from a rider who is not the one assigned_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup)
+- **When**: [📩 `CompleteDelivery`](#command-completedelivery)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
 - **Verifies**: [📐 `DeliveryPickupAndCompletionByRider`](#rule-deliverypickupandcompletionbyrider)
 
 <a id="test-testcanceldelivery"></a>

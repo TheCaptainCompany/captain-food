@@ -86,24 +86,36 @@ queries:
 
 mutations:
 
+  # #865 (ADR-20260904-015903 §6, PROP-171500 D2, realized by #849 "#639 part C step 2b" /
+  # ADR-20260830-191457 parts A+B's `auth.rs::resolve_rider_scope`): `riderId` is DERIVED from
+  # the caller's `ReadScope::Rider` at the resolver seam, never a client input -- deleted from the
+  # generated Input type entirely. `changeRiderStatus`'s riderId is REQUIRED, so the derived-role
+  # rule forces `roles:` to EXACTLY [RIDER] -- the rider's own online/offline toggle; admin manages
+  # a rider's LIFECYCLE (restriction/reinstatement) through `RestrictRider` instead
+  # (ADR-20260904-014136 §Decision 6(i)), not through this door (the #95 comment this replaces read
+  # "admin manages lifecycle (#95)", true of the FEATURE, never of THIS mutation's roles).
   changeRiderStatus:
     command: { $ref: 'commands.yaml#/ChangeRiderStatus' }
-    roles: [RIDER, ADMIN]   # the rider's own online/offline toggle; admin manages lifecycle (#95)
+    roles: [RIDER]
+    derived: { riderId: rider }
     slice: V0
 
   acceptDelivery:
     command: { $ref: 'commands.yaml#/AcceptDelivery' }
     roles: [RIDER]
+    derived: { riderId: rider }
     slice: V0
 
   confirmPickup:
     command: { $ref: 'commands.yaml#/ConfirmPickup' }
     roles: [RIDER]
+    derived: { riderId: rider }
     slice: V0
 
   completeDelivery:
     command: { $ref: 'commands.yaml#/CompleteDelivery' }
     roles: [RIDER]
+    derived: { riderId: rider }
     slice: V0
 
   cancelDelivery:
@@ -119,9 +131,13 @@ mutations:
   # The issue doors (#639 part C step 3-i, ADR-20260904-015903 §5) — additive, and the sets START
   # NARROW on purpose: widening a roles list later is additive, narrowing is a break. Step 4's
   # restricted-rider carve-out binds `reportDeliveryIssue` (with `handBackDelivery`, 3-ii).
+  # #865: riderId is nullable on ReportDeliveryIssue (an ADMIN report carries none -- "ops
+  # reported", the envelope's `user_id` says who), so the derived-role rule imposes no roles
+  # constraint here; the resolver simply omits the key on the non-RIDER (ADMIN) path.
   reportDeliveryIssue:
     command: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
     roles: [RIDER, ADMIN]   # the reporter, or ops on their behalf
+    derived: { riderId: rider }
     slice: V0
 
   resolveDeliveryIssue:
@@ -132,6 +148,7 @@ mutations:
   declineDelivery:
     command: { $ref: 'commands.yaml#/DeclineDelivery' }
     roles: [RIDER]   # refuse a PENDING offer; the job stays PENDING and re-offerable (a fold no-op)
+    derived: { riderId: rider }
     slice: V0
 
 

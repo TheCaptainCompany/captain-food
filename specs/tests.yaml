@@ -2970,6 +2970,23 @@ tests:
     then:
       - { $ref: '#/fixtures/deliveryPickedUp' }
 
+  # #865: D1 keeps the authority AT THE AGGREGATE COMPARE where one exists — the seam that derives
+  # `riderId` at the door (PROP-171500 D2) is not a SUBSTITUTE for this check, it is what makes the
+  # payload trustworthy in the first place. A rider who is not the ASSIGNED one is rejected here
+  # regardless of who the caller claims to be.
+  TestConfirmPickupByAnotherRiderIsRejected:
+    name: "Rejects a pickup confirmation from a rider who is not the one assigned"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPickupAndCompletionByRider' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmPickup' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-2" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
   TestCompleteDelivery:
     name: "The assigned rider records hand-over to the customer"
     rules: [{ $ref: 'rules.yaml#/DeliveryPickupAndCompletionByRider' }]
@@ -2983,6 +3000,21 @@ tests:
       data: { deliveryJobId: "deliv-1", riderId: "rider-1" }
     then:
       - { $ref: '#/fixtures/deliveryCompleted' }
+
+  # #865: same D1 authority as above, at the completion door.
+  TestCompleteDeliveryByAnotherRiderIsRejected:
+    name: "Rejects a completion from a rider who is not the one assigned"
+    rules: [{ $ref: 'rules.yaml#/DeliveryPickupAndCompletionByRider' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryPickedUp' }
+    when:
+      type: { $ref: 'commands.yaml#/CompleteDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-2" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
 
   TestCancelDelivery:
     name: "The restaurant cancels a pending delivery job"
