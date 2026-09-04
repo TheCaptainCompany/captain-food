@@ -319,6 +319,70 @@
     "en": "Escalate dispatch",
     "fr": "Escalader la course"
   },
+  "back.deliveries.issue.body": {
+    "en": "The rider reported a problem on this delivery. Acknowledge it and say what happens next.",
+    "fr": "Le livreur a signalé un problème sur cette course. Prenez-en acte et indiquez la suite."
+  },
+  "back.deliveries.issue.confirm": {
+    "en": "Confirm",
+    "fr": "Confirmer"
+  },
+  "back.deliveries.issue.kind.address_not_found": {
+    "en": "Rider: address not found",
+    "fr": "Livreur : adresse introuvable"
+  },
+  "back.deliveries.issue.kind.customer_unreachable": {
+    "en": "Rider: customer unreachable",
+    "fr": "Livreur : client injoignable"
+  },
+  "back.deliveries.issue.kind.food_damaged": {
+    "en": "Rider: food damaged",
+    "fr": "Livreur : commande abîmée"
+  },
+  "back.deliveries.issue.kind.other": {
+    "en": "Rider: another problem",
+    "fr": "Livreur : autre problème"
+  },
+  "back.deliveries.issue.kind.restaurant_not_ready": {
+    "en": "Rider: order not ready",
+    "fr": "Livreur : commande pas prête"
+  },
+  "back.deliveries.issue.kind.vehicle_or_injury": {
+    "en": "Rider: vehicle or injury",
+    "fr": "Livreur : véhicule ou blessure"
+  },
+  "back.deliveries.issue.note_prompt": {
+    "en": "The facts, without describing anyone",
+    "fr": "Les faits, sans décrire des personnes"
+  },
+  "back.deliveries.issue.resolution.cancelled": {
+    "en": "Delivery cancelled",
+    "fr": "Course annulée"
+  },
+  "back.deliveries.issue.resolution.delivered_by_restaurant": {
+    "en": "We deliver it ourselves",
+    "fr": "Nous la livrons nous-mêmes"
+  },
+  "back.deliveries.issue.resolution.other": {
+    "en": "Other",
+    "fr": "Autre"
+  },
+  "back.deliveries.issue.resolution.reassigned": {
+    "en": "Reassigned to another courier",
+    "fr": "Réattribuée à un autre livreur"
+  },
+  "back.deliveries.issue.resolution_label": {
+    "en": "Outcome",
+    "fr": "Suite donnée"
+  },
+  "back.deliveries.issue.resolve_title": {
+    "en": "What happens with this delivery",
+    "fr": "Quelle suite pour cette course"
+  },
+  "back.deliveries.issue.seen": {
+    "en": "Seen",
+    "fr": "Vu"
+  },
   "back.deliveries.title": {
     "en": "Delivery board",
     "fr": "Tableau des livraisons"
@@ -1351,6 +1415,58 @@
     "en": "Go online",
     "fr": "Passer en ligne"
   },
+  "rider.issue.confirm": {
+    "en": "Tell the restaurant",
+    "fr": "Prévenir le restaurant"
+  },
+  "rider.issue.exit.continue": {
+    "en": "I carry on, but…",
+    "fr": "Je continue, mais…"
+  },
+  "rider.issue.exit_label": {
+    "en": "What happens next",
+    "fr": "Et ensuite"
+  },
+  "rider.issue.kind.address_not_found": {
+    "en": "Address not found",
+    "fr": "Adresse introuvable"
+  },
+  "rider.issue.kind.customer_unreachable": {
+    "en": "Customer unreachable",
+    "fr": "Client injoignable"
+  },
+  "rider.issue.kind.food_damaged": {
+    "en": "Food damaged",
+    "fr": "Commande abîmée"
+  },
+  "rider.issue.kind.other": {
+    "en": "Other",
+    "fr": "Autre"
+  },
+  "rider.issue.kind.restaurant_not_ready": {
+    "en": "Order not ready",
+    "fr": "Commande pas prête"
+  },
+  "rider.issue.kind.vehicle_or_injury": {
+    "en": "Vehicle or injury",
+    "fr": "Véhicule ou blessure"
+  },
+  "rider.issue.kind_label": {
+    "en": "What is wrong",
+    "fr": "Quel est le problème"
+  },
+  "rider.issue.note_prompt": {
+    "en": "The facts, without describing anyone",
+    "fr": "Les faits, sans décrire des personnes"
+  },
+  "rider.issue.pending": {
+    "en": "Reported ✓ — the restaurant is being told…",
+    "fr": "Signalé ✓ — le restaurant est prévenu…"
+  },
+  "rider.issue.title": {
+    "en": "A problem with this delivery",
+    "fr": "Un problème sur cette course"
+  },
   "rider.job.delivered": {
     "en": "Delivered",
     "fr": "Livrée"
@@ -1359,6 +1475,10 @@
     "en": "Drop-off",
     "fr": "Livraison"
   },
+  "rider.job.issue_reported": {
+    "en": "Issue reported",
+    "fr": "Problème signalé"
+  },
   "rider.job.picked_up": {
     "en": "Picked up",
     "fr": "Commande récupérée"
@@ -1366,6 +1486,10 @@
   "rider.job.pickup": {
     "en": "Pickup",
     "fr": "Retrait"
+  },
+  "rider.job.problem": {
+    "en": "A problem",
+    "fr": "Un problème"
   },
   "rider.job.restaurant": {
     "en": "Restaurant",
@@ -1378,6 +1502,10 @@
   "rider.jobs.accept": {
     "en": "Accept job",
     "fr": "Accepter la course"
+  },
+  "rider.jobs.decline": {
+    "en": "Decline",
+    "fr": "Refuser"
   },
   "rider.jobs.empty.body": {
     "en": "Offered and assigned delivery jobs show up here.",

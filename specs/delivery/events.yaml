@@ -261,34 +261,53 @@ DeliveryDeclinedByRider:
 
 
 DeliveryIssueReported:
-  description: "An issue was reported on a delivery job (by the rider, partner, or support)."
+  description: >
+    An issue was reported on a delivery job (by the rider, partner, or support). #639 part C step
+    3-i (ADR-20260904-015903 §4) added the closed `kind` — NULLABLE because the shape is stored and
+    rows appended before it carry none (additive, readers first); `issue` keeps its 1000 bound so
+    every stored row parses, and is nullable because the command's note is optional now. No field
+    renamed or removed. The report never moves the job's status.
   type: object
   properties:
     deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
     riderId:
       $ref: 'scalars.yaml#/RiderId'
       nullable: true
+    kind:
+      $ref: 'scalars.yaml#/DeliveryIssueKind'
+      nullable: true
+      description: "The closed reason; null on rows appended before 3-i."
     issue:
       type: string
       maxLength: 1000
+      nullable: true
+      description: "Optional bounded note (300 on the command; 1000 here so stored rows parse)."
     reportedAt:
       type: string
       format: date-time
-  required: [deliveryJobId, issue]
+  required: [deliveryJobId]
 
 
 DeliveryIssueResolved:
-  description: "A previously reported delivery issue was resolved."
+  description: >
+    A previously reported delivery issue was acknowledged and closed. #639 part C step 3-i
+    (ADR-20260904-015903 §4): `resolution` is the closed `DeliveryIssueResolution` kind (nullable —
+    readers first) and the free text moves to the nullable `note`. No field renamed or removed.
   type: object
   properties:
     deliveryJobId: { $ref: 'scalars.yaml#/DeliveryJobId' }
     resolution:
+      $ref: 'scalars.yaml#/DeliveryIssueResolution'
+      nullable: true
+      description: "The closed outcome; null on rows appended before 3-i."
+    note:
       type: string
-      maxLength: 1000
+      maxLength: 300
+      nullable: true
     resolvedAt:
       type: string
       format: date-time
-  required: [deliveryJobId, resolution]
+  required: [deliveryJobId]
 
 
 # =====================================================================

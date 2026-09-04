@@ -2,6 +2,7 @@
 //! validate() (validate::core).
 
 pub(crate) mod answers; // §2g actor `answers:` blocks (PROP-20260815-142349, #582)
+pub(crate) mod api_operation_keys; // §27 api operation keys are a closed set per section (#639 part C 3-i, step 4's seam)
 pub(crate) mod bins; // §15 bin topology ↔ c4-l2 containers (#382)
 pub(crate) mod business_metrics; // §19 business-metric catalog (ADR-20260811-014129, #484)
 pub(crate) mod citations; // §23 record-citation ratchet (docs/** + CLAUDE.md, #658 slice 1)
@@ -25,9 +26,11 @@ pub(crate) mod shape; // api-shape helpers (roles, inline types, data shapes)
 pub(crate) mod span_error_status; // §21 technical_error rules that cannot fire (observability.yaml vs spans.rs, #623/#624)
 pub(crate) mod status; // §24 STATUS.md journal-split gate (docs/STATUS.md + docs/status/**, #659)
 pub(crate) mod translations; // §10 translation hygiene
+pub(crate) mod view_derive; // `derive:` arm values: literal | { from } | null, and null only on a nullable column (#639 part C 3-i)
 pub(crate) mod warning_baseline; // §17 warning ratchet (tools/codegen-rs/warning-baseline.json)
 
 pub(crate) use answers::*;
+pub(crate) use api_operation_keys::*;
 pub(crate) use bins::*;
 pub(crate) use business_metrics::*;
 pub(crate) use citations::*;
@@ -51,4 +54,5 @@ pub(crate) use shape::*;
 pub(crate) use span_error_status::*;
 pub(crate) use status::*;
 pub(crate) use translations::*;
+pub(crate) use view_derive::*;
 pub(crate) use warning_baseline::*;

@@ -134,22 +134,24 @@ pub struct DeliveryDeclinedByRider {
     pub reason: Option<String>,
 }
 
-/// An issue was reported on a delivery job (by the rider, partner, or support).
+/// An issue was reported on a delivery job (by the rider, partner, or support). #639 part C step 3-i (ADR-20260904-015903 §4) added the closed `kind` — NULLABLE because the shape is stored and rows appended before it carry none (additive, readers first); `issue` keeps its 1000 bound so every stored row parses, and is nullable because the command's note is optional now. No field renamed or removed. The report never moves the job's status.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryIssueReported {
     pub delivery_job_id: DeliveryJobId,
     pub rider_id: Option<RiderId>,
-    pub issue: String,
+    pub kind: Option<DeliveryIssueKind>,
+    pub issue: Option<String>,
     pub reported_at: Option<String>,
 }
 
-/// A previously reported delivery issue was resolved.
+/// A previously reported delivery issue was acknowledged and closed. #639 part C step 3-i (ADR-20260904-015903 §4): `resolution` is the closed `DeliveryIssueResolution` kind (nullable — readers first) and the free text moves to the nullable `note`. No field renamed or removed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryIssueResolved {
     pub delivery_job_id: DeliveryJobId,
-    pub resolution: String,
+    pub resolution: Option<DeliveryIssueResolution>,
+    pub note: Option<String>,
     pub resolved_at: Option<String>,
 }
 

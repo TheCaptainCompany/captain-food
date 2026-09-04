@@ -39,6 +39,23 @@ back.deliveries.escalate:    { messages: { en: "Escalate dispatch", fr: "Escalad
 back.deliveries.delivered:   { messages: { en: "Mark delivered", fr: "Marquer livrée" } }
 back.deliveries.empty.title: { messages: { en: "No active deliveries", fr: "Aucune livraison en cours" } }
 back.deliveries.empty.body:  { messages: { en: "Delivery jobs for your orders show up here.", fr: "Les courses de vos commandes s'affichent ici." } }
+# the rider's reported issue — the pinned card and its acknowledgement sheet (#639 part C step 3-i)
+back.deliveries.issue.kind.address_not_found:    { messages: { en: "Rider: address not found", fr: "Livreur : adresse introuvable" } }
+back.deliveries.issue.kind.customer_unreachable: { messages: { en: "Rider: customer unreachable", fr: "Livreur : client injoignable" } }
+back.deliveries.issue.kind.restaurant_not_ready: { messages: { en: "Rider: order not ready", fr: "Livreur : commande pas prête" } }
+back.deliveries.issue.kind.food_damaged:         { messages: { en: "Rider: food damaged", fr: "Livreur : commande abîmée" } }
+back.deliveries.issue.kind.vehicle_or_injury:    { messages: { en: "Rider: vehicle or injury", fr: "Livreur : véhicule ou blessure" } }
+back.deliveries.issue.kind.other:                { messages: { en: "Rider: another problem", fr: "Livreur : autre problème" } }
+back.deliveries.issue.body:          { messages: { en: "The rider reported a problem on this delivery. Acknowledge it and say what happens next.", fr: "Le livreur a signalé un problème sur cette course. Prenez-en acte et indiquez la suite." } }
+back.deliveries.issue.seen:          { messages: { en: "Seen", fr: "Vu" } }
+back.deliveries.issue.resolve_title: { messages: { en: "What happens with this delivery", fr: "Quelle suite pour cette course" } }
+back.deliveries.issue.resolution_label: { messages: { en: "Outcome", fr: "Suite donnée" } }
+back.deliveries.issue.resolution.reassigned:              { messages: { en: "Reassigned to another courier", fr: "Réattribuée à un autre livreur" } }
+back.deliveries.issue.resolution.delivered_by_restaurant: { messages: { en: "We deliver it ourselves", fr: "Nous la livrons nous-mêmes" } }
+back.deliveries.issue.resolution.cancelled:               { messages: { en: "Delivery cancelled", fr: "Course annulée" } }
+back.deliveries.issue.resolution.other:                   { messages: { en: "Other", fr: "Autre" } }
+back.deliveries.issue.note_prompt:   { messages: { en: "The facts, without describing anyone", fr: "Les faits, sans décrire des personnes" } }
+back.deliveries.issue.confirm:       { messages: { en: "Confirm", fr: "Confirmer" } }
 
 # ── refund queue ─────────────────────────────────────────────────────────────
 back.refunds.title:       { messages: { en: "Refund requests", fr: "Demandes de remboursement" } }

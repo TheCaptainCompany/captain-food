@@ -604,3 +604,77 @@ fn an_identified_customer_on_the_public_path_still_acts_as_public() {
          not by an anonymous visitor"
     );
 }
+
+/// The issue doors of #639 part C step 3-i (ADR-20260904-015903 §Decision 5), on the literal-roles
+/// axis: `reportDeliveryIssue` is [RIDER, ADMIN] (the reporter, or ops on their behalf),
+/// `resolveDeliveryIssue` is [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN] (whoever is TOLD acts — the
+/// reporter never closes their own issue), `declineDelivery` is [RIDER]. The sets start narrow on
+/// purpose: widening later is additive, narrowing is a break.
+///
+/// Every input is COMPLETE so the guard — not argument validation — is what answers (a malformed
+/// input fails before the ACL and proves nothing).
+#[tokio::test]
+async fn the_issue_doors_admit_exactly_their_listed_paths() {
+    let schema = schema();
+    const REPORT: &str = r#"mutation { reportDeliveryIssue(input: {
+        deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+        riderId: "00000000-0000-0000-0000-000000000001",
+        kind: CUSTOMER_UNREACHABLE
+    }) { messageId } }"#;
+    const RESOLVE: &str = r#"mutation { resolveDeliveryIssue(input: {
+        deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+        resolution: REASSIGNED
+    }) { messageId } }"#;
+    const DECLINE: &str = r#"mutation { declineDelivery(input: {
+        deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+        riderId: "00000000-0000-0000-0000-000000000001"
+    }) { messageId } }"#;
+
+    let forbidden = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
+        let schema = schema.clone();
+        async move {
+            for role in roles {
+                let resp = execute_as(&schema, role, query).await;
+                assert_eq!(resp.errors.len(), 1, "{name}: expected one error for {role:?}: {:?}", resp.errors);
+                assert!(is_forbidden(&resp.errors[0]), "{name} must be FORBIDDEN for {role:?}: {:?}", resp.errors[0]);
+            }
+        }
+    };
+    let admitted = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
+        let schema = schema.clone();
+        async move {
+            for role in roles {
+                let resp = execute_as(&schema, role, query).await;
+                // Past the guard the resolver fails on the mailbox this schema does not carry —
+                // that error is the proof the guard admitted the call.
+                assert!(!resp.errors.is_empty(), "{name}: expected the resolver's missing-dep error for {role:?}");
+                assert!(!is_forbidden(&resp.errors[0]), "{name} must pass the guard for {role:?}: {:?}", resp.errors[0]);
+            }
+        }
+    };
+
+    forbidden("reportDeliveryIssue", REPORT, vec![RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant]).await;
+    admitted("reportDeliveryIssue", REPORT, vec![RequestRole::Rider, RequestRole::Admin]).await;
+
+    forbidden("resolveDeliveryIssue", RESOLVE, vec![RequestRole::Rider, RequestRole::Public, RequestRole::Customer]).await;
+    admitted("resolveDeliveryIssue", RESOLVE, vec![RequestRole::Restaurant, RequestRole::RestaurantAccount, RequestRole::Admin]).await;
+
+    forbidden(
+        "declineDelivery",
+        DECLINE,
+        vec![RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant, RequestRole::RestaurantAccount, RequestRole::Admin, RequestRole::External],
+    )
+    .await;
+    admitted("declineDelivery", DECLINE, vec![RequestRole::Rider]).await;
+
+    // Introspection follows: the resolve door is not even NAMED on the rider's schema, and the
+    // rider-only doors are absent from the restaurant's.
+    let (_q, rider_m) = introspected_fields(&schema, RequestRole::Rider).await;
+    assert!(rider_m.contains(&"reportDeliveryIssue".into()), "reportDeliveryIssue missing for RIDER: {rider_m:?}");
+    assert!(rider_m.contains(&"declineDelivery".into()), "declineDelivery missing for RIDER: {rider_m:?}");
+    assert!(!rider_m.contains(&"resolveDeliveryIssue".into()), "resolveDeliveryIssue leaked to RIDER");
+    let (_q, rest_m) = introspected_fields(&schema, RequestRole::Restaurant).await;
+    assert!(rest_m.contains(&"resolveDeliveryIssue".into()), "resolveDeliveryIssue missing for RESTAURANT: {rest_m:?}");
+    assert!(!rest_m.contains(&"reportDeliveryIssue".into()), "reportDeliveryIssue leaked to RESTAURANT");
+    assert!(!rest_m.contains(&"declineDelivery".into()), "declineDelivery leaked to RESTAURANT");
+}

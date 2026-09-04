@@ -18467,3 +18467,157 @@ mod pm_route_gate_send_step_rule {
         );
     }
 }
+
+// ─── §27 — api operation keys are a CLOSED set (#639 part C step 3-i, ADR-20260904-015903 §6) ────
+mod api_operation_key_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn op_mut<'a>(model: &'a mut Model, section: &str, name: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut("api.yaml")
+            .and_then(|v| v.get_mut(section))
+            .and_then(|v| v.get_mut(name))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("api.yaml/{section}/{name} exists"))
+    }
+
+    fn hits(m: &Model, rule: &str) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == rule)
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The real tree is clean: every key on every operation is one the loader reads.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let h = hits(&real_model(), "api-operation-key");
+        assert!(h.is_empty(), "{h:?}");
+    }
+
+    /// RED on the planted defect the rule exists for — step 4's seam: `whileRestricted:` on a
+    /// mutation BEFORE the loader knows the key would be silently dropped (a restriction carve-out
+    /// declared and never enforced). The rule names the key and the operation, as an ERROR.
+    #[test]
+    fn an_unknown_mutation_key_is_refused_by_name() {
+        let mut model = real_model();
+        op_mut(&mut model, "mutations", "acceptDelivery")
+            .insert(Value::from("whileRestricted"), Value::Sequence(vec![Value::from("RIDER")]));
+        let h = hits(&model, "api-operation-key");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(h[0].contains("api.yaml/mutations/acceptDelivery") && h[0].contains("whileRestricted"), "{h:?}");
+        assert!(validate(&model)
+            .issues
+            .iter()
+            .any(|i| i.rule == "api-operation-key" && matches!(i.level, Level::Error)));
+    }
+
+    /// The set is per SECTION: `command:` is a mutation key and means nothing on a query, so a
+    /// query carrying it is refused too (a key legal somewhere is not legal everywhere).
+    #[test]
+    fn a_mutation_key_on_a_query_is_refused() {
+        let mut model = real_model();
+        op_mut(&mut model, "queries", "myDeliveries")
+            .insert(Value::from("command"), Value::from("commands.yaml#/AcceptDelivery"));
+        let h = hits(&model, "api-operation-key");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(h[0].contains("api.yaml/queries/myDeliveries") && h[0].contains("'command'"), "{h:?}");
+    }
+}
+
+// ─── `derive:` gains an explicit `null` arm (#639 part C step 3-i, ADR-20260904-015903 §3) ──────
+mod derive_null_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn derive_mut<'a>(model: &'a mut Model, view: &str, column: &str) -> &'a mut serde_yaml::Mapping {
+        model
+            .defs
+            .get_mut("database/projection_views.yaml")
+            .and_then(|v| v.get_mut(view))
+            .and_then(|v| v.get_mut("columns"))
+            .and_then(|v| v.get_mut(column))
+            .and_then(|v| v.get_mut("derive"))
+            .and_then(|v| v.as_mapping_mut())
+            .unwrap_or_else(|| panic!("{view}.columns.{column}.derive exists"))
+    }
+
+    fn hits(m: &Model, rule: &str) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == rule)
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The real corpus carries the arm: `View_DeliveryJob.open_issue_kind` folds the reported kind
+    /// and `DeliveryIssueResolved: null` CLEARS it — emitted as `THEN NULL`, never silently
+    /// skipped (the latent defect the ADR names: a YAML null used to fall out of the CASE, so the
+    /// "clear" event left the last kind standing).
+    #[test]
+    fn an_explicit_null_arm_emits_then_null() {
+        let sql = emit_views_sql(&real_model());
+        assert!(
+            sql.contains("WHEN 'DeliveryIssueReported' THEN e.payload->>'kind' WHEN 'DeliveryIssueResolved' THEN NULL END"),
+            "open_issue_kind must fold the kind and clear on resolution:\n{sql}"
+        );
+        assert!(
+            sql.contains("e.event_type IN ('DeliveryIssueReported', 'DeliveryIssueResolved')\n     ORDER BY e.position DESC LIMIT 1) AS open_issue_kind"),
+            "the clearing event must be in the arm's event set, or the resolution never wins:\n{sql}"
+        );
+    }
+
+    /// A derive value that is none of the three forms (a literal, `{ from: prop }`, `null`) is an
+    /// ERROR by name — the silent `continue` is closed. Planted: a mapping without `from`.
+    #[test]
+    fn an_unrecognised_derive_value_is_an_error_not_a_silent_skip() {
+        let mut model = real_model();
+        let mut bogus = serde_yaml::Mapping::new();
+        bogus.insert(Value::from("reset"), Value::from(true));
+        derive_mut(&mut model, "View_DeliveryJob", "open_issue_kind")
+            .insert(Value::from("DeliveryIssueResolved"), Value::Mapping(bogus));
+        let h = hits(&model, "view-derive-value-unknown");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(
+            h[0].contains("View_DeliveryJob") && h[0].contains("open_issue_kind") && h[0].contains("DeliveryIssueResolved"),
+            "{h:?}"
+        );
+        assert!(validate(&model)
+            .issues
+            .iter()
+            .any(|i| i.rule == "view-derive-value-unknown" && matches!(i.level, Level::Error)));
+    }
+
+    /// A `null` arm is only legal on a NULLABLE column — resetting a NOT NULL column would panic at
+    /// generation, which is later than here. Planted: a `null` arm on `View_DeliveryJob.status`
+    /// (declared with no `nullable: true`) — an ERROR by name, never a generation-time panic.
+    #[test]
+    fn a_null_arm_on_a_non_nullable_column_is_refused_by_name() {
+        let mut model = real_model();
+        derive_mut(&mut model, "View_DeliveryJob", "status")
+            .insert(Value::from("DeliveryIssueReported"), Value::Null);
+        let h = hits(&model, "view-derive-null-not-nullable");
+        assert_eq!(h.len(), 1, "{h:?}");
+        assert!(
+            h[0].contains("View_DeliveryJob") && h[0].contains("status") && h[0].contains("DeliveryIssueReported"),
+            "{h:?}"
+        );
+        assert!(validate(&model)
+            .issues
+            .iter()
+            .any(|i| i.rule == "view-derive-null-not-nullable" && matches!(i.level, Level::Error)));
+    }
+}

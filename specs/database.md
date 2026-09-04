@@ -121,8 +121,8 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 
 ### `View_DeliveryJob` · 🛶 V0 · source aggregate `DeliveryJob`
 
-- **Fed by**: `DeliveryRequested`, `DeliveryAcceptedByPartner`, `DeliveryRejectedByPartner`, `DeliveryStatusUpdated`, `DeliveryAcceptedByRider`, `DeliveryPickedUp`, `DeliveryCompleted`, `DeliveryCancelled`, `DeliveryDispatchFailed`
-- **Rules**: `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
+- **Fed by**: `DeliveryRequested`, `DeliveryAcceptedByPartner`, `DeliveryRejectedByPartner`, `DeliveryStatusUpdated`, `DeliveryAcceptedByRider`, `DeliveryPickedUp`, `DeliveryCompleted`, `DeliveryCancelled`, `DeliveryDispatchFailed`, `DeliveryIssueReported`, `DeliveryIssueResolved`
+- **Rules**: `open_issue_kind` is the kind of the latest DeliveryIssueReported and NULL once a DeliveryIssueResolved follows it (the `derive:` grammar's explicit `null` arm) — the read side of the issue door: the restaurant is told through this column (#639 part C step 3-i, ADR-20260904-015903 §3). Neither issue fact moves `status` or `rider_id`. `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
 - **Indexes**: `(restaurant_id, status)`, `(rider_id, status)`
 
 | Column | Type | SQL | Constraints | Notes |
@@ -143,6 +143,7 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `picked_up_at` | `timestamptz` | `TIMESTAMPTZ` | nullable |  |
 | `delivered_at` | `timestamptz` | `TIMESTAMPTZ` | nullable | Set on DeliveryCompleted or DeliveryStatusUpdated=DELIVERED (conditional occurrence). |
 | `last_partner_rejection` | `text` | `TEXT` | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected. |
+| `open_issue_kind` | `DeliveryIssueKind` | `TEXT` | nullable | Kind of the OPEN delivery issue: set by DeliveryIssueReported.kind, cleared (NULL) by DeliveryIssueResolved; null when none is open or the report predates the kind (#639 part C step 3-i). |
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 

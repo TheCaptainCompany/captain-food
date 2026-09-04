@@ -668,10 +668,10 @@ fixtures:
     data: { deliveryJobId: "deliv-1", riderId: "rider-1", reason: "Too far" }
   deliveryIssueReported:
     type: { $ref: 'events.yaml#/DeliveryIssueReported' }
-    data: { deliveryJobId: "deliv-1", riderId: "rider-1", issue: "Customer unreachable at the door" }
+    data: { deliveryJobId: "deliv-1", riderId: "rider-1", kind: "CUSTOMER_UNREACHABLE", issue: "Customer unreachable at the door" }
   deliveryIssueResolved:
     type: { $ref: 'events.yaml#/DeliveryIssueResolved' }
-    data: { deliveryJobId: "deliv-1", resolution: "Customer called back; order handed over" }
+    data: { deliveryJobId: "deliv-1", resolution: "REASSIGNED", note: "Customer called back; order handed over" }
 
   # --- Delivery partner self-registration (#61) ---
   deliveryPartnerAvailabilityRequested:
@@ -3524,8 +3524,10 @@ tests:
     then:
       - { $ref: '#/fixtures/deliveryDeclinedByRider' }
 
+  # #639 part C step 3-i (ADR-20260904-015903 §4): the report carries a closed KIND (required on
+  # the command) and an optional bounded note; the status never moves.
   TestDeliveryIssueReported:
-    name: "An issue is reported on a non-delivered job"
+    name: "An issue is reported by kind on a non-delivered job; the job's status does not move"
     rules: [{ $ref: 'rules.yaml#/DeliveryIssueLifecycle' }]
     actor: { $ref: 'actors.yaml#/DeliveryJob' }
     given:
@@ -3533,12 +3535,27 @@ tests:
       - { $ref: '#/fixtures/deliveryAcceptedByRider' }
     when:
       type: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
-      data: { deliveryJobId: "deliv-1", riderId: "rider-1", issue: "Customer unreachable at the door" }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", kind: "CUSTOMER_UNREACHABLE", issue: "Customer unreachable at the door" }
     then:
       - { $ref: '#/fixtures/deliveryIssueReported' }
 
+  TestDeliveryIssueReportOnDeliveredJobIsRejected:
+    name: "Rejects reporting an issue on a job that is already DELIVERED"
+    rules: [{ $ref: 'rules.yaml#/DeliveryIssueLifecycle' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryPickedUp' }
+      - { $ref: '#/fixtures/deliveryCompleted' }
+    when:
+      type: { $ref: 'commands.yaml#/ReportDeliveryIssue' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-1", kind: "FOOD_DAMAGED" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
   TestDeliveryIssueResolved:
-    name: "A previously reported delivery issue is resolved"
+    name: "A previously reported delivery issue is resolved with a closed resolution kind"
     rules: [{ $ref: 'rules.yaml#/DeliveryIssueLifecycle' }]
     actor: { $ref: 'actors.yaml#/DeliveryJob' }
     given:
@@ -3547,9 +3564,39 @@ tests:
       - { $ref: '#/fixtures/deliveryIssueReported' }
     when:
       type: { $ref: 'commands.yaml#/ResolveDeliveryIssue' }
-      data: { deliveryJobId: "deliv-1", resolution: "Customer called back; order handed over" }
+      data: { deliveryJobId: "deliv-1", resolution: "REASSIGNED", note: "Customer called back; order handed over" }
     then:
       - { $ref: '#/fixtures/deliveryIssueResolved' }
+
+  # The actor declares ONE status error for this message (actors.yaml#/DeliveryJob: `InvalidDeliveryStatus`),
+  # and the handler already refuses a job with nothing open under it — so the negative pins the
+  # existing error rather than minting one (a new error would be a spec addition the step does not carry).
+  TestDeliveryIssueResolveWithoutOpenIssueIsRejected:
+    name: "Rejects resolving a delivery issue when none is open"
+    rules: [{ $ref: 'rules.yaml#/DeliveryIssueLifecycle' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/ResolveDeliveryIssue' }
+      data: { deliveryJobId: "deliv-1", resolution: "REASSIGNED" }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidDeliveryStatus' }
+
+  # Existing behaviour, now with a door (`declineDelivery`, 3-i): only a PENDING offer can be refused.
+  TestDeclineDeliveryOnAssignedJobIsRejected:
+    name: "Rejects declining a job another rider already holds"
+    rules: [{ $ref: 'rules.yaml#/DeliveryDeclineKeepsJobPending' }]
+    actor: { $ref: 'actors.yaml#/DeliveryJob' }
+    given:
+      - { $ref: '#/fixtures/deliveryRequested' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+    when:
+      type: { $ref: 'commands.yaml#/DeclineDelivery' }
+      data: { deliveryJobId: "deliv-1", riderId: "rider-2" }
+    thrown:
+      - { $ref: 'errors.yaml#/DeliveryAlreadyAssigned' }
 
   # -------------- Delivery partner self-registration (#61) ------------
   TestDeliveryPartnerAvailabilityRequested:

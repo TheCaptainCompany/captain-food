@@ -359,6 +359,22 @@ enum DeliveryProvider {
   INDEPENDENT
 }
 
+enum DeliveryIssueKind {
+  ADDRESS_NOT_FOUND
+  CUSTOMER_UNREACHABLE
+  RESTAURANT_NOT_READY
+  FOOD_DAMAGED
+  VEHICLE_OR_INJURY
+  OTHER
+}
+
+enum DeliveryIssueResolution {
+  REASSIGNED
+  DELIVERED_BY_RESTAURANT
+  CANCELLED
+  OTHER
+}
+
 enum CityAvailabilityStatus {
   PENDING
   APPROVED
@@ -833,6 +849,7 @@ type DeliveryJob {
   requestedAt: DateTime!
   pickedUpAt: DateTime
   deliveredAt: DateTime
+  openIssue: DeliveryIssueKind
   order: Order!
   restaurant: Restaurant!
 }
@@ -1283,6 +1300,25 @@ input CancelDeliveryInput {
 
 input EscalateDeliveryInput {
   deliveryJobId: DeliveryJobId!
+  reason: String
+}
+
+input ReportDeliveryIssueInput {
+  deliveryJobId: DeliveryJobId!
+  riderId: RiderId
+  kind: DeliveryIssueKind!
+  issue: String
+}
+
+input ResolveDeliveryIssueInput {
+  deliveryJobId: DeliveryJobId!
+  resolution: DeliveryIssueResolution!
+  note: String
+}
+
+input DeclineDeliveryInput {
+  deliveryJobId: DeliveryJobId!
+  riderId: RiderId!
   reason: String
 }
 
@@ -1951,6 +1987,9 @@ type Mutation {
   completeDelivery(input: CompleteDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "CompleteDelivery")
   cancelDelivery(input: CancelDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "CancelDelivery")
   escalateDelivery(input: EscalateDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, ADMIN]) @command(name: "EscalateDelivery")
+  reportDeliveryIssue(input: ReportDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER, ADMIN]) @command(name: "ReportDeliveryIssue")
+  resolveDeliveryIssue(input: ResolveDeliveryIssueInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT, RESTAURANT_ACCOUNT, ADMIN]) @command(name: "ResolveDeliveryIssue")
+  declineDelivery(input: DeclineDeliveryInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RIDER]) @command(name: "DeclineDelivery")
   registerDeliveryPartnerAvailability(input: RegisterDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RegisterDeliveryPartnerAvailability")
   approveDeliveryPartnerAvailability(input: ApproveDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "ApproveDeliveryPartnerAvailability")
   revokeDeliveryPartnerAvailability(input: RevokeDeliveryPartnerAvailabilityInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RevokeDeliveryPartnerAvailability")

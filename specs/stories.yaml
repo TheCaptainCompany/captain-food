@@ -213,6 +213,7 @@ restaurant_manager:
         ViewDeliveries: { $ref: 'api.yaml#/queries/restaurantDeliveries' }
         CancelDelivery: { $ref: 'api.yaml#/mutations/cancelDelivery' }
         EscalateDelivery: { $ref: 'api.yaml#/mutations/escalateDelivery' }   # skip the current channel, advance the ranked dispatch walk (#60)
+        ResolveDeliveryIssue: { $ref: 'api.yaml#/mutations/resolveDeliveryIssue' }   # acknowledge a rider's reported issue from the board's pinned card (#639 part C step 3-i)
         ReviewDeliverySatisfaction: { $ref: 'api.yaml#/queries/restaurantDeliverySatisfaction' }   # #62 customers' delay verdicts → self-dispatch-vs-Captain decision
     HandleOrderConversation:
       description: As a manager, I reply on my orders' conversations, keep internal staff notes, and moderate the thread (#129).
@@ -249,6 +250,8 @@ rider:
         ConfirmPickup: { $ref: 'api.yaml#/mutations/confirmPickup' }
         CompleteDelivery: { $ref: 'api.yaml#/mutations/completeDelivery' }
         TrackDelivery: { $ref: 'api.yaml#/queries/delivery' }
+        DeclineDelivery: { $ref: 'api.yaml#/mutations/declineDelivery' }   # refuse a PENDING offer (#639 part C step 3-i)
+        ReportDeliveryIssue: { $ref: 'api.yaml#/mutations/reportDeliveryIssue' }   # "Un problème" — report by kind, the restaurant is told (#639 part C step 3-i)
 
 admin:
   description: A platform operator who onboards accounts and oversees the platform.

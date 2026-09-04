@@ -87,7 +87,10 @@ View_DeliveryJob:
     - { $ref: 'events.yaml#/DeliveryCompleted' }
     - { $ref: 'events.yaml#/DeliveryCancelled' }
     - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+    - { $ref: 'events.yaml#/DeliveryIssueReported' }
+    - { $ref: 'events.yaml#/DeliveryIssueResolved' }
   rules:
+    - "`open_issue_kind` is the kind of the latest DeliveryIssueReported and NULL once a DeliveryIssueResolved follows it (the `derive:` grammar's explicit `null` arm) — the read side of the issue door: the restaurant is told through this column (#639 part C step 3-i, ADR-20260904-015903 §3). Neither issue fact moves `status` or `rider_id`."
     - "`status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556)."
     - "`provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts."
   indexes:
@@ -191,6 +194,18 @@ View_DeliveryJob:
       from: [{ $ref: 'events.yaml#/DeliveryRejectedByPartner/properties/reason' }]
       nullable: true
       note: "Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected."
+    # #639 part C step 3-i: declared LAST on purpose — `CREATE OR REPLACE VIEW` can only append
+    # columns, so a column inserted mid-list would force a DROP in the hand-written migration.
+    open_issue_kind:
+      type: { $ref: 'scalars.yaml#/DeliveryIssueKind' }
+      derive:
+        DeliveryIssueReported: { from: kind }
+        DeliveryIssueResolved: null
+      from:
+        - { $ref: 'events.yaml#/DeliveryIssueReported' }
+        - { $ref: 'events.yaml#/DeliveryIssueResolved' }
+      nullable: true
+      note: "Kind of the OPEN delivery issue: set by DeliveryIssueReported.kind, cleared (NULL) by DeliveryIssueResolved; null when none is open or the report predates the kind (#639 part C step 3-i)."
 # Delivery-delay satisfaction (#62) — one row per SURVEYED order, folding the customer's timeliness
 # verdict (DeliverySatisfactionRecorded on the Order stream). Feeds the restaurant-facing timeliness
 # insight (restaurantDeliverySatisfaction): the subjective signal behind "is self-dispatch still worth

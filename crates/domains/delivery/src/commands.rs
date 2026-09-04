@@ -55,21 +55,23 @@ pub struct DeclineDelivery {
     pub reason: Option<String>,
 }
 
-/// Report an issue on a delivery job (rider/partner/support).
+/// Report an issue on a delivery job (rider/support) by its closed KIND, with an optional bounded note (#639 part C step 3-i, ADR-20260904-015903 §4 — the D2 controlled-enum-plus-note pattern). The report never moves the job's status; it tells the restaurant through the read model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportDeliveryIssue {
     pub delivery_job_id: DeliveryJobId,
     pub rider_id: Option<RiderId>,
-    pub issue: String,
+    pub kind: DeliveryIssueKind,
+    pub issue: Option<String>,
 }
 
-/// Resolve a previously reported delivery issue.
+/// Acknowledge and close a reported delivery issue with a closed RESOLUTION kind and an optional bounded note (#639 part C step 3-i). Whoever was told acts — the reporter never closes their own issue (api roles). Requires an OPEN issue on a non-DELIVERED job.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveDeliveryIssue {
     pub delivery_job_id: DeliveryJobId,
-    pub resolution: String,
+    pub resolution: DeliveryIssueResolution,
+    pub note: Option<String>,
 }
 
 /// Drive a delivery job's status (independent-rider path / admin correction).

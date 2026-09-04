@@ -757,6 +757,8 @@ pub struct DeliveryJob {
     pub picked_up_at: Option<chrono::DateTime<chrono::Utc>>,
     #[graphql(name = "deliveredAt")]
     pub delivered_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "openIssue")]
+    pub open_issue: Option<DeliveryIssueKind>,
     #[graphql(name = "order")]
     pub order: Order,
     #[graphql(name = "restaurant")]
@@ -1384,6 +1386,7 @@ impl From<(DeliveryJobRow, OrderTrackingRow, Restaurant)> for DeliveryJob {
             requested_at: row.requested_at,
             picked_up_at: row.picked_up_at,
             delivered_at: row.delivered_at,
+            open_issue: row.open_issue_kind.map(Into::into),
             order: (order, restaurant.clone()).into(),
             restaurant,
         }

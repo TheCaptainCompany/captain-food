@@ -442,6 +442,7 @@ fn delivery_job_row(
         requested_at: chrono::Utc::now(),
         picked_up_at: None,
         delivered_at: None,
+        open_issue_kind: None,
     }
 }
 

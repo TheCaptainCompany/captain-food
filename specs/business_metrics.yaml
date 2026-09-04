@@ -68,6 +68,43 @@ projections:
         set: { $ref: '#/projections/OrderAcceptanceLatency/measures/acceptedAt' }
         from: { envelope: occurredAt }
 
+  # #639 part C step 3-i (ADR-20260904-015903 §8): one row per DELIVERY JOB (the stream's birth
+  # fact DeliveryRequested seeds it, so the denominator is every job, not only the ones that hit
+  # an issue), keyed at the ENTITY grain — every folded event carries deliveryJobId. reportedAt /
+  # resolvedAt come from the ENVELOPE (the handler stamps no time in the payload, ADR-0041);
+  # `kind` is the closed DeliveryIssueKind of the latest report; daypart buckets the report.
+  DeliveryIssue:
+    description: >
+      One row per delivery job: which restaurant, whether (and when) a rider reported an issue
+      on it and of which kind, and when the restaurant acknowledged it. A row with reportedAt
+      and no resolvedAt is a rider standing somewhere with a problem nobody has answered — the
+      read side of the issue door.
+    grain: ENTITY
+    key:
+      - from: { $ref: 'events.yaml#/DeliveryRequested/properties/deliveryJobId' }
+    measures:
+      restaurantId: { type: set, of: { $ref: 'events.yaml#/DeliveryRequested/properties/restaurantId' } }
+      kind:         { type: set, of: { $ref: 'events.yaml#/DeliveryIssueReported/properties/kind' } }
+      reportedAt:   { type: set, of: { envelope: occurredAt } }
+      resolvedAt:   { type: set, of: { envelope: occurredAt } }
+      daypart:      { type: set, of: { envelope: occurredAt, bucket: DAYPART } }
+    fold:
+      - on: { $ref: 'events.yaml#/DeliveryRequested' }
+        set: { $ref: '#/projections/DeliveryIssue/measures/restaurantId' }
+        from: { $ref: 'events.yaml#/DeliveryRequested/properties/restaurantId' }
+      - on: { $ref: 'events.yaml#/DeliveryIssueReported' }
+        set: { $ref: '#/projections/DeliveryIssue/measures/kind' }
+        from: { $ref: 'events.yaml#/DeliveryIssueReported/properties/kind' }
+      - on: { $ref: 'events.yaml#/DeliveryIssueReported' }
+        set: { $ref: '#/projections/DeliveryIssue/measures/reportedAt' }
+        from: { envelope: occurredAt }
+      - on: { $ref: 'events.yaml#/DeliveryIssueReported' }
+        set: { $ref: '#/projections/DeliveryIssue/measures/daypart' }
+        from: { envelope: occurredAt, bucket: DAYPART }
+      - on: { $ref: 'events.yaml#/DeliveryIssueResolved' }
+        set: { $ref: '#/projections/DeliveryIssue/measures/resolvedAt' }
+        from: { envelope: occurredAt }
+
 metrics:
   # THE FLIP'S DATA SET (#167, PR #586 checkpoint — business lens, binding): the
   # ENFORCE_ACCEPTANCE_TIMEOUT TTL must be chosen FROM this distribution, per restaurant and per
@@ -92,3 +129,24 @@ metrics:
         ofDurationMs:
           start: { $ref: '#/projections/OrderAcceptanceLatency/measures/placedAt' }
           end:   { $ref: '#/projections/OrderAcceptanceLatency/measures/acceptedAt' }
+
+  # #639 part C step 3-i: the rider's `Deliver` activity carried no metric; this is its first.
+  # A ratio over the DeliveryIssue fold: jobs with a reported kind over every job, by daypart,
+  # kind and restaurant — the number that says whether the issue door is a rare exit or the
+  # Friday-dinner norm at one kitchen. `exposedAs:` stays ABSENT (#484's emitters do not exist).
+  delivery_issue_rate:
+    question: >
+      How often does a rider delivery hit an issue at the dinner peak, by kind — and at which
+      restaurants? (The share of jobs on which the rider opened the issue door.)
+    activity: { $ref: 'stories.yaml#/rider/activities/Deliver' }
+    over: { $ref: '#/projections/DeliveryIssue' }
+    groupBy:
+      - { $ref: '#/projections/DeliveryIssue/measures/daypart' }
+      - { $ref: '#/projections/DeliveryIssue/measures/kind' }
+      - { $ref: '#/projections/DeliveryIssue/measures/restaurantId' }
+    value:
+      ratio:
+        # Numerator: rows whose `kind` is set (an issue was reported); denominator: every job row
+        # of the group. A job reported twice counts once — the fold keeps the latest kind.
+        numerator:   { rowsWhereSet: { $ref: '#/projections/DeliveryIssue/measures/kind' } }
+        denominator: { countRows: {} }

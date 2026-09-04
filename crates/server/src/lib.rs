@@ -190,7 +190,12 @@ pub fn wire() -> HealthDto {
 /// `20260903060000` = `auth_subject_reservations` (#639 part C step 2a, #794): `register_rider`
 /// reserves `(RIDER, authRef)` through it BEFORE appending `RiderRegistered`, so a build without the
 /// table would fail every rider registration at the reservation insert.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260903060000;
+///
+/// `20260904021500` = `delivery_job_open_issue` (#639 part C step 3-i, ADR-20260904-015903): the
+/// `View_DeliveryJob` read repository SELECTs `open_issue_kind` on every `delivery` /
+/// `myDeliveries` / `restaurantDeliveries` read, so a build without the recreated view would fail
+/// every delivery read with `column "open_issue_kind" does not exist` (42703).
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904021500;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see

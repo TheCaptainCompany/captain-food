@@ -23,7 +23,7 @@ use super::enum_sql::{opt_from_text, EnumText};
 /// `last_partner_rejection`/`created_at`/`updated_at`, which the API does not expose).
 const COLUMNS: &str = "delivery_job_id, order_id, restaurant_id, status, provider, rider_id, \
      courier, partner_ref, pickup_address, dropoff_address, estimated_pickup_at, \
-     estimated_dropoff_at, requested_at, picked_up_at, delivered_at";
+     estimated_dropoff_at, requested_at, picked_up_at, delivered_at, open_issue_kind";
 
 /// Unquoted `CREATE VIEW View_DeliveryJob` folds to this identifier in Postgres.
 const VIEW: &str = "view_deliveryjob";
@@ -54,6 +54,7 @@ fn decode(row: &PgRow) -> Result<DeliveryJobRow, DomainError> {
         requested_at: row.try_get("requested_at").map_err(db_err)?,
         picked_up_at: row.try_get("picked_up_at").map_err(db_err)?,
         delivered_at: row.try_get("delivered_at").map_err(db_err)?,
+        open_issue_kind: opt_from_text(row.try_get("open_issue_kind").map_err(db_err)?)?,
     })
 }
 

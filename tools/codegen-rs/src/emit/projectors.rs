@@ -128,6 +128,10 @@ pub(crate) fn emit_projectors(model: &Model) -> String {
                             let inner = format!("e.{}.clone()", rust_ident(&snake_field(p)));
                             if opt { format!("Some({})", inner) } else { inner }
                         }
+                        Some((_, DeriveVal::Null)) => {
+                            if opt { "None".to_string() }
+                            else { panic!("projection {}: non-nullable derive column '{}' is reset (derive: null) by its creation event '{}'", v.name, c.name, creation) }
+                        }
                         None => {
                             if opt { "None".to_string() }
                             else { panic!("projection {}: non-nullable derive column '{}' but creation event '{}' is not in its derive map", v.name, c.name, creation) }
@@ -213,11 +217,23 @@ pub(crate) fn emit_projectors(model: &Model) -> String {
                     }
                     ColMode::Derive => {
                         if let Some((_, dv)) = c.derive.iter().find(|(e, _)| e == ev) {
-                            let inner = match dv {
-                                DeriveVal::Lit(s) => format!("{}::{}", c.ty, s),
-                                DeriveVal::Payload(p) => { uses_e = true; format!("e.{}.clone()", rust_ident(&snake_field(p))) }
+                            let val = match dv {
+                                DeriveVal::Lit(s) => {
+                                    let inner = format!("{}::{}", c.ty, s);
+                                    if opt { format!("Some({})", inner) } else { inner }
+                                }
+                                DeriveVal::Payload(p) => {
+                                    uses_e = true;
+                                    let inner = format!("e.{}.clone()", rust_ident(&snake_field(p)));
+                                    if opt { format!("Some({})", inner) } else { inner }
+                                }
+                                // The explicit `null` arm: the event RESETS the column (a nullable
+                                // column, or the validator would have refused the declaration).
+                                DeriveVal::Null => {
+                                    if !opt { panic!("projection {}: non-nullable derive column '{}' is reset (derive: null) by '{}'", v.name, c.name, ev) }
+                                    "None".to_string()
+                                }
                             };
-                            let val = if opt { format!("Some({})", inner) } else { inner };
                             mech.push(format!("row.{} = {};", cid, val));
                         }
                     }

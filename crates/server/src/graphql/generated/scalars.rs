@@ -2360,6 +2360,80 @@ impl From<DeliveryProvider> for ds::DeliveryProvider {
     }
 }
 
+/// The closed set of reasons a rider (or ops) reports an issue on a delivery job — one tap on the rider sheet; the restaurant board headlines the card with it. OTHER is the only kind that expects a note (#639 part C step 3-i).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum DeliveryIssueKind {
+    #[graphql(name = "ADDRESS_NOT_FOUND")]
+    ADDRESS_NOT_FOUND,
+    #[graphql(name = "CUSTOMER_UNREACHABLE")]
+    CUSTOMER_UNREACHABLE,
+    #[graphql(name = "RESTAURANT_NOT_READY")]
+    RESTAURANT_NOT_READY,
+    #[graphql(name = "FOOD_DAMAGED")]
+    FOOD_DAMAGED,
+    #[graphql(name = "VEHICLE_OR_INJURY")]
+    VEHICLE_OR_INJURY,
+    #[graphql(name = "OTHER")]
+    OTHER,
+}
+impl From<ds::DeliveryIssueKind> for DeliveryIssueKind {
+    fn from(v: ds::DeliveryIssueKind) -> Self {
+        match v {
+            ds::DeliveryIssueKind::ADDRESS_NOT_FOUND => Self::ADDRESS_NOT_FOUND,
+            ds::DeliveryIssueKind::CUSTOMER_UNREACHABLE => Self::CUSTOMER_UNREACHABLE,
+            ds::DeliveryIssueKind::RESTAURANT_NOT_READY => Self::RESTAURANT_NOT_READY,
+            ds::DeliveryIssueKind::FOOD_DAMAGED => Self::FOOD_DAMAGED,
+            ds::DeliveryIssueKind::VEHICLE_OR_INJURY => Self::VEHICLE_OR_INJURY,
+            ds::DeliveryIssueKind::OTHER => Self::OTHER,
+        }
+    }
+}
+impl From<DeliveryIssueKind> for ds::DeliveryIssueKind {
+    fn from(v: DeliveryIssueKind) -> Self {
+        match v {
+            DeliveryIssueKind::ADDRESS_NOT_FOUND => Self::ADDRESS_NOT_FOUND,
+            DeliveryIssueKind::CUSTOMER_UNREACHABLE => Self::CUSTOMER_UNREACHABLE,
+            DeliveryIssueKind::RESTAURANT_NOT_READY => Self::RESTAURANT_NOT_READY,
+            DeliveryIssueKind::FOOD_DAMAGED => Self::FOOD_DAMAGED,
+            DeliveryIssueKind::VEHICLE_OR_INJURY => Self::VEHICLE_OR_INJURY,
+            DeliveryIssueKind::OTHER => Self::OTHER,
+        }
+    }
+}
+
+/// The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum DeliveryIssueResolution {
+    #[graphql(name = "REASSIGNED")]
+    REASSIGNED,
+    #[graphql(name = "DELIVERED_BY_RESTAURANT")]
+    DELIVERED_BY_RESTAURANT,
+    #[graphql(name = "CANCELLED")]
+    CANCELLED,
+    #[graphql(name = "OTHER")]
+    OTHER,
+}
+impl From<ds::DeliveryIssueResolution> for DeliveryIssueResolution {
+    fn from(v: ds::DeliveryIssueResolution) -> Self {
+        match v {
+            ds::DeliveryIssueResolution::REASSIGNED => Self::REASSIGNED,
+            ds::DeliveryIssueResolution::DELIVERED_BY_RESTAURANT => Self::DELIVERED_BY_RESTAURANT,
+            ds::DeliveryIssueResolution::CANCELLED => Self::CANCELLED,
+            ds::DeliveryIssueResolution::OTHER => Self::OTHER,
+        }
+    }
+}
+impl From<DeliveryIssueResolution> for ds::DeliveryIssueResolution {
+    fn from(v: DeliveryIssueResolution) -> Self {
+        match v {
+            DeliveryIssueResolution::REASSIGNED => Self::REASSIGNED,
+            DeliveryIssueResolution::DELIVERED_BY_RESTAURANT => Self::DELIVERED_BY_RESTAURANT,
+            DeliveryIssueResolution::CANCELLED => Self::CANCELLED,
+            DeliveryIssueResolution::OTHER => Self::OTHER,
+        }
+    }
+}
+
 /// Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryChannelKey(pub String);

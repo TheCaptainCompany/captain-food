@@ -23,6 +23,7 @@ rider.sign_in.resend:             { messages: { en: "Send a new code", fr: "Renv
 # ── job list ─────────────────────────────────────────────────────────────────
 rider.jobs.title:       { messages: { en: "My deliveries", fr: "Mes courses" } }
 rider.jobs.accept:      { messages: { en: "Accept job", fr: "Accepter la course" } }
+rider.jobs.decline:     { messages: { en: "Decline", fr: "Refuser" } }
 rider.jobs.empty.title: { messages: { en: "No deliveries", fr: "Aucune course" } }
 rider.jobs.empty.body:  { messages: { en: "Offered and assigned delivery jobs show up here.", fr: "Les courses proposées et attribuées s'affichent ici." } }
 
@@ -33,3 +34,20 @@ rider.job.restaurant: { messages: { en: "Restaurant", fr: "Restaurant" } }
 rider.job.dropoff:   { messages: { en: "Drop-off", fr: "Livraison" } }
 rider.job.picked_up: { messages: { en: "Picked up", fr: "Commande récupérée" } }
 rider.job.delivered: { messages: { en: "Delivered", fr: "Livrée" } }
+rider.job.problem:   { messages: { en: "A problem", fr: "Un problème" } }
+rider.job.issue_reported: { messages: { en: "Issue reported", fr: "Problème signalé" } }
+
+# ── the issue sheet (#639 part C step 3-i) ───────────────────────────────────
+rider.issue.title:         { messages: { en: "A problem with this delivery", fr: "Un problème sur cette course" } }
+rider.issue.exit_label:    { messages: { en: "What happens next", fr: "Et ensuite" } }
+rider.issue.exit.continue: { messages: { en: "I carry on, but…", fr: "Je continue, mais…" } }
+rider.issue.kind_label:    { messages: { en: "What is wrong", fr: "Quel est le problème" } }
+rider.issue.kind.address_not_found:    { messages: { en: "Address not found", fr: "Adresse introuvable" } }
+rider.issue.kind.customer_unreachable: { messages: { en: "Customer unreachable", fr: "Client injoignable" } }
+rider.issue.kind.restaurant_not_ready: { messages: { en: "Order not ready", fr: "Commande pas prête" } }
+rider.issue.kind.food_damaged:         { messages: { en: "Food damaged", fr: "Commande abîmée" } }
+rider.issue.kind.vehicle_or_injury:    { messages: { en: "Vehicle or injury", fr: "Véhicule ou blessure" } }
+rider.issue.kind.other:                { messages: { en: "Other", fr: "Autre" } }
+rider.issue.note_prompt:   { messages: { en: "The facts, without describing anyone", fr: "Les faits, sans décrire des personnes" } }
+rider.issue.confirm:       { messages: { en: "Tell the restaurant", fr: "Prévenir le restaurant" } }
+rider.issue.pending:       { messages: { en: "Reported ✓ — the restaurant is being told…", fr: "Signalé ✓ — le restaurant est prévenu…" } }

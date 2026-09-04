@@ -122,16 +122,27 @@ const ACCEPT_DELIVERY: &str = r#"mutation {
   }) { messageId }
 }"#;
 
+/// #639 part C step 3-i: the issue door, same shape — `reportDeliveryIssue` is `[RIDER, ADMIN]`
+/// and takes its `riderId` from the payload too, so a bare RIDER token with no row could otherwise
+/// report an issue in any rider's name.
+const REPORT_DELIVERY_ISSUE: &str = r#"mutation {
+  reportDeliveryIssue(input: {
+    deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+    riderId: "00000000-0000-0000-0000-000000000bad",
+    kind: CUSTOMER_UNREACHABLE
+  }) { messageId }
+}"#;
+
 /// One real request through the edge: `POST /rider/graphql` with the bearer token, the response
 /// body as JSON.
-async fn post_as_rider(jwt: &str, outcome: RiderIdentityResolution) -> Value {
+async fn post_as_rider(jwt: &str, query: &str, outcome: RiderIdentityResolution) -> Value {
     let request = axum::http::Request::builder()
         .method("POST")
         .uri("/rider/graphql")
         .header(axum::http::header::HOST, "chez-test.captain.food")
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .header(axum::http::header::AUTHORIZATION, format!("Bearer {jwt}"))
-        .body(axum::body::Body::from(json!({ "query": ACCEPT_DELIVERY }).to_string()))
+        .body(axum::body::Body::from(json!({ "query": query }).to_string()))
         .expect("request builds");
     let response = router(outcome).await.oneshot(request).await.expect("router answers");
     assert_eq!(
@@ -163,7 +174,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
 
     // NO ROW: the seam answers `NoMapping`. The caller is nobody — PUBLIC on the read half AND on
     // the write half — so the RIDER guard refuses before the resolver runs.
-    let (message, code) = first_error(&post_as_rider(&jwt, RiderIdentityResolution::NoMapping).await);
+    let (message, code) = first_error(&post_as_rider(&jwt, ACCEPT_DELIVERY, RiderIdentityResolution::NoMapping).await);
     assert_eq!(
         code.as_deref(),
         Some("FORBIDDEN"),
@@ -182,6 +193,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
     let (message, code) = first_error(
         &post_as_rider(
             &jwt,
+            ACCEPT_DELIVERY,
             RiderIdentityResolution::LookupFailed(server::LookupFailureReason::Repository),
         )
         .await,
@@ -192,7 +204,7 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
     // on the mailbox this schema does not carry. This is the control that keeps the two refusals
     // above honest: the rider path is not blanket-refused, the seam's outcome decides.
     let (message, code) = first_error(
-        &post_as_rider(&jwt, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
+        &post_as_rider(&jwt, ACCEPT_DELIVERY, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
             .await,
     );
     assert_ne!(
@@ -204,4 +216,26 @@ async fn a_rider_token_with_no_rider_row_is_forbidden_on_accept_delivery() {
         !message.starts_with("forbidden:"),
         "and the failure that remains is the resolver's, past the guard — got: {message}"
     );
+}
+
+/// The issue door (#639 part C step 3-i): the same bare RIDER JWT with no row is refused AS PUBLIC
+/// on `reportDeliveryIssue` — the door step 4 will carve out for a restricted rider must still be
+/// a door only a rider the seam resolved can knock on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rider_token_with_no_rider_row_is_forbidden_on_report_delivery_issue() {
+    let jwt = bare_rider_jwt(uuid::Uuid::from_u128(0x639_31));
+    let (message, code) =
+        first_error(&post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::NoMapping).await);
+    assert_eq!(code.as_deref(), Some("FORBIDDEN"), "no row ⇒ the guard refuses — got: {message}");
+    assert_eq!(
+        message,
+        "forbidden: role PUBLIC is not authorized for this operation (allowed: RIDER, ADMIN)",
+        "and refused AS PUBLIC, against the door's own literal roles list"
+    );
+    // The control: a resolved row passes the guard (and fails on the absent mailbox, past it).
+    let (message, code) = first_error(
+        &post_as_rider(&jwt, REPORT_DELIVERY_ISSUE, RiderIdentityResolution::Resolved(RiderId(uuid::Uuid::from_u128(0x600D))))
+            .await,
+    );
+    assert_ne!(code.as_deref(), Some("FORBIDDEN"), "a resolved rider acts as RIDER — got: {message}");
 }

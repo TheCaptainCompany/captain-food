@@ -39,9 +39,12 @@ SELECT
   (SELECT e.payload->>'reason' FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRejectedByPartner') AND e.payload ? 'reason'
      ORDER BY e.position DESC LIMIT 1) AS last_partner_rejection,
+  (SELECT CASE e.event_type WHEN 'DeliveryIssueReported' THEN e.payload->>'kind' WHEN 'DeliveryIssueResolved' THEN NULL END FROM domain_events e
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryIssueReported', 'DeliveryIssueResolved')
+     ORDER BY e.position DESC LIMIT 1) AS open_issue_kind,
   c.occurred_at AS created_at,
   (SELECT max(e.occurred_at) FROM domain_events e
-     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed')) AS updated_at
+     WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryRequested', 'DeliveryAcceptedByPartner', 'DeliveryRejectedByPartner', 'DeliveryStatusUpdated', 'DeliveryAcceptedByRider', 'DeliveryPickedUp', 'DeliveryCompleted', 'DeliveryCancelled', 'DeliveryDispatchFailed', 'DeliveryIssueReported', 'DeliveryIssueResolved')) AS updated_at
 FROM domain_events c
 WHERE c.event_type = 'DeliveryRequested';
 

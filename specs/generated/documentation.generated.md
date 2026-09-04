@@ -156,6 +156,7 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 | 🧭 **TrackDeliveries** | ViewDeliveries | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
 |  | CancelDelivery | [✏️ `cancelDelivery`](#mutation-canceldelivery) |
 |  | EscalateDelivery | [✏️ `escalateDelivery`](#mutation-escalatedelivery) |
+|  | ResolveDeliveryIssue | [✏️ `resolveDeliveryIssue`](#mutation-resolvedeliveryissue) |
 |  | ReviewDeliverySatisfaction | [🔎 `restaurantDeliverySatisfaction`](#query-restaurantdeliverysatisfaction) |
 | 🧭 **HandleOrderConversation** | ReplyToCustomer | [✏️ `postMessage`](#mutation-postmessage) |
 |  | ReadInternalNotes | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
@@ -179,6 +180,8 @@ A courier who delivers orders from restaurants to customers.
 |  | ConfirmPickup | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 |  | CompleteDelivery | [✏️ `completeDelivery`](#mutation-completedelivery) |
 |  | TrackDelivery | [🔎 `delivery`](#query-delivery) |
+|  | DeclineDelivery | [✏️ `declineDelivery`](#mutation-declinedelivery) |
+|  | ReportDeliveryIssue | [✏️ `reportDeliveryIssue`](#mutation-reportdeliveryissue) |
 
 <a id="story-admin"></a>
 ### 🎬 `admin` · 🛠️ `ADMIN` · 🗣️ `fr-FR`
@@ -9243,7 +9246,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(14)_
+### 🧰 API operations _(17)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -9315,6 +9318,27 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Roles**: RESTAURANT, ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-reportdeliveryissue"></a>
+#### ✏️ Mutation: `reportDeliveryIssue`
+
+- **Command**: [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue) → handled by [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Roles**: RIDER, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-resolvedeliveryissue"></a>
+#### ✏️ Mutation: `resolveDeliveryIssue`
+
+- **Command**: [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue) → handled by [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Roles**: RESTAURANT, RESTAURANT_ACCOUNT, ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-declinedelivery"></a>
+#### ✏️ Mutation: `declineDelivery`
+
+- **Command**: [📩 `DeclineDelivery`](#command-declinedelivery) → handled by [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Roles**: RIDER · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="mutation-registerdeliverypartneravailability"></a>
 #### ✏️ Mutation: `registerDeliveryPartnerAvailability`
 
@@ -9374,6 +9398,7 @@ One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves
 | <a id="type-deliveryjob--requestedat"></a>`requestedAt` | `string` _date-time_ | ✅ |
 | <a id="type-deliveryjob--pickedupat"></a>`pickedUpAt` | `string` _date-time_ | ⬜ |
 | <a id="type-deliveryjob--deliveredat"></a>`deliveredAt` | `string` _date-time_ | ⬜ |
+| <a id="type-deliveryjob--openissue"></a>`openIssue` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | ⬜ |
 
 <a id="type-deliverypartneravailability"></a>
 #### 🧩 Type: `DeliveryPartnerAvailability`
@@ -9596,8 +9621,8 @@ sequenceDiagram
 #### 🗄️ View: `View_DeliveryJob`
 
 - **Source**: [🎭 `DeliveryJob`](#actor-deliveryjob) · 🛶 V0
-- **Rules**: `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
-- **Fed by**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed)
+- **Rules**: `open_issue_kind` is the kind of the latest DeliveryIssueReported and NULL once a DeliveryIssueResolved follows it (the `derive:` grammar's explicit `null` arm) — the read side of the issue door: the restaurant is told through this column (#639 part C step 3-i, ADR-20260904-015903 §3). Neither issue fact moves `status` or `rider_id`. `status` is derived from the lifecycle events: PENDING on DeliveryRequested → ASSIGNED on DeliveryAcceptedByRider/DeliveryAcceptedByPartner → PICKED_UP on DeliveryPickedUp → then partner DeliveryStatusUpdated (OUT_FOR_DELIVERY/DELIVERED/FAILED) or DeliveryCompleted (DELIVERED) / DeliveryCancelled (CANCELLED) / DeliveryDispatchFailed (FAILED — offer cap exhausted, ADR-20260720-004556). `provider` is INDEPENDENT once a rider accepts, PARTNER once a partner accepts.
+- **Fed by**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByPartner`](#event-deliveryacceptedbypartner), [⚡ `DeliveryRejectedByPartner`](#event-deliveryrejectedbypartner), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `DeliveryIssueReported`](#event-deliveryissuereported), [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -9617,6 +9642,7 @@ sequenceDiagram
 | `picked_up_at` | `timestamptz` | [⚡ `DeliveryPickedUp`](#event-deliverypickedup) | nullable |  |
 | `delivered_at` | `timestamptz` | [⚡ `DeliveryCompleted`](#event-deliverycompleted), [⚡ `DeliveryStatusUpdated`](#event-deliverystatusupdated) | nullable | Set on DeliveryCompleted or DeliveryStatusUpdated=DELIVERED (conditional occurrence). |
 | `last_partner_rejection` | `text` | [⚡ `DeliveryRejectedByPartner`.`reason`](#event-deliveryrejectedbypartner--reason) | nullable | Reason of the latest partner decline (the job stays PENDING and is re-offered, up to the 3-offer cap — ADR-20260720-004556); null if never rejected. |
+| `open_issue_kind` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | [⚡ `DeliveryIssueReported`](#event-deliveryissuereported), [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved) | nullable | Kind of the OPEN delivery issue: set by DeliveryIssueReported.kind, cleared (NULL) by DeliveryIssueResolved; null when none is open or the report predates the kind (#639 part C step 3-i). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -9735,7 +9761,7 @@ The assigned rider marks the delivery complete (handed to the customer).
 
 An independent rider declines a pending delivery job (it stays PENDING, re-offerable).
 
-- **Dispatched by**: — · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Dispatched by**: [✏️ `declineDelivery`](#mutation-declinedelivery) · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Emits**: [⚡ `DeliveryDeclinedByRider`](#event-deliverydeclinedbyrider)
 - **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus), [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned)
 
@@ -9748,9 +9774,9 @@ An independent rider declines a pending delivery job (it stays PENDING, re-offer
 <a id="command-reportdeliveryissue"></a>
 #### 📩 Command: `ReportDeliveryIssue`
 
-Report an issue on a delivery job (rider/partner/support).
+Report an issue on a delivery job (rider/support) by its closed KIND, with an optional bounded note (#639 part C step 3-i, ADR-20260904-015903 §4 — the D2 controlled-enum-plus-note pattern). The report never moves the job's status; it tells the restaurant through the read model.
 
-- **Dispatched by**: — · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Dispatched by**: [✏️ `reportDeliveryIssue`](#mutation-reportdeliveryissue) · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Emits**: [⚡ `DeliveryIssueReported`](#event-deliveryissuereported)
 - **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
 
@@ -9758,21 +9784,23 @@ Report an issue on a delivery job (rider/partner/support).
 | --- | --- | --- | --- |
 | <a id="command-reportdeliveryissue--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="command-reportdeliveryissue--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ⬜ |  |
-| <a id="command-reportdeliveryissue--issue"></a>`issue` | `string` | ✅ |  |
+| <a id="command-reportdeliveryissue--kind"></a>`kind` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | ✅ |  |
+| <a id="command-reportdeliveryissue--issue"></a>`issue` | `string` | ⬜ | Optional note — facts only, no description of persons (prompted on the rider sheet as such); personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000). |
 
 <a id="command-resolvedeliveryissue"></a>
 #### 📩 Command: `ResolveDeliveryIssue`
 
-Resolve a previously reported delivery issue.
+Acknowledge and close a reported delivery issue with a closed RESOLUTION kind and an optional bounded note (#639 part C step 3-i). Whoever was told acts — the reporter never closes their own issue (api roles). Requires an OPEN issue on a non-DELIVERED job.
 
-- **Dispatched by**: — · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
+- **Dispatched by**: [✏️ `resolveDeliveryIssue`](#mutation-resolvedeliveryissue) · **handled by** [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Emits**: [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved)
 - **Throws**: [⛔ `DeliveryJobNotFound`](#error-deliveryjobnotfound), [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="command-resolvedeliveryissue--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
-| <a id="command-resolvedeliveryissue--resolution"></a>`resolution` | `string` | ✅ |  |
+| <a id="command-resolvedeliveryissue--resolution"></a>`resolution` | [🔤 `DeliveryIssueResolution`](#scalar-deliveryissueresolution) | ✅ |  |
+| <a id="command-resolvedeliveryissue--note"></a>`note` | `string` | ⬜ | Optional note — facts only; same erasure scope as the report's note. |
 
 <a id="command-updatedeliverystatus"></a>
 #### 📩 Command: `UpdateDeliveryStatus`
@@ -10131,32 +10159,34 @@ An independent rider declined a pending delivery job (stays PENDING, re-offerabl
 <a id="event-deliveryissuereported"></a>
 #### ⚡ Event: `DeliveryIssueReported`
 
-An issue was reported on a delivery job (by the rider, partner, or support).
+An issue was reported on a delivery job (by the rider, partner, or support). #639 part C step 3-i (ADR-20260904-015903 §4) added the closed `kind` — NULLABLE because the shape is stored and rows appended before it carry none (additive, readers first); `issue` keeps its 1000 bound so every stored row parses, and is nullable because the command's note is optional now. No field renamed or removed. The report never moves the job's status.
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-deliveryissuereported--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="event-deliveryissuereported--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ⬜ |  |
-| <a id="event-deliveryissuereported--issue"></a>`issue` | `string` | ✅ |  |
+| <a id="event-deliveryissuereported--kind"></a>`kind` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | ⬜ | The closed reason; null on rows appended before 3-i. |
+| <a id="event-deliveryissuereported--issue"></a>`issue` | `string` | ⬜ | Optional bounded note (300 on the command; 1000 here so stored rows parse). |
 | <a id="event-deliveryissuereported--reportedat"></a>`reportedAt` | `string` _date-time_ | ⬜ |  |
 
 <a id="event-deliveryissueresolved"></a>
 #### ⚡ Event: `DeliveryIssueResolved`
 
-A previously reported delivery issue was resolved.
+A previously reported delivery issue was acknowledged and closed. #639 part C step 3-i (ADR-20260904-015903 §4): `resolution` is the closed `DeliveryIssueResolution` kind (nullable — readers first) and the free text moves to the nullable `note`. No field renamed or removed.
 
 - **Emitted by**: [🎭 `DeliveryJob`](#actor-deliveryjob)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="event-deliveryissueresolved--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
-| <a id="event-deliveryissueresolved--resolution"></a>`resolution` | `string` | ✅ |  |
+| <a id="event-deliveryissueresolved--resolution"></a>`resolution` | [🔤 `DeliveryIssueResolution`](#scalar-deliveryissueresolution) | ⬜ | The closed outcome; null on rows appended before 3-i. |
+| <a id="event-deliveryissueresolved--note"></a>`note` | `string` | ⬜ |  |
 | <a id="event-deliveryissueresolved--resolvedat"></a>`resolvedAt` | `string` _date-time_ | ⬜ |  |
 
 <a id="event-deliverypartneravailabilityrequested"></a>
@@ -10249,7 +10279,7 @@ A rider's availability/lifecycle status changed.
 | <a id="event-riderstatuschanged--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-riderstatuschanged--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### 🔤 Scalars _(9)_
+### 🔤 Scalars _(11)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10258,6 +10288,8 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-cityid"></a>🔤 `CityId` | string _uuid_ | A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60). |
 | <a id="scalar-riderstatus"></a>🔤 `RiderStatus` | enum (OFFLINE \| AVAILABLE \| ON_DELIVERY \| SUSPENDED) | Availability/lifecycle status of an independent Captain rider. |
 | <a id="scalar-deliveryprovider"></a>🔤 `DeliveryProvider` | enum (PARTNER \| INDEPENDENT) | Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider). |
+| <a id="scalar-deliveryissuekind"></a>🔤 `DeliveryIssueKind` | enum (ADDRESS_NOT_FOUND \| CUSTOMER_UNREACHABLE \| RESTAURANT_NOT_READY \| FOOD_DAMAGED \| VEHICLE_OR_INJURY \| OTHER) | The closed set of reasons a rider (or ops) reports an issue on a delivery job — one tap on the rider sheet; the restaurant board headlines the card with it. OTHER is the only kind that expects a note (#639 part C step 3-i). |
+| <a id="scalar-deliveryissueresolution"></a>🔤 `DeliveryIssueResolution` | enum (REASSIGNED \| DELIVERED_BY_RESTAURANT \| CANCELLED \| OTHER) | The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue. |
 | <a id="scalar-deliverychannelkey"></a>🔤 `DeliveryChannelKey` | string `^[a-z0-9]+(?:_[a-z0-9]+)*$` | Slug key of a delivery channel in the DeliveryChannelCatalog (e.g. 'independent', 'avelo37', 'uber_direct', 'coopcycle'). Data-driven (a new partner = a catalog row + an adapter), so channels are NOT a fixed enum (#60). |
 | <a id="scalar-deliverypartnerregistrationid"></a>🔤 `DeliveryPartnerRegistrationId` | string _uuid_ | A delivery partner's self-registration of availability to serve one city on one catalog channel (#61). Client-generated; the aggregate id of the DeliveryPartnerRegistration. |
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
@@ -10372,14 +10404,14 @@ _A delivery job ASSIGNED to a partner (by the partner's acceptance — the only 
 
 _An independent rider may decline a pending delivery job; the job stays PENDING and re-offerable._
 
-- **Verified by**: [🧪 `TestDeliveryDeclinedByRider`](#test-testdeliverydeclinedbyrider)
+- **Verified by**: [🧪 `TestDeliveryDeclinedByRider`](#test-testdeliverydeclinedbyrider), [🧪 `TestDeclineDeliveryOnAssignedJobIsRejected`](#test-testdeclinedeliveryonassignedjobisrejected)
 
 <a id="rule-deliveryissuelifecycle"></a>
 #### 📐 Rule: `DeliveryIssueLifecycle`
 
-_A delivery issue can be reported on a non-delivered job and later resolved._
+_A delivery issue is reported on a non-delivered job by its closed kind (DeliveryIssueKind — one tap, an optional bounded note only for the facts) and NEVER moves the job's status or its rider; it is told to the restaurant through the read model (View_DeliveryJob.open_issue_kind) and later resolved with a closed DeliveryIssueResolution by whoever was told — resolving with nothing open, or reporting on a DELIVERED job, is rejected (#639 part C step 3-i, ADR-20260904-015903 §4)._
 
-- **Verified by**: [🧪 `TestDeliveryIssueReported`](#test-testdeliveryissuereported), [🧪 `TestDeliveryIssueResolved`](#test-testdeliveryissueresolved)
+- **Verified by**: [🧪 `TestDeliveryIssueReported`](#test-testdeliveryissuereported), [🧪 `TestDeliveryIssueReportOnDeliveredJobIsRejected`](#test-testdeliveryissuereportondeliveredjobisrejected), [🧪 `TestDeliveryIssueResolved`](#test-testdeliveryissueresolved), [🧪 `TestDeliveryIssueResolveWithoutOpenIssueIsRejected`](#test-testdeliveryissueresolvewithoutopenissueisrejected)
 
 <a id="rule-deliverypartnerselfregisterscityavailability"></a>
 #### 📐 Rule: `DeliveryPartnerSelfRegistersCityAvailability`
@@ -10662,22 +10694,52 @@ _An independent rider declines a pending job; it stays PENDING and re-offerable_
 <a id="test-testdeliveryissuereported"></a>
 #### 🧪 Test: `TestDeliveryIssueReported`
 
-_An issue is reported on a non-delivered job_
+_An issue is reported by kind on a non-delivered job; the job's status does not move_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
 - **When**: [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue)
 - **Then**: [⚡ `DeliveryIssueReported`](#event-deliveryissuereported)
 - **Verifies**: [📐 `DeliveryIssueLifecycle`](#rule-deliveryissuelifecycle)
 
+<a id="test-testdeliveryissuereportondeliveredjobisrejected"></a>
+#### 🧪 Test: `TestDeliveryIssueReportOnDeliveredJobIsRejected`
+
+_Rejects reporting an issue on a job that is already DELIVERED_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryPickedUp`](#event-deliverypickedup), [⚡ `DeliveryCompleted`](#event-deliverycompleted)
+- **When**: [📩 `ReportDeliveryIssue`](#command-reportdeliveryissue)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryIssueLifecycle`](#rule-deliveryissuelifecycle)
+
 <a id="test-testdeliveryissueresolved"></a>
 #### 🧪 Test: `TestDeliveryIssueResolved`
 
-_A previously reported delivery issue is resolved_
+_A previously reported delivery issue is resolved with a closed resolution kind_
 
 - **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryIssueReported`](#event-deliveryissuereported)
 - **When**: [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue)
 - **Then**: [⚡ `DeliveryIssueResolved`](#event-deliveryissueresolved)
 - **Verifies**: [📐 `DeliveryIssueLifecycle`](#rule-deliveryissuelifecycle)
+
+<a id="test-testdeliveryissueresolvewithoutopenissueisrejected"></a>
+#### 🧪 Test: `TestDeliveryIssueResolveWithoutOpenIssueIsRejected`
+
+_Rejects resolving a delivery issue when none is open_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `ResolveDeliveryIssue`](#command-resolvedeliveryissue)
+- **Thrown**: [⛔ `InvalidDeliveryStatus`](#error-invaliddeliverystatus)
+- **Verifies**: [📐 `DeliveryIssueLifecycle`](#rule-deliveryissuelifecycle)
+
+<a id="test-testdeclinedeliveryonassignedjobisrejected"></a>
+#### 🧪 Test: `TestDeclineDeliveryOnAssignedJobIsRejected`
+
+_Rejects declining a job another rider already holds_
+
+- **Given**: [⚡ `DeliveryRequested`](#event-deliveryrequested), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider)
+- **When**: [📩 `DeclineDelivery`](#command-declinedelivery)
+- **Thrown**: [⛔ `DeliveryAlreadyAssigned`](#error-deliveryalreadyassigned)
+- **Verifies**: [📐 `DeliveryDeclineKeepsJobPending`](#rule-deliverydeclinekeepsjobpending)
 
 **[🎭 `Rider`](#actor-rider)**
 
@@ -11931,6 +11993,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 ├──────────────────────────────────────────┤
 │ «staff_topbar»                           │
 │ page_header — Delivery board             │
+│ conditional_section                      │
 │ order_list                               │
 │ section                                  │
 │ «staff_nav»                              │
@@ -11942,6 +12005,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 | read | `deliveries.byRestaurant` | [🔎 `restaurantDeliveries`](#query-restaurantdeliveries) |
 | write | `escalate_delivery` | [✏️ `escalateDelivery`](#mutation-escalatedelivery) |
 | write | `mark_order_delivered` | [✏️ `markOrderDelivered`](#mutation-markorderdelivered) |
+| write | `resolve_delivery_issue` | [✏️ `resolveDeliveryIssue`](#mutation-resolvedeliveryissue) |
 
 <a id="screen-refunds_queue"></a>
 ### 📱 `refunds_queue` · `/refunds` · 📱 SDUI · 🔒 auth
@@ -12421,6 +12485,7 @@ _Surface_ **`rider.yaml`**
 | --- | --- | --- |
 | read | `deliveries.mine` | [🔎 `myDeliveries`](#query-mydeliveries) |
 | write | `accept_delivery` | [✏️ `acceptDelivery`](#mutation-acceptdelivery) |
+| write | `decline_delivery` | [✏️ `declineDelivery`](#mutation-declinedelivery) |
 | write | `rider_toggle_online` | [✏️ `changeRiderStatus`](#mutation-changeriderstatus) |
 
 <a id="screen-job_detail"></a>
@@ -12432,6 +12497,7 @@ _Surface_ **`rider.yaml`**
 ├──────────────────────────────────────────┤
 │ back_button_header — Delivery            │
 │ status_chip                              │
+│ badge                                    │
 │ info_row — Pickup                        │
 │ info_row — Drop-off                      │
 │ info_row — Restaurant                    │
@@ -12444,6 +12510,7 @@ _Surface_ **`rider.yaml`**
 | read | `delivery.byOrder` | [🔎 `delivery`](#query-delivery) |
 | write | `confirm_pickup` | [✏️ `confirmPickup`](#mutation-confirmpickup) |
 | write | `complete_delivery` | [✏️ `completeDelivery`](#mutation-completedelivery) |
+| write | `report_delivery_issue` | [✏️ `reportDeliveryIssue`](#mutation-reportdeliveryissue) |
 
 **Gaps**
 - ⚠️ Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant.
@@ -12535,6 +12602,22 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-deliveries-delivered"></a>`back.deliveries.delivered` | — | Mark delivered | Marquer livrée |
 | <a id="translation-back-deliveries-empty-title"></a>`back.deliveries.empty.title` | — | No active deliveries | Aucune livraison en cours |
 | <a id="translation-back-deliveries-empty-body"></a>`back.deliveries.empty.body` | — | Delivery jobs for your orders show up here. | Les courses de vos commandes s'affichent ici. |
+| <a id="translation-back-deliveries-issue-kind-address_not_found"></a>`back.deliveries.issue.kind.address_not_found` | — | Rider: address not found | Livreur : adresse introuvable |
+| <a id="translation-back-deliveries-issue-kind-customer_unreachable"></a>`back.deliveries.issue.kind.customer_unreachable` | — | Rider: customer unreachable | Livreur : client injoignable |
+| <a id="translation-back-deliveries-issue-kind-restaurant_not_ready"></a>`back.deliveries.issue.kind.restaurant_not_ready` | — | Rider: order not ready | Livreur : commande pas prête |
+| <a id="translation-back-deliveries-issue-kind-food_damaged"></a>`back.deliveries.issue.kind.food_damaged` | — | Rider: food damaged | Livreur : commande abîmée |
+| <a id="translation-back-deliveries-issue-kind-vehicle_or_injury"></a>`back.deliveries.issue.kind.vehicle_or_injury` | — | Rider: vehicle or injury | Livreur : véhicule ou blessure |
+| <a id="translation-back-deliveries-issue-kind-other"></a>`back.deliveries.issue.kind.other` | — | Rider: another problem | Livreur : autre problème |
+| <a id="translation-back-deliveries-issue-body"></a>`back.deliveries.issue.body` | — | The rider reported a problem on this delivery. Acknowledge it and say what happens next. | Le livreur a signalé un problème sur cette course. Prenez-en acte et indiquez la suite. |
+| <a id="translation-back-deliveries-issue-seen"></a>`back.deliveries.issue.seen` | — | Seen | Vu |
+| <a id="translation-back-deliveries-issue-resolve_title"></a>`back.deliveries.issue.resolve_title` | — | What happens with this delivery | Quelle suite pour cette course |
+| <a id="translation-back-deliveries-issue-resolution_label"></a>`back.deliveries.issue.resolution_label` | — | Outcome | Suite donnée |
+| <a id="translation-back-deliveries-issue-resolution-reassigned"></a>`back.deliveries.issue.resolution.reassigned` | — | Reassigned to another courier | Réattribuée à un autre livreur |
+| <a id="translation-back-deliveries-issue-resolution-delivered_by_restaurant"></a>`back.deliveries.issue.resolution.delivered_by_restaurant` | — | We deliver it ourselves | Nous la livrons nous-mêmes |
+| <a id="translation-back-deliveries-issue-resolution-cancelled"></a>`back.deliveries.issue.resolution.cancelled` | — | Delivery cancelled | Course annulée |
+| <a id="translation-back-deliveries-issue-resolution-other"></a>`back.deliveries.issue.resolution.other` | — | Other | Autre |
+| <a id="translation-back-deliveries-issue-note_prompt"></a>`back.deliveries.issue.note_prompt` | — | The facts, without describing anyone | Les faits, sans décrire des personnes |
+| <a id="translation-back-deliveries-issue-confirm"></a>`back.deliveries.issue.confirm` | — | Confirm | Confirmer |
 | <a id="translation-back-refunds-title"></a>`back.refunds.title` | — | Refund requests | Demandes de remboursement |
 | <a id="translation-back-refunds-approve"></a>`back.refunds.approve` | — | Approve refund | Approuver le remboursement |
 | <a id="translation-back-refunds-deny"></a>`back.refunds.deny` | — | Deny refund | Refuser le remboursement |
@@ -12800,6 +12883,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-sign_in-resend"></a>`rider.sign_in.resend` | — | Send a new code | Renvoyer un code |
 | <a id="translation-rider-jobs-title"></a>`rider.jobs.title` | — | My deliveries | Mes courses |
 | <a id="translation-rider-jobs-accept"></a>`rider.jobs.accept` | — | Accept job | Accepter la course |
+| <a id="translation-rider-jobs-decline"></a>`rider.jobs.decline` | — | Decline | Refuser |
 | <a id="translation-rider-jobs-empty-title"></a>`rider.jobs.empty.title` | — | No deliveries | Aucune course |
 | <a id="translation-rider-jobs-empty-body"></a>`rider.jobs.empty.body` | — | Offered and assigned delivery jobs show up here. | Les courses proposées et attribuées s'affichent ici. |
 | <a id="translation-rider-job-title"></a>`rider.job.title` | — | Delivery | Course |
@@ -12808,6 +12892,21 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-job-dropoff"></a>`rider.job.dropoff` | — | Drop-off | Livraison |
 | <a id="translation-rider-job-picked_up"></a>`rider.job.picked_up` | — | Picked up | Commande récupérée |
 | <a id="translation-rider-job-delivered"></a>`rider.job.delivered` | — | Delivered | Livrée |
+| <a id="translation-rider-job-problem"></a>`rider.job.problem` | — | A problem | Un problème |
+| <a id="translation-rider-job-issue_reported"></a>`rider.job.issue_reported` | — | Issue reported | Problème signalé |
+| <a id="translation-rider-issue-title"></a>`rider.issue.title` | — | A problem with this delivery | Un problème sur cette course |
+| <a id="translation-rider-issue-exit_label"></a>`rider.issue.exit_label` | — | What happens next | Et ensuite |
+| <a id="translation-rider-issue-exit-continue"></a>`rider.issue.exit.continue` | — | I carry on, but… | Je continue, mais… |
+| <a id="translation-rider-issue-kind_label"></a>`rider.issue.kind_label` | — | What is wrong | Quel est le problème |
+| <a id="translation-rider-issue-kind-address_not_found"></a>`rider.issue.kind.address_not_found` | — | Address not found | Adresse introuvable |
+| <a id="translation-rider-issue-kind-customer_unreachable"></a>`rider.issue.kind.customer_unreachable` | — | Customer unreachable | Client injoignable |
+| <a id="translation-rider-issue-kind-restaurant_not_ready"></a>`rider.issue.kind.restaurant_not_ready` | — | Order not ready | Commande pas prête |
+| <a id="translation-rider-issue-kind-food_damaged"></a>`rider.issue.kind.food_damaged` | — | Food damaged | Commande abîmée |
+| <a id="translation-rider-issue-kind-vehicle_or_injury"></a>`rider.issue.kind.vehicle_or_injury` | — | Vehicle or injury | Véhicule ou blessure |
+| <a id="translation-rider-issue-kind-other"></a>`rider.issue.kind.other` | — | Other | Autre |
+| <a id="translation-rider-issue-note_prompt"></a>`rider.issue.note_prompt` | — | The facts, without describing anyone | Les faits, sans décrire des personnes |
+| <a id="translation-rider-issue-confirm"></a>`rider.issue.confirm` | — | Tell the restaurant | Prévenir le restaurant |
+| <a id="translation-rider-issue-pending"></a>`rider.issue.pending` | — | Reported ✓ — the restaurant is being told… | Signalé ✓ — le restaurant est prévenu… |
 | <a id="translation-mailbox-title"></a>`mailbox.title` | — | Actor mailbox | Boîte aux lettres des acteurs |
 | <a id="translation-mailbox-subtitle"></a>`mailbox.subtitle` | — | One lane per (actor type, partition) — leases, checkpoints and backlog. | Une voie par (type d'acteur, partition) — baux, points de contrôle et arriéré. |
 | <a id="translation-mailbox-lanes"></a>`mailbox.lanes` | — | Lanes | Voies |
