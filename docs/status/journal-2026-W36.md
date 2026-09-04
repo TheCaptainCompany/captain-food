@@ -2,6 +2,32 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #870 merged: step 3 of part C is complete; the rider hands a job back and the
+> customer is told.** [PR #870](https://github.com/TheCaptainCompany/captain-food/pull/870)
+> (`6cf74887`, squash), a two-hour lower-tier run plus a round 2. **Presentation pass**: reviewer FAIL,
+> vernon PASS, young PASS, observability STOP, ux STOP, legal STOP — three blocking clusters, all
+> fixed in round 2 and re-checked PASS by the three lenses that stopped: (1) the issue sheet gated both
+> exits on a chip's value, and the SDUI never re-evaluates a condition on a form field after paint —
+> the sheet rendered NOTHING and took 3-i's report door down with it; now a two-button router opening
+> per-exit sheets, 3-i's chips unconditional, rendered and asserted; (2) the customer banner keyed on
+> `OrderStatus::OUT_FOR_DELIVERY`, which no projector produces, read a second `delivery` state the push
+> path never refreshed, had no test, and promised a re-offer nobody performs — now keyed on
+> `Order.deliveryHandedBack` folded onto the order mirror, facts-only copy in both languages, render
+> and push tests; (3) the `custody-handback` contract declared a required span attribute nothing
+> records and a threshold of 300 "derived from" a key whose value is 900. **Attribution**: the sheet
+> is a card defect (the briefing framed the condition grammar as a parse question, not reactivity);
+> the banner predicate is an ADR-text defect (§7 named a status no fold produces) plus an
+> invited-lens depth miss; neither is roster width. ADR-20260904-015903 §1 and §7 amended in place.
+> Three live-found bugs during the run (an event missing `orderId`, a missing hand-written
+> `OrderTrackingCompute` arm, a CASE-type bug in the executor's own emitter extension) were caught by
+> the card's tests, not by luck (reviewer); what slipped was the one requirement stated in prose
+> with no red-first step. **Lower-tier tally: first-round PASS 1 of 3** (#864 PASS, #867 FAIL→PASS,
+> #870 FAIL→PASS; rounds 1/2/2). Filed: [#871](https://github.com/TheCaptainCompany/captain-food/issues/871)
+> ScopeMembership never revokes on reassignment, [#872](https://github.com/TheCaptainCompany/captain-food/issues/872)
+> three SDUI renderer gaps (chaining, form-field reactivity, `disabled_when`),
+> [#873](https://github.com/TheCaptainCompany/captain-food/issues/873) four handback follow-ups. Next:
+> step 4, rider restriction (ADR-20260904-014136), briefed to the roster first.
+
 > **2026-09-04 — #639 part C step 3-ii, PR #870: review round 2 fixes (still draft, HOLD: human).**
 > Presentation on `3103dc42` (round 1's green hand-back): reviewer FAIL, checkpoint STOPs from
 > observability, ux and legal; vernon and young PASS on their own concerns. Round 2 of the 3-round

@@ -56,7 +56,10 @@ opened on the write side alone re-creates §7.2 with a nicer button. The fold is
 ## Decision
 
 1. **Option (c) — a new fact.** `HandBackDelivery { deliveryJobId, riderId, foodLocation }` →
-   `DeliveryHandedBackByRider { deliveryJobId, riderId, foodLocation }`. `foodLocation` is a
+   `DeliveryHandedBackByRider { deliveryJobId, orderId, riderId, foodLocation }` — `orderId`
+   REQUIRED, folded from the aggregate's own state, never client input (the D-QW1 convention,
+   ADR-20260808-234907; without it the customer's tracking mirror is unreachable — amended
+   2026-09-04 at 3-ii's checkpoint, young). `foodLocation` is a
    dedicated kernel-or-delivery scalar **`FoodCustody`** (one name = one scalar):
    `NOT_COLLECTED | RETURNED_TO_RESTAURANT | WITH_RIDER`. **No free-text `reason`** on the handback
    (legal: the narrative the restriction ADR made unspellable would re-enter by the side door).
@@ -104,14 +107,27 @@ opened on the write side alone re-creates §7.2 with a nicer button. The fold is
    `{delivery (by orderId), reportDeliveryIssue, handBackDelivery}` — the query is in it, or the
    only live control on the page has no data.
 7. **One control, two exits** (ux-designer): `job_detail` gets a secondary *"Un problème"* beside
-   the primary; one sheet whose first choice is *"Je continue, mais…"* (report only) or *"Je ne
-   peux pas continuer"* (report + hand back); reason as one-tap chips; the food question asked only
-   at PICKED_UP or later, as two cards; confirm *"Prévenir le restaurant"*; after a handback the
-   screen becomes an instruction (`WITH_RIDER` → *"Rapportez la commande"* + address). In-app only,
-   no call button (SUPPORT-CONTACT). The restaurant board renders a handed-back job as a pinned,
-   sounded card headlined by where the food is, acknowledged through `resolveDeliveryIssue`; the
-   customer tracking replaces the ETA with *"nouvelle estimation en cours"* when the delivery is
-   PENDING while the order is OUT_FOR_DELIVERY — never a counting ETA, never blank.
+   the primary; one sheet that ROUTES — two buttons, *"Je continue, mais…"* opening the report
+   sheet (3-i's kind chips, note, confirm) and *"Je ne peux pas continuer"* opening the handback
+   sheet (**amended 2026-09-04 at 3-ii's checkpoint, ux**: the SDUI has no client-side
+   re-evaluation of conditions on form fields, so an exit chosen by a chip can gate nothing —
+   the one runtime toggle is `open_bottom_sheet`; #872 carries the gap); the handback sheet asks
+   nothing about the kind (the "report + hand back" two Tells of the briefing need an `on_success`
+   chaining primitive the driver lacks — #872 — so the handback exit is one Tell, narrower not
+   misleading); the food question asked only at PICKED_UP or later, as two cards; confirm
+   *"Prévenir le restaurant"* on both exits; after a handback the screen becomes an instruction
+   (`WITH_RIDER` → *"Rapportez la commande"* + address). In-app only, no call button
+   (SUPPORT-CONTACT). The restaurant board renders a handed-back job as a pinned card headlined by
+   where the food is, acknowledged through `resolveDeliveryIssue` (a sound has no DSL primitive;
+   the board's read is `skipped_reads`, #745, so today the fold and the dead-man gauge are what
+   tell the restaurant); the customer tracking replaces the ETA with a facts-only banner —
+   *"La livraison n'arrivera pas à l'heure indiquée. Le restaurant est prévenu. Nous vous
+   tiendrons informé ici."* — keyed on `Order.deliveryHandedBack`, a custody flag folded onto the
+   order mirror the pushed frame carries, with NO order-status term (**amended 2026-09-04, legal +
+   ux**: the original predicate keyed on `OrderStatus::OUT_FOR_DELIVERY`, which no projector
+   produces, and the original copy promised a re-offer nobody performs; the from-ASSIGNED
+   `NOT_COLLECTED` case leaves the order at READY) — never a counting ETA, never blank, never a
+   promised remedy (#862 owns the remedy).
 8. **Who is told, beyond the fold**: the re-offer is `DeliveryDispatchProcess`'s job and the
    process manager is fenced — filed as a follow-on with a `deferred:` block; a **dead-man gauge**
    `delivery_handed_back_unreassigned_age_seconds` (operational, OTLP, the #608 shape, threshold
