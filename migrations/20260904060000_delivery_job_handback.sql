@@ -20,6 +20,15 @@
 -- "cannot change name of view column". Nothing depends on this view (no other view or function
 -- selects from it; the read repository is SQL at call time), so the drop is safe; precedent:
 -- 20260730043100, mirrored again by 20260904021500.
+--
+-- EMITTER FIX RIDING THIS MIGRATION (found live, via the named `status.derive` mutant): a
+-- `derive: { from: prop }` arm used to extract the payload as bare TEXT (`e.payload->>'prop'`),
+-- unlike every other typed extraction in this file. For an all-TEXT column (`status`/`provider`/
+-- `open_issue_kind`/`food_location`) that is invisible; for `rider_id` (UUID) it silently made the
+-- WHOLE CASE ladder's inferred type TEXT — Postgres infers a CASE's type from its branches — which
+-- compiled clean and only broke `for_rider`'s `rider_id = $1::uuid` comparison at query time
+-- ("operator does not exist: text = uuid"). The emitter (`emit/sql.rs`) now casts a `derive:`
+-- payload extraction the same way `payload_extract` already does for every other column mode.
 
 DROP VIEW IF EXISTS View_DeliveryJob;
 
@@ -34,7 +43,7 @@ SELECT
   (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS provider,
-  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN e.payload->>'riderId' WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN (e.payload->>'riderId')::uuid WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS rider_id,
   (SELECT e.payload->'courier' FROM domain_events e

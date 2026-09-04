@@ -547,6 +547,11 @@ fn fx_delivery_accepted_by_rider() -> DomainEvent {
     DomainEvent::DeliveryAcceptedByRider(evs::DeliveryAcceptedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")) })
 }
 
+/// tests.yaml#/fixtures/deliveryAcceptedByRider2 — events.yaml#/DeliveryAcceptedByRider
+fn fx_delivery_accepted_by_rider2() -> DomainEvent {
+    DomainEvent::DeliveryAcceptedByRider(evs::DeliveryAcceptedByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-2")) })
+}
+
 /// tests.yaml#/fixtures/deliveryPickedUp — events.yaml#/DeliveryPickedUp
 fn fx_delivery_picked_up() -> DomainEvent {
     DomainEvent::DeliveryPickedUp(evs::DeliveryPickedUp { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), at: None })
@@ -609,17 +614,17 @@ fn fx_delivery_declined_by_rider() -> DomainEvent {
 
 /// tests.yaml#/fixtures/deliveryHandedBackNotCollected — events.yaml#/DeliveryHandedBackByRider
 fn fx_delivery_handed_back_not_collected() -> DomainEvent {
-    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::NOT_COLLECTED })
+    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::NOT_COLLECTED })
 }
 
 /// tests.yaml#/fixtures/deliveryHandedBackReturnedToRestaurant — events.yaml#/DeliveryHandedBackByRider
 fn fx_delivery_handed_back_returned_to_restaurant() -> DomainEvent {
-    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::RETURNED_TO_RESTAURANT })
+    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::RETURNED_TO_RESTAURANT })
 }
 
 /// tests.yaml#/fixtures/deliveryHandedBackWithRider — events.yaml#/DeliveryHandedBackByRider
 fn fx_delivery_handed_back_with_rider() -> DomainEvent {
-    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::WITH_RIDER })
+    DomainEvent::DeliveryHandedBackByRider(evs::DeliveryHandedBackByRider { delivery_job_id: sc::DeliveryJobId(support::uid("deliv-1")), order_id: sc::OrderId(support::uid("order-1")), rider_id: sc::RiderId(support::uid("rider-1")), food_location: sc::FoodCustody::WITH_RIDER })
 }
 
 /// tests.yaml#/fixtures/deliveryIssueReported — events.yaml#/DeliveryIssueReported
@@ -4065,7 +4070,7 @@ async fn test_delivery_reoffered_after_hand_back() {
     let result = crate::commands::accept_delivery(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestDeliveryReofferedAfterHandBack: the spec expects acceptance");
     bed.assert_appended("TestDeliveryReofferedAfterHandBack", &before, &[
-        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_accepted_by_rider()),
+        (format!("DeliveryJob-{}", support::uid("deliv-1")), fx_delivery_accepted_by_rider2()),
     ]);
 }
 

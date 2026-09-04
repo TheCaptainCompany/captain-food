@@ -511,7 +511,12 @@ pub(crate) fn generate_fold_sql(v: &SqlView, model: &Model) -> Result<String, St
                             }
                             format!("'{}'", s)
                         }
-                        DeriveVal::Payload(p) => format!("e.payload->>'{}'", p),
+                        // Cast like every other typed extraction (`payload_extract`): a bare
+                        // `->>'prop'` is TEXT, and a CASE ladder's overall type is inferred from
+                        // its branches — an uncast UUID/int/etc. arm silently makes the WHOLE
+                        // column TEXT (found live: `rider_id`'s `for_rider` query then fails
+                        // `operator does not exist: text = uuid` — #639 part C step 3-ii).
+                        DeriveVal::Payload(p) => payload_extract("e", p, &pgty),
                         DeriveVal::Null => "NULL".to_string(),
                         DeriveVal::Mapped(field, pairs) => {
                             let inner: Vec<String> =

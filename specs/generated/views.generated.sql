@@ -14,7 +14,7 @@ SELECT
   (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN 'INDEPENDENT' WHEN 'DeliveryAcceptedByPartner' THEN 'PARTNER' WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryAcceptedByPartner', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS provider,
-  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN e.payload->>'riderId' WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
+  (SELECT CASE e.event_type WHEN 'DeliveryAcceptedByRider' THEN (e.payload->>'riderId')::uuid WHEN 'DeliveryHandedBackByRider' THEN NULL END FROM domain_events e
      WHERE e.stream_name = c.stream_name AND e.event_type IN ('DeliveryAcceptedByRider', 'DeliveryHandedBackByRider')
      ORDER BY e.position DESC LIMIT 1) AS rider_id,
   (SELECT e.payload->'courier' FROM domain_events e

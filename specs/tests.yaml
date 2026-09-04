@@ -630,6 +630,11 @@ fixtures:
   deliveryAcceptedByRider:
     type: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
     data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1" }
+  # The SECOND rider's acceptance -- distinct from `deliveryAcceptedByRider` (rider-1) so the
+  # hand-back reoffer proof (#639 part C step 3-ii) can assert a DIFFERENT rider now holds the job.
+  deliveryAcceptedByRider2:
+    type: { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-2" }
   deliveryPickedUp:
     type: { $ref: 'events.yaml#/DeliveryPickedUp' }
     data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1" }
@@ -669,13 +674,13 @@ fixtures:
   # #639 part C step 3-ii (ADR-20260904-015903 §1-2).
   deliveryHandedBackNotCollected:
     type: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
-    data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "NOT_COLLECTED" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1", foodLocation: "NOT_COLLECTED" }
   deliveryHandedBackReturnedToRestaurant:
     type: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
-    data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "RETURNED_TO_RESTAURANT" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1", foodLocation: "RETURNED_TO_RESTAURANT" }
   deliveryHandedBackWithRider:
     type: { $ref: 'events.yaml#/DeliveryHandedBackByRider' }
-    data: { deliveryJobId: "deliv-1", riderId: "rider-1", foodLocation: "WITH_RIDER" }
+    data: { deliveryJobId: "deliv-1", orderId: "order-1", riderId: "rider-1", foodLocation: "WITH_RIDER" }
   deliveryIssueReported:
     type: { $ref: 'events.yaml#/DeliveryIssueReported' }
     data: { deliveryJobId: "deliv-1", riderId: "rider-1", kind: "CUSTOMER_UNREACHABLE", issue: "Customer unreachable at the door" }
@@ -3628,7 +3633,7 @@ tests:
       type: { $ref: 'commands.yaml#/AcceptDelivery' }
       data: { deliveryJobId: "deliv-1", riderId: "rider-2" }
     then:
-      - { $ref: '#/fixtures/deliveryAcceptedByRider' }
+      - { $ref: '#/fixtures/deliveryAcceptedByRider2' }
 
   TestHandBackDeliveryRejectsRiderMismatch:
     name: "A rider who does not hold the job cannot hand it back"

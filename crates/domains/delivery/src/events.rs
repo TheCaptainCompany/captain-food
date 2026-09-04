@@ -134,11 +134,12 @@ pub struct DeliveryDeclinedByRider {
     pub reason: Option<String>,
 }
 
-/// A rider holding a delivery job handed it back, stating where the food physically is (#639 part C step 3-ii, ADR-20260904-015903 §1-2). Business payload only — the actor is envelope metadata (`domain_events.user_id`). From ASSIGNED the job returns to PENDING (foodLocation NOT_COLLECTED, derived — the rider never picked up); from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT re-offers the job (PENDING) and WITH_RIDER fails it closed (FAILED — a PENDING job whose food is in a restricted rider's bag would be re-offered, which is an oversell).
+/// A rider holding a delivery job handed it back, stating where the food physically is (#639 part C step 3-ii, ADR-20260904-015903 §1-2). Business payload only — the actor is envelope metadata (`domain_events.user_id`). From ASSIGNED the job returns to PENDING (foodLocation NOT_COLLECTED, derived — the rider never picked up); from PICKED_UP/OUT_FOR_DELIVERY, RETURNED_TO_RESTAURANT re-offers the job (PENDING) and WITH_RIDER fails it closed (FAILED — a PENDING job whose food is in a restricted rider's bag would be re-offered, which is an oversell). `orderId` rides the fact (D-QW1 option b, ADR-20260808-234907, folded from the aggregate's own state — the command does not carry it): the OrderTracking projector keys every DeliveryJob-stream fact by payload `orderId`, so an event without one is invisible to the customer's mirror (found live: the `delivery_status`/`courier` reset never reached `ordertracking` — every other rider-authored fact on this stream, DeliveryAcceptedByRider/DeliveryPickedUp/DeliveryCompleted, already carries it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryHandedBackByRider {
     pub delivery_job_id: DeliveryJobId,
+    pub order_id: OrderId,
     pub rider_id: RiderId,
     pub food_location: FoodCustody,
 }

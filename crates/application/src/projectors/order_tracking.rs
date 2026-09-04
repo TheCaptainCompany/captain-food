@@ -165,6 +165,13 @@ impl OrderTrackingCompute for OrderTrackingProjector {
             DomainEvent::DeliveryCompleted(_) => Some(DeliveryStatus::DELIVERED),
             // Terminal dispatch failure — the offer cap was exhausted (ADR-20260720-004556).
             DomainEvent::DeliveryDispatchFailed(_) => Some(DeliveryStatus::FAILED),
+            // #639 part C step 3-ii: custody-keyed, mirrors View_DeliveryJob.status's
+            // `derive: { from, map }` arm — PENDING unless the food is still WITH_RIDER, then
+            // FAILED (never re-offered while a restricted rider's bag still holds it).
+            DomainEvent::DeliveryHandedBackByRider(e) => Some(match e.food_location {
+                domain::generated::scalars::FoodCustody::WITH_RIDER => DeliveryStatus::FAILED,
+                _ => DeliveryStatus::PENDING,
+            }),
             _ => prev.and_then(|r| r.delivery_status.clone()),
         }
     }
@@ -173,6 +180,8 @@ impl OrderTrackingCompute for OrderTrackingProjector {
         match &env.event {
             DomainEvent::DeliveryAcceptedByPartner(e) => serde_json::to_value(&e.courier).ok(),
             DomainEvent::DeliveryAcceptedByRider(e) => Some(json!({ "rider_id": e.rider_id })),
+            // #639 part C step 3-ii: reset — the job is unassigned again.
+            DomainEvent::DeliveryHandedBackByRider(_) => None,
             _ => prev.and_then(|r| r.courier.clone()),
         }
     }

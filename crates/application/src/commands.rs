@@ -1565,6 +1565,9 @@ pub async fn hand_back_delivery(
     }
     let event = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
         delivery_job_id: cmd.delivery_job_id,
+        // From the folded birth fact, never from the client (D-QW1 option b) — the field that lets
+        // the customer's OrderTracking row fold this fact (confirm_pickup's precedent).
+        order_id: state.order_id,
         rider_id: cmd.rider_id,
         food_location: cmd.food_location,
     });

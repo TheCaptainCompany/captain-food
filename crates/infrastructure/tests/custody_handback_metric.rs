@@ -124,7 +124,7 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
         &format!("DeliveryJob-{job_stranded}"),
         3,
         "DeliveryHandedBackByRider",
-        serde_json::json!({ "deliveryJobId": job_stranded, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
+        serde_json::json!({ "deliveryJobId": job_stranded, "orderId": order_stranded, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
         t0 + Duration::minutes(2),
     )
     .await;
@@ -161,7 +161,7 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
         &format!("DeliveryJob-{job_reassigned}"),
         3,
         "DeliveryHandedBackByRider",
-        serde_json::json!({ "deliveryJobId": job_reassigned, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
+        serde_json::json!({ "deliveryJobId": job_reassigned, "orderId": order_reassigned, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
         t0 + Duration::minutes(2),
     )
     .await;

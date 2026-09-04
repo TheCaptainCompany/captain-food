@@ -273,6 +273,7 @@ mod tests {
         });
         let handed_back = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
             delivery_job_id: job_id(),
+            order_id: order_id(),
             rider_id: rider,
             food_location: FoodCustody::RETURNED_TO_RESTAURANT,
         });
@@ -300,6 +301,7 @@ mod tests {
         });
         let handed_back = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
             delivery_job_id: job_id(),
+            order_id: order_id(),
             rider_id: rider,
             food_location: FoodCustody::WITH_RIDER,
         });
@@ -321,6 +323,7 @@ mod tests {
         });
         let handed_back = DomainEvent::DeliveryHandedBackByRider(DeliveryHandedBackByRider {
             delivery_job_id: job_id(),
+            order_id: order_id(),
             rider_id: rider,
             food_location: FoodCustody::NOT_COLLECTED,
         });

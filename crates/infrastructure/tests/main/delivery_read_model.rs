@@ -369,7 +369,7 @@ async fn a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirr
         &stream,
         4,
         "DeliveryHandedBackByRider",
-        serde_json::json!({ "deliveryJobId": job, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
+        serde_json::json!({ "deliveryJobId": job, "orderId": order, "riderId": rider1, "foodLocation": "RETURNED_TO_RESTAURANT" }),
         t0 + Duration::minutes(9),
     )
     .await;
@@ -451,7 +451,7 @@ async fn a_handed_back_job_reappears_pending_on_the_board_and_the_customers_mirr
         &stream2,
         4,
         "DeliveryHandedBackByRider",
-        serde_json::json!({ "deliveryJobId": job2, "riderId": rider1, "foodLocation": "WITH_RIDER" }),
+        serde_json::json!({ "deliveryJobId": job2, "orderId": order2, "riderId": rider1, "foodLocation": "WITH_RIDER" }),
         t0 + Duration::minutes(9),
     )
     .await;
