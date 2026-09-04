@@ -13127,6 +13127,7 @@ _Surface_ **`system.yaml`**
 **Gaps**
 - ⚠️ The System host is not routed today (crates/server/src/hosts.rs `HostRoute::System`) and `specs/screens/system.yaml` declares no `requires_auth`/`unauthenticated:` door — the mailbox supervision screen has the same status. This screen is DARK: declared and asserted by dedicated render tests, reachable from a browser only once step 6's magic-link admin door + System host routing land (ADR-20260904-152807 §9, the RIDER-RESTRICTION-PRECONDITIONS row).
 - ⚠️ The restaurant's name behind a held job is not shown on the roster (ADR §4): `heldDelivery`'s client selection deliberately does not select `restaurant { displayName }` — a delivery -> network navigation hop the D8 binding-walk gate cannot see today.
+- ⚠️ `item_action` on this list is DECLARED but not yet CONSUMED by the renderer (`crates/web/src/renderer.rs` `ComponentKind::List` never reads it, in SSR or hydrate) — a pre-existing corpus-wide gap shared with `restaurant_backoffice.yaml`'s `claims_list`, found while building this screen and reported to the architect rather than fixed here (out of this dispatch's scope: it needs both an SSR row-wrapper and a hydrate click handler, a bigger lift than this card's badge-rendering fix).
 
 <a id="screen-rider_detail"></a>
 ### 📱 `rider_detail` · `/system/riders/:riderId` · 📱 SDUI

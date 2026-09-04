@@ -1098,7 +1098,7 @@ pub mod system {
             ], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("detail_phone")), ("title", PropValue::I18n("roster.phone_label"))], children: &[
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("rider.phone"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("rider_phone_call_btn")), ("label", PropValue::I18n("roster.phone_label")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("phone_call")), ("action.phone", PropValue::Binding("rider.phone"))], children: &[], branches: &[] }
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("rider_phone_call_btn")), ("label", PropValue::I18n("roster.phone_label")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("phone_call")), ("action.number", PropValue::Binding("rider.phone"))], children: &[], branches: &[] }
             ], branches: &[] },
             Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("detail_availability")), ("title", PropValue::I18n("roster.availability_label"))], children: &[
                 Node { kind: ComponentKind::Badge, props: &[("text", PropValue::I18n("roster.status.offline")), ("variant", PropValue::Text("outline")), ("visible_when", PropValue::Text("rider.status == 'OFFLINE'"))], children: &[], branches: &[] },

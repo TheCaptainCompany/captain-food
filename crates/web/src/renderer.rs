@@ -580,7 +580,17 @@ fn item_component_views(node: &Node, row_ctx: &RenderContext) -> Option<Vec<AnyV
                     .into_any(),
                 );
             }
-            // info_row, badge, and any other labelled value template.
+            // A per-item `{ type: badge, text:, variant:, visible_when: }` entry (#639 part C
+            // step 4-iii-A's roster list) — the SAME shape and reasoning as the top-level
+            // `ComponentKind::Badge` arm: `text`, never `label`/`value`, resolved per-row. Guarded
+            // on the declared field so the mailbox lanes screen's older `label:`/`value:` per-item
+            // badge (`item_components.N.type: badge`) keeps its existing rendering unchanged.
+            "badge" if node.prop(&key("text")).is_some() => {
+                let text = item_prop_text(node, &key("text"), row_ctx);
+                let variant = item_prop_text(node, &key("variant"), row_ctx);
+                out.push(view! { <span data-c=ty data-variant=variant>{text}</span> }.into_any());
+            }
+            // info_row, and any other labelled value template.
             _ => {
                 let value = item_prop_text(node, &key("value"), row_ctx);
                 out.push(
@@ -973,6 +983,23 @@ fn render_node_kind(node: &Node, ctx: &RenderContext) -> AnyView {
             let label = prop_text(node, "label", ctx);
             let value = prop_text(node, "value", ctx);
             view! { <div data-c=ty><span>{label}</span><span>{value}</span></div> }.into_any()
+        }
+        // A standalone `{ type: badge, text:, variant:, visible_when: }` (#639 part C step 3-i's
+        // `delivery_issue_card`/`delivery_handback_card`, #639 part C step 4-iii-A's roster/detail
+        // — badge-per-enum-value with a per-row `visible_when`, never `variant_when`, which the
+        // renderer does not consume). Before this arm every SCREEN-level badge (never inside a
+        // `list`'s `item_components`, which `item_badge_view`/`item_component_views` already
+        // handle) fell into the tagged generic container: it checked `title`/`label`/`value`,
+        // never `text`, so the badge rendered an EMPTY node with no `data-variant` at all — a
+        // control that renders but shows nothing, found while wiring the roster's own badges.
+        // Dispatched on the DECLARED field (`text:` vs the mailbox lanes screen's own older
+        // `label:`/`value:`/`variant_when:` shape, ADR-20260904-152807 §5 refuses `variant_when`
+        // for new screens but does not retire the mailbox screen's existing one) so this arm is
+        // strictly additive, never a behaviour change for an already-shipped badge.
+        ComponentKind::Badge if node.prop("text").is_some() => {
+            let text = prop_text(node, "text", ctx);
+            let variant = prop_text(node, "variant", ctx);
+            view! { <span data-c=ty data-variant=variant>{text}</span> }.into_any()
         }
 
         // ── discovery lists ─────────────────────────────────────────────────────
@@ -2689,6 +2716,225 @@ mod tests {
         assert_eq!(format_currency(&json!({ "amountCents": 980, "currency": "EUR" })), "9,80 EUR");
         assert_eq!(format_currency(&json!({ "amountCents": 2305, "currency": "EUR" })), "23,05 EUR");
         assert_eq!(format_currency(&json!("not money")), "");
+    }
+
+    // ─── #639 part C step 4-iii-A (ADR-20260904-152807 §5-6) — the admin roster screens ─────────
+    // `Surface` has no `System` variant (`crates/web/src/handwritten.rs`), so these screens are
+    // NOT reached by `every_screen_of_every_surface_renders` — these dedicated tests are the only
+    // cover, rendered with `crate::generated::screens::system::SHEETS`, never `&[]`.
+
+    fn system_screen(id: &str) -> &'static crate::generated::screens::Screen {
+        crate::generated::screens::system::SCREENS.iter().find(|s| s.id == id).unwrap_or_else(|| {
+            panic!("no system screen '{id}' — SCREENS: {:?}", crate::generated::screens::system::SCREENS.iter().map(|s| s.id).collect::<Vec<_>>())
+        })
+    }
+
+    /// `the_riders_list_badges_exactly_the_restricted_rows`: three rows — ACTIVE (no held job),
+    /// RESTRICTED (held, OUT_FOR_DELIVERY), and a LEGACY SUSPENDED-status rider whose `standing`
+    /// stays ACTIVE (a legacy availability value is never a grant, ADR-20260904-014136 §4/§6). One
+    /// `data-variant="warning"` badge total (the restricted row's own — Actif is `outline`, the
+    /// held stage badge is `info`); the raw enum token `OUT_FOR_DELIVERY` never appears — only its
+    /// French translation.
+    #[test]
+    fn the_riders_list_badges_exactly_the_restricted_rows() {
+        let screen = system_screen("riders");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "riders.all",
+            json!([
+                { "riderId": "r-active", "displayName": "Alice", "phone": "+33600000001", "status": "AVAILABLE", "standing": "ACTIVE", "ground": null, "heldDelivery": null, "restrictionDoorOpen": true },
+                { "riderId": "r-restricted", "displayName": "Bob", "phone": "+33600000002", "status": "OFFLINE", "standing": "RESTRICTED", "ground": "IDENTITY_MISMATCH",
+                  "heldDelivery": { "status": "OUT_FOR_DELIVERY", "foodLocation": null, "pickupAddress": { "line1": "1 Rue Nationale", "postalCode": "37000", "city": "Tours" } },
+                  "restrictionDoorOpen": true },
+                { "riderId": "r-legacy", "displayName": "Carla", "phone": "+33600000003", "status": "SUSPENDED", "standing": "ACTIVE", "ground": null, "heldDelivery": null, "restrictionDoorOpen": true },
+            ]),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert_eq!(html.matches("data-variant=\"warning\"").count(), 1, "exactly ONE restricted row: {html}");
+        assert!(html.contains("Restreint"), "{html}");
+        assert!(html.contains("Actif"), "{html}");
+        assert!(html.contains("En livraison"), "the FRENCH stage label must render: {html}");
+        assert!(!html.contains("OUT_FOR_DELIVERY"), "no raw enum token on a French screen: {html}");
+        assert!(html.contains("1 Rue Nationale"), "the held job's pickup address: {html}");
+        assert!(html.contains("Alice") && html.contains("Bob") && html.contains("Carla"), "{html}");
+    }
+
+    /// `the_legacy_suspended_row_reads_suspendu_ancien_never_restreint` — the DETAIL screen's own
+    /// availability section: SUSPENDED renders its OWN dedicated legacy badge, never the standing
+    /// (access) vocabulary.
+    #[test]
+    fn the_legacy_suspended_row_reads_suspendu_ancien_never_restreint() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-legacy", "displayName": "Carla", "phone": "+33600000003",
+                "status": "SUSPENDED", "standing": "ACTIVE", "ground": null,
+                "decidedAt": null, "effectiveAt": null, "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert!(html.contains("Suspendu (ancien statut)"), "{html}");
+        assert!(!html.contains("Restreint"), "a legacy SUSPENDED status must never read as Restreint: {html}");
+        assert!(html.contains("Actif"), "the access badge stays Actif: {html}");
+    }
+
+    /// `the_reinstate_control_renders_only_when_restricted` — 1/0 and the inverse for the restrict
+    /// control; the restrict control is ALSO hidden when `restrictionDoorOpen: false` even for an
+    /// ACTIVE rider (a live control bound to a closed door is the control that does nothing).
+    #[test]
+    fn the_reinstate_control_renders_only_when_restricted() {
+        let screen = system_screen("rider_detail");
+        let base = json!({
+            "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+            "status": "AVAILABLE", "ground": null, "decidedAt": null, "effectiveAt": null,
+            "reinstatedAt": null, "heldDelivery": null,
+        });
+
+        let mut active_open = base.clone();
+        active_open["standing"] = json!("ACTIVE");
+        active_open["restrictionDoorOpen"] = json!(true);
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved("rider.byId", active_open);
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert_eq!(html.matches("data-sheet=\"restrict_rider_sheet\">Restreindre l'accès<").count(), 1, "ACTIVE + door open: the restrict control renders: {html}");
+        assert_eq!(html.matches("Lever la restriction").count(), 0, "ACTIVE: no reinstate control: {html}");
+
+        let mut active_closed = base.clone();
+        active_closed["standing"] = json!("ACTIVE");
+        active_closed["restrictionDoorOpen"] = json!(false);
+        let mut c2 = RenderContext::new("fr");
+        c2.insert_resolved("rider.byId", active_closed);
+        let html2 = render_screen_html(screen, crate::generated::screens::system::SHEETS, c2);
+        assert_eq!(
+            html2.matches("data-sheet=\"restrict_rider_sheet\">Restreindre l'accès<").count(),
+            0,
+            "door CLOSED: the restrict control must not render even for an ACTIVE rider: {html2}"
+        );
+
+        let mut restricted = base.clone();
+        restricted["standing"] = json!("RESTRICTED");
+        restricted["restrictionDoorOpen"] = json!(true);
+        let mut c3 = RenderContext::new("fr");
+        c3.insert_resolved("rider.byId", restricted);
+        let html3 = render_screen_html(screen, crate::generated::screens::system::SHEETS, c3);
+        assert_eq!(html3.matches("Lever la restriction").count(), 1, "RESTRICTED: the reinstate control renders: {html3}");
+        assert_eq!(
+            html3.matches("data-sheet=\"restrict_rider_sheet\">Restreindre l'accès<").count(),
+            0,
+            "RESTRICTED: no restrict control (already restricted): {html3}"
+        );
+    }
+
+    /// `the_four_ground_chips_carry_the_admin_labels` — the sheet's `ground` chip group carries
+    /// exactly the FOUR closed values with the admin's OWN labels, no catch-all.
+    #[test]
+    fn the_four_ground_chips_carry_the_admin_labels() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "ACTIVE", "ground": null,
+                "decidedAt": null, "effectiveAt": null, "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert_eq!(html.matches("data-chip-group=\"ground\"").count(), 4, "exactly four chips: {html}");
+        for label in ["À la demande du rider", "Justificatif expiré", "Identité non concordante", "Compte compromis"] {
+            assert!(html.contains(label), "missing ground label '{label}': {html}");
+        }
+        assert!(!html.contains("UNRECOGNISED"), "no catch-all chip: {html}");
+    }
+
+    /// `the_rider_detail_sheet_dispatches_restrict_rider_with_the_chip_value_and_no_free_text` —
+    /// the confirm button's `data-vars` names EXACTLY `riderId`/`ground`, "Effectif : maintenant"
+    /// and the notice line render, and NO `text_area`/`text_input` exists anywhere on the page
+    /// (no free text rides beside the closed grounds, ADR §6).
+    #[test]
+    fn the_rider_detail_sheet_dispatches_restrict_rider_with_the_chip_value_and_no_free_text() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "ACTIVE", "ground": null,
+                "decidedAt": null, "effectiveAt": null, "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert!(html.contains("data-sheet-id=\"restrict_rider_sheet\""), "{html}");
+        assert!(html.contains("data-action=\"restrict_rider\""), "{html}");
+        assert!(
+            html.contains("&quot;riderId&quot;:&quot;{{ rider.riderId }}&quot;") || html.contains("riderId"),
+            "riderId must be threaded into data-vars: {html}"
+        );
+        assert!(html.contains("Effectif : maintenant"), "{html}");
+        assert!(html.contains("Le rider est informé dans l&#x27;application") || html.contains("informé dans l'application"), "the notice line: {html}");
+        assert!(!html.contains("data-c=\"text_area\""), "no free text on the sheet: {html}");
+        assert!(!html.contains("data-c=\"text_input\""), "no free text on the sheet: {html}");
+    }
+
+    /// `the_detail_shows_no_count` — no digit-only text node anywhere on the detail (ADR-014136
+    /// §3: no per-rider count of any kind on the admin surface). Asserted by scanning every
+    /// `>text<` run in the rendered HTML and refusing a run that, trimmed, is PURELY digits.
+    #[test]
+    fn the_detail_shows_no_count() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "RESTRICTED", "ground": "ACCOUNT_COMPROMISE",
+                "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z", "reinstatedAt": null,
+                "heldDelivery": { "status": "ASSIGNED", "foodLocation": "WITH_RIDER", "pickupAddress": { "line1": "1 Rue Nationale", "postalCode": "37000", "city": "Tours" } },
+                "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        // Manual `>text<` scan (no `regex` dependency in this crate): every run of characters
+        // strictly between a `>` and the NEXT `<` is one rendered text node.
+        let mut i = 0;
+        while let Some(gt) = html[i..].find('>') {
+            let start = i + gt + 1;
+            let Some(lt) = html[start..].find('<') else { break };
+            let text = html[start..start + lt].trim();
+            assert!(
+                !(!text.is_empty() && text.chars().all(|c| c.is_ascii_digit())),
+                "a digit-only text node is a bare count — not allowed on the admin detail: {text:?} in {html}"
+            );
+            i = start + lt;
+        }
+    }
+
+    /// The `phone_call` control's target prop is `number:` (`crates/web/src/executor.rs`
+    /// `client_effect`), never `phone:` — a wrong field name renders the button PERMANENTLY
+    /// disabled with a loud reason, which this asserts is NOT the case here.
+    #[test]
+    fn the_phone_call_control_is_not_disabled() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "ACTIVE", "ground": null,
+                "decidedAt": null, "effectiveAt": null, "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert!(
+            !html.contains("missing its target prop"),
+            "the phone_call control must not render disabled: {html}"
+        );
     }
 
     #[test]
