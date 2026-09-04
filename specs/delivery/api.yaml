@@ -86,7 +86,8 @@ queries:
 
 mutations:
 
-  # #865 (ADR-20260904-015903 §6, ADR-20260904-014135, PROP-171500 D2): `riderId` is DERIVED from
+  # #865 (ADR-20260904-015903 §6, PROP-171500 D2, realized by #849 "#639 part C step 2b" /
+  # ADR-20260830-191457 parts A+B's `auth.rs::resolve_rider_scope`): `riderId` is DERIVED from
   # the caller's `ReadScope::Rider` at the resolver seam, never a client input -- deleted from the
   # generated Input type entirely. `changeRiderStatus`'s riderId is REQUIRED, so the derived-role
   # rule forces `roles:` to EXACTLY [RIDER] -- the rider's own online/offline toggle; admin manages

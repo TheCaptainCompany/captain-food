@@ -1,8 +1,10 @@
 // ─── `derived:` mutation properties are server-injected, never client input (#865, §6) ──────────
 //
-// ADR-20260904-015903 §6 (the closed operation-key seam) + ADR-20260904-014135 (the rider's domain
-// id lives in `ReadScope::Rider`, never a claim) + PROP-171500 D2 (the recorded final vision this
-// discharges): an api.yaml mutation may declare `derived: { <commandProperty>: <source> }`. The
+// ADR-20260904-015903 §6 (the closed operation-key seam) + [#849 "#639 part C step 2b: the
+// auth_ref -> rider_id resolver at the request seam"] / ADR-20260830-191457 parts A+B (the rider's
+// domain id lives in `ReadScope::Rider`, minted by `auth.rs::resolve_rider_scope`, never a claim)
+// + PROP-171500 D2 (the recorded final vision this discharges): an api.yaml mutation may declare
+// `derived: { <commandProperty>: <source> }`. The
 // named property of its `$ref`'d command is INJECTED by the resolver from the caller's
 // authenticated `ReadScope` at the seam — `emit/server_graphql.rs`'s resolver template, BETWEEN
 // `command_payload(&input)?` and the typed `serde_json::from_value` — never accepted as a client
@@ -87,18 +89,20 @@ pub(crate) fn check_api_derived_fields(model: &Model, issues: &mut Vec<Issue>) {
             let expected_scalar = derived_source_scalar(source);
             let actual_scalar = prop_def.get("$ref").and_then(|x| x.as_str()).and_then(ref_name);
             if expected_scalar.is_none() || actual_scalar.as_deref() != expected_scalar {
+                let expected_str = expected_scalar.map(|s| format!("`{s}`")).unwrap_or_else(|| {
+                    format!("no known scalar -- '{source}' is not a recognized derived source")
+                });
                 issues.push(err(
                     "api-derived-type-mismatch",
                     at.clone(),
                     format!(
                         "mutation '{name}' derives '{prop_name}' from source '{source}', but \
                          commands.yaml#/{cmd_name}/{prop_name} is {} -- a derived property must \
-                         `$ref` EXACTLY the source's scalar ({}).",
+                         `$ref` EXACTLY the source's scalar ({expected_str}).",
                         actual_scalar
                             .as_deref()
                             .map(|s| format!("`{s}`"))
                             .unwrap_or_else(|| "not a scalar $ref".to_string()),
-                        expected_scalar.unwrap_or("no known scalar -- '{source}' is not a recognized derived source")
                     ),
                 ));
             }

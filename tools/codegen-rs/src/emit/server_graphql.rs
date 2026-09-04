@@ -423,9 +423,17 @@ pub(crate) fn emit_server_inputs(model: &Model) -> String {
     for m in &api.mutations {
         if let Some(def) = model.defs.get("commands.yaml").and_then(|d| d.get(&m.command)) {
             // #865: a `derived:` property carries no field on the generated InputObject at all —
-            // its description states where the id comes from (mirrors the SDL emitter exactly).
+            // its description states where the id comes from, APPENDED to the command's own
+            // description (never replacing it -- the command's description is still the primary
+            // documentation of what the mutation DOES).
             let exclude: HashSet<&str> = m.derived.iter().map(|(p, _)| p.as_str()).collect();
-            let desc = derived_doc(&m.derived).or_else(|| def.get("description").and_then(|d| d.as_str()).map(str::to_string));
+            let base_desc = def.get("description").and_then(|d| d.as_str());
+            let desc = match (base_desc, derived_doc(&m.derived)) {
+                (Some(base), Some(derived)) => Some(format!("{base} {derived}")),
+                (Some(base), None) => Some(base.to_string()),
+                (None, Some(derived)) => Some(derived),
+                (None, None) => None,
+            };
             push_gql_struct_open(&mut out, &format!("{}Input", m.command), "InputObject", desc.as_deref());
             push_gql_object_fields_excluding(&mut out, def, "commands.yaml", true, &exclude);
             out.push_str("}\n");
@@ -842,7 +850,9 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
 /// transition on the `OperationStatusBus` for `operationStatus`/`operationStatusChanged`. Nothing
 /// is spawned in the request path and no resolver writes a second journal.
 
-/// One `derived:` property's Rust injection statement (#865, ADR-20260904-014135/-015903 §6): the
+/// One `derived:` property's Rust injection statement (#865, ADR-20260904-015903 §6, realized by
+/// `auth.rs::resolve_rider_scope` — #849 "#639 part C step 2b" / ADR-20260830-191457 parts A+B):
+/// the
 /// resolver reads the caller's OWN `ReadScope` (never a client-suppliable claim) and writes the
 /// domain id straight into the mailbox payload — the ONE seam a client cannot smuggle past, since
 /// the property carries no field on the generated Input type at all. A REQUIRED derived property
