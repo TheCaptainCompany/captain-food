@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 2610,
+  "recordedAt": "2026-09-04T03:58:39.973Z",
+  "branch": "865-derive-rider-id-at-the-door",
+  "note": "#865: derive riderId at the rider door from the seam (DSL grammar, emitter injection, spec+screens, tests, records)"
+}
