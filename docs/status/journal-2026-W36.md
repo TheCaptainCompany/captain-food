@@ -2,6 +2,30 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #882 merged: step 4-ii of part C is complete; the restricted rider is told.**
+> [PR #882](https://github.com/TheCaptainCompany/captain-food/pull/882) (`55ff1111`, squash), two
+> rounds on the lower tier. **Presentation pass on `ed4ca073`**: reviewer PASS, legal PASS, evans PASS,
+> dba PASS, graphql PASS; beck STOP, ux STOP, observability STOP — three blocking clusters: (1) the
+> held-job card rendered BOTH its facts empty in production — the web emitter selected nested
+> navigation edges one level deep (a pre-existing gap, the same rows blank on `job_detail` today) and
+> an `Address` object was bound as text, while the render test passed on a fixture shape the API never
+> emits; (2) a reinstated rider reloading `/restricted` read "Votre accès est restreint." (a record
+> gap: ADR-20260904-124600 §4 considered only the attribution-lag transient — amended on main
+> `06e2b103`); (3) the RESERVED client-leg declaration the ADR named was missing from the contract.
+> **Round 2**: the first executor was lost to a container restart mid-round with an uncommitted
+> partial diff; a fresh executor inherited it, kept item 1 (already correct and tested), built the
+> rest; re-check PASS ×4 (reviewer, beck, ux, observability), CI green, merged directly (all checks
+> already passed). **Attribution**: the empty card = executor depth miss (the fixture) on a
+> **roster-width** miss (no lens named the emitter's one-level nav walk — it goes on the founder's
+> trip-row evidence); the reinstated case = record gap; the RESERVED comment = executor miss against an
+> explicit ADR line; `myStanding.*` paths on the briefing card = card defect, caught at the briefing.
+> **Lower-tier tally: first-round PASS 1 of 5** (#864 PASS, #867, #870, #875, #882 all FAIL→PASS;
+> rounds 1/2/2/3/2). Issues: [#883](https://github.com/TheCaptainCompany/captain-food/issues/883)
+> (nine 4-ii follow-ups incl. two validator gates), [#884](https://github.com/TheCaptainCompany/captain-food/issues/884)
+> (the flex row collapsing a space in the legal sentence — first item of the next rider-screen
+> slice). Next: 4-iii, the admin's hands, briefed to the roster first (a legal surface: the admin's
+> act is the Art. 11(5) human decision).
+
 > **2026-09-04 — #639 part C step 4-ii ROUND 2 (PR #882, still draft): held-job facts fixed,
 > reinstated-rider false notice fixed, six one-liners, three addendum items.** Base
 > `ed4ca073` (matched). Picked up a partial uncommitted diff from a session lost to a container

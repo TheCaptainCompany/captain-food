@@ -27,6 +27,7 @@ note: 'Options with trade-offs, recommendation first (ADR-20260810-011500: a dec
   return `HOLD: human` slices to the bigger tier -- fewer rounds on the legal and stored-shape class,
   at roughly the pre-ADR cost for those slices; the rider 4-ii screen (a legal surface) would be the first
   to move back. (C) REVERT ADR-20260904-013450 -- the simplest record, forgoes the measured saving on
-  the four merged PRs. Until the founder answers, the ruling stands and dispatch continues on the lower
+  the four merged PRs. Since the trip: #882 (4-ii, HOLD: human, lower tier) merged after TWO rounds --
+  tally 1 of 5, one roster-width miss (the emitter's one-level nav walk) banked here as evidence. Until the founder answers, the ruling stands and dispatch continues on the lower
   tier (§5: "nobody re-escalates a single dispatch to the bigger tier on judgment: the only route back is
   that row"). Consulted at the 4-ii briefing: holub named the trip; no other lens objected to continuing.'
