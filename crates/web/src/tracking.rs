@@ -528,7 +528,9 @@ mod tests {
         let id = Uuid::now_v7();
         let fake = FakeTransport::scripted(vec![
             Ok(json!({ "order": order("PLACED", "2026-07-23T12:00:00Z") })),
+            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": null })),
+            Ok(json!({ "delivery": null })),
         ]);
         let mut state = TrackingState::new(id);
         state.load(&fake).await.unwrap();
@@ -791,8 +793,11 @@ mod tests {
         let id = Uuid::now_v7();
         let fake = FakeTransport::scripted(vec![
             Ok(json!({ "order": null })),
+            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": null })),
+            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": order("PLACED", "2026-08-29T19:00:00Z") })),
+            Ok(json!({ "delivery": null })),
         ]);
         let mut state = TrackingState::new(id).with_birth_pending(true);
         let born = state
@@ -801,13 +806,15 @@ mod tests {
             .expect("the re-check pulls cleanly");
         assert!(born, "the third pull found the born order");
         assert_eq!(state.status(), Some("PLACED"));
-        assert_eq!(fake.call_count(), 3, "stops at the first Present, not at the bound");
+        assert_eq!(fake.call_count(), 6, "stops at the first Present, not at the bound (2 calls/pull: order + delivery)");
 
-        // Exhaustion: the bound is respected (an unscripted 3rd call would panic the fake), the
+        // Exhaustion: the bound is respected (an unscripted call would panic the fake), the
         // state stays the honest Absent, and the caller's render still keys on birth_pending.
         let fake = FakeTransport::scripted(vec![
             Ok(json!({ "order": null })),
+            Ok(json!({ "delivery": null })),
             Ok(json!({ "order": null })),
+            Ok(json!({ "delivery": null })),
         ]);
         let mut state = TrackingState::new(id).with_birth_pending(true);
         let born = state
@@ -816,7 +823,7 @@ mod tests {
             .expect("exhaustion is not an error");
         assert!(!born, "the bound ran out before a birth");
         assert_eq!(state.order, OrderRead::Absent, "the read DID answer — Absent, honestly");
-        assert_eq!(fake.call_count(), 2, "BOUNDED: exactly max_attempts pulls, never a loop");
+        assert_eq!(fake.call_count(), 4, "BOUNDED: exactly max_attempts pulls, never a loop (2 calls/pull)");
     }
 
     /// #420: the hero renders WORDS. It used to emit `data-i18n` on empty elements and nothing

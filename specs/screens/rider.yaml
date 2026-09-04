@@ -127,7 +127,11 @@ bottom_sheets:
           - { value: FOOD_DAMAGED,          label: { $ref: 'rider.translations.yaml#/rider.issue.kind.food_damaged' } }
           - { value: VEHICLE_OR_INJURY,     label: { $ref: 'rider.translations.yaml#/rider.issue.kind.vehicle_or_injury' } }
           - { value: OTHER,                 label: { $ref: 'rider.translations.yaml#/rider.issue.kind.other' } }
-      - { type: text_area, id: issue_note, placeholder: { $ref: 'rider.translations.yaml#/rider.issue.note_prompt' }, max_length: 300, visible_when: "issue_exit.value == 'CONTINUE' && issue_kind.value == 'OTHER'" }
+      - type: conditional_section
+        condition: "issue_exit.value == 'CONTINUE'"
+        if_true:
+          - { type: text_area, id: issue_note, placeholder: { $ref: 'rider.translations.yaml#/rider.issue.note_prompt' }, max_length: 300, visible_when: "issue_kind.value == 'OTHER'" }
+        if_false: []
       - type: button
         id: report_issue_btn
         label: { $ref: 'rider.translations.yaml#/rider.issue.confirm' }
@@ -143,37 +147,41 @@ bottom_sheets:
       # The handback question: asked only once collected (PICKED_UP/OUT_FOR_DELIVERY) — from ASSIGNED
       # the answer is derived (below), never asked (ADR-20260904-015903 §2 "ask the rider nothing
       # about the food it can derive").
-      - type: chip_multi_select
-        id: handback_location
-        label: { $ref: 'rider.translations.yaml#/rider.issue.custody_label' }
-        single_select: true
-        visible_when: "issue_exit.value == 'HAND_BACK' && (delivery.status == 'PICKED_UP' || delivery.status == 'OUT_FOR_DELIVERY')"
-        options:
-          - { value: WITH_RIDER,             label: { $ref: 'rider.translations.yaml#/rider.issue.custody.with_rider' } }
-          - { value: RETURNED_TO_RESTAURANT, label: { $ref: 'rider.translations.yaml#/rider.issue.custody.returned' } }
-      - type: button
-        id: hand_back_delivery_picked_up_btn
-        label: { $ref: 'rider.translations.yaml#/rider.issue.handback_confirm' }
-        variant: primary
-        full_width: true
-        visible_when: "issue_exit.value == 'HAND_BACK' && (delivery.status == 'PICKED_UP' || delivery.status == 'OUT_FOR_DELIVERY')"
-        action:
-          type: hand_back_delivery
-          variables: { deliveryJobId: "{{ delivery.id }}", foodLocation: "{{ handback_location.value }}" }
-          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
-          on_success: [{ type: close_sheet }]
-      # From ASSIGNED: no question, foodLocation is the literal NOT_COLLECTED (derived by the sheet).
-      - type: button
-        id: hand_back_delivery_assigned_btn
-        label: { $ref: 'rider.translations.yaml#/rider.issue.handback_confirm' }
-        variant: primary
-        full_width: true
-        visible_when: "issue_exit.value == 'HAND_BACK' && delivery.status == 'ASSIGNED'"
-        action:
-          type: hand_back_delivery
-          variables: { deliveryJobId: "{{ delivery.id }}", foodLocation: "NOT_COLLECTED" }
-          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
-          on_success: [{ type: close_sheet }]
+      - type: conditional_section
+        condition: "issue_exit.value == 'HAND_BACK'"
+        if_true:
+          - type: chip_multi_select
+            id: handback_location
+            label: { $ref: 'rider.translations.yaml#/rider.issue.custody_label' }
+            single_select: true
+            visible_when: "delivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']"
+            options:
+              - { value: WITH_RIDER,             label: { $ref: 'rider.translations.yaml#/rider.issue.custody.with_rider' } }
+              - { value: RETURNED_TO_RESTAURANT, label: { $ref: 'rider.translations.yaml#/rider.issue.custody.returned' } }
+          - type: button
+            id: hand_back_delivery_picked_up_btn
+            label: { $ref: 'rider.translations.yaml#/rider.issue.handback_confirm' }
+            variant: primary
+            full_width: true
+            visible_when: "delivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']"
+            action:
+              type: hand_back_delivery
+              variables: { deliveryJobId: "{{ delivery.id }}", foodLocation: "{{ handback_location.value }}" }
+              loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
+              on_success: [{ type: close_sheet }]
+          # From ASSIGNED: no question, foodLocation is the literal NOT_COLLECTED (derived by the sheet).
+          - type: button
+            id: hand_back_delivery_assigned_btn
+            label: { $ref: 'rider.translations.yaml#/rider.issue.handback_confirm' }
+            variant: primary
+            full_width: true
+            visible_when: "delivery.status == 'ASSIGNED'"
+            action:
+              type: hand_back_delivery
+              variables: { deliveryJobId: "{{ delivery.id }}", foodLocation: "NOT_COLLECTED" }
+              loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
+              on_success: [{ type: close_sheet }]
+        if_false: []
       - { type: inline_error, id: hand_back_delivery_error, for_action: hand_back_delivery, visible_when: "issue_exit.value == 'HAND_BACK'" }
 
   rider_code_sheet:
@@ -296,8 +304,8 @@ screens:
       # fold has already moved to PENDING/FAILED and unassigned (rider_id null) is no longer this
       # rider's to act on.
       - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.job.handback_instruction_title' }, visible_when: "delivery.foodLocation == 'WITH_RIDER'" }
-      - { type: text, value: { $ref: 'rider.translations.yaml#/rider.job.handback_done_body' }, visible_when: "delivery.foodLocation != null && delivery.foodLocation != 'WITH_RIDER'" }
-      - { type: button, id: handback_back_to_jobs_btn, label: { $ref: 'rider.translations.yaml#/rider.job.back_to_jobs' }, variant: primary, full_width: true, visible_when: "delivery.foodLocation != null && delivery.foodLocation != 'WITH_RIDER'", action: { type: navigate, route: "/" } }
+      - { type: text, value: { $ref: 'rider.translations.yaml#/rider.job.handback_done_body' }, visible_when: "delivery.foodLocation in ['NOT_COLLECTED', 'RETURNED_TO_RESTAURANT']" }
+      - { type: button, id: handback_back_to_jobs_btn, label: { $ref: 'rider.translations.yaml#/rider.job.back_to_jobs' }, variant: primary, full_width: true, visible_when: "delivery.foodLocation in ['NOT_COLLECTED', 'RETURNED_TO_RESTAURANT']", action: { type: navigate, route: "/" } }
       - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress }}" }
       - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}", visible_when: "delivery.foodLocation == null" }
       # #717: plain name row via the FK-derived navigation edge (DeliveryJob.restaurant: Restaurant!).

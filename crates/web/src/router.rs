@@ -644,11 +644,16 @@ mod tests {
         // The human sentence, in BOTH shipped languages — a `data-i18n` attribute with an empty
         // element is not a page that tells anybody anything.
         for (locale, sentence) in [("fr", "Commande acceptée"), ("en", "Order accepted")] {
-            let fake = FakeTransport::scripted(vec![Ok(order())]);
+            let fake =
+                FakeTransport::scripted(vec![Ok(order()), Ok(json!({ "delivery": null }))]);
             let html = render_path_with(&fake, "chez-test.captain.food", path, locale, None)
                 .await
                 .expect("the confirmation route renders").html;
-            assert_eq!(fake.call_count(), 1, "the page must READ the order it is about: {locale}");
+            assert_eq!(
+                fake.call_count(),
+                2,
+                "the page must READ the order AND its delivery job (#639 3-ii): {locale}"
+            );
             assert!(html.contains(sentence), "{locale}: no human status sentence in {html}");
             assert!(html.contains("data-status=\"ACCEPTED\""), "{locale}: {html}");
             assert!(
@@ -663,7 +668,10 @@ mod tests {
 
         // A read the transport cannot answer degrades to the not-found hero — never a 500, never a
         // blank page (the SSR contract), and never a claim about an order we could not see.
-        let fake = FakeTransport::scripted(vec![Ok(json!({ "order": null }))]);
+        let fake = FakeTransport::scripted(vec![
+            Ok(json!({ "order": null })),
+            Ok(json!({ "delivery": null })),
+        ]);
         let html = render_path_with(&fake, "chez-test.captain.food", path, "fr", None)
             .await
             .expect("the confirmation route still renders").html;
