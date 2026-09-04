@@ -2,6 +2,32 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #867 merged after a second round; the rider's controls have a source; 3-ii claimed.**
+> [PR #867](https://github.com/TheCaptainCompany/captain-food/pull/867) (`5b2d3da0`, squash) executes
+> PROP-171500 D2 for riders: `derived: { riderId: rider }` on six mutations (including
+> `changeRiderStatus`, narrowed to `[RIDER]`), one `<Command>Input` per command with the field deleted,
+> the resolver injecting the seam's `ReadScope::Rider` before the typed deserialize, `Forbidden` before
+> enqueue when no scope resolves, the four rider controls rebound to `deliveryJobId`; baseline
+> `action-missing-required-input` 11→7 and `action-unknown-input` 7→4 (antecedent: the PR's validator
+> run). **Review: FAIL on the first pass, PASS on a bounded re-check — two rounds of three.** Blocking:
+> the REQUIRED-derived fail-closed branch had no test reaching it (the `NoMapping` case is refused by
+> the guard first; the ACL harness has no mailbox), fixed with a test seen red on the nil-uuid mutant
+> (`left: 0 right: 1`). Non-blocking, fixed: a false coverage comment, a claimed `payload_hash`
+> assertion that did not exist, the derived sentence replacing six InputObject descriptions, the
+> `'{source}'` literal, the ReadScope fact cited to the wrong ADR in four code comments. Filed:
+> [#868](https://github.com/TheCaptainCompany/captain-food/issues/868) (jobs-list accept/decline bind
+> `delivery.id` outside the item scope — system-wide, `order_card` has no action slot; the online toggle
+> supplies no `status` inside a component the validator never walks),
+> [#869](https://github.com/TheCaptainCompany/captain-food/issues/869) (`myDeliveries` keys the rider on
+> the JWT subject while writes carry the seam's id). **Lower-tier tally (ADR-20260904-013450
+> §Decision 5): first-round PASS 1 of 2**; the reviewer's reading of both runs: the diffs are not
+> different in kind, what slips is record accuracy and one substituted negative reported as coverage.
+> Coordinator card defects this step, attribution card: the ReadScope fact cited to
+> ADR-20260904-014135 (the two-role claim decision) instead of #849 / ADR-20260830-191457; "the
+> aggregate compare stays the authority" stated for five mutations when it holds for two. **3-ii
+> claimed** as [PR #870](https://github.com/TheCaptainCompany/captain-food/pull/870) from `5b2d3da0`,
+> executor on `sonnet`, the one-arm fence carve-out per ADR-20260904-015903 §Decision 10.
+
 > **2026-09-04 — #865 PR #867 review round 2: BLOCKING fixed, six non-blocking findings applied.**
 > The reviewer's ONE blocking finding: the REQUIRED-derived fail-closed branch
 > (`let Some(ReadScope::Rider(__derived_id)) = __derived_scope else { return Err(forbidden_error())
