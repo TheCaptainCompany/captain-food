@@ -180,6 +180,25 @@ The raw stored text always stays in the immutable `domain_events.payload` — th
 decode-time convenience, never a data-loss. First use: `scalars.yaml#/RiderRestrictionGround`'s
 `UNRECOGNISED`.
 
+## `screen-sheet-binding-unknown` — the §25 binding walk extended to a screen's opened sheets (#639 part C step 4-iii-A, ADR-20260904-152807 §6)
+
+§25's `{{ root.path }}` binding walk (`screen-binding-unknown-field`, `tools/codegen-rs/src/validate/screen_bindings.rs`) originally checked only a screen's OWN component subtree — a sheet a screen opens (`open_bottom_sheet`) was invisible to it, so `{{ rider.riderld }}` inside a bottom sheet passed `make validate` at 0 errors and would have dispatched a mutation with an empty id at runtime. `check_screen_bindings` now takes the whole screens FILE `doc` and, after checking the screen body, walks every sheet id `screen_roles::reachable_sheets(doc, screen)` returns (the SAME transitive reachability §26's own role walk already derives — one derivation, not two) against the SAME root map the screen's own `data_requirements` computed: a sheet opened from a detail route reads that route's resolver root (`restrict_rider_sheet` reads `rider.*`, exactly like `rider_detail`, which opens it). A finding inside a sheet reports as `screen-sheet-binding-unknown` — a DISTINCT rule code from the screen-body `screen-binding-unknown-field` (same underlying walk, different location, so a screen-level typo and a sheet-level typo are never conflated in a triage list). Wiring this full-strength on the real corpus found and required fixing two genuinely dead bindings already committed in `restaurant_frontoffice.yaml`'s `rating_sheet` (`order.tipRecipient`, `order.currency` — neither is a declared `Order` property; `recipient` for that widget is a fixed `RIDER` literal and the currency lives at `order.totalAmount.currency`), the SAME "corpus first, wiring last, every commit green" discipline §25's own history states.
+
+## `decisionRow:` — binding a configuration key to its release-gate decision row (#639 part C step 4-iii-A, ADR-20260904-152807 §7)
+
+`decisionRow: <KEY>` is an optional attribute on a `configuration.yaml` key, naming the
+`docs/decisions/<KEY>.yaml` row that key's release is gated on. The codegen rule
+`decision-row-open-key-must-be-off` (`tools/codegen-rs/src/validate/decisions.rs`,
+`validate_decision_row_gated_config_keys`) reads it: while the named row's `status` is `open`, the
+key's `deploy.production` value must be EXACTLY `"false"`; a row naming no declared key is itself a
+finding; once the row closes (any status other than `open`), the rule is silent — flipping the
+production value to anything else IS the recorded decision that closes the row (gate-then-stabilize,
+ADR-20260808-144738). This exists because a key and its release preconditions can drift silently
+otherwise: `RUN_SIRENE_WORKER`'s own prose said the worker was STOPPED while its `deploy.production`
+said `"true"`, unreconciled, discovered only by a human reading both at once
+(`PUBLISH-PRECONDITIONS`). First use: `configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR` bound to
+[`RIDER-RESTRICTION-PRECONDITIONS`](../decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml).
+
 ## The specs index — full detail (moved from CLAUDE.md, 2026-08-01)
 
 CLAUDE.md keeps the one-line index; the load-bearing detail lives here:

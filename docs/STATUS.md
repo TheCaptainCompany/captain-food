@@ -81,6 +81,7 @@ Two directions: partner-**push** webhooks (below) vs external-**drive** `/extern
 
 ## 👤 Ops / user actions
 
+- 🌑 **Admin rider roster + restrict/reinstate screens** ([#639](https://github.com/TheCaptainCompany/captain-food/issues/639) part C step 4-iii-A, [ADR-20260904-152807](adr/ADR-20260904-152807-the-admin-s-hands-one-custody-truth-read-at-query-time-a-door-that-refuses-until-the-notice-exists-and-two-slices.md)): `riders`/`rider_detail` on `specs/screens/system.yaml`, ADMIN-only, DARK (the System host is not routed and no admin sign-in door exists — reachable only through GraphQL as ADMIN until step 6 lands the magic-link door + host routing). The restrict door key `RUN_RIDER_RESTRICTION_DOOR` is OFF everywhere; three named preconditions (the admin door, the SMS notice #874, an alert route for the dead-man gauge) gate the flip, tracked in [`RIDER-RESTRICTION-PRECONDITIONS`](decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml) (open).
 - ✅ Keep the web service **warm via uptimerobot `/ping` every 5 min** (prevents free-tier spin-down so the in-process projector + SIRENE worker keep running).
 - 🗑️ `INTERNAL_TRIGGER_TOKEN` / `POST /internal/sirene/drain` — agreed to **remove** (superseded by the `/ping` warmth approach); code removal deferred to avoid colliding with concurrent `routes.rs` edits — harmless meanwhile (fail-closed 503 when the secret is unset).
 

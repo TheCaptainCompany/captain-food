@@ -10975,6 +10975,98 @@ mod decisions_register {
     }
 }
 
+// ─── #639 part C step 4-iii-A (ADR-20260904-152807 §7) — decision-row-open-key-must-be-off ──────
+mod decision_row_gated_config_keys {
+    use crate::*;
+
+    fn config_model(key_yaml: &str) -> Model {
+        let spec = format!("keys:\n  TEST_KEY:\n{key_yaml}");
+        Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("parses"),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    fn row(status: &str) -> Vec<DecisionRow> {
+        let content = format!(
+            "key: \"TEST-ROW\"\nstatus: \"{status}\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-09-04\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n"
+        );
+        let mut issues = Vec::new();
+        parse_decision_rows(&[("docs/decisions/TEST-ROW.yaml".to_string(), content)], &mut issues)
+    }
+
+    fn hits(model: &Model, rows: &[DecisionRow]) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_decision_row_gated_config_keys(model, rows, &mut issues);
+        issues
+    }
+
+    /// The named mutant (M8): a `decisionRow`-gated key's `deploy.production` set to `"true"`
+    /// while the row is still `open` — refused, the `RUN_SIRENE_WORKER` lesson made executable.
+    #[test]
+    fn an_open_row_with_a_true_production_value_is_rejected() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model, &row("open"));
+        assert_eq!(found.len(), 1, "expected exactly one finding: {:?}", found.iter().map(|i| i.rule).collect::<Vec<_>>());
+        assert_eq!(found[0].rule, "decision-row-open-key-must-be-off");
+    }
+
+    /// The complement: `deploy.production: "false"` while the row is `open` is silent — this is
+    /// the SPEC's own current, correct state for `RUN_RIDER_RESTRICTION_DOOR`.
+    #[test]
+    fn an_open_row_with_a_false_production_value_is_silent() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"test\"\n    deploy:\n      production: \"false\"\n",
+        );
+        assert!(hits(&model, &row("open")).is_empty());
+    }
+
+    /// A DECIDED row (any closed status) is silent even with production `"true"` — flipping the
+    /// value IS the recorded decision that closes the row.
+    #[test]
+    fn a_decided_row_permits_any_production_value() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n",
+        );
+        assert!(hits(&model, &row("decided")).is_empty());
+    }
+
+    /// A `decisionRow:` naming no declared row is its own finding — a key cannot gate on a row
+    /// that does not exist.
+    #[test]
+    fn a_decision_row_naming_no_declared_row_is_rejected() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: NO-SUCH-ROW\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model, &row("open"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rule, "decision-row-open-key-must-be-off");
+    }
+
+    /// A key with no `decisionRow:` at all is never touched by this rule.
+    #[test]
+    fn a_key_with_no_decision_row_is_untouched() {
+        let model = config_model("    type: bool\n    default: false\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n");
+        assert!(hits(&model, &row("open")).is_empty());
+    }
+
+    /// The real corpus: `RUN_RIDER_RESTRICTION_DOOR` is the ONLY `decisionRow:`-bearing key today
+    /// and it is clean.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut Vec::new());
+        let found = hits(&model, &dec_rows);
+        assert!(found.is_empty(), "the real corpus must be clean: {:?}", found.iter().map(|i| format!("{}: {}", i.rule, i.message)).collect::<Vec<_>>());
+    }
+}
+
 mod record_resolution {
     use crate::*;
 
@@ -16297,6 +16389,94 @@ mod screen_binding_gate {
             .expect("DeliveryJob declares properties")
             .insert(Value::from("riderNickname"), Value::from("placeholder"));
         assert!(!fires(&model), "declaring the property must clear the finding");
+    }
+}
+
+// ─── #639 part C step 4-iii-A (ADR-20260904-152807 §6) — screen-sheet-binding-unknown ───────────
+mod screen_sheet_bindings_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// Push `{{ binding }}` as a new `text` node into ONE named bottom sheet's `sections:` list —
+    /// the sheet-subtree twin of `screen_bindings_gate::plant_typo`.
+    fn plant_typo_in_sheet(model: &mut Model, screens_file: &str, sheet_id: &str, binding: &str) {
+        let sheet = model
+            .defs
+            .get_mut(screens_file)
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut(sheet_id))
+            .unwrap_or_else(|| panic!("{screens_file} declares bottom_sheets.{sheet_id}"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from(format!("{{{{ {binding} }}}}")));
+        sheet
+            .get_mut("sections")
+            .and_then(|v| v.as_sequence_mut())
+            .unwrap_or_else(|| panic!("bottom_sheets.{sheet_id} has sections"))
+            .push(Value::Mapping(node));
+    }
+
+    /// The rule is WIRED and the real corpus is CLEAN, then a planted `{{ rider.riderld }}` typo
+    /// (the card's own named mutant, #639 part C step 4-iii-A) inside `restrict_rider_sheet` is
+    /// caught — before this rule, this exact typo passed `make validate` and would have dispatched
+    /// the Art. 11 act with an empty id (`screen_bindings.rs`'s own module doc).
+    #[test]
+    fn screen_sheet_bindings_are_checked_and_the_corpus_is_clean() {
+        let model = real_model();
+        let hits = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "screen-sheet-binding-unknown")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus: {:?}", hits(&model));
+
+        let mut mutant = real_model();
+        plant_typo_in_sheet(&mut mutant, "screens/system.yaml", "restrict_rider_sheet", "rider.riderld");
+        let found = hits(&mutant);
+        assert_eq!(found.len(), 1, "the planted typo must fire exactly once: {:?}", found);
+        assert!(found[0].contains("riderld"), "{:?}", found);
+        assert!(found[0].contains("restrict_rider_sheet"), "the location must name the sheet: {:?}", found);
+    }
+
+    /// A typo on the SCREEN's own body (never inside a sheet) must NOT be reported by the sheet
+    /// rule — the two codes are distinct locations of the SAME underlying walk, not aliases.
+    #[test]
+    fn a_screen_body_typo_is_not_reported_as_a_sheet_finding() {
+        let mut model = real_model();
+        let screens = model
+            .defs
+            .get_mut("screens/system.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("system.yaml declares screens");
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("rider_detail"))
+            .expect("rider_detail exists");
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from("{{ rider.riderld }}"));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("rider_detail has components")
+            .push(Value::Mapping(node));
+        let issues = validate(&model).issues;
+        assert!(
+            issues.iter().any(|i| i.rule == "screen-binding-unknown-field" && i.message.contains("riderld")),
+            "a screen-body typo must fire the SCREEN rule"
+        );
+        assert!(
+            !issues.iter().any(|i| i.rule == "screen-sheet-binding-unknown"),
+            "a screen-body typo must never fire the SHEET rule"
+        );
     }
 }
 
