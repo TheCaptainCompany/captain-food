@@ -2,6 +2,58 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — Five founder answers recorded, #854 merged on a first-round PASS, and the team now
+> decides option spaces.** The founder answered the 2026-09-04 form (five questions, register-checked
+> each). **(1) Authority** — *"I authorize you to do everything"* (2026-09-03), scope chosen: *"team
+> decides option spaces and spec diffs; external, legal and admin-gated actions still come to me"* →
+> [ADR-20260904-013834](../adr/ADR-20260904-013834-the-team-decides-option-spaces-and-spec-diffs-external-legal-and-admin-gated-actions-stay-with-the-founder.md),
+> register row `TEAM-DECIDES-OPTION-SPACES` (decided), banners on ADR-20260810-215503 items 1 and 3
+> and on ADR-20260808-144738 d.3 (*"When in doubt, it goes to the customer"* — the tie-break is now
+> consent in the mob; a split takes the reversible option behind a gate, the safer option on a legal
+> surface; holub's finding that deleting the tie-break unstated would have re-created the PM in the
+> coordinator's seat), CLAUDE.md's "NOT delegated" clause rewritten. **(2) A rider who also orders
+> dinner** → *"final vision: one claim, one binding per role; own issue after step 6; refusal stands"*
+> → [ADR-20260904-014135](../adr/ADR-20260904-014135-one-subject-may-hold-several-roles-the-claim-carries-a-role-set-and-the-path-picks-the-one-that-acts.md):
+> young's ambiguity resolved by the team the way that contradicts no record — a binding is a ROLE in
+> the token, the identity resolved in our Postgres (ADR-20260818-004646 read forward), additive
+> producer + tolerant reader + one write, readers deploy first, `domain_events.user_type` stays the
+> path role; the `deletion:` block for `Rider`/`Member` and the never-released reservation's
+> retention ground are owed in the same issue (legal); Concern `one-subject-one-role` checked; built
+> by [#857](https://github.com/TheCaptainCompany/captain-food/issues/857) after step 6. **(3) Rider
+> restriction vs counsel timing** → *"build step 4 now with the smallest closed set naming no
+> work-performance ground; counsel can only add"* →
+> [ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md):
+> four grounds naming the fact observed (legal's proposal, not clearance), performance grounds and
+> catch-alls refused, additive-only (never removed — unspellable at the door instead), the fold keys
+> on the FACT never the ground, a read-only catch-all variant keeps the stream loadable (young: strict
+> decoding of an unknown ground fails the whole stream load and blocks `ReinstateRider`), Directive
+> 2024/2831 duties on the event, the notice and the review path ([#858](https://github.com/TheCaptainCompany/captain-food/issues/858));
+> Concern `revocation-grounds` rewritten, discharges when step 4 lands. **(4) Model tier** → *"lower
+> tier always for the executor; big tier only for lenses and reviewers"* (the literal reading; holub and
+> farley had read *"if it's possible"* as room) →
+> [ADR-20260904-013450](../adr/ADR-20260904-013450-the-executor-runs-on-the-lower-model-tier-and-lenses-and-reviewers-keep-the-bigger-one.md),
+> the never-applied 2026-08-28 workflow.md section bannered, its `HOLD: human` carve-out withdrawn,
+> [PR #859](https://github.com/TheCaptainCompany/captain-food/pull/859) adds `model: sonnet` to
+> `executor.md`/`generator.md`; exit condition per holub: first-round review PASS over the first 10
+> lower-tier PRs or 14 days, trip = 0/10 or a `HOLD: human` PR hitting the three-round ceiling → a
+> decision-queue row; **precondition: every dispatch card and PR body states the executor tier from
+> now on.** Baseline on the bigger tier, this week: **1 of 5** first-round PASS (#835, #846, #849,
+> #852 FAIL→PASS; #854 PASS). **(5) Build order** → *"keep the approved order: 3, 4, 5, 6, 7"*. Cost
+> recorded honestly (holub): steps 4–5 spend two `HOLD: human` slices restricting and disconnecting
+> riders while the rider population is zero (production deliberately suspended, ADR-20260817-105844),
+> and restaurant staff — the side that must be told about a paid order — get no sign-in door until the
+> fourth slice from now; a 3 ∥ 6 lane was considered and is the re-ranking the founder just declined
+> (the two slices share `stories.yaml`, `tests.yaml`, SPEC-LOG, the journal and the baseline, and step
+> 6 must land `public-graph-limits` under one reviewer pass). **#854 merged** (`08262fa7`, squash):
+> the team's one reviewer pass returned PASS with no BLOCKING finding — three NON-BLOCKING ones in
+> [#855](https://github.com/TheCaptainCompany/captain-food/issues/855) (sync `errors[].message` and
+> the bus frame still English; subscription-bound resolvers invisible to the screen-role walk; HTML
+> docs badge), the two dead controls the WARNING form found in
+> [#856](https://github.com/TheCaptainCompany/captain-food/issues/856); zero pre-existing assertions
+> moved in a runtime commit; read-time localization of `Operation.message` judged presentation-only
+> (the additive step ADR-20260719-120000 reserved), no gate. Next: step 3, the custody doors (GREEN),
+> on the lower tier.
+
 > **2026-09-03 — #639 part C step 2c-ii: the rider sign-in SCREEN, and R1 — the per-screen transport role
 > that makes it reachable. A rider can sign in end to end from the rider app for the first time.** PR
 > [#854](https://github.com/TheCaptainCompany/captain-food/pull/854), `HOLD: human`, hands back in draft;

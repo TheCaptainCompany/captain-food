@@ -87,6 +87,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `SETTLE-PAYMENT-REF` | decided | 2026-08-31 | Does the settlement leg keep the two-hop ask for paymentIntentId, or does OrderPlaced carry it so the fact arrives with the order? -> ADR-20260831-121957 | founder |
 | `STAFF-AUTH` | decided | 2026-08-30 | How does a restaurant operator, an account manager or a rider come to exist as a sign-in-capable person? Nothing in the repository writes a RESTAURANT, RESTAURANT_ACCOUNT or RIDER claim: the sole claim writer hardcodes role CUSTOMER, so three of the four principal roles cannot authenticate at all. -> ADR-20260830-213135 | founder |
 | `SUPPORT-CONTACT` | decided | 2026-08-31 | SUPPORT_CONTACT is designed as a required configuration key with no default, so the #792 refusal screen cannot boot without a value. What string is published, who reads it, and does it carry a voice leg at peak? -> ADR-20260830-234532 | founder |
+| `TEAM-DECIDES-OPTION-SPACES` | decided | 2026-09-04 | After 'I authorize you to do everything', which of the classes ADR-20260810-215503 kept with the founder move to the team: option spaces, specs/** approval, or external/legal/admin-gated actions too? -> ADR-20260904-013834 | founder |
 | `TYPED-ACTOR-INBOX` | decided | 2026-08-30 | Does the mailbox runtime keep a flat string router over all actors -- where a message an actor DECLARES it receives can have no dispatch arm and ship green, and a row on lane A can drive a handler that writes aggregate B -- or does each actor's declared `receives:` set become a GENERATED enum whose routing match the compiler proves exhaustive? -> ADR-20260830-183000 | founder |
 | `V0-PROMO-AND-MINIMUM` | decided | 2026-08-29 | Does V0 ship promo codes and/or a minimum order amount, and at what rules/values? -> ADR-20260829-145848 | founder |
 | `RETRIEVAL-QMD` | superseded | 2026-08-22 | Is the minimal, advisory, BM25-only QMD retrieval integration DESIGN (the decision-lookup skill + wrapper over a project-local disposable .qmd/ cache) adopted — subject to a required first-install activation test — never as authority or memory, never replacing rg + aliases, direct source reading, exact docs/decisions/<KEY>.yaml resolution, or the AskUserQuestion gate? -> superseded by `RETRIEVAL-QMD-CI` (this row decided by PROP-20260822-171212) | founder |
@@ -95,7 +96,7 @@ holds the queue. If a decision is not here, it is not blocking anything.
 | `PROP-20260809-021351--D5` | withdrawn | 2026-08-09 | Demo world lifetime | team |
 | `PROP-20260809-021351--D6` | withdrawn | 2026-08-09 | Who drives the counterparties | team |
 
-**Migrated rows: 81 — 15 open · 61 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
+**Migrated rows: 82 — 15 open · 62 decided · 1 superseded · 4 withdrawn.** Oldest open row: `LOSS-1` since 2026-08-14 (owner: founder).
 
 **Legacy rows remaining: 100** (`docs/decisions/_legacy.yaml`, the closed allowlist — a declared migration boundary, never an authority and never a founder-question bypass). **This index is NOT exhaustive of open decisions.** Migration is mandatory, in the same change, on any of: decision-question reference · amendment · reopening/challenge (`reconsiders`) · explicit dispatch. The diff of these lines is the per-change migration record.
 

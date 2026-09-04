@@ -327,10 +327,10 @@ re-enables it**. Auth, keys, query discipline:
   [ADR-20260810-215503](docs/adr/ADR-20260810-215503-backlog-prioritisation-delegated-to-the-team.md)):
   priorities live in the GitHub Project "Prioritized backlog" (Priority field + row order) — pick
   from the top; skipping the top item needs a stated reason. Bucket and order are the team's to set;
-  the founder may override either at any time, without justification. NOT delegated: genuine option
-  spaces, external/legal/admin-gated matters, `specs/**` approval — **a `Priority` is not an
-  approval; ranking an AMBER item `Urgent` does not make it dispatchable** — and **the method**, now
-  **binding**: [docs/BACKLOG.md](docs/BACKLOG.md) defines value (value-first, ADR-20260720-213024:
+  the founder may override either at any time, without justification. NOT delegated:
+  external/legal/admin-gated matters — **a `Priority` is not an approval; ranking an AMBER item
+  `Urgent` does not make it dispatchable**, the approval now being the mob briefing's recorded
+  scope — and **the method**, now **binding**: [docs/BACKLOG.md](docs/BACKLOG.md) defines value (value-first, ADR-20260720-213024:
   foundations/cross-functional/non-functional first, then features in value-stream order) and every
   ranking must be justifiable under it. **An agent must never change a Priority bucket or row
   position to make an item dispatchable, or its own recommendation legitimate**: a blocked top item
@@ -338,6 +338,15 @@ re-enables it**. Auth, keys, query discipline:
   architect's run report with the method clause justifying it; a re-ranking that reverses a
   previously stated order also gets a dated line at the top of the current
   `docs/status/journal-YYYY-Www.md` — `STATUS.md` changes only when durable state does.
+  **Genuine option spaces and `specs/**` approval are the TEAM's since 2026-09-04** (founder
+  directive 2026-09-03, verbatim *"Don't need ask me authorization all the time / I authorize you to
+  do everything"*, scope chosen by him 2026-09-04,
+  [ADR-20260904-013834](docs/adr/ADR-20260904-013834-the-team-decides-option-spaces-and-spec-diffs-external-legal-and-admin-gated-actions-stay-with-the-founder.md),
+  register row `TEAM-DECIDES-OPTION-SPACES`): decided by consent in the mob and recorded with a
+  `Consulted:` block; a split among lenses takes the reversible option behind a gate, the safer option
+  on a legal surface; the founder reads the record and keeps the override. **External, legal and
+  admin-gated actions still go to him**, and no agent holds a capacity the statutes confer. The
+  question form is never used to ask "shall I proceed?".
 - **Spec- and docs-only changes go straight to `main`** (founder directive): commit and push directly
   — no branch, no PR, no claim ceremony — for changes confined to `specs/**`, `docs/**`, ADRs,
   `CLAUDE.md`, `STATUS.md` and the artifacts they regenerate. **Keep `main` green**: run `make rust`

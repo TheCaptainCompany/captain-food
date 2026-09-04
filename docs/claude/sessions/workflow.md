@@ -866,6 +866,17 @@ matches nothing is the more expensive mistake.
 
 ## Delegate execution to a cheaper model tier (founder, 2026-08-28)
 
+> **AMENDED 2026-09-04 by
+> [ADR-20260904-013450](../../adr/ADR-20260904-013450-the-executor-runs-on-the-lower-model-tier-and-lenses-and-reviewers-keep-the-bigger-one.md)
+> (founder `/decision` 2026-09-03: *"use lower model for to the executor if it's possible / Keep
+> bigger model for the mob and the reviewers"*, scope answer 2026-09-04: *"lower tier always for the
+> executor; big tier only for lenses and reviewers"*).** Read the section below with this in front
+> of it: the executor runs on the lower tier ALWAYS — the "anything on the `HOLD: human` class"
+> carve-out below is withdrawn; lenses and the reviewer keep the bigger tier; the rule now lives in
+> `.claude/agents/executor.md` (`model: sonnet`), not in this prose; and it was never applied
+> between 2026-08-28 and 2026-09-04 — every #639 executor ran on the session model. The text below
+> is history.
+
 The founder's standing instruction for token optimisation: **execution goes to subagents on a lower
 model tier; the coordinating session keeps judgment, mob mechanics and founder-facing surfaces.**
 Concretely, when spawning `executor`/`generator`/sweep-style agents, pass a cheaper model (`sonnet`

@@ -47,6 +47,12 @@ agents currently are, not of bad organization design.
    agent ensemble and recorded as an ADR, with the customer holding an asynchronous veto window —
    decision by consent, not by approval queue. Irreversible, value-laden, legal, or money-path
    decisions go to the customer. When in doubt, it goes to the customer.
+   > **Last sentence AMENDED 2026-09-04 by
+   > [ADR-20260904-013834](ADR-20260904-013834-the-team-decides-option-spaces-and-spec-diffs-external-legal-and-admin-gated-actions-stay-with-the-founder.md):**
+   > for genuine option spaces the default destination is no longer the customer — the mob decides
+   > by consent, a split takes the reversible option behind a gate (the safer option on a legal
+   > surface), and the customer's asynchronous veto window and override stand. Irreversible
+   > external, legal and admin-gated actions still go to the customer.
 4. **The coordinator role is per-session and disposable.** The repo carries the state
    (proposals, ADRs, checklists, sessions.md), so any future session can coordinate. No standing
    coordinator agent is created either — that is where a PM would quietly re-emerge.

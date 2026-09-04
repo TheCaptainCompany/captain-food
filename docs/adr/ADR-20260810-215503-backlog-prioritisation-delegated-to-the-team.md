@@ -47,6 +47,14 @@ explicitly rather than left to inference.
 
 ### What is NOT delegated
 
+> **Items 1 and 3 SUPERSEDED, 2026-09-04, by
+> [ADR-20260904-013834](ADR-20260904-013834-the-team-decides-option-spaces-and-spec-diffs-external-legal-and-admin-gated-actions-stay-with-the-founder.md)
+> (register row [TEAM-DECIDES-OPTION-SPACES](../decisions/TEAM-DECIDES-OPTION-SPACES.yaml),
+> founder directive 2026-09-03 *"I authorize you to do everything"*, scope chosen 2026-09-04).**
+> Genuine option spaces and `specs/**` approval are now the TEAM's, decided by consent in the mob
+> and recorded; items 2 (external, legal and admin-gated matters), 4 (the binding method) and 5
+> (the founder's override) stand exactly as written below.
+
 1. **Genuine option spaces.** [`docs/proposals/DECISIONS.md`](../proposals/DECISIONS.md) is untouched.
    A ranking says *when* known work happens; a decision chooses between designs with different
    consequences. The register remains the product owner's surface — and since their attention to the
