@@ -48,7 +48,7 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 >
 > **Gates (VERDICT lines, wall-clock)**: `rm -rf target/debug/incremental` first (disk pressure hit
 > repeatedly across the run, low-single-digit-GB→9G+ after cleanup each time — see the
-> operational-learnings note below) · `cargo build --workspace` — **0 errors, 88s** (final re-run,
+> operational-learnings paragraph below) · `cargo build --workspace` — **0 errors, 88s** (final re-run,
 > after the walk/metric tests) · `make validate` — **0 errors** (`grep -cE '\[error\]'` = 0),
 > warning surface unchanged, **2s** · `make rust` (build + test + validate + generate + link-check)
 > — **0 errors, exit 0** (final re-run) · `cargo build --workspace --tests` — **0 errors** (confirms
@@ -57,7 +57,7 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > `cargo clippy -p server -p application -p infrastructure -p domain -p telemetry --all-targets --
 > -D clippy::disallowed-methods -D clippy::mistyped_literal_suffixes` — **exit 0** (warnings present,
 > neither denied lint fired; 7m02s on the final from-clean run after `rm -rf target` cleared a
-> disk-pressure incident, see the operational-learnings note) · DB-gated (`DATABASE_URL` to a live
+> disk-pressure incident, see the operational-learnings paragraph below) · DB-gated (`DATABASE_URL` to a live
 > local Postgres, `DB_TESTS_REQUIRED=1`): `make test-crates` full workspace suite, isolated database
 > (`cf639`, the shared-Postgres collision below) — **1649 passed, 0 failed** (the 4 new tests below
 > included) · `rider_projection.rs` — **7 passed**
@@ -70,6 +70,34 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 > own binary — `telemetry::meters` binds the process-wide OTel meter once via `OnceLock`) — **1
 > passed**; `rider_standing_lag_metric.rs` (NEW, own binary, same reason) — **2 passed** (the
 > embedded-migration-manifest check rides along by `#[path]`).
+>
+> **Operational learnings (round 2 item 9 — farley, reviewer, beck: pasted here from the
+> hand-back rather than left as a dangling forward-reference)**: (1) disk exhaustion, twice,
+> from the SAME cause — `df -h /` reports a nominal 252G filesystem, but the actually-usable
+> capacity this session ever observed topped out around 37-38G (`du -sh /*` sums to the same
+> ~28G `df` reports as used, so there is no hidden/leaked space — the filesystem is just much
+> smaller than its `Size` column claims); `target/debug` alone reached 18G mid-session from the
+> cumulative weight of many builds across one long session, and periodic
+> `rm -rf target/debug/incremental` did not keep pace — a full `rm -rf target/` (18G freed
+> instantly) is the reliable fix and should be reached for earlier (~5G avail), not after a
+> command has already died from ENOSPC losing its output. (2) The scratchpad task-output
+> directory shares the SAME filesystem as the repo, so a `run_in_background` command can lose
+> its own stdout to ENOSPC when disk is critical — a confusing failure mode distinct from the
+> command's own logic failing. (3) `ReadScope`-injecting test harnesses
+> (`graphql_write_path.rs`'s `acting()` idiom) mint an `ActingRole` but never a full
+> `crate::auth::Principal` — `operationStatus`'s ownership check
+> (`mailbox_operation_owned`) reads `ctx.data_opt::<Principal>()`, NOT `ActingRole`, so polling
+> `operationStatus` as a non-ADMIN role under this harness spins to its timeout with no
+> diagnostic even though the row is `SUCCEEDED` in the DB the whole time (confirmed via direct
+> `psql`); poll as ADMIN regardless of which role enqueued the operation (ADMIN sees every
+> operation unconditionally, and the guard decision under test already happened at enqueue
+> time). (4) `OfferId`/`ProductId` are real UUID scalars in production, but `specs/tests.yaml`'s
+> canonical fixtures (`orderPlaced`, etc.) use human-readable placeholder strings (`"off-1"`)
+> that decode fine through the TYPED behaviour-test harness but fail a real Postgres
+> JSONB→struct decode (`UUID parsing failed: invalid character: found 'o' at 0`) — substitute
+> real UUIDs for any UUID-scalar field before reusing a `tests.yaml` fixture verbatim in a
+> raw-event-append DB-gated test. Landed as two new rules in
+> [gates.md](../claude/sessions/gates.md) (item (3) and (4) above) in the same change.
 >
 > **Eight mutants, verbatim reds, all reverted (the codebase is currently GREEN)**:
 > - **M1** (seam maps RESTRICTED like ACTIVE): `auth.rs::resolve_rider_scope`'s `ReadScope::Rider`
@@ -97,6 +125,12 @@ Journal entries for ISO week 2026-W36, newest first, in the order they were writ
 >   declared fold, by construction. Verified instead with a direct hook-level probe (temporary,
 >   not committed) calling `RiderProjector.standing` with a `RiderStatusChanged{SUSPENDED}` envelope
 >   directly: `assertion left == right failed: … left: RESTRICTED right: ACTIVE`.
+>   Round 2 item 9 (farley, reviewer, beck): M4 as planted was an EQUIVALENT mutant to "no arm at
+>   all" — since the hook is never called on `RiderStatusChanged` by construction, adding a branch
+>   to it is inert — and `a_legacy_suspended_status_does_not_restrict_and_the_fact_does` (test 5,
+>   `rider_projection.rs`) is the test that actually guards the `standing` column's `from:` lineage
+>   (only `RiderRestricted`/`RiderReinstated`) staying closed to `RiderStatusChanged`, DB-gated
+>   through the real generated dispatch rather than a direct hook call.
 > - **M5** (the creating arm writes standing): `_ => RiderStanding::ACTIVE` unconditionally
 >   (dropping the `prev`-preserving fallback). The DB-gated replay test (`run_once()` drains a
 >   whole stream to exhaustion per call, so a LATER `RiderRestricted` on the same stream self-heals

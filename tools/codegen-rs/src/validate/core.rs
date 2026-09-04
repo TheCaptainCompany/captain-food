@@ -456,6 +456,9 @@ pub(crate) fn validate(model: &Model) -> Report {
     check_api_while_restricted(model, &mut issues);
     // pm-sends-human-only-command (#639 part C step 4-i): no saga may send a human-only command.
     check_pm_sends_human_only_command(model, &mut issues);
+    // pm-emits-human-only-event (#639 part C step 4-i round 2 item 1): no saga inbox may declare
+    // `emits:` of an event only a human-only command's door produces.
+    check_pm_emits_human_only_event(model, &mut issues);
     // `derive:` arm values are one of three forms, and `null` only resets a nullable column.
     check_view_derive_values(model, &mut issues);
 
@@ -1414,6 +1417,22 @@ pub(crate) fn validate(model: &Model) -> Report {
         }
         for er in &t_throwable_errors {
             if !used_errors.contains(er) {
+                // #639 part C step 4-i round 2 item 5: an error whose ONLY trigger is a
+                // readOnlyCatchAll decode value is structurally unspellable in any tests.yaml
+                // fixture (`test-invalid-enum-value` rejects the literal before a `thrown:` could
+                // even be asserted) -- errors.yaml may mark the item `noTestFixturePossible: true`
+                // to exempt it here, pinned instead by a named Rust unit test (the flag names WHY,
+                // never a silent gap).
+                let exempt = model
+                    .defs
+                    .get("errors.yaml")
+                    .and_then(|v| v.get(er))
+                    .and_then(|v| v.get("noTestFixturePossible"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if exempt {
+                    continue;
+                }
                 issues.push(err(
                     "test-uncovered-error",
                     format!("errors.yaml/{}", er),

@@ -1863,14 +1863,23 @@ pub async fn change_rider_status(
 /// validator gate to assert here (the `requires_post_message` pattern's ADMIN arm: `Ok(())`, no
 /// state comparison). `decidedAt`/`effectiveAt` are BOTH stamped from `now` — never in the past,
 /// never admin-typed (a backdating vector inside the Art. 11 log). Rejects when already restricted
-/// (`RiderRestrictionLifecycle`) and, as a belt, an `Unrecognised` ground can never be STORED here
-/// (unspellable at the GraphQL door already; the wire type is the closed four).
+/// (`RiderRestrictionLifecycle`) and, as a belt, an `UNRECOGNISED` ground is REJECTED
+/// (`RiderRestrictionGroundUnrecognised`) rather than stored -- unspellable at the GraphQL door
+/// already (the wire type is the closed four), this is the handler's OWN belt against a caller that
+/// bypasses the door entirely (round 2 item 5).
 pub async fn restrict_rider(
     store: &dyn EventStore,
     cmd: RestrictRider,
     actor: &Actor,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), DomainError> {
+    // Round-2 item 5 handler belt: `UNRECOGNISED` is unspellable at the GraphQL door already
+    // (RiderRestrictionGround excludes it on write), but this is the LAST line of defense against
+    // a caller that bypasses the door entirely -- no `tests.yaml` fixture can spell it, pinned by
+    // a Rust unit test constructing the raw command from JSON instead.
+    if cmd.ground == RiderRestrictionGround::UNRECOGNISED {
+        return Err(reject("RiderRestrictionGroundUnrecognised", json!({ "riderId": cmd.rider_id })));
+    }
     let (state, version) = require_rider(store, &cmd.rider_id).await?;
     if state.restriction.is_some() {
         return Err(reject("RiderAlreadyRestricted", json!({ "riderId": cmd.rider_id })));
@@ -1895,6 +1904,44 @@ pub async fn reinstate_rider(store: &dyn EventStore, cmd: ReinstateRider, actor:
     }
     let event = DomainEvent::RiderReinstated(RiderReinstated { rider_id: cmd.rider_id });
     Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// Tests — restrict_rider's own handler belt (#639 part C step 4-i round 2, item 5). `UNRECOGNISED`
+// is unspellable at the GraphQL door already (RiderRestrictionGround excludes it from `enum:`), so
+// no `tests.yaml` fixture can ever construct it (`test-invalid-enum-value` rejects the literal
+// before a `thrown:` could even be asserted, errors.yaml#/RiderRestrictionGroundUnrecognised's
+// `noTestFixturePossible: true`). The ONLY way to reach it in Rust is to deserialize a raw JSON
+// payload naming an unknown ground string — a caller bypassing the GraphQL door entirely — which
+// is exactly what this test does, never a typed literal construction of the variant.
+// ================================================================================================
+#[cfg(test)]
+mod restrict_rider_unrecognised_ground_tests {
+    use super::{reject, restrict_rider, rejection_code};
+    use crate::behaviour_support::actor;
+    use crate::process_managers::test_support::MemStore;
+    use domain::generated::commands::RestrictRider;
+    use domain::generated::scalars::{RiderId, RiderRestrictionGround};
+
+    /// A raw-JSON command whose `ground` is a string the closed enum does not declare decodes to
+    /// the `#[serde(other)]` catch-all (`UNRECOGNISED`) rather than failing to parse — and the
+    /// handler's OWN belt rejects it before ever touching the store (`require_rider` runs AFTER
+    /// this check, so no seeded row is needed).
+    #[tokio::test]
+    async fn an_unrecognised_ground_is_rejected_before_the_store_is_touched() {
+        let rider_id = uuid::Uuid::from_u128(0xD1);
+        let raw = serde_json::json!({ "riderId": rider_id, "ground": "SOME_FUTURE_GROUND_THIS_BUILD_DOES_NOT_KNOW" });
+        let cmd: RestrictRider = serde_json::from_value(raw).expect("raw JSON decodes (the catch-all tolerates it)");
+        assert_eq!(cmd.ground, RiderRestrictionGround::UNRECOGNISED, "the catch-all absorbed the unknown string");
+
+        let store = MemStore::default(); // never queried -- the belt fires first.
+        let err = restrict_rider(&store, cmd, &actor(), chrono::Utc::now()).await.unwrap_err();
+        assert_eq!(rejection_code(&err), Some("RiderRestrictionGroundUnrecognised"));
+
+        // The same rejection shape `reject()` builds everywhere else in this file (RiderId context).
+        let expected = reject("RiderRestrictionGroundUnrecognised", serde_json::json!({ "riderId": RiderId(rider_id) }));
+        assert_eq!(rejection_code(&expected), rejection_code(&err));
+    }
 }
 
 // ================================================================================================

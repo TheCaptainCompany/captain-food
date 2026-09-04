@@ -88,6 +88,21 @@ one catalog is a validation error (`scope-duplicate-item`).
   specs — never weaken the gate.
 - After any DSL change: `make validate` must be green before `make generate`.
 
+## `legacyStates:` — a retired lifecycle state, exempt from reachability (#639 part C step 4-i, ADR-20260904-081527 §6)
+
+`legacyStates: [STATE, …]` is an optional key on an `actors.yaml` aggregate's `lifecycle:` block,
+a sibling of `transitions:`/`terminal:`. It declares states named ONLY as the target of a retired
+entry edge — no LIVE transition produces them anymore, but a pre-existing STORED row may still
+carry the value, so its exit edge(s) stay declared (a legacy row must still be able to leave the
+state) while the reachability gate stops demanding a live way IN. First use: `RiderStatus.SUSPENDED`
+— the four `-> SUSPENDED` entry edges were removed when `RestrictRider`/`ReinstateRider` replaced
+`ChangeRiderStatus` as the human-only door, but a historical row minted before that change may still
+read `SUSPENDED`, and its one legacy exit (`SUSPENDED -> OFFLINE`) has to stay live for it. The
+member must still appear in the scalar's own `enum:` (a `legacyStates` entry is never a licence to
+invent a state the type does not have) — the exemption is a declared list the reachability check
+consults by name, never a silent absence read as "must be fine". Validated in
+`tools/codegen-rs/src/validate/lifecycles.rs`.
+
 ## `whileRestricted:` — the standing carve-out grammar (#639 part C step 4-i, ADR-20260904-081527 §4)
 
 `whileRestricted: [ROLE]` is an optional key on an `api.yaml` query or mutation: a SUBSET of the

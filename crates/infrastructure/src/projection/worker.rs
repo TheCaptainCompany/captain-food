@@ -457,7 +457,25 @@ const REGISTRY: &[ProjectorGroup] = &[
     ProjectorGroup {
         checkpoint: "Rider",
         stream_prefixes: &["Rider-"],
-        projectors: &[ReadModelProjector::Rider, ReadModelProjector::RiderRestriction],
+        projectors: &[ReadModelProjector::Rider],
+        scope: "delivery",
+    },
+    // Round 2 item 7 (dba, young — a migration-class defect, #639 part C step 4-i): `RiderRestriction`
+    // is born by THIS migration, weeks after the `Rider` checkpoint above first advanced — folding
+    // it under that already-advanced checkpoint means a rider registered before this migration NEVER
+    // gets a row (the checkpoint never rewinds to replay their `RiderRegistered`), so a LATER
+    // `RiderRestricted` on that same stream is silently dropped by the projector's own
+    // `let mut row = state?;` short-circuit: the door closes, `myStanding` shows `restriction: null`,
+    // the notice has no ground. Its OWN checkpoint, its OWN group — the #424 lesson the comment above
+    // already states for exactly this shape — starting at 0 (a group with no `projection_checkpoint`
+    // row starts there for free): the whole `Rider-` log replays through THIS projector alone, so a
+    // table born after the log is backfilled by replay rather than a migration-time copy. The lag
+    // gauge stays on the `"Rider"` checkpoint (unchanged — `RiderRestriction`'s own replay lag is not
+    // this contract's subject).
+    ProjectorGroup {
+        checkpoint: "RiderRestriction",
+        stream_prefixes: &["Rider-"],
+        projectors: &[ReadModelProjector::RiderRestriction],
         scope: "delivery",
     },
     ProjectorGroup {
@@ -811,7 +829,13 @@ impl ProjectionWorker {
             // `rider-restriction` contract (#639 part C step 4-i, ADR-20260904-081527 §9): the
             // `scope_membership_lag_positions` mirror — while the Rider projector lags, a
             // restricted rider is still GRANTED, so "immediately" is a measured claim only with
-            // this gauge. Emitted per scan, 0 when caught up.
+            // this gauge. Round 2 item 6(b) (dba, farley): "0 when caught up" was FALSE as
+            // written — this loop returns on a short page and the idle gate below never
+            // re-records, so an idle platform exports the PRE-DRAIN page length until the log next
+            // moves. True shape: the pending page length at each scan — a lower bound capped at
+            // `batch_size` while draining, re-recorded only when the log moves, 0 only on the
+            // first scan that finds nothing. Pre-existing, shared `drain_group` behaviour (not
+            // fixed here — architect-owned issue).
             if group.checkpoint == "Rider" {
                 telemetry::meters::rider_restriction::lag(pending.len() as i64);
             }

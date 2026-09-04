@@ -163,12 +163,17 @@ impl Guard for StandingGuard {
             return Ok(());
         }
         telemetry::meters::rider_restriction::denied(self.operation);
-        tracing::info!(
-            rider_id = %id.0,
-            correlation_id = %ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0.to_string()).unwrap_or_default(),
-            operation = self.operation,
-            "rider.standing.denied"
-        );
+        let correlation_id =
+            ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0.to_string()).unwrap_or_default();
+        // Round 2 item 6(a): a REAL span now (never just a bare event) — the `rider-restriction`
+        // contract's declared `business.operation`/`business.correlation_id` attributes are
+        // genuinely populated here, and `rider_id` rides the #748 skip-trace pattern as a nested
+        // INFO event (deliberately off the span's own structured attributes, matching the
+        // counter's own no-rider_id-label posture).
+        let span = telemetry::spans::rider_standing_denied(self.operation, &correlation_id);
+        span.in_scope(|| {
+            tracing::info!(rider_id = %id.0, "rider.standing.denied");
+        });
         Err(async_graphql::Error::new(
             "forbidden: your access is restricted".to_string(),
         )

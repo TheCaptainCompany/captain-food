@@ -687,9 +687,18 @@ rider-restriction:
     - { name: correlation_id, source: "request.correlation_id", required: true }
     - { name: trace_id, source: "otel.trace_id", required: true }
 
+  # Round 2 item 6(a) (observability-agent, dba, farley): as landed in round 1 this declared a span
+  # the runtime never constructed — only a bare `tracing::info!` EVENT (`crates/server/src/graphql/
+  # acl.rs`, `StandingGuard::check`), no matching constructor in `crates/telemetry/src/spans.rs` —
+  # so the attributes below were never actually emitted, and `status_rules.technical_error.
+  # any_span_errors` (removed below) was unreachable by construction (the same shape
+  # `obs-technical-error-unreachable` already catches elsewhere in this file). FIXED AT THE ROOT
+  # rather than reworded away (`crates/telemetry/src/spans.rs::rider_standing_denied`): the span is
+  # real now, opened on every carved-out-tested RIDER denial, and `rider_id` rides beside it as a
+  # nested INFO event (the #748 skip-trace pattern — deliberately off the span's own structured
+  # attributes and off the counter, so a rider identity never becomes a metric cardinality axis;
+  # joinable to both by `correlation_id`, visible under the deployed `LOG_LEVEL=info` default).
   spans:
-    # An INFO trace event beside the counter carries `rider_id` + `correlation_id` (the #748
-    # skip-trace pattern) — the counter itself carries no rider_id label.
     - name: "rider.standing.denied"
       kind: INTERNAL
       required: false   # only a carve-out-tested RIDER denial opens it
@@ -698,17 +707,22 @@ rider-restriction:
         - { key: "business.correlation_id", type: string, required: true }
 
   metrics:
-    # `operation` bounded by the closed `api-operation-key` set; NO `rider_id` label (the INFO trace
-    # event above carries it, joinable by correlation_id).
+    # `operation` bounded by the closed `api-operation-key` set; NO `rider_id` label (the span
+    # above, and its nested event, carry it — joinable by correlation_id).
     - { name: "rider_restricted_denied_total", type: counter, attributes: ["operation"] }
-    # The `scope_membership_lag_positions` mirror, for the Rider projector group.
+    # The `scope_membership_lag_positions` mirror, for the Rider projector group. Round 2 item 6(b)
+    # (dba, farley): reworded to what `drain_group` actually records — "0 when caught up" was FALSE
+    # as written (`drain_group` returns on a short page and the idle gate never re-records, so an
+    # idle platform exports the pre-drain page length until the log next moves). True shape: the
+    # pending page length at each scan — a lower bound capped at `batch_size` while draining,
+    # RE-RECORDED only when the log moves, and 0 only on the first scan that finds nothing. This is
+    # `drain_group`'s own shared, pre-existing behaviour (mirrored by `scope_membership_lag_positions`
+    # and `read_authorization::lag_positions` too) — not fixed here (architect-owned issue).
     - { name: "rider_standing_lag_positions", type: gauge, attributes: [] }
 
   status_rules:
     success:
-      required_spans: []   # the span is opened only on a denial
-    technical_error:
-      any_span_errors: true
+      required_spans: []   # no spans on this contract
 
   latency_budget: { max_p95_ms: 15, max_p99_ms: 50 }
   error_budget: { max_error_rate_pct: 0.1 }

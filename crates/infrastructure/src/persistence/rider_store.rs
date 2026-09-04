@@ -11,10 +11,11 @@
 //! rider sign-in door), not here: this module is the projector's store, that one is the request
 //! seam's reader, and they were kept apart so a lookup nothing calls could not be declared before
 //! its caller existed (the shape the erasure chunk paid for once). Two things about that reader are
-//! not negotiable: it selects `rider_id` and NOTHING else (the table answers *who this connection
-//! is*, never *what it may see* — see the read model's own `rules:`), and it never `LIMIT 1`s,
-//! because picking a row is an elevation decision made by row order. The `UNIQUE` on `auth_ref` is
-//! what lets the query be written without one.
+//! not negotiable: it selects `rider_id, standing` and NOTHING else (#639 part C step 4-i round 2
+//! item 8 — `standing` joined the SELECT the moment it became the platform's own GRANT test, never
+//! *what it may see* beyond that one grant bit — see the read model's own `rules:`), and it never
+//! `LIMIT 1`s, because picking a row is an elevation decision made by row order. The `UNIQUE` on
+//! `auth_ref` is what lets the query be written without one.
 
 use application::queries::RiderRow;
 use domain::generated::scalars::{AuthSubject, PhoneNumber, RiderId};

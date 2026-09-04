@@ -776,8 +776,11 @@ pub mod rider_restriction {
         denied_counter().add(1, &[KeyValue::new("operation", operation.to_string())]);
     }
 
-    /// `rider_standing_lag_positions` — the Rider projector group's lag (0 while caught up),
-    /// emitted every sweep like `scope_membership_lag_positions`.
+    /// `rider_standing_lag_positions` — the Rider projector group's pending page length at each
+    /// scan: a lower bound capped at `batch_size` while draining, re-recorded only when the log
+    /// moves, 0 only on the first scan that finds nothing (round 2 item 6(b) — "0 while caught up"
+    /// was false as written; `drain_group`'s own pre-existing shape, shared with
+    /// `scope_membership_lag_positions`).
     pub fn lag(positions: i64) {
         lag_gauge().record(positions, &[]);
     }

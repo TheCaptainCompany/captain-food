@@ -88,11 +88,23 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
    has to state: the row is a term in the read-side derivation and a GRANT test only; the write
    side keeps its own authority by folding `Rider-{id}`; the row is never the arbiter of an append.
 2. **The fold writes `standing` only from the restriction facts, and the creation arm never
-   touches it.** `RiderRegistered` inserts the row with the column's `DEFAULT 'ACTIVE'` and its
-   upsert's `DO UPDATE SET` omits `standing` (the `created_at` precedent in the same store);
-   `RiderRestricted` writes `RESTRICTED`, `RiderReinstated` writes `ACTIVE`. End state is identical
-   to a three-literal `derive:` map, and a from-zero replay by checkpoint reset — still the recipe,
-   never `TRUNCATE` — **re-grants nobody** for the length of the drain. The fold keys on the FACT,
+   touches it.** As LANDED (round 2 item 8 — dba, farley — corrects this sentence's own mechanism
+   claim, the guarantee stands): the upsert's `DO UPDATE SET` does NOT omit `standing` — it is
+   included like every other mutable column, because the SAME statement also carries
+   `RiderRestricted`/`RiderReinstated`'s real writes, and SQL-level omission would silently drop
+   those too. The never-write guarantee instead lives in the `RiderCompute::standing` hook itself
+   (`crates/application/src/projectors/rider.rs`): on a REPLAYED creation (checkpoint-reset
+   rebuild-in-place over an existing row — never `TRUNCATE`) it returns the PRIOR row's value
+   unchanged rather than a literal `ACTIVE`, so `row.standing` computed for a `RiderRegistered` fold
+   is never anything but "whatever was already there, or `ACTIVE` for a genuinely fresh row" — the
+   `created_at` precedent's INTENT (never let the creating arm move it), generalised to a column two
+   OTHER events are the sole live write authority for. Pinned by
+   `RiderCompute::standing`'s own unit test (`crates/application/src/projectors/rider.rs`, the
+   replay-in-place mutant, M5 on the 4-i card) and the DB-gated
+   `a_restricted_fact_flips_standing_and_a_reinstated_fact_flips_it_back` /
+   `a_rider_predating_the_restriction_group_still_gets_backfilled_by_its_own_replay` suites. End
+   state is identical to a three-literal `derive:` map, and a from-zero replay by checkpoint reset —
+   still the recipe, never `TRUNCATE` — **re-grants nobody** for the length of the drain. The fold keys on the FACT,
    never on the ground's value or on `status` (ADR-20260904-014136 §5): a legacy
    `RiderStatusChanged { SUSPENDED }` alone leaves `standing = ACTIVE`. Migration: `ALTER TABLE
    rider ADD COLUMN standing TEXT NOT NULL DEFAULT 'ACTIVE'`, metadata-only, **no checkpoint

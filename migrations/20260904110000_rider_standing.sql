@@ -16,7 +16,15 @@ ALTER TABLE rider ADD COLUMN IF NOT EXISTS standing TEXT NOT NULL DEFAULT 'ACTIV
 
 -- The attribution behind `Rider.standing`: ground/decidedAt/effectiveAt/reinstatedAt -- the source
 -- of `myStanding` and of 4-iii's admin surface. No `auth_ref`, no `phone` (see the table's `rules:`
--- in the spec); a brand-new table, so no backfill is owed.
+-- in the spec). Round 2 item 7 (dba, young): "no backfill is owed" was WRONG as first written --
+-- a brand-new table born under the ALREADY-ADVANCED `Rider` checkpoint would never replay a single
+-- row for a rider registered before this migration, so a LATER RiderRestricted on that stream would
+-- be silently dropped. The backfill IS owed, and it is REPLAY: `RiderRestriction` gets its OWN
+-- `ProjectorGroup` (checkpoint `"RiderRestriction"`, `crates/infrastructure/src/projection/
+-- worker.rs`) starting at position 0 -- no `projection_checkpoint` row for it yet, so the whole
+-- `Rider-` stream prefix replays through this table alone the first time it drains. No copy between
+-- derived tables here, on purpose: a migration-time INSERT ... SELECT FROM rider would be a SECOND
+-- source of truth for a fact the event log already owns.
 CREATE TABLE IF NOT EXISTS rider_restriction (
   rider_id UUID PRIMARY KEY,
   standing TEXT NOT NULL,

@@ -464,6 +464,21 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     assert_eq!(op["status"], "SUCCEEDED", "reinstateRider operation: {op:?}");
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (reinstate)");
 
+    // 10b) myStanding as the reinstated (ACTIVE) rider: round-2 item 2 (graphql-architect) — the
+    //      RiderRestriction row keeps its ground/dates after ReinstateRider by design
+    //      (projection_tables.yaml:578, the Art. 11 log), so the resolver must gate `restriction`
+    //      on `standing == RESTRICTED` rather than on the row's mere existence, or a reinstated
+    //      rider's OWN standing answer would keep exposing a stale attribution api.yaml/ADR §4
+    //      never promised past reinstatement.
+    let my_standing_reinstated = "query { myStanding { standing restriction { ground } } }";
+    let resp = schema
+        .execute(async_graphql::Request::new(my_standing_reinstated).data(acting(RequestRole::Rider)).data(active.clone()))
+        .await;
+    assert!(resp.errors.is_empty(), "myStanding (reinstated) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["myStanding"]["standing"], "ACTIVE");
+    assert_eq!(data["myStanding"]["restriction"], serde_json::Value::Null, "a reinstated rider's own standing answer must carry no restriction attribution: {data:?}");
+
     // 11) acceptDelivery as the reinstated (ACTIVE) rider: the GUARD reopens — the mutation reaches
     //     the business layer again (PENDING, never a synchronous FORBIDDEN); the eventual REJECTED
     //     is the business layer's own, unrelated call (already ASSIGNED to this same rider) —

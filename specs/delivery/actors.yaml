@@ -244,6 +244,7 @@ Rider:
       throws:
         - { $ref: 'errors.yaml#/RiderNotFound' }
         - { $ref: 'errors.yaml#/RiderAlreadyRestricted' }
+        - { $ref: 'errors.yaml#/RiderRestrictionGroundUnrecognised' }
     - message: { $ref: 'commands.yaml#/ReinstateRider' }
       requires:
         acting:

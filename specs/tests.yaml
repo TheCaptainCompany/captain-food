@@ -715,9 +715,13 @@ fixtures:
   riderStatusChanged:
     type: { $ref: 'events.yaml#/RiderStatusChanged' }
     data: { riderId: "rider-1", status: "AVAILABLE" }
-  # #639 part C step 4-i (ADR-20260904-081527 §5): decidedAt/effectiveAt are both server-stamped —
-  # omitted from `data:`, the DeliveryPickedUp.at precedent (a required date-time the handler stamps
-  # from the clock port stays out of the fixture's comparison).
+  # #639 part C step 4-i (ADR-20260904-081527 §5): decidedAt/effectiveAt are both server-stamped
+  # from `now` (RestrictionTakesEffectWhenDecided — V0 stamps effectiveAt == decidedAt). Round 2
+  # item 9 (farley, reviewer, beck): this comment previously said both dates were OMITTED from
+  # `data:` (the DeliveryPickedUp.at precedent) — wrong as written, both ARE in the fixture below:
+  # `TestRiderRestricted` passes an explicit `at:` to the `when:` block (see that test), so the
+  # handler's `now` matches the literal timestamps this fixture asserts, rather than the fixture
+  # comparing against whatever the clock happens to read.
   riderRestricted:
     type: { $ref: 'events.yaml#/RiderRestricted' }
     data: { riderId: "rider-1", ground: "IDENTITY_MISMATCH", decidedAt: "2026-01-06T12:00:00Z", effectiveAt: "2026-01-06T12:00:00Z" }

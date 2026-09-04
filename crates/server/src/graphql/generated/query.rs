@@ -184,14 +184,14 @@ impl QueryRoot {
         };
         let restrictions = ctx.data::<std::sync::Arc<dyn application::queries::RiderRestrictionReadRepository>>()?;
         let row = restrictions.by_rider_id(*rider_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        let restriction = row.as_ref().and_then(|r| match (r.ground, r.decided_at, r.effective_at) {
+        let restriction = if *standing == domain::generated::scalars::RiderStanding::RESTRICTED { row.as_ref().and_then(|r| match (r.ground, r.decided_at, r.effective_at) {
             (Some(ground), Some(decided_at), Some(effective_at)) => Some(RiderRestrictionInfo {
                 ground: super::scalars::rider_restriction_ground_from_domain(ground),
                 decided_at,
                 effective_at,
             }),
             _ => None,
-        });
+        }) } else { None };
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;

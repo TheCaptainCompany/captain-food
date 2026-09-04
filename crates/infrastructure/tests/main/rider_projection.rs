@@ -217,6 +217,23 @@ async fn a_restricted_fact_flips_standing_and_a_reinstated_fact_flips_it_back() 
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restricted)");
     assert_eq!(standing_of(&pool, rider_id).await, "RESTRICTED");
 
+    // Round-2 item 4 (beck, farley): the real Postgres resolver
+    // (`PgRiderRepository::rider_id_by_auth_subject`) is the one untested link on this slice's own
+    // read side — the walk injects `ReadScope` directly and the seam suite scripts `resolve`, so
+    // neither exercises the actual `SELECT rider_id, standing` decode against a RESTRICTED row.
+    let repo = infrastructure::PgRiderRepository::new(pool.clone());
+    let resolved = <infrastructure::PgRiderRepository as application::queries::RiderIdentityRepository>::rider_id_by_auth_subject(
+        &repo,
+        domain::generated::scalars::AuthSubject("auth-supabase-restrict-1".to_string()),
+    )
+    .await
+    .expect("rider_id_by_auth_subject (restricted)");
+    assert_eq!(
+        resolved,
+        Some((domain::generated::scalars::RiderId(rider_id), domain::generated::scalars::RiderStanding::RESTRICTED)),
+        "the real Postgres resolver must read RESTRICTED off the actual row, not just the fold's own table"
+    );
+
     append_event(
         &pool,
         &format!("Rider-{rider_id}"),
@@ -227,6 +244,18 @@ async fn a_restricted_fact_flips_standing_and_a_reinstated_fact_flips_it_back() 
     .await;
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (reinstated)");
     assert_eq!(standing_of(&pool, rider_id).await, "ACTIVE");
+
+    let resolved = <infrastructure::PgRiderRepository as application::queries::RiderIdentityRepository>::rider_id_by_auth_subject(
+        &repo,
+        domain::generated::scalars::AuthSubject("auth-supabase-restrict-1".to_string()),
+    )
+    .await
+    .expect("rider_id_by_auth_subject (reinstated)");
+    assert_eq!(
+        resolved,
+        Some((domain::generated::scalars::RiderId(rider_id), domain::generated::scalars::RiderStanding::ACTIVE)),
+        "the real Postgres resolver must read ACTIVE again off the actual row after reinstatement"
+    );
 }
 
 /// (5) A legacy `RiderStatusChanged { SUSPENDED }` alone never restricts — the fold keys on the
@@ -269,10 +298,18 @@ async fn a_legacy_suspended_status_does_not_restrict_and_the_fact_does() {
     assert_eq!(standing_of(&pool, rider_id).await, "RESTRICTED", "the FACT restricts");
 }
 
-/// (6) dba's mutant: a checkpoint-reset replay-in-place over an EXISTING restricted row must never
-/// re-grant it. Restrict, then re-run the creation event (`RiderRegistered`) through the SAME
-/// projector without resetting the row — the replay-in-place shape a checkpoint reset produces
-/// (the row survives; only the checkpoint rewinds).
+/// (6) Round 2 item 9 (farley, reviewer, beck — rewritten to what this test actually proves):
+/// an end-to-end checkpoint-reset replay over an EXISTING restricted row must re-grant nobody.
+/// This is NOT an arm-level proof that the creating arm's own write never moves `standing` — that
+/// proof is the `RiderCompute::standing` hook's own unit test (`crates/application/src/
+/// projectors/rider.rs`), pinned directly against M5 on the 4-i card. `run_once()`'s inner loop
+/// drains every pending event to exhaustion regardless of `with_batch_size`, so the two calls
+/// below never actually observe an intermediate state between "creation replayed" and "restriction
+/// re-applied" — the first call alone already drains both events to the SAME end state the second
+/// call's assertion repeats. Kept as the end-to-end guarantee (a real checkpoint-reset replay,
+/// through the real router/projector/store, re-grants nobody) rather than removed, since that
+/// property is real and worth its own DB-gated proof — it is simply a DIFFERENT, weaker claim than
+/// the arm-level one the original comment implied.
 #[tokio::test]
 async fn replaying_rider_registered_over_a_restricted_row_keeps_it_restricted() {
     let Some(db) = crate::common::TestDb::acquire("rider_standing_replay_registered").await else { return };
@@ -296,26 +333,27 @@ async fn replaying_rider_registered_over_a_restricted_row_keeps_it_restricted() 
     assert_eq!(standing_of(&pool, rider_id).await, "RESTRICTED");
 
     // The replay-in-place: rewind the Rider checkpoint to 0 (never TRUNCATE — the row stays) and
-    // drain again. `with_batch_size(1)` is load-bearing, not incidental: a single unbounded
-    // `run_once()` would fold BOTH RiderRegistered and RiderRestricted back-to-back in the SAME
-    // batch transaction, so even a creating arm that WROTE `standing` would be immediately
-    // corrected by the restriction fact that follows it in the same drain — the mutant this test
-    // exists to catch would be invisible. Batch size 1 forces two SEPARATE batches so the
-    // intermediate state (creation replayed, restriction not yet re-applied) is observable
-    // in between — exactly the live-read window the ADR is protecting.
+    // drain again. `with_batch_size(1)` bounds each individual BATCH TRANSACTION to one event, but
+    // `run_once()`'s own loop keeps calling batches until nothing is pending — so the FIRST
+    // `run_once()` below already drains both RiderRegistered and RiderRestricted to the same end
+    // state the second call's assertion repeats; neither call observes a genuine intermediate
+    // state (round 2 item 9). This proves the end-to-end replay guarantee only — the arm-level
+    // proof (the creating arm's own write never moves `standing`) is the `RiderCompute::standing`
+    // hook's own unit test.
     sqlx::query("UPDATE projection_checkpoint SET position = 0 WHERE projector = 'Rider'")
         .execute(&pool)
         .await
         .expect("rewind the Rider checkpoint");
     let worker = ProjectionWorker::new(pool.clone()).with_batch_size(1);
-    worker.run_once().await.expect("run_once (replay, batch 1: RiderRegistered only)");
+    worker.run_once().await.expect("run_once (replay, drains to exhaustion regardless of batch_size)");
     assert_eq!(
         standing_of(&pool, rider_id).await,
         "RESTRICTED",
-        "RiderRegistered replaying ALONE, before RiderRestricted catches up, must never re-grant \
-         the rider — the creating arm's own write must never move `standing`"
+        "a from-zero replay by checkpoint reset must re-grant nobody"
     );
-    worker.run_once().await.expect("run_once (replay, batch 2: RiderRestricted)");
+    // A second call is a no-op (nothing pending) — kept to document that this drained to
+    // completion rather than stopping partway, not to observe a second state.
+    worker.run_once().await.expect("run_once (replay, second call is a no-op)");
     assert_eq!(
         standing_of(&pool, rider_id).await,
         "RESTRICTED",
@@ -390,5 +428,72 @@ async fn a_rider_row_that_predates_the_migration_reads_active() {
         standing_of(&pool, rider_id).await,
         "ACTIVE",
         "the fleet is granted, not denied, by the migration's own DEFAULT"
+    );
+}
+
+/// (8) Round 2 item 7 (dba, young — a migration-class defect, #639 part C step 4-i): `RiderRestriction`
+/// must ride its OWN `ProjectorGroup` checkpoint, starting at 0 — never a prefix bolted onto the
+/// ALREADY-ADVANCED `"Rider"` checkpoint. Reproduced by pre-seeding ONLY the shared `"Rider"`
+/// checkpoint past this rider's own `RiderRegistered` position BEFORE any drain ever runs — the
+/// exact starting condition a real fleet is in the moment `RiderRestriction`'s code ships onto an
+/// already-running platform whose `"Rider"` checkpoint has long since passed this rider. Under the
+/// bundled (pre-fix) arrangement the shared checkpoint would skip straight to the NEW
+/// `RiderRestricted` fact without ever having folded the `RiderRegistered` birth into
+/// `rider_restriction`, so `let mut row = state?;` drops it silently. Under the fix,
+/// `RiderRestriction`'s OWN checkpoint has no row yet (starts at 0), so this ONE drain replays the
+/// WHOLE `Rider-` stream for THIS group — `RiderRegistered` then `RiderRestricted`, in order — and
+/// the row is created and updated in the same pass regardless of where the SHARED `"Rider"`
+/// checkpoint sits.
+#[tokio::test]
+async fn a_rider_predating_the_restriction_group_still_gets_backfilled_by_its_own_replay() {
+    let Some(db) = crate::common::TestDb::acquire("rider_restriction_own_checkpoint").await else { return };
+    let pool = db.pool();
+    let rider_id = uuid::Uuid::new_v4();
+    registered(&pool, rider_id, "auth-supabase-own-checkpoint-1").await;
+
+    let registered_position: i64 =
+        sqlx::query_scalar("SELECT position FROM domain_events WHERE stream_name = $1 AND version = 1")
+            .bind(format!("Rider-{rider_id}"))
+            .fetch_one(&pool)
+            .await
+            .expect("the RiderRegistered position");
+
+    // Pre-seed ONLY the SHARED `"Rider"` checkpoint past this rider's registration -- simulating a
+    // fleet that already existed before `RiderRestriction` shipped. Never touch a
+    // `"RiderRestriction"` row: its absence IS the fix (starts at 0 on its own first drain).
+    sqlx::query(
+        "INSERT INTO projection_checkpoint (projector, position, updated_at) VALUES ('Rider', $1, now())",
+    )
+    .bind(registered_position)
+    .execute(&pool)
+    .await
+    .expect("pre-seed the shared Rider checkpoint");
+
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        2,
+        "RiderRestricted",
+        serde_json::json!({
+            "riderId": rider_id,
+            "ground": "IDENTITY_MISMATCH",
+            "decidedAt": "2026-01-06T12:00:00Z",
+            "effectiveAt": "2026-01-06T12:00:00Z"
+        }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restricted, own-checkpoint replay)");
+
+    let ground: Option<String> = sqlx::query_scalar("SELECT ground FROM rider_restriction WHERE rider_id = $1")
+        .bind(rider_id)
+        .fetch_optional(&pool)
+        .await
+        .expect("query rider_restriction");
+    assert_eq!(
+        ground,
+        Some("IDENTITY_MISMATCH".to_string()),
+        "RiderRestriction's own checkpoint must replay this rider's birth on its first-ever drain, \
+         regardless of where the shared Rider checkpoint already sits -- a row bundled under an \
+         already-advanced checkpoint would be silently dropped here"
     );
 }

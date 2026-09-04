@@ -512,6 +512,25 @@ pub fn record_claims_stamp_result(span: &Span, stamped: bool) {
     }
 }
 
+/// `rider.standing.denied` (INTERNAL) — the `StandingGuard`'s own carve-out-tested RIDER denial
+/// (`rider-restriction` contract, #639 part C step 4-i round 2 item 6(a)). Round 1 declared this
+/// span in `observability.yaml` but the runtime only ever emitted a bare `tracing::info!` EVENT —
+/// no constructor here, so the declared attributes were never actually populated and
+/// `status_rules.technical_error.any_span_errors` was unreachable by construction (obs-technical-
+/// error-unreachable's own shape). Fixed at the root rather than reworded away: this constructor
+/// is the real thing. No `otel.status_code` field — a denial here is the ORDINARY, expected
+/// outcome of a restriction the platform itself imposed (the same posture as
+/// `auth_scope_membership`, never a technical error), so there is no failure mode for this span to
+/// classify; `rider-restriction`'s `status_rules` drops `technical_error` accordingly.
+pub fn rider_standing_denied(operation: &str, correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "rider.standing.denied",
+        otel.kind = "internal",
+        business.operation = operation,
+        business.correlation_id = correlation_id,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

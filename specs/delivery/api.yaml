@@ -197,7 +197,7 @@ mutations:
     command: { $ref: 'commands.yaml#/HandBackDelivery' }
     roles: [RIDER]
     derived: { riderId: rider }
-    whileRestricted: [RIDER]   # #639 part C step 4-i, ADR-20260904-081527 §4: revocation of ACCESS is not release of CUSTODY
+    whileRestricted: [RIDER]   # #639 part C step 4-i, ADR-20260904-081527 §4: restriction of ACCESS is not release of CUSTODY
     slice: V0
 
 

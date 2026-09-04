@@ -18768,6 +18768,7 @@ mod while_restricted_gate {
             "api-while-restricted-no-standing-source",
             "api-while-restricted-mutation-derives-actor",
             "pm-sends-human-only-command",
+            "pm-emits-human-only-event",
         ] {
             let h = hits(&model, rule);
             assert!(h.is_empty(), "{rule}: {h:?}");
@@ -18844,6 +18845,34 @@ mod while_restricted_gate {
             .push(Value::Mapping(send));
         let h = hits(&model, "pm-sends-human-only-command");
         assert!(!h.is_empty(), "planting `sends: RestrictRider` on a process manager must be refused: {h:?}");
+    }
+
+    /// Round-2 item 1: `pm-emits-human-only-event` -- the `emits:` complement of `pm-sends-human-only-command`.
+    /// A `processmanager.yaml` `receives[].emits:` naming `RiderRestricted` (RestrictRider's own emitted
+    /// event, derived from `human_only_commands`/`human_only_events` -- never hand-listed) would let a
+    /// saga PRODUCE the result of a human decision without ever going through the door that requires one.
+    /// Plants it on `RefundProcess`'s first receives leg's `emits:` list (a scratch model mutation, never
+    /// a touch to the real fenced file).
+    #[test]
+    fn a_pm_emit_of_a_human_only_event_is_refused() {
+        let mut model = real_model();
+        let pm = model
+            .defs
+            .get_mut("processmanager.yaml")
+            .and_then(|v| v.get_mut("RefundProcess"))
+            .and_then(|v| v.get_mut("receives"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("RefundProcess.receives exists");
+        let leg = pm.first_mut().expect("at least one receives leg").as_mapping_mut().expect("leg is a mapping");
+        let mut ev_ref = serde_yaml::Mapping::new();
+        ev_ref.insert(Value::from("$ref"), Value::from("events.yaml#/RiderRestricted"));
+        leg.entry(Value::from("emits"))
+            .or_insert_with(|| Value::Sequence(vec![]))
+            .as_sequence_mut()
+            .expect("emits is a sequence")
+            .push(Value::Mapping(ev_ref));
+        let h = hits(&model, "pm-emits-human-only-event");
+        assert!(!h.is_empty(), "planting `emits: RiderRestricted` on a process manager must be refused: {h:?}");
     }
 }
 
