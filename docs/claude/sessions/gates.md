@@ -975,3 +975,31 @@ is itself the argument: **a list that grows has no business stating its own leng
   warning list under a failing verdict, and `| grep` makes `$?` grep's rather than make's — both
   reported success over a failing gate this week.
 
+## 19c. Test-bed and gate findings from #854 and the 2026-09-04 records pass
+
+- **The loop-budget timer's 240-minute staleness bound fires on a legitimate long run under the same
+  run id** (#854: `stop` refused with exit 3 at 340 min and required `--elapsed-seconds`). A run
+  relaunched after transient 529s under the same id should record wall-clock explicitly; the guard's
+  message should distinguish "same run id" from "another run's timer". Cost: one extra cycle plus a
+  billing judgment call.
+- **The subscriptions suite scripts a terminal bus frame over a still-RECEIVED row**
+  (`crates/server/tests/graphql_subscriptions.rs`, the `operation_status_changed_streams_the_mailbox_lifecycle`
+  case): any change that re-reads the mailbox row on a push must trust the row only when it is
+  itself terminal, or a terminal push turns back into PENDING. Cost on #854: one full
+  `make test-crates` cycle (~12 min with rebuild).
+- **A plain YAML scalar in `stories.yaml` cannot contain `: `** — a description sentence with a
+  colon cost two regenerate cycles. Quote the string or avoid the colon.
+- **`make validate` in a fresh worktree needs its own codegen build (~1 min 15 s on this box) —
+  cheap, so a docs-only change can be gated in a side worktree while an executor holds the shared
+  checkout.** The register index `docs/proposals/DECISIONS.md` is GENERATED: adding a
+  `docs/decisions/*.yaml` row without `make generate` fails `decision-index-stale`. The workspace
+  `target/` is what holds the disk (22 GB of 31 GB used on 2026-09-04); the two-command sweep in
+  §19a recovered 6.5 GB → 13 GB in seconds.
+- **Two coordinator self-inflicted cycles, same shape: an UNQUOTED heredoc feeding python.** Bash
+  expands backticks and `$` inside `<<EOF` text, so `` `specs/**` `` became a command substitution
+  ("specs/architecture: Is a directory") and the python assert on the garbled string failed — after
+  the earlier replacements in the same script had already written files with the garbling in them.
+  Rule: `<<'PYEOF'` (quoted) for any script that carries markdown, and pass variables through the
+  environment (`ID="$ID" python3 - <<'PYEOF'`). Inspect `git diff` of every file such a script
+  touched before trusting the assert that failed.
+
