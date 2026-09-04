@@ -22,7 +22,7 @@ use crate::auth::Principal;
 use crate::graphql::acl::RequestRole;
 use crate::graphql::schema::CaptainSchema;
 use crate::graphql::session::{RequestCorrelationId, SessionHeader, TraceContext};
-use web::graphql::{Transport, TransportError};
+use web::graphql::{ErrorExtensions, Transport, TransportError};
 
 /// The BFF's SSR executor: the schema + the anonymous PUBLIC context, shared with the host
 /// fallback via an Extension.
@@ -100,8 +100,25 @@ impl Transport for SchemaTransport {
         let response = self.schema.execute(request).await;
         if !response.errors.is_empty() {
             // Same envelope rule as the HTTP transport: anything in `errors` fails the whole read
-            // (acceptance-first leaves nothing business-meaningful there).
-            return Err(TransportError::Errors(format!("{:?}", response.errors)));
+            // (acceptance-first leaves nothing business-meaningful there). #639 4-ii
+            // (ADR-20260904-124600 §1/§3): the SAME typed `extensions` shape the HTTP transport
+            // parses — this leg does not act on it yet (the document-GET bounce rides with step 5,
+            // ADR-081527 §11 amended), but the shape must not lie about carrying none.
+            let extensions = response
+                .errors
+                .iter()
+                .map(|e| {
+                    let ext = serde_json::to_value(&e.extensions).unwrap_or_default();
+                    ErrorExtensions {
+                        code: ext.get("code").and_then(Value::as_str).map(str::to_string),
+                        reason: ext.get("reason").and_then(Value::as_str).map(str::to_string),
+                    }
+                })
+                .collect();
+            return Err(TransportError::Errors {
+                message: format!("{:?}", response.errors),
+                extensions,
+            });
         }
         serde_json::to_value(response.data)
             .map_err(|e| TransportError::Malformed(e.to_string()))
@@ -132,6 +149,6 @@ mod tests {
             .execute("query { notAField }", serde_json::json!({}))
             .await
             .unwrap_err();
-        assert!(matches!(err, TransportError::Errors(_)));
+        assert!(matches!(err, TransportError::Errors { .. }));
     }
 }

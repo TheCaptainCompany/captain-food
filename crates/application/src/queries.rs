@@ -524,6 +524,11 @@ pub trait DeliveryReadRepository: Send + Sync {
         rider_id: RiderId,
         status: Option<DeliveryStatus>,
     ) -> Result<Vec<DeliveryJobRow>, DomainError>;
+    /// The ONE job a rider currently holds custody of, if any (#639 part C step 4-ii,
+    /// ADR-20260904-124600 §5, #879's item): `ASSIGNED | PICKED_UP | OUT_FOR_DELIVERY`, narrowed
+    /// server-side by SQL rather than `for_rider(..).find(..)` over the rider's whole history plus
+    /// the unassigned PENDING pool — the `/restricted` screen's per-paint read.
+    async fn held_by_rider(&self, rider_id: RiderId) -> Result<Option<DeliveryJobRow>, DomainError>;
     /// A restaurant's delivery board, honouring the optional status filter, newest first.
     async fn by_restaurant(
         &self,

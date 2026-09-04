@@ -44,6 +44,7 @@ pub enum ResolverKey {
     ReclamationsMine,
     RewardsBalance,
     DeliveriesMine,
+    StandingMine,
     MailboxLanes,
     MailboxPoisoned,
 }
@@ -81,6 +82,7 @@ impl ResolverKey {
         ResolverKey::ReclamationsMine,
         ResolverKey::RewardsBalance,
         ResolverKey::DeliveriesMine,
+        ResolverKey::StandingMine,
         ResolverKey::MailboxLanes,
         ResolverKey::MailboxPoisoned,
     ];
@@ -118,6 +120,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => "reclamations.mine",
             ResolverKey::RewardsBalance => "rewards.balance",
             ResolverKey::DeliveriesMine => "deliveries.mine",
+            ResolverKey::StandingMine => "standing.mine",
             ResolverKey::MailboxLanes => "mailbox.lanes",
             ResolverKey::MailboxPoisoned => "mailbox.poisoned",
         }
@@ -156,6 +159,7 @@ impl ResolverKey {
             "reclamations.mine" => Some(ResolverKey::ReclamationsMine),
             "rewards.balance" => Some(ResolverKey::RewardsBalance),
             "deliveries.mine" => Some(ResolverKey::DeliveriesMine),
+            "standing.mine" => Some(ResolverKey::StandingMine),
             "mailbox.lanes" => Some(ResolverKey::MailboxLanes),
             "mailbox.poisoned" => Some(ResolverKey::MailboxPoisoned),
             _ => None,
@@ -195,6 +199,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => Some("myReclamations"),
             ResolverKey::RewardsBalance => None,
             ResolverKey::DeliveriesMine => Some("myDeliveries"),
+            ResolverKey::StandingMine => Some("myStanding"),
             ResolverKey::MailboxLanes => Some("mailboxLanes"),
             ResolverKey::MailboxPoisoned => Some("poisonedMailboxMessages"),
         }
@@ -235,6 +240,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => None,
             ResolverKey::RewardsBalance => None,
             ResolverKey::DeliveriesMine => Some("MyDeliveriesQueryInput"),
+            ResolverKey::StandingMine => None,
             ResolverKey::MailboxLanes => None,
             ResolverKey::MailboxPoisoned => Some("PoisonedMailboxMessagesQueryInput"),
         }
@@ -275,6 +281,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => Some("{ reclamationId orderId customerId restaurantId category description requestedResolution status resolution refundAmount { amountCents currency } rejectReason openedAt decidedAt overdue }"),
             ResolverKey::RewardsBalance => None,
             ResolverKey::DeliveriesMine => Some("{ id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt openIssue foodLocation handedBackAt }"),
+            ResolverKey::StandingMine => Some("{ standing restriction { ground decidedAt effectiveAt } heldDelivery { id orderId restaurantId status provider courier { displayName phone riderId } pickupAddress { line1 line2 postalCode city country } dropoffAddress { line1 line2 postalCode city country } estimatedPickupAt estimatedDropoffAt requestedAt pickedUpAt deliveredAt openIssue foodLocation handedBackAt } contestContact heldDelivery { restaurant { displayName } } }"),
             ResolverKey::MailboxLanes => Some("{ actorType partition ownershipVersion claimedBy leaseUntil checkpoint pending scheduled oldestPendingAt retryingAttempts poisoned registration }"),
             ResolverKey::MailboxPoisoned => Some("{ messageId actorType partition messageType attempts errorCode correlationId receivedAt completedAt }"),
         }
@@ -313,6 +320,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => &[],
             ResolverKey::RewardsBalance => &[],
             ResolverKey::DeliveriesMine => &[],
+            ResolverKey::StandingMine => &[],
             ResolverKey::MailboxLanes => &[],
             ResolverKey::MailboxPoisoned => &[],
         }
@@ -351,6 +359,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => None,
             ResolverKey::RewardsBalance => Some("Captain Coins / loyalty balance not modelled (deferred domain)."),
             ResolverKey::DeliveriesMine => None,
+            ResolverKey::StandingMine => None,
             ResolverKey::MailboxLanes => None,
             ResolverKey::MailboxPoisoned => None,
         }
@@ -392,6 +401,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => &["CUSTOMER"],
             ResolverKey::RewardsBalance => &[],
             ResolverKey::DeliveriesMine => &["RIDER"],
+            ResolverKey::StandingMine => &["RIDER"],
             ResolverKey::MailboxLanes => &["ADMIN"],
             ResolverKey::MailboxPoisoned => &["ADMIN"],
         }
@@ -431,6 +441,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => &[],
             ResolverKey::RewardsBalance => &[],
             ResolverKey::DeliveriesMine => &[],
+            ResolverKey::StandingMine => &[],
             ResolverKey::MailboxLanes => &[],
             ResolverKey::MailboxPoisoned => &[],
         }
@@ -472,6 +483,7 @@ impl ResolverKey {
             ResolverKey::ReclamationsMine => None,
             ResolverKey::RewardsBalance => None,
             ResolverKey::DeliveriesMine => match param { "deliveryStatus" | "status" => Some("status"), _ => None },
+            ResolverKey::StandingMine => None,
             ResolverKey::MailboxLanes => None,
             ResolverKey::MailboxPoisoned => match param { "actorType" | "mailboxActorType" => Some("actorType"), "limit" | "pageLimit" => Some("limit"), _ => None },
         }

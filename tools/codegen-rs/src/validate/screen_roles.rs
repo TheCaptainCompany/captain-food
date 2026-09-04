@@ -20,6 +20,22 @@
 //     • `screen-unauthenticated-route-unknown`   — `unauthenticated: { type: navigate, route }`
 //                                                  names no `requires_auth: false` route of the same
 //                                                  file (a bounce into another gated screen loops).
+//     • `screen-restricted-route-unknown`        — `restricted: { type: navigate, route }` (#639
+//                                                  part C step 4-ii, ADR-20260904-124600 §2) names
+//                                                  no `while_restricted: true` route of the same
+//                                                  file that carries no `restricted:` of its own
+//                                                  (the `unauthenticated:` twin — a bounce into
+//                                                  another gated screen loops).
+//     • `screen-restricted-binds-uncarved-op`    — a screen that is a `restricted:` TARGET, or that
+//                                                  declares `while_restricted: true` itself, binds
+//                                                  (transitively over its sheets and
+//                                                  data_requirements) an operation that does not
+//                                                  carry `whileRestricted:` for the screen's own
+//                                                  role — a RESTRICTED rider on that screen would
+//                                                  hit a dead control. `rider_topbar`'s only action
+//                                                  (`rider_toggle_online` → `changeRiderStatus`,
+//                                                  never `whileRestricted:`) makes mounting it a
+//                                                  special case of this SAME check, not a second one.
 //
 //   WARNING (the general form, `screen.roles ⊆ ∩(roles of every bound operation)`):
 //     • `screen-role-refused-operation` — one of the screen's admitted roles is refused by a bound
@@ -60,6 +76,21 @@ fn roles_of(model: &Model, section: &str, name: &str) -> Vec<String> {
         .and_then(|v| v.get(section))
         .and_then(|v| v.get(name))
         .and_then(|v| v.get("roles"))
+        .and_then(|v| v.as_sequence())
+        .map(|s| s.iter().filter_map(|r| r.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// An operation's `whileRestricted:` carve-set (#639 part C step 4-i, ADR-20260904-081527 §4) —
+/// empty when absent (fail-closed by absence lives in the emitter; here it just means "carves out
+/// nothing").
+fn while_restricted_of(model: &Model, section: &str, name: &str) -> Vec<String> {
+    model
+        .defs
+        .get("api.yaml")
+        .and_then(|v| v.get(section))
+        .and_then(|v| v.get(name))
+        .and_then(|v| v.get("whileRestricted"))
         .and_then(|v| v.as_sequence())
         .map(|s| s.iter().filter_map(|r| r.as_str().map(str::to_string)).collect())
         .unwrap_or_default()
@@ -303,6 +334,108 @@ pub(crate) fn check_screen_roles(
                 "screen-unauthenticated-route-unknown",
                 at,
                 "unauthenticated: declared on a screen that does not require auth — nothing would ever take the bounce.".to_string(),
+            ));
+        }
+    }
+}
+
+/// `restricted:` (#639 part C step 4-ii, ADR-20260904-124600 §2) — the `unauthenticated:` twin,
+/// keyed on `standing` instead of "no session": the bounce a RESTRICTED rider's refused read/Tell
+/// takes. Two ERRORS, see the module docs.
+pub(crate) fn check_screen_restricted(
+    model: &Model,
+    issues: &mut Vec<Issue>,
+    sfkey: &str,
+    sid: &str,
+    screen: &Value,
+    doc: &Value,
+) {
+    let at = format!("{}/screens/{}", sfkey, sid);
+    let while_restricted = screen.get("while_restricted").and_then(|v| v.as_bool()).unwrap_or(false);
+    let own_route = screen.get("route").and_then(|v| v.as_str());
+
+    // `restricted: { type: navigate, route }` — the target must be a `while_restricted: true`
+    // route of THIS file that declares no `restricted:` of its own (a bounce into another gated
+    // screen loops — same shape as `unauthenticated:`'s check).
+    if let Some(rs) = screen.get("restricted") {
+        let ty = rs.get("type").and_then(|x| x.as_str()).unwrap_or("");
+        let route = rs.get("route").and_then(|x| x.as_str());
+        let target_ok = route.is_some_and(|route| {
+            doc.get("screens")
+                .and_then(|x| x.as_sequence())
+                .map(|screens| {
+                    screens.iter().any(|s| {
+                        s.get("route").and_then(|r| r.as_str()) == Some(route)
+                            && s.get("while_restricted").and_then(|v| v.as_bool()).unwrap_or(false)
+                            && s.get("restricted").is_none()
+                    })
+                })
+                .unwrap_or(false)
+        });
+        if !UNAUTHENTICATED_TYPES.contains(&ty) || !target_ok {
+            issues.push(err(
+                "screen-restricted-route-unknown",
+                at.clone(),
+                format!(
+                    "restricted must be {{ type: navigate, route: <a while_restricted: true route of this file with no restricted: of its own> }}; got type '{}', route {}.",
+                    ty,
+                    route.map(|r| format!("'{r}'")).unwrap_or_else(|| "<none>".to_string())
+                ),
+            ));
+        }
+    }
+
+    // Is THIS screen named as another screen's `restricted:` target?
+    let is_a_restricted_target = own_route.is_some_and(|own_route| {
+        doc.get("screens")
+            .and_then(|x| x.as_sequence())
+            .map(|screens| {
+                screens.iter().any(|s| {
+                    s.get("restricted")
+                        .and_then(|r| r.get("route"))
+                        .and_then(|r| r.as_str())
+                        == Some(own_route)
+                })
+            })
+            .unwrap_or(false)
+    });
+
+    if !while_restricted && !is_a_restricted_target {
+        return;
+    }
+
+    // A `while_restricted: true` screen (or a `restricted:` target) may bind ONLY operations
+    // carrying `whileRestricted:` for its own role — otherwise a RESTRICTED rider on it hits a
+    // dead control. `rider_topbar`'s online toggle binds `changeRiderStatus` (never
+    // `whileRestricted:`), so mounting it fails THIS check too — no second mechanism needed.
+    let screen_roles: Vec<String> = screen
+        .get("roles")
+        .and_then(|x| x.as_sequence())
+        .map(|s| s.iter().filter_map(|r| r.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let bound = bound_operations(model, doc, screen);
+    for (kind, name, roles) in &bound.ops {
+        if roles.is_empty() {
+            continue; // an operation open to every role carries no standing question at all
+        }
+        let section = if *kind == "mutation" { "mutations" } else { "queries" };
+        let wr = while_restricted_of(model, section, name);
+        let uncarved: Vec<&str> = screen_roles
+            .iter()
+            .filter(|r| roles.iter().any(|x| x == *r) && !wr.iter().any(|x| x == *r))
+            .map(String::as_str)
+            .collect();
+        if !uncarved.is_empty() {
+            issues.push(err(
+                "screen-restricted-binds-uncarved-op",
+                at.clone(),
+                format!(
+                    "{} '{}' carries no `whileRestricted:` for role{} {} — a RESTRICTED rider on this screen (while_restricted: true, or a restricted: target) would hit a dead control.",
+                    kind,
+                    name,
+                    if uncarved.len() == 1 { "" } else { "s" },
+                    uncarved.join(", ")
+                ),
             ));
         }
     }

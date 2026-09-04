@@ -108,6 +108,26 @@ impl DeliveryReadRepository for PgDeliveryRepository {
         rows.iter().map(decode).collect()
     }
 
+    /// #639 part C step 4-ii (ADR-20260904-124600 §5, #879): the SQL `held_by_rider` narrows —
+    /// one row, `rider_id = $1 AND status IN (ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY)`, never the
+    /// `for_rider(..).find(..)` scan over the rider's whole history plus the unassigned PENDING
+    /// pool `for_rider` exists to serve `myDeliveries`.
+    async fn held_by_rider(&self, rider_id: RiderId) -> Result<Option<DeliveryJobRow>, DomainError> {
+        let sql = format!(
+            "SELECT {COLUMNS} FROM {VIEW} WHERE rider_id = $1 AND status IN ($2, $3, $4) \
+             ORDER BY requested_at DESC LIMIT 1"
+        );
+        let row = sqlx::query(&sql)
+            .bind(rider_id.0)
+            .bind(DeliveryStatus::ASSIGNED.to_text())
+            .bind(DeliveryStatus::PICKED_UP.to_text())
+            .bind(DeliveryStatus::OUT_FOR_DELIVERY.to_text())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        row.as_ref().map(decode).transpose()
+    }
+
     async fn by_restaurant(
         &self,
         restaurant_id: RestaurantId,

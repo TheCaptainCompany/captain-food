@@ -29,6 +29,10 @@ app_types: [web, ios, android]   # couriers live on phones; web is the V0 vehicl
 resolvers:
   deliveries.mine:  { query: { $ref: 'api.yaml#/queries/myDeliveries' } }
   delivery.byOrder: { query: { $ref: 'api.yaml#/queries/delivery' } }
+  # #639 part C step 4-ii (ADR-20260904-124600 §4): the `/restricted` screen's ONE read — every
+  # binding path on that screen is `standing.*` (the resolver alias root is the key's FIRST
+  # segment, `standing`; `standing.mine` -> `standing.*`, never `myStanding.*`).
+  standing.mine: { query: { $ref: 'api.yaml#/queries/myStanding' } }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA LAYER — ACTIONS. The pickup→dropoff flow; `mark_order_delivered` redeclares the
@@ -209,6 +213,54 @@ bottom_sheets:
           on_success: [{ type: close_sheet }]
       - { type: inline_error, id: hand_back_delivery_error, for_action: hand_back_delivery }
 
+  # #639 part C step 4-ii (ADR-20260904-124600 §5): the `/restricted` screen's held-job control —
+  # a SECOND sheet, a COPY of `rider_handback_sheet` re-bound to `standing.heldDelivery.status` /
+  # `.id` (the screen's own resolver root; no screen-level alias grammar exists between two
+  # different resolver roots, and inventing one is a second naming scheme the validator cannot
+  # see — ADR §5 refused the alias). `on_success` closes the sheet AND re-executes the screen's
+  # own reads (`$reload`, #529's declared same-page token): `heldDelivery` is a view over the log
+  # (correct on the very next read), so the after-state renders without a second control existing
+  # anywhere to invent.
+  rider_restricted_handback_sheet:
+    id: rider_restricted_handback_sheet
+    type: bottom_sheet
+    title: { $ref: 'rider.translations.yaml#/rider.issue.exit.hand_back' }
+    sections:
+      - type: chip_multi_select
+        id: restricted_handback_location
+        label: { $ref: 'rider.translations.yaml#/rider.issue.custody_label' }
+        single_select: true
+        visible_when: "standing.heldDelivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']"
+        options:
+          - { value: WITH_RIDER,             label: { $ref: 'rider.translations.yaml#/rider.issue.custody.with_rider' } }
+          - { value: RETURNED_TO_RESTAURANT, label: { $ref: 'rider.translations.yaml#/rider.issue.custody.returned' } }
+      - type: button
+        id: restricted_hand_back_delivery_picked_up_btn
+        label: { $ref: 'rider.translations.yaml#/rider.issue.confirm' }
+        variant: primary
+        full_width: true
+        visible_when: "standing.heldDelivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']"
+        action:
+          type: hand_back_delivery
+          variables: { deliveryJobId: "{{ standing.heldDelivery.id }}", foodLocation: "{{ restricted_handback_location.value }}" }
+          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
+          on_success: [{ type: close_sheet }, { type: navigate, route: "$reload" }]
+      # From ASSIGNED: no question, foodLocation is the literal NOT_COLLECTED (ADR-20260904-015903
+      # §2 "ask the rider nothing about the food it can derive") — the SAME derivation as the
+      # first sheet's ASSIGNED button.
+      - type: button
+        id: restricted_hand_back_delivery_assigned_btn
+        label: { $ref: 'rider.translations.yaml#/rider.issue.confirm' }
+        variant: primary
+        full_width: true
+        visible_when: "standing.heldDelivery.status == 'ASSIGNED'"
+        action:
+          type: hand_back_delivery
+          variables: { deliveryJobId: "{{ standing.heldDelivery.id }}", foodLocation: "NOT_COLLECTED" }
+          loading_label: { $ref: 'rider.translations.yaml#/rider.issue.handback_pending' }
+          on_success: [{ type: close_sheet }, { type: navigate, route: "$reload" }]
+      - { type: inline_error, id: restricted_hand_back_delivery_error, for_action: hand_back_delivery }
+
   rider_code_sheet:
     id: rider_code_sheet
     type: bottom_sheet
@@ -283,6 +335,10 @@ screens:
     # there before any render; client-side: a 401 from this surface's role path on the screen's
     # reads navigates there. Before 2c-ii this screen rendered its shell with the read failed.
     unauthenticated: { type: navigate, route: "/sign-in" }
+    # #639 part C step 4-ii (ADR-20260904-124600 §2): the `unauthenticated:` twin, keyed on the
+    # server's own standing signal (`extensions.reason == RIDER_RESTRICTED`) rather than "no
+    # session" — a refused read OR a refused Tell on this screen bounces here.
+    restricted: { type: navigate, route: "/restricted" }
     data_requirements: [deliveries.mine]
     actions_used: [accept_delivery, decline_delivery, rider_toggle_online]
     components:
@@ -311,6 +367,10 @@ screens:
     # Before 2c-ii an unauthenticated visitor here was bounced to `/` (the staff-surface arm of the
     # #92 client guard), where `jobs` then rendered its shell with the read failed.
     unauthenticated: { type: navigate, route: "/sign-in" }
+    # #639 part C step 4-ii (ADR-20260904-124600 §2): a rider mid-job here who gets restricted —
+    # the next refused Tell (confirm_pickup/complete_delivery/…) bounces to the notice, never a
+    # toast (`delivery.byOrder` itself stays reachable, `whileRestricted: [RIDER]`).
+    restricted: { type: navigate, route: "/restricted" }
     data_requirements: [delivery.byOrder]
     actions_used: [confirm_pickup, complete_delivery, report_delivery_issue, hand_back_delivery, phone_call]
     gaps:
@@ -331,8 +391,8 @@ screens:
       - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.job.handback_instruction_title' }, visible_when: "delivery.foodLocation == 'WITH_RIDER'" }
       - { type: text, value: { $ref: 'rider.translations.yaml#/rider.job.handback_done_body' }, visible_when: "delivery.foodLocation in ['NOT_COLLECTED', 'RETURNED_TO_RESTAURANT']" }
       - { type: button, id: handback_back_to_jobs_btn, label: { $ref: 'rider.translations.yaml#/rider.job.back_to_jobs' }, variant: primary, full_width: true, visible_when: "delivery.foodLocation in ['NOT_COLLECTED', 'RETURNED_TO_RESTAURANT']", action: { type: navigate, route: "/" } }
-      - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress }}" }
-      - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress }}", visible_when: "delivery.foodLocation == null" }
+      - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' },  value: "{{ delivery.pickupAddress | format_address }}" }
+      - { type: info_row, icon: home,    label: { $ref: 'rider.translations.yaml#/rider.job.dropoff' }, value: "{{ delivery.dropoffAddress | format_address }}", visible_when: "delivery.foodLocation == null" }
       # #717: plain name row via the FK-derived navigation edge (DeliveryJob.restaurant: Restaurant!).
       # Deliberately NOT a contact row — a rebound name beside a dead call button is a false signifier.
       - { type: info_row, icon: store, label: { $ref: 'rider.translations.yaml#/rider.job.restaurant' }, value: "{{ delivery.restaurant.displayName }}" }
@@ -347,3 +407,122 @@ screens:
           # full width, min 56px on-bike target) opens the issue sheet — its second exit is the
           # handback door. In-app only: no call button.
           - { type: button, id: report_issue_open_btn, label: { $ref: 'rider.translations.yaml#/rider.job.problem' }, variant: outline, full_width: true, min_height: 56, action: { type: open_bottom_sheet, sheet_id: rider_issue_sheet } }
+
+  # SCREEN 3 — The restricted notice (#639 part C step 4-ii, ADR-20260904-124600 §4/§5): where the
+  # `restricted:` bounce on `jobs`/`job_detail` lands — a refused read (the hydrate loop) or a
+  # refused Tell (`interact.rs`) carrying `extensions.reason == RIDER_RESTRICTED`. NO
+  # `rider_topbar`: its online toggle dispatches `changeRiderStatus`, never `whileRestricted:`
+  # (validator rule `screen-restricted-binds-uncarved-op` would refuse mounting it here — a plain
+  # `back_button_header` in its place). `standing.mine` is the ONLY read; every binding path is
+  # `standing.*` (the resolver alias root is the key's FIRST segment).
+  - id: restricted
+    roles: [RIDER]
+    route: "/restricted"
+    title: { $ref: 'rider.translations.yaml#/rider.restricted.title' }
+    sdui: true
+    requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
+    while_restricted: true
+    data_requirements: [standing.mine]
+    actions_used: [hand_back_delivery]
+    gaps:
+      - "The restaurant's phone on the held-job card (#717): DeliveryJob carries no phone field, same declared gap as job_detail's contact row."
+      - "The copy-to-clipboard control on the contact address (#872): `copy_to_clipboard` is a declared ActionKey with no listener (`crates/web/src/executor.rs:405,545`, `interact.rs:227,516`) — the address is plain selectable text instead, per ADR-20260904-124600 §4 ('no copy button — a declared action with no listener is the control that does nothing, on a legal surface')."
+      - "The document-GET bounce (ADR-20260904-081527 §11, amended by ADR-20260904-124600 §3): the page GET makes zero Postgres reads today; a restricted rider who opens a fresh tab sees the ordinary shell until the client's own `standing.mine` read answers. Rides with step 5's socket re-resolution (one resolver, three callers)."
+    components:
+      # #882 round-2 item 2 (ADR-20260904-081527 §7): a reinstated (ACTIVE) rider can land
+      # here (back-navigation, a stale `$reload`) with `restriction: null` -- the whole
+      # notice body, INCLUDING the door's own header (a rider who back-navigates here must
+      # never read "Votre accès est restreint." anywhere on the page, not even in the back
+      # button's title), is gated on the rider's OWN current standing; the else branch is a
+      # full-page swap to the reinstated sentence, verbatim, with the ONE control back to the
+      # job list.
+      - type: conditional_section
+        id: restricted_notice_or_reinstated
+        condition: "standing.standing == 'RESTRICTED'"
+        if_true:
+          - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.restricted.title' } }
+          # Title + the "no more jobs" sentence: UNCONDITIONAL while RESTRICTED (ADR §4) — never
+          # gated on the attribution row below, which can lag one tick behind the standing flip.
+          - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.restricted.title' } }
+          - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.no_more_jobs' } }
+          # The attribution: EITHER the ground + both dates (restriction resolved) OR the transient
+          # "not yet available" sentence (restriction.decidedAt/effectiveAt not folded yet, ADR §4's
+          # documented one-tick transient) — the two branches of ONE `condition:` section, so the
+          # transient can only ever show while the restriction is genuinely absent, never alongside it
+          # (the corpus grammar has no `&&`; nesting is how "unrecognised renders only when the
+          # restriction exists" holds without inventing one).
+          - type: conditional_section
+            id: restricted_attribution
+            condition: "standing.restriction != null"
+            if_true:
+              - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground_label' } }
+              - type: row
+                id: restricted_ground_rider_requested
+                visible_when: "standing.restriction.ground == 'RIDER_REQUESTED'"
+                content:
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.rider_requested.lead' } }
+                  - { type: text, value: "{{ standing.contestContact }}" }
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.rider_requested.trail' } }
+              - type: row
+                id: restricted_ground_eligibility_document_lapsed
+                visible_when: "standing.restriction.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'"
+                content:
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.eligibility_document_lapsed.lead' } }
+                  - { type: text, value: "{{ standing.contestContact }}" }
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.eligibility_document_lapsed.trail' } }
+              - type: row
+                id: restricted_ground_identity_mismatch
+                visible_when: "standing.restriction.ground == 'IDENTITY_MISMATCH'"
+                content:
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.identity_mismatch.lead' } }
+                  - { type: text, value: "{{ standing.contestContact }}" }
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.identity_mismatch.trail' } }
+              - type: row
+                id: restricted_ground_account_compromise
+                visible_when: "standing.restriction.ground == 'ACCOUNT_COMPROMISE'"
+                content:
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.account_compromise.lead' } }
+                  - { type: text, value: "{{ standing.contestContact }}" }
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.account_compromise.trail' } }
+              # The catch-all (#639 part C step 4-i, ADR-20260904-081527 §3): `ground == null` INSIDE
+              # this branch means "a restriction exists whose ground the strict decode could not
+              # spell" — never the transient (that is the OTHER branch of this same section) and
+              # never a blank row (never a key built from the value).
+              - type: row
+                id: restricted_ground_unrecognised
+                visible_when: "standing.restriction.ground == null"
+                content:
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.unrecognised.lead' } }
+                  - { type: text, value: "{{ standing.contestContact }}" }
+                  - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.ground.unrecognised.trail' } }
+              - { type: info_row, icon: calendar, label: { $ref: 'rider.translations.yaml#/rider.restricted.decided_at_label' }, value: "{{ standing.restriction.decidedAt | format_datetime }}" }
+              - { type: info_row, icon: calendar, label: { $ref: 'rider.translations.yaml#/rider.restricted.effective_at_label' }, value: "{{ standing.restriction.effectiveAt | format_datetime }}" }
+            if_false:
+              - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.details_pending' } }
+          # The held-job card (ADR-20260904-015903 §7, ADR-20260904-124600 §5): the pickup address is
+          # the biggest element; the restaurant's phone is #717 (declared above). The one control opens
+          # the second sheet; once `foodLocation` is set the after-state text replaces it — no control
+          # is ever live on a job this rider no longer holds.
+          - type: conditional_section
+            id: restricted_held_job
+            condition: "standing.heldDelivery != null"
+            if_true:
+              - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.restricted.held_title' } }
+              - { type: info_row, icon: store, label: { $ref: 'rider.translations.yaml#/rider.job.restaurant' }, value: "{{ standing.heldDelivery.restaurant.displayName }}" }
+              - { type: info_row, icon: map_pin, label: { $ref: 'rider.translations.yaml#/rider.job.pickup' }, value: "{{ standing.heldDelivery.pickupAddress | format_address }}" }
+              - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.held_instruction' }, visible_when: "standing.heldDelivery.foodLocation == null" }
+              - { type: button, id: restricted_cannot_continue_btn, label: { $ref: 'rider.translations.yaml#/rider.issue.exit.hand_back' }, variant: outline, full_width: true, visible_when: "standing.heldDelivery.foodLocation == null", action: { type: open_bottom_sheet, sheet_id: rider_restricted_handback_sheet } }
+              - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.held_after' }, visible_when: "standing.heldDelivery.foodLocation != null" }
+          # The footer: UNCONDITIONAL (Art. 11(2), ADR-014136 §6(ii)) — how to contest, plain
+          # selectable text, no copy button, no deadline, no verdict word.
+          - type: row
+            id: restricted_contest
+            content:
+              - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.contest.lead' } }
+              - { type: text, value: "{{ standing.contestContact }}" }
+              - { type: text, value: { $ref: 'rider.translations.yaml#/rider.restricted.contest.trail' } }
+        if_false:
+          - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.restricted.reinstated' } }
+          - { type: page_header, title: { $ref: 'rider.translations.yaml#/rider.restricted.reinstated' } }
+          - { type: button, id: restricted_reinstated_back_to_jobs_btn, label: { $ref: 'rider.translations.yaml#/rider.job.back_to_jobs' }, variant: primary, full_width: true, action: { type: navigate, route: "/" } }

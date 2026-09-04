@@ -767,3 +767,24 @@ async fn the_standing_doors_admit_exactly_admin() {
     assert!(!rider_m.contains(&"restrictRider".into()), "restrictRider leaked to RIDER");
     assert!(!rider_m.contains(&"reinstateRider".into()), "reinstateRider leaked to RIDER");
 }
+
+/// #639 part C step 4-ii (ADR-20260904-124600 §1): the `RoleGuard` rejection carries NO `reason`
+/// extension — only `StandingGuard`'s does (`rider_restricted_is_refused_on_the_write_half.rs`
+/// asserts the positive half through the real seam). This schema (`build_schema(None, None, None)`)
+/// injects no `ReadScope` at all, so every rejection here is `RoleGuard`'s own — the asymmetry the
+/// client's bounce decision (`crates/web/src/bounce.rs`) depends on to key on the SERVER's own
+/// signal rather than on a bare `FORBIDDEN`.
+#[tokio::test]
+async fn a_role_refusal_carries_no_reason_extension() {
+    let schema = schema();
+    let admin_query = "{ prospectionPipeline { score } }"; // [ADMIN]
+    let resp = execute_as(&schema, RequestRole::Public, admin_query).await;
+    assert_eq!(resp.errors.len(), 1, "expected one error: {:?}", resp.errors);
+    assert!(is_forbidden(&resp.errors[0]), "expected FORBIDDEN: {:?}", resp.errors[0]);
+    let ext = serde_json::to_value(&resp.errors[0]).ok().and_then(|v| v.get("extensions").cloned());
+    assert_eq!(
+        ext.as_ref().and_then(|e| e.get("reason")),
+        None,
+        "a RoleGuard refusal must carry no `reason` extension — got: {ext:?}"
+    );
+}

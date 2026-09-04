@@ -228,8 +228,10 @@ pub mod mount {
         // The delegated action layer, exactly as the SDUI path installs it: checkout's
         // `payment_failed_state` renders two client-kind `navigate` buttons carrying the renderer's
         // own DOM contract, and without this listener they are controls that render and do nothing
-        // — the failure mode CLAUDE.md calls worse than no control at all.
-        crate::interact::install(&origin, role, session);
+        // — the failure mode CLAUDE.md calls worse than no control at all. `matched.screen` (#639
+        // 4-ii): none of these hand-written screens declare `restricted:`/`unauthenticated:` today,
+        // but the driver's bounce decision reads the SAME field the SDUI path does.
+        crate::interact::install(&origin, role, session, matched.screen);
         let transport = HttpTransport::new(&origin, role, session);
         let tenant = crate::router::Surface::slug_of(&host).map(str::to_string);
 

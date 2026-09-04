@@ -218,9 +218,25 @@ CLAUDE.md keeps the one-line index; the load-bearing detail lives here:
   tree, its reads, the sheets it opens) admits that role — a role-refused control is a control that
   renders and does nothing. A `requires_auth` screen may declare
   `unauthenticated: { type: navigate, route }` naming an open route of the same file: the server
-  302s a cookie-less GET there and the client navigates there on a 401 from its role path. An
-  `inline_error` with `for_action: <action>` is where that action's REJECTED verdict renders, in
-  the caller's language (the server localizes `Operation.message` from the row's typed context).
+  302s a cookie-less GET there and the client navigates there on a 401 from its role path. **4-ii**
+  (#639 part C, ADR-20260904-124600 §2) adds the `unauthenticated:` TWIN, keyed on standing instead
+  of session: `restricted: { type: navigate, route }` names a route of the same file that declares
+  `while_restricted: true` and carries no `restricted:` of its own (validator
+  `screen-restricted-route-unknown`); the client navigates there on a refused read OR a refused Tell
+  carrying `extensions.reason == RIDER_RESTRICTED` (`crates/web/src/bounce.rs`'s ONE pure
+  `bounce_after` function — no server-side document-GET leg exists yet, ADR §3). A screen that
+  declares `while_restricted: true` (or is named as another screen's `restricted:` target) may bind
+  ONLY operations carrying `whileRestricted:` for its own role — never `rider_topbar` (its online
+  toggle is never carved) — validator `screen-restricted-binds-uncarved-op`. An `inline_error` with
+  `for_action: <action>` is where that action's REJECTED verdict renders, in the caller's language
+  (the server localizes `Operation.message` from the row's typed context). Bindings support `|
+  filter` suffixes on `{{ path | filter }}` (`crates/web/src/renderer.rs::binding_text`):
+  `format_currency` (Money objects), `format_datetime` (a UTC instant string → Europe/Paris,
+  `fr` — "4 sept. 2026, 14:02"; the event/read model keep the UTC instant, this is presentation-
+  only) and `format_address` (an `Address` object → one display line, "12 rue de la Paix, 37000
+  Tours" — `line2` only when present, `country` never shown, V0 is Tours-only): an object bound
+  with NO filter falls through to `format_currency`'s Money-shaped read and silently renders "" —
+  the 4-ii round-2 defect this third filter closes (#882).
 - **specs/translations.yaml** (ADR-0033; sidecars ADR-20260722-101500) — SHARED UI i18n catalog,
   errors.yaml-style (dotted keys + typed `params` + `messages.en`/`fr`) for cross-surface
   strings (`common.*`) + future backend text; surface-specific strings live in co-located

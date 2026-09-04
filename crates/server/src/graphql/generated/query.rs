@@ -195,8 +195,10 @@ impl QueryRoot {
         let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
         let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
         let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
-        let jobs = deliveries.for_rider(*rider_id, None).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        let held = jobs.into_iter().find(|j| matches!(j.status, domain::generated::scalars::DeliveryStatus::ASSIGNED | domain::generated::scalars::DeliveryStatus::PICKED_UP | domain::generated::scalars::DeliveryStatus::OUT_FOR_DELIVERY));
+        // #639 part C step 4-ii (ADR-20260904-124600 §5, #879): the held-job read is a PER-PAINT
+        // port keyed on the standing carve-out, not `for_rider`'s whole-history-plus-PENDING-pool
+        // scan over a view of the log.
+        let held = deliveries.held_by_rider(*rider_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let mut held_delivery = None;
         if let Some(job) = held {
             if let Some(order) = orders.by_id(job.order_id, &application::queries::ReadScope::System).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
@@ -205,7 +207,10 @@ impl QueryRoot {
                 }
             }
         }
-        Ok(RiderStandingInfo { standing: (*standing).into(), restriction, held_delivery })
+        // #639 4-ii (ADR-20260904-124600 §4): SUPPORT_CONTACT, bound ONCE from the composition
+        // root's ReadDeps (the 2c refusal-screen precedent) -- never a translation-string literal.
+        let contest_contact = ctx.data_opt::<Option<domain::generated::scalars::EmailAddress>>().cloned().flatten().map(Into::into);
+        Ok(RiderStandingInfo { standing: (*standing).into(), restriction, held_delivery, contest_contact })
     }
     /// The independent rider's assigned/available delivery jobs (rider app).
     #[graphql(name = "myDeliveries", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"myDeliveries\"))", visible = "visible_rider")]

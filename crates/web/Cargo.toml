@@ -15,6 +15,12 @@ app-core = { path = "../core" }
 serde = { workspace = true }        # the generated registry derives Serialize/Deserialize on its enums
 serde_json = { workspace = true }   # the data layer speaks raw GraphQL JSON until typed DTOs are generated
 thiserror = { workspace = true }    # typed data-layer errors (gap refusals, transport, poll exhaustion)
+# `format_datetime` (#639 part C step 4-ii, ADR-20260904-124600 §4): Europe/Paris, `fr` — the
+# notice's `decidedAt`/`effectiveAt` are a legal statement, never a raw UTC instant. Pure formatting
+# only (no OS timezone database, no threads) — compiles on wasm32 like every other `chrono` user in
+# the workspace (`domain::service_window`).
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
 async-trait = { workspace = true }  # the object-safe `Transport` seam (fake-injectable in tests)
 uuid = { workspace = true, features = ["v7"] }  # v7: client-minted messageId/sessionId (time-ordered, ADR-20260720-015500)
 leptos = { version = "0.8", default-features = false }

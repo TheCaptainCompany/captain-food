@@ -297,6 +297,33 @@ pub(crate) fn collect_screen_nav_selections(
     let prop_node = |ty: &str, field: &str| -> Option<Value> {
         api_types?.get(ty)?.get("properties")?.get(field).cloned()
     };
+    // The bound leaf on a nav edge's target type: a scalar leaf selects by name; an object-typed
+    // leaf expands through the SAME `selection_fields` walk the base selection uses (bounded
+    // depth, cycle-guarded), so the two shapes cannot drift. `None` means nothing selectable
+    // survived — the caller omits the whole binding rather than emit an unexecutable bare object
+    // field (shared by both the direct `root.edge.leaf` case and the nested
+    // `root.property.edge.leaf` case below, #882 R2 item 1a).
+    let leaf_part = |target: &str, leaf: &str, depth: usize| -> Option<String> {
+        let node = prop_node(target, leaf)?;
+        let unwrapped = if node.get("type").and_then(|t| t.as_str()) == Some("array") {
+            node.get("items").cloned().unwrap_or(node.clone())
+        } else {
+            node.clone()
+        };
+        match unwrapped.get("$ref").and_then(|r| r.as_str()) {
+            None => Some(leaf.to_string()),
+            Some(rf) => match ref_target_file(rf, "api.yaml").as_deref() {
+                Some("scalars.yaml") | None => Some(leaf.to_string()),
+                Some(f) => match resolve_ref(model, rf, "api.yaml") {
+                    Some(t) if t.get("properties").is_some() => {
+                        let mut path_guard = vec![selection_ref_key(rf, "api.yaml")?];
+                        selection_fields(model, t, f, depth, &mut path_guard).map(|sub| format!("{leaf} {sub}"))
+                    }
+                    _ => Some(leaf.to_string()),
+                },
+            },
+        }
+    };
 
     let mut surfaces: Vec<&String> = model.defs.keys().filter(|k| k.starts_with("screens/")).collect();
     surfaces.sort();
@@ -330,8 +357,40 @@ pub(crate) fn collect_screen_nav_selections(
                 if segs.len() < 2 {
                     continue; // a nav USE is `root.edge.field…` — anything shorter is property land
                 }
-                if prop_node(type_name, segs[0]).is_some() {
-                    continue; // a declared property — the base selection already fetches it
+                if let Some(pnode) = prop_node(type_name, segs[0]) {
+                    // A declared property — the base selection already fetches ITS OWN declared
+                    // properties. But it never reaches a nav edge nested ONE level inside that
+                    // property (an edge is FK-derived, not in `properties`, so the base walk's
+                    // property-only recursion cannot see it either — #882 R2 item 1a,
+                    // `standing.heldDelivery.restaurant.displayName`: `heldDelivery` IS a declared
+                    // property of `RiderStandingInfo`, so the OLD code stopped here and the widget
+                    // rendered blank). Splice the edge under the PROPERTY's own field name —
+                    // GraphQL merges repeated selections on one field, so this composes with the
+                    // base walk's `heldDelivery { …declared props… }` rather than fighting it.
+                    if segs.len() == 3 {
+                        let unwrapped = if pnode.get("type").and_then(|t| t.as_str()) == Some("array") {
+                            pnode.get("items").cloned().unwrap_or(pnode.clone())
+                        } else {
+                            pnode.clone()
+                        };
+                        let Some(prop_rf) = unwrapped.get("$ref").and_then(|r| r.as_str()) else { continue };
+                        if ref_target_file(prop_rf, "api.yaml").as_deref() == Some("scalars.yaml") {
+                            continue; // a scalar property has no nav edges to nest
+                        }
+                        let Some(prop_type) = parse_ref(prop_rf).and_then(|p| p.path.last().cloned()) else { continue };
+                        let Some(nf2) = nav
+                            .get(prop_type.as_str())
+                            .and_then(|nfs| nfs.iter().find(|n| n.field == segs[1] && !n.list))
+                        else {
+                            continue; // segs[1] is not a nav edge on the property's type either
+                        };
+                        // depth-3: one level consumed by the property, one by the edge, matching
+                        // the direct-edge case's depth-2 (root consumes one, edge consumes one).
+                        let Some(part) = leaf_part(&nf2.target, segs[2], SELECTION_MAX_DEPTH - 3) else { continue };
+                        let nested = format!("{} {{ {} }}", nf2.field, part);
+                        out.entry(query.clone()).or_default().entry(segs[0].to_string()).or_default().insert(nested);
+                    }
+                    continue;
                 }
                 let Some(nf) = nav
                     .get(type_name.as_str())
@@ -339,38 +398,7 @@ pub(crate) fn collect_screen_nav_selections(
                 else {
                     continue; // not an edge either — §25's error, not a fetch concern
                 };
-                // The bound field on the edge's target type: a leaf selects by name; an object
-                // property expands through the SAME `selection_fields` walk the base selection
-                // uses (bounded depth, cycle-guarded) so the two shapes cannot drift.
-                let Some(node) = prop_node(&nf.target, segs[1]) else { continue };
-                let unwrapped = if node.get("type").and_then(|t| t.as_str()) == Some("array") {
-                    node.get("items").cloned().unwrap_or(node.clone())
-                } else {
-                    node.clone()
-                };
-                let part = match unwrapped.get("$ref").and_then(|r| r.as_str()) {
-                    None => segs[1].to_string(),
-                    Some(rf) => {
-                        let file = ref_target_file(rf, "api.yaml");
-                        match file.as_deref() {
-                            Some("scalars.yaml") | None => segs[1].to_string(),
-                            Some(f) => match resolve_ref(model, rf, "api.yaml") {
-                                Some(target) if target.get("properties").is_some() => {
-                                    let mut path_guard = match selection_ref_key(rf, "api.yaml") {
-                                        Some(k) => vec![k],
-                                        None => continue,
-                                    };
-                                    match selection_fields(model, target, f, SELECTION_MAX_DEPTH - 2, &mut path_guard)
-                                    {
-                                        Some(sub) => format!("{} {}", segs[1], sub),
-                                        None => continue, // nothing selectable — omit, never emit bare
-                                    }
-                                }
-                                _ => segs[1].to_string(),
-                            },
-                        }
-                    }
-                };
+                let Some(part) = leaf_part(&nf.target, segs[1], SELECTION_MAX_DEPTH - 2) else { continue };
                 out.entry(query.clone()).or_default().entry(nf.field.clone()).or_default().insert(part);
             }
         }
@@ -1150,7 +1178,7 @@ pub(crate) fn emit_web_screens(model: &Model) -> String {
     surfaces.sort();
 
     let mut out = String::from(
-        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/screens) — do not edit\n// by hand. The SDUI SCREEN TREES (#87, ADR-0033): one module per surface, each screen's route,\n// roles, resolver bindings and component tree as static data. The renderer walks these trees and\n// dispatches on `ComponentKind`; `sdui: false` screens carry an EMPTY tree (their markup is\n// hand-written — checkout.rs / tracking.rs) but still register their route for the router.\n\nuse super::data_layer::ResolverKey;\nuse super::registry::ComponentKind;\n\n/// One flattened prop on a screen node: literal text, a translation key (resolve via the i18n\n/// catalog), or a `{{ path }}` binding into the screen's resolved resolver data.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum PropValue {\n    Text(&'static str),\n    I18n(&'static str),\n    Binding(&'static str),\n}\n\n/// One renderable node of a screen tree.\n#[derive(Debug, Clone, Copy)]\npub struct Node {\n    pub kind: ComponentKind,\n    /// Dotted-path props flattened from the DSL (`empty_state.title`, `action.type`, …).\n    pub props: &'static [(&'static str, PropValue)],\n    pub children: &'static [Node],\n    /// Named branch child groups (#725): `conditional_section`'s `if_true`/`if_false`, verbatim\n    /// from the DSL. The renderer evaluates the node's `condition:` prop and renders EXACTLY ONE\n    /// group (unevaluatable → neither, fail closed); the condition-defect walk traverses all.\n    pub branches: &'static [(&'static str, &'static [Node])],\n}\n\n/// One bottom sheet of a surface (#94): the DSL `bottom_sheets` entry as a renderable tree — the\n/// renderer mounts every sheet HIDDEN into each of the surface's screens; `open_bottom_sheet`\n/// toggles them by id.\n#[derive(Debug, Clone, Copy)]\npub struct Sheet {\n    pub id: &'static str,\n    pub node: Node,\n}\n\n/// One screen of a surface.\n#[derive(Debug, Clone, Copy)]\npub struct Screen {\n    pub id: &'static str,\n    pub route: &'static str,\n    /// UserType tokens (scalars.yaml#/UserType) admitted to this screen.\n    pub roles: &'static [&'static str],\n    pub requires_auth: bool,\n    /// False = deliberately NOT SDUI-rendered (hand-written page); tree is empty.\n    pub sdui: bool,\n    pub data_requirements: &'static [ResolverKey],\n    /// The GENERATED skip table (#745, §25b): the subset of `data_requirements` PROVEN\n    /// structurally unfulfillable at paint time (a required query arg with no route-param, pin\n    /// or tenant-host source — each declared on the binding in the DSL). The paint loops skip\n    /// these BEFORE any network: the read would fail GraphQL validation on every paint and is\n    /// skipped by design, never counted as a degraded render.\n    pub skipped_reads: &'static [ResolverKey],\n    /// R1 (#639 part C step 2c-ii, PROP-20260831-180622 §5): the UserType token whose\n    /// `/{role}/graphql` path THIS screen's transports address, when the DSL declares\n    /// `graphql_role:`; `None` = the surface's own role (`Surface::role`, the default every\n    /// pre-R1 screen keeps byte-identically). Validator §26 proves every operation the screen\n    /// binds admits it, so a declared role can never be a role-refused transport.\n    pub graphql_role: Option<&'static str>,\n    /// The route a `requires_auth` screen bounces to when the surface has NO session\n    /// (`unauthenticated: { type: navigate, route }`, #639 2c-ii): the server 302s a\n    /// cookie-less document GET there, the client navigates there on a 401 from its role path.\n    /// `None` = the pre-2c-ii behaviour (customer surfaces: the auth sheet over the screen).\n    pub unauthenticated_route: Option<&'static str>,\n    pub tree: &'static [Node],\n}\n\nimpl Node {\n    /// The first value of a dotted prop path, if present.\n    pub fn prop(&self, key: &str) -> Option<PropValue> {\n        self.props.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)\n    }\n\n    /// The named branch child group (`if_true`/`if_false`), if this node carries it (#725).\n    pub fn branch(&self, name: &str) -> Option<&'static [Node]> {\n        self.branches.iter().find(|(n, _)| *n == name).map(|(_, c)| *c)\n    }\n}\n",
+        "// GENERATED by the Captain.Food codegen from specs/screens/*.yaml (#/screens) — do not edit\n// by hand. The SDUI SCREEN TREES (#87, ADR-0033): one module per surface, each screen's route,\n// roles, resolver bindings and component tree as static data. The renderer walks these trees and\n// dispatches on `ComponentKind`; `sdui: false` screens carry an EMPTY tree (their markup is\n// hand-written — checkout.rs / tracking.rs) but still register their route for the router.\n\nuse super::data_layer::ResolverKey;\nuse super::registry::ComponentKind;\n\n/// One flattened prop on a screen node: literal text, a translation key (resolve via the i18n\n/// catalog), or a `{{ path }}` binding into the screen's resolved resolver data.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum PropValue {\n    Text(&'static str),\n    I18n(&'static str),\n    Binding(&'static str),\n}\n\n/// One renderable node of a screen tree.\n#[derive(Debug, Clone, Copy)]\npub struct Node {\n    pub kind: ComponentKind,\n    /// Dotted-path props flattened from the DSL (`empty_state.title`, `action.type`, …).\n    pub props: &'static [(&'static str, PropValue)],\n    pub children: &'static [Node],\n    /// Named branch child groups (#725): `conditional_section`'s `if_true`/`if_false`, verbatim\n    /// from the DSL. The renderer evaluates the node's `condition:` prop and renders EXACTLY ONE\n    /// group (unevaluatable → neither, fail closed); the condition-defect walk traverses all.\n    pub branches: &'static [(&'static str, &'static [Node])],\n}\n\n/// One bottom sheet of a surface (#94): the DSL `bottom_sheets` entry as a renderable tree — the\n/// renderer mounts every sheet HIDDEN into each of the surface's screens; `open_bottom_sheet`\n/// toggles them by id.\n#[derive(Debug, Clone, Copy)]\npub struct Sheet {\n    pub id: &'static str,\n    pub node: Node,\n}\n\n/// One screen of a surface.\n#[derive(Debug, Clone, Copy)]\npub struct Screen {\n    pub id: &'static str,\n    pub route: &'static str,\n    /// UserType tokens (scalars.yaml#/UserType) admitted to this screen.\n    pub roles: &'static [&'static str],\n    pub requires_auth: bool,\n    /// False = deliberately NOT SDUI-rendered (hand-written page); tree is empty.\n    pub sdui: bool,\n    pub data_requirements: &'static [ResolverKey],\n    /// The GENERATED skip table (#745, §25b): the subset of `data_requirements` PROVEN\n    /// structurally unfulfillable at paint time (a required query arg with no route-param, pin\n    /// or tenant-host source — each declared on the binding in the DSL). The paint loops skip\n    /// these BEFORE any network: the read would fail GraphQL validation on every paint and is\n    /// skipped by design, never counted as a degraded render.\n    pub skipped_reads: &'static [ResolverKey],\n    /// R1 (#639 part C step 2c-ii, PROP-20260831-180622 §5): the UserType token whose\n    /// `/{role}/graphql` path THIS screen's transports address, when the DSL declares\n    /// `graphql_role:`; `None` = the surface's own role (`Surface::role`, the default every\n    /// pre-R1 screen keeps byte-identically). Validator §26 proves every operation the screen\n    /// binds admits it, so a declared role can never be a role-refused transport.\n    pub graphql_role: Option<&'static str>,\n    /// The route a `requires_auth` screen bounces to when the surface has NO session\n    /// (`unauthenticated: { type: navigate, route }`, #639 2c-ii): the server 302s a\n    /// cookie-less document GET there, the client navigates there on a 401 from its role path.\n    /// `None` = the pre-2c-ii behaviour (customer surfaces: the auth sheet over the screen).\n    pub unauthenticated_route: Option<&'static str>,\n    /// The route a rider bounces to on a REFUSED read/Tell carrying `extensions.reason ==\n    /// RIDER_RESTRICTED` (`restricted: { type: navigate, route }`, #639 part C step 4-ii,\n    /// ADR-20260904-124600 §2) — the `unauthenticated:` twin, keyed on the server's own standing\n    /// signal instead of a missing session. `None` on every screen that declares no bounce (the\n    /// `/restricted` screen itself carries none — validator rule `screen-restricted-route-unknown`).\n    pub restricted_route: Option<&'static str>,\n    /// True on a screen a RESTRICTED rider may still reach without bouncing (`while_restricted:\n    /// true`, #639 4-ii): the `/restricted` screen itself. Validator rule\n    /// `screen-restricted-binds-uncarved-op` proves such a screen binds only `whileRestricted:`\n    /// operations for its role and never mounts `rider_topbar`.\n    pub while_restricted: bool,\n    pub tree: &'static [Node],\n}\n\nimpl Node {\n    /// The first value of a dotted prop path, if present.\n    pub fn prop(&self, key: &str) -> Option<PropValue> {\n        self.props.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)\n    }\n\n    /// The named branch child group (`if_true`/`if_false`), if this node carries it (#725).\n    pub fn branch(&self, name: &str) -> Option<&'static [Node]> {\n        self.branches.iter().find(|(n, _)| *n == name).map(|(_, c)| *c)\n    }\n}\n",
     );
 
     for sf in &surfaces {
@@ -1182,6 +1210,16 @@ pub(crate) fn emit_web_screens(model: &Model) -> String {
                 .and_then(|v| v.as_str())
                 .map(|r| format!("Some(\"{}\")", rust_str(r)))
                 .unwrap_or_else(|| "None".to_string());
+            // #639 part C step 4-ii (ADR-20260904-124600 §2): the `unauthenticated:` twin, keyed
+            // on the standing signal instead of the session one.
+            let restricted_route = s
+                .get("restricted")
+                .and_then(|u| u.get("route"))
+                .and_then(|v| v.as_str())
+                .map(|r| format!("Some(\"{}\")", rust_str(r)))
+                .unwrap_or_else(|| "None".to_string());
+            let while_restricted =
+                s.get("while_restricted").and_then(|v| v.as_bool()).unwrap_or(false);
             let roles: Vec<String> = s
                 .get("roles")
                 .and_then(|v| v.as_sequence())
@@ -1231,7 +1269,7 @@ pub(crate) fn emit_web_screens(model: &Model) -> String {
                 }
             };
             out.push_str(&format!(
-                "        Screen {{\n            id: \"{}\",\n            route: \"{}\",\n            roles: &[{}],\n            requires_auth: {},\n            sdui: {},\n            data_requirements: &[{}],\n            skipped_reads: &[{}],\n            graphql_role: {},\n            unauthenticated_route: {},\n            tree: {},\n        }},\n",
+                "        Screen {{\n            id: \"{}\",\n            route: \"{}\",\n            roles: &[{}],\n            requires_auth: {},\n            sdui: {},\n            data_requirements: &[{}],\n            skipped_reads: &[{}],\n            graphql_role: {},\n            unauthenticated_route: {},\n            restricted_route: {},\n            while_restricted: {},\n            tree: {},\n        }},\n",
                 rust_str(id),
                 rust_str(route),
                 roles_lit.join(", "),
@@ -1241,6 +1279,8 @@ pub(crate) fn emit_web_screens(model: &Model) -> String {
                 skipped.join(", "),
                 graphql_role,
                 unauthenticated_route,
+                restricted_route,
+                while_restricted,
                 tree
             ));
         }

@@ -1571,6 +1571,94 @@
     "en": "My deliveries",
     "fr": "Mes courses"
   },
+  "rider.restricted.contest.lead": {
+    "en": "You can contest this decision and ask for it to be reviewed by a person: ",
+    "fr": "Vous pouvez contester cette décision et demander son réexamen par une personne : "
+  },
+  "rider.restricted.contest.trail": {
+    "en": ".",
+    "fr": "."
+  },
+  "rider.restricted.decided_at_label": {
+    "en": "Decided on",
+    "fr": "Décidé le"
+  },
+  "rider.restricted.details_pending": {
+    "en": "Restriction details not yet available.",
+    "fr": "Détails de la restriction pas encore disponibles."
+  },
+  "rider.restricted.effective_at_label": {
+    "en": "Effective since",
+    "fr": "Effectif depuis"
+  },
+  "rider.restricted.ground.account_compromise.lead": {
+    "en": "Account security. We have reason to believe your account was used by someone else; access is restricted to protect you. Contact ",
+    "fr": "Sécurité du compte. Nous avons des raisons de penser que votre compte a été utilisé par un tiers ; l'accès est restreint pour vous protéger. Contactez "
+  },
+  "rider.restricted.ground.account_compromise.trail": {
+    "en": " to restore it.",
+    "fr": " pour le rétablir."
+  },
+  "rider.restricted.ground.eligibility_document_lapsed.lead": {
+    "en": "Expired document. A document required to deliver is no longer valid. Send a valid document to ",
+    "fr": "Justificatif expiré. Un document obligatoire pour livrer n'est plus valide. Transmettez un justificatif en cours de validité à "
+  },
+  "rider.restricted.ground.eligibility_document_lapsed.trail": {
+    "en": " to restore access.",
+    "fr": " pour rétablir l'accès."
+  },
+  "rider.restricted.ground.identity_mismatch.lead": {
+    "en": "Identity mismatch. The signed-in identity does not match the person verified at registration. Contact ",
+    "fr": "Identité non concordante. L'identité connectée ne correspond pas à la personne vérifiée à l'inscription. Contactez "
+  },
+  "rider.restricted.ground.identity_mismatch.trail": {
+    "en": " to clarify the situation.",
+    "fr": " pour clarifier la situation."
+  },
+  "rider.restricted.ground.rider_requested.lead": {
+    "en": "At your request. You asked for your access to be restricted. To restore it, write to ",
+    "fr": "À votre demande. Vous avez demandé la restriction de votre accès. Pour le rétablir, écrivez à "
+  },
+  "rider.restricted.ground.rider_requested.trail": {
+    "en": ".",
+    "fr": "."
+  },
+  "rider.restricted.ground.unrecognised.lead": {
+    "en": "Ground not recognised — contact ",
+    "fr": "Motif non reconnu — contactez "
+  },
+  "rider.restricted.ground.unrecognised.trail": {
+    "en": ".",
+    "fr": "."
+  },
+  "rider.restricted.ground_label": {
+    "en": "Ground",
+    "fr": "Motif"
+  },
+  "rider.restricted.held_after": {
+    "en": "Order handed back. The restaurant has been told.",
+    "fr": "Course rendue. Le restaurant est prévenu."
+  },
+  "rider.restricted.held_instruction": {
+    "en": "Take the order back to the restaurant.",
+    "fr": "Rapportez la commande au restaurant."
+  },
+  "rider.restricted.held_title": {
+    "en": "You still have an order",
+    "fr": "Vous avez encore une commande"
+  },
+  "rider.restricted.no_more_jobs": {
+    "en": "You will no longer receive deliveries.",
+    "fr": "Vous ne recevrez plus de courses."
+  },
+  "rider.restricted.reinstated": {
+    "en": "Your access has been restored.",
+    "fr": "Votre accès est rétabli."
+  },
+  "rider.restricted.title": {
+    "en": "Your access is restricted.",
+    "fr": "Votre accès est restreint."
+  },
   "rider.sign_in.body": {
     "en": "Enter your phone number. No password: you will receive a code by SMS.",
     "fr": "Entrez votre numéro de téléphone. Aucun mot de passe : vous recevrez un code par SMS."

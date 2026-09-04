@@ -891,6 +891,7 @@ type RiderStandingInfo {
   standing: RiderStanding!
   restriction: RiderRestrictionInfo
   heldDelivery: DeliveryJob
+  contestContact: EmailAddress
 }
 
 type DeliveryPartnerAvailability {

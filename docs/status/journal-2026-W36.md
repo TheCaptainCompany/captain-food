@@ -2,6 +2,85 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #639 part C step 4-ii ROUND 2 (PR #882, still draft): held-job facts fixed,
+> reinstated-rider false notice fixed, six one-liners, three addendum items.** Base
+> `ed4ca073` (matched). Picked up a partial uncommitted diff from a session lost to a container
+> restart mid-round; kept its item 1 work (both halves), redid/extended everything else.
+> **Item 1 (kept, extended slightly)**: `collect_screen_nav_selections` (`tools/codegen-rs/src/
+> emit/web.rs`) now splices a nav edge nested INSIDE a declared property (`heldDelivery.restaurant.
+> displayName` — `heldDelivery` is itself a declared `RiderStandingInfo` property, so the old
+> first-segment-only walk stopped there); a new `format_address` render filter (beside
+> `format_currency`/`format_datetime`) replaces every unfiltered `Address`-object binding on
+> `job_detail` and `restricted` that used to fall through to the Money-shaped formatter and render
+> "". Codegen test + render-test fixtures updated to the REAL `Address` shape. **Item 2 (new)**: the
+> WHOLE notice body, including the door's own `back_button_header`, is now one `conditional_section`
+> keyed on `standing.standing == 'RESTRICTED'` — the `if_false` branch renders
+> `rider.restricted.reinstated` ("Votre accès est rétabli.", ADR-081527 §7 verbatim) with one
+> `navigate: "/"` control. First attempt only gated the inner `page_header`/text/footer and left the
+> `back_button_header`'s title unconditional, which still said "Votre accès est restreint." for a
+> reinstated rider on the FIRST render test run — caught by the test's own positive assertion
+> (`!html.contains("restreint")`), fixed by moving the header inside both branches too. **Item 3
+> (new)**: `specs/observability.yaml#/rider-restriction` gains a comment declaring the client bounce
+> leg RESERVED (`rider.restricted.bounced`, the `sdui_degraded_render_total` convention, no OTel in
+> `web`) — comment only, `make validate`/`check-drift` unaffected. **One-liners**: both date LABELS
+> asserted (not just values, item 4); a native fixture for the second sheet's ASSIGNED arm asserting
+> the literal `NOT_COLLECTED` reaches `data-vars` (item 5); the `d-1` assertion sharpened to the
+> `data-vars` `deliveryJobId` payload (item 6) — both required matching the RENDERED (HTML-escaped,
+> `&quot;`) form, not the raw JSON string, caught by a first red on exactly that; a `[data-c="row"]`
+> flex CSS rule so the split legal sentence (three `<p data-c="text">` children) flows as one line
+> instead of stacking (item 7 — `row` already implied this for the chat compose bar, so this is a
+> general fix, not a special case); `specs/delivery/api.yaml` drops a stale line-number citation
+> (item 8); `make wasm` GREEN, 57s (item 9). **Addendum**: clippy widened to include
+> `captain-food-codegen` (item 11); a `router.rs` twin assertion that `restricted` itself declares
+> `unauthenticated: /sign-in` (item 12); `rider_standing_walk.rs` threads
+> `Some(EmailAddress("support@captain.food"))` through `ReadDeps` and asserts
+> `myStanding.contestContact` reaches the wire — every other fixture in the corpus passes `None`
+> (item 13). **Gates**: `cargo build --workspace` GREEN; `make validate` 0 errors; `make rust` GREEN
+> 95s (build+test(codegen 417)+validate+generate+link-check); DB-gated `make test-crates` GREEN
+> against an isolated `cf639r2ii` database (DB PRE-FLIGHT OK, empty skip receipt, 0 FAILED across
+> ~209 `test result: ok` blocks, incl. `the_restriction_walk_forbids_and_reopens_the_real_doors`
+> carrying the new `contestContact` assertion); `cargo clippy -p web -p server -p infrastructure -p
+> shared_types -p application -p captain-food-codegen --all-targets -D clippy::disallowed-methods -D
+> clippy::mistyped_literal_suffixes` exit 0; codegen test binary 417 passed; `make link-check` 8589
+> links, 0 broken; `make warning-baseline` run, diff clean (surface did not move). PR stays DRAFT,
+> `HOLD: human` unchanged. Full detail: hand-back at
+> `/tmp/.../handback-4ii-r2.md` per the dispatch.
+
+> **2026-09-04 — #639 part C step 4-ii landed (PR #882, draft, hand-back at green): the restricted
+> rider is told.** [ADR-20260904-124600](../adr/ADR-20260904-124600-the-restricted-rider-is-told-on-the-client-leg-first-keyed-on-the-server-s-own-reason-and-the-page-get-leg-rides-with-the-socket.md).
+> Executor tier: sonnet. Base `f00ceeec` (the empty claim commit) on `ec374f2e` == `origin/main` —
+> checked first, matched. **A.** `shared_types::RIDER_RESTRICTED` (the one crate both `server` and
+> `web` name directly); `StandingGuard` adds `extensions.reason` beside the unchanged `code:
+> FORBIDDEN`; `RoleGuard` adds nothing (asserted both ways, `graphql_acl.rs` +
+> `rider_restricted_is_refused_on_the_write_half.rs`). `crates/web/src/graphql.rs` parses
+> `extensions` into a typed `ErrorExtensions { code, reason }` once, at the transport boundary.
+> **B.** `restricted:`/`while_restricted:` screen keys (the `unauthenticated:` twin) +
+> `screen-restricted-route-unknown` / `screen-restricted-binds-uncarved-op` (the latter's "never
+> mounts `rider_topbar`" clause falls out of the SAME uncarved-op check — no second mechanism, since
+> the topbar's only action, `changeRiderStatus`, is never `whileRestricted:`). ONE pure
+> `bounce_after` (new `crates/web/src/bounce.rs`) decides the bounce for BOTH the hydrate loop's
+> refused reads and `interact.rs`'s refused Tells; the pre-existing 2c-ii 401 leg moved in and was
+> seen red for the first time through this function's own tests. **C.** The `/restricted` screen:
+> `standing.mine -> myStanding`, the notice (title/no-more-jobs UNCONDITIONAL; ground + both dates
+> gated on `standing.restriction != null`, the transient the OTHER branch of the SAME
+> `conditional_section` — no `&&` needed); the five ground leaves + the footer, each split at the
+> address into `.lead`/`{{ standing.contestContact }}`/`.trail` (the `contestContact` field is
+> additive on `RiderStandingInfo`, resolved once from `SUPPORT_CONTACT`, the 2c refusal-screen
+> precedent); `format_datetime` (Europe/Paris, `fr`, beside `format_currency`, `chrono`+`chrono-tz`
+> newly in `web`'s `Cargo.toml`); the held-job card + the second sheet
+> `rider_restricted_handback_sheet` bound to `standing.heldDelivery.*`; `held_by_rider` (#879's
+> item) replaces `for_rider(..).find(..)` in the `myStanding` resolver. **D.** Native render tests
+> (ground loop × both dates × contact × no raw ISO × no `rider_toggle_online`; the transient; the
+> held-job card + sheet dispatch), the bounce tests, the router twin, the DB-gated walk extended
+> (both dates non-null, `heldDelivery` via the new port, a SECOND restriction cycle proving
+> `handBackDelivery` reaches the business layer while RESTRICTED and `myStanding.heldDelivery`
+> narrows to null after). Seven mutants planted, red captured verbatim, reverted — see the hand-back
+> (`/tmp/.../handback-4ii.md` per the dispatch, and the PR body). **Card defects banked** (not
+> roster-width): the card's example M7 wording ("data-variables") names the wrong attribute
+> (`data-vars`); no `an_unknown_screen_key_is_refused`-shaped test exists for screens today (no
+> closed key-set schema on the screens loader — banked, not built). `HOLD: human` (a legal surface,
+> Tours-facing copy) — PR stays DRAFT; the coordinator reviews and merges.
+
 > **2026-09-04 — Step 4-ii (the restricted rider is told) decided by the team; the lower-tier trip
 > row is queued to the founder.** [ADR-20260904-124600](../adr/ADR-20260904-124600-the-restricted-rider-is-told-on-the-client-leg-first-keyed-on-the-server-s-own-reason-and-the-page-get-leg-rides-with-the-socket.md), full mob (13 lenses, a legal surface).
 > The register had already chosen both legs (ADR-20260904-081527 §11); the roster corrected the

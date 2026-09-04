@@ -18,6 +18,7 @@ use shared_types::HealthDto;
 
 pub mod actions;
 pub mod auth;
+pub mod bounce;
 pub mod checkout;
 pub mod condition;
 pub mod executor;

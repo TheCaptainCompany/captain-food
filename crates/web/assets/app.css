@@ -110,6 +110,15 @@ body {
 
 /* ── content ────────────────────────────────────────────────────────────── */
 [data-c="text"] { color: var(--color-text-secondary); }
+/* #882 round-2 item 7: `row` lays its children out HORIZONTALLY — the compose bar (text_input +
+   button) already relies on this; a legal sentence split across three `text` children (lead +
+   bound address + trail, ADR-20260904-124600 §4/§5 — never a hard-coded address in a translation
+   string) needs the SAME flow so it reads as one continuous line, wrapping like prose rather than
+   breaking one fragment per row (the default block `<p data-c="text">` stacking). `margin: 0` on
+   the text children removes the browser default `<p>` margin that would otherwise still gap them
+   apart inside the flex row. */
+[data-c="row"] { display: flex; flex-wrap: wrap; align-items: baseline; }
+[data-c="row"] > [data-c="text"] { margin: 0; }
 [data-c="cta_banner"], [data-c="cta_section"] {
   display: block;
   padding: var(--space-section-gap);

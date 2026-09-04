@@ -712,6 +712,14 @@ rider-restriction:
         - { key: "business.correlation_id", type: string, required: true }
 
   metrics:
+    # #882 round-2 item 3 (#639 part C step 4-ii): the CLIENT bounce leg (`crate::bounce`
+    # redirecting a refused read/Tell to the `restricted` screen, `crates/web/src/router.rs`
+    # `restricted_route`) is RESERVED, not yet emitted — no OTel in `web` (WASM), the same
+    # `sdui_degraded_render_total` convention as the `client_resolver_failed` /
+    # `client_condition_unparseable` legs above. When a beacon exists it joins the refused
+    # request by `correlation_id` and the event name is `rider.restricted.bounced` — step 5's
+    # problem (the document-GET bounce this same file already defers there), documented not
+    # fixed.
     # `operation` bounded by the closed `api-operation-key` set; NO `rider_id` label (the span
     # above, and its nested event, carry it — joinable by correlation_id).
     - { name: "rider_restricted_denied_total", type: counter, attributes: ["operation"] }

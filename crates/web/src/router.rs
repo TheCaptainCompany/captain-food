@@ -515,10 +515,29 @@ mod tests {
     fn gated_rider_screens_name_the_door_and_nothing_else_does() {
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/"), Some("/sign-in"));
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/jobs/o-1"), Some("/sign-in"));
+        // #882 R2 addendum item 12: the `restricted` screen ITSELF is `requires_auth: true` with
+        // `unauthenticated: { navigate: /sign-in }` — a signed-out rider bounced here (an
+        // impossible state in practice, but the door names it all the same) resolves the SAME way.
+        assert_eq!(unauthenticated_redirect("riders.captain.food", "/restricted"), Some("/sign-in"));
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/sign-in"), None);
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/nope"), None);
         assert_eq!(unauthenticated_redirect("chez-test.captain.food", "/orders"), None);
         assert_eq!(unauthenticated_redirect("restos.captain.food", "/"), None);
+    }
+
+    /// #639 part C step 4-ii (ADR-20260904-124600 §2): the `unauthenticated:` twin — the rider
+    /// app's gated screens name the STANDING door (`/restricted`), and the door itself carries no
+    /// `restricted:` of its own (M7's fence: `bounce_after` reads THIS field, never a hand-typed
+    /// `"/restricted"` string in Rust — a hand-typed literal would still make this pass, which is
+    /// exactly what `crate::bounce::tests` proves independently by reading `screen.restricted_route`
+    /// through the SAME generated field this test reads).
+    #[test]
+    fn gated_rider_screens_name_the_restricted_route_and_the_target_does_not() {
+        let restricted_route_of = |path: &str| match_route(Surface::Rider, path).map(|m| m.screen.restricted_route);
+        assert_eq!(restricted_route_of("/"), Some(Some("/restricted")));
+        assert_eq!(restricted_route_of("/jobs/o-1"), Some(Some("/restricted")));
+        assert_eq!(restricted_route_of("/restricted"), Some(None), "the door itself declares no restricted: of its own");
+        assert_eq!(restricted_route_of("/sign-in"), Some(None), "the sign-in door is PUBLIC — nothing to restrict");
     }
 
     #[test]
@@ -608,9 +627,10 @@ mod tests {
         // and DEGRADES to a shell when the answer is a refusal. Today's SSR transport is
         // anonymous/PUBLIC, so this is what production sees: one role-guard rejection, and the
         // client owns the data — byte-identical output to the old unconditional skip.
-        let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Errors(
-            "Unauthorized: orders requires CUSTOMER".into(),
-        ))]);
+        let fake = FakeTransport::scripted(vec![Err(crate::graphql::TransportError::Errors {
+            message: "Unauthorized: orders requires CUSTOMER".into(),
+            extensions: vec![],
+        })]);
         let html = render_path_with(&fake, "chez-marco.captain.food", "/orders", "fr", None)
             .await
             .expect("order history renders").html;

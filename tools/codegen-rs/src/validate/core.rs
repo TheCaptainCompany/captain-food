@@ -2065,6 +2065,10 @@ pub(crate) fn validate(model: &Model) -> Report {
                     // ratcheted warning. Plus the `unauthenticated:` bounce target.
                     if let Some(doc) = cs {
                         check_screen_roles(model, &mut issues, sfkey, &sid, s, doc, &user_type_set);
+                        // #639 part C step 4-ii (ADR-20260904-124600 §2): the `restricted:` bounce
+                        // target + the `while_restricted: true` carve-out proof — the
+                        // `unauthenticated:` twin, keyed on standing instead of session.
+                        check_screen_restricted(model, &mut issues, sfkey, &sid, s, doc);
                     }
                     // `status_config` keys ⇔ scalars.yaml#/OrderStatus, both ways (#167,
                     // ADR-0032-style bidirectional completeness). The defect class this kills

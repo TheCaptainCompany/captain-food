@@ -125,6 +125,8 @@ impl RenderContext {
         let value = self.lookup(path);
         match (value, filter) {
             (Some(v), Some("format_currency")) => format_currency(v),
+            (Some(v), Some("format_datetime")) => format_datetime(v),
+            (Some(v), Some("format_address")) => format_address(v),
             (Some(Value::String(s)), _) => s.clone(),
             (Some(Value::Number(n)), _) => n.to_string(),
             (Some(Value::Bool(b)), _) => b.to_string(),
@@ -379,6 +381,56 @@ pub(crate) fn format_currency(v: &Value) -> String {
         return String::new();
     };
     format!("{},{:02} {}", cents / 100, (cents % 100).abs(), cur)
+}
+
+/// The French month abbreviations Europe/Paris display uses (`format_datetime`) — three/four-letter
+/// forms with the trailing period France actually prints, `mars`/`mai`/`juin`/`août` excepted (no
+/// abbreviation shorter than the full word).
+const FR_MONTHS: [&str; 12] = [
+    "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.",
+];
+
+/// `| format_datetime` (#639 part C step 4-ii, ADR-20260904-124600 §4): a UTC instant string
+/// (`decidedAt`/`effectiveAt`) rendered Europe/Paris, `fr` — e.g. "4 sept. 2026, 14:02". The event
+/// and the read model keep the UTC instant; this is presentation-only, beside `format_currency` —
+/// the SECOND filter this catalog has ever needed. Unparseable/absent input renders "" (a binding
+/// is a data slot, not an error) — never a raw ISO string leaking through.
+pub(crate) fn format_datetime(v: &Value) -> String {
+    use chrono::{DateTime, Datelike, Timelike};
+    let Some(s) = v.as_str() else { return String::new() };
+    let Ok(dt) = DateTime::parse_from_rfc3339(s) else { return String::new() };
+    let paris = dt.with_timezone(&chrono_tz::Europe::Paris);
+    let month = FR_MONTHS[paris.month0() as usize];
+    format!("{} {} {}, {:02}:{:02}", paris.day(), month, paris.year(), paris.hour(), paris.minute())
+}
+
+/// `| format_address` (#639 part C step 4-ii round 2, ADR-20260904-124600 §5): an `Address`
+/// object (`line1`[, `line2`], `postalCode`, `city`) rendered as ONE display line — "12 rue de la
+/// Paix, 37000 Tours". `line2` is appended only when present (most France addresses carry none);
+/// `country` is never shown (V0 is Tours-only, ADR-0004). Missing `line1` renders "" — a binding
+/// is a data slot, not an error — never a bare object falling through to `format_currency`'s
+/// Money-shaped read (the exact defect this filter closes, round-2 item 1b: an `Address` object
+/// bound with no filter used to route there and silently render "").
+pub(crate) fn format_address(v: &Value) -> String {
+    let Some(line1) = v.get("line1").and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    let mut out = line1.to_string();
+    if let Some(line2) = v.get("line2").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        out.push_str(", ");
+        out.push_str(line2);
+    }
+    let postal = v.get("postalCode").and_then(Value::as_str).unwrap_or_default();
+    let city = v.get("city").and_then(Value::as_str).unwrap_or_default();
+    if !postal.is_empty() || !city.is_empty() {
+        out.push_str(", ");
+        out.push_str(postal);
+        if !postal.is_empty() && !city.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(city);
+    }
+    out
 }
 
 /// Resolve any prop value to display text.
@@ -1497,15 +1549,18 @@ pub fn hydrate() {
     let transport = crate::graphql::HttpTransport::new(&origin, role, session);
 
     // The interaction layer (#93): delegated button dispatch + push socket + boot pending-resume.
-    crate::interact::install(&origin, role, session);
+    // `screen` (#639 4-ii): the bounce decision on a refused Tell needs the SAME screen's declared
+    // routes the hydrate loop above reads.
+    crate::interact::install(&origin, role, session, screen);
 
     let sheets = surface.sheets();
     wasm_bindgen_futures::spawn_local(async move {
         let mut ctx = RenderContext::new(&locale);
-        // #639 2c-ii: a 401 from this screen's role path is the POSITIVE "no session" signal — a
-        // staff path refuses an anonymous caller before any guard runs — so a gated screen that
-        // declares a door navigates there instead of painting a shell over a refused read.
-        let mut unauthorized = false;
+        // #639 part C step 4-ii (ADR-20260904-124600 §2): the bounce decision is now the ONE
+        // function `crate::bounce::bounce_after` — a 401 (no session, the 2c-ii leg) or a refused
+        // read carrying `extensions.reason == RIDER_RESTRICTED` both resolve through it; the first
+        // read that answers either signal decides where this screen sends its visitor.
+        let mut bounce_route: Option<&'static str> = None;
         for resolver in screen.data_requirements {
             // #745: the generated §25b skip table — a structurally unfulfillable read (required
             // arg, no paint-time source, declared on the binding) is skipped before any network
@@ -1524,11 +1579,10 @@ pub fn hydrate() {
             // (The client degradation legs are RESERVED in the observability contract — no
             // OTel in WASM, so nothing is emitted here.)
             let result = crate::graphql::execute_resolver(&transport, *resolver, vars).await;
-            if matches!(
-                result,
-                Err(crate::graphql::ResolverError::Transport(crate::graphql::TransportError::Status { status: 401 }))
-            ) {
-                unauthorized = true;
+            if bounce_route.is_none() {
+                if let Err(crate::graphql::ResolverError::Transport(t)) = &result {
+                    bounce_route = crate::bounce::bounce_after(t, screen);
+                }
             }
             match crate::graphql::classify_resolve(role, *resolver, result) {
                 crate::graphql::ResolveOutcome::Resolved(value) => {
@@ -1540,6 +1594,18 @@ pub fn hydrate() {
         }
         leptos::mount::mount_to_body(move || SduiScreen(SduiScreenProps { screen, sheets, ctx }));
 
+        // The declared bounce first (#639 2c-ii, extended 4-ii): a refused read whose signal names
+        // a door sends the visitor there instead of painting a shell over it — the server already
+        // 302s a cookie-less GET, this is the leg for a cookie that no longer verifies OR a
+        // standing that flipped since the last paint. A visitor whose reads answered has neither
+        // signal and stays.
+        if let Some(route) = bounce_route {
+            if let Some(w) = web_sys::window() {
+                let _ = w.location().set_href(route);
+            }
+            return;
+        }
+
         // The requires_auth guard (#92, client-side): auth state lives ONLY in the browser (no
         // auth cookie exists yet — the server-side 302 is the recorded follow-up), and today no
         // token store exists at all, so every visitor is anonymous. Customer surfaces open the
@@ -1547,16 +1613,6 @@ pub fn hydrate() {
         // ADR-20260722-174500); a staff surface without one bounces to its root, where the
         // role-pathed GraphQL enforces the real gate.
         if screen.requires_auth {
-            // The declared door first (#639 2c-ii): a surface that names one sends the
-            // unauthenticated visitor there — the server already 302s a cookie-less GET, this is
-            // the leg for a cookie that no longer verifies. A visitor whose reads answered has a
-            // session and stays.
-            if let (true, Some(route)) = (unauthorized, screen.unauthenticated_route) {
-                if let Some(w) = web_sys::window() {
-                    let _ = w.location().set_href(route);
-                }
-                return;
-            }
             let opened = web_sys::window()
                 .and_then(|w| w.document())
                 .and_then(|d| d.query_selector("[data-sheet-id=\"auth_sheet\"]").ok().flatten())
@@ -1683,8 +1739,11 @@ mod tests {
             json!({
                 "id": "d-1",
                 "status": status,
-                "pickupAddress": "12 rue de la Paix",
-                "dropoffAddress": "4 avenue Foch",
+                // The REAL shape (#882 R2 item 1b) — `Address`, not a bare string; an unfiltered
+                // binding used to fall through to `format_currency`'s Money-shaped read and
+                // silently render "", and a plain-string fixture masked exactly that.
+                "pickupAddress": { "line1": "12 rue de la Paix", "postalCode": "37000", "city": "Tours" },
+                "dropoffAddress": { "line1": "4 avenue Foch", "postalCode": "37000", "city": "Tours" },
                 "foodLocation": null,
                 "openIssue": null,
                 "restaurant": { "displayName": "Chez Test" },
@@ -1705,6 +1764,10 @@ mod tests {
             !html.contains("data-chip-group=\"handback_location\""),
             "ASSIGNED: food cards must be absent (derived, never asked) -- {html}"
         );
+        // #882 R2 item 1b: `pickupAddress`/`dropoffAddress` are `Address` objects, formatted via
+        // `| format_address` — never a raw `[object Object]`-shaped fall-through.
+        assert!(html.contains("12 rue de la Paix, 37000 Tours"), "pickup address must format: {html}");
+        assert!(html.contains("4 avenue Foch, 37000 Tours"), "dropoff address must format: {html}");
 
         // PICKED_UP — collected: the food cards ask WITH_RIDER vs RETURNED_TO_RESTAURANT.
         let mut c2 = ctx();
@@ -1712,6 +1775,218 @@ mod tests {
         let html2 = render_screen_html(screen, Surface::Rider.sheets(), c2);
         assert!(html2.contains("data-chip-group=\"handback_location\""), "PICKED_UP: food cards missing -- {html2}");
         assert!(html2.contains("data-action=\"hand_back_delivery\""), "handback sheet: confirm missing on PICKED_UP -- {html2}");
+    }
+
+    /// #639 part C step 4-ii (ADR-20260904-124600 §4): a `standing.mine` fixture per ground, `fr`
+    /// locale — every ground's own sentence, BOTH formatted dates (never a raw ISO instant), the
+    /// contact address, "contester" in the footer, no `rider_toggle_online` control (no
+    /// `rider_topbar`) anywhere on this screen.
+    #[test]
+    fn the_restricted_notice_shows_both_dates_and_the_contact_for_every_ground_and_the_catch_all() {
+        let screen = Surface::Rider.screens().iter().find(|s| s.id == "restricted").unwrap();
+        let standing = |ground: Option<&str>| {
+            json!({
+                "standing": "RESTRICTED",
+                "restriction": { "ground": ground, "decidedAt": "2026-09-04T14:02:00Z", "effectiveAt": "2026-09-04T14:02:00Z" },
+                "heldDelivery": null,
+                "contestContact": "support@captain.food",
+            })
+        };
+        for (ground, fr_fragment) in [
+            (Some("RIDER_REQUESTED"), "À votre demande"),
+            (Some("ELIGIBILITY_DOCUMENT_LAPSED"), "Justificatif expiré"),
+            (Some("IDENTITY_MISMATCH"), "Identité non concordante"),
+            (Some("ACCOUNT_COMPROMISE"), "Sécurité du compte"),
+            (None, "Motif non reconnu"),
+        ] {
+            let mut c = RenderContext::new("fr");
+            c.insert_resolved("standing.mine", standing(ground));
+            let html = render_screen_html(screen, Surface::Rider.sheets(), c);
+            assert!(html.contains(fr_fragment), "ground {ground:?}: missing '{fr_fragment}' -- {html}");
+            // Both dates, formatted (never a raw ISO instant leaking through) — "4 sept. 2026" for
+            // both decidedAt and effectiveAt (equal in V0, both shown per ADR-081527 §5). 14:02Z
+            // is 16:02 Europe/Paris in September (CEST, UTC+2) — the conversion IS the assertion.
+            assert_eq!(html.matches("4 sept. 2026, 16:02").count(), 2, "both dates must render, converted to Europe/Paris: {html}");
+            assert!(!html.contains("2026-09-04T14:02:00Z"), "no raw ISO instant may leak through: {html}");
+            // #882 R2 item 4: both LABELS, not merely both VALUES — a label dropped from either
+            // `info_row` would still pass a bare value-only assertion.
+            assert!(html.contains("Décidé le"), "the decided-at label must render: {html}");
+            assert!(html.contains("Effectif depuis"), "the effective-at label must render: {html}");
+            // The contact renders TWICE — once inside the ground sentence, once in the footer —
+            // so a contact dropped from EITHER branch is caught (a bare `contains` would still
+            // pass with only one of the two, M6's exact trap).
+            assert_eq!(html.matches("support@captain.food").count(), 2, "the contact must render in both the ground sentence and the footer: {html}");
+            assert!(html.contains("contester"), "the footer's contest sentence must render: {html}");
+            assert!(!html.contains("data-action=\"rider_toggle_online\""), "no rider_topbar on the restricted screen: {html}");
+            // #882 R2 item 7: the split legal sentence (lead + bound address + trail, three
+            // `<p data-c="text">` children of ONE `<div data-c="row">`) must read as ONE
+            // continuous line, never one fragment per visual row — the inlined `app.css` (SSR'd
+            // in the SAME document, `renderer.rs:1469-1471`) must carry the flex rule that makes
+            // it flow.
+            assert!(
+                html.contains("[data-c=\"row\"] { display: flex; flex-wrap: wrap;"),
+                "the row must lay its text fragments out horizontally, not one per line: {html}"
+            );
+        }
+    }
+
+    /// The transient row (`standing.restriction == null`, the documented one-tick lag between the
+    /// `Rider.standing` and `RiderRestriction` checkpoints, ADR-20260904-081527 §4/§9) never
+    /// renders blank: the sentence AND the (unconditional) contact both show.
+    #[test]
+    fn the_details_pending_transient_never_renders_blank() {
+        let screen = Surface::Rider.screens().iter().find(|s| s.id == "restricted").unwrap();
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "standing.mine",
+            json!({ "standing": "RESTRICTED", "restriction": null, "heldDelivery": null, "contestContact": "support@captain.food" }),
+        );
+        let html = render_screen_html(screen, Surface::Rider.sheets(), c);
+        assert!(html.contains("Détails de la restriction pas encore disponibles"), "{html}");
+        assert!(html.contains("support@captain.food"), "the contact stays unconditional: {html}");
+        // Never the ground/date rows (the OTHER branch of the same conditional_section).
+        assert!(!html.contains("Décidé le"), "the transient must not show the resolved attribution: {html}");
+    }
+
+    /// The held-job card + its second sheet: the ONE control opens `rider_restricted_handback_sheet`
+    /// and dispatches `hand_back_delivery` carrying the held job's id — bound to
+    /// `standing.heldDelivery.*`, never `myStanding.*` / `delivery.*` (the card-defect ADR banked:
+    /// no screen-level alias grammar exists). Absent held job: neither the card nor its control.
+    /// `foodLocation` set: the after-state text, no control.
+    #[test]
+    fn the_held_job_card_and_its_sheet_dispatch_hand_back_delivery() {
+        let screen = Surface::Rider.screens().iter().find(|s| s.id == "restricted").unwrap();
+        let standing_with = |held: Value| {
+            json!({
+                "standing": "RESTRICTED",
+                "restriction": { "ground": "RIDER_REQUESTED", "decidedAt": "2026-09-04T14:02:00Z", "effectiveAt": "2026-09-04T14:02:00Z" },
+                "heldDelivery": held,
+                "contestContact": "support@captain.food",
+            })
+        };
+
+        // Held, still with the rider (foodLocation null): the control + the sheet's dispatch.
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "standing.mine",
+            standing_with(json!({
+                "id": "d-1", "status": "PICKED_UP", "foodLocation": null,
+                // The REAL shape (#882 R2 item 1b) — `Address`, not a bare string.
+                "pickupAddress": { "line1": "12 rue de la Paix", "postalCode": "37000", "city": "Tours" },
+                "restaurant": { "displayName": "Chez Test" },
+            })),
+        );
+        let html = render_screen_html(screen, Surface::Rider.sheets(), c);
+        assert!(html.contains("Vous avez encore une commande"), "{html}");
+        assert!(html.contains("data-sheet=\"rider_restricted_handback_sheet\""), "{html}");
+        assert!(html.contains("data-action=\"hand_back_delivery\""), "{html}");
+        // #882 R2 item 6: sharpened from a bare `contains("d-1")` (which would also match a
+        // mis-bound `delivery.id` fixture, M3's exact trap) to the `data-vars` PAYLOAD carrying
+        // the held job's id under its own key.
+        assert!(
+            html.contains("&quot;deliveryJobId&quot;:&quot;d-1&quot;"),
+            "the sheet's data-vars must carry the held job's id: {html}"
+        );
+        assert!(html.contains("Chez Test"), "the restaurant name (FK nav edge): {html}");
+        assert!(html.contains("12 rue de la Paix, 37000 Tours"), "the formatted pickup address: {html}");
+
+        // #882 R2 item 5: the SECOND sheet's ASSIGNED arm asks the rider nothing about the food —
+        // `foodLocation` is the literal `NOT_COLLECTED` (ADR-20260904-015903 §2), never a chip
+        // read, and it must actually reach `data-vars`, not merely the button's `visible_when`.
+        let mut c_assigned = RenderContext::new("fr");
+        c_assigned.insert_resolved(
+            "standing.mine",
+            standing_with(json!({
+                "id": "d-1", "status": "ASSIGNED", "foodLocation": null,
+                "pickupAddress": { "line1": "12 rue de la Paix", "postalCode": "37000", "city": "Tours" },
+                "restaurant": { "displayName": "Chez Test" },
+            })),
+        );
+        let html_assigned = render_screen_html(screen, Surface::Rider.sheets(), c_assigned);
+        assert!(html_assigned.contains("data-action=\"hand_back_delivery\""), "{html_assigned}");
+        assert!(
+            html_assigned.contains("&quot;foodLocation&quot;:&quot;NOT_COLLECTED&quot;"),
+            "the ASSIGNED arm's data-vars must carry the literal NOT_COLLECTED: {html_assigned}"
+        );
+        assert!(
+            html_assigned.contains("&quot;deliveryJobId&quot;:&quot;d-1&quot;"),
+            "the ASSIGNED arm's data-vars must also carry the held job's id: {html_assigned}"
+        );
+
+        // No held job: neither the card nor the control.
+        let mut c2 = RenderContext::new("fr");
+        c2.insert_resolved("standing.mine", standing_with(Value::Null));
+        let html2 = render_screen_html(screen, Surface::Rider.sheets(), c2);
+        assert!(!html2.contains("Vous avez encore une commande"), "{html2}");
+
+        // Handed back (foodLocation set): the after-state, no control ever live on a job this
+        // rider no longer holds.
+        let mut c3 = RenderContext::new("fr");
+        c3.insert_resolved(
+            "standing.mine",
+            standing_with(json!({
+                "id": "d-1", "status": "PICKED_UP", "foodLocation": "RETURNED_TO_RESTAURANT",
+                "pickupAddress": { "line1": "12 rue de la Paix", "postalCode": "37000", "city": "Tours" },
+                "restaurant": { "displayName": "Chez Test" },
+            })),
+        );
+        let html3 = render_screen_html(screen, Surface::Rider.sheets(), c3);
+        assert!(html3.contains("Course rendue. Le restaurant est prévenu."), "{html3}");
+        assert!(
+            !html3.contains("Rapportez la commande au restaurant."),
+            "the instruction must not show once handed back: {html3}"
+        );
+        // The control button itself must be gone (`data-sheet="…"` on the BUTTON — distinct from
+        // the sheet's own always-mounted `data-sheet-id="…"`): no control is ever live on a job
+        // this rider no longer holds.
+        assert!(
+            !html3.contains("data-sheet=\"rider_restricted_handback_sheet\""),
+            "the control must not render once handed back: {html3}"
+        );
+    }
+
+    /// #882 round-2 item 2 (ADR-20260904-081527 §7, verbatim): a reinstated (ACTIVE) rider who
+    /// lands on `/restricted` (back-navigation, a stale `$reload` after `ReinstateRider`) must
+    /// NEVER read the restricted notice — the whole notice body is gated on the rider's OWN
+    /// current standing, and the else branch is the reinstated sentence + the one control back to
+    /// the job list. M2's exact trap: a wrong-root `visible_when` fails CLOSED (neither branch
+    /// renders), which this test's negative assertions alone would not catch — the POSITIVE
+    /// assertion on the reinstated sentence is what proves the if_false branch actually fired.
+    #[test]
+    fn a_reinstated_rider_on_restricted_reads_the_restored_sentence_not_the_notice() {
+        let screen = Surface::Rider.screens().iter().find(|s| s.id == "restricted").unwrap();
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "standing.mine",
+            json!({
+                "standing": "ACTIVE",
+                "restriction": null,
+                "heldDelivery": null,
+                "contestContact": "support@captain.food",
+            }),
+        );
+        let html = render_screen_html(screen, Surface::Rider.sheets(), c);
+        assert!(!html.contains("restreint"), "an ACTIVE rider must never read the restricted copy: {html}");
+        assert!(!html.contains("Vous ne recevrez plus de courses."), "{html}");
+        assert!(html.contains("Votre accès est rétabli."), "the reinstated sentence must render, verbatim: {html}");
+        assert!(html.contains("data-route=\"/\""), "the control must navigate to \"/\": {html}");
+        assert!(html.contains("Retour aux courses"), "the control reuses the back-to-jobs label: {html}");
+
+        // The RESTRICTED tests above are unchanged: re-confirm a RESTRICTED standing never shows
+        // the reinstated sentence.
+        let mut c2 = RenderContext::new("fr");
+        c2.insert_resolved(
+            "standing.mine",
+            json!({
+                "standing": "RESTRICTED",
+                "restriction": { "ground": "RIDER_REQUESTED", "decidedAt": "2026-09-04T14:02:00Z", "effectiveAt": "2026-09-04T14:02:00Z" },
+                "heldDelivery": null,
+                "contestContact": "support@captain.food",
+            }),
+        );
+        let html2 = render_screen_html(screen, Surface::Rider.sheets(), c2);
+        assert!(!html2.contains("Votre accès est rétabli."), "{html2}");
+        assert!(html2.contains("Vous ne recevrez plus de courses."), "{html2}");
     }
 
     /// #167 (PR #586 ux STOP): the timed-out treatment is a PER-CARD render, never an

@@ -83,6 +83,18 @@ impl Role {
     }
 }
 
+/// One GraphQL error's `extensions`, typed (#639 part C step 4-ii, ADR-20260904-124600 §1): `code`
+/// (the guard's literal, e.g. `FORBIDDEN`) and `reason` (`StandingGuard`'s ADDITIVE discriminator,
+/// `shared_types::RIDER_RESTRICTED` — absent on a bare `RoleGuard` rejection or a business
+/// rejection's typed `context`). Parsed ONCE at the transport boundary (`HttpTransport::execute`)
+/// so the bounce decision (`crate::bounce`) never re-stringifies the `errors` array to classify a
+/// refusal — the exact thing the pre-4-ii transport did (`errors.to_string()`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ErrorExtensions {
+    pub code: Option<String>,
+    pub reason: Option<String>,
+}
+
 /// What can go wrong BELOW the resolver layer — network, HTTP, or the GraphQL envelope itself.
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
@@ -95,8 +107,10 @@ pub enum TransportError {
     /// The server executed and answered with GraphQL `errors`. NOTE: business rejections are NOT
     /// here (acceptance-first, ADR-20260720-015500) — they surface as `operationStatus` REJECTED.
     /// Anything in `errors` is a contract-level failure (validation, authz, malformed document).
-    #[error("GraphQL errors: {0}")]
-    Errors(String),
+    /// `message` keeps the raw array's text for DISPLAY (unchanged); `extensions` is the TYPED
+    /// per-error `extensions` object (#639 4-ii) the bounce decision classifies on.
+    #[error("GraphQL errors: {message}")]
+    Errors { message: String, extensions: Vec<ErrorExtensions> },
     /// A 2xx response whose body is not the GraphQL envelope we expect.
     #[error("malformed GraphQL response: {0}")]
     Malformed(String),
@@ -182,7 +196,27 @@ impl Transport for HttpTransport {
         // acceptance-first contract leaves nothing business-meaningful in `errors`, so any error
         // is treated as a failure of the whole read — no partial-data heroics.
         if let Some(errors) = body.get("errors").filter(|e| e.as_array().is_some_and(|a| !a.is_empty())) {
-            return Err(TransportError::Errors(errors.to_string()));
+            // #639 4-ii (ADR-20260904-124600 §1): parse `extensions` into the typed shape HERE —
+            // the ONE place the raw JSON array exists — so no caller re-stringifies it to classify
+            // a refusal ever again.
+            let extensions = errors
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|e| ErrorExtensions {
+                    code: e
+                        .get("extensions")
+                        .and_then(|x| x.get("code"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    reason: e
+                        .get("extensions")
+                        .and_then(|x| x.get("reason"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                })
+                .collect();
+            return Err(TransportError::Errors { message: errors.to_string(), extensions });
         }
         match body.get("data") {
             Some(data) if !data.is_null() => Ok(data.clone()),
@@ -524,7 +558,10 @@ mod tests {
     fn classification_is_decided_by_roles_not_by_the_error_variant() {
         use crate::generated::data_layer::ResolverKey;
         let network = || TransportError::Network("connection reset by peer".into()).into();
-        let auth_errors = || TransportError::Errors("Unauthorized: not for you".into()).into();
+        let auth_errors = || {
+            TransportError::Errors { message: "Unauthorized: not for you".into(), extensions: vec![] }
+                .into()
+        };
 
         // orders.byRestaurant admits [CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, ADMIN] — never
         // PUBLIC — so on the anonymous path EVERY error variant is a skip by design.

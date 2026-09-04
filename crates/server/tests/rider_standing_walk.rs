@@ -33,7 +33,7 @@ use application::queries::{
     PricingPolicyReadRepository, ProspectionReadRepository, ReadScope, RefundReadRepository,
     RestaurantReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
-use domain::generated::scalars::{RiderId, RiderStanding};
+use domain::generated::scalars::{EmailAddress, RiderId, RiderStanding};
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedIdentityService, FailClosedPaymentGateway,
     PgCartRepository, PgCatalogRepository, PgCustomerRepository, PgDeliveryRepository,
@@ -213,6 +213,10 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             customer_credit,
             mailbox_lanes,
             service_window_horizon: Default::default(),
+            // #882 R2 addendum item 13: every OTHER fixture in the corpus threads `None` here —
+            // this is the ONE walk that actually reads `myStanding.contestContact` back, so it is
+            // the walk that must prove the configured value reaches the wire.
+            support_contact: Some(EmailAddress("support@captain.food".to_string())),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,
@@ -443,7 +447,10 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     assert_eq!(data["delivery"]["status"], "ASSIGNED", "the held job stays visible: {data:?}");
 
     // 9) myStanding as the restricted rider: standing + attribution + the held job, one query.
-    let my_standing = "query { myStanding { standing restriction { ground } heldDelivery { id status } } }";
+    // #639 part C step 4-ii (ADR-20260904-124600 §4/§5, card D): both dates non-null (the notice
+    // shows BOTH even though V0 stamps them equal, ADR-081527 §5) and `heldDelivery` answers
+    // through the NEW `held_by_rider` port (#879).
+    let my_standing = "query { myStanding { standing restriction { ground decidedAt effectiveAt } heldDelivery { id status } contestContact } }";
     let resp = schema
         .execute(async_graphql::Request::new(my_standing).data(acting(RequestRole::Rider)).data(restricted.clone()))
         .await;
@@ -451,8 +458,14 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     let data = resp.data.into_json().expect("json");
     assert_eq!(data["myStanding"]["standing"], "RESTRICTED");
     assert_eq!(data["myStanding"]["restriction"]["ground"], "RIDER_REQUESTED");
+    assert_ne!(data["myStanding"]["restriction"]["decidedAt"], serde_json::Value::Null, "decidedAt must be folded: {data:?}");
+    assert_ne!(data["myStanding"]["restriction"]["effectiveAt"], serde_json::Value::Null, "effectiveAt must be folded: {data:?}");
     assert_eq!(data["myStanding"]["heldDelivery"]["status"], "ASSIGNED");
     assert_eq!(data["myStanding"]["heldDelivery"]["id"], job_id.to_string());
+    // #882 R2 addendum item 13: `support_contact` threaded `Some(..)` through `ReadDeps` above —
+    // every other fixture in the corpus passes `None`, which never proves the binding reaches
+    // `myStanding.contestContact` at all.
+    assert_eq!(data["myStanding"]["contestContact"], "support@captain.food", "the configured SUPPORT_CONTACT must reach the wire: {data:?}");
 
     // 10) reinstateRider as ADMIN.
     let reinstate = format!(r#"mutation {{ reinstateRider(input: {{ riderId: "{rider_id}" }}) {{ messageId operationStatus }} }}"#);
@@ -491,4 +504,54 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
     assert_eq!(op["status"], "REJECTED", "acceptDelivery (reinstated) operation: {op:?}");
     assert_eq!(op["errorCode"], "DeliveryAlreadyAssigned", "the business layer's own, unrelated rejection: {op:?}");
+
+    // 12) A SECOND restriction cycle (ADR-20260904-081527 §2: "a second ground needs a
+    //     reinstatement first" — this rider WAS reinstated in step 10, so restricting again is a
+    //     valid lifecycle transition) proves the held-job custody carve-out end to end: the job
+    //     this walk has held throughout is STILL `ASSIGNED` to this rider (every mutation on it
+    //     above was either refused synchronously by the guard or REJECTED business-side — never
+    //     released), so a fresh restriction sees it held again.
+    let restrict2 = format!(
+        r#"mutation {{ restrictRider(input: {{ riderId: "{rider_id}", ground: IDENTITY_MISMATCH }}) {{ messageId operationStatus }} }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(restrict2).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "restrictRider (second cycle) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let message_id = data["restrictRider"]["messageId"].as_str().unwrap().to_string();
+    let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
+    assert_eq!(op["status"], "SUCCEEDED", "restrictRider (second cycle) operation: {op:?}");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restrict 2)");
+
+    let restricted2 = ReadScope::Rider { id: RiderId(rider_id), standing: RiderStanding::RESTRICTED };
+
+    // 13) handBackDelivery as the (again) restricted rider — restriction of ACCESS is not
+    //     release of CUSTODY (ADR-20260904-081527 §4/§7): the carve-out (`whileRestricted:
+    //     [RIDER]`) reaches the business layer, never a synchronous FORBIDDEN.
+    let hand_back = format!(
+        r#"mutation {{ handBackDelivery(input: {{ deliveryJobId: "{job_id}", foodLocation: NOT_COLLECTED }}) {{ messageId operationStatus }} }}"#
+    );
+    let resp = schema
+        .execute(async_graphql::Request::new(hand_back).data(acting(RequestRole::Rider)).data(restricted2.clone()))
+        .await;
+    assert!(resp.errors.is_empty(), "handBackDelivery (RESTRICTED) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["handBackDelivery"]["operationStatus"], "PENDING", "the carve-out reaches the business layer: {data:?}");
+    let message_id = data["handBackDelivery"]["messageId"].as_str().unwrap().to_string();
+    let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
+    assert_eq!(op["status"], "SUCCEEDED", "handBackDelivery (RESTRICTED) operation: {op:?}");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (handback)");
+
+    // 14) myStanding.heldDelivery == null (card D, #879): `held_by_rider` narrows on status
+    //     (ASSIGNED/PICKED_UP/OUT_FOR_DELIVERY) and the handback moved this job out of all three.
+    let my_standing_after_handback = "query { myStanding { heldDelivery { id } } }";
+    let resp = schema
+        .execute(async_graphql::Request::new(my_standing_after_handback).data(acting(RequestRole::Rider)).data(restricted2))
+        .await;
+    assert!(resp.errors.is_empty(), "myStanding (post-handback) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(
+        data["myStanding"]["heldDelivery"],
+        serde_json::Value::Null,
+        "held_by_rider must narrow to nothing once handed back: {data:?}"
+    );
 }

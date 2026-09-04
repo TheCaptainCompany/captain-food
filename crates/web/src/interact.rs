@@ -36,9 +36,10 @@ use uuid::Uuid;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::actions::{ActionOutcome, DispatchHandle};
+use crate::actions::{ActionError, ActionOutcome, DispatchHandle};
 use crate::executor::{attrs, OnSuccessStep};
 use crate::generated::data_layer::{ActionKey, ActionKind};
+use crate::generated::screens::Screen;
 use crate::graphql::{HttpTransport, Role};
 use crate::pending::{self, BrowserPendingStore, PendingStore, ResumedWrite};
 use crate::session::SessionId;
@@ -73,11 +74,18 @@ struct Driver {
     /// This tab's anonymous session id (#529 — the `X-SESSION-ID` `claim_session` must present to
     /// match the one that journaled `verify_otp`).
     session: SessionId,
+    /// The screen this page mounted (#639 part C step 4-ii, ADR-20260904-124600 §2): a refused
+    /// Tell's bounce decision (`crate::bounce::bounce_after`) needs the SAME screen's declared
+    /// routes the hydrate loop reads — one screen per page, so one `&'static Screen` for the
+    /// driver's whole lifetime.
+    screen: &'static Screen,
 }
 
 /// Install the interaction layer: the delegated click listener, the shared subscription socket,
-/// and the boot-time pending resume. Called once from `hydrate()`.
-pub fn install(origin: &str, role: Role, session: SessionId) {
+/// and the boot-time pending resume. Called once from `hydrate()`. `screen` is the matched screen
+/// of THIS page — the bounce decision on a refused Tell reads its `restricted_route`/
+/// `unauthenticated_route`, the same pair the hydrate loop's refused READS already read.
+pub fn install(origin: &str, role: Role, session: SessionId, screen: &'static Screen) {
     let driver = Rc::new(Driver {
         transport: Rc::new(HttpTransport::new(origin, role, session)),
         store: Rc::new(BrowserPendingStore),
@@ -85,6 +93,7 @@ pub fn install(origin: &str, role: Role, session: SessionId) {
         in_flight: Rc::new(RefCell::new(HashMap::new())),
         origin: origin.to_string(),
         session,
+        screen,
     });
 
     // The shared push socket. `on_connect` fires on every (re)connect: store the fresh handle —
@@ -300,6 +309,16 @@ impl Driver {
                     h
                 }
                 Err(err) => {
+                    // #639 part C step 4-ii (ADR-20260904-124600 §2): a refused Tell bounces the
+                    // SAME way a refused read does — never a toast for a rider mid-job who just
+                    // got restricted. `ActionError::Transport` is the ONLY variant that can carry
+                    // the signal (a client/auth/gap/unbound refusal never reaches the transport).
+                    if let ActionError::Transport(t) = &err {
+                        if let Some(route) = crate::bounce::bounce_after(t, d.screen) {
+                            navigate_to(route);
+                            return;
+                        }
+                    }
                     // Pre-acceptance failure: the record (if any) is stamped for a same-id retry.
                     if let Some(w) = d.store.load().into_iter().find(|w| w.action == key) {
                         let _ = el.set_attribute("data-retry", &w.message_id.to_string());

@@ -791,6 +791,8 @@ pub struct RiderStandingInfo {
     pub restriction: Option<RiderRestrictionInfo>,
     #[graphql(name = "heldDelivery")]
     pub held_delivery: Option<DeliveryJob>,
+    #[graphql(name = "contestContact")]
+    pub contest_contact: Option<EmailAddress>,
 }
 
 /// A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
