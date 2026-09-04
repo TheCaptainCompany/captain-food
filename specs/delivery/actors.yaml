@@ -192,11 +192,20 @@ Rider:
   description: "A rider identity, linked to the auth provider user (authRef)."
   # Availability machine. RiderRegistered carries the birth status in its payload (`via: status`,
   # ADR-20260721-093027) — canonically OFFLINE (rules.yaml#/RiderLifecycle); RiderStatusChanged
-  # carries its target state the same way. SUSPENDED is admin-imposed from anywhere (idempotently
-  # re-suspendable — the self-loop is deliberate); reinstatement goes through OFFLINE only. No
-  # terminal state.
+  # carries its target state the same way. No terminal state. Restriction is NOT a second lifecycle
+  # machine (#639 part C step 4-i, ADR-20260904-081527 §1/§6): it is a FACT IN STATE
+  # (`restriction: Option<…>` in the hand-written `crates/domain/src/rider.rs` apply), folded from
+  # RiderRestricted/RiderReinstated. The four `-> SUSPENDED` entry edges are RETIRED (RiderStatus's
+  # SUSPENDED value is LEGACY, parse-only, unspellable at this door — RiderAvailabilityTarget
+  # excludes it); `SUSPENDED -> OFFLINE` stays as the exit for legacy rows so a stored row never
+  # breaks. The aggregate's own belt: `ChangeRiderStatus -> AVAILABLE` on a restricted rider is
+  # rejected `RiderAccessRestricted` (checked beside the lifecycle transition, one aggregate, no
+  # cross-aggregate read).
   lifecycle:
     status: { $ref: 'scalars.yaml#/RiderStatus' }
+    # SUSPENDED is unreachable from any live transition by DESIGN (its four entry edges are
+    # retired) — kept only as an `-> OFFLINE` exit for a pre-existing stored row.
+    legacyStates: [SUSPENDED]
     initial:
       - event: { $ref: 'events.yaml#/RiderRegistered' }
         to: OFFLINE
@@ -205,7 +214,6 @@ Rider:
       - { from: [OFFLINE, ON_DELIVERY], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: AVAILABLE, via: status }
       - { from: [AVAILABLE, SUSPENDED], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: OFFLINE, via: status }
       - { from: [AVAILABLE], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: ON_DELIVERY, via: status }
-      - { from: [OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED], event: { $ref: 'events.yaml#/RiderStatusChanged' }, to: SUSPENDED, via: status }
     terminal: []
   receives:
     - message: { $ref: 'commands.yaml#/RegisterRider' }
@@ -223,6 +231,27 @@ Rider:
       throws:
         - { $ref: 'errors.yaml#/RiderNotFound' }
         - { $ref: 'errors.yaml#/InvalidRiderStatusTransition' }
+        - { $ref: 'errors.yaml#/RiderAccessRestricted' }
+    # The human-only doors (#639 part C step 4-i, ADR-20260904-081527 §6, §8): `requires: acting:
+    # { ADMIN: any }` — no EXTERNAL key, so no partner ACL can ever reach these; the validator rule
+    # `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of either an ERROR, and a
+    # codegen test asserts no PM inbox `emits` RiderRestricted.
+    - message: { $ref: 'commands.yaml#/RestrictRider' }
+      requires:
+        acting:
+          ADMIN: any
+      emits: [{ $ref: 'events.yaml#/RiderRestricted' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderNotFound' }
+        - { $ref: 'errors.yaml#/RiderAlreadyRestricted' }
+    - message: { $ref: 'commands.yaml#/ReinstateRider' }
+      requires:
+        acting:
+          ADMIN: any
+      emits: [{ $ref: 'events.yaml#/RiderReinstated' }]
+      throws:
+        - { $ref: 'errors.yaml#/RiderNotFound' }
+        - { $ref: 'errors.yaml#/RiderNotRestricted' }
     # The rider SIGN-IN DOOR (#639 part C step 2c-i, PROP-20260831-180622 build-order row 2c):
     # two pure effects on the Rider lane, both emitting nothing. Identify-only -- a verified phone
     # with no rider behind it is REFUSED, never registered (RegisterRider above is the only birth).

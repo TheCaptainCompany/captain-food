@@ -143,6 +143,33 @@ RiderSignInRequiresSession:
     fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez."
 
 
+RiderAlreadyRestricted:
+  description: "The rider is already restricted (#639 part C step 4-i) — restrict only an unrestricted rider; a second ground needs a reinstatement first (the Art. 11 log is never overwritten)."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "This rider is already restricted."
+    fr: "Ce livreur est déjà restreint."
+
+
+RiderNotRestricted:
+  description: "The rider is not currently restricted (#639 part C step 4-i) — reinstate only a restricted rider."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "This rider is not restricted."
+    fr: "Ce livreur n'est pas restreint."
+
+
+RiderAccessRestricted:
+  description: "The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "Your access is restricted, so you cannot go available for deliveries."
+    fr: "Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons."
+
+
 AuthSubjectHoldsAnotherRole:
   description: >
     The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a

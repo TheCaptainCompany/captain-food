@@ -264,7 +264,7 @@ pub(crate) fn bt_event_stream(
 /// here gets a `when_at` binding emitted before its call, and its `bt_command_call` arm threads
 /// it; `when.at` on any OTHER command is an emitter panic, never a silent no-op (the #413
 /// "silently invisible" defect class).
-pub(crate) const BT_CLOCK_CONSUMING: &[&str] = &["PlaceOrder"];
+pub(crate) const BT_CLOCK_CONSUMING: &[&str] = &["PlaceOrder", "RestrictRider"];
 
 /// The FIXED default `when.at` (a Tuesday noon, UTC): every clock-consuming test is deterministic
 /// even when it declares no instant. Documented in specs/tests.yaml's header — keep the two in
@@ -299,6 +299,9 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
     };
     match cmd {
         "PlaceOrder" => "crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await".to_string(),
+        // The Art. 11 log's decidedAt/effectiveAt are BOTH server-set (ADR-20260904-081527 §5) —
+        // "now is a parameter" (RSO-1), never a system-clock read inside the handler.
+        "RestrictRider" => "crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await".to_string(),
         "ApproveRefund" => "crate::process_managers::refund::approve_refund(&bed.store, &bed.refund_pm, &bed.payments, cmd, &support::actor()).await".to_string(),
         "DenyRefund" => "crate::process_managers::refund::deny_refund(&bed.store, &bed.refund_pm, cmd, &support::actor()).await".to_string(),
         "RegisterRestaurant" | "CreateCatalog" | "AddProduct" | "UpdateProduct" | "MarkRestaurantAsFavorite" => {

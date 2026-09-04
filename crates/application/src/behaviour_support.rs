@@ -995,8 +995,16 @@ impl RiderIdentityRepository for SpecRiders {
     async fn rider_id_by_auth_subject(
         &self,
         auth_subject: AuthSubject,
-    ) -> Result<Option<RiderId>, DomainError> {
-        Ok(self.rows.lock().unwrap().iter().find(|(a, _)| *a == auth_subject.0).map(|(_, id)| *id))
+    ) -> Result<Option<(RiderId, domain::generated::scalars::RiderStanding)>, DomainError> {
+        // Behaviour tests never script a restricted-rider seam (that lives on the server-side
+        // guard tests) — every bound rider here is ACTIVE.
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(a, _)| *a == auth_subject.0)
+            .map(|(_, id)| (*id, domain::generated::scalars::RiderStanding::ACTIVE)))
     }
 }
 

@@ -74,14 +74,14 @@ impl QueryRoot {
         Ok(row.map(|r| catalog_tree_section::<CatalogCategory>(&r.tree, "categories")).unwrap_or_default())
     }
     /// Actor supervision (ADMIN): every mailbox lane with its checkpoint, lease, fencing counter and live pending/scheduled depth — the PROP-20260728-152752 §6 ops monitor as an API. Transient — served from the DECLARED lane grid LEFT JOINed to mailbox_partitions and inbound_messages (#596 — driven by the declaration, so an unseeded lane holding work is visible rather than absent), no View_* (write-path infrastructure, not a business read model).
-    #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "mailboxLanes", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"mailboxLanes\"))", visible = "visible_admin")]
     async fn mailbox_lanes(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<MailboxLane>> {
         let repo = ctx.data::<std::sync::Arc<dyn actor_client::supervision::MailboxLaneRepository>>()?;
         let rows = actor_client::supervision::mailbox_lanes(repo.as_ref()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(MailboxLane::from).collect())
     }
     /// Actor supervision detail (ADMIN, #315): every cap-poisoned mailbox row — terminal FAILED with error code DeliveryInfrastructureError — newest first, with the messageId the requeueMailboxMessage recovery needs and the error evidence to judge whether the cause is fixed. The per-row detail behind MailboxLane.poisoned's count. Transient — served from inbound_messages directly, no View_* (write-path infrastructure, not a business read model). Server clamps the page to 200.
-    #[graphql(name = "poisonedMailboxMessages", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "poisonedMailboxMessages", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"poisonedMailboxMessages\"))", visible = "visible_admin")]
     async fn poisoned_mailbox_messages(&self, ctx: &async_graphql::Context<'_>, input: Option<PoisonedMailboxMessagesQueryInput>) -> async_graphql::Result<Vec<PoisonedMailboxMessage>> {
         let repo = ctx.data::<std::sync::Arc<dyn actor_client::supervision::MailboxLaneRepository>>()?;
         let (actor_type, limit) = input
@@ -110,21 +110,21 @@ impl QueryRoot {
         Ok(None)
     }
     /// The customer-visible (PUBLIC) message thread for one order, with the order's live status; the customer and the order's staff/rider read it (#129). NO ownership check exists today: the resolver reads `by_order(orderId)` with the caller's argument and returns the thread to ANY caller holding any of the listed roles — including a SELF-REGISTERED customer, since signup is open (phone OTP, `verifyPhone` roles [PUBLIC, CUSTOMER]). This is the sharpest read surface in the cross-tenant IDOR (#618; write side #178, DECISIONS §39) because the thread is unbounded customer free text, which in a food business predictably carries Art. 9(1) special-category prose (BRIEF-20260816-idor-obligation-map). Null when the conversation has not been opened.
-    #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "orderConversation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[], \"orderConversation\"))", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn order_conversation(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationQueryInput) -> async_graphql::Result<Option<OrderConversation>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
         let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(OrderConversation::from))
     }
     /// The INTERNAL staff notes on one order's conversation — staff/rider/admin only, deliberately NOT on the CUSTOMER schema (the visibility guarantee, #129). The role exclusion IS enforced — CUSTOMER is absent from the composed schema — but NO ownership check exists beyond it: the resolver reads `by_order(orderId)` from the caller's argument, so any RESTAURANT/RESTAURANT_ACCOUNT/RIDER credential reads any order's internal notes. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Null when the conversation has not been opened.
-    #[graphql(name = "orderConversationInternalNotes", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "orderConversationInternalNotes", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[], \"orderConversationInternalNotes\"))", visible = "visible_restaurant_account_restaurant_rider_admin")]
     async fn order_conversation_internal_notes(&self, ctx: &async_graphql::Context<'_>, input: OrderConversationInternalNotesQueryInput) -> async_graphql::Result<Option<ConversationInternalNotes>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::OrderConversationReadRepository>>()?;
         let row = repo.by_order(input.order_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(ConversationInternalNotes::from))
     }
     /// The signed-in customer's own profile (resolves the session authRef → Customer via Customer).
-    #[graphql(name = "me", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "me", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"me\"))", visible = "visible_customer")]
     async fn me(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerProfile>> {
         // The verified session identity (ADR-0047), injected per-request by the HTTP layer. No
         // principal (schema executed outside a request) or an anonymous one → no profile, not an error.
@@ -139,12 +139,12 @@ impl QueryRoot {
         Ok(row.map(CustomerProfile::from))
     }
     /// The authenticated customer's own erasure request, or null when none exists. NO ARGS BY DESIGN: the subject is derived from AUTH CONTEXT server-side, never supplied by the client. A required `customerId!` here would be exactly the #745 unfulfillable class — an identity fact the account route has no source for, so the read would fail structurally on every paint — AND it would let any authenticated caller ask about somebody else's deletion, which is a disclosure of the most sensitive thing this product knows about a person. Answers before AND after the erasure completes: pre-receipt from the folded request row, post-receipt from the same row now carrying the receipt's policy and retained-under limbs. CONFIRM-WHILE-LOGGED-OUT is deliberately NOT served here (see the mutation roles): this query is CUSTOMER-only, so a subject who has signed out follows their emailed link, confirms, and then sees the status by signing in — the status surface never becomes an unauthenticated lookup of "what is happening to this account".
-    #[graphql(name = "erasureStatus", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "erasureStatus", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"erasureStatus\"))", visible = "visible_customer")]
     async fn erasure_status(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerErasure>> {
         Err(crate::graphql::typed_error(&domain::generated::errors::ERASURE_ENGINE_UNAVAILABLE))
     }
     /// The delivery job of an order (tracking); owning customer, the restaurant/admin, or the assigned rider. Ownership enforced server-side.
-    #[graphql(name = "delivery", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
+    #[graphql(name = "delivery", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_RIDER_ADMIN).and(StandingGuard::new(&[RequestRole::Rider], \"delivery\"))", visible = "visible_customer_restaurant_account_restaurant_rider_admin")]
     async fn delivery(&self, ctx: &async_graphql::Context<'_>, input: DeliveryQueryInput) -> async_graphql::Result<Option<DeliveryJob>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -173,8 +173,42 @@ impl QueryRoot {
             .ok_or_else(|| async_graphql::Error::new("delivery references an unknown restaurant"))?;
         Ok(Some(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon)))))
     }
+    /// The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any).
+    #[graphql(name = "myStanding", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[RequestRole::Rider], \"myStanding\"))", visible = "visible_rider")]
+    async fn my_standing(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<RiderStandingInfo> {
+        // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
+        // down -- every serviceWindow this request builds agrees on "now".
+        let (now, horizon) = crate::graphql::service_clock::evaluation(ctx);
+        let Some(application::queries::ReadScope::Rider { id: rider_id, standing }) = ctx.data_opt::<application::queries::ReadScope>() else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let restrictions = ctx.data::<std::sync::Arc<dyn application::queries::RiderRestrictionReadRepository>>()?;
+        let row = restrictions.by_rider_id(*rider_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let restriction = row.as_ref().and_then(|r| match (r.ground, r.decided_at, r.effective_at) {
+            (Some(ground), Some(decided_at), Some(effective_at)) => Some(RiderRestrictionInfo {
+                ground: super::scalars::rider_restriction_ground_from_domain(ground),
+                decided_at,
+                effective_at,
+            }),
+            _ => None,
+        });
+        let deliveries = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryReadRepository>>()?;
+        let orders = ctx.data::<std::sync::Arc<dyn application::queries::OrderReadRepository>>()?;
+        let restaurants = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantReadRepository>>()?;
+        let jobs = deliveries.for_rider(*rider_id, None).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let held = jobs.into_iter().find(|j| matches!(j.status, domain::generated::scalars::DeliveryStatus::ASSIGNED | domain::generated::scalars::DeliveryStatus::PICKED_UP | domain::generated::scalars::DeliveryStatus::OUT_FOR_DELIVERY));
+        let mut held_delivery = None;
+        if let Some(job) = held {
+            if let Some(order) = orders.by_id(job.order_id, &application::queries::ReadScope::System).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                if let Some(restaurant) = restaurants.by_id(job.restaurant_id).await.map_err(|e| async_graphql::Error::new(e.to_string()))? {
+                    held_delivery = Some(DeliveryJob::from((job, order, Restaurant::at(restaurant, now, horizon))));
+                }
+            }
+        }
+        Ok(RiderStandingInfo { standing: (*standing).into(), restriction, held_delivery })
+    }
     /// The independent rider's assigned/available delivery jobs (rider app).
-    #[graphql(name = "myDeliveries", guard = "RoleGuard::new(ALLOW_RIDER)", visible = "visible_rider")]
+    #[graphql(name = "myDeliveries", guard = "RoleGuard::new(ALLOW_RIDER).and(StandingGuard::new(&[], \"myDeliveries\"))", visible = "visible_rider")]
     async fn my_deliveries(&self, ctx: &async_graphql::Context<'_>, input: Option<MyDeliveriesQueryInput>) -> async_graphql::Result<Vec<DeliveryJob>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -214,7 +248,7 @@ impl QueryRoot {
         Ok(out)
     }
     /// A restaurant's active delivery jobs (delivery board; ownership enforced server-side).
-    #[graphql(name = "restaurantDeliveries", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT)", visible = "visible_restaurant_account_restaurant")]
+    #[graphql(name = "restaurantDeliveries", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT).and(StandingGuard::new(&[], \"restaurantDeliveries\"))", visible = "visible_restaurant_account_restaurant")]
     async fn restaurant_deliveries(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliveriesQueryInput) -> async_graphql::Result<Vec<DeliveryJob>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -251,7 +285,7 @@ impl QueryRoot {
         Ok(out)
     }
     /// Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) reviews the state of its own submissions and an admin works the review queue. Optional filters by city, channel and status (status = PENDING is the admin review queue). EXTERNAL is a trusted partner-ACL role — no per-owner narrowing in this slice (a recorded gap; contact-scoped narrowing is a follow-up).
-    #[graphql(name = "deliveryPartnerAvailabilities", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL)", visible = "visible_admin_external")]
+    #[graphql(name = "deliveryPartnerAvailabilities", guard = "RoleGuard::new(ALLOW_ADMIN_EXTERNAL).and(StandingGuard::new(&[], \"deliveryPartnerAvailabilities\"))", visible = "visible_admin_external")]
     async fn delivery_partner_availabilities(&self, ctx: &async_graphql::Context<'_>, input: Option<DeliveryPartnerAvailabilitiesQueryInput>) -> async_graphql::Result<Vec<DeliveryPartnerAvailability>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliveryPartnerAvailabilityReadRepository>>()?;
         let filter = input
@@ -265,7 +299,7 @@ impl QueryRoot {
         Ok(rows.into_iter().map(DeliveryPartnerAvailability::from).collect())
     }
     /// The customer's favorited restaurants (Customer.favorite_restaurant_ids joined to Restaurant).
-    #[graphql(name = "favoriteRestaurants", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "favoriteRestaurants", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"favoriteRestaurants\"))", visible = "visible_customer")]
     async fn favorite_restaurants(&self, ctx: &async_graphql::Context<'_>, input: FavoriteRestaurantsQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -318,7 +352,7 @@ impl QueryRoot {
         Ok(row.map(|r| Restaurant::at(r, now, horizon)))
     }
     /// All restaurant locations under an account (back-office). NO ownership check exists today: `accountId` is taken from the caller's argument and passed straight to `by_account`, with nothing proving the caller holds that account — any RESTAURANT_ACCOUNT credential enumerates any other account's estate. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39).
-    #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN)", visible = "visible_restaurant_account_admin")]
+    #[graphql(name = "restaurantLocationsByAccount", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_ADMIN).and(StandingGuard::new(&[], \"restaurantLocationsByAccount\"))", visible = "visible_restaurant_account_admin")]
     async fn restaurant_locations_by_account(&self, ctx: &async_graphql::Context<'_>, input: RestaurantLocationsByAccountQueryInput) -> async_graphql::Result<Vec<Restaurant>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -328,7 +362,7 @@ impl QueryRoot {
         Ok(rows.into_iter().map(|r| Restaurant::at(r, now, horizon)).collect())
     }
     /// B2B prospection pipeline (admin): scored prospects, optionally filtered by minimum score / pipeline status.
-    #[graphql(name = "prospectionPipeline", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "prospectionPipeline", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"prospectionPipeline\"))", visible = "visible_admin")]
     async fn prospection_pipeline(&self, ctx: &async_graphql::Context<'_>, input: Option<ProspectionPipelineQueryInput>) -> async_graphql::Result<Vec<Prospect>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -357,7 +391,7 @@ impl QueryRoot {
             .collect())
     }
     /// A customer's carts (one OPEN cart per restaurant). Ownership enforced server-side (#144): for a CUSTOMER caller the customerId argument is IGNORED and forced to the caller's own identity (resolved once per request from the verified principal); only ADMIN reads another customer's carts. An unresolvable caller identity yields an empty list, never a fall-through to the client-supplied filter.
-    #[graphql(name = "carts", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
+    #[graphql(name = "carts", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN).and(StandingGuard::new(&[], \"carts\"))", visible = "visible_customer_admin")]
     async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -404,7 +438,7 @@ impl QueryRoot {
         Ok(out)
     }
     /// A single cart by id — the per-restaurant cart a customer picked from their carts list (`carts`), serving the checkout-breakdown and Uber-comparison story steps. Ownership enforced server-side by claim (#144/#434): for a CUSTOMER caller the row must belong to the caller's claim-resolved customer id, else null (no existence oracle); ADMIN reads any cart. This retires the live IDOR the query shipped with (no role guard, any cart fetchable by id — found in the #451 mob briefing). Claim-ownership was chosen over ADMIN-only because the customer story steps legitimately read a specific cart by id. The GUEST path is not this query and not a gap: anonymous carts are session-keyed and read through `current`'s session leg (ADR-20260810-120531 — CartBindingProcess associates them to the customer on identification).
-    #[graphql(name = "cart", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN)", visible = "visible_customer_admin")]
+    #[graphql(name = "cart", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN).and(StandingGuard::new(&[], \"cart\"))", visible = "visible_customer_admin")]
     async fn cart(&self, ctx: &async_graphql::Context<'_>, input: CartQueryInput) -> async_graphql::Result<Option<Cart>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -437,7 +471,7 @@ impl QueryRoot {
         Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
     }
     /// The caller's CURRENT cart AT THIS STOREFRONT — the cart/mini-cart read, TWO-LEG resolution WITHIN ONE TENANT (#451/#469, PROP-20260810-231500, ADR-20260810-120531): carts are built ANONYMOUSLY under a session id (cookie on web, stored in the native app) BEFORE any customer identity exists, and CartBindingProcess associates them to the customer on identification. The TENANT comes from the request Host ({slug}.captain.food -> RestaurantId, resolved once at the edge), NEVER from an argument — an argument would let a client assert whose cart to serve, and an OPTIONAL one would mean "unbounded when omitted". BOTH legs are bounded by it, in SQL. Leg 1 — a verified CUSTOMER claim resolves the claim-holder's most-recently-updated OPEN cart AT THIS RESTAURANT (ReadScope::Customer, the `myReclamations` pattern; PUBLIC is the anonymous PATH, not "no identity" — the open path reads the caller's credential and degrades to anonymous, so a signed-in customer on a storefront IS resolved here). Leg 2 — otherwise (anonymous, or the association not yet folded), a valid X-SESSION-ID resolves the session's most-recently-updated OPEN cart at this restaurant WHERE its customerId is NULL or equals the caller's claim: the session id is an UNAUTHENTICATED correlator, scoping only, never identity — a cart already bound to someone else is invisible to it. Zero args: neither leg reads a client argument or route param. A host that names NO restaurant (the marketplace, an unknown slug) resolves NULL, never "the newest cart anywhere" — the customer's carts at other restaurants are a different query (`carts`). OPEN only; priced fresh on every read via the shared `price_cart` authority (LIVE price; the authoritative freeze happens once, at checkout). Null means "no open cart here" — the client renders the empty state, never a fabricated 0,00 EUR payable.
-    #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER)", visible = "visible_public_customer")]
+    #[graphql(name = "current", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER).and(StandingGuard::new(&[], \"current\"))", visible = "visible_public_customer")]
     async fn current(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<Cart>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -474,7 +508,7 @@ impl QueryRoot {
         Ok(Some(crate::graphql::cart_read::priced(&**catalogs, row, Restaurant::at(restaurant, now, horizon), correlation_id).await?))
     }
     /// Orders, optionally scoped by customer and/or restaurant and filtered by status. Serves both the customer's own history and the restaurant back-office queue; ownership/scope enforced server-side.
-    #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    #[graphql(name = "orders", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"orders\"))", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn orders(&self, ctx: &async_graphql::Context<'_>, input: Option<OrdersQueryInput>) -> async_graphql::Result<Vec<Order>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -506,7 +540,7 @@ impl QueryRoot {
             .collect())
     }
     /// Order tracking by id; owning customer or the restaurant/admin. Ownership enforced server-side.
-    #[graphql(name = "order", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    #[graphql(name = "order", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"order\"))", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn order(&self, ctx: &async_graphql::Context<'_>, input: OrderQueryInput) -> async_graphql::Result<Option<Order>> {
         // ONE request clock (RSO-1): (now, horizon) read once at the transport seam and threaded
         // down -- every serviceWindow this request builds agrees on "now".
@@ -526,7 +560,7 @@ impl QueryRoot {
         Ok(Some(Order::from((row, Restaurant::at(restaurant, now, horizon)))))
     }
     /// A restaurant's delivery-delay satisfaction answers (#62): one row per surveyed order, the customer timeliness verdict feeding the self-dispatch-vs-Captain decision. NO ownership check exists today: `restaurantId` is taken from the caller's argument and passed straight to `by_restaurant`, with nothing proving the caller owns that restaurant — any RESTAURANT/RESTAURANT_ACCOUNT credential reads any restaurant's satisfaction data. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39). Optionally filtered to a single timeliness verdict.
-    #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "restaurantDeliverySatisfaction", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"restaurantDeliverySatisfaction\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn restaurant_delivery_satisfaction(&self, ctx: &async_graphql::Context<'_>, input: RestaurantDeliverySatisfactionQueryInput) -> async_graphql::Result<Vec<DeliverySatisfaction>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::DeliverySatisfactionReadRepository>>()?;
         let rows = repo
@@ -536,7 +570,7 @@ impl QueryRoot {
         Ok(rows.into_iter().map(DeliverySatisfaction::from).collect())
     }
     /// The authenticated customer's own reclamations (claims/disputes), newest-first (#154). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row); an anonymous caller sees an empty list.
-    #[graphql(name = "myReclamations", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "myReclamations", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"myReclamations\"))", visible = "visible_customer")]
     async fn my_reclamations(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<Reclamation>> {
         // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
@@ -549,7 +583,7 @@ impl QueryRoot {
         Ok(rows.into_iter().map(Reclamation::from).collect())
     }
     /// The claims queue for the restaurant's orders (#154): a manager/owner works its customers' claims, an admin oversees. Optional filters by status (OPEN = the outstanding queue) and category. NO per-restaurant scoping exists today — this is a role guard and nothing more. The resolver reads `repo.list(filter)` and the filter type has no restaurant field to narrow with, so ANY caller holding a RESTAURANT/RESTAURANT_ACCOUNT credential reads EVERY restaurant's claims, and calling it with NO ARGUMENTS returns the whole platform's. Read-side half of the cross-tenant IDOR (#618; write side #178, DECISIONS §39); the EXTERNAL deliveryPartnerAvailabilities queue has the identical shape. Until #618 lands, treat this queue as unscoped.
-    #[graphql(name = "restaurantReclamations", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_restaurant_account_restaurant_admin")]
+    #[graphql(name = "restaurantReclamations", guard = "RoleGuard::new(ALLOW_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"restaurantReclamations\"))", visible = "visible_restaurant_account_restaurant_admin")]
     async fn restaurant_reclamations(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantReclamationsQueryInput>) -> async_graphql::Result<Vec<Reclamation>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
         let filter = input
@@ -563,14 +597,14 @@ impl QueryRoot {
         Ok(rows.into_iter().map(Reclamation::from).collect())
     }
     /// A single reclamation by id (#154) — claim detail for the customer who raised it and the restaurant/admin deciding it. Null when unknown.
-    #[graphql(name = "reclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN)", visible = "visible_customer_restaurant_account_restaurant_admin")]
+    #[graphql(name = "reclamation", guard = "RoleGuard::new(ALLOW_CUSTOMER_RESTAURANT_ACCOUNT_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"reclamation\"))", visible = "visible_customer_restaurant_account_restaurant_admin")]
     async fn reclamation(&self, ctx: &async_graphql::Context<'_>, input: ReclamationQueryInput) -> async_graphql::Result<Option<Reclamation>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::ReclamationReadRepository>>()?;
         let row = repo.by_id(input.reclamation_id.into()).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(row.map(Reclamation::from))
     }
     /// The checkout payment state for an order (ADR-20260720-015500): paymentIntentId, clientSecret while the run is in flight, and the folded PaymentStatus — the read-side home of the values placeOrder used to return. Served from the PlaceOrderProcess run row (the declared exception to PM-table privacy). Literal roles [PUBLIC, CUSTOMER, ADMIN] (#13/#31): the checkout paths only, ownership-scoped in the resolver — the checkout's customer, its anonymous session (X-SESSION-ID), or ADMIN; strangers resolve null (never an existence oracle).
-    #[graphql(name = "paymentStatus", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN)", visible = "visible_public_customer_admin")]
+    #[graphql(name = "paymentStatus", guard = "RoleGuard::new(ALLOW_PUBLIC_CUSTOMER_ADMIN).and(StandingGuard::new(&[], \"paymentStatus\"))", visible = "visible_public_customer_admin")]
     async fn payment_status(&self, ctx: &async_graphql::Context<'_>, input: PaymentStatusQueryInput) -> async_graphql::Result<Option<PaymentIntent>> {
         let pm = ctx.data::<std::sync::Arc<dyn application::pm_state::PaymentProcessStateStore>>()?;
         let Some(row) = pm
@@ -602,7 +636,7 @@ impl QueryRoot {
         }))
     }
     /// The refund queue (RefundProcess): refunds opened for decision, with their lifecycle status (status = REQUESTED is the pending, awaiting-decision queue). An admin arbitrates across restaurants. NO ownership check exists today: `restaurantId` is an OPTIONAL caller-supplied filter passed to `repo.list(filter)`, so a RESTAURANT credential that OMITS it reads every restaurant's refund queue — and one that supplies another restaurant's id reads that queue. Money-path read surface of the cross-tenant IDOR (#618; the matching write gap is approveRefund/denyRefund consulting no identity at all — #178, DECISIONS §39).
-    #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN)", visible = "visible_restaurant_admin")]
+    #[graphql(name = "pendingRefunds", guard = "RoleGuard::new(ALLOW_RESTAURANT_ADMIN).and(StandingGuard::new(&[], \"pendingRefunds\"))", visible = "visible_restaurant_admin")]
     async fn pending_refunds(&self, ctx: &async_graphql::Context<'_>, input: Option<PendingRefundsQueryInput>) -> async_graphql::Result<Vec<Refund>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::RefundReadRepository>>()?;
         let filter = input
@@ -615,7 +649,7 @@ impl QueryRoot {
         Ok(rows.into_iter().map(Refund::from).collect())
     }
     /// The authenticated customer's store-credit balance (#158, Part B of #207). No args — scoped server-side to the caller's Customer identity (the verified session principal → Customer row, the same me-pattern as myReclamations); an anonymous caller, or a customer with no ledger yet, sees null (no credit).
-    #[graphql(name = "customerCredit", guard = "RoleGuard::new(ALLOW_CUSTOMER)", visible = "visible_customer")]
+    #[graphql(name = "customerCredit", guard = "RoleGuard::new(ALLOW_CUSTOMER).and(StandingGuard::new(&[], \"customerCredit\"))", visible = "visible_customer")]
     async fn customer_credit(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<CustomerCredit>> {
         // Per-instance authorization (#144/#433): the ReadScope was resolved ONCE at the edge from the token's verified claims (CARD-11) and injected into the context -- the same identity source as every other guarded read; the by_auth_ref bridge is gone from authorization. Absent => Public -- fail closed.
         let scope = ctx.data_opt::<application::queries::ReadScope>().cloned().unwrap_or(application::queries::ReadScope::Public);
@@ -628,21 +662,21 @@ impl QueryRoot {
         Ok(row.map(CustomerCredit::from))
     }
     /// The active Captain service-fee policy (admin; calibration/transparency).
-    #[graphql(name = "pricingPolicy", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "pricingPolicy", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"pricingPolicy\"))", visible = "visible_admin")]
     async fn pricing_policy(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<PricingPolicy>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::PricingPolicyReadRepository>>()?;
         let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(PricingPolicy::from).collect())
     }
     /// The active per-cuisine Uber Eats mark-up coefficients (admin; calibration/transparency).
-    #[graphql(name = "uberEstimationPolicy", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "uberEstimationPolicy", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"uberEstimationPolicy\"))", visible = "visible_admin")]
     async fn uber_estimation_policy(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<UberEstimationPolicy>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::UberEstimationPolicyReadRepository>>()?;
         let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         Ok(rows.into_iter().map(UberEstimationPolicy::from).collect())
     }
     /// The active Uber Eats split/fee assumptions for the estimated comparison (admin; calibration/transparency).
-    #[graphql(name = "uberSplitPolicy", guard = "RoleGuard::new(ALLOW_ADMIN)", visible = "visible_admin")]
+    #[graphql(name = "uberSplitPolicy", guard = "RoleGuard::new(ALLOW_ADMIN).and(StandingGuard::new(&[], \"uberSplitPolicy\"))", visible = "visible_admin")]
     async fn uber_split_policy(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<UberSplitPolicy>> {
         let repo = ctx.data::<std::sync::Arc<dyn application::queries::UberSplitPolicyReadRepository>>()?;
         let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;

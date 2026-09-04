@@ -14,7 +14,7 @@ use domain::generated::scalars::{
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
     AuthSubject, CatalogId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
-    ScopeType, SessionId, Slug,
+    RiderStanding, ScopeType, SessionId, Slug,
     StockStatus, UserType,
 };
 use domain::shared::errors::DomainError;
@@ -34,6 +34,9 @@ pub use crate::generated::rows::RestaurantRow;
 /// bridge, read by the request seam rather than by any GraphQL query — see `projectors::rider`.
 /// Written and not yet read: the resolver lands with the rider sign-in door.
 pub use crate::generated::rows::RiderRow;
+/// The restriction attribution read model (#639 part C step 4-i, ADR-20260904-081527 §2) — the
+/// source of `myStanding`.
+pub use crate::generated::rows::RiderRestrictionRow;
 
 /// Optional filters for public restaurant discovery — mirrors the `restaurants` query args in api.yaml.
 /// V0 applies a subset (the rest are accepted and ignored until the read model backs them).
@@ -399,18 +402,28 @@ pub trait CustomerReadRepository: Send + Sync {
 /// and step 1b (#836) retypes it; this one is born with the right scalar so #836 unifies two
 /// `AuthSubject` ports instead of retyping a third site.
 ///
-/// It answers WHO this connection is and nothing else — one column out, never `status`, never the
-/// row (the read model's own rules: an identity index must not become an authorization oracle, and
-/// a `SUSPENDED => deny` check belongs in the handler that folds the `Rider-{id}` stream).
+/// It answers WHO this connection is and, since #639 part C step 4-i (ADR-20260904-081527 §1),
+/// WHETHER the platform grants it anything — `standing` is a GRANT TEST ONLY, never the arbiter of
+/// an append (the write side keeps its own authority folding the `Rider-{id}` stream) — and
+/// nothing else: still never `status` (availability is not an authorization signal; the LEGACY
+/// `SUSPENDED` value must never be read here).
 #[async_trait]
 pub trait RiderIdentityRepository: Send + Sync {
-    /// The rider bound to this verified auth subject, or `None` when no `RiderRegistered` has been
-    /// projected for it. The adapter must never `LIMIT 1`: picking a row is an elevation decision
-    /// made by row order, and `rider.auth_ref UNIQUE` is what makes a bare `fetch_optional` honest.
+    /// The rider bound to this verified auth subject with its current standing, or `None` when no
+    /// `RiderRegistered` has been projected for it. ONE read (`SELECT rider_id, standing`, never
+    /// two). The adapter must never `LIMIT 1`: picking a row is an elevation decision made by row
+    /// order, and `rider.auth_ref UNIQUE` is what makes a bare `fetch_optional` honest.
     async fn rider_id_by_auth_subject(
         &self,
         auth_subject: AuthSubject,
-    ) -> Result<Option<RiderId>, DomainError>;
+    ) -> Result<Option<(RiderId, RiderStanding)>, DomainError>;
+}
+
+/// Read port over the `RiderRestriction` attribution table (#639 part C step 4-i,
+/// ADR-20260904-081527 §2/§4) — the source of `myStanding`.
+#[async_trait]
+pub trait RiderRestrictionReadRepository: Send + Sync {
+    async fn by_rider_id(&self, rider_id: RiderId) -> Result<Option<RiderRestrictionRow>, DomainError>;
 }
 
 /// Optional filters for the order list — mirrors the `orders` query args in api.yaml
@@ -871,7 +884,11 @@ pub enum ReadScope {
     Customer(CustomerId),
     Restaurant(RestaurantId),
     RestaurantAccount(RestaurantAccountId),
-    Rider(RiderId),
+    /// #639 part C step 4-i (ADR-20260904-081527 §1): a STRUCT variant, deliberately — `standing`
+    /// rides WITH the id so a guard that ignores it does not compile (compiler-first,
+    /// ADR-20260803-234035). Resolved once at the edge (`auth.rs::resolve_rider_scope`) from the
+    /// SAME `Rider` row the id comes from: one `SELECT rider_id, standing`, never two.
+    Rider { id: RiderId, standing: RiderStanding },
     /// Unrestricted by role alone — ADMIN holds no membership rows at all, by design.
     Admin,
     /// The system itself: a process manager or worker acting with no user principal (#144).
@@ -891,7 +908,7 @@ impl ReadScope {
             ReadScope::Customer(id) => Some((UserType::CUSTOMER, id.0)),
             ReadScope::Restaurant(id) => Some((UserType::RESTAURANT, id.0)),
             ReadScope::RestaurantAccount(id) => Some((UserType::RESTAURANT_ACCOUNT, id.0)),
-            ReadScope::Rider(id) => Some((UserType::RIDER, id.0)),
+            ReadScope::Rider { id, .. } => Some((UserType::RIDER, id.0)),
             ReadScope::Admin | ReadScope::System | ReadScope::Public => None,
         }
     }

@@ -65,7 +65,22 @@ RiderLifecycle:
   description: "A rider registers once (per auth user), may update editable profile fields, and changes availability status only through valid transitions."
 
 RiderAuthSubjectBoundOnce:
-  description: "One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and revoking or suspending a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)."
+  description: "One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and restricting a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)."
+
+RiderStandingIsAGrant:
+  description: "The seam admits a RIDER-role operation iff the identity row's `standing` is ACTIVE, or the operation declares `whileRestricted: [RIDER]`; a missing row is Unbound, never a grant (#639 part C step 4-i, ADR-20260904-081527 §1/§4)."
+
+RiderRestrictionLifecycle:
+  description: "Restrict only an unrestricted rider (RiderAlreadyRestricted otherwise); reinstate only a restricted one (RiderNotRestricted otherwise); a second ground needs a reinstatement first -- the Art. 11 log is never overwritten (#639 part C step 4-i, ADR-20260904-081527 §Enforced-by, ADR-20260904-014136)."
+
+RestrictionTakesEffectWhenDecided:
+  description: "V0: `effectiveAt == decidedAt`, both server-set, never in the past -- no admin-typed date, no clock term in the grant predicate (RIDER-REVOCATION-TTL, ADR-20260810-231300). The future scheduled form is designed, not shipped (#639 part C step 4-i, ADR-20260904-081527 §5)."
+
+RestrictRiderIsAHumanAct:
+  description: "RestrictRider/ReinstateRider are `roles: [ADMIN]` with `requires: acting: { ADMIN: any }` and no EXTERNAL key; no process manager may `send` either (validator `pm-sends-human-only-command`) and no PM inbox `emits` RiderRestricted (#639 part C step 4-i, ADR-20260904-081527 §6/§8)."
+
+RiderAvailabilityNeverSpellsRestriction:
+  description: "ChangeRiderStatus takes RiderAvailabilityTarget (OFFLINE/AVAILABLE/ON_DELIVERY) — SUSPENDED is unspellable at this door — and a restricted rider's ChangeRiderStatus -> AVAILABLE is rejected RiderAccessRestricted (#639 part C step 4-i, ADR-20260904-081527 §6)."
 
 RiderSignInIdentifiesOnly:
   description: "Rider sign-in is identify-only, never register: a verified phone whose login is bound to a rider stamps `{ role: RIDER }` (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified phone with no rider behind it is refused with RiderNotRegistered and creates nothing; a login already carrying another role's claim is refused rather than overwritten; a confirmation that carries no session to own the parked credential is refused with RiderSignInRequiresSession BEFORE the OTP is spent, so a parked rider session always has an owner; and the code REQUEST never reveals whether the phone belongs to a rider (#639 part C step 2c-i)."

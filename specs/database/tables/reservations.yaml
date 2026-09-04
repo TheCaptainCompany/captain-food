@@ -84,4 +84,5 @@ auth_subject_reservations:
     policy: >
       NONE, deliberately, and stronger than the sibling's: there is no release column to sweep on.
       A binding must outlive the principal it names -- an erased rider's credential must never
-      resolve to a second rider id, and a suspended rider's must resolve to the same one.
+      resolve to a second rider id, and a restricted rider's must resolve to the same one (#639 part C
+      step 4-i, ADR-20260904-081527 §7 -- restriction is never release).

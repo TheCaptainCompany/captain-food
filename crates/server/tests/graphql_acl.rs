@@ -571,10 +571,17 @@ async fn an_unbound_rider_acts_and_records_as_public_through_the_seam() {
     let (bound, scope) = server::resolve_read_scope(
         token_only,
         correlation,
-        &rider_seam(server::RiderIdentityResolution::Resolved(rider_id)),
+        &rider_seam(server::RiderIdentityResolution::Resolved((
+            rider_id,
+            domain::generated::scalars::RiderStanding::ACTIVE,
+        ))),
     )
     .await;
-    assert_eq!(scope, application::queries::ReadScope::Rider(rider_id), "a row: reads that rider");
+    assert_eq!(
+        scope,
+        application::queries::ReadScope::Rider { id: rider_id, standing: domain::generated::scalars::RiderStanding::ACTIVE },
+        "a row: reads that rider"
+    );
     assert_eq!(bound.acting_role(RequestRole::Rider).get(), RequestRole::Rider, "a row: acts as RIDER");
     assert_eq!(bound.recorded_role(), RequestRole::Rider, "a row: recorded as RIDER");
     // And the /public rule still holds for a resolved rider: the ACL runs against the PATH.
@@ -702,4 +709,61 @@ async fn the_issue_doors_admit_exactly_their_listed_paths() {
     assert!(!rest_m.contains(&"reportDeliveryIssue".into()), "reportDeliveryIssue leaked to RESTAURANT");
     assert!(!rest_m.contains(&"declineDelivery".into()), "declineDelivery leaked to RESTAURANT");
     assert!(!rest_m.contains(&"handBackDelivery".into()), "handBackDelivery leaked to RESTAURANT");
+}
+
+/// #639 part C step 4-i (ADR-20260904-081527 §6/§11): the human-only doors — `restrictRider` /
+/// `reinstateRider` are `roles: [ADMIN]`, no `derived:` (the target is payload, the actor is the
+/// envelope). No `ReadScope` is injected here (`schema()` carries no deps), so this exercises the
+/// ROLE layer only — `RoleGuard`, ahead of `StandingGuard` in the `.and(..)` chain — never standing.
+#[tokio::test]
+async fn the_standing_doors_admit_exactly_admin() {
+    let schema = schema();
+    const RESTRICT: &str = r#"mutation { restrictRider(input: {
+        riderId: "00000000-0000-0000-0000-00000000000d",
+        ground: IDENTITY_MISMATCH
+    }) { messageId } }"#;
+    const REINSTATE: &str = r#"mutation { reinstateRider(input: {
+        riderId: "00000000-0000-0000-0000-00000000000d"
+    }) { messageId } }"#;
+
+    let forbidden = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
+        let schema = schema.clone();
+        async move {
+            for role in roles {
+                let resp = execute_as(&schema, role, query).await;
+                assert_eq!(resp.errors.len(), 1, "{name}: expected one error for {role:?}: {:?}", resp.errors);
+                assert!(is_forbidden(&resp.errors[0]), "{name} must be FORBIDDEN for {role:?}: {:?}", resp.errors[0]);
+            }
+        }
+    };
+    let admitted = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
+        let schema = schema.clone();
+        async move {
+            for role in roles {
+                let resp = execute_as(&schema, role, query).await;
+                assert!(!resp.errors.is_empty(), "{name}: expected an error past the guard for {role:?}");
+                assert!(!is_forbidden(&resp.errors[0]), "{name} must pass the guard for {role:?}: {:?}", resp.errors[0]);
+            }
+        }
+    };
+
+    let non_admin = vec![
+        RequestRole::Public,
+        RequestRole::Customer,
+        RequestRole::Restaurant,
+        RequestRole::RestaurantAccount,
+        RequestRole::Rider,
+        RequestRole::External,
+    ];
+    forbidden("restrictRider", RESTRICT, non_admin.clone()).await;
+    admitted("restrictRider", RESTRICT, vec![RequestRole::Admin]).await;
+    forbidden("reinstateRider", REINSTATE, non_admin).await;
+    admitted("reinstateRider", REINSTATE, vec![RequestRole::Admin]).await;
+
+    let (_q, admin_m) = introspected_fields(&schema, RequestRole::Admin).await;
+    assert!(admin_m.contains(&"restrictRider".into()), "restrictRider missing for ADMIN: {admin_m:?}");
+    assert!(admin_m.contains(&"reinstateRider".into()), "reinstateRider missing for ADMIN: {admin_m:?}");
+    let (_q, rider_m) = introspected_fields(&schema, RequestRole::Rider).await;
+    assert!(!rider_m.contains(&"restrictRider".into()), "restrictRider leaked to RIDER");
+    assert!(!rider_m.contains(&"reinstateRider".into()), "reinstateRider leaked to RIDER");
 }

@@ -220,6 +220,15 @@ impl application::queries::DeliveryReadRepository for Empty {
         Ok(vec![])
     }
 }
+#[async_trait]
+impl application::queries::RiderRestrictionReadRepository for Empty {
+    async fn by_rider_id(
+        &self,
+        _r: ds::RiderId,
+    ) -> Result<Option<application::queries::RiderRestrictionRow>, DomainError> {
+        Ok(None)
+    }
+}
 
 #[async_trait]
 impl application::queries::OrderConversationReadRepository for Empty {
@@ -477,6 +486,7 @@ fn schema_over_with_deliveries(
             order_conversations: Arc::new(Empty),
             customers: Arc::new(Empty),
             deliveries,
+            rider_restrictions: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -1244,6 +1254,7 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
             order_conversations: Arc::new(Empty),
             customers: Arc::new(Empty),
             deliveries: Arc::new(InMemoryDeliveries(Arc::new(Mutex::new(None)))),
+            rider_restrictions: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),

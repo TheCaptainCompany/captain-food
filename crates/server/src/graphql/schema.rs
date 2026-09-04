@@ -19,8 +19,8 @@ use application::queries::{
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
     DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
-    RefundReadRepository, RestaurantReadRepository, UberEstimationPolicyReadRepository,
-    UberSplitPolicyReadRepository,
+    RefundReadRepository, RestaurantReadRepository, RiderRestrictionReadRepository,
+    UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 
 use actor_client::OperationStatusBus;
@@ -46,6 +46,8 @@ pub struct ReadDeps {
     pub order_conversations: Arc<dyn OrderConversationReadRepository>,
     pub customers: Arc<dyn CustomerReadRepository>,
     pub deliveries: Arc<dyn DeliveryReadRepository>,
+    /// #639 part C step 4-i (ADR-20260904-081527 §4): the `myStanding` source.
+    pub rider_restrictions: Arc<dyn RiderRestrictionReadRepository>,
     pub refunds: Arc<dyn RefundReadRepository>,
     pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
@@ -144,6 +146,7 @@ pub fn build_schema_for_scope(
             order_conversations,
             customers,
             deliveries,
+            rider_restrictions,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -163,6 +166,7 @@ pub fn build_schema_for_scope(
         builder = builder.data(order_conversations);
         builder = builder.data(customers);
         builder = builder.data(deliveries);
+        builder = builder.data(rider_restrictions);
         builder = builder.data(refunds);
         builder = builder.data(delivery_satisfaction);
         builder = builder.data(delivery_partner_availabilities);

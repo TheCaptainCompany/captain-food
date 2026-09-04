@@ -88,6 +88,57 @@ one catalog is a validation error (`scope-duplicate-item`).
   specs — never weaken the gate.
 - After any DSL change: `make validate` must be green before `make generate`.
 
+## `whileRestricted:` — the standing carve-out grammar (#639 part C step 4-i, ADR-20260904-081527 §4)
+
+`whileRestricted: [ROLE]` is an optional key on an `api.yaml` query or mutation: a SUBSET of the
+operation's own `roles:` that stays reachable even while a caller's standing (see `readOnlyCatchAll`
+below and `RiderStanding`) is RESTRICTED. Closed key set (`api_operation_keys.rs`), values validated
+by `tools/codegen-rs/src/validate/api_while_restricted.rs`:
+
+- `api-while-restricted-not-subset` — every value must be in the operation's own `roles:`; `roles:`
+  omitted is itself an ERROR (nothing to carve out of an already-open operation — operations with
+  `roles:` omitted are unaffected by restriction, full stop).
+- `api-while-restricted-no-standing-source` — a value must name a role from the closed,
+  standing-bearing set (today `{RIDER}`) — a role with no standing to test cannot be carved.
+- `api-while-restricted-mutation-derives-actor` — a carved MUTATION must declare
+  `derived: { <field>: rider }` (the #865 grammar): the acting identity under the carve-out is
+  ALWAYS the caller's own, from `ReadScope`, never a client-suppliable id.
+
+Emitted onto the SDL as `@whileRestricted(roles: [UserType!]!)`, a sibling of `@auth`, omitted when
+the key is absent. The generated `guard = "RoleGuard::new(ALLOW_X).and(StandingGuard::new(&[...],
+"opName"))"` attribute is emitted on EVERY role-guarded operation, with an EMPTY carve slice when the
+key is absent — fail-closed by absence lives in the emitter (`tools/codegen-rs/src/emit/
+server_graphql.rs::acl_field_attr`), never in the author's memory. `StandingGuard`
+(`crates/server/src/graphql/acl.rs`) reads `ctx.data_opt::<ReadScope>()` only (never a claim — a
+claim has no standing) and is chained `.and(..)` after `RoleGuard`, so the two questions (role,
+standing) stay orthogonal.
+
+A companion validator, `pm-sends-human-only-command`
+(`tools/codegen-rs/src/validate/pm_human_only.rs`), makes it an ERROR for any `processmanager.yaml`
+`sends:` to name a command whose `actors.yaml` `requires: acting` carries no `EXTERNAL` key — no
+saga may impersonate the human such a door requires.
+
+## `readOnlyCatchAll:` — a decode-tolerant enum variant (#639 part C step 4-i, ADR-20260904-081527 §3)
+
+`readOnlyCatchAll: <VARIANT>` is an optional attribute on a `scalars.yaml` enum scalar, a sibling of
+`enum:` (never a member of that list). It declares a variant that:
+
+- the generated **domain Rust enum** gains with `#[serde(other)]`, so an unrecognised stored value
+  DECODES to it instead of failing the whole aggregate load;
+- the **GraphQL SDL enum** (`api.rs#enums_block`, which walks only `enum:`) EXCLUDES — unspellable at
+  any write door, by construction;
+- the **server-side async-graphql mirror enum** (`emit/server_graphql.rs::emit_server_scalars`) also
+  excludes, and the domain→wire conversion becomes a plain function `<scalar>_from_domain(v) ->
+  Option<Mirror>` (never a blind `From`, and never `impl From<Foreign> for Option<Foreign>` — that
+  violates the orphan rule) so the catch-all renders `null` on the wire, never a panic or a
+  fabricated real value — the field carrying it MUST be nullable;
+- a **hand-written `EnumText` impl** (never the `enum_text!` macro, which has no tolerant arm) makes
+  `from_text` fold an unknown stored string into the catch-all rather than erroring the SQL read.
+
+The raw stored text always stays in the immutable `domain_events.payload` — the catch-all is a
+decode-time convenience, never a data-loss. First use: `scalars.yaml#/RiderRestrictionGround`'s
+`UNRECOGNISED`.
+
 ## The specs index — full detail (moved from CLAUDE.md, 2026-08-01)
 
 CLAUDE.md keeps the one-line index; the load-bearing detail lives here:

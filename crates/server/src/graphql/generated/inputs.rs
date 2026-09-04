@@ -491,12 +491,13 @@ pub struct CancelCustomerErasureInput {
     pub erasure_request_id: ErasureRequestId,
 }
 
-/// Change a rider's availability/lifecycle status. `riderId` is derived from the caller's RIDER identity.
+/// Change a rider's own availability. The rider's target is `RiderAvailabilityTarget` (#639 part C step 4-i, ADR-20260904-081527 §6) — narrower than the stored RiderStatus so SUSPENDED cannot be spelled through this door; admin restriction/reinstatement goes through RestrictRider / ReinstateRider instead.
+/// `riderId` is derived from the caller's RIDER identity.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRiderStatusInput {
     #[graphql(name = "status")]
-    pub status: RiderStatus,
+    pub status: RiderAvailabilityTarget,
 }
 
 /// An independent Captain rider accepts a pending delivery job. `riderId` is derived from the caller's RIDER identity.
@@ -589,6 +590,24 @@ pub struct HandBackDeliveryInput {
     pub delivery_job_id: DeliveryJobId,
     #[graphql(name = "foodLocation")]
     pub food_location: FoodCustody,
+}
+
+/// An admin restricts a rider's access, citing one of the closed grounds (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §5). NO dates on the input, NO free text: the handler stamps `decidedAt = effectiveAt = now` from the clock port — an admin-typed date would be a backdating vector inside the Art. 11 log.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestrictRiderInput {
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
+    #[graphql(name = "ground")]
+    pub ground: RiderRestrictionGround,
+}
+
+/// An admin reinstates a previously restricted rider (#639 part C step 4-i, ADR-20260904-081527 §6) — a new fact, never a row edit; rollback of a wrong restriction is a fresh ReinstateRider.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ReinstateRiderInput {
+    #[graphql(name = "riderId")]
+    pub rider_id: RiderId,
 }
 
 /// A delivery partner self-registers its availability to serve a city on a catalog channel (#61). Birth of a DeliveryPartnerRegistration; lands PENDING until an admin approves. registrationId is client-generated (idempotent).

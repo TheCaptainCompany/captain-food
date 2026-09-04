@@ -81,9 +81,10 @@ use domain::delivery_job::DeliveryJobState;
 use domain::generated::commands::{
     AcceptDelivery, AddCartLine, BindCartToCustomer, CancelDelivery,
     ChangeCartLineQuantity, CompleteDelivery, ConfirmPickup, DeclineDelivery, EscalateDelivery,
-    HandBackDelivery, PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant, RecordDeliverySatisfaction,
-    RegisterRider, RemoveCartLine, ReportDeliveryIssue, RequestRefund, ResolveDeliveryIssue, TipOrder,
-    UnassignDeliveryFromPartner, UpdateRiderInfo,
+    ChangeRiderStatus, HandBackDelivery, PlaceOrder, PlaceReplacementOrder, RateOrder, RateRestaurant,
+    RecordDeliverySatisfaction, ReinstateRider, RegisterRider, RemoveCartLine, ReportDeliveryIssue,
+    RequestRefund, ResolveDeliveryIssue, RestrictRider, TipOrder, UnassignDeliveryFromPartner,
+    UpdateRiderInfo,
 };
 use domain::generated::entities::CartLineItem;
 use domain::generated::events::{
@@ -94,10 +95,12 @@ use domain::generated::events::{
     DeliveryPickedUp, DeliverySatisfactionRecorded,
     DeliveryUnassignedFromPartner, OrderPlaced, OrderRated, OrderTipped, PaymentIntentCreated,
     RefundRequested, RestaurantRated as RestaurantRatedEvent, RiderInfoUpdated, RiderRegistered,
+    RiderReinstated, RiderRestricted, RiderStatusChanged,
 };
 use domain::generated::scalars::{
     CartId, CartStatus, CatalogItemAvailability, DeliveryJobId, DeliveryStatus, Mode,
     OrderAcceptanceMode, OrderId, OrderStatus, OptionId, PaymentProcessStatus, PaymentStatus,
+    RiderAvailabilityTarget, RiderRestrictionGround,
     RiderId, RiderStatus, ServiceType, ServiceWindowVerdict, TipRecipient, Tipper,
 };
 use domain::order::OrderState;
@@ -159,7 +162,7 @@ use crate::repository::Repository;
 // unchanged; their seams (require_*/invalid_*/…_stream/canonical_predecessor) stay below as
 // pub(crate) hand-written policy.
 pub use crate::generated::handlers::{
-    accept_order, cancel_order_by_customer, cancel_order_by_restaurant, change_rider_status,
+    accept_order, cancel_order_by_customer, cancel_order_by_restaurant,
     mark_order_delivered, mark_order_ready, reject_order, start_preparation,
     update_delivery_status,
 };
@@ -1818,6 +1821,79 @@ pub async fn update_rider_info(
         display_name: cmd.display_name,
         phone: cmd.phone,
     });
+    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ChangeRiderStatus` → emit `events.yaml#/RiderStatusChanged` (#639 part C
+/// step 4-i, ADR-20260904-081527 §6). Hand-written rather than the mechanical require+guard+append
+/// generator: the command's `status` is `RiderAvailabilityTarget` (OFFLINE/AVAILABLE/ON_DELIVERY —
+/// SUSPENDED unspellable at this door) while the event/lifecycle stay on `RiderStatus`, so the
+/// generator cannot build the event by same-named-field copy; and a restricted rider's move to
+/// AVAILABLE is refused `RiderAccessRestricted` (rules.yaml#/RiderAvailabilityNeverSpellsRestriction)
+/// BEFORE the lifecycle table is even consulted — the aggregate's own belt, one aggregate, no
+/// cross-aggregate read.
+pub async fn change_rider_status(
+    store: &dyn EventStore,
+    cmd: ChangeRiderStatus,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = require_rider(store, &cmd.rider_id).await?;
+    if cmd.status == RiderAvailabilityTarget::AVAILABLE && state.restriction.is_some() {
+        return Err(reject("RiderAccessRestricted", json!({ "riderId": cmd.rider_id })));
+    }
+    let target = match cmd.status {
+        RiderAvailabilityTarget::OFFLINE => RiderStatus::OFFLINE,
+        RiderAvailabilityTarget::AVAILABLE => RiderStatus::AVAILABLE,
+        RiderAvailabilityTarget::ON_DELIVERY => RiderStatus::ON_DELIVERY,
+    };
+    let event = DomainEvent::RiderStatusChanged(RiderStatusChanged { rider_id: cmd.rider_id, status: target });
+    if domain::rider::lifecycle::transition(state.status, &event).is_none() {
+        return Err(reject(
+            "InvalidRiderStatusTransition",
+            json!({ "riderId": cmd.rider_id, "currentStatus": state.status, "targetStatus": target }),
+        ));
+    }
+    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/RestrictRider` → emit `events.yaml#/RiderRestricted` (#639 part C step
+/// 4-i, ADR-20260904-081527 §1-3, §5-6, ADR-20260904-014136). The `requires: acting: { ADMIN: any
+/// }` grammar (actors.yaml) needs no per-instance state comparison to enforce — `any` — so there is
+/// nothing beyond the GraphQL door's `roles: [ADMIN]` and the `pm-sends-human-only-command`
+/// validator gate to assert here (the `requires_post_message` pattern's ADMIN arm: `Ok(())`, no
+/// state comparison). `decidedAt`/`effectiveAt` are BOTH stamped from `now` — never in the past,
+/// never admin-typed (a backdating vector inside the Art. 11 log). Rejects when already restricted
+/// (`RiderRestrictionLifecycle`) and, as a belt, an `Unrecognised` ground can never be STORED here
+/// (unspellable at the GraphQL door already; the wire type is the closed four).
+pub async fn restrict_rider(
+    store: &dyn EventStore,
+    cmd: RestrictRider,
+    actor: &Actor,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), DomainError> {
+    let (state, version) = require_rider(store, &cmd.rider_id).await?;
+    if state.restriction.is_some() {
+        return Err(reject("RiderAlreadyRestricted", json!({ "riderId": cmd.rider_id })));
+    }
+    let now_text = rfc3339_z(now);
+    let event = DomainEvent::RiderRestricted(RiderRestricted {
+        rider_id: cmd.rider_id,
+        ground: cmd.ground,
+        decided_at: now_text.clone(),
+        effective_at: now_text,
+    });
+    Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
+}
+
+/// Handle `commands.yaml#/ReinstateRider` → emit `events.yaml#/RiderReinstated` (#639 part C step
+/// 4-i, ADR-20260904-081527 §1/§6). A new fact, never a row edit — rollback of a wrong restriction
+/// is a fresh ReinstateRider, never mutating the RiderRestricted row.
+pub async fn reinstate_rider(store: &dyn EventStore, cmd: ReinstateRider, actor: &Actor) -> Result<(), DomainError> {
+    let (state, version) = require_rider(store, &cmd.rider_id).await?;
+    if state.restriction.is_none() {
+        return Err(reject("RiderNotRestricted", json!({ "riderId": cmd.rider_id })));
+    }
+    let event = DomainEvent::RiderReinstated(RiderReinstated { rider_id: cmd.rider_id });
     Repository::new(store).save(&rider_stream(&cmd.rider_id), version, &[event], actor).await.map(|_| ())
 }
 

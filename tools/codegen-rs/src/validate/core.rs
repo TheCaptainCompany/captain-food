@@ -452,6 +452,10 @@ pub(crate) fn validate(model: &Model) -> Report {
     check_api_operation_keys(model, &mut issues);
     // §28 (#865): mutation `derived:` properties are server-injected, never client input.
     check_api_derived_fields(model, &mut issues);
+    // §29 (#639 part C step 4-i): the whileRestricted: standing carve-out grammar.
+    check_api_while_restricted(model, &mut issues);
+    // pm-sends-human-only-command (#639 part C step 4-i): no saga may send a human-only command.
+    check_pm_sends_human_only_command(model, &mut issues);
     // `derive:` arm values are one of three forms, and `null` only resets a nullable column.
     check_view_derive_values(model, &mut issues);
 

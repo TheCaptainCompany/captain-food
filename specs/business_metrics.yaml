@@ -171,6 +171,43 @@ projections:
         set: { $ref: '#/projections/DeliveryHandback/measures/outcomeAt' }
         from: { envelope: occurredAt }
 
+  # #639 part C step 4-i (ADR-20260904-081527 §10): how many riders are restricted right now, on
+  # which fact, for how long, and how many came back? Keyed on `riderId` alone — a rider CAN be
+  # restricted twice, so this is a keying LIMIT the grammar cannot express today (no repeatable-fact
+  # grain for a fold key): a second restriction OVERWRITES this row's attribution rather than adding
+  # a second one; the immutable Art. 11 LOG (every RiderRestricted/RiderReinstated fact, in order)
+  # lives in `domain_events`, never here. `riderId` is deliberately NOT a measure (only the fold
+  # KEY) — `groupBy riderId` is therefore UNSPELLABLE (`bam-measure-foreign` rejects a groupBy
+  # naming an undeclared measure), never merely a documented refusal: a per-rider restriction rate
+  # is the performance-and-behaviour ground counsel's own gate refused before counsel
+  # (ADR-20260904-014136 §3), the `HandBackIsNeverALever` shape (rules.yaml).
+  RiderRestriction:
+    description: >
+      How many riders are restricted right now, on which fact, for how long, and how many came
+      back? One row per rider (the keying limit above); ground/decidedAt/effectiveAt hold the
+      CURRENT restriction's attribution, reinstatedAt the latest reinstatement.
+    grain: ENTITY
+    key:
+      - from: { $ref: 'events.yaml#/RiderRegistered/properties/riderId' }
+    measures:
+      ground:       { type: set, of: { $ref: 'events.yaml#/RiderRestricted/properties/ground' } }
+      decidedAt:    { type: set, of: { $ref: 'events.yaml#/RiderRestricted/properties/decidedAt' } }
+      effectiveAt:  { type: set, of: { $ref: 'events.yaml#/RiderRestricted/properties/effectiveAt' } }
+      reinstatedAt: { type: set, of: { envelope: occurredAt } }
+    fold:
+      - on: { $ref: 'events.yaml#/RiderRestricted' }
+        set: { $ref: '#/projections/RiderRestriction/measures/ground' }
+        from: { $ref: 'events.yaml#/RiderRestricted/properties/ground' }
+      - on: { $ref: 'events.yaml#/RiderRestricted' }
+        set: { $ref: '#/projections/RiderRestriction/measures/decidedAt' }
+        from: { $ref: 'events.yaml#/RiderRestricted/properties/decidedAt' }
+      - on: { $ref: 'events.yaml#/RiderRestricted' }
+        set: { $ref: '#/projections/RiderRestriction/measures/effectiveAt' }
+        from: { $ref: 'events.yaml#/RiderRestricted/properties/effectiveAt' }
+      - on: { $ref: 'events.yaml#/RiderReinstated' }
+        set: { $ref: '#/projections/RiderRestriction/measures/reinstatedAt' }
+        from: { envelope: occurredAt }
+
 metrics:
   # THE FLIP'S DATA SET (#167, PR #586 checkpoint — business lens, binding): the
   # ENFORCE_ACCEPTANCE_TIMEOUT TTL must be chosen FROM this distribution, per restaurant and per
@@ -250,3 +287,28 @@ metrics:
         ofDurationMs:
           start: { $ref: '#/projections/DeliveryHandback/measures/handedBackAt' }
           end:   { $ref: '#/projections/DeliveryHandback/measures/reassignedAt' }
+
+  # #639 part C step 4-i (ADR-20260904-081527 §10): how many restrictions land on each ground —
+  # the closed scalar `$ref` (`groupBy` a declared bounded population); the catch-all is its own
+  # bucket, same as any other value. `riderId` is unspellable here (see the projection note).
+  restrictions_by_ground:
+    question: "How many restrictions land on each closed ground (the catch-all its own bucket)?"
+    activity: { $ref: 'stories.yaml#/admin/activities/ManageRiderStanding' }
+    over: { $ref: '#/projections/RiderRestriction' }
+    groupBy:
+      - { $ref: '#/projections/RiderRestriction/measures/ground' }
+    value:
+      countRows: {}
+
+  # "Still restricted" is this gauge's job (rows with no reinstatedAt are excluded from the
+  # percentile population, the same shape as time_to_reassign_ms above).
+  restricted_to_reinstated_duration_ms:
+    question: "Once restricted, how long until a rider is reinstated — p50/p90/p99? (Never-reinstated rows are excluded; 'still restricted' is the gauge's job.)"
+    activity: { $ref: 'stories.yaml#/admin/activities/ManageRiderStanding' }
+    over: { $ref: '#/projections/RiderRestriction' }
+    value:
+      percentiles:
+        levels: [50, 90, 99]
+        ofDurationMs:
+          start: { $ref: '#/projections/RiderRestriction/measures/decidedAt' }
+          end:   { $ref: '#/projections/RiderRestriction/measures/reinstatedAt' }

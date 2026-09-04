@@ -23,8 +23,53 @@ RiderStatus:
     - OFFLINE        # not accepting jobs
     - AVAILABLE      # online, can be offered jobs
     - ON_DELIVERY    # currently fulfilling a delivery
-    - SUSPENDED      # blocked by admin — terminal until reinstated
+    # LEGACY — retired by RiderRestricted (ADR-20260904-014136 §4, ADR-20260904-081527 §6);
+    # unspellable at the command door (ChangeRiderStatus takes RiderAvailabilityTarget instead),
+    # parse-only so a stored legacy row still decodes.
+    - SUSPENDED
   description: "Availability/lifecycle status of an independent Captain rider."
+
+
+# #639 part C step 4-i (ADR-20260904-081527 §6): the target vocabulary ChangeRiderStatus accepts —
+# one name, one scalar, deliberately narrower than RiderStatus so SUSPENDED cannot be spelled at the
+# door. The event keeps RiderStatus (SUSPENDED stays a decodable legacy value).
+RiderAvailabilityTarget:
+  type: string
+  enum:
+    - OFFLINE
+    - AVAILABLE
+    - ON_DELIVERY
+  description: "The rider-settable availability targets for ChangeRiderStatus (#639 part C step 4-i, ADR-20260904-081527 §6) — RiderStatus minus the retired SUSPENDED, so an admin-imposed restriction cannot be spelled through this door."
+
+
+# #639 part C step 4-i (ADR-20260904-081527 §1): the platform's GRANT on the rider identity row —
+# orthogonal to availability (RiderStatus): an OFFLINE rider is ACTIVE, and a RESTRICTED rider may
+# legitimately be ON_DELIVERY holding food (the held-job carve-out). Named `standing`, not `status`:
+# RiderStatus is the rider's own fact, standing is the platform's.
+RiderStanding:
+  type: string
+  enum:
+    - ACTIVE
+    - RESTRICTED
+  description: "The platform's grant on a rider's identity row (#639 part C step 4-i, ADR-20260904-081527 §1) — orthogonal to RiderStatus (availability). ACTIVE admits every door; RESTRICTED admits only the carve-out (myStanding, delivery, reportDeliveryIssue, handBackDelivery)."
+
+
+# #639 part C step 4-i (ADR-20260904-081527 §3, ADR-20260904-014136): the closed set of grounds a
+# human admin may cite to restrict a rider (Art. 11(5) Directive 2024/2831 — additive-only, counsel
+# can only ADD). `readOnlyCatchAll: UNRECOGNISED` (docs/claude/dsl.md "readOnlyCatchAll") declares a
+# READ-ONLY decode-tolerant variant: the Rust enum gets `#[serde(other)]`, the GraphQL SDL enum
+# EXCLUDES it (unspellable at any write door), `EnumText::from_text` tolerates it rather than
+# failing the whole `Rider-{id}` stream load. The raw stored text stays in the immutable
+# `domain_events.payload` for counsel; UNRECOGNISED itself is never emitted by any command.
+RiderRestrictionGround:
+  type: string
+  enum:
+    - RIDER_REQUESTED
+    - ELIGIBILITY_DOCUMENT_LAPSED
+    - IDENTITY_MISMATCH
+    - ACCOUNT_COMPROMISE
+  readOnlyCatchAll: UNRECOGNISED
+  description: "The closed, additive-only set of grounds a human admin cites to restrict a rider's access (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §3/§7). No free text rides beside it — the narrative the restriction ADR made unspellable would re-enter by the side door."
 
 
 # Who fulfils a delivery: an external delivery PARTNER (e.g. Avelo37, with its own couriers) or an

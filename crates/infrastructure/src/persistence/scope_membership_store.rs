@@ -204,7 +204,7 @@ pub fn scope_predicate(scope: &ReadScope) -> ScopePredicate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId};
+    use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId, RiderId, RiderStanding};
 
     fn member_of(scope: &ReadScope) -> Option<(&'static str, Uuid)> {
         match scope_predicate(scope) {
@@ -239,7 +239,7 @@ mod tests {
             ReadScope::Customer(CustomerId(id)),
             ReadScope::Restaurant(RestaurantId(id)),
             ReadScope::RestaurantAccount(RestaurantAccountId(id)),
-            ReadScope::Rider(RiderId(id)),
+            ReadScope::Rider { id: RiderId(id), standing: RiderStanding::ACTIVE },
         ]
         .iter()
         .map(|s| member_of(s).expect("tenant role is a member scope").0)
@@ -249,7 +249,7 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), types.len(), "two roles share a member_type value");
-        for scope in [ReadScope::Customer(CustomerId(id)), ReadScope::Rider(RiderId(id))] {
+        for scope in [ReadScope::Customer(CustomerId(id)), ReadScope::Rider { id: RiderId(id), standing: RiderStanding::ACTIVE }] {
             assert_eq!(member_of(&scope).unwrap().1, id);
         }
     }
@@ -266,7 +266,7 @@ mod tests {
             "RESTAURANT_ACCOUNT"
         );
         assert_eq!(member_of(&ReadScope::Restaurant(RestaurantId(id))).unwrap().0, "RESTAURANT");
-        assert_eq!(member_of(&ReadScope::Rider(RiderId(id))).unwrap().0, "RIDER");
+        assert_eq!(member_of(&ReadScope::Rider { id: RiderId(id), standing: RiderStanding::ACTIVE }).unwrap().0, "RIDER");
         assert_eq!(ScopeType::ORDER.to_text(), "ORDER");
         assert_eq!(ScopeType::RESTAURANT.to_text(), "RESTAURANT");
     }

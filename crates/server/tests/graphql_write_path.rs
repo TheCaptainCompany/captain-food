@@ -206,6 +206,9 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
     let orders: Arc<dyn OrderReadRepository> = Arc::new(PgOrderRepository::new(pool.clone()));
     let customers: Arc<dyn CustomerReadRepository> = Arc::new(PgCustomerRepository::new(pool.clone()));
     let deliveries: Arc<dyn DeliveryReadRepository> = Arc::new(PgDeliveryRepository::new(pool.clone()));
+    let rider_restrictions: Arc<dyn application::queries::RiderRestrictionReadRepository> = Arc::new(
+        infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
+    );
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
@@ -244,6 +247,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             order_conversations,
             customers,
             deliveries,
+            rider_restrictions,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,

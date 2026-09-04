@@ -124,3 +124,54 @@ impl Guard for RoleGuard {
         .extend_with(|_, e| e.set("code", "FORBIDDEN")))
     }
 }
+
+/// The standing carve-out guard (#639 part C step 4-i, ADR-20260904-081527 §4/§9): a SECOND,
+/// orthogonal question from `RoleGuard` — chained `.and(..)` on every role-guarded operation, an
+/// empty carve set when `whileRestricted:` is absent (fail-closed by absence lives in the
+/// generated emitter, never here). Reads `ctx.data_opt::<ReadScope>()` ONLY — never a claim (a
+/// claim has no standing) — so a guard that ignored `standing` would not compile
+/// (compiler-first, ADR-20260803-234035: `ReadScope::Rider` is a struct variant carrying it).
+/// Admits: any non-`ReadScope::Rider` scope (nothing to restrict — Public/Customer/Restaurant/
+/// RestaurantAccount/Admin/System all pass through untouched), a `Rider` scope with `standing ==
+/// ACTIVE`, or a `Rider` scope whose carve set contains `RIDER`. Denied on the RESTRICTED,
+/// not-carved path: increments `rider_restricted_denied_total{operation}` (the FIRST guard-level
+/// emitter — a plain FORBIDDEN emits nothing today) and logs an INFO trace event carrying
+/// `rider_id`/`correlation_id` beside it (the #748 skip-trace pattern — no `rider_id` label on the
+/// counter itself).
+pub struct StandingGuard {
+    carve: &'static [RequestRole],
+    operation: &'static str,
+}
+
+impl StandingGuard {
+    pub fn new(carve: &'static [RequestRole], operation: &'static str) -> Self {
+        Self { carve, operation }
+    }
+}
+
+impl Guard for StandingGuard {
+    async fn check(&self, ctx: &Context<'_>) -> Result<()> {
+        use application::queries::ReadScope;
+        let scope = ctx.data_opt::<ReadScope>();
+        let ReadScope::Rider { id, standing } = scope.unwrap_or(&ReadScope::Public) else {
+            return Ok(());
+        };
+        if *standing == domain::generated::scalars::RiderStanding::ACTIVE {
+            return Ok(());
+        }
+        if self.carve.contains(&RequestRole::Rider) {
+            return Ok(());
+        }
+        telemetry::meters::rider_restriction::denied(self.operation);
+        tracing::info!(
+            rider_id = %id.0,
+            correlation_id = %ctx.data_opt::<crate::graphql::session::RequestCorrelationId>().map(|c| c.0.to_string()).unwrap_or_default(),
+            operation = self.operation,
+            "rider.standing.denied"
+        );
+        Err(async_graphql::Error::new(
+            "forbidden: your access is restricted".to_string(),
+        )
+        .extend_with(|_, e| e.set("code", "FORBIDDEN")))
+    }
+}

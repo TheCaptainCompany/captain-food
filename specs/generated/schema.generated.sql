@@ -396,6 +396,18 @@ CREATE TABLE Rider (
   display_name TEXT NOT NULL,
   phone TEXT NOT NULL,
   status TEXT NOT NULL,
+  standing TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE RiderRestriction (
+  rider_id UUID PRIMARY KEY,
+  standing TEXT NOT NULL,
+  ground TEXT,
+  decided_at TIMESTAMPTZ,
+  effective_at TIMESTAMPTZ,
+  reinstated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );

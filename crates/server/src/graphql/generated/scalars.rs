@@ -2335,6 +2335,93 @@ impl From<RiderStatus> for ds::RiderStatus {
     }
 }
 
+/// The rider-settable availability targets for ChangeRiderStatus (#639 part C step 4-i, ADR-20260904-081527 §6) — RiderStatus minus the retired SUSPENDED, so an admin-imposed restriction cannot be spelled through this door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RiderAvailabilityTarget {
+    #[graphql(name = "OFFLINE")]
+    OFFLINE,
+    #[graphql(name = "AVAILABLE")]
+    AVAILABLE,
+    #[graphql(name = "ON_DELIVERY")]
+    ON_DELIVERY,
+}
+impl From<ds::RiderAvailabilityTarget> for RiderAvailabilityTarget {
+    fn from(v: ds::RiderAvailabilityTarget) -> Self {
+        match v {
+            ds::RiderAvailabilityTarget::OFFLINE => Self::OFFLINE,
+            ds::RiderAvailabilityTarget::AVAILABLE => Self::AVAILABLE,
+            ds::RiderAvailabilityTarget::ON_DELIVERY => Self::ON_DELIVERY,
+        }
+    }
+}
+impl From<RiderAvailabilityTarget> for ds::RiderAvailabilityTarget {
+    fn from(v: RiderAvailabilityTarget) -> Self {
+        match v {
+            RiderAvailabilityTarget::OFFLINE => Self::OFFLINE,
+            RiderAvailabilityTarget::AVAILABLE => Self::AVAILABLE,
+            RiderAvailabilityTarget::ON_DELIVERY => Self::ON_DELIVERY,
+        }
+    }
+}
+
+/// The platform's grant on a rider's identity row (#639 part C step 4-i, ADR-20260904-081527 §1) — orthogonal to RiderStatus (availability). ACTIVE admits every door; RESTRICTED admits only the carve-out (myStanding, delivery, reportDeliveryIssue, handBackDelivery).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RiderStanding {
+    #[graphql(name = "ACTIVE")]
+    ACTIVE,
+    #[graphql(name = "RESTRICTED")]
+    RESTRICTED,
+}
+impl From<ds::RiderStanding> for RiderStanding {
+    fn from(v: ds::RiderStanding) -> Self {
+        match v {
+            ds::RiderStanding::ACTIVE => Self::ACTIVE,
+            ds::RiderStanding::RESTRICTED => Self::RESTRICTED,
+        }
+    }
+}
+impl From<RiderStanding> for ds::RiderStanding {
+    fn from(v: RiderStanding) -> Self {
+        match v {
+            RiderStanding::ACTIVE => Self::ACTIVE,
+            RiderStanding::RESTRICTED => Self::RESTRICTED,
+        }
+    }
+}
+
+/// The closed, additive-only set of grounds a human admin cites to restrict a rider's access (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §3/§7). No free text rides beside it — the narrative the restriction ADR made unspellable would re-enter by the side door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum RiderRestrictionGround {
+    #[graphql(name = "RIDER_REQUESTED")]
+    RIDER_REQUESTED,
+    #[graphql(name = "ELIGIBILITY_DOCUMENT_LAPSED")]
+    ELIGIBILITY_DOCUMENT_LAPSED,
+    #[graphql(name = "IDENTITY_MISMATCH")]
+    IDENTITY_MISMATCH,
+    #[graphql(name = "ACCOUNT_COMPROMISE")]
+    ACCOUNT_COMPROMISE,
+}
+/// `readOnlyCatchAll`: UNRECOGNISED decodes to `None` — unspellable on the wire, renders null.
+pub fn rider_restriction_ground_from_domain(v: ds::RiderRestrictionGround) -> Option<RiderRestrictionGround> {
+    match v {
+        ds::RiderRestrictionGround::RIDER_REQUESTED => Some(RiderRestrictionGround::RIDER_REQUESTED),
+        ds::RiderRestrictionGround::ELIGIBILITY_DOCUMENT_LAPSED => Some(RiderRestrictionGround::ELIGIBILITY_DOCUMENT_LAPSED),
+        ds::RiderRestrictionGround::IDENTITY_MISMATCH => Some(RiderRestrictionGround::IDENTITY_MISMATCH),
+        ds::RiderRestrictionGround::ACCOUNT_COMPROMISE => Some(RiderRestrictionGround::ACCOUNT_COMPROMISE),
+        ds::RiderRestrictionGround::UNRECOGNISED => None,
+    }
+}
+impl From<RiderRestrictionGround> for ds::RiderRestrictionGround {
+    fn from(v: RiderRestrictionGround) -> Self {
+        match v {
+            RiderRestrictionGround::RIDER_REQUESTED => Self::RIDER_REQUESTED,
+            RiderRestrictionGround::ELIGIBILITY_DOCUMENT_LAPSED => Self::ELIGIBILITY_DOCUMENT_LAPSED,
+            RiderRestrictionGround::IDENTITY_MISMATCH => Self::IDENTITY_MISMATCH,
+            RiderRestrictionGround::ACCOUNT_COMPROMISE => Self::ACCOUNT_COMPROMISE,
+        }
+    }
+}
+
 /// Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
 pub enum DeliveryProvider {

@@ -858,7 +858,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         let identity = crate::auth::IdentitySources {
             customer: crate::auth::CustomerIdentitySource::Claim,
             rider: crate::auth::RiderIdentitySource::new(Arc::new(WsScriptedRiderResolver(
-                crate::auth::RiderIdentityResolution::Resolved(RiderId(right_id)),
+                crate::auth::RiderIdentityResolution::Resolved((RiderId(right_id), domain::generated::scalars::RiderStanding::ACTIVE)),
             ))),
         };
         let (_, acting, _, scope) =
@@ -872,12 +872,12 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
         );
         assert_eq!(
             scope,
-            application::queries::ReadScope::Rider(RiderId(right_id)),
+            application::queries::ReadScope::Rider { id: RiderId(right_id), standing: domain::generated::scalars::RiderStanding::ACTIVE },
             "the WS connect path must resolve a rider through Postgres, not the claim"
         );
         assert_ne!(
             scope,
-            application::queries::ReadScope::Rider(RiderId(wrong_claim)),
+            application::queries::ReadScope::Rider { id: RiderId(wrong_claim), standing: domain::generated::scalars::RiderStanding::ACTIVE },
             "and never the claim's id"
         );
     }

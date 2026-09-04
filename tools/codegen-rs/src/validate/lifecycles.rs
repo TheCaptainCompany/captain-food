@@ -37,6 +37,9 @@ pub(crate) struct Lifecycle {
     pub(crate) initial: Vec<LifecycleInitial>,
     pub(crate) transitions: Vec<LifecycleTransition>,
     pub(crate) terminal: Vec<String>,
+    /// `legacyStates:` (#639 part C step 4-i, ADR-20260904-081527 §6): states named only for a
+    /// retired entry, exempt from the reachability check by declaration.
+    pub(crate) legacy_states: Vec<String>,
 }
 
 /// Parse every aggregate's `lifecycle:` block, in actors.yaml order.
@@ -105,6 +108,7 @@ pub(crate) fn parse_lifecycles(model: &Model) -> Vec<Lifecycle> {
             initial,
             transitions,
             terminal: str_seq(lc.get("terminal")),
+            legacy_states: str_seq(lc.get("legacyStates")),
         });
     }
     out
@@ -404,7 +408,21 @@ pub(crate) fn validate_lifecycles(model: &Model, issues: &mut Vec<Issue>) {
             named.extend(t.from.iter().cloned());
             named.insert(t.to.clone());
         }
+        // `legacyStates:` (#639 part C step 4-i, ADR-20260904-081527 §6): a state named ONLY for a
+        // retired entry — no live transition ever produces it again, but a pre-existing STORED row
+        // may still carry it, so its EXIT edge(s) stay declared for legacy reads (fold-side reading
+        // uses the payload's target, so no stored row breaks). Exempt from reachability by name,
+        // never silently: the state must still appear in the scalar's enum (`check_state` above)
+        // and the exemption is a declared list, not an absence.
+        let legacy: BTreeSet<String> = lc
+            .legacy_states
+            .iter()
+            .cloned()
+            .collect();
         for s in named {
+            if legacy.contains(&s) {
+                continue;
+            }
             if state_set.contains(s.as_str()) && !reachable.contains(&s) {
                 issues.push(err(
                     "lc-unreachable",

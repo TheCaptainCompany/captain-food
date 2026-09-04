@@ -12,19 +12,26 @@
 
 use crate::generated::events::DomainEvent;
 pub use crate::generated::lifecycles::rider as lifecycle;
-use crate::generated::scalars::{PhoneNumber, RiderStatus};
+use crate::generated::scalars::{PhoneNumber, RiderRestrictionGround, RiderStatus};
 
 /// What the Rider command handlers need to know to accept or reject a command. `None` (from
 /// [`fold`]) means no `RiderRegistered` yet on this stream.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RiderState {
-    /// Availability/lifecycle machine (OFFLINE/AVAILABLE/ON_DELIVERY/SUSPENDED) — guarded by
-    /// [`lifecycle::transition`].
+    /// Availability/lifecycle machine (OFFLINE/AVAILABLE/ON_DELIVERY) — guarded by
+    /// [`lifecycle::transition`]. `SUSPENDED` is LEGACY (parse-only) and stays representable here
+    /// only because a pre-existing stored row may still carry it as its status.
     pub status: RiderStatus,
     /// Current display name (profile field, edited via UpdateRiderInfo).
     pub display_name: String,
     /// Current canonical E.164 phone (profile field, edited via UpdateRiderInfo).
     pub phone: PhoneNumber,
+    /// The platform's grant — a FACT IN STATE, never a second `lifecycle:` machine (#639 part C
+    /// step 4-i, ADR-20260904-081527 §1/§6): `Some(ground)` while restricted, `None` while ACTIVE.
+    /// `RestrictRider`/`ReinstateRider` (`crates/application/src/commands.rs`) enforce
+    /// `RiderRestrictionLifecycle`; `ChangeRiderStatus -> AVAILABLE` on a `Some` value is the
+    /// aggregate's own belt (`RiderAccessRestricted`).
+    pub restriction: Option<RiderRestrictionGround>,
 }
 
 /// Fold a Rider stream (events in version order) into its current state. `None` ⇔ the stream has no
@@ -42,6 +49,7 @@ fn apply(state: Option<RiderState>, event: &DomainEvent) -> Option<RiderState> {
                 status,
                 display_name: e.display_name.clone(),
                 phone: e.phone.clone(),
+                restriction: None,
             });
         }
     }
@@ -59,6 +67,13 @@ fn apply(state: Option<RiderState>, event: &DomainEvent) -> Option<RiderState> {
         if let Some(phone) = &e.phone {
             s.phone = phone.clone();
         }
+    }
+    // The standing FACT (#639 part C step 4-i, ADR-20260904-081527 §1/§6) — never a second
+    // `lifecycle:` machine; folded independently of `status`.
+    match event {
+        DomainEvent::RiderRestricted(e) => s.restriction = Some(e.ground),
+        DomainEvent::RiderReinstated(_) => s.restriction = None,
+        _ => {}
     }
     Some(s)
 }
@@ -126,7 +141,10 @@ mod tests {
 
     /// The generated table IS the declared machine (actors.yaml#/Rider/lifecycle, dynamic-target
     /// form: `RiderStatusChanged` carries the target in `status`) — the same legality set the old
-    /// hand `can_transition` encoded, now spec-checked (rules.yaml#/RiderLifecycle).
+    /// hand `can_transition` encoded, now spec-checked (rules.yaml#/RiderLifecycle). #639 part C
+    /// step 4-i (ADR-20260904-081527 §6): the four `-> SUSPENDED` ENTRY edges are RETIRED — this
+    /// is the decision change the ADR calls out, so the rows asserting them as LEGAL moved to the
+    /// invalid-jumps section below; `SUSPENDED -> OFFLINE` stays as the legacy exit.
     #[test]
     fn generated_transition_table_matches_the_declared_machine() {
         use RiderStatus::*;
@@ -136,12 +154,7 @@ mod tests {
         assert_eq!(t(AVAILABLE, OFFLINE), Some(OFFLINE));
         assert_eq!(t(AVAILABLE, ON_DELIVERY), Some(ON_DELIVERY));
         assert_eq!(t(ON_DELIVERY, AVAILABLE), Some(AVAILABLE));
-        assert_eq!(t(SUSPENDED, OFFLINE), Some(OFFLINE)); // reinstate
-        // Suspension is admin-imposed from anywhere, idempotently (SUSPENDED → SUSPENDED).
-        assert_eq!(t(OFFLINE, SUSPENDED), Some(SUSPENDED));
-        assert_eq!(t(AVAILABLE, SUSPENDED), Some(SUSPENDED));
-        assert_eq!(t(ON_DELIVERY, SUSPENDED), Some(SUSPENDED));
-        assert_eq!(t(SUSPENDED, SUSPENDED), Some(SUSPENDED));
+        assert_eq!(t(SUSPENDED, OFFLINE), Some(OFFLINE)); // the legacy exit
         // The notable invalid jumps.
         assert_eq!(t(OFFLINE, ON_DELIVERY), None);
         assert_eq!(t(ON_DELIVERY, OFFLINE), None);
@@ -149,9 +162,46 @@ mod tests {
         assert_eq!(t(SUSPENDED, ON_DELIVERY), None);
         assert_eq!(t(OFFLINE, OFFLINE), None);
         assert_eq!(t(AVAILABLE, AVAILABLE), None);
+        // The retired entry edges: no live transition ever produces SUSPENDED again.
+        assert_eq!(t(OFFLINE, SUSPENDED), None);
+        assert_eq!(t(AVAILABLE, SUSPENDED), None);
+        assert_eq!(t(ON_DELIVERY, SUSPENDED), None);
+        assert_eq!(t(SUSPENDED, SUSPENDED), None);
         // The birth is event-carried too, and no state is terminal.
         assert_eq!(lifecycle::initial(&registered(AVAILABLE)), Some(AVAILABLE));
         assert!(lifecycle::TERMINAL.is_empty());
+    }
+
+    /// #639 part C step 4-i (ADR-20260904-081527 §1): restriction is a FACT IN STATE, folded
+    /// independently of the availability machine — a restricted rider may legitimately be
+    /// ON_DELIVERY holding food.
+    #[test]
+    fn restriction_folds_independently_of_status() {
+        use crate::generated::events::{RiderReinstated, RiderRestricted};
+        use crate::generated::scalars::RiderRestrictionGround;
+        let restricted = DomainEvent::RiderRestricted(RiderRestricted {
+            rider_id: RiderId(uuid::Uuid::nil()),
+            ground: RiderRestrictionGround::IDENTITY_MISMATCH,
+            decided_at: "2026-01-06T12:00:00Z".into(),
+            effective_at: "2026-01-06T12:00:00Z".into(),
+        });
+        let s = fold(&[registered(RiderStatus::ON_DELIVERY), restricted]).unwrap();
+        assert_eq!(s.restriction, Some(RiderRestrictionGround::IDENTITY_MISMATCH));
+        assert_eq!(s.status, RiderStatus::ON_DELIVERY);
+
+        let reinstated = DomainEvent::RiderReinstated(RiderReinstated { rider_id: RiderId(uuid::Uuid::nil()) });
+        let s2 = fold(&[
+            registered(RiderStatus::ON_DELIVERY),
+            DomainEvent::RiderRestricted(RiderRestricted {
+                rider_id: RiderId(uuid::Uuid::nil()),
+                ground: RiderRestrictionGround::IDENTITY_MISMATCH,
+                decided_at: "2026-01-06T12:00:00Z".into(),
+                effective_at: "2026-01-06T12:00:00Z".into(),
+            }),
+            reinstated,
+        ])
+        .unwrap();
+        assert_eq!(s2.restriction, None);
     }
 
     #[test]

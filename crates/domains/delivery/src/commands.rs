@@ -144,12 +144,27 @@ pub struct UpdateRiderInfo {
     pub phone: Option<PhoneNumber>,
 }
 
-/// Change a rider's availability/lifecycle status.
+/// Change a rider's own availability. The rider's target is `RiderAvailabilityTarget` (#639 part C step 4-i, ADR-20260904-081527 §6) — narrower than the stored RiderStatus so SUSPENDED cannot be spelled through this door; admin restriction/reinstatement goes through RestrictRider / ReinstateRider instead.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRiderStatus {
     pub rider_id: RiderId,
-    pub status: RiderStatus,
+    pub status: RiderAvailabilityTarget,
+}
+
+/// An admin restricts a rider's access, citing one of the closed grounds (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §5). NO dates on the input, NO free text: the handler stamps `decidedAt = effectiveAt = now` from the clock port — an admin-typed date would be a backdating vector inside the Art. 11 log.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestrictRider {
+    pub rider_id: RiderId,
+    pub ground: RiderRestrictionGround,
+}
+
+/// An admin reinstates a previously restricted rider (#639 part C step 4-i, ADR-20260904-081527 §6) — a new fact, never a row edit; rollback of a wrong restriction is a fresh ReinstateRider.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReinstateRider {
+    pub rider_id: RiderId,
 }
 
 /// Ask the auth provider to send an SMS OTP to a rider's phone (the same OVHcloud SMS hook and the same send guards as RequestPhoneVerification). Emits no event, and MUST NOT reveal whether the phone belongs to a rider: the handler never consults the rider read model, so the outcome is identical for a rider's phone and a stranger's (no enumeration oracle).

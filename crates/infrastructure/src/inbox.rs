@@ -527,6 +527,10 @@ async fn rider(
         RiderInbox::RegisterRider(cmd) => run(async { application::commands::register_rider(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         RiderInbox::RequestRiderSignInCode(cmd) => run(async { application::commands::request_rider_sign_in_code(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor).await }).await,
         RiderInbox::UpdateRiderInfo(cmd) => run(async { application::commands::update_rider_info(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+        // #639 part C step 4-i (ADR-20260904-081527 §8): the two human-only doors — additive arms
+        // only, no routing/fencing/catch-all machinery touched.
+        RiderInbox::RestrictRider(cmd) => run(async { application::commands::restrict_rider(deps.store.as_ref(), cmd, actor, chrono::Utc::now()).await.map(|_| ()) }).await,
+        RiderInbox::ReinstateRider(cmd) => run(async { application::commands::reinstate_rider(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
     }
 }
 

@@ -99,6 +99,30 @@ pub const RIDER_SIGN_IN_REQUIRES_SESSION: ErrorDef = ErrorDef {
     message_fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez.",
 };
 
+/// The rider is already restricted (#639 part C step 4-i) — restrict only an unrestricted rider; a second ground needs a reinstatement first (the Art. 11 log is never overwritten).
+/// Context: `riderId`.
+pub const RIDER_ALREADY_RESTRICTED: ErrorDef = ErrorDef {
+    code: "RiderAlreadyRestricted",
+    message_en: "This rider is already restricted.",
+    message_fr: "Ce livreur est déjà restreint.",
+};
+
+/// The rider is not currently restricted (#639 part C step 4-i) — reinstate only a restricted rider.
+/// Context: `riderId`.
+pub const RIDER_NOT_RESTRICTED: ErrorDef = ErrorDef {
+    code: "RiderNotRestricted",
+    message_en: "This rider is not restricted.",
+    message_fr: "Ce livreur n'est pas restreint.",
+};
+
+/// The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus.
+/// Context: `riderId`.
+pub const RIDER_ACCESS_RESTRICTED: ErrorDef = ErrorDef {
+    code: "RiderAccessRestricted",
+    message_en: "Your access is restricted, so you cannot go available for deliveries.",
+    message_fr: "Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons.",
+};
+
 /// The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
 /// Context: `authRef`.
 pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {

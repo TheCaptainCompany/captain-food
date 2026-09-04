@@ -80,6 +80,8 @@ pub enum DomainEvent {
     RiderRegistered(RiderRegistered),
     RiderInfoUpdated(RiderInfoUpdated),
     RiderStatusChanged(RiderStatusChanged),
+    RiderRestricted(RiderRestricted),
+    RiderReinstated(RiderReinstated),
     RestaurantAccountRegistered(RestaurantAccountRegistered),
     RestaurantAccountUpdated(RestaurantAccountUpdated),
     RestaurantAccountDeleted(RestaurantAccountDeleted),

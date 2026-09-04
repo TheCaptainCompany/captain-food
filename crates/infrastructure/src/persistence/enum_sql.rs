@@ -14,7 +14,8 @@ use domain::generated::scalars::{
     InboundMessageStatus, OrderAcceptanceMode, OrderStatus, PaymentProcessStatus, PaymentStatus,
     PrincipalKind, ProspectPipelineStatus, ReclamationCategory, ReclamationResolution, ReclamationStatus,
     RefundProcessStatus, RefundStatus, RestaurantDispatchMode, RestaurantListingStatus,
-    RestaurantStatus, RiderStatus, ScopeType, ServiceType, ThumbRating, UserType,
+    RestaurantStatus, RiderRestrictionGround, RiderStanding, RiderStatus, ScopeType, ServiceType,
+    ThumbRating, UserType,
 };
 use domain::shared::errors::DomainError;
 
@@ -84,6 +85,34 @@ enum_text!(DeliveryIssueKind {
 // #639 part C step 3-ii: FoodCustody — View_DeliveryJob.food_location.
 enum_text!(FoodCustody { NOT_COLLECTED, RETURNED_TO_RESTAURANT, WITH_RIDER });
 enum_text!(RiderStatus { OFFLINE, AVAILABLE, ON_DELIVERY, SUSPENDED });
+// #639 part C step 4-i: Rider.standing / RiderRestriction.standing — the platform's grant.
+enum_text!(RiderStanding { ACTIVE, RESTRICTED });
+// #639 part C step 4-i (ADR-20260904-081527 §3): `readOnlyCatchAll: UNRECOGNISED` — hand-written,
+// NOT the `enum_text!` macro, because an unknown stored value must TOLERATE (decode to
+// `Unrecognised`) rather than fail the whole `Rider-{id}` load (blocking ReinstateRider) or leave
+// the projector's stale-grant fault-and-skip in place. The raw text stays in the immutable
+// `domain_events.payload` for counsel; `Unrecognised` itself is never written by `to_text` (no
+// command can produce it — unspellable at the door).
+impl EnumText for RiderRestrictionGround {
+    fn to_text(&self) -> &'static str {
+        match self {
+            RiderRestrictionGround::RIDER_REQUESTED => "RIDER_REQUESTED",
+            RiderRestrictionGround::ELIGIBILITY_DOCUMENT_LAPSED => "ELIGIBILITY_DOCUMENT_LAPSED",
+            RiderRestrictionGround::IDENTITY_MISMATCH => "IDENTITY_MISMATCH",
+            RiderRestrictionGround::ACCOUNT_COMPROMISE => "ACCOUNT_COMPROMISE",
+            RiderRestrictionGround::UNRECOGNISED => "UNRECOGNISED",
+        }
+    }
+    fn from_text(s: &str) -> Result<Self, DomainError> {
+        Ok(match s {
+            "RIDER_REQUESTED" => RiderRestrictionGround::RIDER_REQUESTED,
+            "ELIGIBILITY_DOCUMENT_LAPSED" => RiderRestrictionGround::ELIGIBILITY_DOCUMENT_LAPSED,
+            "IDENTITY_MISMATCH" => RiderRestrictionGround::IDENTITY_MISMATCH,
+            "ACCOUNT_COMPROMISE" => RiderRestrictionGround::ACCOUNT_COMPROMISE,
+            _ => RiderRestrictionGround::UNRECOGNISED,
+        })
+    }
+}
 enum_text!(InboundMessageStatus {
     SCHEDULED,
     CANCELLED,

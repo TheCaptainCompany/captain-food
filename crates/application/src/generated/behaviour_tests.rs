@@ -672,6 +672,16 @@ fn fx_rider_status_changed() -> DomainEvent {
     DomainEvent::RiderStatusChanged(evs::RiderStatusChanged { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderStatus::AVAILABLE })
 }
 
+/// tests.yaml#/fixtures/riderRestricted — events.yaml#/RiderRestricted
+fn fx_rider_restricted() -> DomainEvent {
+    DomainEvent::RiderRestricted(evs::RiderRestricted { rider_id: sc::RiderId(support::uid("rider-1")), ground: sc::RiderRestrictionGround::IDENTITY_MISMATCH, decided_at: "2026-01-06T12:00:00Z".to_string(), effective_at: "2026-01-06T12:00:00Z".to_string() })
+}
+
+/// tests.yaml#/fixtures/riderReinstated — events.yaml#/RiderReinstated
+fn fx_rider_reinstated() -> DomainEvent {
+    DomainEvent::RiderReinstated(evs::RiderReinstated { rider_id: sc::RiderId(support::uid("rider-1")) })
+}
+
 /// tests.yaml#/fixtures/conversationOpened — events.yaml#/ConversationOpened
 fn fx_conversation_opened() -> DomainEvent {
     DomainEvent::ConversationOpened(evs::ConversationOpened { order_id: sc::OrderId(support::uid("order-1")), restaurant_id: sc::RestaurantId(support::uid("resto-1")), customer_id: Some(sc::CustomerId(support::uid("cust-1"))), customer_chat_enabled: true })
@@ -4542,7 +4552,7 @@ async fn test_rider_status_changed() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::ChangeRiderStatus { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderStatus::AVAILABLE };
+    let cmd = cmds::ChangeRiderStatus { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderAvailabilityTarget::AVAILABLE };
     let result = crate::commands::change_rider_status(&bed.store, cmd, &support::actor()).await;
     let _ = result.expect("TestRiderStatusChanged: the spec expects acceptance");
     bed.assert_appended("TestRiderStatusChanged", &before, &[
@@ -4558,11 +4568,105 @@ async fn test_rider_status_change_is_rejected() {
     spec_baseline(&bed).await;
     bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::ChangeRiderStatus { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderStatus::ON_DELIVERY };
+    let cmd = cmds::ChangeRiderStatus { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderAvailabilityTarget::ON_DELIVERY };
     let result = crate::commands::change_rider_status(&bed.store, cmd, &support::actor()).await;
     let err = result.expect_err("TestRiderStatusChangeIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRiderStatusChangeIsRejected", &err, &["InvalidRiderStatusTransition"]);
     bed.assert_appended("TestRiderStatusChangeIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRiderRestricted — "An admin restricts a rider, citing a closed ground"
+/// rules: RiderRestrictionLifecycle, RestrictionTakesEffectWhenDecided, RiderStandingIsAGrant, RestrictRiderIsAHumanAct
+#[tokio::test]
+async fn test_rider_restricted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-1")), ground: sc::RiderRestrictionGround::IDENTITY_MISMATCH };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await;
+    let _ = result.expect("TestRiderRestricted: the spec expects acceptance");
+    bed.assert_appended("TestRiderRestricted", &before, &[
+        (format!("Rider-{}", support::uid("rider-1")), fx_rider_restricted()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestRiderReinstated — "An admin reinstates a previously restricted rider"
+/// rules: RiderRestrictionLifecycle
+#[tokio::test]
+async fn test_rider_reinstated() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered(), fx_rider_restricted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ReinstateRider { rider_id: sc::RiderId(support::uid("rider-1")) };
+    let result = crate::commands::reinstate_rider(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestRiderReinstated: the spec expects acceptance");
+    bed.assert_appended("TestRiderReinstated", &before, &[
+        (format!("Rider-{}", support::uid("rider-1")), fx_rider_reinstated()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestRestrictAlreadyRestrictedRiderIsRejected — "Restricting an already-restricted rider is rejected — a second ground needs a reinstatement first"
+/// rules: RiderRestrictionLifecycle
+#[tokio::test]
+async fn test_restrict_already_restricted_rider_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered(), fx_rider_restricted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-1")), ground: sc::RiderRestrictionGround::ACCOUNT_COMPROMISE };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await;
+    let err = result.expect_err("TestRestrictAlreadyRestrictedRiderIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRestrictAlreadyRestrictedRiderIsRejected", &err, &["RiderAlreadyRestricted"]);
+    bed.assert_appended("TestRestrictAlreadyRestrictedRiderIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestReinstateUnrestrictedRiderIsRejected — "Reinstating an unrestricted rider is rejected"
+/// rules: RiderRestrictionLifecycle
+#[tokio::test]
+async fn test_reinstate_unrestricted_rider_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ReinstateRider { rider_id: sc::RiderId(support::uid("rider-1")) };
+    let result = crate::commands::reinstate_rider(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestReinstateUnrestrictedRiderIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestReinstateUnrestrictedRiderIsRejected", &err, &["RiderNotRestricted"]);
+    bed.assert_appended("TestReinstateUnrestrictedRiderIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRestrictUnknownRiderIsRejected — "Restricting an unknown rider is rejected"
+/// rules: RiderRestrictionLifecycle
+#[tokio::test]
+async fn test_restrict_unknown_rider_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-404")), ground: sc::RiderRestrictionGround::IDENTITY_MISMATCH };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await;
+    let err = result.expect_err("TestRestrictUnknownRiderIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRestrictUnknownRiderIsRejected", &err, &["RiderNotFound"]);
+    bed.assert_appended("TestRestrictUnknownRiderIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRestrictedRiderCannotGoAvailable — "A restricted rider's ChangeRiderStatus to AVAILABLE is rejected (the aggregate's own belt)"
+/// rules: RiderAvailabilityNeverSpellsRestriction
+#[tokio::test]
+async fn test_restricted_rider_cannot_go_available() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("Rider-{}", support::uid("rider-1")), vec![fx_rider_registered(), fx_rider_restricted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ChangeRiderStatus { rider_id: sc::RiderId(support::uid("rider-1")), status: sc::RiderAvailabilityTarget::AVAILABLE };
+    let result = crate::commands::change_rider_status(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRestrictedRiderCannotGoAvailable: the spec expects a typed rejection");
+    support::assert_thrown("TestRestrictedRiderCannotGoAvailable", &err, &["RiderAccessRestricted"]);
+    bed.assert_appended("TestRestrictedRiderCannotGoAvailable", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPaymentAuthorizationOrphanIsFlagged — "An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)"

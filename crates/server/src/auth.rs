@@ -2205,8 +2205,10 @@ pub enum IdentityResolution<Id> {
 
 /// The CUSTOMER seam's outcome (#641).
 pub type CustomerIdentityResolution = IdentityResolution<domain::generated::scalars::CustomerId>;
-/// The RIDER seam's outcome (#639 part C step 2b).
-pub type RiderIdentityResolution = IdentityResolution<domain::generated::scalars::RiderId>;
+/// The RIDER seam's outcome (#639 part C step 2b; carries `standing` since #639 part C step 4-i,
+/// ADR-20260904-081527 §1 — the SAME `Rider` row, one `SELECT rider_id, standing`, never two).
+pub type RiderIdentityResolution =
+    IdentityResolution<(domain::generated::scalars::RiderId, domain::generated::scalars::RiderStanding)>;
 
 /// The coarse, CLOSED set of reasons a lookup can fail — safe as a telemetry label (never the
 /// underlying error string, which is unbounded cardinality on a labeled series).
@@ -2523,9 +2525,9 @@ async fn resolve_rider_scope(
 
     let unbound = || Identity::Unbound { sub: sub.clone(), role: RequestRole::Rider };
     let (identity, scope, result, reason) = match &outcome {
-        RiderIdentityResolution::Resolved(rider_id) => (
+        RiderIdentityResolution::Resolved((rider_id, standing)) => (
             Identity::Rider { sub: sub.clone() },
-            ReadScope::Rider(*rider_id),
+            ReadScope::Rider { id: *rider_id, standing: *standing },
             "resolved",
             None,
         ),
@@ -2538,7 +2540,14 @@ async fn resolve_rider_scope(
             (unbound(), ReadScope::Public, "lookup_failed", Some(reason.label()))
         }
     };
-    telemetry::spans::record_rider_identity_resolve_result(&span, result, reason);
+    let standing_label = match &scope {
+        ReadScope::Rider { standing, .. } => Some(match standing {
+            domain::generated::scalars::RiderStanding::ACTIVE => "ACTIVE",
+            domain::generated::scalars::RiderStanding::RESTRICTED => "RESTRICTED",
+        }),
+        _ => None,
+    };
+    telemetry::spans::record_rider_identity_resolve_result(&span, result, reason, standing_label);
     telemetry::meters::rider_identity::duration(elapsed_ms, result);
     // ONE real Postgres round trip per request / WS connect, on the same seam the customer arm
     // uses — no second mechanism, no cache. `request_reuse` is declared for the same reason as on
@@ -2789,7 +2798,9 @@ mod read_scope_tests {
     impl ResolveRiderIdentity for ScriptedRiderTable {
         async fn resolve(&self, auth_subject: &str) -> RiderIdentityResolution {
             match self.0.get(auth_subject) {
-                Some(id) => RiderIdentityResolution::Resolved(RiderId(*id)),
+                Some(id) => {
+                    RiderIdentityResolution::Resolved((RiderId(*id), domain::generated::scalars::RiderStanding::ACTIVE))
+                }
                 None => RiderIdentityResolution::NoMapping,
             }
         }
@@ -2837,10 +2848,14 @@ mod read_scope_tests {
         )
         .await;
 
-        assert_eq!(scope, ReadScope::Rider(RiderId(rider_a)), "Postgres wins over the claim");
+        assert_eq!(
+            scope,
+            ReadScope::Rider { id: RiderId(rider_a), standing: domain::generated::scalars::RiderStanding::ACTIVE },
+            "Postgres wins over the claim"
+        );
         assert_ne!(
             scope,
-            ReadScope::Rider(RiderId(rider_b)),
+            ReadScope::Rider { id: RiderId(rider_b), standing: domain::generated::scalars::RiderStanding::ACTIVE },
             "the claim's rider id is never the scope"
         );
         assert!(principal.bridge_resolved(&scope), "a resolved rider reads as resolved");
@@ -2870,7 +2885,7 @@ mod read_scope_tests {
         assert_eq!(scope, ReadScope::Public, "no row -> fail closed");
         assert_ne!(
             scope,
-            ReadScope::Rider(RiderId(rider_b)),
+            ReadScope::Rider { id: RiderId(rider_b), standing: domain::generated::scalars::RiderStanding::ACTIVE },
             "and specifically NOT the claim's rider: try-Postgres-else-claim passes (a) and fails here"
         );
         assert!(

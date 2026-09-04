@@ -313,17 +313,28 @@ pub fn rider_identity_resolve(correlation_id: &str) -> Span {
         business.correlation_id = correlation_id,
         business.result = Empty,
         business.failure_reason = Empty,
+        business.standing = Empty,
         otel.status_code = Empty,
     )
 }
 
 /// Record the rider seam's typed outcome — `reason` only for `lookup_failed`, which also sets
-/// OTel ERROR status.
-pub fn record_rider_identity_resolve_result(span: &Span, result: &str, reason: Option<&str>) {
+/// OTel ERROR status; `standing` (#639 part C step 4-i, ADR-20260904-081527 §9) only on
+/// `result=resolved` — an attribute on the wide event, never a label on the histogram, so "why was
+/// THIS rider denied at 19:40" is answerable per request.
+pub fn record_rider_identity_resolve_result(
+    span: &Span,
+    result: &str,
+    reason: Option<&str>,
+    standing: Option<&str>,
+) {
     span.record(attr::RESULT, result);
     if let Some(reason) = reason {
         span.record(attr::FAILURE_REASON, reason);
         span.record("otel.status_code", "ERROR");
+    }
+    if let Some(standing) = standing {
+        span.record("business.standing", standing);
     }
 }
 

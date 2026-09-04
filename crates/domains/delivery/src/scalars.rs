@@ -22,6 +22,37 @@ pub enum RiderStatus {
     SUSPENDED,
 }
 
+/// The rider-settable availability targets for ChangeRiderStatus (#639 part C step 4-i, ADR-20260904-081527 §6) — RiderStatus minus the retired SUSPENDED, so an admin-imposed restriction cannot be spelled through this door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum RiderAvailabilityTarget {
+    OFFLINE,
+    AVAILABLE,
+    ON_DELIVERY,
+}
+
+/// The platform's grant on a rider's identity row (#639 part C step 4-i, ADR-20260904-081527 §1) — orthogonal to RiderStatus (availability). ACTIVE admits every door; RESTRICTED admits only the carve-out (myStanding, delivery, reportDeliveryIssue, handBackDelivery).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum RiderStanding {
+    ACTIVE,
+    RESTRICTED,
+}
+
+/// The closed, additive-only set of grounds a human admin cites to restrict a rider's access (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §3/§7). No free text rides beside it — the narrative the restriction ADR made unspellable would re-enter by the side door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum RiderRestrictionGround {
+    RIDER_REQUESTED,
+    ELIGIBILITY_DOCUMENT_LAPSED,
+    IDENTITY_MISMATCH,
+    ACCOUNT_COMPROMISE,
+    /// Read-only catch-all: an unrecognised stored value tolerates decode instead of
+    /// failing the whole load. Unspellable at any write door.
+    #[serde(other)]
+    UNRECOGNISED,
+}
+
 /// Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]

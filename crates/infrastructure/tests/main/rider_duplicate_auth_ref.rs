@@ -93,7 +93,7 @@ async fn a_replayed_duplicate_auth_ref_is_skipped_the_checkpoint_advances_and_th
     let reader = PgRiderRepository::new(pool.clone());
     assert_eq!(
         reader.rider_id_by_auth_subject(AuthSubject(auth_ref.to_string())).await.expect("probe"),
-        Some(RiderId(rider_a)),
+        Some((RiderId(rider_a), domain::generated::scalars::RiderStanding::ACTIVE)),
         "the door resolves the login to the first rider; the second is Public forever (no row)"
     );
     assert_eq!(

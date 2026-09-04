@@ -769,6 +769,30 @@ pub struct DeliveryJob {
     pub restaurant: Restaurant,
 }
 
+/// Why and when a rider's access is restricted (#639 part C step 4-i) — the Art. 11 attribution: ground, decidedAt, effectiveAt.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderRestrictionInfo {
+    #[graphql(name = "ground")]
+    pub ground: Option<RiderRestrictionGround>,
+    #[graphql(name = "decidedAt")]
+    pub decided_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(name = "effectiveAt")]
+    pub effective_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The calling rider's own standing (#639 part C step 4-i) — ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any) so the restricted rider's one control (hand it back) needs no second query.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderStandingInfo {
+    #[graphql(name = "standing")]
+    pub standing: RiderStanding,
+    #[graphql(name = "restriction")]
+    pub restriction: Option<RiderRestrictionInfo>,
+    #[graphql(name = "heldDelivery")]
+    pub held_delivery: Option<DeliveryJob>,
+}
+
 /// A delivery partner's declared availability to serve a city on a catalog channel, with its review status (#61). Serves the EXTERNAL partner portal + the admin review queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]

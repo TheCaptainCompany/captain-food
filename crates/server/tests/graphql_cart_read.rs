@@ -381,6 +381,15 @@ impl application::queries::DeliveryReadRepository for Empty {
     }
 }
 #[async_trait]
+impl application::queries::RiderRestrictionReadRepository for Empty {
+    async fn by_rider_id(
+        &self,
+        _r: ds::RiderId,
+    ) -> Result<Option<application::queries::RiderRestrictionRow>, DomainError> {
+        Ok(None)
+    }
+}
+#[async_trait]
 impl application::queries::OrderConversationReadRepository for Empty {
     async fn by_order(&self, _o: ds::OrderId) -> Result<Option<OrderConversationRow>, DomainError> {
         Ok(None)
@@ -466,6 +475,7 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
             order_conversations: Arc::new(Empty),
             customers: Arc::new(Empty),
             deliveries: Arc::new(Empty),
+            rider_restrictions: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -925,6 +935,7 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
             order_conversations: Arc::new(Empty),
             customers: Arc::new(Empty),
             deliveries: Arc::new(Empty),
+            rider_restrictions: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),

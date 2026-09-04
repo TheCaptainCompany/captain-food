@@ -754,6 +754,35 @@ pub mod rider_identity {
     }
 }
 
+/// Technical metrics for the `rider-restriction` contract (#639 part C step 4-i,
+/// ADR-20260904-081527 §9): the `StandingGuard` denial counter and the Rider projector lag gauge.
+pub mod rider_restriction {
+    use super::*;
+
+    fn denied_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RIDER_RESTRICTED_DENIED_TOTAL).build())
+    }
+
+    fn lag_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::RIDER_STANDING_LAG_POSITIONS).build())
+    }
+
+    /// `rider_restricted_denied_total{operation}` — the `StandingGuard` refused a restricted
+    /// rider at the gateway boundary. NO `rider_id` label; pair with an INFO trace event carrying
+    /// it (the #748 skip-trace pattern).
+    pub fn denied(operation: &str) {
+        denied_counter().add(1, &[KeyValue::new("operation", operation.to_string())]);
+    }
+
+    /// `rider_standing_lag_positions` — the Rider projector group's lag (0 while caught up),
+    /// emitted every sweep like `scope_membership_lag_positions`.
+    pub fn lag(positions: i64) {
+        lag_gauge().record(positions, &[]);
+    }
+}
+
 /// Technical metrics for the `customer-identification` contract (#437).
 pub mod customer_identification {
     use super::*;

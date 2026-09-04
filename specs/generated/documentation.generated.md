@@ -183,6 +183,7 @@ A courier who delivers orders from restaurants to customers.
 |  | DeclineDelivery | [✏️ `declineDelivery`](#mutation-declinedelivery) |
 |  | ReportDeliveryIssue | [✏️ `reportDeliveryIssue`](#mutation-reportdeliveryissue) |
 |  | HandBackDelivery | [✏️ `handBackDelivery`](#mutation-handbackdelivery) |
+|  | ViewMyStanding | [🔎 `myStanding`](#query-mystanding) |
 
 <a id="story-admin"></a>
 ### 🎬 `admin` · 🛠️ `ADMIN` · 🗣️ `fr-FR`
@@ -204,6 +205,8 @@ A platform operator who onboards accounts and oversees the platform.
 |  | MarkClosed | [✏️ `markRestaurantClosed`](#mutation-markrestaurantclosed) |
 | 🧭 **Prospection** | ReviewPipeline | [🔎 `prospectionPipeline`](#query-prospectionpipeline) |
 |  | LogReply | [✏️ `recordProspectReply`](#mutation-recordprospectreply) |
+| 🧭 **ManageRiderStanding** | RestrictRider | [✏️ `restrictRider`](#mutation-restrictrider) |
+|  | ReinstateRider | [✏️ `reinstateRider`](#mutation-reinstaterider) |
 | 🧭 **ArbitrateRefunds** | ReviewPendingRefunds | [🔎 `pendingRefunds`](#query-pendingrefunds) |
 |  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
 |  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
@@ -9249,7 +9252,7 @@ _criticality: **high**_
 
 _Delivery fulfilment: dispatch of ready DELIVERY orders to a partner (Avelo37) and/or independent riders, courier assignment, status tracking to hand-over (ADR-0031)._
 
-### 🧰 API operations _(18)_
+### 🧰 API operations _(21)_
 
 <a id="query-delivery"></a>
 #### 🔎 Query: `delivery`
@@ -9259,6 +9262,15 @@ The delivery job of an order (tracking); owning customer, the restaurant/admin, 
 - **Input**: 🧩 `DeliveryQueryInput!` — `orderId`: [🔤 `OrderId`](#scalar-orderid)
 - **Returns**: [🧩 `DeliveryJob`](#type-deliveryjob) · **reads** [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
 - **Roles**: CUSTOMER, RESTAURANT, RESTAURANT_ACCOUNT, RIDER, ADMIN · **slice** V0
+
+<a id="query-mystanding"></a>
+#### 🔎 Query: `myStanding`
+
+The calling rider's own standing (#639 part C step 4-i): ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any).
+
+- **Input**: _(none)_
+- **Returns**: [🧩 `RiderStandingInfo`](#type-riderstandinginfo) · **reads** [🗄️ `RiderRestriction`](#view-riderrestriction), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+- **Roles**: RIDER · **slice** V0
 
 <a id="query-mydeliveries"></a>
 #### 🔎 Query: `myDeliveries`
@@ -9349,6 +9361,20 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Roles**: RIDER · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-restrictrider"></a>
+#### ✏️ Mutation: `restrictRider`
+
+- **Command**: [📩 `RestrictRider`](#command-restrictrider) → handled by [🎭 `Rider`](#actor-rider)
+- **Roles**: ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-reinstaterider"></a>
+#### ✏️ Mutation: `reinstateRider`
+
+- **Command**: [📩 `ReinstateRider`](#command-reinstaterider) → handled by [🎭 `Rider`](#actor-rider)
+- **Roles**: ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 <a id="mutation-registerdeliverypartneravailability"></a>
 #### ✏️ Mutation: `registerDeliveryPartnerAvailability`
 
@@ -9384,7 +9410,7 @@ Delivery-partner city-availability registrations (#61): a partner (EXTERNAL) rev
 - **Roles**: PUBLIC · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-### 🧩 Output types _(2)_
+### 🧩 Output types _(3)_
 
 <a id="type-deliveryjob"></a>
 #### 🧩 Type: `DeliveryJob`
@@ -9411,6 +9437,19 @@ One delivery of an order (ADR-0031): status, courier, addresses and ETAs. Serves
 | <a id="type-deliveryjob--openissue"></a>`openIssue` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | ⬜ |
 | <a id="type-deliveryjob--foodlocation"></a>`foodLocation` | [🔤 `FoodCustody`](#scalar-foodcustody) | ⬜ |
 | <a id="type-deliveryjob--handedbackat"></a>`handedBackAt` | `string` _date-time_ | ⬜ |
+
+<a id="type-riderstandinginfo"></a>
+#### 🧩 Type: `RiderStandingInfo`
+
+The calling rider's own standing (#639 part C step 4-i) — ACTIVE/RESTRICTED, the restriction attribution when restricted, and the held delivery job (if any) so the restricted rider's one control (hand it back) needs no second query.
+
+- **Read model**: [🗄️ `RiderRestriction`](#view-riderrestriction), [🗄️ `View_DeliveryJob`](#view-view_deliveryjob)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-riderstandinginfo--standing"></a>`standing` | [🔤 `RiderStanding`](#scalar-riderstanding) | ✅ |
+| <a id="type-riderstandinginfo--restriction"></a>`restriction` | [🧩 `RiderRestrictionInfo`](#type-riderrestrictioninfo) | ⬜ |
+| <a id="type-riderstandinginfo--helddelivery"></a>`heldDelivery` | [🧩 `DeliveryJob`](#type-deliveryjob) | ⬜ |
 
 <a id="type-deliverypartneravailability"></a>
 #### 🧩 Type: `DeliveryPartnerAvailability`
@@ -9518,7 +9557,9 @@ _🧩 aggregate_ — A rider identity, linked to the auth provider user (authRef
 | --- | --- | --- |
 | [📩 `RegisterRider`](#command-registerrider) | [⚡ `RiderRegistered`](#event-riderregistered) | [⛔ `RiderAlreadyRegistered`](#error-rideralreadyregistered), [⛔ `RiderAuthSubjectAlreadyBound`](#error-riderauthsubjectalreadybound) |
 | [📩 `UpdateRiderInfo`](#command-updateriderinfo) | [⚡ `RiderInfoUpdated`](#event-riderinfoupdated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `NoEditableFieldProvided`](#error-noeditablefieldprovided) |
-| [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition) |
+| [📩 `ChangeRiderStatus`](#command-changeriderstatus) | [⚡ `RiderStatusChanged`](#event-riderstatuschanged) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition), [⛔ `RiderAccessRestricted`](#error-rideraccessrestricted) |
+| [📩 `RestrictRider`](#command-restrictrider) | [⚡ `RiderRestricted`](#event-riderrestricted) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted) |
+| [📩 `ReinstateRider`](#command-reinstaterider) | [⚡ `RiderReinstated`](#event-riderreinstated) | [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderNotRestricted`](#error-ridernotrestricted) |
 | [📩 `RequestRiderSignInCode`](#command-requestridersignincode) | _Delegate to the auth provider: send an SMS OTP, REFUSING when the send guards say so. Never consults the rider read model (no enumeration oracle). No event._ | [⛔ `PhoneCountryNotServed`](#error-phonecountrynotserved), [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted) |
 | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) | _Refuse a request carrying no session to own the parked credential (RiderSignInRequiresSession) BEFORE the OTP is spent; verify the OTP with the auth provider, look the proved subject up in the Rider read model (identify-only: no rider -> RiderNotRegistered, nothing created), stamp `{ role: RIDER }` on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationCode`](#error-invalidverificationcode), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `RiderNotRegistered`](#error-ridernotregistered), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `RiderSignInRequiresSession`](#error-ridersigninrequiressession) |
 
@@ -9532,10 +9573,6 @@ stateDiagram-v2
   AVAILABLE --> OFFLINE : RiderStatusChanged(status)
   SUSPENDED --> OFFLINE : RiderStatusChanged(status)
   AVAILABLE --> ON_DELIVERY : RiderStatusChanged(status)
-  OFFLINE --> SUSPENDED : RiderStatusChanged(status)
-  AVAILABLE --> SUSPENDED : RiderStatusChanged(status)
-  ON_DELIVERY --> SUSPENDED : RiderStatusChanged(status)
-  SUSPENDED --> SUSPENDED : RiderStatusChanged(status)
 ```
 
 <a id="actor-deliverydispatchprocess"></a>
@@ -9633,7 +9670,7 @@ sequenceDiagram
   end
 ```
 
-### 🗄️ Views (read models) _(3)_
+### 🗄️ Views (read models) _(4)_
 
 <a id="view-view_deliveryjob"></a>
 #### 🗄️ View: `View_DeliveryJob`
@@ -9691,8 +9728,8 @@ sequenceDiagram
 
 - **Source**: [🎭 `Rider`](#actor-rider) · 🛶 V0 · 🔒 internal
 - **Note**: The rider identity read model: the auth subject -> riderId mapping the authenticated request path resolves against (ADR-20260818-004646 -- no business identifier lives in the identity provider, so the mapping resolves in OUR Postgres), plus the rider's profile and availability. `RiderRegistered` has always carried `authRef` as required; until #639 nothing projected it, so `auth_ref` occurred exactly once in the whole projection set, on Customer, and the RIDER role had no sign-in-capable identity at all. A TABLE and not a `View_*` for the reason SlugAlias states three declarations up: this is read on EVERY authenticated request and must never fold on read -- peak is Friday/Saturday 19:00-21:30. Recovery is REPLAY, so there is no backup of it and there must not be one. 
-- **Rules**: This table answers WHO this connection is. It must never become the anchor for WHAT that connection may see -- the distinction the mapping exists to preserve. Concretely: the resolver reads `auth_ref -> rider_id` and NOTHING else. `status` sits in the same row and will tempt a `SUSPENDED => deny` check onto the auth path; that check belongs in the handler folding the `Rider-{id}` stream, which owns the transition table (delivery/actors.yaml) and reads it anyway. A read model is not an authorization oracle, and revocation is separately recorded as unrepresentable today -- there is no unbinding fact for anyone in the model (ADR-20260818-094500 finding 5). `auth_ref` is UNIQUE, not merely indexed, and the difference is a security property rather than a performance one: the repository lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- plan-dependent, no error -- and `ScopeMembership` keys its grants on `member_id = rider_id`, so a duplicate would hand one rider another rider's order scope. The constraint converts a silent breach into a visible denial. It does NOT create the invariant: nothing on the write side prevents two `RiderRegistered` with the same `authRef` and different `riderId`s (`register_rider` guards `riderId` existence only), and the write-side reservation that does is `database/tables/reservations.yaml#/auth_subject_reservations`, keyed `(principal_kind, auth_subject)` and pinned by `rules.yaml#/RiderAuthSubjectBoundOnce`: `register_rider` reserves BEFORE the append, so a duplicate is refused up front and this constraint is the second line, never the first. Uniqueness over a POPULATION is not an aggregate's to enforce. `phone` carries NO unique constraint and NO index, deliberately, and this is where copying Customer would inject a defect: Customer.phone is UNIQUE because it is that aggregate's identity key, whereas a rider is keyed by `authRef` precisely so the phone never becomes a domain key. French mobile numbers are recycled, so a unique phone here is a scheduled future projector fault on a number's second owner. Rebuild by RESETTING THE CHECKPOINT, never by TRUNCATE. The fold is an upsert keyed on `rider_id` and `RiderRegistered` is the only creating arm, so a from-zero replay rewrites every row in place and no rider is ever denied mid-rebuild. TRUNCATE + replay does the opposite: every rider fails closed to Public for the length of the drain, and the fleet cannot sign in. ERASURE, named here so the sweep cannot miss an app-projected table the generated dispatch skips (the ScopeMembership precedent): `display_name` and `phone` are a natural person's data held OUTSIDE the stream, and the deletion engine deletes streams, not projection rows. Delivery declares no `deletion:` block for Rider today, so there is nothing to build yet -- but a rider tombstone fold is OWED the moment one is declared.
-- **Fed by**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderInfoUpdated`](#event-riderinfoupdated), [⚡ `RiderStatusChanged`](#event-riderstatuschanged)
+- **Rules**: This table answers WHO this connection is AND, since #639 part C step 4-i, whether the platform GRANTS that connection anything at all -- the split ADR-20260904-081527 §1 states: the row is a TERM in the read-side derivation and a GRANT test only (`standing`), never the arbiter of an append -- the write side keeps its own authority by folding the `Rider-{id}` stream, which owns the transition table (delivery/actors.yaml) and the restriction fact independently. Concretely: the resolver reads `auth_ref -> rider_id, standing` and NOTHING else. `status` (availability) sits in the same row and remains NOT an authorization signal -- the LEGACY `SUSPENDED` value must never be read as a grant; `standing` is the one column the seam's grant test may read. `auth_ref` is UNIQUE, not merely indexed, and the difference is a security property rather than a performance one: the repository lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- plan-dependent, no error -- and `ScopeMembership` keys its grants on `member_id = rider_id`, so a duplicate would hand one rider another rider's order scope. The constraint converts a silent breach into a visible denial. It does NOT create the invariant: nothing on the write side prevents two `RiderRegistered` with the same `authRef` and different `riderId`s (`register_rider` guards `riderId` existence only), and the write-side reservation that does is `database/tables/reservations.yaml#/auth_subject_reservations`, keyed `(principal_kind, auth_subject)` and pinned by `rules.yaml#/RiderAuthSubjectBoundOnce`: `register_rider` reserves BEFORE the append, so a duplicate is refused up front and this constraint is the second line, never the first. Uniqueness over a POPULATION is not an aggregate's to enforce. `phone` carries NO unique constraint and NO index, deliberately, and this is where copying Customer would inject a defect: Customer.phone is UNIQUE because it is that aggregate's identity key, whereas a rider is keyed by `authRef` precisely so the phone never becomes a domain key. French mobile numbers are recycled, so a unique phone here is a scheduled future projector fault on a number's second owner. Rebuild by RESETTING THE CHECKPOINT, never by TRUNCATE. The fold is an upsert keyed on `rider_id` and `RiderRegistered` is the only creating arm, so a from-zero replay rewrites every row in place and no rider is ever denied mid-rebuild. TRUNCATE + replay does the opposite: every rider fails closed to Public for the length of the drain, and the fleet cannot sign in. ERASURE, named here so the sweep cannot miss an app-projected table the generated dispatch skips (the ScopeMembership precedent): `display_name` and `phone` are a natural person's data held OUTSIDE the stream, and the deletion engine deletes streams, not projection rows. Delivery declares no `deletion:` block for Rider today, so there is nothing to build yet -- but a rider tombstone fold is OWED the moment one is declared.
+- **Fed by**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderInfoUpdated`](#event-riderinfoupdated), [⚡ `RiderStatusChanged`](#event-riderstatuschanged), [⚡ `RiderRestricted`](#event-riderrestricted), [⚡ `RiderReinstated`](#event-riderreinstated)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
@@ -9701,10 +9738,30 @@ sequenceDiagram
 | `display_name` | `text` _(derived)_ | [⚡ `RiderRegistered`.`displayName`](#event-riderregistered--displayname), [⚡ `RiderInfoUpdated`.`displayName`](#event-riderinfoupdated--displayname) | — | Rider's display name; RiderInfoUpdated overwrites it only when it carries one. |
 | `phone` | [🔤 `PhoneNumber`](#scalar-phonenumber) _(derived)_ | [⚡ `RiderRegistered`.`phone`](#event-riderregistered--phone), [⚡ `RiderInfoUpdated`.`phone`](#event-riderinfoupdated--phone) | — | Contact number, a profile attribute and never a lookup key -- see the `phone` rule above. NOT NULL for the same partial-update reason as display_name. |
 | `status` | [🔤 `RiderStatus`](#scalar-riderstatus) _(derived)_ | [⚡ `RiderRegistered`.`status`](#event-riderregistered--status), [⚡ `RiderStatusChanged`.`status`](#event-riderstatuschanged--status) | — | Availability/lifecycle status, straight off the payload of whichever event wrote last. |
+| `standing` | [🔤 `RiderStanding`](#scalar-riderstanding) | [⚡ `RiderRestricted`](#event-riderrestricted), [⚡ `RiderReinstated`](#event-riderreinstated) | — | The platform's grant (ACTIVE/RESTRICTED) -- see the column comment for why the creating arm (RiderRegistered) never writes it. |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(19)_
+<a id="view-riderrestriction"></a>
+#### 🗄️ View: `RiderRestriction`
+
+- **Source**: [🎭 `Rider`](#actor-rider) · 🛶 V0
+- **Note**: The attribution behind `Rider.standing` (#639 part C step 4-i, ADR-20260904-081527 §2): ground, decidedAt, effectiveAt, reinstatedAt -- the source of `myStanding` (§4) and of 4-iii's admin surface. Kept OFF the identity row on purpose: `Rider` carries the grant and nothing the notice needs, `auth_ref` and `phone` never migrate here. NOT `internal` -- unlike `Rider`, this table IS a legitimate GraphQL `reads` target (myStanding), never the request seam's own identity lookup. 
+- **Rules**: Keyed on `riderId` (grain: the rider, not the restriction fact) -- a repeatable-fact grain (riderId + occurrence) is what the business_metrics.yaml `RiderRestriction` projection needs for `restrictRider`/`reinstateRider`'s own fold; THIS read-side table answers 'what is true of this rider right now', so `RiderRestricted` overwrites the prior attribution rather than appending a row -- the Art. 11 LOG lives in `domain_events`, immutable, never here. No `auth_ref`, no `phone` -- this table answers WHY and WHEN a rider is restricted, never WHO to contact; the identity bridge stays exclusively on `Rider`.
+- **Fed by**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderRestricted`](#event-riderrestricted), [⚡ `RiderReinstated`](#event-riderreinstated)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `rider_id` | [🔤 `RiderId`](#scalar-riderid) _(derived)_ | [⚡ `RiderRegistered`.`riderId`](#event-riderregistered--riderid) | PK |  |
+| `standing` | [🔤 `RiderStanding`](#scalar-riderstanding) | [⚡ `RiderRestricted`](#event-riderrestricted), [⚡ `RiderReinstated`](#event-riderreinstated) | — | Mirrors Rider.standing (the same two facts write it) -- kept here too so myStanding needs no second table join for the value it renders alongside ground/decidedAt/effectiveAt. |
+| `ground` | [🔤 `RiderRestrictionGround`](#scalar-riderrestrictionground) | [⚡ `RiderRestricted`.`ground`](#event-riderrestricted--ground) | nullable | Null before any restriction (RiderRegistered) and untouched by RiderReinstated (the attribution stays for counsel/admin history until the next RiderRestricted overwrites it). |
+| `decided_at` | `timestamptz` | [⚡ `RiderRestricted`.`decidedAt`](#event-riderrestricted--decidedat) | nullable |  |
+| `effective_at` | `timestamptz` | [⚡ `RiderRestricted`.`effectiveAt`](#event-riderrestricted--effectiveat) | nullable |  |
+| `reinstated_at` | `timestamptz` | [⚡ `RiderReinstated`](#event-riderreinstated) | nullable | The occurred_at of the LATEST RiderReinstated fact for this rider (an occurrence timestamp, no payload field) -- history, not a live 'currently reinstated' flag: `standing` is the field that answers whether the rider is restricted right now; this column simply stops being the freshest fact once a later RiderRestricted follows it. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+### 📩 Commands _(21)_
 
 <a id="command-acceptdelivery"></a>
 #### 📩 Command: `AcceptDelivery`
@@ -9943,16 +10000,43 @@ Update editable rider profile fields.
 <a id="command-changeriderstatus"></a>
 #### 📩 Command: `ChangeRiderStatus`
 
-Change a rider's availability/lifecycle status.
+Change a rider's own availability. The rider's target is `RiderAvailabilityTarget` (#639 part C step 4-i, ADR-20260904-081527 §6) — narrower than the stored RiderStatus so SUSPENDED cannot be spelled through this door; admin restriction/reinstatement goes through RestrictRider / ReinstateRider instead.
 
 - **Dispatched by**: [✏️ `changeRiderStatus`](#mutation-changeriderstatus) · **handled by** [🎭 `Rider`](#actor-rider)
 - **Emits**: [⚡ `RiderStatusChanged`](#event-riderstatuschanged)
-- **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition)
+- **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition), [⛔ `RiderAccessRestricted`](#error-rideraccessrestricted)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="command-changeriderstatus--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
-| <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
+| <a id="command-changeriderstatus--status"></a>`status` | [🔤 `RiderAvailabilityTarget`](#scalar-rideravailabilitytarget) | ✅ |  |
+
+<a id="command-restrictrider"></a>
+#### 📩 Command: `RestrictRider`
+
+An admin restricts a rider's access, citing one of the closed grounds (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §5). NO dates on the input, NO free text: the handler stamps `decidedAt = effectiveAt = now` from the clock port — an admin-typed date would be a backdating vector inside the Art. 11 log.
+
+- **Dispatched by**: [✏️ `restrictRider`](#mutation-restrictrider) · **handled by** [🎭 `Rider`](#actor-rider)
+- **Emits**: [⚡ `RiderRestricted`](#event-riderrestricted)
+- **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-restrictrider--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
+| <a id="command-restrictrider--ground"></a>`ground` | [🔤 `RiderRestrictionGround`](#scalar-riderrestrictionground) | ✅ |  |
+
+<a id="command-reinstaterider"></a>
+#### 📩 Command: `ReinstateRider`
+
+An admin reinstates a previously restricted rider (#639 part C step 4-i, ADR-20260904-081527 §6) — a new fact, never a row edit; rollback of a wrong restriction is a fresh ReinstateRider.
+
+- **Dispatched by**: [✏️ `reinstateRider`](#mutation-reinstaterider) · **handled by** [🎭 `Rider`](#actor-rider)
+- **Emits**: [⚡ `RiderReinstated`](#event-riderreinstated)
+- **Throws**: [⛔ `RiderNotFound`](#error-ridernotfound), [⛔ `RiderNotRestricted`](#error-ridernotrestricted)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-reinstaterider--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 
 <a id="command-requestridersignincode"></a>
 #### 📩 Command: `RequestRiderSignInCode`
@@ -9984,7 +10068,7 @@ Verify the SMS OTP with the auth provider, then IDENTIFY the rider: the proved a
 | <a id="command-confirmridersignin--nationalnumber"></a>`nationalNumber` | [🔤 `NationalPhoneNumber`](#scalar-nationalphonenumber) | ✅ |  |
 | <a id="command-confirmridersignin--code"></a>`code` | [🔤 `OtpCode`](#scalar-otpcode) | ✅ |  |
 
-### ⚡ Events _(22)_
+### ⚡ Events _(24)_
 
 <a id="event-deliveryrequested"></a>
 #### ⚡ Event: `DeliveryRequested`
@@ -10291,7 +10375,7 @@ An independent Captain rider registered (linked to the auth provider user).
 
 - **Emitted by**: [🎭 `Rider`](#actor-rider)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Rider`](#view-rider)
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10330,7 +10414,36 @@ A rider's availability/lifecycle status changed.
 | <a id="event-riderstatuschanged--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
 | <a id="event-riderstatuschanged--status"></a>`status` | [🔤 `RiderStatus`](#scalar-riderstatus) | ✅ |  |
 
-### 🔤 Scalars _(12)_
+<a id="event-riderrestricted"></a>
+#### ⚡ Event: `RiderRestricted`
+
+An admin restricted a rider's access, citing one of the closed grounds (ADR-20260904-014136, ADR-20260904-081527 §1-3, §5). Business payload only — the deciding admin is envelope metadata (`domain_events.user_id`). `decidedAt` and `effectiveAt` are both server-set and equal in V0 (the future-effectiveAt form is designed, not shipped, §5); both are kept on the payload as the legal shape either way. The read-side fold keys on THIS FACT, never on `ground`'s value or on RiderStatus — a legacy `RiderStatusChanged { SUSPENDED }` alone never restricts.
+
+- **Emitted by**: [🎭 `Rider`](#actor-rider)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-riderrestricted--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
+| <a id="event-riderrestricted--ground"></a>`ground` | [🔤 `RiderRestrictionGround`](#scalar-riderrestrictionground) | ✅ |  |
+| <a id="event-riderrestricted--decidedat"></a>`decidedAt` | `string` _date-time_ | ✅ |  |
+| <a id="event-riderrestricted--effectiveat"></a>`effectiveAt` | `string` _date-time_ | ✅ |  |
+
+<a id="event-riderreinstated"></a>
+#### ⚡ Event: `RiderReinstated`
+
+A previously restricted rider was reinstated by an admin (#639 part C step 4-i, ADR-20260904-081527 §1/§6) — a new fact, never a row edit. Business payload only; the deciding admin is envelope metadata.
+
+- **Emitted by**: [🎭 `Rider`](#actor-rider)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `Rider`](#view-rider), [🗄️ `RiderRestriction`](#view-riderrestriction)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-riderreinstated--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ✅ |  |
+
+### 🔤 Scalars _(15)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -10338,6 +10451,9 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-deliveryjobid"></a>🔤 `DeliveryJobId` | string _uuid_ | Identifies one DeliveryJob (a single delivery of an order from restaurant to customer). |
 | <a id="scalar-cityid"></a>🔤 `CityId` | string _uuid_ | A city Captain operates in — the scope that anchors delivery routing config (CityDeliveryRanking) and, later, partner availability. First-class id (delivery dispatch strategy foundation, #60). |
 | <a id="scalar-riderstatus"></a>🔤 `RiderStatus` | enum (OFFLINE \| AVAILABLE \| ON_DELIVERY \| SUSPENDED) | Availability/lifecycle status of an independent Captain rider. |
+| <a id="scalar-rideravailabilitytarget"></a>🔤 `RiderAvailabilityTarget` | enum (OFFLINE \| AVAILABLE \| ON_DELIVERY) | The rider-settable availability targets for ChangeRiderStatus (#639 part C step 4-i, ADR-20260904-081527 §6) — RiderStatus minus the retired SUSPENDED, so an admin-imposed restriction cannot be spelled through this door. |
+| <a id="scalar-riderstanding"></a>🔤 `RiderStanding` | enum (ACTIVE \| RESTRICTED) | The platform's grant on a rider's identity row (#639 part C step 4-i, ADR-20260904-081527 §1) — orthogonal to RiderStatus (availability). ACTIVE admits every door; RESTRICTED admits only the carve-out (myStanding, delivery, reportDeliveryIssue, handBackDelivery). |
+| <a id="scalar-riderrestrictionground"></a>🔤 `RiderRestrictionGround` | enum (RIDER_REQUESTED \| ELIGIBILITY_DOCUMENT_LAPSED \| IDENTITY_MISMATCH \| ACCOUNT_COMPROMISE) | The closed, additive-only set of grounds a human admin cites to restrict a rider's access (#639 part C step 4-i, ADR-20260904-014136, ADR-20260904-081527 §3/§7). No free text rides beside it — the narrative the restriction ADR made unspellable would re-enter by the side door. |
 | <a id="scalar-deliveryprovider"></a>🔤 `DeliveryProvider` | enum (PARTNER \| INDEPENDENT) | Fulfilment channel of a delivery: PARTNER (e.g. Avelo37) or INDEPENDENT (a Captain rider). |
 | <a id="scalar-deliveryissuekind"></a>🔤 `DeliveryIssueKind` | enum (ADDRESS_NOT_FOUND \| CUSTOMER_UNREACHABLE \| RESTAURANT_NOT_READY \| FOOD_DAMAGED \| VEHICLE_OR_INJURY \| OTHER) | The closed set of reasons a rider (or ops) reports an issue on a delivery job — one tap on the rider sheet; the restaurant board headlines the card with it. OTHER is the only kind that expects a note (#639 part C step 3-i). |
 | <a id="scalar-deliveryissueresolution"></a>🔤 `DeliveryIssueResolution` | enum (REASSIGNED \| DELIVERED_BY_RESTAURANT \| CANCELLED \| OTHER) | The closed set of outcomes whoever was TOLD of a delivery issue records when acknowledging it (#639 part C step 3-i); the reporter never closes their own issue. |
@@ -10347,7 +10463,7 @@ A rider's availability/lifecycle status changed.
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
 | <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(13)_
+### ⛔ Errors _(16)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10359,13 +10475,16 @@ A rider's availability/lifecycle status changed.
 | <a id="error-deliverypartneravailabilitynotpending"></a>⛔ `DeliveryPartnerAvailabilityNotPending` | The availability registration is not PENDING, so it cannot be approved. | 🇬🇧 This availability registration is not awaiting review. | 🇫🇷 Cette demande de disponibilité n'est pas en attente de validation. | [📩 `ApproveDeliveryPartnerAvailability`](#command-approvedeliverypartneravailability) |
 | <a id="error-rideralreadyregistered"></a>⛔ `RiderAlreadyRegistered` | A rider is already registered for this identity (authRef/id). | 🇬🇧 You are already registered as a rider. | 🇫🇷 Vous êtes déjà inscrit en tant que livreur. | [📩 `RegisterRider`](#command-registerrider) |
 | <a id="error-riderauthsubjectalreadybound"></a>⛔ `RiderAuthSubjectAlreadyBound` | The login credential (`authRef`) is already bound to ANOTHER rider id: the write-side reservation `(RIDER, authRef)` in `database/tables/reservations.yaml#/auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C, #794). Named for THIS population and distinct from `RiderAlreadyRegistered` (same rider id twice) and from `RefAlreadyUsed` (a HubRise import key): the human already has a rider account, and the remedy is to sign in to it, never to register a second one -- the binding is never released.  | 🇬🇧 This login is already linked to a rider account. Sign in to that account instead. | 🇫🇷 Cette identité de connexion est déjà liée à un compte livreur. Connectez-vous à ce compte. | [📩 `RegisterRider`](#command-registerrider) |
-| <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
+| <a id="error-ridernotfound"></a>⛔ `RiderNotFound` | No rider with this id. | 🇬🇧 Rider not found. | 🇫🇷 Livreur introuvable. | [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `ChangeRiderStatus`](#command-changeriderstatus), [📩 `RestrictRider`](#command-restrictrider), [📩 `ReinstateRider`](#command-reinstaterider) |
 | <a id="error-invalidriderstatustransition"></a>⛔ `InvalidRiderStatusTransition` | The rider is not in a status that allows this transition. | 🇬🇧 A rider cannot move from '{currentStatus}' to '{targetStatus}'. | 🇫🇷 Un livreur ne peut pas passer de '{currentStatus}' à '{targetStatus}'. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-ridernotregistered"></a>⛔ `RiderNotRegistered` | A phone was verified but no rider account is bound to the login it proves (#639 part C step 2c-i): rider sign-in is IDENTIFY-ONLY and registers nobody, so the sign-in is refused and nothing is created. Named for the RIDER population; the remedy is the support route (`SUPPORT_CONTACT`, ADR-20260830-213135 -- a required key with no default), never self-registration. Only the phone's owner can see it (the OTP was verified first), so it is not an enumeration oracle.  | 🇬🇧 This phone number is not linked to a rider account. Contact {supportContact} to get set up. | 🇫🇷 Ce numéro de téléphone n'est lié à aucun compte livreur. Contactez {supportContact} pour être enregistré. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 | <a id="error-ridersigninrequiressession"></a>⛔ `RiderSignInRequiresSession` | The sign-in confirmation arrived with no `X-SESSION-ID` (the independent review of #852, B1). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId -- which travels in spans and logs. So the door refuses BEFORE the OTP is spent (the code stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's, not the rider's (the SDUI client always sends the header, so a rider never sees this). The `AuthSessionStore` port's both-`None` claim is untouched -- that is another channel's contract; this door simply never parks without an owner.  | 🇬🇧 Sign-in needs a browser session. Reload the page and try again. | 🇫🇷 La connexion nécessite une session de navigation. Rechargez la page et réessayez. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
+| <a id="error-rideralreadyrestricted"></a>⛔ `RiderAlreadyRestricted` | The rider is already restricted (#639 part C step 4-i) — restrict only an unrestricted rider; a second ground needs a reinstatement first (the Art. 11 log is never overwritten). | 🇬🇧 This rider is already restricted. | 🇫🇷 Ce livreur est déjà restreint. | [📩 `RestrictRider`](#command-restrictrider) |
+| <a id="error-ridernotrestricted"></a>⛔ `RiderNotRestricted` | The rider is not currently restricted (#639 part C step 4-i) — reinstate only a restricted rider. | 🇬🇧 This rider is not restricted. | 🇫🇷 Ce livreur n'est pas restreint. | [📩 `ReinstateRider`](#command-reinstaterider) |
+| <a id="error-rideraccessrestricted"></a>⛔ `RiderAccessRestricted` | The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus. | 🇬🇧 Your access is restricted, so you cannot go available for deliveries. | 🇫🇷 Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 
-### 📐 Business rules _(22)_
+### 📐 Business rules _(27)_
 
 <a id="rule-readydeliveryordertriggersdispatch"></a>
 #### 📐 Rule: `ReadyDeliveryOrderTriggersDispatch`
@@ -10503,9 +10622,44 @@ _A rider registers once (per auth user), may update editable profile fields, and
 <a id="rule-riderauthsubjectboundonce"></a>
 #### 📐 Rule: `RiderAuthSubjectBoundOnce`
 
-_One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and revoking or suspending a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)._
+_One login credential binds to at most one rider id, forever: a registration whose authRef is already bound to another rider is rejected before any fact is recorded, and restricting a rider never frees the binding -- the same human always resolves to the same rider (#639 part C step 2a, #794)._
 
 - **Verified by**: [🧪 `TestRiderAuthSubjectAlreadyBoundIsRejected`](#test-testriderauthsubjectalreadyboundisrejected)
+
+<a id="rule-riderstandingisagrant"></a>
+#### 📐 Rule: `RiderStandingIsAGrant`
+
+_The seam admits a RIDER-role operation iff the identity row's `standing` is ACTIVE, or the operation declares `whileRestricted: [RIDER]`; a missing row is Unbound, never a grant (#639 part C step 4-i, ADR-20260904-081527 §1/§4)._
+
+- **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted)
+
+<a id="rule-riderrestrictionlifecycle"></a>
+#### 📐 Rule: `RiderRestrictionLifecycle`
+
+_Restrict only an unrestricted rider (RiderAlreadyRestricted otherwise); reinstate only a restricted one (RiderNotRestricted otherwise); a second ground needs a reinstatement first -- the Art. 11 log is never overwritten (#639 part C step 4-i, ADR-20260904-081527 §Enforced-by, ADR-20260904-014136)._
+
+- **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted), [🧪 `TestRiderReinstated`](#test-testriderreinstated), [🧪 `TestRestrictAlreadyRestrictedRiderIsRejected`](#test-testrestrictalreadyrestrictedriderisrejected), [🧪 `TestReinstateUnrestrictedRiderIsRejected`](#test-testreinstateunrestrictedriderisrejected), [🧪 `TestRestrictUnknownRiderIsRejected`](#test-testrestrictunknownriderisrejected)
+
+<a id="rule-restrictiontakeseffectwhendecided"></a>
+#### 📐 Rule: `RestrictionTakesEffectWhenDecided`
+
+_V0: `effectiveAt == decidedAt`, both server-set, never in the past -- no admin-typed date, no clock term in the grant predicate (RIDER-REVOCATION-TTL, ADR-20260810-231300). The future scheduled form is designed, not shipped (#639 part C step 4-i, ADR-20260904-081527 §5)._
+
+- **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted)
+
+<a id="rule-restrictriderisahumanact"></a>
+#### 📐 Rule: `RestrictRiderIsAHumanAct`
+
+_RestrictRider/ReinstateRider are `roles: [ADMIN]` with `requires: acting: { ADMIN: any }` and no EXTERNAL key; no process manager may `send` either (validator `pm-sends-human-only-command`) and no PM inbox `emits` RiderRestricted (#639 part C step 4-i, ADR-20260904-081527 §6/§8)._
+
+- **Verified by**: [🧪 `TestRiderRestricted`](#test-testriderrestricted)
+
+<a id="rule-rideravailabilityneverspellsrestriction"></a>
+#### 📐 Rule: `RiderAvailabilityNeverSpellsRestriction`
+
+_ChangeRiderStatus takes RiderAvailabilityTarget (OFFLINE/AVAILABLE/ON_DELIVERY) — SUSPENDED is unspellable at this door — and a restricted rider's ChangeRiderStatus -> AVAILABLE is rejected RiderAccessRestricted (#639 part C step 4-i, ADR-20260904-081527 §6)._
+
+- **Verified by**: [🧪 `TestRestrictedRiderCannotGoAvailable`](#test-testrestrictedridercannotgoavailable)
 
 <a id="rule-ridersigninidentifiesonly"></a>
 #### 📐 Rule: `RiderSignInIdentifiesOnly`
@@ -11079,6 +11233,66 @@ _An OFFLINE rider cannot jump straight to ON_DELIVERY (invalid transition)_
 - **Thrown**: [⛔ `InvalidRiderStatusTransition`](#error-invalidriderstatustransition)
 - **Verifies**: [📐 `RiderLifecycle`](#rule-riderlifecycle)
 
+<a id="test-testriderrestricted"></a>
+#### 🧪 Test: `TestRiderRestricted`
+
+_An admin restricts a rider, citing a closed ground_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `RestrictRider`](#command-restrictrider)
+- **Then**: [⚡ `RiderRestricted`](#event-riderrestricted)
+- **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle), [📐 `RestrictionTakesEffectWhenDecided`](#rule-restrictiontakeseffectwhendecided), [📐 `RiderStandingIsAGrant`](#rule-riderstandingisagrant), [📐 `RestrictRiderIsAHumanAct`](#rule-restrictriderisahumanact)
+
+<a id="test-testriderreinstated"></a>
+#### 🧪 Test: `TestRiderReinstated`
+
+_An admin reinstates a previously restricted rider_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderRestricted`](#event-riderrestricted)
+- **When**: [📩 `ReinstateRider`](#command-reinstaterider)
+- **Then**: [⚡ `RiderReinstated`](#event-riderreinstated)
+- **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle)
+
+<a id="test-testrestrictalreadyrestrictedriderisrejected"></a>
+#### 🧪 Test: `TestRestrictAlreadyRestrictedRiderIsRejected`
+
+_Restricting an already-restricted rider is rejected — a second ground needs a reinstatement first_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderRestricted`](#event-riderrestricted)
+- **When**: [📩 `RestrictRider`](#command-restrictrider)
+- **Thrown**: [⛔ `RiderAlreadyRestricted`](#error-rideralreadyrestricted)
+- **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle)
+
+<a id="test-testreinstateunrestrictedriderisrejected"></a>
+#### 🧪 Test: `TestReinstateUnrestrictedRiderIsRejected`
+
+_Reinstating an unrestricted rider is rejected_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered)
+- **When**: [📩 `ReinstateRider`](#command-reinstaterider)
+- **Thrown**: [⛔ `RiderNotRestricted`](#error-ridernotrestricted)
+- **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle)
+
+<a id="test-testrestrictunknownriderisrejected"></a>
+#### 🧪 Test: `TestRestrictUnknownRiderIsRejected`
+
+_Restricting an unknown rider is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `RestrictRider`](#command-restrictrider)
+- **Thrown**: [⛔ `RiderNotFound`](#error-ridernotfound)
+- **Verifies**: [📐 `RiderRestrictionLifecycle`](#rule-riderrestrictionlifecycle)
+
+<a id="test-testrestrictedridercannotgoavailable"></a>
+#### 🧪 Test: `TestRestrictedRiderCannotGoAvailable`
+
+_A restricted rider's ChangeRiderStatus to AVAILABLE is rejected (the aggregate's own belt)_
+
+- **Given**: [⚡ `RiderRegistered`](#event-riderregistered), [⚡ `RiderRestricted`](#event-riderrestricted)
+- **When**: [📩 `ChangeRiderStatus`](#command-changeriderstatus)
+- **Thrown**: [⛔ `RiderAccessRestricted`](#error-rideraccessrestricted)
+- **Verifies**: [📐 `RiderAvailabilityNeverSpellsRestriction`](#rule-rideravailabilityneverspellsrestriction)
+
 **[🎭 `DeliveryDispatchProcess`](#actor-deliverydispatchprocess)**
 
 <a id="test-testdispatchonorderready"></a>
@@ -11317,7 +11531,7 @@ Live status of one journaled command, keyed by its messageId acceptance handle (
 - **Streams**: [🧩 `Operation`](#type-operation)
 - **Roles**: EVERYONE (open — roles omitted) · **slice** V0
 
-### 🧩 Output types _(13)_
+### 🧩 Output types _(14)_
 
 <a id="type-product"></a>
 #### 🧩 Type: `Product`
@@ -11464,6 +11678,19 @@ Live status of a journaled command (ADR-20260720-015300), keyed by its `messageI
 | <a id="type-operation--errorcode"></a>`errorCode` | `string` | ⬜ |
 | <a id="type-operation--message"></a>`message` | `string` | ⬜ |
 | <a id="type-operation--occurredat"></a>`occurredAt` | `string` _date-time_ | ✅ |
+
+<a id="type-riderrestrictioninfo"></a>
+#### 🧩 Type: `RiderRestrictionInfo`
+
+Why and when a rider's access is restricted (#639 part C step 4-i) — the Art. 11 attribution: ground, decidedAt, effectiveAt.
+
+- **Read model**: _(resolved within a parent projection)_
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-riderrestrictioninfo--ground"></a>`ground` | [🔤 `RiderRestrictionGround`](#scalar-riderrestrictionground) | ⬜ |
+| <a id="type-riderrestrictioninfo--decidedat"></a>`decidedAt` | `string` _date-time_ | ✅ |
+| <a id="type-riderrestrictioninfo--effectiveat"></a>`effectiveAt` | `string` _date-time_ | ✅ |
 
 <a id="type-servicewindow"></a>
 #### 🧩 Type: `ServiceWindow`
@@ -11714,7 +11941,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(13)_
+### 📡 Observability _(14)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -11815,9 +12042,34 @@ _criticality: **high**_
 
 | Span | Kind | Req. | Multiplicity | Attributes |
 | --- | --- | --- | --- | --- |
-| `rider.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason` |
+| `rider.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason`, `business.standing` |
 
 - **Metrics**: `rider_identity_resolve_ms` _(histogram)_, `rider_identity_not_found_total` _(counter)_, `rider_identity_lookup_failed_total` _(counter)_, `rider_identity_lookup_source_total` _(counter)_, `rider_claim_stamp_failed_total` _(counter)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
+
+<a id="obs-rider-restriction"></a>
+#### 📡 Contract: `rider-restriction`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `rider.standing.denied` | `INTERNAL` | ⬜ | — | `business.operation`*, `business.correlation_id`* |
+
+- **Metrics**: `rider_restricted_denied_total` _(counter)_, `rider_standing_lag_positions` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 

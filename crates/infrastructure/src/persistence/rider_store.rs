@@ -27,7 +27,7 @@ use super::db_err;
 
 /// The full column list, in `RiderRow` field order — keep SELECTs and the upsert in sync.
 pub(crate) const COLUMNS: &str =
-    "rider_id, auth_ref, display_name, phone, status, created_at, updated_at";
+    "rider_id, auth_ref, display_name, phone, status, standing, created_at, updated_at";
 
 pub(crate) fn decode(row: &PgRow) -> Result<RiderRow, DomainError> {
     Ok(RiderRow {
@@ -36,6 +36,7 @@ pub(crate) fn decode(row: &PgRow) -> Result<RiderRow, DomainError> {
         display_name: row.try_get::<String, _>("display_name").map_err(db_err)?,
         phone: PhoneNumber(row.try_get::<String, _>("phone").map_err(db_err)?),
         status: EnumText::from_text(&row.try_get::<String, _>("status").map_err(db_err)?)?,
+        standing: EnumText::from_text(&row.try_get::<String, _>("standing").map_err(db_err)?)?,
         created_at: row.try_get("created_at").map_err(db_err)?,
         updated_at: row.try_get("updated_at").map_err(db_err)?,
     })
@@ -55,14 +56,25 @@ pub async fn load(exec: impl sqlx::PgExecutor<'_>, id: RiderId) -> Result<Option
 ///
 /// `created_at` is deliberately absent from the `DO UPDATE SET` list (the `slugalias` shape, not the
 /// `customer` one): the creation instant belongs to `RiderRegistered` and no later fact may move it.
+/// `standing` (#639 part C step 4-i, ADR-20260904-081527 §2): included in `DO UPDATE SET` like
+/// every other mutable column — the creation-never-writes-it property is NOT SQL-level omission
+/// here (that would also silently drop RiderRestricted/RiderReinstated's real writes, which land
+/// through this SAME statement) but is instead the `RiderCompute::standing` hook's own guarantee
+/// (`crates/application/src/projectors/rider.rs`): on a REPLAYED creation (checkpoint-reset
+/// rebuild-in-place over an existing row — never TRUNCATE) it returns the PRIOR row's value
+/// unchanged, so `row.standing` computed for a creation event is never anything but "whatever was
+/// already there, or ACTIVE for a genuinely fresh row" — the `created_at` precedent's INTENT
+/// (never let the creating arm move it), generalised to a column two OTHER events are the sole
+/// live write authority for.
 pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &RiderRow) -> Result<(), DomainError> {
     let sql = format!(
-        "INSERT INTO rider ({COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO rider ({COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (rider_id) DO UPDATE SET \
            auth_ref = EXCLUDED.auth_ref, \
            display_name = EXCLUDED.display_name, \
            phone = EXCLUDED.phone, \
            status = EXCLUDED.status, \
+           standing = EXCLUDED.standing, \
            updated_at = EXCLUDED.updated_at"
     );
     sqlx::query(&sql)
@@ -71,6 +83,7 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &RiderRow) -> Result<(
         .bind(row.display_name.clone())
         .bind(row.phone.0.clone())
         .bind(row.status.to_text())
+        .bind(row.standing.to_text())
         .bind(row.created_at)
         .bind(row.updated_at)
         .execute(exec)
