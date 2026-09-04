@@ -2,6 +2,37 @@
 
 Journal entries for ISO week 2026-W36, newest first, in the order they were written.
 
+> **2026-09-04 — #639 part C step 3 briefed to the whole roster; the team's first option-space decision
+> under `TEAM-DECIDES-OPTION-SPACES`: the custody doors are a NEW fact.** Thirteen lenses, before any
+> code. **Card defect banked, attribution: card** — the coordinator graded option (a) (reuse the partner
+> unassign as `handBackDelivery`) "additive, GREEN"; six lenses independently found it false at HEAD
+> (`unassign_delivery_from_partner` refuses a rider-held job, the lifecycle admits it from ASSIGNED
+> only, the rule says "the only assignment path"), so (a) was (b) in partner vocabulary with no
+> `riderId` and no custody fact, and (a)-now-(c)-later is the shape staging ADR-20260808-235113 does
+> not license (holub). **Decision by consent**, no lens naming a harm: option (c),
+> [ADR-20260904-015903](../adr/ADR-20260904-015903-the-custody-doors-are-a-new-fact-a-rider-hands-a-job-back-with-the-food-s-whereabouts-and-the-read-models-fold-it.md) —
+> `HandBackDelivery { deliveryJobId, riderId, foodLocation: FoodCustody }` → `DeliveryHandedBackByRider`;
+> transitions keyed on custody (`WITH_RIDER` → FAILED, never PENDING — an oversell otherwise, vernon);
+> OUT_FOR_DELIVERY in the set; no free-text reason and a handback is never a lever (legal); the issue
+> door takes the D2 pattern (closed `DeliveryIssueKind` + 300-char note; ADR-20260808-171056 was
+> controlling and the card had missed it). **The finding that dominated, in every option: nobody is
+> told** — `View_DeliveryJob` and `OrderTracking` fold no release fact and `rider_id` never clears, so a
+> door on the write side alone re-creates §7.2 with a nicer button; the fold is slice content, and
+> farley found `views.generated.sql` is applied by NOTHING (hand-written migration + `include_str!`
+> chain; gate filed as [#861](https://github.com/TheCaptainCompany/captain-food/issues/861)). **The
+> fence is opened for exactly one additive arm** in `crates/infrastructure/src/inbox.rs` (E0004 demands
+> it): antecedent — #780 closed 2026-08-30 (PR #783), last fenced-path commit `c1a70a6f` 2026-08-30, no
+> `status/in-progress` issue but #639, no open PR on a fenced path. Step 3 splits into **3-i** (issue
+> doors) and **3-ii** (handback), both `HOLD: human` — the proposal's "GREEN once additive" corrected in
+> row 3. Filed: [#860](https://github.com/TheCaptainCompany/captain-food/issues/860) re-offer PM step
+> (fenced), [#862](https://github.com/TheCaptainCompany/captain-food/issues/862) no customer remedy
+> path from a delivery outcome (capture-on-delivered makes it a void, the restaurant make-whole has no
+> flow), [#863](https://github.com/TheCaptainCompany/captain-food/issues/863) the DeliveryJob erasure
+> list is an intention not an artifact. Register-check correction (architect): the carve-out's records
+> are the PROP and ADR-20260830-234532, not ADR-20260904-014136 as the card said. Six stale drafts named
+> by holub (#844, #841, #654, #621, #587, #365 — the oldest 28 days). Next: claim 3-i, executor on
+> `sonnet`, tier stated on the card and the PR body.
+
 > **2026-09-04 — Five founder answers recorded, #854 merged on a first-round PASS, and the team now
 > decides option spaces.** The founder answered the 2026-09-04 form (five questions, register-checked
 > each). **(1) Authority** — *"I authorize you to do everything"* (2026-09-03), scope chosen: *"team
