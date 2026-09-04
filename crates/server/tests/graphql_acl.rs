@@ -631,6 +631,12 @@ async fn the_issue_doors_admit_exactly_their_listed_paths() {
     const DECLINE: &str = r#"mutation { declineDelivery(input: {
         deliveryJobId: "00000000-0000-0000-0000-00000000000d"
     }) { messageId } }"#;
+    // #639 part C step 3-ii (ADR-20260904-015903 §5): `riderId` likewise carries no field on this
+    // Input type (`derived: { riderId: rider }`, #865) — complete without it.
+    const HAND_BACK: &str = r#"mutation { handBackDelivery(input: {
+        deliveryJobId: "00000000-0000-0000-0000-00000000000d",
+        foodLocation: NOT_COLLECTED
+    }) { messageId } }"#;
 
     let forbidden = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
         let schema = schema.clone();
@@ -676,14 +682,24 @@ async fn the_issue_doors_admit_exactly_their_listed_paths() {
     .await;
     admitted("declineDelivery", DECLINE, vec![RequestRole::Rider]).await;
 
+    forbidden(
+        "handBackDelivery",
+        HAND_BACK,
+        vec![RequestRole::Public, RequestRole::Customer, RequestRole::Restaurant, RequestRole::RestaurantAccount, RequestRole::Admin, RequestRole::External],
+    )
+    .await;
+    admitted("handBackDelivery", HAND_BACK, vec![RequestRole::Rider]).await;
+
     // Introspection follows: the resolve door is not even NAMED on the rider's schema, and the
     // rider-only doors are absent from the restaurant's.
     let (_q, rider_m) = introspected_fields(&schema, RequestRole::Rider).await;
     assert!(rider_m.contains(&"reportDeliveryIssue".into()), "reportDeliveryIssue missing for RIDER: {rider_m:?}");
     assert!(rider_m.contains(&"declineDelivery".into()), "declineDelivery missing for RIDER: {rider_m:?}");
+    assert!(rider_m.contains(&"handBackDelivery".into()), "handBackDelivery missing for RIDER: {rider_m:?}");
     assert!(!rider_m.contains(&"resolveDeliveryIssue".into()), "resolveDeliveryIssue leaked to RIDER");
     let (_q, rest_m) = introspected_fields(&schema, RequestRole::Restaurant).await;
     assert!(rest_m.contains(&"resolveDeliveryIssue".into()), "resolveDeliveryIssue missing for RESTAURANT: {rest_m:?}");
     assert!(!rest_m.contains(&"reportDeliveryIssue".into()), "reportDeliveryIssue leaked to RESTAURANT");
     assert!(!rest_m.contains(&"declineDelivery".into()), "declineDelivery leaked to RESTAURANT");
+    assert!(!rest_m.contains(&"handBackDelivery".into()), "handBackDelivery leaked to RESTAURANT");
 }

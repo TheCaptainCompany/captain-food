@@ -195,7 +195,7 @@ pub fn wire() -> HealthDto {
 /// `View_DeliveryJob` read repository SELECTs `open_issue_kind` on every `delivery` /
 /// `myDeliveries` / `restaurantDeliveries` read, so a build without the recreated view would fail
 /// every delivery read with `column "open_issue_kind" does not exist` (42703).
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904021500;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904060000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
