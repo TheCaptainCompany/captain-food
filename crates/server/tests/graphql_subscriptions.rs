@@ -387,6 +387,7 @@ fn order_row(order_id: uuid::Uuid, restaurant_id: uuid::Uuid, status: ds::OrderS
         delivery_status: None,
         courier: None,
         estimated_dropoff_at: None,
+        delivery_handed_back: false,
         created_at: now,
         updated_at: now,
     }
