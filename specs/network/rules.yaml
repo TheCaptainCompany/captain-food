@@ -106,3 +106,25 @@ ProspectContactScheduleAndLimit:
 
 ProspectOutreachStateTransitions:
   description: "A prospect can be marked cold or replied; acting on a missing prospect is rejected."
+
+
+# --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
+# ADR-20260905-101349 §1-§7) -------------------------------------------------------------------
+
+RestaurantAccessGrantIsIdempotent:
+  description: "GrantRestaurantAccess on an EXISTING membershipId is an idempotent no-op (no second event) -- a caller retry never mints a duplicate relationship (#639 part C step 6-i, ADR-20260905-101349 §2)."
+
+MemberAuthSubjectBoundOnce:
+  description: "One login credential (authSubject) binds to at most one MemberId, forever: a grant whose authSubject is already bound to another member is rejected before any fact is recorded (MemberAuthSubjectAlreadyBound), and revoking a membership never frees the binding -- the same human always resolves to the same member (#639 part C step 6-i, ADR-20260905-101349 §4, the 2a auth_subject_reservations precedent)."
+
+RestaurantMembershipRevocationIsFinal:
+  description: "RevokeRestaurantAccess on an unknown membershipId is rejected (RestaurantMembershipNotFound); on an already-revoked one it is rejected (RestaurantMembershipAlreadyRevoked) rather than silently re-recorded -- the log is never overwritten (#639 part C step 6-i)."
+
+GrantRestaurantAccessIsAHumanAct:
+  description: "GrantRestaurantAccess and RevokeRestaurantAccess are roles: [ADMIN] with requires: acting: { ADMIN: any } and no EXTERNAL key -- Captain provisions by hand, the human is the process manager (PROP-20260831-180622 §6.2 Q1); no process manager may `send` either (validator pm-sends-human-only-command) (#639 part C step 6-i, ADR-20260905-101349 §1)."
+
+MemberAccessGrantGatedBeforeStore:
+  description: "GrantRestaurantAccess refuses with the typed MemberAccessGrantDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT is off; RevokeRestaurantAccess is never gated -- releasing access is always safe to allow (#639 part C step 6-i, ADR-20260905-101349 §6, the RestrictRider/ReinstateRider asymmetry)."
+
+RestaurantAccessBasisAcceptedSetIsNarrower:
+  description: "AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three with the typed AccessBasisNotYetAccepted (#639 part C step 6-i, ADR-20260905-101349 §3)."

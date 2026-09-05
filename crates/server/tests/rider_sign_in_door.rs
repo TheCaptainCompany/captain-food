@@ -360,6 +360,7 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         riders: riders_port,
         support_contact: Some(EmailAddress(SUPPORT.into())),
         run_rider_restriction_door: false,
+        run_member_access_grant: false,
     };
     Door { mailbox, identity, riders, sessions, deps, app }
 }

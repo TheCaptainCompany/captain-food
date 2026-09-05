@@ -50,6 +50,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "EscalateDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "EscalateToAdmin" => Some(("Conversation", Some("orderId"), 5)),
         "GrantCustomerCredit" => Some(("CustomerCredit", Some("customerId"), 5)),
+        "GrantRestaurantAccess" => Some(("RestaurantMembership", Some("membershipId"), 5)),
         "HandBackDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "ImportCatalog" => Some(("Catalog", Some("catalogId"), 5)),
         "MarkOrderDelivered" => Some(("Order", Some("orderId"), 5)),
@@ -96,6 +97,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "ResolveReclamation" => Some(("Reclamation", Some("reclamationId"), 5)),
         "RestrictRider" => Some(("Rider", Some("riderId"), 5)),
         "RevokeDeliveryPartnerAvailability" => Some(("DeliveryPartnerRegistration", Some("registrationId"), 5)),
+        "RevokeRestaurantAccess" => Some(("RestaurantMembership", Some("membershipId"), 5)),
         "SetCustomerAddress" => Some(("Customer", Some("customerId"), 5)),
         "SetCustomerPaymentMethod" => Some(("Customer", Some("customerId"), 5)),
         "SetCustomerPreferences" => Some(("Customer", Some("customerId"), 5)),
@@ -141,6 +143,7 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
     ("RefundProcess", 5),
     ("Restaurant", 5),
     ("RestaurantAccount", 5),
+    ("RestaurantMembership", 5),
     ("Rider", 5),
 ];
 
@@ -168,5 +171,6 @@ pub const ACTOR_INBOUND_FACTS: &[(&str, &[&str])] = &[
     ("RefundProcess", &["PaymentRefunded"]),
     ("Restaurant", &["RestaurantRegistered"]),
     ("RestaurantAccount", &[]),
+    ("RestaurantMembership", &[]),
     ("Rider", &[]),
 ];

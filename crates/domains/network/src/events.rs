@@ -223,3 +223,25 @@ pub struct ProspectReplied {
     pub restaurant_id: RestaurantId,
     pub note: Option<String>,
 }
+
+/// A `MemberId` was granted access to a restaurant scope (ADR-20260905-101349 §2/§3). Business payload only (ADR-0041): the acting admin is envelope `domain_events.user_id`, never a field here. `principalKind` is always `MEMBER` -- carried because `ScopeMembership`'s own grant fold reads it (young, §2) and because a `*Granted` event stating WHAT KIND of principal it grants is cheaper to read from the log than re-deriving it. No provider term (`sub`, `app_metadata`, `accessToken`) rides in this payload -- `authSubject` is the kernel `AuthSubject` scalar, the one crossing of the auth boundary this scope is allowed (ADR-20260818-004646).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccessGranted {
+    pub membership_id: MembershipId,
+    pub scope_type: ScopeType,
+    pub scope_id: RestaurantId,
+    pub principal_kind: PrincipalKind,
+    pub member_id: MemberId,
+    pub auth_subject: AuthSubject,
+    pub authority: MemberAuthority,
+    pub basis: AccessBasis,
+}
+
+/// A `RestaurantMembership` ended (ADR-20260905-101349 §2/§11). Never releases the underlying `(MEMBER, authSubject)` reservation (PROP §7) -- the human stays bound to their `MemberId`. `ground` is the closed, additive-only `AccessRevocationGround`; no free text rides beside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantAccessRevoked {
+    pub membership_id: MembershipId,
+    pub ground: AccessRevocationGround,
+}

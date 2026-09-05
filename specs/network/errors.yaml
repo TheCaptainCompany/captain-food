@@ -148,3 +148,69 @@ ProspectNotFound:
   messages:
     en: "Prospect not found."
     fr: "Prospect introuvable."
+
+
+# --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
+# ADR-20260905-101349 §1-§7) -------------------------------------------------------------------
+
+MemberAccessGrantDoorClosed:
+  description: >
+    The grant door is closed by `configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT` (#639 part C
+    step 6-i, ADR-20260905-101349 §6) -- a declared, supervisable refusal while the preconditions
+    (`docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml`) are open, never a silent no-op. The
+    first hand-provisioned grant about a real Tours human is the irreversible moment that starts
+    every legal clock, so the store is never touched while this is off.
+  context:
+    scopeId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "Granting restaurant access is not yet enabled in this environment."
+    fr: "L'octroi d'accès restaurant n'est pas encore activé dans cet environnement."
+
+
+AccessBasisNotYetAccepted:
+  description: >
+    `GrantRestaurantAccess.basis` named a declared but not-yet-implemented door (#639 part C step
+    6-i, ADR-20260905-101349 §3): only `CAPTAIN_ONBOARDING` is accepted today.
+    `GOOGLE_BUSINESS_PROFILE`, `OWNER_DECLARATION` and `MEMBER_INVITATION` are named in the closed
+    `AccessBasis` set so the vocabulary does not widen a second time when each door lands, but none
+    of the three has a handler yet.
+  context:
+    basis: { $ref: 'scalars.yaml#/AccessBasis' }
+  messages:
+    en: "This access basis is not yet supported."
+    fr: "Ce fondement d'accès n'est pas encore pris en charge."
+
+
+MemberAuthSubjectAlreadyBound:
+  description: >
+    The login credential (`authSubject`) is already bound to ANOTHER member id: the write-side
+    reservation `(MEMBER, authSubject)` in `database/tables/reservations.yaml#/
+    auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C
+    step 6-i, ADR-20260905-101349 §4). The binding is never released by a revoke, so the remedy is
+    to grant the EXISTING member id, never a new one.
+  context:
+    authSubject: { $ref: 'scalars.yaml#/AuthSubject' }
+  messages:
+    en: "This login is already linked to a restaurant member. Grant the existing member instead."
+    fr: "Cette identité de connexion est déjà liée à un membre. Accordez l'accès au membre existant."
+
+
+RestaurantMembershipNotFound:
+  description: "No `RestaurantMembership` exists for this `membershipId` (#639 part C step 6-i)."
+  context:
+    membershipId: { $ref: 'scalars.yaml#/MembershipId' }
+  messages:
+    en: "This restaurant membership was not found."
+    fr: "Cette adhésion restaurant est introuvable."
+
+
+RestaurantMembershipAlreadyRevoked:
+  description: >
+    The `RestaurantMembership` was already revoked (#639 part C step 6-i) -- revocation is a fact
+    that happens once; a second `RevokeRestaurantAccess` on the same `membershipId` is rejected
+    rather than silently re-recorded (the Art. 11-log style: the log is never overwritten).
+  context:
+    membershipId: { $ref: 'scalars.yaml#/MembershipId' }
+  messages:
+    en: "This restaurant membership was already revoked."
+    fr: "Cette adhésion restaurant a déjà été révoquée."

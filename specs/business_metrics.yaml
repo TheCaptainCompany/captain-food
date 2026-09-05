@@ -208,6 +208,33 @@ projections:
         set: { $ref: '#/projections/RiderRestriction/measures/reinstatedAt' }
         from: { envelope: occurredAt }
 
+  # #639 part C step 6-i (ADR-20260905-101349 §12): one row per RESTAURANT that has ever had at
+  # least one RestaurantAccessGranted fact -- unlike RiderRestriction above (a row for EVERY
+  # rider, via RiderRegistered as the key event), the key here IS the granting event: a restaurant
+  # with no grant never gets a row, which is what makes `countRows` below a DISTINCT-IDENTITY
+  # denominator (the count of restaurants, not the count of grants -- a restaurant with three
+  # members is ONE row) rather than a counter, inexpressible as one because the population is a
+  # SET of identities, not an event tally. Never removed on revoke (the row answers "has this
+  # restaurant EVER onboarded staff", the same monotonic-population choice as the `Member` bridge
+  # table outliving any one grant, ADR-20260905-101349 §5) -- a restaurant whose only member is
+  # later revoked still counts here, which is a DELIBERATE simplification for 6-i's spec-only
+  # metric (the roster, 6-iv, is what answers "how many CURRENTLY").
+  RestaurantStaffAccess:
+    description: >
+      Has this restaurant ever had a member's access granted, and when was the most recent one?
+      One row per restaurant with at least one RestaurantAccessGranted fact (a restaurant with
+      zero grants never appears — the population itself is the answer to "how many restaurants
+      have a bound member", never a per-grant tally).
+    grain: ENTITY
+    key:
+      - from: { $ref: 'events.yaml#/RestaurantAccessGranted/properties/scopeId' }
+    measures:
+      lastGrantedAt: { type: set, of: { envelope: occurredAt } }
+    fold:
+      - on: { $ref: 'events.yaml#/RestaurantAccessGranted' }
+        set: { $ref: '#/projections/RestaurantStaffAccess/measures/lastGrantedAt' }
+        from: { envelope: occurredAt }
+
 metrics:
   # THE FLIP'S DATA SET (#167, PR #586 checkpoint — business lens, binding): the
   # ENFORCE_ACCEPTANCE_TIMEOUT TTL must be chosen FROM this distribution, per restaurant and per
@@ -312,3 +339,17 @@ metrics:
         ofDurationMs:
           start: { $ref: '#/projections/RiderRestriction/measures/decidedAt' }
           end:   { $ref: '#/projections/RiderRestriction/measures/reinstatedAt' }
+
+  # #639 part C step 6-i (ADR-20260905-101349 §12): the first metric on ManageRestaurantMembership
+  # (a NEW activity this step adds to stories.yaml). A distinct-identity denominator, inexpressible
+  # as a counter (the projection note): `countRows` here counts ROWS of RestaurantStaffAccess,
+  # whose population IS distinct restaurants by construction. No groupBy — the raw population size
+  # is the question, the same shape as `restricted_to_reinstated_duration_ms` above. Spec-only
+  # until the `bam` runtime exists (#484): `exposedAs:` stays ABSENT, same as every 6-i-adjacent
+  # metric on this page.
+  restaurants_with_a_bound_member:
+    question: "How many restaurants have ever had at least one member's access granted (the reach of staff authentication, 6-i onward)?"
+    activity: { $ref: 'stories.yaml#/admin/activities/ManageRestaurantMembership' }
+    over: { $ref: '#/projections/RestaurantStaffAccess' }
+    value:
+      countRows: {}

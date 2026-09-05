@@ -187,6 +187,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "actor-restaurant-membership"
+version = "0.1.0"
+dependencies = [
+ "bin_runtime",
+ "domain-network",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "actor-rider"
 version = "0.1.0"
 dependencies = [
@@ -1165,6 +1177,17 @@ dependencies = [
 
 [[package]]
 name = "client-restaurant-account"
+version = "0.1.0"
+dependencies = [
+ "actor_client",
+ "domain",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "client-restaurant-membership"
 version = "0.1.0"
 dependencies = [
  "actor_client",
@@ -4776,6 +4799,7 @@ dependencies = [
  "client-refund-process",
  "client-restaurant",
  "client-restaurant-account",
+ "client-restaurant-membership",
  "client-rider",
  "coopcycle-adapter",
  "db-test-gate",

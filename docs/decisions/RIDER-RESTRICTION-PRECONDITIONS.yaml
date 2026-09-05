@@ -24,5 +24,15 @@ note: 'The key is consumed at the WRITE door only: restrictRider OFF returns the
   specs/observability.yaml for the gauge, then a recorded decision flips deploy.production to "true"
   (gate-then-stabilize, ADR-20260808-144738) and this row moves to decided. Consulted at the 4-iii
   briefing: legal-specialist (the row + the key + the test), farley (the key at the write door),
-  architect (the gap named), observability-agent (the route as a precondition).'
-amendment_20260905: 'Precondition (1) is NOT discharged by step 6 as decided (ADR-20260905-101349): the member door (6-ii) stamps MEMBER only and ADMIN stays hand-provisioned, so an ADMIN still cannot reach /system/riders from a browser after 6-ii + 6-iii. What discharges (1) is an ADMIN door -- the final vision is a CAPTAIN_ONBOARDING grant with a platform scope resolved at the identity seam; until a record decides it, (1) stays open and the restrict key stays pinned off.'
+  architect (the gap named), observability-agent (the route as a precondition).
+
+  Amendment 2026-09-05 (ADR-20260905-101349): Precondition (1) is NOT discharged by step 6 as
+  decided: the member door (6-ii) stamps MEMBER only and ADMIN stays hand-provisioned, so an ADMIN
+  still cannot reach /system/riders from a browser after 6-ii + 6-iii. What discharges (1) is an
+  ADMIN door -- the final vision is a CAPTAIN_ONBOARDING grant with a platform scope resolved at
+  the identity seam; until a record decides it, (1) stays open and the restrict key stays pinned
+  off. (#639 part C step 6-i executor note: the prior commit introduced this amendment under a
+  field name `amendment_20260905` outside the closed decision-row schema, tripping
+  `decision-field-unknown`, and as a SECOND `note:` key in the same mapping, which YAML silently
+  resolves to only the LAST one -- the amendment above was merged into this single `note:` field,
+  content unchanged, to restore a green `make validate`.)'

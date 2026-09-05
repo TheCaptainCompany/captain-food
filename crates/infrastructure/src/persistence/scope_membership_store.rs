@@ -54,6 +54,55 @@ pub async fn grant(
     Ok(())
 }
 
+/// #639 part C step 6-i (ADR-20260905-101349 §2/§3): the `RestaurantMembership` MEMBER arm. The
+/// row's `membership_id` PK is the CALLER-SUPPLIED value (the `RestaurantMembership` aggregate's
+/// own minted id, reused verbatim -- never the UUIDv5 derivation [`grant`] uses), which is what
+/// lets [`revoke_member`] target this ONE row with no lookup. `member_type` is written as the
+/// LITERAL text `"MEMBER"` (`PrincipalKind::MEMBER`'s wire value) rather than through
+/// `UserType::to_text()`: the column is TEXT with no CHECK/FK, and typing it `PrincipalKind` for
+/// real is the retype PROP-20260831-180622 §6.5 owns and 6-i does not build.
+pub async fn grant_member(
+    conn: &mut sqlx::PgConnection,
+    membership_id: Uuid,
+    scope_type: ScopeType,
+    scope_id: Uuid,
+    member_id: Uuid,
+    granted_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), DomainError> {
+    sqlx::query(
+        "INSERT INTO scopemembership \
+           (membership_id, scope_type, scope_id, member_type, member_id, granted_at, created_at, updated_at) \
+         VALUES ($1,$2,$3,'MEMBER',$4,$5,$5,$5) \
+         ON CONFLICT (membership_id) DO NOTHING",
+    )
+    .bind(membership_id)
+    .bind(scope_type.to_text())
+    .bind(scope_id)
+    .bind(member_id)
+    .bind(granted_at)
+    .execute(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Drop exactly the ONE row whose `membership_id` equals this value -- the targeted counterpart
+/// to [`revoke_role`]'s broad delete. Never used for the CUSTOMER/RESTAURANT/RIDER arms above: a
+/// `RestaurantMembership` names a person, not a role population, so there is no sibling row
+/// sharing this key the way a reassigned rider's predecessor grant would be.
+pub async fn revoke_member(
+    conn: &mut sqlx::PgConnection,
+    membership_id: Uuid,
+) -> Result<u64, DomainError> {
+    let deleted = sqlx::query("DELETE FROM scopemembership WHERE membership_id = $1")
+        .bind(membership_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(db_err)?
+        .rows_affected();
+    Ok(deleted)
+}
+
 /// Drop EVERY member holding `member_type` on this scope.
 ///
 /// Deliberately not "revoke this one rider": if a reassignment ever left two rider rows on one order,

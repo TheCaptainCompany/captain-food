@@ -11,8 +11,8 @@
 
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
-    CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, MessageId,
-    OrderId, ReclamationId, RestaurantAccountId, RestaurantId, RiderId,
+    CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, MembershipId,
+    MessageId, OrderId, ReclamationId, RestaurantAccountId, RestaurantId, RiderId,
 };
 // A Conversation is keyed by the OrderId (its identity IS its order, #129) — same id type as Order, distinct stream.
 
@@ -77,6 +77,15 @@ impl_aggregate!(crate::reclamation::ReclamationState, ReclamationId, "Reclamatio
 impl_aggregate!(crate::customer_credit::CustomerCreditState, CustomerId, "CustomerCredit", crate::customer_credit::fold);
 // MailboxSupervision is keyed by the SUPERVISED row's messageId (#315) — the write-path envelope id, distinct stream.
 impl_aggregate!(crate::mailbox_supervision::MailboxSupervisionState, MessageId, "MailboxSupervision", crate::mailbox_supervision::fold);
+// #639 part C step 6-i (ADR-20260905-101349 §1-§2): its own aggregate, its own stream, keyed by
+// its own minted MembershipId — distinct from the MemberId it grants and from ScopeMembership's
+// derived UUIDv5 key.
+impl_aggregate!(
+    crate::restaurant_membership::RestaurantMembershipState,
+    MembershipId,
+    "RestaurantMembership",
+    crate::restaurant_membership::fold
+);
 
 #[cfg(test)]
 mod tests {

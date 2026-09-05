@@ -179,6 +179,14 @@
       ],
       "path": "crates/bins/actor-restaurant-account"
     },
+    "actor-restaurant-membership": {
+      "actor": "RestaurantMembership",
+      "kind": "aggregate",
+      "domain_crates": [
+        "domain-network"
+      ],
+      "path": "crates/bins/actor-restaurant-membership"
+    },
     "actor-rider": {
       "actor": "Rider",
       "kind": "aggregate",

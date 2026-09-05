@@ -428,6 +428,13 @@ CREATE TABLE RiderRoster (
 CREATE INDEX IF NOT EXISTS riderroster_display_name_rider_id_idx ON RiderRoster (display_name, rider_id);
 CREATE INDEX IF NOT EXISTS riderroster_standing_idx ON RiderRoster (standing);
 
+CREATE TABLE Member (
+  member_id UUID PRIMARY KEY,
+  auth_subject TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,

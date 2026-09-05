@@ -217,6 +217,7 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps {
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: false,
+        run_member_access_grant: false,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
@@ -725,6 +726,7 @@ fn routed_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> CommandDeps 
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: false,
+        run_member_access_grant: false,
         route_gates: application::generated::process_managers::RouteGates {
             order_placed_to_order: true,
             place_replacement_order_to_order: false,

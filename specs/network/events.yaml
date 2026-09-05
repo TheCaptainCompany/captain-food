@@ -470,3 +470,60 @@ ProspectReplied:
       nullable: true
   required:
     - restaurantId
+
+
+# --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
+# ADR-20260905-101349 §1-§7) -------------------------------------------------------------------
+
+RestaurantAccessGranted:
+  description: >
+    A `MemberId` was granted access to a restaurant scope (ADR-20260905-101349 §2/§3). Business
+    payload only (ADR-0041): the acting admin is envelope `domain_events.user_id`, never a field
+    here. `principalKind` is always `MEMBER` -- carried because `ScopeMembership`'s own grant fold
+    reads it (young, §2) and because a `*Granted` event stating WHAT KIND of principal it grants is
+    cheaper to read from the log than re-deriving it. No provider term (`sub`, `app_metadata`,
+    `accessToken`) rides in this payload -- `authSubject` is the kernel `AuthSubject` scalar, the
+    one crossing of the auth boundary this scope is allowed (ADR-20260818-004646).
+  type: object
+  properties:
+    membershipId:
+      $ref: 'scalars.yaml#/MembershipId'
+    scopeType:
+      $ref: 'scalars.yaml#/ScopeType'
+    scopeId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    principalKind:
+      $ref: 'scalars.yaml#/PrincipalKind'
+    memberId:
+      $ref: 'scalars.yaml#/MemberId'
+    authSubject:
+      $ref: 'scalars.yaml#/AuthSubject'
+    authority:
+      $ref: 'scalars.yaml#/MemberAuthority'
+    basis:
+      $ref: 'scalars.yaml#/AccessBasis'
+  required:
+    - membershipId
+    - scopeType
+    - scopeId
+    - principalKind
+    - memberId
+    - authSubject
+    - authority
+    - basis
+
+
+RestaurantAccessRevoked:
+  description: >
+    A `RestaurantMembership` ended (ADR-20260905-101349 §2/§11). Never releases the underlying
+    `(MEMBER, authSubject)` reservation (PROP §7) -- the human stays bound to their `MemberId`.
+    `ground` is the closed, additive-only `AccessRevocationGround`; no free text rides beside it.
+  type: object
+  properties:
+    membershipId:
+      $ref: 'scalars.yaml#/MembershipId'
+    ground:
+      $ref: 'scalars.yaml#/AccessRevocationGround'
+  required:
+    - membershipId
+    - ground

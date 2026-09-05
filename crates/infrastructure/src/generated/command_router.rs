@@ -38,5 +38,6 @@ pub const ACTOR_ACTIVATIONS: &[(&str, bool, Option<i64>)] = &[
     ("RefundProcess", true, None),
     ("Restaurant", true, None),
     ("RestaurantAccount", true, None),
+    ("RestaurantMembership", true, None),
     ("Rider", true, None),
 ];

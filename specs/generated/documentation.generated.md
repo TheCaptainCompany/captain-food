@@ -209,6 +209,8 @@ A platform operator who onboards accounts and oversees the platform.
 |  | ViewRider | [🔎 `rider`](#query-rider) |
 |  | RestrictRider | [✏️ `restrictRider`](#mutation-restrictrider) |
 |  | ReinstateRider | [✏️ `reinstateRider`](#mutation-reinstaterider) |
+| 🧭 **ManageRestaurantMembership** | GrantAccess | [✏️ `grantRestaurantAccess`](#mutation-grantrestaurantaccess) |
+|  | RevokeAccess | [✏️ `revokeRestaurantAccess`](#mutation-revokerestaurantaccess) |
 | 🧭 **ArbitrateRefunds** | ReviewPendingRefunds | [🔎 `pendingRefunds`](#query-pendingrefunds) |
 |  | ApproveRefund | [✏️ `approveRefund`](#mutation-approverefund) |
 |  | DenyRefund | [✏️ `denyRefund`](#mutation-denyrefund) |
@@ -251,7 +253,7 @@ A delivery partner (already integrated: a known catalog channel) acting as an EX
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(28)_
+### 🧰 API operations _(30)_
 
 <a id="query-restaurantdeliveries"></a>
 #### 🔎 Query: `restaurantDeliveries`
@@ -470,6 +472,20 @@ The refund queue (RefundProcess): refunds opened for decision, with their lifecy
 - **Roles**: ADMIN, EXTERNAL · **slice** V1
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-grantrestaurantaccess"></a>
+#### ✏️ Mutation: `grantRestaurantAccess`
+
+- **Command**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) → handled by [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Roles**: ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-revokerestaurantaccess"></a>
+#### ✏️ Mutation: `revokeRestaurantAccess`
+
+- **Command**: [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) → handled by [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Roles**: ADMIN · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 ### 🧩 Output types _(2)_
 
 <a id="type-restaurant"></a>
@@ -523,7 +539,7 @@ A B2B prospect (NON_PARTNER listing) with its computed score and outreach state 
 | <a id="type-prospect--lastcontactedat"></a>`lastContactedAt` | `string` _date-time_ | ⬜ |
 | <a id="type-prospect--repliedat"></a>`repliedAt` | `string` _date-time_ | ⬜ |
 
-### 🎭 Actors _(3)_
+### 🎭 Actors _(4)_
 
 <a id="actor-restaurantaccount"></a>
 #### 🎭 Actor: `RestaurantAccount`
@@ -589,7 +605,18 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | [📩 `MarkProspectCold`](#command-markprospectcold) | [⚡ `ProspectMarkedCold`](#event-prospectmarkedcold) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
 | [📩 `RecordProspectReply`](#command-recordprospectreply) | [⚡ `ProspectReplied`](#event-prospectreplied) | [⛔ `ProspectNotFound`](#error-prospectnotfound) |
 
-### 🗄️ Views (read models) _(3)_
+<a id="actor-restaurantmembership"></a>
+#### 🎭 Actor: `RestaurantMembership`
+
+_🧩 aggregate_ — The bridge and the grant (#639 part C step 6-i, ADR-20260905-101349 §1-§7): one `MemberId`'s access to one restaurant scope. Its OWN aggregate, its OWN stream (`RestaurantMembership- {membershipId}`), its OWN lane -- FORK 1 Option A (PROP-20260831-180622 §3, young, evans): a targeted revoke needs its own identity distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants. Captain provisions by hand in V0 -- the human is the process manager (Q1); no saga holds this one bit.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) | [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound) |
+| [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) | [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked) | [⛔ `RestaurantMembershipNotFound`](#error-restaurantmembershipnotfound), [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked) |
+
+### 🗄️ Views (read models) _(4)_
 
 <a id="view-restaurant"></a>
 #### 🗄️ View: `Restaurant`
@@ -663,7 +690,22 @@ _🧩 aggregate_ — Sales/CRM state of a NON_PARTNER restaurant listing worked 
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(20)_
+<a id="view-member"></a>
+#### 🗄️ View: `Member`
+
+- **Source**: [🎭 `RestaurantMembership`](#actor-restaurantmembership) · 🛶 V0 · 🔒 internal
+- **Note**: The bridge a MEMBER-stamped request resolves through (6-ii, not built here): one row per person who has ever been granted access to at least one restaurant scope. Deliberately holds NOTHING ELSE -- no `display_name` (YAGNI: nothing displays it in 6-i, the roster is 6-iv) and no grant-shaped column (authority/basis/scopeId all live on `RestaurantAccessGranted` in `domain_events` and on `ScopeMembership`, never duplicated here) -- the binding OUTLIVES any one grant, so a column that describes ONE grant does not belong on the person row. 
+- **Rules**: Rebuild = checkpoint reset, never TRUNCATE (the `Rider`/`RiderRestriction` precedent, PROP-20260831-180622 §6.4): upsert keyed on `member_id` with ONE creating arm (`RestaurantAccessGranted`), so a from-zero replay rewrites every row in place and no member is denied mid-rebuild. TRUNCATE + reset fails every member closed for the length of the drain. This rule holds only while `Member` carries no grant-shaped column (dba) -- the day one is added, the rebuild discipline must be re-examined exactly as `Rider.standing` forced `RiderRoster` to split off with its OWN opposite recipe. `auth_subject` is UNIQUE, not merely indexed, and the difference is a security property (the `Rider.auth_ref` precedent): the seam's lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- the constraint converts a silent breach into a visible denial. It does NOT create the invariant: the write-side reservation that does is `database/tables/reservations.yaml#/auth_subject_reservations`, keyed `(principal_kind, auth_subject)` -- `grant_restaurant_access` reserves BEFORE the append, so a duplicate is refused up front and this constraint is the second line, never the first. RestaurantAccessRevoked touches NOTHING here (ADR-20260905-101349 §5): the binding a person resolves to outlives any one grant they lose -- revoking access is a `ScopeMembership` fact, never a `Member` fact. No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `RiderRoster` precedent): a stray value fails the ONE row's projection rather than halting the whole group.
+- **Fed by**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `member_id` | [🔤 `MemberId`](#scalar-memberid) | [⚡ `RestaurantAccessGranted`.`memberId`](#event-restaurantaccessgranted--memberid) | PK | Keyed on the DOMAIN person id, never `membershipId` (the grant relationship) -- resolved by the projection worker from the PAYLOAD, not from the stream name: the aggregate that authors this event is `RestaurantMembership-{membershipId}`, a DIFFERENT identity from the row this table keys on (the same cross-stream shape as `ScopeMembership`'s `RestaurantListingClaimed` arm). |
+| `auth_subject` | [🔤 `AuthSubject`](#scalar-authsubject) | [⚡ `RestaurantAccessGranted`.`authSubject`](#event-restaurantaccessgranted--authsubject) | unique | The login credential this person resolves through (6-ii's seam). UNIQUE, no other index (deliberately no `index: true` beside `unique:` -- the two are separate emitter passes and would emit a redundant second btree, the `Rider.auth_ref` precedent) -- see the table rule. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+### 📩 Commands _(22)_
 
 <a id="command-registerrestaurantaccount"></a>
 #### 📩 Command: `RegisterRestaurantAccount`
@@ -987,7 +1029,40 @@ Record that a prospect replied (CRM/admin or inbound), stopping the sequence.
 | <a id="command-recordprospectreply--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="command-recordprospectreply--note"></a>`note` | `string` | ⬜ |  |
 
-### ⚡ Events _(21)_
+<a id="command-grantrestaurantaccess"></a>
+#### 📩 Command: `GrantRestaurantAccess`
+
+Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants. `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command. `membershipId` is OPTIONAL: absent, the handler mints a fresh one (birth); present and already granted, the call is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship. The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
+
+- **Dispatched by**: [✏️ `grantRestaurantAccess`](#mutation-grantrestaurantaccess) · **handled by** [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Emits**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **Throws**: [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-grantrestaurantaccess--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ⬜ |  |
+| <a id="command-grantrestaurantaccess--scopetype"></a>`scopeType` | [🔤 `ScopeType`](#scalar-scopetype) | ✅ |  |
+| <a id="command-grantrestaurantaccess--scopeid"></a>`scopeId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-grantrestaurantaccess--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ✅ |  |
+| <a id="command-grantrestaurantaccess--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
+| <a id="command-grantrestaurantaccess--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |  |
+| <a id="command-grantrestaurantaccess--basis"></a>`basis` | [🔤 `AccessBasis`](#scalar-accessbasis) | ✅ |  |
+
+<a id="command-revokerestaurantaccess"></a>
+#### 📩 Command: `RevokeRestaurantAccess`
+
+End one `RestaurantMembership` (ADR-20260905-101349 §2/§11). Revocation of ACCESS is never release of the underlying `(MEMBER, authSubject)` reservation (§4, PROP §7): the human stays bound to their `MemberId` forever, so a later re-invitation cannot mint a second person for the same credential. `ground` is the closed, additive-only `AccessRevocationGround` -- no free-text field exists on this command, on purpose (the ADR-20260904-014136 precedent: a stored performance-keyed reason is the strongest requalification exhibit a labour dispute could ask for). Never gated: releasing access is always safe to allow (the `ReinstateRider`/ `RestrictRider` asymmetry, ADR-20260904-152807 §7).
+
+- **Dispatched by**: [✏️ `revokeRestaurantAccess`](#mutation-revokerestaurantaccess) · **handled by** [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Emits**: [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked)
+- **Throws**: [⛔ `RestaurantMembershipNotFound`](#error-restaurantmembershipnotfound), [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-revokerestaurantaccess--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
+| <a id="command-revokerestaurantaccess--ground"></a>`ground` | [🔤 `AccessRevocationGround`](#scalar-accessrevocationground) | ✅ |  |
+
+### ⚡ Events _(23)_
 
 <a id="event-restaurantaccountregistered"></a>
 #### ⚡ Event: `RestaurantAccountRegistered`
@@ -1326,6 +1401,40 @@ A prospect replied to outreach; the sequence stops pending human follow-up.
 | <a id="event-prospectreplied--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
 | <a id="event-prospectreplied--note"></a>`note` | `string` | ⬜ |  |
 
+<a id="event-restaurantaccessgranted"></a>
+#### ⚡ Event: `RestaurantAccessGranted`
+
+A `MemberId` was granted access to a restaurant scope (ADR-20260905-101349 §2/§3). Business payload only (ADR-0041): the acting admin is envelope `domain_events.user_id`, never a field here. `principalKind` is always `MEMBER` -- carried because `ScopeMembership`'s own grant fold reads it (young, §2) and because a `*Granted` event stating WHAT KIND of principal it grants is cheaper to read from the log than re-deriving it. No provider term (`sub`, `app_metadata`, `accessToken`) rides in this payload -- `authSubject` is the kernel `AuthSubject` scalar, the one crossing of the auth boundary this scope is allowed (ADR-20260818-004646).
+
+- **Emitted by**: [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `Member`](#view-member), [🗄️ `ScopeMembership`](#view-scopemembership)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantaccessgranted--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
+| <a id="event-restaurantaccessgranted--scopetype"></a>`scopeType` | [🔤 `ScopeType`](#scalar-scopetype) | ✅ |  |
+| <a id="event-restaurantaccessgranted--scopeid"></a>`scopeId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantaccessgranted--principalkind"></a>`principalKind` | [🔤 `PrincipalKind`](#scalar-principalkind) | ✅ |  |
+| <a id="event-restaurantaccessgranted--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ✅ |  |
+| <a id="event-restaurantaccessgranted--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
+| <a id="event-restaurantaccessgranted--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |  |
+| <a id="event-restaurantaccessgranted--basis"></a>`basis` | [🔤 `AccessBasis`](#scalar-accessbasis) | ✅ |  |
+
+<a id="event-restaurantaccessrevoked"></a>
+#### ⚡ Event: `RestaurantAccessRevoked`
+
+A `RestaurantMembership` ended (ADR-20260905-101349 §2/§11). Never releases the underlying `(MEMBER, authSubject)` reservation (PROP §7) -- the human stays bound to their `MemberId`. `ground` is the closed, additive-only `AccessRevocationGround`; no free text rides beside it.
+
+- **Emitted by**: [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Consumed by**: —
+- **Projected into**: [🗄️ `ScopeMembership`](#view-scopemembership)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantaccessrevoked--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
+| <a id="event-restaurantaccessrevoked--ground"></a>`ground` | [🔤 `AccessRevocationGround`](#scalar-accessrevocationground) | ✅ |  |
+
 ### 📦 Entities _(7)_
 
 <a id="entity-openinghoursslot"></a>
@@ -1429,12 +1538,14 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(24)_
+### 🔤 Scalars _(30)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
 | <a id="scalar-cuisinecategory"></a>🔤 `CuisineCategory` | enum (FAST_FOOD \| PIZZA \| TRADITIONAL \| BISTRONOMIC \| FOOD_TRUCK) | A restaurant's SINGLE primary/representative cuisine bucket, used only to select ONE Uber Eats mark-up coefficient in View_UberEstimationPolicy (ADR-0024): FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35. NOT for discovery — a restaurant may belong to several cuisines for browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because the estimate needs a single coefficient.  |
+| <a id="scalar-memberid"></a>🔤 `MemberId` | string _uuid_ | A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.  |
+| <a id="scalar-principalkind"></a>🔤 `PrincipalKind` | enum (CUSTOMER \| RESTAURANT \| RESTAURANT_ACCOUNT \| RIDER \| MEMBER) | WHAT KIND OF PRINCIPAL acts -- the vocabulary `ScopeMembership.member_type` is really typed by, and the first half of the rider sign-in reservation key `(principal_kind, auth_subject)`. One member per entry in `actors.yaml`'s `principals` map, plus `MEMBER`. A NEW scalar with NO stored history: nothing has ever been written with this type, so `MEMBER` costs no upcaster, no re-attribution of past events, and no migration. That is the whole reason the vocabulary is added here rather than onto `UserType` (see the note above). `PUBLIC`, `ADMIN` and `EXTERNAL` are absent on purpose, exactly as they are absent from `principals`: they have no resolved domain identity, so they can never be a member of anything and can never satisfy an `acting` entry other than the explicit `any` keyword. NOT `ScopeType`, which is untouched by this change: `ScopeType` names the kind of protected INSTANCE one belongs to (`ORDER`, `RESTAURANT`), whereas this names the kind of party doing the belonging. A member is not a thing others are members of.  |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
 | <a id="scalar-userid"></a>🔤 `UserId` | string _uuid_ |  |
 | <a id="scalar-externalidentifierkey"></a>🔤 `ExternalIdentifierKey` | string | Key of a generic external identifier kept on a Restaurant listing (see entities.yaml#/ExternalIdentifier). Open vocabulary preserving the ORIGINAL source key; well-known values: 'siret', 'naf', 'google_place_id', 'hubrise_ref'. NOTE: external ids are NOT assumed unique — one SIRET can host several dark-kitchen brands; cross-reference sources (a google_place_id usually distinguishes them).  |
@@ -1457,8 +1568,12 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-orderacceptancemode"></a>🔤 `OrderAcceptanceMode` | enum (NORMAL \| BUSY \| PAUSED) | Current order acceptance mode of a restaurant (HubRise: order_acceptance). |
 | <a id="scalar-pricerange"></a>🔤 `PriceRange` | enum (BUDGET \| MODERATE \| PREMIUM) | Coarse price tier of a restaurant, used as a discovery filter (UI: $ / $$ / $$$). |
 | <a id="scalar-restaurantlistkey"></a>🔤 `RestaurantListKey` | enum (ORDER_AGAIN \| RECOMMENDED \| TOP_DEALS \| GREEN_PACKAGING) | Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.  |
+| <a id="scalar-membershipid"></a>🔤 `MembershipId` | string _uuid_ | Identity of one `RestaurantMembership` grant (#639 part C step 6-i) -- the relationship between one `MemberId` and one restaurant scope, NOT the person (`MemberId`, `specs/common/scalars.yaml`) and NOT the ScopeMembership ACL row (a UUIDv5 derived from the natural key, database/tables/ projection_tables.yaml#/ScopeMembership). Minted by `GrantRestaurantAccess` when the caller supplies none; supplying an existing one makes a second grant call idempotent (rules.yaml#/ RestaurantAccessGrantIsIdempotent).  |
+| <a id="scalar-memberauthority"></a>🔤 `MemberAuthority` | enum (MANAGER \| OPERATOR) | What a member may do within the restaurant scope they hold access to (ADR-20260905-101349 §3, evans). `ADMINISTRATOR` was refused: it collides with `restaurant_manager`, an existing word already meaning "the person who runs one shop", and would give a second population the same stem. Two values, additive-only forever: a change of authority is a revoke followed by a new grant, never a `MemberAuthorityChanged` event (`*Updated` carrying a capability is the `RiderStatusChanged` shape this scope refuses to reincarnate, PROP-20260831-180622 §6).  |
+| <a id="scalar-accessbasis"></a>🔤 `AccessBasis` | enum (CAPTAIN_ONBOARDING \| GOOGLE_BUSINESS_PROFILE \| OWNER_DECLARATION \| MEMBER_INVITATION) | WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager (ADR-20260905-101349 §2).  |
+| <a id="scalar-accessrevocationground"></a>🔤 `AccessRevocationGround` | enum (LEFT_THE_RESTAURANT \| ACCESS_NO_LONGER_NEEDED) | WHY a `RestaurantAccessRevoked` fact was recorded -- the smallest closed set naming no work-performance ground (the ADR-20260904-014136 precedent, legal-graded: a stored decline/performance-keyed reason is the strongest requalification exhibit a labour tribunal could ask for, so none is offered). `LEFT_THE_RESTAURANT` (the member's own departure -- resignation, end of contract) and `ACCESS_NO_LONGER_NEEDED` (the restaurant's own operational call -- a role changed, a device was reassigned) are the two ordinary paths. `UNRECOGNISED` is the read-only catch-all (`#[serde(other)]`, unspellable at the command door -- the same shape `RiderRestrictionGround` carries): without it a future stored value fails the whole stream load on decode. No free text rides beside either value -- no `note` field exists on `RevokeRestaurantAccess`. Counsel review at the checkpoint (ADR-20260905-101349 §11); additive- only if it ever grows, same discipline as `RiderRestrictionGround` (counsel can only add).  |
 
-### ⛔ Errors _(14)_
+### ⛔ Errors _(19)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -1476,8 +1591,13 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-prospectcontactlimitreached"></a>⛔ `ProspectContactLimitReached` | The prospect already received the maximum number of outreach contacts (anti-spam: ≤ 3). | 🇬🇧 This prospect has already been contacted the maximum number of times. | 🇫🇷 Ce prospect a déjà été contacté le nombre maximum de fois. | [📩 `RecordProspectContact`](#command-recordprospectcontact) |
 | <a id="error-prospectcontactedtoorecently"></a>⛔ `ProspectContactedTooRecently` | A new contact is too soon after the previous one (anti-spam: ≥ 7 days apart). | 🇬🇧 This prospect was contacted too recently; wait before contacting again. | 🇫🇷 Ce prospect a été contacté trop récemment ; patientez avant de le recontacter. | [📩 `RecordProspectContact`](#command-recordprospectcontact) |
 | <a id="error-prospectnotfound"></a>⛔ `ProspectNotFound` | No prospect (contact history) exists for this restaurant. | 🇬🇧 Prospect not found. | 🇫🇷 Prospect introuvable. | [📩 `MarkProspectCold`](#command-markprospectcold), [📩 `RecordProspectReply`](#command-recordprospectreply) |
+| <a id="error-memberaccessgrantdoorclosed"></a>⛔ `MemberAccessGrantDoorClosed` | The grant door is closed by `configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT` (#639 part C step 6-i, ADR-20260905-101349 §6) -- a declared, supervisable refusal while the preconditions (`docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml`) are open, never a silent no-op. The first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock, so the store is never touched while this is off.  | 🇬🇧 Granting restaurant access is not yet enabled in this environment. | 🇫🇷 L'octroi d'accès restaurant n'est pas encore activé dans cet environnement. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) |
+| <a id="error-accessbasisnotyetaccepted"></a>⛔ `AccessBasisNotYetAccepted` | `GrantRestaurantAccess.basis` named a declared but not-yet-implemented door (#639 part C step 6-i, ADR-20260905-101349 §3): only `CAPTAIN_ONBOARDING` is accepted today. `GOOGLE_BUSINESS_PROFILE`, `OWNER_DECLARATION` and `MEMBER_INVITATION` are named in the closed `AccessBasis` set so the vocabulary does not widen a second time when each door lands, but none of the three has a handler yet.  | 🇬🇧 This access basis is not yet supported. | 🇫🇷 Ce fondement d'accès n'est pas encore pris en charge. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) |
+| <a id="error-memberauthsubjectalreadybound"></a>⛔ `MemberAuthSubjectAlreadyBound` | The login credential (`authSubject`) is already bound to ANOTHER member id: the write-side reservation `(MEMBER, authSubject)` in `database/tables/reservations.yaml#/ auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C step 6-i, ADR-20260905-101349 §4). The binding is never released by a revoke, so the remedy is to grant the EXISTING member id, never a new one.  | 🇬🇧 This login is already linked to a restaurant member. Grant the existing member instead. | 🇫🇷 Cette identité de connexion est déjà liée à un membre. Accordez l'accès au membre existant. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) |
+| <a id="error-restaurantmembershipnotfound"></a>⛔ `RestaurantMembershipNotFound` | No `RestaurantMembership` exists for this `membershipId` (#639 part C step 6-i). | 🇬🇧 This restaurant membership was not found. | 🇫🇷 Cette adhésion restaurant est introuvable. | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) |
+| <a id="error-restaurantmembershipalreadyrevoked"></a>⛔ `RestaurantMembershipAlreadyRevoked` | The `RestaurantMembership` was already revoked (#639 part C step 6-i) -- revocation is a fact that happens once; a second `RevokeRestaurantAccess` on the same `membershipId` is rejected rather than silently re-recorded (the Art. 11-log style: the log is never overwritten).  | 🇬🇧 This restaurant membership was already revoked. | 🇫🇷 Cette adhésion restaurant a déjà été révoquée. | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) |
 
-### 📐 Business rules _(24)_
+### 📐 Business rules _(30)_
 
 <a id="rule-accountregistrationvalidcurrencyuniqueref"></a>
 #### 📐 Rule: `AccountRegistrationValidCurrencyUniqueRef`
@@ -1647,7 +1767,49 @@ _A prospect can be marked cold or replied; acting on a missing prospect is rejec
 
 - **Verified by**: [🧪 `TestProspectMarkedCold`](#test-testprospectmarkedcold), [🧪 `TestProspectReplied`](#test-testprospectreplied), [🧪 `TestProspectMarkColdNotFound`](#test-testprospectmarkcoldnotfound)
 
-### 🧪 Tests _(3)_
+<a id="rule-restaurantaccessgrantisidempotent"></a>
+#### 📐 Rule: `RestaurantAccessGrantIsIdempotent`
+
+_GrantRestaurantAccess on an EXISTING membershipId is an idempotent no-op (no second event) -- a caller retry never mints a duplicate relationship (#639 part C step 6-i, ADR-20260905-101349 §2)._
+
+- **Verified by**: [🧪 `TestGrantRestaurantAccessTwiceIsIdempotent`](#test-testgrantrestaurantaccesstwiceisidempotent)
+
+<a id="rule-memberauthsubjectboundonce"></a>
+#### 📐 Rule: `MemberAuthSubjectBoundOnce`
+
+_One login credential (authSubject) binds to at most one MemberId, forever: a grant whose authSubject is already bound to another member is rejected before any fact is recorded (MemberAuthSubjectAlreadyBound), and revoking a membership never frees the binding -- the same human always resolves to the same member (#639 part C step 6-i, ADR-20260905-101349 §4, the 2a auth_subject_reservations precedent)._
+
+- **Verified by**: [🧪 `TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected`](#test-testgrantrestaurantaccessauthsubjectalreadyboundisrejected)
+
+<a id="rule-restaurantmembershiprevocationisfinal"></a>
+#### 📐 Rule: `RestaurantMembershipRevocationIsFinal`
+
+_RevokeRestaurantAccess on an unknown membershipId is rejected (RestaurantMembershipNotFound); on an already-revoked one it is rejected (RestaurantMembershipAlreadyRevoked) rather than silently re-recorded -- the log is never overwritten (#639 part C step 6-i)._
+
+- **Verified by**: [🧪 `TestRestaurantAccessRevoked`](#test-testrestaurantaccessrevoked), [🧪 `TestRevokeUnknownRestaurantMembershipIsRejected`](#test-testrevokeunknownrestaurantmembershipisrejected), [🧪 `TestRevokeAlreadyRevokedRestaurantMembershipIsRejected`](#test-testrevokealreadyrevokedrestaurantmembershipisrejected)
+
+<a id="rule-grantrestaurantaccessisahumanact"></a>
+#### 📐 Rule: `GrantRestaurantAccessIsAHumanAct`
+
+_GrantRestaurantAccess and RevokeRestaurantAccess are roles: [ADMIN] with requires: acting: { ADMIN: any } and no EXTERNAL key -- Captain provisions by hand, the human is the process manager (PROP-20260831-180622 §6.2 Q1); no process manager may `send` either (validator pm-sends-human-only-command) (#639 part C step 6-i, ADR-20260905-101349 §1)._
+
+- **Verified by**: [🧪 `TestRestaurantAccessGranted`](#test-testrestaurantaccessgranted)
+
+<a id="rule-memberaccessgrantgatedbeforestore"></a>
+#### 📐 Rule: `MemberAccessGrantGatedBeforeStore`
+
+_GrantRestaurantAccess refuses with the typed MemberAccessGrantDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT is off; RevokeRestaurantAccess is never gated -- releasing access is always safe to allow (#639 part C step 6-i, ADR-20260905-101349 §6, the RestrictRider/ReinstateRider asymmetry)._
+
+- **Verified by**: [🧪 `TestGrantRestaurantAccessDoorClosed`](#test-testgrantrestaurantaccessdoorclosed)
+
+<a id="rule-restaurantaccessbasisacceptedsetisnarrower"></a>
+#### 📐 Rule: `RestaurantAccessBasisAcceptedSetIsNarrower`
+
+_AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three with the typed AccessBasisNotYetAccepted (#639 part C step 6-i, ADR-20260905-101349 §3)._
+
+- **Verified by**: [🧪 `TestRestaurantAccessGranted`](#test-testrestaurantaccessgranted), [🧪 `TestGrantRestaurantAccessBasisNotYetAccepted`](#test-testgrantrestaurantaccessbasisnotyetaccepted)
+
+### 🧪 Tests _(4)_
 
 **[🎭 `RestaurantAccount`](#actor-restaurantaccount)**
 
@@ -2054,6 +2216,88 @@ _Rejects marking cold a prospect that was never contacted_
 - **When**: [📩 `MarkProspectCold`](#command-markprospectcold)
 - **Thrown**: [⛔ `ProspectNotFound`](#error-prospectnotfound)
 - **Verifies**: [📐 `ProspectOutreachStateTransitions`](#rule-prospectoutreachstatetransitions)
+
+**[🎭 `RestaurantMembership`](#actor-restaurantmembership)**
+
+<a id="test-testrestaurantaccessgranted"></a>
+#### 🧪 Test: `TestRestaurantAccessGranted`
+
+_An admin grants a member access to a restaurant scope on the accepted basis_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Then**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **Verifies**: [📐 `GrantRestaurantAccessIsAHumanAct`](#rule-grantrestaurantaccessisahumanact), [📐 `RestaurantAccessBasisAcceptedSetIsNarrower`](#rule-restaurantaccessbasisacceptedsetisnarrower)
+
+<a id="test-testgrantrestaurantaccessdoorclosed"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessDoorClosed`
+
+_grantRestaurantAccess is refused by the door key while it is OFF (the production default), before the store is even read_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Thrown**: [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed)
+- **Verifies**: [📐 `MemberAccessGrantGatedBeforeStore`](#rule-memberaccessgrantgatedbeforestore)
+
+<a id="test-testgrantrestaurantaccessbasisnotyetaccepted"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessBasisNotYetAccepted`
+
+_grantRestaurantAccess refuses a declared-but-unimplemented AccessBasis_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Thrown**: [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted)
+- **Verifies**: [📐 `RestaurantAccessBasisAcceptedSetIsNarrower`](#rule-restaurantaccessbasisacceptedsetisnarrower)
+
+<a id="test-testgrantrestaurantaccesstwiceisidempotent"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessTwiceIsIdempotent`
+
+_Granting the same membershipId twice is a no-op (idempotent)_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `RestaurantAccessGrantIsIdempotent`](#rule-restaurantaccessgrantisidempotent)
+
+<a id="test-testgrantrestaurantaccessauthsubjectalreadyboundisrejected"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected`
+
+_Granting a NEW membershipId with a login already bound to another member is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Thrown**: [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound)
+- **Verifies**: [📐 `MemberAuthSubjectBoundOnce`](#rule-memberauthsubjectboundonce)
+
+<a id="test-testrestaurantaccessrevoked"></a>
+#### 🧪 Test: `TestRestaurantAccessRevoked`
+
+_An admin revokes a member's access, citing a closed ground_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess)
+- **Then**: [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked)
+- **Verifies**: [📐 `RestaurantMembershipRevocationIsFinal`](#rule-restaurantmembershiprevocationisfinal)
+
+<a id="test-testrevokeunknownrestaurantmembershipisrejected"></a>
+#### 🧪 Test: `TestRevokeUnknownRestaurantMembershipIsRejected`
+
+_Revoking an unknown membershipId is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess)
+- **Thrown**: [⛔ `RestaurantMembershipNotFound`](#error-restaurantmembershipnotfound)
+- **Verifies**: [📐 `RestaurantMembershipRevocationIsFinal`](#rule-restaurantmembershiprevocationisfinal)
+
+<a id="test-testrevokealreadyrevokedrestaurantmembershipisrejected"></a>
+#### 🧪 Test: `TestRevokeAlreadyRevokedRestaurantMembershipIsRejected`
+
+_Revoking an already-revoked membership is rejected — the Art. 11-log style log is never overwritten_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted), [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked)
+- **When**: [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess)
+- **Thrown**: [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked)
+- **Verifies**: [📐 `RestaurantMembershipRevocationIsFinal`](#rule-restaurantmembershiprevocationisfinal)
 
 ### 📡 Observability _(1)_
 
@@ -4303,17 +4547,17 @@ sequenceDiagram
 
 - **Source**: [🎭 `Order`](#actor-order) · 🛶 V0 · 🔒 internal
 - **Note**: WHO may see WHICH protected instance (#144). One row per (scope, member): the single index every read-side authorization question resolves against, for every role and every surface — `SELECT EXISTS(... WHERE membership_id = $1)`. The guard never learns what an order is, so a new ScopeType is a projector rule rather than new code in the guard. Adopting this index replaced four separate mechanisms (PROP-20260725-185140 §3.4): per-role table/column resolution, the restaurant -> account hop, an `active` predicate on rider membership, and multi-rider-per-order special cases. Reassignment needs no special handling: it is a REVOKE followed by a GRANT, so the previous rider loses access the moment the new one is recorded. SAFETY: this is an ACL cache with asymmetric failure modes. A MISSING row denies (visible, safe); a STALE row grants (a silent breach). The revoke rules are therefore more safety-critical than the grants, and the projector errs toward deleting. Drift is repairable by replay, which is the property that makes the cache acceptable at all. 
-- **Rules**: GRANT on OrderPlaced: the order's customer, its restaurant, and that restaurant's account. These are PERMANENT — order history must stay readable forever (product-owner decision, 2026-07-25). GRANT on DeliveryAcceptedByRider: the accepting rider, on the `orderId` the event carries (D-QW1 option b, ADR-20260808-234907). REVOKE on DeliveryCancelled / DeliveryDispatchFailed: the RIDER role rows for that job's order. The ONLY revoke in V0 — riders are the only membership that ends. DeliveryCancelled carries no orderId, so the worker resolves it via View_DeliveryJob before folding; an unresolvable job yields NO change (allow-stale on an orphan stream — acceptable only because a birth fact always precedes its cancel in position order). GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT. GRANT on RestaurantListingClaimed: the claiming account, scope_type RESTAURANT — the post-registration attachment path. A Sirene-seeded listing registers with NO accountId; without this fold its account would never gain membership and resolve_restaurant_account would find nothing for every subsequent OrderPlaced (review finding, ADR-20260809-160000 addendum). ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless. membership_id is UUIDv5 over (scope_type, scope_id, member_type, member_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern). ERASURE (#194, ADR-20260731-160000): this is an Order-fed read model holding a customer-to-order link — it OWES an OrderExpired tombstone fold (delete the order scope's rows) when the deletion engine lands. Named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips.
-- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed)
+- **Rules**: GRANT on OrderPlaced: the order's customer, its restaurant, and that restaurant's account. These are PERMANENT — order history must stay readable forever (product-owner decision, 2026-07-25). GRANT on DeliveryAcceptedByRider: the accepting rider, on the `orderId` the event carries (D-QW1 option b, ADR-20260808-234907). REVOKE on DeliveryCancelled / DeliveryDispatchFailed: the RIDER role rows for that job's order. The ONLY revoke in V0 — riders are the only membership that ends. DeliveryCancelled carries no orderId, so the worker resolves it via View_DeliveryJob before folding; an unresolvable job yields NO change (allow-stale on an orphan stream — acceptable only because a birth fact always precedes its cancel in position order). GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT. GRANT on RestaurantListingClaimed: the claiming account, scope_type RESTAURANT — the post-registration attachment path. A Sirene-seeded listing registers with NO accountId; without this fold its account would never gain membership and resolve_restaurant_account would find nothing for every subsequent OrderPlaced (review finding, ADR-20260809-160000 addendum). ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless. membership_id is UUIDv5 over (scope_type, scope_id, member_type, member_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern). EXCEPTION (#639 part C step 6-i, ADR-20260905-101349 §2): the MEMBER arm reuses `RestaurantAccessGranted.membershipId` VERBATIM as this row's own PK instead of re-deriving it — that id is already a stable, unique identifier minted once by the `RestaurantMembership` aggregate, and reusing it is what lets `RestaurantAccessRevoked` (which carries `membershipId` and NOTHING else identifying the scope) target-delete this ONE row with no lookup. GRANT on RestaurantAccessGranted (#639 part C step 6-i, ADR-20260905-101349 §2): ONE row, scope_type RESTAURANT, member_type MEMBER, member_id the event's `memberId` — see the member_id column note for why NOT `membershipId`. REVOKE on RestaurantAccessRevoked (#639 part C step 6-i): a TARGETED delete of the ONE row whose `membership_id` equals the event's `membershipId` — NEVER the broad `revoke_role` arm above (which would strip every MEMBER row on the scope). A member table with a per-relationship identity is exactly the case the broad arm's own doc warns about: 'membership' here names a person, not a role population, so a targeted revoke cannot leave a sibling holding stale access — there IS no sibling row sharing this key. ADR-20260905-101349 §3, DISAMBIGUATING NOTE (member_id, #639 part C step 6-i): `member_id`'s existing note says 'the DOMAIN id, never the auth subject' — true for MEMBER too, and the domain id here is `MemberId` (the person), never `membershipId` (the grant/relationship). `member_id` therefore now names TWO different things depending on `member_type`: an aggregate's OWN identity (customerId/restaurantId/restaurantAccountId/riderId, each row IS that aggregate) versus a PERSON's identity who is not the scope itself (MEMBER). PROP-20260831-180622 §6.5 names this semantics fix as owed and not built in 6-i; this note is the marker for whoever picks it up. ERASURE (#194, ADR-20260731-160000): this is an Order-fed read model holding a customer-to-order link — it OWES an OrderExpired tombstone fold (delete the order scope's rows) when the deletion engine lands. Named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips.
+- **Fed by**: [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted), [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked)
 
 | Column | Type | Sourced from | Constraints | Notes |
 | --- | --- | --- | --- | --- |
-| `membership_id` | `uuid` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed) | PK | UUIDv5(scope_type|scope_id|member_type|member_id) — derived, never random, so a replayed grant upserts onto itself. |
-| `scope_type` | [🔤 `ScopeType`](#scalar-scopetype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — | Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload. The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, member_type) — they write no value, they key a deletion. |
-| `scope_id` | `uuid` | [⚡ `OrderPlaced`.`orderId`](#event-orderplaced--orderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid), [⚡ `RestaurantListingClaimed`.`restaurantId`](#event-restaurantlistingclaimed--restaurantid), [⚡ `DeliveryAcceptedByRider`.`orderId`](#event-deliveryacceptedbyrider--orderid), [⚡ `DeliveryDispatchFailed`.`orderId`](#event-deliverydispatchfailed--orderid), [⚡ `DeliveryCancelled`](#event-deliverycancelled) | — | The protected instance: an OrderId or a RestaurantId. DeliveryCancelled carries no orderId — the worker resolves the job's order via View_DeliveryJob before folding. |
-| `member_type` | [🔤 `UserType`](#scalar-usertype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed) | — | In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or their customer row would let them fetch rider-audience data. The revoke events key their deletion by this column (the RIDER role), which is why they appear in its lineage.  |
-| `member_id` | `uuid` | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid), [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid), [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid), [⚡ `RestaurantListingClaimed`.`accountId`](#event-restaurantlistingclaimed--accountid) | — | The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth subject — the sub->domain bridge happens once per request at the edge. |
-| `granted_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed) | — | When the membership was recorded (the event's occurred_at) — deterministic under replay; preserved on a replayed grant (ON CONFLICT DO NOTHING). |
+| `membership_id` | `uuid` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantAccessGranted`.`membershipId`](#event-restaurantaccessgranted--membershipid), [⚡ `RestaurantAccessRevoked`.`membershipId`](#event-restaurantaccessrevoked--membershipid) | PK | UUIDv5(scope_type|scope_id|member_type|member_id) — derived, never random, so a replayed grant upserts onto itself. EXCEPTION: the MEMBER arm carries the RestaurantAccessGranted/Revoked payload's `membershipId` VERBATIM instead (see the table rule) — a pre-minted, already-unique id, not re-derived. |
+| `scope_type` | [🔤 `ScopeType`](#scalar-scopetype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | — | Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload (RestaurantAccessGranted's OWN `scopeType` payload field is RESTAURANT-only in 6-i, but the column here is still the CONSTANT the fold applies, not a passthrough). The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, member_type) — they write no value, they key a deletion. RestaurantAccessRevoked is the ONE exception: its targeted delete keys on `membership_id` alone (see the table rule), so it does not appear here. |
+| `scope_id` | `uuid` | [⚡ `OrderPlaced`.`orderId`](#event-orderplaced--orderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid), [⚡ `RestaurantListingClaimed`.`restaurantId`](#event-restaurantlistingclaimed--restaurantid), [⚡ `DeliveryAcceptedByRider`.`orderId`](#event-deliveryacceptedbyrider--orderid), [⚡ `DeliveryDispatchFailed`.`orderId`](#event-deliverydispatchfailed--orderid), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `RestaurantAccessGranted`.`scopeId`](#event-restaurantaccessgranted--scopeid) | — | The protected instance: an OrderId or a RestaurantId. DeliveryCancelled carries no orderId — the worker resolves the job's order via View_DeliveryJob before folding. |
+| `member_type` | [🔤 `UserType`](#scalar-usertype) | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `DeliveryCancelled`](#event-deliverycancelled), [⚡ `DeliveryDispatchFailed`](#event-deliverydispatchfailed), [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | — | In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or their customer row would let them fetch rider-audience data. The revoke events key their deletion by this column (the RIDER role), which is why they appear in its lineage. EXCEPTION (#639 part C step 6-i, ADR-20260905-101349 §3): the constant this column stores for a `RestaurantAccessGranted` fold is the LITERAL text `MEMBER` -- a `PrincipalKind` value written into a column declared `UserType` (this scalar, above), because typing `member_type` as `PrincipalKind` for real would be the retype PROP-20260831-180622 §6.5 owns and 6-i does not build (`UserType` stays exactly the seven-role enum it is; adding `MEMBER` there would mint an eighth `/{path}/graphql` role by accident). The stored column is plain TEXT at the DB layer (no FK, no CHECK) so this is representable today; the $ref above documents the column's INTENDED type once §6.5 lands, not its current one.  |
+| `member_id` | `uuid` | [⚡ `OrderPlaced`.`customerId`](#event-orderplaced--customerid), [⚡ `OrderPlaced`.`restaurantId`](#event-orderplaced--restaurantid), [⚡ `DeliveryAcceptedByRider`.`riderId`](#event-deliveryacceptedbyrider--riderid), [⚡ `RestaurantRegistered`.`restaurantId`](#event-restaurantregistered--restaurantid), [⚡ `RestaurantListingClaimed`.`accountId`](#event-restaurantlistingclaimed--accountid), [⚡ `RestaurantAccessGranted`.`memberId`](#event-restaurantaccessgranted--memberid) | — | The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth subject — the sub->domain bridge happens once per request at the edge. DISAMBIGUATING NOTE (#639 part C step 6-i, ADR-20260905-101349 §3, D): for the MEMBER arm this is the person's `MemberId`, NEVER `membershipId` (the grant/relationship `RestaurantAccessGranted` also carries) — every OTHER member_type's value here names an aggregate that IS the scope row itself, while MEMBER is the first case where the value names a PERSON distinct from any scope they hold access to. This column therefore now carries two different KINDS of identity depending on member_type, which PROP-20260831-180622 §6.5 names as an owed semantics fix; 6-i does not build it, and this note is the marker for whoever does.  |
+| `granted_at` | `timestamptz` | [⚡ `OrderPlaced`](#event-orderplaced), [⚡ `DeliveryAcceptedByRider`](#event-deliveryacceptedbyrider), [⚡ `RestaurantRegistered`](#event-restaurantregistered), [⚡ `RestaurantListingClaimed`](#event-restaurantlistingclaimed), [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | — | When the membership was recorded (the event's occurred_at) — deterministic under replay; preserved on a replayed grant (ON CONFLICT DO NOTHING). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -5732,7 +5976,7 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="entity-order--status"></a>`status` | [🔤 `OrderStatus`](#scalar-orderstatus) | ✅ |  |
 | <a id="entity-order--note"></a>`note` | [🔤 `OrderNote`](#scalar-ordernote) | ⬜ |  |
 
-### 🔤 Scalars _(38)_
+### 🔤 Scalars _(37)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -5751,7 +5995,6 @@ A customer's in-progress selection for a SINGLE restaurant. customerId is null w
 | <a id="scalar-reclamationcategory"></a>🔤 `ReclamationCategory` | enum (MISSING_ITEM \| WRONG_ITEM \| QUALITY \| LATE_DELIVERY \| DAMAGED \| NOT_DELIVERED \| OTHER) | What the customer is claiming about the order: an item was missing, the wrong item was delivered, a quality problem, a late delivery, damaged goods, nothing delivered at all, or another reason (#151).  |
 | <a id="scalar-reclamationresolution"></a>🔤 `ReclamationResolution` | enum (FULL_REFUND \| PARTIAL_REFUND \| REPLACEMENT \| GOODWILL_CREDIT \| REJECTED) | The decision recorded when a reclamation is closed: a full or partial refund, a replacement order, a goodwill credit, or a rejection of the claim. The aggregate records the DECISION only; the refund money-move, credit ledger and replacement orders are downstream slices (#151).  |
 | <a id="scalar-reclamationreason"></a>🔤 `ReclamationReason` | string | Free-text reason recorded when a reclamation is rejected or reopened — why the claim was declined, or why it is being reopened after a decision (#151).  |
-| <a id="scalar-scopetype"></a>🔤 `ScopeType` | enum (ORDER \| RESTAURANT) | The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.  |
 | <a id="scalar-conversationmessageid"></a>🔤 `ConversationMessageId` | string _uuid_ | Client-generated id of one posted conversation message — the idempotency key for PostMessage (a re-post with the same id is rejected). Distinct from the write-path envelope `MessageId` (the mailbox submission id); this identifies the business message itself (#129).  |
 | <a id="scalar-messagevisibility"></a>🔤 `MessageVisibility` | enum (PUBLIC \| INTERNAL) | Audience of a conversation message: PUBLIC = visible to the customer in the order thread; INTERNAL = staff-only note (restaurant/rider/admin), never shown to the customer (#129).  |
 | <a id="scalar-conversationauthorrole"></a>🔤 `ConversationAuthorRole` | enum (CUSTOMER \| RESTAURANT \| RIDER \| ADMIN) | Business role that authored a conversation message. A semantic role that changes the meaning of the thread (a customer message vs a staff note), so it is business payload — NOT envelope metadata (the acting user stays on domain_events.user_id) (#129).  |
@@ -11924,7 +12167,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(65)_
+### 🔤 Scalars _(64)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -11971,8 +12214,6 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-deliverychannelkind"></a>🔤 `DeliveryChannelKind` | enum (POOL \| PARTNER) | Kind of a DeliveryChannelCatalog entry — POOL (independent riders) vs PARTNER (adapter-backed). Every PARTNER channel must have a wired services.yaml delivery implementation (#60). |
 | <a id="scalar-mode"></a>🔤 `Mode` | enum (LIVE \| TEST) | Whether an aggregate is production (LIVE) or a non-production TEST fixture coexisting in prod (ADR-0038, Stripe-`livemode`-style). Set at creation, immutable; absent = LIVE. TEST data is isolated from payouts, analytics and real notifications; a TEST order may target a LIVE restaurant to validate the real receipt path.  |
 | <a id="scalar-authsubject"></a>🔤 `AuthSubject` | string | The identity provider's subject (`sub`) for ONE credential -- the Supabase Auth user id, as carried by `authRef` on CustomerRegistered / CustomerIdentified / RiderRegistered. Example: 'a3f1c8de-0b2e-4f77-9a11-0c4d2e8b7f10'. NOT `ExternalReference`, which this replaces at those sites: that scalar is declared as the HubRise `ref` with examples 'MARGHERITA' and 'CAT-PIZZAS', so typing a person's credential with it made a catalog import key and a human identity the same type -- interchangeable at every boundary, in the kernel, against CLAUDE.md's `one name = one dedicated scalar`. Structurally the same string (`type: string`, so the same TEXT column and the same JSON), which is precisely why the compiler could not see the confusion until the names were separated. It is an AUTHENTICATION fact and never an authorization one: `ScopeMembership.member_id` holds the DOMAIN id, never this, because the sub->domain bridge happens once per request at the edge (ADR-20260818-004646). A subject that reaches the authorization index has crossed a boundary that exists to be crossed exactly once.  |
-| <a id="scalar-memberid"></a>🔤 `MemberId` | string _uuid_ | A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.  |
-| <a id="scalar-principalkind"></a>🔤 `PrincipalKind` | enum (CUSTOMER \| RESTAURANT \| RESTAURANT_ACCOUNT \| RIDER \| MEMBER) | WHAT KIND OF PRINCIPAL acts -- the vocabulary `ScopeMembership.member_type` is really typed by, and the first half of the rider sign-in reservation key `(principal_kind, auth_subject)`. One member per entry in `actors.yaml`'s `principals` map, plus `MEMBER`. A NEW scalar with NO stored history: nothing has ever been written with this type, so `MEMBER` costs no upcaster, no re-attribution of past events, and no migration. That is the whole reason the vocabulary is added here rather than onto `UserType` (see the note above). `PUBLIC`, `ADMIN` and `EXTERNAL` are absent on purpose, exactly as they are absent from `principals`: they have no resolved domain identity, so they can never be a member of anything and can never satisfy an `acting` entry other than the explicit `any` keyword. NOT `ScopeType`, which is untouched by this change: `ScopeType` names the kind of protected INSTANCE one belongs to (`ORDER`, `RESTAURANT`), whereas this names the kind of party doing the belonging. A member is not a thing others are members of.  |
 | <a id="scalar-configboolean"></a>🔤 `ConfigBoolean` | string `^(?i)(true|yes|1|on|false|no|0|off)$` | A boolean configuration value. Accepts true/yes/1/on and false/no/0/off, CASE-INSENSITIVE, with surrounding whitespace and wrapping quotes trimmed before matching (ADR-20260728-224500). Deliberately generous, because the failure it prevents was real: `RUN_SIRENE_WORKER=TRUE` silently meant PAUSED under an exact `== "true"` gate, and 6,649 rows sat unprocessed for four hours. Anything NOT in this set is a misconfiguration, not a false — it is reported, never guessed.  |
 | <a id="scalar-stripesecretkey"></a>🔤 `StripeSecretKey` | string `^sk_(test|live)_[A-Za-z0-9]+$` | A Stripe secret API key, either mode. The app is mode-agnostic by design: the deployed value decides, and its `sk_test_` / `sk_live_` prefix is what the boot report renders as the MODE (never the key). Accepting both is deliberate for now — V0 runs TEST keys on production pre-launch. At go-live, swapping this key's scalar to StripeSecretKeyLive makes "production must be live mode" a startup guarantee instead of a thing someone remembers to check.  |
 | <a id="scalar-stripesecretkeytest"></a>🔤 `StripeSecretKeyTest` | string `^sk_test_[A-Za-z0-9]+$` | A Stripe TEST-mode secret key. Typing the test slot separately is what stops a LIVE key being pasted into it — which would move real money from a job whose entire premise is that it cannot (`prod-smoke.sh` already refuses to confirm a payment unless the key is `sk_test_`; this makes the same rule declarative and checked at startup rather than only in one script).  |
@@ -11986,6 +12227,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-honeycombingestkey"></a>🔤 `HoneycombIngestKey` | string `^[A-Za-z0-9_]{20,120}$` | A Honeycomb INGEST key — the credential the OTLP exporter sends as `x-honeycomb-team` (ADR-20260729 telemetry backend, issue #191). Deliberately PERMISSIVE on charset and length, and that is a considered choice rather than laziness. Honeycomb has shipped several ingest-key formats (32-char hex "classic" keys, and the newer `hc?ik_`-prefixed keys), and this value gates STARTUP: on production a pattern that is stricter than reality turns a perfectly good key into `exit 78` and a failed deploy. An over-tight regex here would manufacture exactly the outage this file exists to prevent, so the rule encodes only what is genuinely invariant across formats. What it does still catch is the mistake people actually make: a **management** key (`<Key ID>:<Secret Key>`, used by the Honeycomb MCP server and the Query API) pasted into the ingest slot. Management keys contain a colon, ingest keys never do — so the colon exclusion is the load- bearing part of this pattern, in the same spirit as rejecting a `pk_` publishable key in a `StripeSecretKey` slot. It also rejects the empty, whitespace-padded and obviously-truncated value.  |
 | <a id="scalar-tracesampleratio"></a>🔤 `TraceSampleRatio` | string `^(0(\.[0-9]+)?|1(\.0+)?)$` | The head-sampling probability for traces, as a decimal in [0, 1] — `1.0` keeps every trace, `0.1` keeps a tenth. Rejects the two plausible mistakes that would otherwise be discovered as missing data weeks later: a percentage (`50`, `50%`) silently read as "way out of range", and a ratio above 1.  |
 | <a id="scalar-loglevel"></a>🔤 `LogLevel` | string `^(?i)(trace|debug|info|warn|error)$` | The minimum severity emitted by the structured-logging layer, case-insensitive. A closed set rather than a free-form `RUST_LOG` filter, because the failure mode of a typo'd directive is silence — the logs simply stop, which reads as a healthy quiet system.  |
+| <a id="scalar-scopetype"></a>🔤 `ScopeType` | enum (ORDER \| RESTAURANT) | The kind of instance an authorization scope refers to (#144). Paired with a scope id, it names exactly one protected instance: `ScopeMembership` records who belongs to it. Read-side per-instance authorization asks one question of this vocabulary — "is this principal a member of (scopeType, scopeId)?" — for every role and every surface, so the guard never learns what an order or a restaurant is.  |
 | <a id="scalar-commandfailureseam"></a>🔤 `CommandFailureSeam` | enum (PAYMENT_GATEWAY \| COMMAND_PAYLOAD \| DOMAIN_INVARIANT \| INFRASTRUCTURE) | WHICH SEAM of a command's handling failed — the first thing an operator needs and the thing [#623](https://github.com/TheCaptainCompany/captain-food/issues/623) found missing: a failed `PlaceOrder` recorded `{"code":"Internal","context":{}}`, so "Stripe is refusing us" and "our database is wedged" were the same string at peak. Deliberately COARSE and closed: it names the boundary that failed, never what the boundary said. The operational response differs per member, which is the test for whether a value belongs here. EVERY MEMBER HAS A PRODUCER, and that is enforced rather than promised: an exhaustive test in `crates/infrastructure/src/mailbox/attribution.rs` drives a real `DomainError` onto each one, so adding a member here fails the build until something can actually emit it. `EVENT_APPEND` was drafted in the #623 review and WITHDRAWN before landing for exactly that reason — its producers are the three staged-flush arms of [#628](https://github.com/TheCaptainCompany/captain-food/issues/628), which are out of #623's scope, and a declared-but-unemitted member is the same defect class this scalar exists to fix. It comes back with #628, in the change that emits it.  |
 | <a id="scalar-commandfailurereason"></a>🔤 `CommandFailureReason` | enum (GATEWAY_REFUSED \| CARD_DECLINED \| PAYLOAD_UNDECODABLE \| UNCATALOGUED_INVARIANT \| TRANSIENT_INFRASTRUCTURE) | WHY the seam failed, in the coarsest vocabulary that still changes what an operator does. Paired with `CommandFailureSeam`, never alone: the same reason means different things at different seams. Closed for the same reason as the seam — this value is written into a durable, customer-servable jsonb row, so the set of things it can say must be enumerable in advance. `UNCATALOGUED_INVARIANT` is the honest catch-all and its presence in a row is itself a finding: a business refusal that reaches it is a missing `errors.yaml` declaration.  |
 | <a id="scalar-gatewaystatuscode"></a>🔤 `GatewayStatusCode` | integer | The HTTP status an external gateway answered with, when a failure attribution has one. A NUMBER, on purpose: it is the one further discrimination the operator needs (401 = our credentials, 400 = our request, 402 = the customer's card) and it is the only shape at that seam that cannot carry a provider's prose. The provider's message goes to the log; this goes to the journal row.  |
@@ -13652,7 +13894,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 
 | Context | Description | Aggregates / process managers |
 | --- | --- | --- |
-| 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect) |
+| 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `RestaurantMembership`](#actor-restaurantmembership) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess) |
 | 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
@@ -13699,6 +13941,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `actor-restaurant-account` | Rust — mailbox worker bin | Drains RestaurantAccount lanes; appends its domain events.<br>realizes: [🎭 `RestaurantAccount`](#actor-restaurantaccount) |
 | 🧱 `actor-restaurant` | Rust — mailbox worker bin | Drains Restaurant lanes; appends its domain events.<br>realizes: [🎭 `Restaurant`](#actor-restaurant) |
 | 🧱 `actor-prospect` | Rust — mailbox worker bin | Drains Prospect lanes; appends its domain events.<br>realizes: [🎭 `Prospect`](#actor-prospect) |
+| 🧱 `actor-restaurant-membership` | Rust — mailbox worker bin | Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT.<br>realizes: [🎭 `RestaurantMembership`](#actor-restaurantmembership) |
 | 🧱 `actor-catalog` | Rust — mailbox worker bin | Drains Catalog lanes (incl. HubRise imports); appends its domain events.<br>realizes: [🎭 `Catalog`](#actor-catalog) |
 | 🧱 `actor-customer` | Rust — mailbox worker bin | Drains Customer lanes; appends its domain events.<br>realizes: [🎭 `Customer`](#actor-customer) |
 | 🧱 `actor-cart` | Rust — mailbox worker bin | Drains Cart lanes; appends its domain events.<br>realizes: [🎭 `Cart`](#actor-cart) |

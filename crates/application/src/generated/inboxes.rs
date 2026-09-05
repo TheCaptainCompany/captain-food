@@ -3098,6 +3098,81 @@ impl RestaurantAccountInbox {
     }
 }
 
+/// GENERATED from `actors.yaml#/RestaurantMembership/receives` — the CLOSED set of messages the `RestaurantMembership`
+/// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
+/// each variant carrying its typed payload.
+///
+/// Adding a `receives:` entry adds a variant here, and the human-owned `match` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides what the new
+/// message DOES. That compile error is the whole point: before #771 the same omission shipped
+/// green and surfaced as a `FAILED "unroutable command type"` row in production.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RestaurantMembershipInbox {
+    /// COMMAND `GrantRestaurantAccess`.
+    GrantRestaurantAccess(domain::generated::commands::GrantRestaurantAccess),
+    /// COMMAND `RevokeRestaurantAccess`.
+    RevokeRestaurantAccess(domain::generated::commands::RevokeRestaurantAccess),
+}
+
+impl RestaurantMembershipInbox {
+    /// The actors.yaml key this inbox belongs to — the `inbound_messages.actor_type` a row
+    /// must carry to be parseable here.
+    pub const ACTOR_TYPE: &'static str = "RestaurantMembership";
+
+    /// Every message type this actor DECLARES it receives, in emission order — the
+    /// operator-facing answer to "is this row's type one we know?" without constructing a value.
+    pub const DECLARED: &'static [&'static str] = &["GrantRestaurantAccess", "RevokeRestaurantAccess"];
+
+    /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
+    /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
+    ///
+    /// An UNDECLARED message type is NOT an error about this payload — during a rolling deploy an
+    /// old consumer legitimately meets a message type a newer producer already emits. The caller
+    /// must treat it as TRANSIENT (retry, then park loudly), never as a terminal failure:
+    /// terminal-failing it buries a paid order.
+    pub fn parse(
+        message_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Self, InboxParseError> {
+        match message_type {
+            "GrantRestaurantAccess" => serde_json::from_value::<domain::generated::commands::GrantRestaurantAccess>(payload.clone())
+                .map(Self::GrantRestaurantAccess)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "GrantRestaurantAccess",
+                    detail: e.to_string(),
+                }),
+            "RevokeRestaurantAccess" => serde_json::from_value::<domain::generated::commands::RevokeRestaurantAccess>(payload.clone())
+                .map(Self::RevokeRestaurantAccess)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RevokeRestaurantAccess",
+                    detail: e.to_string(),
+                }),
+            other => Err(InboxParseError::UndeclaredMessage {
+                actor_type: Self::ACTOR_TYPE,
+                message_type: other.to_string(),
+            }),
+        }
+    }
+
+    /// The wire `message_type` this value came from — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::GrantRestaurantAccess(_) => "GrantRestaurantAccess",
+            Self::RevokeRestaurantAccess(_) => "RevokeRestaurantAccess",
+        }
+    }
+
+    /// The message kind — a total projection of the variant set.
+    pub fn kind(&self) -> InboxKind {
+        match self {
+            Self::GrantRestaurantAccess(_) => InboxKind::Command,
+            Self::RevokeRestaurantAccess(_) => InboxKind::Command,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/Rider/receives` — the CLOSED set of messages the `Rider`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -3265,6 +3340,8 @@ pub enum ActorInbox {
     Restaurant(RestaurantInbox),
     /// A row on a `RestaurantAccount` lane.
     RestaurantAccount(RestaurantAccountInbox),
+    /// A row on a `RestaurantMembership` lane.
+    RestaurantMembership(RestaurantMembershipInbox),
     /// A row on a `Rider` lane.
     Rider(RiderInbox),
 }
@@ -3295,6 +3372,7 @@ impl ActorInbox {
             "RefundProcess" => RefundProcessInbox::parse(message_type, payload).map(Self::RefundProcess),
             "Restaurant" => RestaurantInbox::parse(message_type, payload).map(Self::Restaurant),
             "RestaurantAccount" => RestaurantAccountInbox::parse(message_type, payload).map(Self::RestaurantAccount),
+            "RestaurantMembership" => RestaurantMembershipInbox::parse(message_type, payload).map(Self::RestaurantMembership),
             "Rider" => RiderInbox::parse(message_type, payload).map(Self::Rider),
             other => Err(InboxParseError::UnknownActor { actor_type: other.to_string() }),
         }
@@ -3319,6 +3397,7 @@ impl ActorInbox {
             Self::RefundProcess(_) => RefundProcessInbox::ACTOR_TYPE,
             Self::Restaurant(_) => RestaurantInbox::ACTOR_TYPE,
             Self::RestaurantAccount(_) => RestaurantAccountInbox::ACTOR_TYPE,
+            Self::RestaurantMembership(_) => RestaurantMembershipInbox::ACTOR_TYPE,
             Self::Rider(_) => RiderInbox::ACTOR_TYPE,
         }
     }
@@ -3342,6 +3421,7 @@ impl ActorInbox {
             Self::RefundProcess(m) => m.message_type(),
             Self::Restaurant(m) => m.message_type(),
             Self::RestaurantAccount(m) => m.message_type(),
+            Self::RestaurantMembership(m) => m.message_type(),
             Self::Rider(m) => m.message_type(),
         }
     }
@@ -3365,6 +3445,7 @@ impl ActorInbox {
             Self::RefundProcess(m) => m.kind(),
             Self::Restaurant(m) => m.kind(),
             Self::RestaurantAccount(m) => m.kind(),
+            Self::RestaurantMembership(m) => m.kind(),
             Self::Rider(m) => m.kind(),
         }
     }
@@ -3483,6 +3564,8 @@ impl ActorInbox {
             Self::Restaurant(m) => m.into_fact().map(ActorFactInbox::Restaurant),
             // The `RestaurantAccount` lane declares no fact.
             Self::RestaurantAccount(_) => None,
+            // The `RestaurantMembership` lane declares no fact.
+            Self::RestaurantMembership(_) => None,
             // The `Rider` lane declares no fact.
             Self::Rider(_) => None,
         }

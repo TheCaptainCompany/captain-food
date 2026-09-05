@@ -767,6 +767,16 @@ fn fx_mailbox_message_requeued() -> DomainEvent {
     DomainEvent::MailboxMessageRequeued(evs::MailboxMessageRequeued { target_message_id: sc::MessageId(support::uid("poisoned-1")), actor_type: sc::MailboxActorType("Payment".into()) })
 }
 
+/// tests.yaml#/fixtures/restaurantAccessGranted — events.yaml#/RestaurantAccessGranted
+fn fx_restaurant_access_granted() -> DomainEvent {
+    DomainEvent::RestaurantAccessGranted(evs::RestaurantAccessGranted { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), principal_kind: sc::PrincipalKind::MEMBER, member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING })
+}
+
+/// tests.yaml#/fixtures/restaurantAccessRevoked — events.yaml#/RestaurantAccessRevoked
+fn fx_restaurant_access_revoked() -> DomainEvent {
+    DomainEvent::RestaurantAccessRevoked(evs::RestaurantAccessRevoked { membership_id: sc::MembershipId(support::uid("membership-1")), ground: sc::AccessRevocationGround::LEFT_THE_RESTAURANT })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -4686,6 +4696,127 @@ async fn test_restricted_rider_cannot_go_available() {
     let err = result.expect_err("TestRestrictedRiderCannotGoAvailable: the spec expects a typed rejection");
     support::assert_thrown("TestRestrictedRiderCannotGoAvailable", &err, &["RiderAccessRestricted"]);
     bed.assert_appended("TestRestrictedRiderCannotGoAvailable", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRestaurantAccessGranted — "An admin grants a member access to a restaurant scope on the accepted basis"
+/// rules: GrantRestaurantAccessIsAHumanAct, RestaurantAccessBasisAcceptedSetIsNarrower
+#[tokio::test]
+async fn test_restaurant_access_granted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let run_member_access_grant: bool = true;
+    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let _ = result.expect("TestRestaurantAccessGranted: the spec expects acceptance");
+    bed.assert_appended("TestRestaurantAccessGranted", &before, &[
+        (format!("RestaurantMembership-{}", support::uid("membership-1")), fx_restaurant_access_granted()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestGrantRestaurantAccessDoorClosed — "grantRestaurantAccess is refused by the door key while it is OFF (the production default), before the store is even read"
+/// rules: MemberAccessGrantGatedBeforeStore
+#[tokio::test]
+async fn test_grant_restaurant_access_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let run_member_access_grant: bool = false;
+    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let err = result.expect_err("TestGrantRestaurantAccessDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantRestaurantAccessDoorClosed", &err, &["MemberAccessGrantDoorClosed"]);
+    bed.assert_appended("TestGrantRestaurantAccessDoorClosed", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantRestaurantAccessBasisNotYetAccepted — "grantRestaurantAccess refuses a declared-but-unimplemented AccessBasis"
+/// rules: RestaurantAccessBasisAcceptedSetIsNarrower
+#[tokio::test]
+async fn test_grant_restaurant_access_basis_not_yet_accepted() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::OWNER_DECLARATION };
+    let run_member_access_grant: bool = true;
+    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let err = result.expect_err("TestGrantRestaurantAccessBasisNotYetAccepted: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantRestaurantAccessBasisNotYetAccepted", &err, &["AccessBasisNotYetAccepted"]);
+    bed.assert_appended("TestGrantRestaurantAccessBasisNotYetAccepted", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantRestaurantAccessTwiceIsIdempotent — "Granting the same membershipId twice is a no-op (idempotent)"
+/// rules: RestaurantAccessGrantIsIdempotent
+#[tokio::test]
+async fn test_grant_restaurant_access_twice_is_idempotent() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let run_member_access_grant: bool = true;
+    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let _ = result.expect("TestGrantRestaurantAccessTwiceIsIdempotent: the spec expects acceptance");
+    bed.assert_appended("TestGrantRestaurantAccessTwiceIsIdempotent", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected — "Granting a NEW membershipId with a login already bound to another member is rejected"
+/// rules: MemberAuthSubjectBoundOnce
+#[tokio::test]
+async fn test_grant_restaurant_access_auth_subject_already_bound_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-2"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-2")), member_id: sc::MemberId(support::uid("member-2")), auth_subject: sc::AuthSubject("already-bound-member".into()), authority: sc::MemberAuthority::OPERATOR, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let run_member_access_grant: bool = true;
+    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let err = result.expect_err("TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected", &err, &["MemberAuthSubjectAlreadyBound"]);
+    bed.assert_appended("TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRestaurantAccessRevoked — "An admin revokes a member's access, citing a closed ground"
+/// rules: RestaurantMembershipRevocationIsFinal
+#[tokio::test]
+async fn test_restaurant_access_revoked() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RevokeRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), ground: sc::AccessRevocationGround::LEFT_THE_RESTAURANT };
+    let result = crate::commands::revoke_restaurant_access(&bed.store, cmd, &support::actor()).await;
+    let _ = result.expect("TestRestaurantAccessRevoked: the spec expects acceptance");
+    bed.assert_appended("TestRestaurantAccessRevoked", &before, &[
+        (format!("RestaurantMembership-{}", support::uid("membership-1")), fx_restaurant_access_revoked()),
+    ]);
+}
+
+/// tests.yaml#/tests/TestRevokeUnknownRestaurantMembershipIsRejected — "Revoking an unknown membershipId is rejected"
+/// rules: RestaurantMembershipRevocationIsFinal
+#[tokio::test]
+async fn test_revoke_unknown_restaurant_membership_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RevokeRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-404")), ground: sc::AccessRevocationGround::LEFT_THE_RESTAURANT };
+    let result = crate::commands::revoke_restaurant_access(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRevokeUnknownRestaurantMembershipIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRevokeUnknownRestaurantMembershipIsRejected", &err, &["RestaurantMembershipNotFound"]);
+    bed.assert_appended("TestRevokeUnknownRestaurantMembershipIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestRevokeAlreadyRevokedRestaurantMembershipIsRejected — "Revoking an already-revoked membership is rejected — the Art. 11-log style log is never overwritten"
+/// rules: RestaurantMembershipRevocationIsFinal
+#[tokio::test]
+async fn test_revoke_already_revoked_restaurant_membership_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted(), fx_restaurant_access_revoked()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RevokeRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), ground: sc::AccessRevocationGround::ACCESS_NO_LONGER_NEEDED };
+    let result = crate::commands::revoke_restaurant_access(&bed.store, cmd, &support::actor()).await;
+    let err = result.expect_err("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &err, &["RestaurantMembershipAlreadyRevoked"]);
+    bed.assert_appended("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPaymentAuthorizationOrphanIsFlagged — "An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)"

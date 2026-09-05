@@ -262,6 +262,8 @@ pub struct Config {
     pub service_window_validity_horizon_seconds: i64,
     /// DEFAULT `false`. SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene. STOPPED since 2026-07-28, and the reason this text used to give ("PAUSED with the CI sweep, issue #220") is STALE: #220 closed the same day, as did the other named bottleneck #218, so the chain has been off for over a month behind a blocker that no longer exists and nobody has re-taken the restart decision. Restarting is NOT a flag flip -- an owner-declared restaurant carries no SIRET, which is the crawl's idempotency key, so un-pausing before that door shares the key manufactures duplicate restaurants; and a self-declared listing currently enters the prospect funnel. Both guards, and the decision itself, are issue #800.
     pub run_sirene_worker: bool,
+    /// DEFAULT `false`. The staff access grant door (#639 part C step 6-i, ADR-20260905-101349 §6). ON, `grantRestaurantAccess` appends `RestaurantAccessGranted` as normal (subject to the accepted- basis check, `AccessBasisNotYetAccepted`). OFF, the handler refuses BEFORE touching the store with the typed `MemberAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantAccess` is NEVER gated by this key: releasing access is always safe to allow. Preconditions gating the flip are named in `docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml` (open): the Art. 14 notice to the provisioned person, an Art. 30 entry "staff access management", the lifetime reservation written down with its future path, the Supabase DPA/region and Art. 26 items (founder's, external), and 6-ii merged (a grant with no door is a binding nobody can use).
+    pub run_member_access_grant: bool,
     /// INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal). `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which injects the repo secret of the same name directly; the Render sync (which only carries the server service) has nothing to do with it.
     pub insee_api_token: Option<String>,
     /// Override of the version-pinned Sirene base URL. Exists because the version is IN the path (`/api-sirene/3.11`): when INSEE bumps it, a sweep can be redirected without a release. Unset, the client uses its own pinned constant -- so no `default` here, which would be a second copy of it.
@@ -415,6 +417,10 @@ impl Config {
             .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
             .unwrap_or(false);
+        let run_member_access_grant = raw("RUN_MEMBER_ACCESS_GRANT")
+            .or_else(|| baked("RUN_MEMBER_ACCESS_GRANT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_MEMBER_ACCESS_GRANT", &v, false))
+            .unwrap_or(false);
         let insee_api_token = raw("INSEE_API_TOKEN");
         let insee_api_base_url = raw("INSEE_API_BASE_URL");
         let sirene_departments = raw("SIRENE_DEPARTMENTS");
@@ -512,6 +518,7 @@ impl Config {
                 route_order_delivery_completion_through_lane,
                 service_window_validity_horizon_seconds,
                 run_sirene_worker,
+                run_member_access_grant,
                 insee_api_token,
                 insee_api_base_url,
                 sirene_departments,
@@ -577,6 +584,7 @@ impl Config {
         out.push_str(&format!("  ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE = {}\n", self.route_order_delivery_completion_through_lane));
         out.push_str(&format!("  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS = {}\n", self.service_window_validity_horizon_seconds));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
+        out.push_str(&format!("  RUN_MEMBER_ACCESS_GRANT    = {}\n", self.run_member_access_grant));
         out.push_str(&format!("  INSEE_API_TOKEN            = {}\n", if self.insee_api_token.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INSEE_API_BASE_URL         = {}\n", self.insee_api_base_url.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  SIRENE_DEPARTMENTS         = {}\n", self.sirene_departments.as_deref().unwrap_or("unset")));
@@ -586,7 +594,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 44;
+pub const KEY_COUNT: usize = 45;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -631,6 +639,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
     "SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS",
     "RUN_SIRENE_WORKER",
+    "RUN_MEMBER_ACCESS_GRANT",
     "INSEE_API_TOKEN",
     "INSEE_API_BASE_URL",
     "SIRENE_DEPARTMENTS",
@@ -670,4 +679,5 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_RETENTION_SWEEP", "staging", "true"),
     ("RUN_SIRENE_WORKER", "production", "true"),
     ("RUN_SIRENE_WORKER", "staging", "true"),
+    ("RUN_MEMBER_ACCESS_GRANT", "production", "false"),
 ];

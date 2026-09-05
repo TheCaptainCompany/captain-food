@@ -297,6 +297,11 @@ admin:
         ViewRider: { $ref: 'api.yaml#/queries/rider' }     # one rider's detail (/system/riders/:riderId)
         RestrictRider: { $ref: 'api.yaml#/mutations/restrictRider' }
         ReinstateRider: { $ref: 'api.yaml#/mutations/reinstateRider' }
+    ManageRestaurantMembership:
+      description: As an admin, I provision a restaurant member's access by hand and revoke it on a closed ground when their tenure ends — the first slice of staff authentication, ships dark behind RUN_MEMBER_ACCESS_GRANT (#639 part C step 6-i, ADR-20260905-101349 §1/§6). The roster read (ViewMembers) and self-service invitation are 6-iv's.
+      steps:
+        GrantAccess: { $ref: 'api.yaml#/mutations/grantRestaurantAccess' }
+        RevokeAccess: { $ref: 'api.yaml#/mutations/revokeRestaurantAccess' }
     ArbitrateRefunds:
       description: As an admin, I arbitrate pending refund requests when the restaurant does not decide (RefundProcess).
       steps:
