@@ -333,15 +333,35 @@ fn collect_form_field_ids(node: &Value, out: &mut std::collections::BTreeSet<Str
     }
 }
 
-/// The leading `[A-Za-z_][A-Za-z0-9_]*` identifier of a `condition:`/`visible_when:` expression —
-/// its dotted-path SUBJECT's root (`ground.value == 'X'` -> `ground`; `!resend_available` ->
-/// `resend_available`; `order.status in [...] and ...` -> `order`). Anything not starting with an
-/// identifier (a literal, a parenthesis) has no root and is left alone — the same honest-boundary
-/// posture `screen_binding_roots` states for the sibling rule.
-fn condition_subject_root(expr: &str) -> Option<String> {
-    let trimmed = expr.trim().trim_start_matches('!').trim_start();
-    let re = regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*").unwrap();
-    re.find(trimmed).map(|m| m.as_str().to_string())
+/// Every dotted-path identifier ROOT in a `condition:`/`visible_when:` expression
+/// (`ground.value == 'X'` -> `["ground"]`; `!resend_available` -> `["resend_available"]`;
+/// `rider.standing == ground.value` -> `["rider", "ground"]`). Round 3 tightening (#639 part C
+/// step 4-iii-A, BECK): the round-2 version read only the LEADING identifier, so a form field on
+/// the RIGHT operand of a comparison evaded the rule entirely. The corpus grammar
+/// (`crates/web/src/condition.rs`) has NO conjunction (`and`/`or`) and today never puts a path on
+/// the RHS of a compare/`in` — so a single-root expression is the common case — but the validator
+/// must not assume that stays true, hence scanning every identifier root rather than trusting
+/// position. String literals (`'RIDER_REQUESTED'`, the grammar's one string spelling) are stripped
+/// before scanning so a quoted value is never mistaken for a path; the closed words `in`/`true`/
+/// `false`/`null` are excluded as they are grammar keywords, never form-field ids.
+fn condition_subject_roots(expr: &str) -> Vec<String> {
+    let mut stripped = String::with_capacity(expr.len());
+    let mut in_quote = false;
+    for c in expr.chars() {
+        match c {
+            '\'' => in_quote = !in_quote,
+            _ if in_quote => {}
+            _ => stripped.push(c),
+        }
+    }
+    const CLOSED_WORDS: &[&str] = &["in", "true", "false", "null"];
+    let re = regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*").unwrap();
+    re.find_iter(&stripped)
+        .filter_map(|m| {
+            let root = m.as_str().split('.').next().unwrap_or(m.as_str());
+            (!CLOSED_WORDS.contains(&root)).then(|| root.to_string())
+        })
+        .collect()
 }
 
 /// Every `condition:`/`visible_when:` string prop in `node`'s subtree, with a location string.
@@ -382,19 +402,18 @@ pub(crate) fn check_condition_on_form_field(issues: &mut Vec<Issue>, sfkey: &str
     let mut conditions = Vec::new();
     collect_conditions(node, "", &mut conditions);
     for (loc, prop, expr) in conditions {
-        let Some(root) = condition_subject_root(&expr) else { continue };
-        if form_ids.contains(&root) {
-            issues.push(err(
-                "screen-condition-on-form-field",
-                format!("{sfkey}/{unit_kind}/{unit_id}{loc}"),
-                format!(
-                    "{prop} '{expr}' reads '{root}', a form field in this {unit_kind} (a chip pick / typed value) — \
-                     never resolver data. `RenderContext::lookup` serves resolver data only, and the client never \
-                     re-evaluates `condition:`/`visible_when:` after the field changes: this can only ever see the \
-                     field's INITIAL state, so the node can never actually appear (#870-class)."
-                ),
-            ));
-        }
+        let roots = condition_subject_roots(&expr);
+        let Some(root) = roots.iter().find(|r| form_ids.contains(*r)) else { continue };
+        issues.push(err(
+            "screen-condition-on-form-field",
+            format!("{sfkey}/{unit_kind}/{unit_id}{loc}"),
+            format!(
+                "{prop} '{expr}' reads '{root}', a form field in this {unit_kind} (a chip pick / typed value) — \
+                 never resolver data. `RenderContext::lookup` serves resolver data only, and the client never \
+                 re-evaluates `condition:`/`visible_when:` after the field changes: this can only ever see the \
+                 field's INITIAL state, so the node can never actually appear (#870-class)."
+            ),
+        ));
     }
 }
 

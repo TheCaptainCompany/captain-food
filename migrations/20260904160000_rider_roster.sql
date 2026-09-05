@@ -1,11 +1,16 @@
 -- #639 part C step 4-iii-A (ADR-20260904-152807 §1/§3): the admin's rider roster — the source of
 -- the `riders`/`rider` GraphQL queries (`/system/riders`, `/system/riders/:riderId`). DDL MIRRORS
 -- specs/generated/schema.generated.sql (specs/database/tables/projection_tables.yaml#/RiderRoster)
--- -- generated first, copied here, never hand-shaped. Round 2 item 9 (dba): `CREATE TABLE`
--- carries `IF NOT EXISTS` (the standard idempotent-migration convention); the two `CREATE INDEX`
--- statements below do NOT (the `indexes:` emitter in tools/codegen-rs/src/emit/sql.rs never adds
--- it, corpus-wide, not just here) -- re-running this migration against a partially-applied schema
--- would fail on a duplicate index name, not silently no-op.
+-- -- generated first, copied here, never hand-shaped. Round 2 item 9 (dba) said `CREATE TABLE`
+-- carries `IF NOT EXISTS` while `CREATE INDEX` never does, and would "fail on a duplicate index
+-- name" on a re-run -- FALSE, corrected round 3 (R3-2, dba): the two indexes below were UNNAMED,
+-- so Postgres auto-named them (`..._idx`, then `..._idx1` on a second run) and a re-run SILENTLY
+-- created a SECOND, redundant index instead of failing -- double write amplification on every
+-- roster projection update, the opposite of what the round-2 header told an incident responder.
+-- Both indexes now carry `IF NOT EXISTS` and an EXPLICIT name matching exactly the default name
+-- Postgres already auto-assigned this table's indexes with (`tools/codegen-rs/src/emit/sql.rs`'s
+-- `pg_index_name`: `<table>_<col1>_<col2>_..._idx`, lowercased) -- an already-applied schema is
+-- therefore idempotently consistent with a re-run: same name, same index, a true no-op.
 --
 -- NEW table, its OWN `ProjectorGroup` checkpoint ("RiderRoster",
 -- crates/infrastructure/src/projection/worker.rs) starting at position 0 -- no `projection_checkpoint`
@@ -34,5 +39,5 @@ CREATE TABLE IF NOT EXISTS rider_roster (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX ON rider_roster (display_name, rider_id);
-CREATE INDEX ON rider_roster (standing);
+CREATE INDEX IF NOT EXISTS rider_roster_display_name_rider_id_idx ON rider_roster (display_name, rider_id);
+CREATE INDEX IF NOT EXISTS rider_roster_standing_idx ON rider_roster (standing);

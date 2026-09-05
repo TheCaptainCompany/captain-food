@@ -503,7 +503,7 @@ screens:
     data_requirements: [reclamation.byId]
     actions_used: [resolve_reclamation, reject_reclamation]
     gaps:
-      - "refundAmount currency is hard-coded EUR (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel). PARTIAL_REFUND is fully wired via the amount picker's own action; a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0)."
+      - "PARTIAL_REFUND has no UI path until a renderer arm lands for `tip_amount_selector` (round 3, #639 part C step 4-iii-A R3-3): the amount picker was DELETED rather than rendered inert, since `tip_amount_selector` has no renderer arm (falls to the generic catch-all — a bare label, no presets, no input, no `data-action`) and an inert money control on a live screen is worse than none — [#888 \"Renderer: `text_area` and `tip_amount_selector` have no arm — …\"](https://github.com/TheCaptainCompany/captain-food/issues/888). `resolve_btn`'s own action still dispatches `resolve_reclamation` for FULL_REFUND/REPLACEMENT/GOODWILL_CREDIT. `refundAmount` currency is hard-coded EUR when the picker returns (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel); a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0)."
     components:
       - { component: staff_topbar }
       - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.title' } }
@@ -526,30 +526,14 @@ screens:
           - { value: REPLACEMENT,     label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolution.replacement' } }
           - { value: GOODWILL_CREDIT, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolution.goodwill_credit' } }
       - { type: text_input, id: note, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.note_ph' } }
-      # Amount picker — for PARTIAL_REFUND (and GOODWILL_CREDIT). Its OWN action confirms the partial
-      # refund with a nested Money `refundAmount` (amountCents from the picker, currency EUR), so the
-      # partial-refund path is fully wired without conditional variables on the main button.
-      # #639 part C step 4-iii-A round 2 addendum item 12 (`screen-condition-on-form-field`): was
-      # gated on `resolution.value in [...]` — `resolution` is this SAME screen's chip, a form
-      # field, never resolver data, so this picker (a MONEY-PATH control: the partial-refund amount)
-      # could never render, for ANY resolution, ever — a real, pre-existing, previously invisible
-      # defect this round's rule surfaced. Rendered unconditionally instead: it costs one always-
-      # visible optional amount picker beside FULL_REFUND/REPLACEMENT, and it is the ONLY shape that
-      # can reach the DOM; staff who never touch it change nothing (`resolve_btn`'s own action is
-      # unaffected — the two buttons dispatch INDEPENDENTLY).
-      - type: tip_amount_selector
-        id: refund_amount
-        title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.title' }
-        subtitle: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.subtitle' }
-        presets_cents: [200, 450, 500, 1000]
-        custom_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.custom' }
-        action:
-          type: resolve_reclamation
-          variables:
-            reclamationId: "{{ reclamation.reclamationId }}"
-            resolution: "PARTIAL_REFUND"
-            note: "{{ note.value }}"
-            refundAmount: { amountCents: "{{ refund_amount.value }}", currency: "EUR" }
+      # ROUND 3 fix (#639 part C step 4-iii-A R3-3, `screen-condition-on-form-field`): round 2 had
+      # rendered this amount picker unconditionally after finding it could never render behind its
+      # OWN sheet's `resolution.value in [...]` gate — but `tip_amount_selector` ALSO has no renderer
+      # arm (`renderer.rs::render_node_kind` falls to the generic catch-all: a bare "Montant" label,
+      # no presets, no input, no `data-action`), so rendering it unconditionally put an INERT
+      # MONEY-PATH control on a LIVE screen (`claim_resolve`, routed `/claims/:reclamationId`) — an
+      # admin sees a control that looks live and does nothing (CLAUDE.md: worse than no control at
+      # all). DELETED rather than un-conditioned. GAP(renderer): #888, `gaps:` line above.
       - type: button
         id: resolve_btn
         label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.submit' }

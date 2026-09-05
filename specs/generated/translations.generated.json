@@ -195,18 +195,6 @@
     "en": "Public reply",
     "fr": "Réponse publique"
   },
-  "back.claims.amount.custom": {
-    "en": "Other amount",
-    "fr": "Autre montant"
-  },
-  "back.claims.amount.subtitle": {
-    "en": "Choose the amount to refund or credit.",
-    "fr": "Choisissez le montant à rembourser ou à créditer."
-  },
-  "back.claims.amount.title": {
-    "en": "Amount",
-    "fr": "Montant"
-  },
   "back.claims.category": {
     "en": "Problem",
     "fr": "Problème"
@@ -1494,10 +1482,6 @@
   "rider.issue.kind_label": {
     "en": "What is wrong",
     "fr": "Quel est le problème"
-  },
-  "rider.issue.note_prompt": {
-    "en": "The facts, without describing anyone",
-    "fr": "Les faits, sans décrire des personnes"
   },
   "rider.issue.pending": {
     "en": "Reported ✓ — the restaurant is being told…",

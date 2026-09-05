@@ -145,11 +145,16 @@ bottom_sheets:
           - { value: FOOD_DAMAGED,          label: { $ref: 'rider.translations.yaml#/rider.issue.kind.food_damaged' } }
           - { value: VEHICLE_OR_INJURY,     label: { $ref: 'rider.translations.yaml#/rider.issue.kind.vehicle_or_injury' } }
           - { value: OTHER,                 label: { $ref: 'rider.translations.yaml#/rider.issue.kind.other' } }
-      # Pre-existing gap, not this fix's to close (dispatch: remove every `issue_exit.value`
-      # condition only): `issue_kind.value == 'OTHER'` is itself a form-field `visible_when` and
-      # inherits the same non-reactivity. Left as-is — it was not part of the regression this round
-      # addresses, and is not on the path to the confirm control.
-      - { type: text_area, id: issue_note, placeholder: { $ref: 'rider.translations.yaml#/rider.issue.note_prompt' }, max_length: 300, visible_when: "issue_kind.value == 'OTHER'" }
+      # ROUND 3 fix (#639 part C step 4-iii-A, screen-condition-on-form-field): the PRIOR round's
+      # comment here deferred `issue_kind.value == 'OTHER'` as a "gap not this fix's to close" —
+      # but it is exactly the class the new corpus-wide rule catches: `visible_when` on a sibling
+      # form field can only ever see that field's INITIAL (empty) state, so the note could never
+      # actually appear. `text_area` also has no renderer arm (`renderer.rs::render_node_kind` falls
+      # to the generic catch-all and paints an empty tagged div) — rendering it unconditionally would
+      # be an inert control on the rider's one-hand surface, worse than removing it. DELETED rather
+      # than un-conditioned; the legal placeholder condition is thereby moot (no live box at all).
+      # GAP(renderer): #888, gaps: line on `job_detail` (this sheet's owning screen — sheets carry no
+      # `gaps:` field of their own).
       - type: button
         id: report_issue_btn
         label: { $ref: 'rider.translations.yaml#/rider.issue.confirm' }
@@ -157,7 +162,7 @@ bottom_sheets:
         full_width: true
         action:
           type: report_delivery_issue
-          variables: { deliveryJobId: "{{ delivery.id }}", kind: "{{ issue_kind.value }}", issue: "{{ issue_note.value }}" }
+          variables: { deliveryJobId: "{{ delivery.id }}", kind: "{{ issue_kind.value }}" }
           loading_label: { $ref: 'rider.translations.yaml#/rider.issue.pending' }
           on_success: [{ type: close_sheet }]
       - { type: inline_error, id: report_issue_error, for_action: report_delivery_issue }
@@ -376,6 +381,7 @@ screens:
     gaps:
       - "Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant."
       - "The handback after-state's 'Rapportez la commande' instruction (#639 part C step 3-ii) names no external-navigation control: no `ClientEffect`/action kind for opening a maps app exists anywhere in this DSL (`navigate` is the SDUI's own internal route change, not GPS). The pickup address is shown as the biggest element instead (page_header); a real turn-by-turn deep link is a follow-on, not invented here as a dead control."
+      - "The issue sheet's optional free-text note (D2, `rider_report_sheet`'s `issue_note`, ROUND 3 #639 part C step 4-iii-A) was removed rather than un-conditioned: `text_area` has no renderer arm (falls to the generic catch-all, an inert empty div), so an OTHER-kind report is closed-kind only until a renderer arm exists — [#888 \"Renderer: `text_area` and `tip_amount_selector` have no arm — …\"](https://github.com/TheCaptainCompany/captain-food/issues/888)."
     components:
       - { type: back_button_header, title: { $ref: 'rider.translations.yaml#/rider.job.title' } }
       - { type: status_chip, status: "{{ delivery.status }}" }

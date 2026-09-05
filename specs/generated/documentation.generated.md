@@ -12659,7 +12659,6 @@ _Surface_ **`restaurant_backoffice.yaml`**
 │ info_row — Details                       │
 │ chip_multi_select — Resolve as           │
 │ text_input — Note (optional)             │
-│ tip_amount_selector — Amount             │
 │ button — Resolve                         │
 │ section — Reject                         │
 │ «staff_nav»                              │
@@ -12673,7 +12672,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 | write | `reject_reclamation` | [✏️ `rejectReclamation`](#mutation-rejectreclamation) |
 
 **Gaps**
-- ⚠️ refundAmount currency is hard-coded EUR (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel). PARTIAL_REFUND is fully wired via the amount picker's own action; a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0).
+- ⚠️ PARTIAL_REFUND has no UI path until a renderer arm lands for `tip_amount_selector` (round 3, #639 part C step 4-iii-A R3-3): the amount picker was DELETED rather than rendered inert, since `tip_amount_selector` has no renderer arm (falls to the generic catch-all — a bare label, no presets, no input, no `data-action`) and an inert money control on a live screen is worse than none — [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — …"](https://github.com/TheCaptainCompany/captain-food/issues/888). `resolve_btn`'s own action still dispatches `resolve_reclamation` for FULL_REFUND/REPLACEMENT/GOODWILL_CREDIT. `refundAmount` currency is hard-coded EUR when the picker returns (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel); a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0).
 
 <a id="screen-restaurant_profile"></a>
 ### 📱 `restaurant_profile` · `/settings/profile` · 📱 SDUI · 🔒 auth
@@ -12845,7 +12844,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 **Gaps**
 - ⚠️ `reorder` action has no backing op — the client re-adds past lines via add_to_cart.
-- ⚠️ `courier_tip`/`tip_order` (rating_sheet) hardcodes `recipient: RIDER`, which ADR-20260722-181500 wants dynamic (RESTAURANT on self-dispatch); `Order` carries no self-dispatch signal to bind instead, and `tip_order()` (crates/web/src/tracking.rs) has no production caller today (this sdui:false page never wires it), so the concern is real but not yet live. #639 part C step 4-iii-A round 2 items 6/13; unresolved pending a coordinator decision on the read-model wiring.
+- ⚠️ `courier_tip`/`tip_order` (rating_sheet) hardcodes `recipient: RIDER`, which ADR-20260722-181500 wants dynamic (RESTAURANT on self-dispatch); `Order` carries no self-dispatch signal to bind instead, and `tip_order()` (crates/web/src/tracking.rs) has no production caller today (this sdui:false page never wires it), so the concern is real but not yet live. #639 part C step 4-iii-A round 2 items 6/13; unresolved pending a coordinator decision on the read-model wiring — tracked as [#887 "The courier tip's `recipient` binding is dead: `tip_order` never sends RIDER or RESTAURANT for self-dispatch (ADR-20260722-181500)"](https://github.com/TheCaptainCompany/captain-food/issues/887).
 - ⚠️ Order status timeline: Order carries no event-history field (only status + statusChangedAt), so the timeline widget bound a field that does not exist; removed (#717). tracking.rs keeps an empty order_timeline slot. Needs a read-model decision (per-order status history).
 - ⚠️ Customer → restaurant contact: the api Restaurant type exposes no phone (the projection intent exists — DECISIONS STO-8 — but no api field), so the contact row bound dead fields and tracking.rs never rendered it; removed (#717). The concept: a customer mid-delivery needs to reach the restaurant.
 - ⚠️ Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code.
@@ -13065,6 +13064,7 @@ _Surface_ **`rider.yaml`**
 **Gaps**
 - ⚠️ Rider → restaurant pickup contact: the api Restaurant type exposes no phone, so the removed restaurant_contact_row bound fields (restaurantName/restaurantPhone) DeliveryJob never carried and its call button could never dial (#717). The projection INTENT is recorded (DECISIONS STO-8 joins the restaurant's phone into the rider job view) but no api field carries it. The concept: a rider at pickup who cannot find the entrance, or whose order is not ready, needs to call the restaurant.
 - ⚠️ The handback after-state's 'Rapportez la commande' instruction (#639 part C step 3-ii) names no external-navigation control: no `ClientEffect`/action kind for opening a maps app exists anywhere in this DSL (`navigate` is the SDUI's own internal route change, not GPS). The pickup address is shown as the biggest element instead (page_header); a real turn-by-turn deep link is a follow-on, not invented here as a dead control.
+- ⚠️ The issue sheet's optional free-text note (D2, `rider_report_sheet`'s `issue_note`, ROUND 3 #639 part C step 4-iii-A) was removed rather than un-conditioned: `text_area` has no renderer arm (falls to the generic catch-all, an inert empty div), so an OTHER-kind report is closed-kind only until a renderer arm exists — [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — …"](https://github.com/TheCaptainCompany/captain-food/issues/888).
 
 <a id="screen-restricted"></a>
 ### 📱 `restricted` · `/restricted` · 📱 SDUI · 🔒 auth
@@ -13294,9 +13294,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-claims-resolution-partial_refund"></a>`back.claims.resolution.partial_refund` | — | Partial refund | Remboursement partiel |
 | <a id="translation-back-claims-resolution-replacement"></a>`back.claims.resolution.replacement` | — | Replacement | Remplacement |
 | <a id="translation-back-claims-resolution-goodwill_credit"></a>`back.claims.resolution.goodwill_credit` | — | Goodwill credit | Geste commercial |
-| <a id="translation-back-claims-amount-title"></a>`back.claims.amount.title` | — | Amount | Montant |
-| <a id="translation-back-claims-amount-subtitle"></a>`back.claims.amount.subtitle` | — | Choose the amount to refund or credit. | Choisissez le montant à rembourser ou à créditer. |
-| <a id="translation-back-claims-amount-custom"></a>`back.claims.amount.custom` | — | Other amount | Autre montant |
 | <a id="translation-back-claims-reject-label"></a>`back.claims.reject.label` | — | Reject | Rejeter |
 | <a id="translation-back-claims-reject-reason_ph"></a>`back.claims.reject.reason_ph` | — | Reason (required) | Motif (obligatoire) |
 | <a id="translation-back-claims-filter-overdue"></a>`back.claims.filter.overdue` | — | SLA | SLA |
@@ -13539,7 +13536,6 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-rider-issue-kind-food_damaged"></a>`rider.issue.kind.food_damaged` | — | Food damaged | Commande abîmée |
 | <a id="translation-rider-issue-kind-vehicle_or_injury"></a>`rider.issue.kind.vehicle_or_injury` | — | Vehicle or injury | Véhicule ou blessure |
 | <a id="translation-rider-issue-kind-other"></a>`rider.issue.kind.other` | — | Other | Autre |
-| <a id="translation-rider-issue-note_prompt"></a>`rider.issue.note_prompt` | — | The facts, without describing anyone | Les faits, sans décrire des personnes |
 | <a id="translation-rider-issue-confirm"></a>`rider.issue.confirm` | — | Tell the restaurant | Prévenir le restaurant |
 | <a id="translation-rider-issue-pending"></a>`rider.issue.pending` | — | Reported ✓ — the restaurant is being told… | Signalé ✓ — le restaurant est prévenu… |
 | <a id="translation-rider-restricted-title"></a>`rider.restricted.title` | — | Your access is restricted. | Votre accès est restreint. |

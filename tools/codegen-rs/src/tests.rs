@@ -16502,16 +16502,15 @@ mod screen_condition_on_form_field_gate {
     /// fixed, and the SAME rule surfaced two more pre-existing instances (`resolution` in
     /// `restaurant_backoffice.yaml`'s `claim_resolve` screen — a MONEY-PATH control, the
     /// partial-refund amount picker; `issue_resolution` in that file's `issue_resolution_sheet`),
-    /// all rendered unconditionally in the same change. `screens/rider.yaml` is EXCLUDED from this
-    /// wired rule (`validate/core.rs`'s own comment): this round's dispatch forbids touching that
-    /// file, and it carries ONE pre-existing instance of the class (`issue_kind` in
-    /// `rider_report_sheet`) already documented, in a PRIOR round's own comment, as a
-    /// deliberately-deferred gap — flagged in the hand-back, not silently fixed nor silently left
-    /// to break this test.
+    /// all rendered unconditionally in the same change. Round 3 (#639 part C step 4-iii-A,
+    /// CLAUDE.md "never weaken a gate") removed the round-2 `screens/rider.yaml` exclusion after
+    /// fixing that file's one live instance (`issue_kind` in `rider_report_sheet`'s `issue_note`,
+    /// DELETED — `text_area` has no renderer arm, #888) — the corpus-wide gate now covers every
+    /// screens/sheets file with no filename carve-out.
     #[test]
     fn the_real_corpus_is_clean() {
         let model = real_model();
-        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus (excluding the fenced screens/rider.yaml): {:?}", hits(&model));
+        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus: {:?}", hits(&model));
     }
 
     /// Plant the named mutant class directly: a `condition:` on a bottom-sheet's OWN
@@ -16575,6 +16574,39 @@ mod screen_condition_on_form_field_gate {
         assert!(found[0].contains("claim_resolve"), "the location must name the screen: {:?}", found);
     }
 
+    /// Round 3 BECK tightening (#639 part C step 4-iii-A): a form field on the RIGHT operand of a
+    /// comparison must be caught too — the round-2 rule read only the LEADING identifier
+    /// (`condition_subject_root`, singular), so `rider.standing == ground.value` would have evaded
+    /// it entirely (`rider` is resolver data; `ground` is the sheet's own chip). Plants the exact
+    /// shape on the RIGHT operand this time.
+    #[test]
+    fn a_condition_reading_its_own_sheets_chip_on_the_right_operand_is_caught() {
+        let mut model = real_model();
+        let sheet = model
+            .defs
+            .get_mut("screens/system.yaml")
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut("restrict_rider_sheet"))
+            .expect("restrict_rider_sheet exists");
+        let mut if_true_item = serde_yaml::Mapping::new();
+        if_true_item.insert(Value::from("type"), Value::from("text"));
+        if_true_item.insert(Value::from("value"), Value::from("mutant"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("conditional_section"));
+        node.insert(Value::from("id"), Value::from("planted_mutant_rhs"));
+        node.insert(Value::from("condition"), Value::from("rider.standing == ground.value"));
+        node.insert(Value::from("if_true"), Value::Sequence(vec![Value::Mapping(if_true_item)]));
+        sheet
+            .get_mut("sections")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restrict_rider_sheet has sections")
+            .push(Value::Mapping(node));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "the planted mutant on the RIGHT operand must fire exactly once: {:?}", found);
+        assert!(found[0].contains("'ground'"), "must name the RIGHT-operand form field root, not 'rider': {:?}", found);
+        assert!(found[0].contains("restrict_rider_sheet"), "the location must name the sheet: {:?}", found);
+    }
+
     /// A condition reading genuinely RESOLVER data (never a form field) must never fire — the real
     /// corpus is FULL of these (`rider.standing == 'RESTRICTED'`, `order.status == 'DELIVERED'`,
     /// …) and `the_real_corpus_is_clean` above is the corpus-wide proof; this is the narrow,
@@ -16602,6 +16634,58 @@ mod screen_condition_on_form_field_gate {
             .expect("claim_resolve has components")
             .push(Value::Mapping(node));
         assert!(hits(&model).is_empty(), "resolver-data conditions must never fire this rule: {:?}", hits(&model));
+    }
+}
+
+// ─── #639 part C step 4-iii-A round 3 R3-2 (dba) — schema.generated.sql index naming ────────────
+// Compiler-first form declined for size (types cannot reach a generated-artifact string, and
+// `migrations/**` legitimately carries 61 applied unnamed indexes this must NOT gate — the R3-1
+// antipattern): this is the codegen-side fallback the card names. Every index in the GENERATED
+// output must be named + idempotent; `migrations/**` (the applied, historical shape) is untouched.
+mod schema_sql_index_naming_gate {
+    use super::super::*;
+
+    fn real_schema_sql() -> String {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let specs = root.join("specs");
+        let model = load_model(&specs).expect("load real specs");
+        emit_schema_sql(&model, &specs)
+    }
+
+    /// The named defect (R3-2): every `CREATE INDEX` in the generated schema must be BOTH named and
+    /// `IF NOT EXISTS` — a bare `CREATE INDEX ON` is exactly the shape that silently duplicates on a
+    /// migration re-run instead of erroring or no-op'ing.
+    #[test]
+    fn every_generated_index_is_named_and_idempotent() {
+        let sql = real_schema_sql();
+        assert!(
+            !sql.contains("CREATE INDEX ON "),
+            "every generated index must be named (never a bare `CREATE INDEX ON`): {:?}",
+            sql.lines().filter(|l| l.contains("CREATE INDEX ON ")).collect::<Vec<_>>()
+        );
+        let create_index_lines: Vec<&str> = sql.lines().filter(|l| l.trim_start().starts_with("CREATE INDEX")).collect();
+        assert!(!create_index_lines.is_empty(), "sanity: the corpus must actually declare indexes");
+        for line in &create_index_lines {
+            assert!(line.contains("IF NOT EXISTS"), "every CREATE INDEX must carry IF NOT EXISTS: {line}");
+        }
+    }
+
+    /// `pg_index_name` reproduces Postgres's OWN default naming exactly — the property that makes
+    /// naming an already-applied (unnamed) index idempotently consistent with an `IF NOT EXISTS`
+    /// re-run: same inputs, same name Postgres itself would have chosen.
+    #[test]
+    fn pg_index_name_matches_postgres_default_shape_lowercased() {
+        assert_eq!(pg_index_name("rider_roster", &["display_name", "rider_id"]), "rider_roster_display_name_rider_id_idx");
+        assert_eq!(pg_index_name("rider_roster", &["standing"]), "rider_roster_standing_idx");
+        assert_eq!(pg_index_name("RiderRoster", &["standing"]), "riderroster_standing_idx", "lowercased, matching Postgres's own unquoted-identifier fold");
+    }
+
+    /// The panic path: an emitted name past NAMEDATALEN (63 bytes) must fail LOUDLY at generation
+    /// time, never truncate silently (a truncated name that collides is a worse failure).
+    #[test]
+    #[should_panic(expected = "NAMEDATALEN")]
+    fn pg_index_name_panics_rather_than_truncates_past_namedatalen() {
+        let _ = pg_index_name("a_table_name_chosen_to_be_deliberately_far_too_long_for_postgres", &["a_very_long_column_name_indeed"]);
     }
 }
 
