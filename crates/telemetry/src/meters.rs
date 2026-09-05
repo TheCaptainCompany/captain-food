@@ -829,7 +829,8 @@ pub mod rider_restriction {
     }
 
     /// `rider_restriction_socket_close_total{outcome}` — `outcome` bounded: closed |
-    /// no_open_socket | missed. NO `rider_id` label.
+    /// no_open_socket | missed (RESERVED, never emitted — `socket_close_missed` below is the
+    /// signal for that case). NO `rider_id` label.
     pub fn socket_close(outcome: &str) {
         socket_close_counter().add(1, &[KeyValue::new("outcome", outcome.to_string())]);
     }
@@ -841,7 +842,8 @@ pub mod rider_restriction {
     }
 
     /// `rider_restriction_socket_close_missed_total{reason}` — a Lagged/Closed re-derivation could
-    /// not complete after bounded retry; the socket stayed open (ADR-20260904-124600 §3).
+    /// not complete after bounded retry; the socket stayed open (ADR-20260904-124600 §3). `reason`
+    /// bounded: lookup_failed | not_found (the identity seam has no mapping for this auth subject).
     pub fn socket_close_missed(reason: &str) {
         socket_close_missed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
     }

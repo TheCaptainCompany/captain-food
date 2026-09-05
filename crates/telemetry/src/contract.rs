@@ -352,8 +352,10 @@ pub mod metric {
     pub const RIDER_CLAIM_STAMP_FAILED_TOTAL: &str = "rider_claim_stamp_failed_total";
     /// `rider-restriction` contract (#639 part C step 5, ADR-20260905-065415 §8), behind
     /// `RUN_RIDER_RESTRICTION_SOCKET_CLOSE`: the socket watcher's own outcome, attribute `outcome`
-    /// (closed | no_open_socket | missed). NO `rider_id` label — the nested INFO event
-    /// `rider.restricted.socket_terminated` carries it.
+    /// (closed | no_open_socket | missed — RESERVED, never emitted: the dedicated
+    /// `RIDER_RESTRICTION_SOCKET_CLOSE_MISSED_TOTAL` counter below is the signal for that case).
+    /// NO `rider_id` label — the nested INFO event `rider.restricted.socket_terminated` carries
+    /// the connection correlation id and the aggregate correlation id only, never `rider_id`.
     pub const RIDER_RESTRICTION_SOCKET_CLOSE_TOTAL: &str = "rider_restriction_socket_close_total";
     /// `rider-restriction` contract (step 5): t0 = the `EventBus` publish instant, never
     /// `occurred_at` (cross-host skew post-#358) — time from the fact landing on this process's bus
@@ -362,7 +364,8 @@ pub mod metric {
         "rider_restriction_socket_close_latency_ms";
     /// `rider-restriction` contract (step 5): a Lagged/Closed re-derivation could not complete after
     /// bounded retry (ADR-20260904-124600 §3: a lookup error never terminates) — the socket STAYS
-    /// open. Attribute `reason` (lookup_failed today).
+    /// open. Attribute `reason` (lookup_failed | not_found — the identity seam has no mapping for
+    /// this auth subject, distinct from a genuine lookup failure).
     pub const RIDER_RESTRICTION_SOCKET_CLOSE_MISSED_TOTAL: &str =
         "rider_restriction_socket_close_missed_total";
     /// `rider-restriction` contract (step 5): THE WATCHER'S OWN LIVENESS PROOF — the
