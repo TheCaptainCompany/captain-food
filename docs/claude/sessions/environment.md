@@ -27,6 +27,7 @@ planned workspace run, not after one fails. Note `target/release` does not exist
 **But count the cost before doing it:** deleting the debug cache means every later `make rust` is a
 cold build. In the session where this happened it bought two full rebuilds. Delete only when writes
 are actually failing, and prefer dropping `incremental`/`deps` over the whole `target/`.
+**The squeeze now lands AFTER `make test-crates`, at the clippy/wasm step that follows it (2026-09-05, #899: 6.7 GB → 2.6 GB inside one gate sequence; 510 MB free once mid-`cargo test`):** re-check `df -h /home/user` before the DB suite AND again before clippy/wasm, not once at dispatch; `rm -rf target/debug/incremental` recovered 6–12 GB each time without a cold rebuild.
 
 **Check `target/release` FIRST (2026-08-04):** it was **1.2G** in a session that only ever ran debug
 gates — `make rust`, `cargo test --workspace` and the codegen all build debug, so `rm -rf
