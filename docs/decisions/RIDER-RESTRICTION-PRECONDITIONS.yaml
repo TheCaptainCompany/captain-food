@@ -25,3 +25,4 @@ note: 'The key is consumed at the WRITE door only: restrictRider OFF returns the
   (gate-then-stabilize, ADR-20260808-144738) and this row moves to decided. Consulted at the 4-iii
   briefing: legal-specialist (the row + the key + the test), farley (the key at the write door),
   architect (the gap named), observability-agent (the route as a precondition).'
+amendment_20260905: 'Precondition (1) is NOT discharged by step 6 as decided (ADR-20260905-101349): the member door (6-ii) stamps MEMBER only and ADMIN stays hand-provisioned, so an ADMIN still cannot reach /system/riders from a browser after 6-ii + 6-iii. What discharges (1) is an ADMIN door -- the final vision is a CAPTAIN_ONBOARDING grant with a platform scope resolved at the identity seam; until a record decides it, (1) stays open and the restrict key stays pinned off.'

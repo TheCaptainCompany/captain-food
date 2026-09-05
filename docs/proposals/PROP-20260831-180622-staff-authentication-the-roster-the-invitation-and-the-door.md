@@ -467,13 +467,13 @@ Rebuild recipes are **per table and they are opposites** — state each one wher
 | `ScopeMembership` | `DELETE` + checkpoint reset + full replay | Set-shaped: one event grants/revokes N rows. A stale row **grants** — a silent breach — so the projector errs toward deleting, and a rebuild must start from empty. |
 | `Rider` | Checkpoint reset, **never** `TRUNCATE` | Upsert keyed on `rider_id` with one creating arm, so a from-zero replay rewrites every row in place and no rider is denied mid-rebuild. `TRUNCATE` + replay fails every rider closed to Public for the length of the drain: the fleet cannot sign in. **Step 4 adds `standing` (grant-shaped, NOT NULL) and the creating arm never writes it** — otherwise the same replay re-grants every restricted rider for the drain ([ADR-20260904-081527](../adr/ADR-20260904-081527-rider-standing-is-a-grant-on-the-identity-row-the-doors-are-human-only-and-step-4-lands-in-three-slices.md) §2). |
 | `Member` (new, the staff bridge) | Checkpoint reset, never `TRUNCATE` | Same shape as `Rider`, same reason. |
-| `member_subject_reservations` (new) | **Not rebuildable — do not replay it** | A reservation table is not a projection: nothing replays into it, and a rebuild would not reproduce it. It is domain-owned write state whose whole content is a `UNIQUE` constraint plus enough provenance to explain a rejection. |
+| `auth_subject_reservations` (2a's table, REUSED — no `member_subject_reservations`, [ADR-20260905-101349](../adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md) §4) | **Not rebuildable — do not replay it** | A reservation table is not a projection: nothing replays into it, and a rebuild would not reproduce it. It is domain-owned write state whose whole content is a `UNIQUE` constraint plus enough provenance to explain a rejection. |
 
 **Revocation must NOT release the reservation.** The subject stays bound to its `MemberId` after the
 grant ends; releasing it would let a re-invitation mint a second person for the same human and
 silently split their history.
 
-**#794 is a copy job.** `specs/database/tables/reservations.yaml` already declares the category and
+**#794 is a copy job — and since 2026-09-05 not even that: the MEMBER binding reserves in 2a's own table ([ADR-20260905-101349](../adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md) §4).** `specs/database/tables/reservations.yaml` already declares the category and
 pre-writes both refutations — why not the projection (eventually consistent: two claimants both pass
 a read-model lookup and only diverge once the projector catches up) and why not the projection's own
 `UNIQUE` (it fires in the projector, *after* the caller was told success). Key on
@@ -489,8 +489,7 @@ a staff binding, and collapsing them makes one revoke the other.
   deprecation path (deprecate → ignore → remove — **never reshape in the PR that adds the grant
   path**), `ScopeMembership.member_id` semantics, and any `UserType` widening.
 - **`deletion:`** — the membership stream is a natural person's employment history. This proposal
-  **owes it a block or an explicit "not yet, and why"**, and takes the second: Delivery declares no
-  `deletion:` for `Rider` today, so a staff tombstone fold has no engine to hang on; it is owed the
+  **owes it a block or an explicit "not yet, and why"**, and takes the second: a `deletion:` engine EXISTS (`specs/ordering/actors.yaml`, Customer's block) but is gated off behind the erasure launch gate, and Delivery declares none for `Rider`, so the Member block is owed on the SAME clock as Customer's, not "when an engine appears" (corrected 2026-09-05, legal, [ADR-20260905-101349](../adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md) §11); it is owed the
   moment one is declared, and Option A minimises the exposure by leaving no membership stream at all
   for an invitation never accepted.
 
@@ -1046,8 +1045,9 @@ own note says so.
 Copied to the tracking issue's checklist on approval, per the Rust-RFC move — each later closed by an
 ADR, a spec change or an explicit "won't fix".
 
-1. **Fork 1's answer** (§3): Option A or Option C. The deciding question is whether the authorization
-   index's pk being the membership stream id is worth one two-aggregate accept step.
+1. **Fork 1's answer** (§3): **settled 2026-09-05 — Option A**, [ADR-20260905-101349](../adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md) §2: the accept is TWO commands in two
+   lanes (invitation accept, then `GrantRestaurantAccess` with `basis: MEMBER_INVITATION`), never one handler staging two
+   streams (the open AGGREGATES-OWN-THE-FACTS plan) and never a process manager.
 2. **`MemberAuthority`'s values** (§2.1). `ADMINISTRATOR` / `OPERATOR` pass the provenance test; the
    set may want a third. `evans`.
 3. **`RiderRestrictionGround`'s contents** (né `RevocationGround`) — ruled 2026-09-04 by
