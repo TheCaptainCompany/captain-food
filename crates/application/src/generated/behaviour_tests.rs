@@ -4705,7 +4705,7 @@ async fn test_restaurant_access_granted() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let _ = result.expect("TestRestaurantAccessGranted: the spec expects acceptance");
@@ -4721,7 +4721,7 @@ async fn test_grant_restaurant_access_door_closed() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = false;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let err = result.expect_err("TestGrantRestaurantAccessDoorClosed: the spec expects a typed rejection");
@@ -4736,7 +4736,7 @@ async fn test_grant_restaurant_access_basis_not_yet_accepted() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::OWNER_DECLARATION };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::OWNER_DECLARATION };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let err = result.expect_err("TestGrantRestaurantAccessBasisNotYetAccepted: the spec expects a typed rejection");
@@ -4752,7 +4752,7 @@ async fn test_grant_restaurant_access_twice_is_idempotent() {
     spec_baseline(&bed).await;
     bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-1"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let _ = result.expect("TestGrantRestaurantAccessTwiceIsIdempotent: the spec expects acceptance");
@@ -4766,7 +4766,7 @@ async fn test_grant_restaurant_access_auth_subject_already_bound_is_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: Some(sc::MembershipId(support::uid("membership-2"))), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-2")), member_id: sc::MemberId(support::uid("member-2")), auth_subject: sc::AuthSubject("already-bound-member".into()), authority: sc::MemberAuthority::OPERATOR, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-2")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-2")), member_id: sc::MemberId(support::uid("member-2")), auth_subject: sc::AuthSubject("already-bound-member".into()), authority: sc::MemberAuthority::OPERATOR, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let err = result.expect_err("TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected: the spec expects a typed rejection");

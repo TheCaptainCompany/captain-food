@@ -38,11 +38,18 @@ pub async fn load(
 /// Write the folded row. Idempotent on re-projection (the `rider_roster_store` shape):
 /// `created_at` is absent from `DO UPDATE SET`. `RestaurantAccessRevoked` touches NOTHING here
 /// (the table's own `rules:`), so the only writer is the one creating arm below.
+///
+/// `auth_subject` is FIRST-WRITE-WINS, like `created_at` (round-2 dba finding, R2-8): a second
+/// grant for the same `member_id` under a fresh `membershipId` and a different `authSubject` must
+/// never rebind the bridge -- "the binding OUTLIVES any one grant" (the table's own `rules:`). If
+/// `auth_subject` were in `DO UPDATE SET`, that second grant would pass every belt (the
+/// idempotency key is `membershipId`; the reservation keys on the fresh subject) and silently
+/// orphan the first credential. Replay-deterministic: a full rebuild folds the same events in the
+/// same order and lands on the same first subject every time.
 pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &MemberRow) -> Result<(), DomainError> {
     let sql = format!(
         "INSERT INTO member ({COLUMNS}) VALUES ($1, $2, $3, $4) \
          ON CONFLICT (member_id) DO UPDATE SET \
-           auth_subject = EXCLUDED.auth_subject, \
            updated_at = EXCLUDED.updated_at"
     );
     sqlx::query(&sql)

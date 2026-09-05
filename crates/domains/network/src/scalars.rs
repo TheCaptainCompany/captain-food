@@ -138,7 +138,7 @@ pub enum RestaurantListKey {
     GREEN_PACKAGING,
 }
 
-/// Identity of one `RestaurantMembership` grant (#639 part C step 6-i) -- the relationship between one `MemberId` and one restaurant scope, NOT the person (`MemberId`, `specs/common/scalars.yaml`) and NOT the ScopeMembership ACL row (a UUIDv5 derived from the natural key, database/tables/ projection_tables.yaml#/ScopeMembership). Minted by `GrantRestaurantAccess` when the caller supplies none; supplying an existing one makes a second grant call idempotent (rules.yaml#/ RestaurantAccessGrantIsIdempotent).
+/// Identity of one `RestaurantMembership` grant (#639 part C step 6-i) -- the relationship between one `MemberId` and one restaurant scope, NOT the person (`MemberId`, `specs/common/scalars.yaml`) and NOT the ScopeMembership ACL row's derived key (normally a UUIDv5 over the natural key, database/tables/projection_tables.yaml#/ScopeMembership) -- EXCEPT the MEMBER arm, which reuses this id VERBATIM as that row's own PK instead of re-deriving one, because it is already a stable, unique identifier minted once by this aggregate (see the table's own rule for why). REQUIRED and CALLER-MINTED on `GrantRestaurantAccess` (round-2 finding, R2-3: the mailbox lane address needs it present to route at all); resubmitting the same id makes a second grant call idempotent (rules.yaml#/RestaurantAccessGrantIsIdempotent).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MembershipId(pub uuid::Uuid);
 

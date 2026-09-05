@@ -977,13 +977,13 @@ pub struct RecordProspectReplyInput {
 
 /// Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants.
 /// `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command.
-/// `membershipId` is OPTIONAL: absent, the handler mints a fresh one (birth); present and already granted, the call is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship.
+/// `membershipId` is REQUIRED and CALLER-MINTED (round-2 vernon+young finding, R2-3 -- the same defect from two sides): the mailbox lane address declares `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than migrate later. Submitting an already-granted `membershipId` is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship.
 /// The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct GrantRestaurantAccessInput {
     #[graphql(name = "membershipId")]
-    pub membership_id: Option<MembershipId>,
+    pub membership_id: MembershipId,
     #[graphql(name = "scopeType")]
     pub scope_type: ScopeType,
     #[graphql(name = "scopeId")]

@@ -1596,7 +1596,7 @@ input RecordProspectReplyInput {
 }
 
 input GrantRestaurantAccessInput {
-  membershipId: MembershipId
+  membershipId: MembershipId!
   scopeType: ScopeType!
   scopeId: RestaurantId!
   memberId: MemberId!

@@ -3118,7 +3118,10 @@ pub async fn grant_restaurant_access(
     if cmd.basis != AccessBasis::CAPTAIN_ONBOARDING {
         return Err(reject("AccessBasisNotYetAccepted", json!({ "basis": cmd.basis })));
     }
-    let membership_id = cmd.membership_id.unwrap_or_else(|| MembershipId(uuid::Uuid::new_v4()));
+    // `membershipId` is REQUIRED and CALLER-MINTED (round-2 finding, R2-3): the mailbox lane
+    // address needs it present to route at all, so a handler-side mint would be dead code in
+    // practice and a mint-then-lose-the-race would duplicate the membership.
+    let membership_id = cmd.membership_id;
     let (state, version) = Repository::new(store).load::<RestaurantMembershipState>(membership_id).await?;
     if state.is_some() {
         // Idempotent replay on the same membershipId (rules.yaml#/RestaurantAccessGrantIsIdempotent):

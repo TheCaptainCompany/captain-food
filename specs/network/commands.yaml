@@ -450,9 +450,15 @@ GrantRestaurantAccess:
     aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId`
     directly; a future scope type widens the union rather than reshaping this command.
 
-    `membershipId` is OPTIONAL: absent, the handler mints a fresh one (birth); present and already
-    granted, the call is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) --
-    never a second event for the same relationship.
+    `membershipId` is REQUIRED and CALLER-MINTED (round-2 vernon+young finding, R2-3 -- the same
+    defect from two sides): the mailbox lane address declares `Some("membershipId")` and
+    `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is
+    DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the
+    membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a
+    sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than
+    migrate later. Submitting an already-granted `membershipId` is an idempotent no-op
+    (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same
+    relationship.
 
     The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the
     human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three
@@ -465,7 +471,6 @@ GrantRestaurantAccess:
   properties:
     membershipId:
       $ref: 'scalars.yaml#/MembershipId'
-      nullable: true
     scopeType:
       $ref: 'scalars.yaml#/ScopeType'
     scopeId:
@@ -478,7 +483,7 @@ GrantRestaurantAccess:
       $ref: 'scalars.yaml#/MemberAuthority'
     basis:
       $ref: 'scalars.yaml#/AccessBasis'
-  required: [scopeType, scopeId, memberId, authSubject, authority, basis]
+  required: [membershipId, scopeType, scopeId, memberId, authSubject, authority, basis]
 
 
 RevokeRestaurantAccess:

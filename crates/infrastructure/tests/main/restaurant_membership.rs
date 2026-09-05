@@ -38,7 +38,7 @@ async fn grant(
         &store,
         &auth_subjects,
         GrantRestaurantAccess {
-            membership_id: Some(MembershipId(membership_id)),
+            membership_id: MembershipId(membership_id),
             scope_type: ScopeType::RESTAURANT,
             scope_id: RestaurantId(scope_id),
             member_id: MemberId(member_id),
@@ -228,10 +228,16 @@ async fn member_resolves_at_every_point_of_a_checkpoint_reset_replay() {
     assert!(member_auth_subject(&pool, member).await.is_some(), "member resolves after the first drain");
 
     // Checkpoint reset, never TRUNCATE: rewind the Member checkpoint to 0.
-    sqlx::query("UPDATE projection_checkpoint SET position = 0 WHERE projector = 'Member'")
+    let reset = sqlx::query("UPDATE projection_checkpoint SET position = 0 WHERE projector = 'Member'")
         .execute(&pool)
         .await
         .expect("rewind the Member checkpoint");
+    assert_eq!(
+        reset.rows_affected(),
+        1,
+        "the projector name must match the registered 'Member' group -- a rename here would pass \
+         vacuously with 0 rows touched (round-2 beck finding, R2-4)"
+    );
     // The claim, checked at its strongest point: RIGHT AFTER the reset, BEFORE the replay runs.
     assert!(
         member_auth_subject(&pool, member).await.is_some(),
@@ -376,5 +382,75 @@ async fn member_carries_no_grant_shaped_column() {
         vec!["auth_subject", "created_at", "member_id", "updated_at"],
         "a grant-shaped column (authority/basis/scopeId/...) here would break the checkpoint-reset \
          rebuild rule -- the table's own `rules:` holds only while this stays true"
+    );
+}
+
+/// Round-2 dba finding (R2-8): a SECOND grant for the same `member_id`, under a FRESH
+/// `membershipId` and a DIFFERENT `authSubject`, must never rebind the bridge -- "the binding
+/// OUTLIVES any one grant" (the table's own `rules:`). Before the fix, `member_store::upsert`'s
+/// `ON CONFLICT (member_id) DO UPDATE SET auth_subject = EXCLUDED.auth_subject` passed every other
+/// belt (the idempotency key is `membershipId`; the reservation keys on the fresh subject) and
+/// silently orphaned the first credential. First-write-wins: `Member.auth_subject` stays the FIRST
+/// subject ever folded for that member.
+#[tokio::test]
+async fn a_second_grant_for_the_same_member_never_rebinds_the_auth_subject() {
+    let Some(db) = crate::common::TestDb::acquire("member_first_write_wins").await else { return };
+    let pool = db.pool();
+
+    let member = uuid::Uuid::new_v4();
+    let (m1, m2) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    grant(&pool, m1, uuid::Uuid::new_v4(), member, "auth-first-subject").await.expect("grant 1");
+    grant(&pool, m2, uuid::Uuid::new_v4(), member, "auth-second-subject").await.expect("grant 2");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once");
+
+    assert_eq!(
+        member_auth_subject(&pool, member).await.as_deref(),
+        Some("auth-first-subject"),
+        "a second grant with a new membershipId and a different authSubject must never rebind an \
+         already-bound member's Member row -- first-write-wins, replay-deterministic"
+    );
+}
+
+/// Round-2 beck finding (R2-5): `TestGrantRestaurantAccessDoorClosed` (the generated behaviour
+/// test) only proves `assert_appended(&[])` -- moving the door check BELOW `auth_subjects.reserve`
+/// would still pass that test while a login got bound to a never-granted member. The generated
+/// harness's `SpecAuthSubjectReservations.held` map is private to `behaviour_support.rs` with no
+/// accessor, so the harness cannot express this; asserted here instead, against the real table.
+#[tokio::test]
+async fn door_closed_never_touches_the_auth_subject_reservation() {
+    let Some(db) = crate::common::TestDb::acquire("member_door_closed_no_reservation").await else { return };
+    let pool = db.pool();
+    let store = PgEventStore::new(pool.clone());
+    let auth_subjects = PgAuthSubjectReservationRepository::new(pool.clone());
+    let subject = format!("auth-door-closed-{}", uuid::Uuid::new_v4());
+    let result = grant_restaurant_access(
+        &store,
+        &auth_subjects,
+        GrantRestaurantAccess {
+            membership_id: MembershipId(uuid::Uuid::new_v4()),
+            scope_type: ScopeType::RESTAURANT,
+            scope_id: RestaurantId(uuid::Uuid::new_v4()),
+            member_id: MemberId(uuid::Uuid::new_v4()),
+            auth_subject: AuthSubject(subject.clone()),
+            authority: MemberAuthority::MANAGER,
+            basis: AccessBasis::CAPTAIN_ONBOARDING,
+        },
+        &actor(),
+        false, // RUN_MEMBER_ACCESS_GRANT OFF
+    )
+    .await;
+    assert!(result.is_err(), "the door-closed call must be refused");
+
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth_subject_reservations WHERE auth_subject = $1",
+    )
+    .bind(&subject)
+    .fetch_one(&pool)
+    .await
+    .expect("count reservations");
+    assert_eq!(
+        held, 0,
+        "the door check must run BEFORE the reservation write -- a login must never get bound to a \
+         never-granted member"
     );
 }

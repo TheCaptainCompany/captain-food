@@ -219,7 +219,7 @@ projections:
   # table outliving any one grant, ADR-20260905-101349 §5) -- a restaurant whose only member is
   # later revoked still counts here, which is a DELIBERATE simplification for 6-i's spec-only
   # metric (the roster, 6-iv, is what answers "how many CURRENTLY").
-  RestaurantStaffAccess:
+  RestaurantMemberAccess:
     description: >
       Has this restaurant ever had a member's access granted, and when was the most recent one?
       One row per restaurant with at least one RestaurantAccessGranted fact (a restaurant with
@@ -232,7 +232,7 @@ projections:
       lastGrantedAt: { type: set, of: { envelope: occurredAt } }
     fold:
       - on: { $ref: 'events.yaml#/RestaurantAccessGranted' }
-        set: { $ref: '#/projections/RestaurantStaffAccess/measures/lastGrantedAt' }
+        set: { $ref: '#/projections/RestaurantMemberAccess/measures/lastGrantedAt' }
         from: { envelope: occurredAt }
 
 metrics:
@@ -342,7 +342,7 @@ metrics:
 
   # #639 part C step 6-i (ADR-20260905-101349 §12): the first metric on ManageRestaurantMembership
   # (a NEW activity this step adds to stories.yaml). A distinct-identity denominator, inexpressible
-  # as a counter (the projection note): `countRows` here counts ROWS of RestaurantStaffAccess,
+  # as a counter (the projection note): `countRows` here counts ROWS of RestaurantMemberAccess,
   # whose population IS distinct restaurants by construction. No groupBy — the raw population size
   # is the question, the same shape as `restricted_to_reinstated_duration_ms` above. Spec-only
   # until the `bam` runtime exists (#484): `exposedAs:` stays ABSENT, same as every 6-i-adjacent
@@ -350,6 +350,6 @@ metrics:
   restaurants_with_a_bound_member:
     question: "How many restaurants have ever had at least one member's access granted (the reach of staff authentication, 6-i onward)?"
     activity: { $ref: 'stories.yaml#/admin/activities/ManageRestaurantMembership' }
-    over: { $ref: '#/projections/RestaurantStaffAccess' }
+    over: { $ref: '#/projections/RestaurantMemberAccess' }
     value:
       countRows: {}
