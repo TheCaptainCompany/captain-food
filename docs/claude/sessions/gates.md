@@ -1098,3 +1098,14 @@ is itself the argument: **a list that grows has no business stating its own leng
 - **The disk step runs at EVERY round start, not only at dispatch**: round 1's 27 GB `target/` filled the disk mid
   round 2 on #895 (the same recovery as the 4-iii-A card recorded). Put `df -h /home/user` + the `rm -rf target/`
   threshold in every round card's first line.
+- **A `docs/decisions/*.yaml` row is a CLOSED schema, and a docs-only push can turn main red** (2026-09-05): the
+  coordinator amended RIDER-RESTRICTION-PRECONDITIONS with a new top-level key (`amendment_20260905:`) and pushed
+  straight to main under the docs-only rule; `make validate` reads the decision rows (`decision-field-unknown`) and
+  main was red for ~65 minutes until the 6-i executor found it. Two rules: amend a row inside an EXISTING field
+  (`note:`), never a new key; and a docs push that touches `docs/decisions/**`, `specs/**` or anything a validator
+  reads is NOT "regenerates nothing" — run `make validate` (or `cargo run --bin generate -- --validate-only`) before
+  pushing it. Also: a second `note:` key in one YAML mapping silently keeps only the last one.
+- **GitHub closes an issue on ANY closing keyword in a merged PR body, whatever the intent** (2026-09-05): #639 was
+  auto-closed at the #892 merge although part C had two steps left. Card constraint for multi-step issues: the PR
+  body says `Refs #NN` and contains no `Closes`/`Fixes`/`Resolves` before `#NN` anywhere — the coordinator greps the
+  body before the ready flip; the closing PR says `Closes` on purpose and only once.

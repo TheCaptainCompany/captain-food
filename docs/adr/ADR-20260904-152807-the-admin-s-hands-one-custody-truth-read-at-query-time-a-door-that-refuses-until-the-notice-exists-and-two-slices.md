@@ -197,7 +197,16 @@ act).
    location and retention for the filed `RIDER_REQUESTED` message where it may carry Art. 9 data —
    health or family reasons routinely accompany "please restrict me") and **Q9** (must a REFUSED
    restriction attempt — a closed-door REJECTED mailbox row holding `riderId` + `ground` — be
-   retained, and for how long, given it is not an Art. 11 decision); the return-leg pay exposure stays
+   retained, and for how long, given it is not an Art. 11 decision); **added 2026-09-05 from the step-6-i presentation pass (legal-specialist, not
+   clearance)** — **Q11** (does hand-provisioning a restaurant employee's login on the owner's say-so make Captain
+   controller or joint controller (Art. 26) with the restaurant for that member record, and who owes the Art. 14
+   notice due at obtaining), **Q12** (is a written manual erasure procedure sufficient for a hand-provisioned member
+   population, or must the `deletion:` block exist before the first grant — Art. 17 + Art. 5(1)(e)), **Q13** (does
+   `LEFT_THE_RESTAURANT` record an employment-departure inference about a person Captain does not employ, immutably —
+   necessary under Art. 5(1)(c), or should `ACCESS_NO_LONGER_NEEDED` be the sole ground; reversible today at zero rows,
+   not after the first grant), **Q14** (does the lifetime, never-released `(MEMBER, authSubject)` binding survive an
+   erasure request — pseudonymise, crypto-shred, or retention as an integrity measure), **Q15** (the `Member` record is
+   stored via Supabase as processor: DPA, region, sub-processors — the founder's external item); the return-leg pay exposure stays
    named, unpriced (rider pay has no record). Card defects banked: the worker path; the nav-depth gap
    listed as open; (b) presented as live; `PageOffset`'s scope.
 
