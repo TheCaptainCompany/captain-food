@@ -82,6 +82,8 @@ const LANES: &[(&str, &str)] = &[
     ("Customer", "CustomerErasureDue"),
     ("Order", "OrderAcceptanceTimedOut"),
     ("Order", "OrderExpired"),
+    // #639 part C step 6-iv (ADR-20260905-101349 SS2/SS3): the invitation TTL reminder.
+    ("RestaurantInvitation", "RestaurantInvitationExpired"),
 ];
 
 /// The ROUTED lanes the watch must report on (#598) — same literal-not-derived discipline as
@@ -528,6 +530,9 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // release gate -- the SAME fleet-parity lesson, pinned again so a future regression
             // that drops the `declare_flag` call ships green.
             ("RUN_MEMBER_SIGN_IN_DOOR", deps.run_member_sign_in_door),
+            // #639 part C step 6-iv (ADR-20260905-101349 SS2/SS3, the SAME fleet-parity lesson):
+            // the invitation door's own release gate.
+            ("RUN_RESTAURANT_INVITATION", deps.run_restaurant_invitation),
         ],
     );
 
