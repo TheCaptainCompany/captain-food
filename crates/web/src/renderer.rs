@@ -2828,6 +2828,38 @@ mod tests {
         );
     }
 
+    /// Round 2 item 4 (legal): a REINSTATED (ACTIVE) rider whose `ground`/`effectiveAt` are still
+    /// set (M1: the tuple STAYS set after reinstate) must not read as still-restricted — no ground
+    /// text, no "Effectif depuis" row, and the NEW "Rétabli le" row from `reinstatedAt` instead.
+    #[test]
+    fn a_reinstated_rider_shows_no_ground_and_shows_reinstated_on() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "ACTIVE",
+                "ground": "IDENTITY_MISMATCH",
+                "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z",
+                "reinstatedAt": "2026-01-10T09:30:00Z",
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        // The ground string ALSO exists as the sheet's own (always-mounted, hidden) chip label —
+        // so a bare `contains` would pass vacuously even if the detail's own ground row rendered
+        // too. Restricted-rider tests below (`the_detail_shows_no_count`) prove the RESTRICTED case
+        // shows it TWICE (chip label + detail row); here, reinstated (ACTIVE), it must show ONCE
+        // (the chip label only).
+        assert_eq!(
+            html.matches("Identité non concordante").count(), 1,
+            "a reinstated rider must not show the DETAIL ground row (only the sheet's own chip label survives): {html}"
+        );
+        assert!(!html.contains("Effectif depuis"), "a reinstated rider must not show the past effective-since row: {html}");
+        assert!(html.contains("Rétabli le"), "a reinstated rider must show the reinstated-on row: {html}");
+    }
+
     /// `the_four_ground_chips_carry_the_admin_labels` — the sheet's `ground` chip group carries
     /// exactly the FOUR closed values with the admin's OWN labels, no catch-all.
     #[test]
