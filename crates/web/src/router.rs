@@ -501,12 +501,49 @@ mod tests {
         let jobs_transport = HttpTransport::new(origin, Surface::Rider.role_for(jobs), SessionId::mint());
         assert_eq!(door_transport.endpoint(), "https://riders.captain.food/public/graphql");
         assert_eq!(jobs_transport.endpoint(), "https://riders.captain.food/rider/graphql");
-        // Every other surface is byte-identical to before R1: no screen declares a role.
-        for surface in [Surface::CaptainFrontoffice, Surface::RestaurantFrontoffice, Surface::RestaurantBackoffice] {
+        // Every other surface is byte-identical to before R1: no screen declares a role --
+        // EXCEPT `restaurant_backoffice.yaml`'s own sign-in door (#639 part C step 6-ii,
+        // ADR-20260905-101349 SS9), the SAME shape one level down.
+        for surface in [Surface::CaptainFrontoffice, Surface::RestaurantFrontoffice] {
             for screen in surface.screens() {
                 assert_eq!(surface.role_for(screen), surface.role(), "{}", screen.id);
             }
         }
+        for screen in Surface::RestaurantBackoffice.screens() {
+            if screen.id == "sign_in" || screen.id == "not_linked" {
+                assert_eq!(Surface::RestaurantBackoffice.role_for(screen), Role::Public, "{}", screen.id);
+            } else {
+                assert_eq!(
+                    Surface::RestaurantBackoffice.role_for(screen),
+                    Surface::RestaurantBackoffice.role(),
+                    "{}",
+                    screen.id
+                );
+            }
+        }
+    }
+
+    /// #639 part C step 6-ii (ADR-20260905-101349 SS9): the SAME property as the rider door above,
+    /// one level down — the member sign-in door speaks to `/public/graphql`, its `not_linked`
+    /// sibling too, and the restaurant surface's other screens keep `/restaurant/graphql`.
+    #[test]
+    fn the_member_sign_in_door_addresses_the_public_graph_and_its_siblings_do_not() {
+        use crate::graphql::HttpTransport;
+        use crate::session::SessionId;
+        let door = match_route(Surface::RestaurantBackoffice, "/sign-in").expect("the door is routed").screen;
+        let not_linked = match_route(Surface::RestaurantBackoffice, "/sign-in/not-linked")
+            .expect("the not-linked screen is routed")
+            .screen;
+        let orders = match_route(Surface::RestaurantBackoffice, "/").expect("the orders queue is routed").screen;
+        assert_eq!(door.graphql_role, Some("PUBLIC"));
+        assert_eq!(not_linked.graphql_role, Some("PUBLIC"));
+        assert_eq!(orders.graphql_role, None, "the default is the surface's role, untouched");
+        assert!(!door.requires_auth && !not_linked.requires_auth && orders.requires_auth);
+        let origin = "https://restos.captain.food";
+        let door_transport = HttpTransport::new(origin, Surface::RestaurantBackoffice.role_for(door), SessionId::mint());
+        let orders_transport = HttpTransport::new(origin, Surface::RestaurantBackoffice.role_for(orders), SessionId::mint());
+        assert_eq!(door_transport.endpoint(), "https://restos.captain.food/public/graphql");
+        assert_eq!(orders_transport.endpoint(), "https://restos.captain.food/restaurant/graphql");
     }
 
     /// #639 2c-ii: the rider app's gated screens declare the door; the door and every other
@@ -522,7 +559,13 @@ mod tests {
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/sign-in"), None);
         assert_eq!(unauthenticated_redirect("riders.captain.food", "/nope"), None);
         assert_eq!(unauthenticated_redirect("chez-test.captain.food", "/orders"), None);
-        assert_eq!(unauthenticated_redirect("restos.captain.food", "/"), None);
+        // #639 part C step 6-ii (ADR-20260905-101349 SS9): the SAME shape one level down — every
+        // requires_auth screen on the restaurant backoffice now names its own PUBLIC sign-in door,
+        // and the door (plus its not-linked sibling) names none.
+        assert_eq!(unauthenticated_redirect("restos.captain.food", "/"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("restos.captain.food", "/deliveries"), Some("/sign-in"));
+        assert_eq!(unauthenticated_redirect("restos.captain.food", "/sign-in"), None);
+        assert_eq!(unauthenticated_redirect("restos.captain.food", "/sign-in/not-linked"), None);
     }
 
     /// #639 part C step 4-ii (ADR-20260904-124600 §2): the `unauthenticated:` twin — the rider
