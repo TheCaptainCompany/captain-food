@@ -594,7 +594,6 @@ pub mod restaurant_backoffice {
         Sheet { id: "member_sign_in_confirmation_sheet", node:
             Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("member_sign_in_confirmation_sheet")), ("title", PropValue::I18n("back.sign_in.confirmation_title")), ("drag_to_close", PropValue::Text("true"))], children: &[
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.confirmation_body"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("member_email.value")), ("style.weight", PropValue::Text("bold"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.expiry_note"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_resend_link")), ("label", PropValue::I18n("back.sign_in.resend")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_sign_in_confirmation_close")), ("label", PropValue::I18n("back.sign_in.close")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }

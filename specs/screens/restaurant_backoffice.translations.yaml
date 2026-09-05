@@ -180,13 +180,14 @@ back.sign_in.no_password:       { messages: { en: "No password: the link replace
 # configured key by hand until a `{{ config.* }}` binding exists (see the screen's `gaps:` line).
 back.sign_in.support_lead:      { messages: { en: "A problem? support@captain.food", fr: "Un problème ? support@captain.food" } }
 back.sign_in.confirmation_title: { messages: { en: "Check your email", fr: "Vérifiez vos e-mails" } }
-# Round 2 R2-U1/R2-U2: was "...a link has just been sent to it/à cette adresse" -- an enumeration
-# oracle-safe sentence that never named the address, but ALSO never confirmed the user typed the
-# right one (a typo silently wastes the wait). Now ends "...à :" and the typed address renders as
-# its own bound `text` node right after (`specs/screens/restaurant_backoffice.yaml`'s
-# `member_sign_in_confirmation_sheet` -- this DSL has no inline-interpolation grammar for
-# translated prose, see that file's comment).
-back.sign_in.confirmation_body: { messages: { en: "If this address is registered, a link has just been sent to:", fr: "Si cette adresse est enregistrée, un lien vient d'être envoyé à :" } }
+# Round 3 R3-1 (ux, BLOCKING, #870 class): round 2's "...à :" plus a following bound `text` node
+# echoing `member_email.value` painted an EMPTY paragraph -- a `text` node resolves at PAINT from
+# RESOLVER data, never from a form field's dispatch-time `.value`
+# (`crates/web/src/renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that
+# could carry it across. Restored to the self-contained round-1 sentence (never named the address,
+# so still enumeration-oracle-safe); the address-echo need is the screen's `gaps:` line instead of
+# a text node that paints empty.
+back.sign_in.confirmation_body: { messages: { en: "If this address is registered, a link has just been sent to it.", fr: "Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse." } }
 # `UNVERIFIED input`: the provider's default magic-link expiry (ADR-20260817-105845 -- read the
 # provider's configured default before treating 15 as authoritative).
 back.sign_in.expiry_note:       { messages: { en: "The link expires in 15 minutes.", fr: "Le lien expire dans 15 minutes." } }

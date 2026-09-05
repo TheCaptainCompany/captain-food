@@ -604,8 +604,8 @@
     "fr": "Fermer"
   },
   "back.sign_in.confirmation_body": {
-    "en": "If this address is registered, a link has just been sent to:",
-    "fr": "Si cette adresse est enregistrée, un lien vient d'être envoyé à :"
+    "en": "If this address is registered, a link has just been sent to it.",
+    "fr": "Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse."
   },
   "back.sign_in.confirmation_title": {
     "en": "Check your email",

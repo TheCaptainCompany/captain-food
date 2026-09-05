@@ -982,14 +982,22 @@ keys:
   EMAIL_QUOTA_KEY_HMAC_SECRET:
     type: string
     secret: true
+    required: [staging, production]
     gates: >
-      Round 2 R2-V1 (legal, Art. 5(1)(e) storage limitation): the per-address send-abuse buckets
-      above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table --
-      storing the RAW address there would make that table a second, unbounded store of personal
-      data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret,
-      never the address itself. Unset, a fixed DEV-ONLY key is used (`application::email_guard::
+      Round 3 R3-2 (legal, small): round 2's prose CLAIMED this key was "required" in
+      staging/production without declaring it, so nothing enforced it -- `required:` below is what
+      makes that true (`Config::resolve()` reports it MISSING and `must_stop_on_problems()` exits
+      78 before the router binds, `crates/server/src/main.rs:~45`). Art. 5(1)(e) storage
+      limitation: the per-address send-abuse buckets above are enforced against a row keyed by the
+      address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that
+      table a second, unbounded store of personal data with no retention story of its own, so the
+      key is HMAC-SHA256(address) with this secret, never the address itself. Unset in
+      development/test, a fixed DEV-ONLY key is used (`application::email_guard::
       DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever
-      reaches that table without this key set; set it before any real email address does.
+      reaches that table without this key set. Unset in staging/production, boot STOPS instead:
+      the founder's admin-gated provisioning of this secret is the named precondition (PR #899's
+      round-2 note), not resolved by this change -- the manifests' `secretKeyRef` has existed since
+      round 2.
     deploy:
       from_secret:
         production: EMAIL_QUOTA_KEY_HMAC_SECRET

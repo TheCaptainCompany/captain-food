@@ -1723,6 +1723,40 @@ mod tests {
         assert!(en.contains("Order queue"), "en title missing");
     }
 
+    /// Round 3 R3-1 (ux, BLOCKING, `#870` class -- see the comment at line ~1751): the
+    /// `member_sign_in_confirmation_sheet` used to echo `{{ member_email.value }}` in a `text`
+    /// node right after `confirmation_body`. A `text` node resolves at PAINT from RESOLVER data
+    /// (`text_of` -> `RenderContext::lookup`); a form field's `.value` exists only at DISPATCH,
+    /// for ACTION variables (`interact.rs:~251-272`) -- there is no resolver named `member_email`
+    /// this SSR/render context ever populates, so the binding always resolved to nothing and the
+    /// panel painted the sentence followed by an EMPTY `<p data-c="text"></p>`. The surface's
+    /// sheets render unconditionally (HIDDEN, `#94`) alongside every screen of that surface, so
+    /// rendering `sign_in` is enough to reach the confirmation panel without any dispatch.
+    #[test]
+    fn member_sign_in_confirmation_panel_has_no_empty_echoed_address() {
+        let screen = Surface::RestaurantBackoffice.screens().iter().find(|s| s.id == "sign_in").unwrap();
+
+        let fr = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), RenderContext::new("fr"));
+        assert!(
+            fr.contains("Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse."),
+            "fr confirmation panel must carry the self-contained sentence: {fr}"
+        );
+        assert!(
+            !fr.contains("<p data-c=\"text\"> </p>"),
+            "confirmation panel must never paint an empty text node: {fr}"
+        );
+
+        let en = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), RenderContext::new("en"));
+        assert!(
+            en.contains("If this address is registered, a link has just been sent to it."),
+            "en confirmation panel must carry the self-contained sentence: {en}"
+        );
+        assert!(
+            !en.contains("<p data-c=\"text\"> </p>"),
+            "confirmation panel must never paint an empty text node: {en}"
+        );
+    }
+
     #[test]
     fn bindings_render_lists_from_resolved_data() {
         let screen = Surface::RestaurantBackoffice

@@ -13196,6 +13196,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 **Gaps**
 - ⚠️ The link-expiry countdown and the 60s-delayed 'Renvoyer un lien' re-enable (PROP-20260831-180622 §8.1) need a client-side timer/countdown primitive this DSL does not declare anywhere yet -- the resend control below is always active (calling the SAME identify-only action again is harmless: the wall is server-side, ADR-20260905-101349 §9) rather than a fake-disabled control that renders and does nothing.
 - ⚠️ Round 2 R2-L1 (legal, grade (b), counsel to confirm): Art. 13 information is owed AT COLLECTION -- the moment an address is typed and this form's mutation fires, whether or not it turns out to be a roster address (the no-enumeration-oracle design means Captain has already processed a non-member's address by the time any refusal could show it a notice). This screen carries no Art. 13 notice/link yet; MEMBER-SIGN-IN-DOOR-PRECONDITIONS names it as a precondition of the flip, not resolved here.
+- ⚠️ Round 3 R3-1 (ux, #870 class): the confirmation panel does not echo the typed address back to the operator -- the SDUI `text` node type has no binding to FORM-FIELD state (only to resolver data, `renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that could carry `member_email`'s dispatch-time value into the sheet's render context. A form-state-to-text binding is the shape of the fix (not built by this slice); the confirmation sentence stays self-contained (`back.sign_in.confirmation_body`) instead of ending in an empty paragraph.
 
 <a id="screen-sign_in_return"></a>
 ### 📱 `sign_in_return` · `/sign-in/return` · 🚫 not SDUI — Query-string token extraction + acceptance-first confirm/claim/route sequencing -- a hand-written page, the checkout/order_tracking precedent. · ⇄ /public/graphql
@@ -13848,7 +13849,7 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-sign_in-no_password"></a>`back.sign_in.no_password` | — | No password: the link replaces it. | Aucun mot de passe : le lien remplace le mot de passe. |
 | <a id="translation-back-sign_in-support_lead"></a>`back.sign_in.support_lead` | — | A problem? support@captain.food | Un problème ? support@captain.food |
 | <a id="translation-back-sign_in-confirmation_title"></a>`back.sign_in.confirmation_title` | — | Check your email | Vérifiez vos e-mails |
-| <a id="translation-back-sign_in-confirmation_body"></a>`back.sign_in.confirmation_body` | — | If this address is registered, a link has just been sent to: | Si cette adresse est enregistrée, un lien vient d'être envoyé à : |
+| <a id="translation-back-sign_in-confirmation_body"></a>`back.sign_in.confirmation_body` | — | If this address is registered, a link has just been sent to it. | Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse. |
 | <a id="translation-back-sign_in-expiry_note"></a>`back.sign_in.expiry_note` | — | The link expires in 15 minutes. | Le lien expire dans 15 minutes. |
 | <a id="translation-back-sign_in-resend"></a>`back.sign_in.resend` | — | Resend a link | Renvoyer un lien |
 | <a id="translation-back-sign_in-close"></a>`back.sign_in.close` | — | Close | Fermer |

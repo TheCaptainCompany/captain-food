@@ -174,15 +174,17 @@ bottom_sheets:
     # opened by a mutation's `on_success` has no swipe affordance on every client).
     drag_to_close: true
     sections:
-      # Round 2 R2-U1/R2-U2: the translation is split across two nodes rather than one, because
-      # this DSL has no inline-interpolation grammar for translated prose (`docs/claude/dsl.md`
-      # §25's `{{ path }}` binding walk resolves a WHOLE node's value, never a placeholder inside
-      # a literal string) -- `confirmation_body` now ends in "...envoyé à :" and the address node
-      # right after it echoes EXACTLY what `member_email` held when the mutation fired (the SAME
-      # screen's own form field, unlike `not_linked.body`'s cross-screen case, which stays a
-      # `gaps:` line because THAT value never crosses a navigation).
+      # Round 3 R3-1 (ux, BLOCKING; #870 class, `crates/web/src/renderer.rs:~1751`): round 2's
+      # comment above claimed the `{{ member_email.value }}` text node "echoes EXACTLY what
+      # `member_email` held when the mutation fired" -- false. A `text` node resolves at PAINT
+      # from RESOLVER data (`renderer.rs` `text_of` -> `RenderContext::lookup`); a form field's
+      # `.value` exists only at DISPATCH, for ACTION variables (`interact.rs:~251-272`), and
+      # `open_bottom_sheet` only toggles `hidden` -- there is no repaint that carries the typed
+      # value into this sheet's resolver context. The panel rendered the sentence followed by an
+      # EMPTY paragraph. `confirmation_body` is restored to the self-contained sentence ux
+      # accepted in round 1 (it never needed the address); the address node is removed rather than
+      # left to paint empty. See `gaps:` below on the `sign_in` screen for the real fix.
       - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.confirmation_body' } }
-      - { type: text, value: "{{ member_email.value }}", style: { weight: bold } }
       - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.expiry_note' } }
       # The 60s-delayed re-enable is the declared `gaps:` line on the `sign_in` screen (no timer
       # primitive exists in this DSL); this control is always active.
@@ -780,6 +782,7 @@ screens:
     gaps:
       - "The link-expiry countdown and the 60s-delayed 'Renvoyer un lien' re-enable (PROP-20260831-180622 §8.1) need a client-side timer/countdown primitive this DSL does not declare anywhere yet -- the resend control below is always active (calling the SAME identify-only action again is harmless: the wall is server-side, ADR-20260905-101349 §9) rather than a fake-disabled control that renders and does nothing."
       - "Round 2 R2-L1 (legal, grade (b), counsel to confirm): Art. 13 information is owed AT COLLECTION -- the moment an address is typed and this form's mutation fires, whether or not it turns out to be a roster address (the no-enumeration-oracle design means Captain has already processed a non-member's address by the time any refusal could show it a notice). This screen carries no Art. 13 notice/link yet; MEMBER-SIGN-IN-DOOR-PRECONDITIONS names it as a precondition of the flip, not resolved here."
+      - "Round 3 R3-1 (ux, #870 class): the confirmation panel does not echo the typed address back to the operator -- the SDUI `text` node type has no binding to FORM-FIELD state (only to resolver data, `renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that could carry `member_email`'s dispatch-time value into the sheet's render context. A form-state-to-text binding is the shape of the fix (not built by this slice); the confirmation sentence stays self-contained (`back.sign_in.confirmation_body`) instead of ending in an empty paragraph."
     components:
       - type: sticky_header
         id: member_sign_in_topbar

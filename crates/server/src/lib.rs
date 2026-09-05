@@ -436,7 +436,11 @@ pub(crate) fn email_send_guard(
         Some(config.email_max_sends_per_address_per_hour as i32),
         Some(config.email_max_sends_per_address_per_day as i32),
         Some(config.email_max_sends_per_day_global as i32),
-        config.email_quota_key_hmac_secret.as_deref(),
+        // Round 3 R3-2: the generated field is now a required (staging/production) `String`, not
+        // `Option<String>` -- unset in development/test resolves to `""`, which
+        // `EmailSendPolicy::from_config` already treats as "fall back to the dev-only key" (it
+        // trims and filters empty before using it), so `Some(...)` here is correct in every profile.
+        Some(config.email_quota_key_hmac_secret.as_str()),
     );
     tracing::info!(
         binding = "email_send_guard",
