@@ -1605,13 +1605,17 @@ input RecordProspectReplyInput {
 
 input GrantRestaurantAccessInput {
   membershipId: MembershipId!
-  scopeType: ScopeType
-  scopeId: RestaurantId
-  memberId: MemberId
-  authSubject: AuthSubject
-  authority: MemberAuthority
+  scopeType: ScopeType!
+  scopeId: RestaurantId!
+  memberId: MemberId!
+  authSubject: AuthSubject!
+  authority: MemberAuthority!
   basis: AccessBasis!
-  invitationId: RestaurantInvitationId
+}
+
+input GrantRestaurantAccessByInvitationInput {
+  invitationId: RestaurantInvitationId!
+  token: EmailVerificationToken!
 }
 
 input RevokeRestaurantAccessInput {
@@ -2182,7 +2186,8 @@ type Mutation {
   recordProspectContact(input: RecordProspectContactInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RecordProspectContact")
   markProspectCold(input: MarkProspectColdInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
-  grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, PUBLIC]) @command(name: "GrantRestaurantAccess")
+  grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantRestaurantAccess")
+  grantRestaurantAccessByInvitation(input: GrantRestaurantAccessByInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "GrantRestaurantAccessByInvitation")
   revokeRestaurantAccess(input: RevokeRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RevokeRestaurantAccess")
   requestMemberSignInLink(input: RequestMemberSignInLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "RequestMemberSignInLink")
   confirmMemberSignIn(input: ConfirmMemberSignInInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "ConfirmMemberSignIn")

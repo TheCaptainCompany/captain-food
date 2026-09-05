@@ -13,7 +13,7 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    AuthSubject, CatalogId, MemberId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
+    AuthSubject, CatalogId, MemberAuthority, MemberId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
     RiderStanding, ScopeType, SessionId, Slug,
     StockStatus, UserType,
 };
@@ -135,6 +135,18 @@ pub trait AuthSubjectReservationRepository: Send + Sync {
     /// `Ok(false)` = bound to a DIFFERENT principal of that kind. The caller maps `false` to the
     /// population's typed error (`RiderAuthSubjectAlreadyBound` for riders).
     async fn reserve(&self, subject: AuthSubject, principal: BoundPrincipal) -> Result<bool, DomainError>;
+
+    /// A PURE read of the current holder of `(kind, subject)`, or `None` if unbound -- unlike
+    /// [`Self::reserve`], never binds. #639 part C step 6-iv (ADR-20260905-101349 §2): the
+    /// invitation-accept grant leg must know whether the accepting auth subject already holds a
+    /// MEMBER binding (a re-hire, or a person taking a second restaurant) BEFORE deciding which
+    /// `memberId` the resulting `RestaurantAccessGranted` fact carries -- a stray
+    /// `MemberAuthSubjectAlreadyBound` after a terminal accept, with no retry, is not acceptable.
+    async fn holder_of(
+        &self,
+        subject: AuthSubject,
+        kind: PrincipalKind,
+    ) -> Result<Option<uuid::Uuid>, DomainError>;
 }
 
 #[async_trait]
@@ -444,6 +456,22 @@ pub trait MemberIdentityRepository: Send + Sync {
     /// has ever been projected for it. `member.auth_subject UNIQUE` is what makes a bare
     /// `fetch_optional` honest (the `Rider.auth_ref` precedent) -- never `LIMIT 1`.
     async fn member_id_by_auth_subject(&self, auth_subject: AuthSubject) -> Result<Option<MemberId>, DomainError>;
+}
+
+/// #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment): the `AuthorityGuard`'s source
+/// of truth for "does this MEMBER hold MANAGER authority on this restaurant scope right now" --
+/// resolved from the ALREADY-LANDED `member` identity bridge (6-i/6-ii) joined to the WRITE-SIDE
+/// `domain_events` log itself, NEVER from the roster projection this round adds (young: a roster
+/// rebuild window must never change what a write-path guard accepts). `None` on every negative --
+/// unknown subject, wrong restaurant, or a revoked membership -- fail-closed, indistinguishable by
+/// design (this is an authorization question, not a diagnostic one).
+#[async_trait]
+pub trait MemberAuthorityRepository: Send + Sync {
+    async fn authority_for_subject(
+        &self,
+        auth_subject: AuthSubject,
+        restaurant_id: RestaurantId,
+    ) -> Result<Option<MemberAuthority>, DomainError>;
 }
 
 /// Read port over the `RiderRestriction` attribution table (#639 part C step 4-i,

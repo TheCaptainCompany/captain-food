@@ -29,8 +29,10 @@ pub struct RestaurantInvitationState {
     pub restaurant_id: RestaurantId,
     pub invited_email: EmailAddress,
     pub authority: MemberAuthority,
-    /// Minted by `InviteRestaurantMember`'s handler, not the client — "ours, so it exists before
-    /// any credential does". The SAME id rides on the eventual `RestaurantAccessGranted`.
+    /// CALLER-MINTED on `InviteRestaurantMember` (ADR-0034, corrected from an earlier handler-mint
+    /// draft, round 1 STOP finding) — "ours, so it exists before any credential does" holds either
+    /// way, since the platform still mints it before the invitee ever authenticates. The SAME id
+    /// rides on the eventual `RestaurantAccessGranted` (or the reservation holder's, round 2 §4).
     pub member_id: MemberId,
     /// `Some` once `RestaurantInvitationAccepted` has landed — `verify_email_token`'s OUTPUT,
     /// never a payload field (ADR-0041). `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg reads
@@ -80,20 +82,31 @@ fn apply(
                 terminal: None,
             }))
         }
+        // First-terminal-wins on replay (round 2, young): the lifecycle only ever transitions OUT
+        // of PENDING once, but a fold must stay correct even against a stray/duplicate terminal
+        // event on the stream -- a later Expired must never overwrite an already-recorded
+        // Accepted, because the cross-stream grant read's safety (vernon) rests on ACCEPTED being
+        // durably terminal once folded.
         DomainEvent::RestaurantInvitationAccepted(e) => {
             let mut s = state?;
-            s.accepted_auth_subject = Some(e.auth_subject.clone());
-            s.terminal = Some(RestaurantInvitationTerminal::Accepted);
+            if s.terminal.is_none() {
+                s.accepted_auth_subject = Some(e.auth_subject.clone());
+                s.terminal = Some(RestaurantInvitationTerminal::Accepted);
+            }
             Some(s)
         }
         DomainEvent::RestaurantInvitationRevoked(_) => {
             let mut s = state?;
-            s.terminal = Some(RestaurantInvitationTerminal::Revoked);
+            if s.terminal.is_none() {
+                s.terminal = Some(RestaurantInvitationTerminal::Revoked);
+            }
             Some(s)
         }
         DomainEvent::RestaurantInvitationExpired(_) => {
             let mut s = state?;
-            s.terminal = Some(RestaurantInvitationTerminal::Expired);
+            if s.terminal.is_none() {
+                s.terminal = Some(RestaurantInvitationTerminal::Expired);
+            }
             Some(s)
         }
         _ => state,
@@ -175,6 +188,28 @@ mod tests {
         let state = fold(&[sent(id), expired(id)]).expect("invitation exists");
         assert!(!state.is_pending());
         assert!(!state.is_accepted());
+    }
+
+    /// Round 2 (young): a stray `Expired` after an already-recorded `Accepted` must never
+    /// overwrite it -- the cross-stream grant read's safety rests on ACCEPTED being durably
+    /// terminal once folded.
+    #[test]
+    fn a_stray_expired_after_accepted_never_overwrites_it() {
+        let id = uuid::Uuid::from_u128(1);
+        let state = fold(&[sent(id), accepted(id), expired(id)]).expect("invitation exists");
+        assert!(state.is_accepted(), "first-terminal-wins: ACCEPTED must survive a later Expired");
+        assert_eq!(state.accepted_auth_subject, Some(AuthSubject("auth-supabase-1".into())));
+    }
+
+    /// Round 2 (vernon): ACCEPTED's terminality is pinned directly -- the grant-by-invitation
+    /// leg's whole proof rests on `is_pending()` being false and `is_accepted()` being true once
+    /// this fact has landed, whatever else replays after it.
+    #[test]
+    fn accepted_is_pinned_terminal() {
+        let id = uuid::Uuid::from_u128(1);
+        let state = fold(&[sent(id), accepted(id)]).expect("invitation exists");
+        assert!(!state.is_pending());
+        assert!(state.is_accepted());
     }
 
     #[test]

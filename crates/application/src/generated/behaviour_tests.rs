@@ -809,7 +809,22 @@ fn fx_restaurant_invitation_expired() -> DomainEvent {
 
 /// tests.yaml#/fixtures/restaurantAccessGrantedFromInvitation — events.yaml#/RestaurantAccessGranted
 fn fx_restaurant_access_granted_from_invitation() -> DomainEvent {
-    DomainEvent::RestaurantAccessGranted(evs::RestaurantAccessGranted { membership_id: sc::MembershipId(support::uid("membership-10")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), principal_kind: sc::PrincipalKind::MEMBER, member_id: sc::MemberId(support::uid("member-10")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::OPERATOR, basis: sc::AccessBasis::MEMBER_INVITATION })
+    DomainEvent::RestaurantAccessGranted(evs::RestaurantAccessGranted { membership_id: sc::MembershipId(support::uid("membership-from-invitation-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), principal_kind: sc::PrincipalKind::MEMBER, member_id: sc::MemberId(support::uid("member-10")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::OPERATOR, basis: sc::AccessBasis::MEMBER_INVITATION })
+}
+
+/// tests.yaml#/fixtures/restaurantInvitationSentToRehire — events.yaml#/RestaurantInvitationSent
+fn fx_restaurant_invitation_sent_to_rehire() -> DomainEvent {
+    DomainEvent::RestaurantInvitationSent(evs::RestaurantInvitationSent { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-5")), restaurant_id: sc::RestaurantId(support::uid("resto-2")), invited_email: sc::EmailAddress("rehire@example.com".into()), authority: sc::MemberAuthority::MANAGER, member_id: sc::MemberId(support::uid("member-fresh-rehire")) })
+}
+
+/// tests.yaml#/fixtures/restaurantInvitationAcceptedByRehire — events.yaml#/RestaurantInvitationAccepted
+fn fx_restaurant_invitation_accepted_by_rehire() -> DomainEvent {
+    DomainEvent::RestaurantInvitationAccepted(evs::RestaurantInvitationAccepted { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-5")), auth_subject: sc::AuthSubject("auth-rehire".into()) })
+}
+
+/// tests.yaml#/fixtures/restaurantAccessGrantedToRehire — events.yaml#/RestaurantAccessGranted
+fn fx_restaurant_access_granted_to_rehire() -> DomainEvent {
+    DomainEvent::RestaurantAccessGranted(evs::RestaurantAccessGranted { membership_id: sc::MembershipId(support::uid("membership-from-invitation-5")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-2")), principal_kind: sc::PrincipalKind::MEMBER, member_id: sc::MemberId(support::uid("member-existing-rehire")), auth_subject: sc::AuthSubject("auth-rehire".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::MEMBER_INVITATION })
 }
 
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
@@ -4740,7 +4755,7 @@ async fn test_restaurant_access_granted() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: Some(sc::ScopeType::RESTAURANT), scope_id: Some(sc::RestaurantId(support::uid("resto-1"))), member_id: Some(sc::MemberId(support::uid("member-1"))), auth_subject: Some(sc::AuthSubject("auth-supabase-1".into())), authority: Some(sc::MemberAuthority::MANAGER), basis: sc::AccessBasis::CAPTAIN_ONBOARDING, invitation_id: None };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let _ = result.expect("TestRestaurantAccessGranted: the spec expects acceptance");
@@ -4756,7 +4771,7 @@ async fn test_grant_restaurant_access_door_closed() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: Some(sc::ScopeType::RESTAURANT), scope_id: Some(sc::RestaurantId(support::uid("resto-1"))), member_id: Some(sc::MemberId(support::uid("member-1"))), auth_subject: Some(sc::AuthSubject("auth-supabase-1".into())), authority: Some(sc::MemberAuthority::MANAGER), basis: sc::AccessBasis::CAPTAIN_ONBOARDING, invitation_id: None };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = false;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let err = result.expect_err("TestGrantRestaurantAccessDoorClosed: the spec expects a typed rejection");
@@ -4771,7 +4786,7 @@ async fn test_grant_restaurant_access_basis_not_yet_accepted() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: Some(sc::ScopeType::RESTAURANT), scope_id: Some(sc::RestaurantId(support::uid("resto-1"))), member_id: Some(sc::MemberId(support::uid("member-1"))), auth_subject: Some(sc::AuthSubject("auth-supabase-1".into())), authority: Some(sc::MemberAuthority::MANAGER), basis: sc::AccessBasis::OWNER_DECLARATION, invitation_id: None };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::OWNER_DECLARATION };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let err = result.expect_err("TestGrantRestaurantAccessBasisNotYetAccepted: the spec expects a typed rejection");
@@ -4787,7 +4802,7 @@ async fn test_grant_restaurant_access_twice_is_idempotent() {
     spec_baseline(&bed).await;
     bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: Some(sc::ScopeType::RESTAURANT), scope_id: Some(sc::RestaurantId(support::uid("resto-1"))), member_id: Some(sc::MemberId(support::uid("member-1"))), auth_subject: Some(sc::AuthSubject("auth-supabase-1".into())), authority: Some(sc::MemberAuthority::MANAGER), basis: sc::AccessBasis::CAPTAIN_ONBOARDING, invitation_id: None };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-1")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), member_id: sc::MemberId(support::uid("member-1")), auth_subject: sc::AuthSubject("auth-supabase-1".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let _ = result.expect("TestGrantRestaurantAccessTwiceIsIdempotent: the spec expects acceptance");
@@ -4801,7 +4816,7 @@ async fn test_grant_restaurant_access_auth_subject_already_bound_is_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-2")), scope_type: Some(sc::ScopeType::RESTAURANT), scope_id: Some(sc::RestaurantId(support::uid("resto-2"))), member_id: Some(sc::MemberId(support::uid("member-2"))), auth_subject: Some(sc::AuthSubject("already-bound-member".into())), authority: Some(sc::MemberAuthority::OPERATOR), basis: sc::AccessBasis::CAPTAIN_ONBOARDING, invitation_id: None };
+    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-2")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-2")), member_id: sc::MemberId(support::uid("member-2")), auth_subject: sc::AuthSubject("already-bound-member".into()), authority: sc::MemberAuthority::OPERATOR, basis: sc::AccessBasis::CAPTAIN_ONBOARDING };
     let run_member_access_grant: bool = true;
     let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let err = result.expect_err("TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected: the spec expects a typed rejection");
@@ -4854,52 +4869,70 @@ async fn test_revoke_already_revoked_restaurant_membership_is_rejected() {
     bed.assert_appended("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &before, &[]);
 }
 
-/// tests.yaml#/tests/TestGrantRestaurantAccessFromInvitation — "The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from the client's copies"
-/// rules: MemberInvitationGrantDerivesFromInvitation, RestaurantAccessBasisAcceptedSetIsNarrower
+/// tests.yaml#/tests/TestGrantRestaurantAccessFromInvitation — "The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from a client copy, and its membershipId is UUIDv5-derived"
+/// rules: MemberInvitationGrantDerivesFromInvitation, RestaurantAccessGrantByInvitationDerivesMembershipId
 #[tokio::test]
 async fn test_grant_restaurant_access_from_invitation() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     bed.seed(&format!("RestaurantInvitation-{}", support::uid("invitation-1")), vec![fx_restaurant_invitation_sent(), fx_restaurant_invitation_accepted()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-10")), scope_type: None, scope_id: None, member_id: None, auth_subject: None, authority: None, basis: sc::AccessBasis::MEMBER_INVITATION, invitation_id: Some(sc::RestaurantInvitationId(support::uid("invitation-1"))) };
+    let cmd = cmds::GrantRestaurantAccessByInvitation { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-1")), token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
     let run_member_access_grant: bool = true;
-    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let result = crate::commands::grant_restaurant_access_by_invitation(&bed.store, &bed.identity, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
     let _ = result.expect("TestGrantRestaurantAccessFromInvitation: the spec expects acceptance");
     bed.assert_appended("TestGrantRestaurantAccessFromInvitation", &before, &[
-        (format!("RestaurantMembership-{}", support::uid("membership-10")), fx_restaurant_access_granted_from_invitation()),
+        (format!("RestaurantMembership-{}", support::uid("membership-from-invitation-1")), fx_restaurant_access_granted_from_invitation()),
     ]);
 }
 
-/// tests.yaml#/tests/TestGrantRestaurantAccessMissingInvitationProofIsRejected — "GrantRestaurantAccess on basis: MEMBER_INVITATION with no invitationId is rejected"
+/// tests.yaml#/tests/TestGrantRestaurantAccessByInvitationFromUnacceptedInvitationIsRejected — "GrantRestaurantAccessByInvitation naming an invitation that was never accepted is rejected, identically to an unknown one"
 /// rules: MemberInvitationGrantDerivesFromInvitation
 #[tokio::test]
-async fn test_grant_restaurant_access_missing_invitation_proof_is_rejected() {
-    let bed = TestBed::new();
-    spec_baseline(&bed).await;
-    let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-11")), scope_type: None, scope_id: None, member_id: None, auth_subject: None, authority: None, basis: sc::AccessBasis::MEMBER_INVITATION, invitation_id: None };
-    let run_member_access_grant: bool = true;
-    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
-    let err = result.expect_err("TestGrantRestaurantAccessMissingInvitationProofIsRejected: the spec expects a typed rejection");
-    support::assert_thrown("TestGrantRestaurantAccessMissingInvitationProofIsRejected", &err, &["InvitationProofRequired"]);
-    bed.assert_appended("TestGrantRestaurantAccessMissingInvitationProofIsRejected", &before, &[]);
-}
-
-/// tests.yaml#/tests/TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected — "GrantRestaurantAccess on basis: MEMBER_INVITATION naming an invitation that was never accepted is rejected, identically to an unknown one"
-/// rules: MemberInvitationGrantDerivesFromInvitation
-#[tokio::test]
-async fn test_grant_restaurant_access_from_unaccepted_invitation_is_rejected() {
+async fn test_grant_restaurant_access_by_invitation_from_unaccepted_invitation_is_rejected() {
     let bed = TestBed::new();
     spec_baseline(&bed).await;
     bed.seed(&format!("RestaurantInvitation-{}", support::uid("invitation-1")), vec![fx_restaurant_invitation_sent()]).await;
     let before = bed.snapshot();
-    let cmd = cmds::GrantRestaurantAccess { membership_id: sc::MembershipId(support::uid("membership-12")), scope_type: None, scope_id: None, member_id: None, auth_subject: None, authority: None, basis: sc::AccessBasis::MEMBER_INVITATION, invitation_id: Some(sc::RestaurantInvitationId(support::uid("invitation-1"))) };
+    let cmd = cmds::GrantRestaurantAccessByInvitation { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-1")), token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
     let run_member_access_grant: bool = true;
-    let result = crate::commands::grant_restaurant_access(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
-    let err = result.expect_err("TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected: the spec expects a typed rejection");
-    support::assert_thrown("TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected", &err, &["RestaurantInvitationNotAcceptable"]);
-    bed.assert_appended("TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected", &before, &[]);
+    let result = crate::commands::grant_restaurant_access_by_invitation(&bed.store, &bed.identity, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let err = result.expect_err("TestGrantRestaurantAccessByInvitationFromUnacceptedInvitationIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantRestaurantAccessByInvitationFromUnacceptedInvitationIsRejected", &err, &["RestaurantInvitationNotAcceptable"]);
+    bed.assert_appended("TestGrantRestaurantAccessByInvitationFromUnacceptedInvitationIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantRestaurantAccessByInvitationWrongSubjectIsRejected — "A caller proving a DIFFERENT subject than the one who accepted is refused identically to an unknown invitation -- the caller-is-the-subject proof"
+/// rules: MemberInvitationGrantDerivesFromInvitation
+#[tokio::test]
+async fn test_grant_restaurant_access_by_invitation_wrong_subject_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantInvitation-{}", support::uid("invitation-1")), vec![fx_restaurant_invitation_sent(), fx_restaurant_invitation_accepted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccessByInvitation { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-1")), token: sc::EmailVerificationToken("sb-magic-token-customer-login".into()) };
+    let run_member_access_grant: bool = true;
+    let result = crate::commands::grant_restaurant_access_by_invitation(&bed.store, &bed.identity, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let err = result.expect_err("TestGrantRestaurantAccessByInvitationWrongSubjectIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestGrantRestaurantAccessByInvitationWrongSubjectIsRejected", &err, &["RestaurantInvitationNotAcceptable"]);
+    bed.assert_appended("TestGrantRestaurantAccessByInvitationWrongSubjectIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestGrantRestaurantAccessByInvitationReusesHeldMemberId — "A re-hire (or a person joining a second restaurant) whose auth subject already holds a memberId gets the grant with the EXISTING memberId, never the invitation's freshly-minted one"
+/// rules: RestaurantAccessGrantByInvitationReusesTheHeldMemberId
+#[tokio::test]
+async fn test_grant_restaurant_access_by_invitation_reuses_held_member_id() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantInvitation-{}", support::uid("invitation-5")), vec![fx_restaurant_invitation_sent_to_rehire(), fx_restaurant_invitation_accepted_by_rehire()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::GrantRestaurantAccessByInvitation { invitation_id: sc::RestaurantInvitationId(support::uid("invitation-5")), token: sc::EmailVerificationToken("sb-magic-token-rehire".into()) };
+    let run_member_access_grant: bool = true;
+    let result = crate::commands::grant_restaurant_access_by_invitation(&bed.store, &bed.identity, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await;
+    let _ = result.expect("TestGrantRestaurantAccessByInvitationReusesHeldMemberId: the spec expects acceptance");
+    bed.assert_appended("TestGrantRestaurantAccessByInvitationReusesHeldMemberId", &before, &[
+        (format!("RestaurantMembership-{}", support::uid("membership-from-invitation-5")), fx_restaurant_access_granted_to_rehire()),
+    ]);
 }
 
 /// tests.yaml#/tests/TestRestaurantInvitationSent — "A restaurant member invites a colleague by email"

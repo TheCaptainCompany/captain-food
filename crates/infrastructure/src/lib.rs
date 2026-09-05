@@ -44,7 +44,7 @@ pub use persistence::{
     PgEventStore, PgOrderConversationRepository, PgOrderRepository,
     PgPricingPolicyRepository,
     PgProspectionRepository, PgReclamationRepository, PgRefundQueueRepository,
-    PgRestaurantRepository, PgRiderRepository, PgMemberRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
+    PgRestaurantRepository, PgRiderRepository, PgMemberRepository, PgMemberAuthorityRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
     PgUberSplitPolicyRepository,
 };
 pub use deletion::{DeletionEngine, DeletionEngineStatus};

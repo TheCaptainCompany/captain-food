@@ -61,6 +61,16 @@ pub use crate::process_managers::test_support::envelope;
 /// (`delivery_job_id_for`, the run's idempotency key), so the spec pair `deliv-1`/`order-1` must
 /// resolve to that same derivation or payload equality on `DeliveryRequested` could never hold.
 pub fn uid(s: &str) -> uuid::Uuid {
+    // #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment): the invitation-based
+    // grant's membershipId is UUIDv5-DERIVED from invitationId, never a free label -- so the
+    // fixture pool computes the SAME derivation a `then:` fixture asserts (the `deliv-1`
+    // precedent below), for ANY `membership-from-invitation-{label}`, generically.
+    if let Some(label) = s.strip_prefix("membership-from-invitation-") {
+        return crate::commands::restaurant_membership_id_for_invitation(
+            domain::generated::scalars::RestaurantInvitationId(uid(&format!("invitation-{label}"))),
+        )
+        .0;
+    }
     match s {
         "deliv-1" => {
             crate::process_managers::delivery_dispatch::delivery_job_id_for(&OrderId(uid("order-1"))).0
@@ -609,6 +619,11 @@ impl Default for SpecAuthSubjectReservations {
             (PrincipalKind::MEMBER, "already-bound-member".to_string()),
             uuid::Uuid::from_u128(0xB0B5757),
         );
+        // #639 part C step 6-iv round 2 (young B1): "auth-rehire" already holds an EXISTING
+        // memberId -- `TestGrantRestaurantAccessByInvitationReusesHeldMemberId` invites the SAME
+        // person again with a FRESH, DIFFERENT minted memberId and asserts the grant lands the
+        // HELD one, never the freshly-minted one.
+        held.insert((PrincipalKind::MEMBER, "auth-rehire".to_string()), uid("member-existing-rehire"));
         Self { held: std::sync::Mutex::new(held) }
     }
 }
@@ -630,6 +645,15 @@ impl crate::queries::AuthSubjectReservationRepository for SpecAuthSubjectReserva
                 Ok(true)
             }
         }
+    }
+
+    async fn holder_of(
+        &self,
+        subject: AuthSubject,
+        kind: PrincipalKind,
+    ) -> Result<Option<uuid::Uuid>, DomainError> {
+        let held = self.held.lock().unwrap();
+        Ok(held.get(&(kind, subject.0)).copied())
     }
 }
 
@@ -1440,8 +1464,12 @@ impl IdentityService for FakeIdentity {
         // SAME auth subject `stamp_rider_claim`'s fixture already treats as CUSTOMER-stamped
         // (`FAKE_CUSTOMER_STAMPED_SUBJECT`) — the member door's `riderRegisteredOnCustomerLogin`
         // precedent.
+        // #639 part C step 6-iv round 2: a SECOND named subject, proving "auth-rehire" -- the
+        // `SpecAuthSubjectReservations` seed's re-hire sentinel (see its `Default` impl).
         let auth_ref = if input.token.0 == "sb-magic-token-customer-login" {
             AuthSubject(FAKE_CUSTOMER_STAMPED_SUBJECT.into())
+        } else if input.token.0 == "sb-magic-token-rehire" {
+            AuthSubject("auth-rehire".into())
         } else {
             AuthSubject("auth-supabase-1".into())
         };

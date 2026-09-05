@@ -562,6 +562,10 @@ async fn restaurant_membership(
     let _ = (deps, actor, env);
     match message {
         RestaurantMembershipInbox::GrantRestaurantAccess(cmd) => run(async { application::commands::grant_restaurant_access(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor, deps.run_member_access_grant).await.map(|_| ()) }).await,
+        // Round 2 (ADR-20260905-101349 §2 amendment): the PUBLIC second half of the two-lane
+        // accept, its own message on the SAME lane -- verifies its own token through the SAME
+        // identity port `AcceptRestaurantInvitation`/`ConfirmMemberSignIn` use.
+        RestaurantMembershipInbox::GrantRestaurantAccessByInvitation(cmd) => run(async { application::commands::grant_restaurant_access_by_invitation(deps.store.as_ref(), deps.auth.as_ref(), deps.auth_subjects.as_ref(), cmd, actor, deps.run_member_access_grant).await.map(|_| ()) }).await,
         RestaurantMembershipInbox::RevokeRestaurantAccess(cmd) => run(async { application::commands::revoke_restaurant_access(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         // The member sign-in door (#639 part C step 6-ii, `member-sign-in` contract): gated at
         // BOTH handlers, unlike the grant/revoke asymmetry above. The gate-liveness gauge is

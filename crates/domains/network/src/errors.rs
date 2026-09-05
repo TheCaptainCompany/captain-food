@@ -180,20 +180,12 @@ pub const RESTAURANT_INVITATION_ALREADY_REVOKED: ErrorDef = ErrorDef {
     message_fr: "Cette invitation n'est plus en attente.",
 };
 
-/// `AcceptRestaurantInvitation` is refused (#639 part C step 6-iv) -- deliberately ONE error for five distinct causes (unknown `invitationId`, invited-email/verified-email mismatch, already accepted, revoked, expired), never distinguished, the 6-ii sign-in door's no-enumeration posture carried to the invitation door: a stranger holding a guessed or borrowed `invitationId` must learn nothing about which of the five is true. Never thrown by `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg (that leg only reads an ALREADY-accepted invitation, and its own absence there is the same error, by construction -- see the command's description).
+/// `AcceptRestaurantInvitation` is refused (#639 part C step 6-iv) -- deliberately ONE error for five distinct causes (unknown `invitationId`, invited-email/verified-email mismatch, already accepted, revoked, expired), never distinguished, the 6-ii sign-in door's no-enumeration posture carried to the invitation door: a stranger holding a guessed or borrowed `invitationId` must learn nothing about which of the five is true. ALSO thrown by `GrantRestaurantAccessByInvitation` (round 2, ADR-20260905-101349 §2 amendment) for the SAME reason plus one more: the invitation must be terminal `ACCEPTED` **and** its recorded `acceptedAuthSubject` must equal the caller's OWN proved subject -- a stranger who learns an `invitationId` and calls this door with their OWN valid token still gets this identical refusal, never a hint that the invitation exists or belongs to someone else.
 /// Context: `invitationId`.
 pub const RESTAURANT_INVITATION_NOT_ACCEPTABLE: ErrorDef = ErrorDef {
     code: "RestaurantInvitationNotAcceptable",
     message_en: "This invitation link is no longer valid.",
     message_fr: "Ce lien d'invitation n'est plus valide.",
-};
-
-/// `GrantRestaurantAccess` named `basis: MEMBER_INVITATION` but carried no `invitationId` -- the one proof that basis accepts. A client bug (the two-lane accept always supplies it), never a stranger-reachable path (the mutation still requires `roles: [ADMIN, PUBLIC]`, but PUBLIC has no OTHER way to reach `RestaurantAccessGranted`).
-/// Context: `membershipId`.
-pub const INVITATION_PROOF_REQUIRED: ErrorDef = ErrorDef {
-    code: "InvitationProofRequired",
-    message_en: "This grant is missing its invitation proof.",
-    message_fr: "Cet octroi n'a pas de preuve d'invitation.",
 };
 
 /// The magic-link token verified (the email is genuinely proven), but no `Member` row exists for this auth subject in `Member.auth_subject` (the step-6-i bridge) -- the not-yet-linked refusal (PROP-20260831-180622 §8.5, the rider door's `RiderNotRegistered` precedent). NOTHING is stamped and NOTHING is created; the session is still parked so the refusal screen can offer "Se déconnecter" against a real cookie. `email` carries the VERIFIED address (the token's output, never client input) so the refusal screen can print it.

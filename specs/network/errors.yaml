@@ -257,27 +257,17 @@ RestaurantInvitationNotAcceptable:
     five distinct causes (unknown `invitationId`, invited-email/verified-email mismatch, already
     accepted, revoked, expired), never distinguished, the 6-ii sign-in door's no-enumeration
     posture carried to the invitation door: a stranger holding a guessed or borrowed `invitationId`
-    must learn nothing about which of the five is true. Never thrown by `GrantRestaurantAccess`'s
-    `MEMBER_INVITATION` leg (that leg only reads an ALREADY-accepted invitation, and its own
-    absence there is the same error, by construction -- see the command's description).
+    must learn nothing about which of the five is true. ALSO thrown by
+    `GrantRestaurantAccessByInvitation` (round 2, ADR-20260905-101349 §2 amendment) for the SAME
+    reason plus one more: the invitation must be terminal `ACCEPTED` **and** its recorded
+    `acceptedAuthSubject` must equal the caller's OWN proved subject -- a stranger who learns an
+    `invitationId` and calls this door with their OWN valid token still gets this identical
+    refusal, never a hint that the invitation exists or belongs to someone else.
   context:
     invitationId: { $ref: 'scalars.yaml#/RestaurantInvitationId' }
   messages:
     en: "This invitation link is no longer valid."
     fr: "Ce lien d'invitation n'est plus valide."
-
-
-InvitationProofRequired:
-  description: >
-    `GrantRestaurantAccess` named `basis: MEMBER_INVITATION` but carried no `invitationId` -- the
-    one proof that basis accepts. A client bug (the two-lane accept always supplies it), never a
-    stranger-reachable path (the mutation still requires `roles: [ADMIN, PUBLIC]`, but PUBLIC has
-    no OTHER way to reach `RestaurantAccessGranted`).
-  context:
-    membershipId: { $ref: 'scalars.yaml#/MembershipId' }
-  messages:
-    en: "This grant is missing its invitation proof."
-    fr: "Cet octroi n'a pas de preuve d'invitation."
 
 
 # --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) -----------------

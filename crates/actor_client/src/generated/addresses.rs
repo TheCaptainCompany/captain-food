@@ -53,6 +53,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "EscalateToAdmin" => Some(("Conversation", Some("orderId"), 5)),
         "GrantCustomerCredit" => Some(("CustomerCredit", Some("customerId"), 5)),
         "GrantRestaurantAccess" => Some(("RestaurantMembership", Some("membershipId"), 5)),
+        "GrantRestaurantAccessByInvitation" => Some(("RestaurantMembership", None, 5)),
         "HandBackDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "ImportCatalog" => Some(("Catalog", Some("catalogId"), 5)),
         "InviteRestaurantMember" => Some(("RestaurantInvitation", Some("invitationId"), 5)),

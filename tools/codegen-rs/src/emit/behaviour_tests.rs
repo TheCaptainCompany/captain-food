@@ -290,6 +290,9 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     // read at the WRITE door only — `revokeRestaurantAccess` never consumes it (absent here on
     // purpose, the `RestrictRider`/`ReinstateRider` asymmetry).
     ("GrantRestaurantAccess", "RUN_MEMBER_ACCESS_GRANT", "run_member_access_grant"),
+    // Round 2 (ADR-20260905-101349 §2 amendment): the invitation-accept grant leg is its OWN
+    // command now, gated by the SAME door as the ADMIN grant above.
+    ("GrantRestaurantAccessByInvitation", "RUN_MEMBER_ACCESS_GRANT", "run_member_access_grant"),
     // #639 part C step 6-ii (ADR-20260905-101349 §6): the member sign-in door's release gate,
     // read at BOTH mutation handlers (unlike the grant door's asymmetry) -- OFF refuses before
     // the identity provider is touched at all.
@@ -404,6 +407,12 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         }
         "AcceptRestaurantInvitation" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor()).await", snake)
+        }
+        // Round 2 (ADR-20260905-101349 §2 amendment): the SECOND command of the two-lane accept,
+        // its own PUBLIC door -- verifies its OWN token through the SAME identity port, then reads
+        // across to the RestaurantInvitation stream and the 2a reservation table.
+        "GrantRestaurantAccessByInvitation" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await", snake)
         }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }

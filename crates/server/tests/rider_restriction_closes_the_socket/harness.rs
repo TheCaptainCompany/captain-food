@@ -339,6 +339,8 @@ pub fn schema_over(
         infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
     );
     let rider_roster: Arc<dyn RiderRosterReadRepository> = Arc::new(roster);
+    let member_authority: Arc<dyn application::queries::MemberAuthorityRepository> =
+        Arc::new(infrastructure::PgMemberAuthorityRepository::new(pool.clone()));
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
@@ -378,6 +380,7 @@ pub fn schema_over(
             deliveries,
             rider_restrictions,
             rider_roster,
+            member_authority,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,

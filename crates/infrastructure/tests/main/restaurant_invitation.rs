@@ -1,16 +1,17 @@
-//! `RestaurantInvitation` walk (#639 part C step 6-iv, ADR-20260905-101349 §2/§3): the roster and
-//! the invitation, on REAL Postgres. Needs `DATABASE_URL`; SKIPS offline (`DB_TESTS_REQUIRED=0`),
-//! the `restaurant_membership.rs` precedent this file mirrors -- application-layer command
-//! handlers against a real `PgEventStore`, no HTTP/GraphQL layer (that stack needs the read
-//! models this dispatch declares NOT LANDED, see the hand-back). What this proves: invite ->
-//! accept (right/wrong email, byte-identical refusal) -> the SECOND command derives the grant's
-//! fields from the accepted invitation, never the client's copies -> revoke -> a second accept of
-//! an already-accepted/revoked invitation is refused identically -> the door gates the invite leg
-//! only.
+//! `RestaurantInvitation` walk (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, round 2's §2
+//! amendment): the roster and the invitation, on REAL Postgres. Needs `DATABASE_URL`; SKIPS offline
+//! (`DB_TESTS_REQUIRED=0`), the `restaurant_membership.rs` precedent this file mirrors --
+//! application-layer command handlers against a real `PgEventStore`, no HTTP/GraphQL layer (that
+//! stack needs the read models this dispatch declares NOT LANDED, see the hand-back). What this
+//! proves: invite -> accept (right/wrong email, byte-identical refusal, the token spent
+//! UNCONDITIONALLY) -> the SECOND, PUBLIC-only command derives the grant's fields from the accepted
+//! invitation, proving the caller IS the accepting subject, deriving a UUIDv5 membershipId and
+//! reusing an already-held memberId for a re-hire -> revoke -> a second accept of an
+//! already-accepted/revoked invitation is refused identically -> the door gates the invite leg only.
 
 use application::commands::{
-    accept_restaurant_invitation, grant_restaurant_access, invite_restaurant_member,
-    revoke_restaurant_invitation,
+    accept_restaurant_invitation, grant_restaurant_access_by_invitation, invite_restaurant_member,
+    restaurant_membership_id_for_invitation, revoke_restaurant_invitation,
 };
 use application::generated::services::{
     IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentitySendEmailMagicLinkInput,
@@ -22,12 +23,12 @@ use application::generated::services::{
 use application::ports::{Actor, EventStore};
 use async_trait::async_trait;
 use domain::generated::commands::{
-    AcceptRestaurantInvitation, GrantRestaurantAccess, InviteRestaurantMember,
+    AcceptRestaurantInvitation, GrantRestaurantAccessByInvitation, InviteRestaurantMember,
     RevokeRestaurantInvitation,
 };
 use domain::generated::events::DomainEvent;
 use domain::generated::scalars::{
-    AccessBasis, EmailAddress, EmailVerificationToken, MemberAuthority, MemberId, MembershipId,
+    AccessBasis, EmailAddress, EmailVerificationToken, MemberAuthority, MemberId,
     RestaurantId, RestaurantInvitationId,
 };
 use domain::shared::errors::DomainError;
@@ -45,9 +46,11 @@ fn actor() -> Actor {
     }
 }
 
-/// A scriptable `verify_email_token`: proves `email` for any token except `"bad-token"`
-/// (`InvalidVerificationToken`) -- the `FakeIdentity` precedent (`application::behaviour_support`),
-/// re-implemented here because that module is `#[cfg(test)]`-private to its own crate.
+/// A scriptable `verify_email_token`: proves `email`/`auth_subject` for any token except
+/// `"bad-token"` (`InvalidVerificationToken`) -- the `FakeIdentity` precedent
+/// (`application::behaviour_support`), re-implemented here because that module is
+/// `#[cfg(test)]`-private to its own crate. `calls` is asserted directly (beck): a refusal alone
+/// never proves whether the token was spent.
 struct ScriptedIdentity {
     email: EmailAddress,
     auth_subject: domain::generated::scalars::AuthSubject,
@@ -61,6 +64,10 @@ impl ScriptedIdentity {
             auth_subject: domain::generated::scalars::AuthSubject(auth_subject.to_string()),
             calls: Mutex::new(0),
         }
+    }
+
+    fn calls(&self) -> u32 {
+        *self.calls.lock().expect("mutex")
     }
 }
 
@@ -171,23 +178,19 @@ async fn revoke(pool: &PgPool, invitation_id: uuid::Uuid) -> Result<(), DomainEr
 
 async fn grant_from_invitation(
     pool: &PgPool,
-    membership_id: uuid::Uuid,
+    identity: &dyn IdentityService,
     invitation_id: uuid::Uuid,
+    tok: &str,
 ) -> Result<(), DomainError> {
     let store = PgEventStore::new(pool.clone());
     let auth_subjects = infrastructure::PgAuthSubjectReservationRepository::new(pool.clone());
-    grant_restaurant_access(
+    grant_restaurant_access_by_invitation(
         &store,
+        identity,
         &auth_subjects,
-        GrantRestaurantAccess {
-            membership_id: MembershipId(membership_id),
-            scope_type: None,
-            scope_id: None,
-            member_id: None,
-            auth_subject: None,
-            authority: None,
-            basis: AccessBasis::MEMBER_INVITATION,
-            invitation_id: Some(RestaurantInvitationId(invitation_id)),
+        GrantRestaurantAccessByInvitation {
+            invitation_id: RestaurantInvitationId(invitation_id),
+            token: token(tok),
         },
         &actor(),
         true, // RUN_MEMBER_ACCESS_GRANT ON -- this walk exercises the aggregate, not the door.
@@ -234,6 +237,11 @@ async fn wrong_email_and_unknown_invitation_refuse_identically() {
         }
         other => panic!("expected two Rejected errors, got {other:?}"),
     }
+    // Round 2 (beck BLOCKING): the token is spent UNCONDITIONALLY on BOTH legs -- an unknown
+    // invitationId burns it exactly like a wrong-email one. Red under the round-1 ordering (the
+    // `is_pending()` filter ran BEFORE `verify_email_token`, so the unknown leg's `calls` stayed 0).
+    assert_eq!(stranger.calls(), 1, "wrong-email leg must call verify_email_token exactly once");
+    assert_eq!(genuine.calls(), 1, "unknown-invitation leg must call verify_email_token exactly once too");
 }
 
 #[tokio::test]
@@ -252,12 +260,13 @@ async fn revoked_invitation_refuses_accept_and_a_second_revoke() {
     assert!(matches!(second_revoke, DomainError::Rejected { code, .. } if code == "RestaurantInvitationAlreadyRevoked"));
 }
 
-/// The two-lane accept, end to end: AcceptRestaurantInvitation, then GrantRestaurantAccess derives
-/// EVERY field (scopeId/memberId/authority/authSubject) from the invitation's own recorded facts
-/// -- never from the (deliberately absent) client copies on the second command. A second
-/// submission of the same accepted invitationId is the idempotent-replay path, not a privilege
-/// question (M3, named mutant: if the handler trusted a client-supplied field instead of deriving
-/// it, this test's assertions on the recorded event would fail).
+/// The two-lane accept, end to end: `AcceptRestaurantInvitation`, then
+/// `GrantRestaurantAccessByInvitation` derives EVERY field (scopeId/memberId/authority/authSubject)
+/// from the invitation's own recorded facts and its OWN proved token -- there is no client copy to
+/// trust or ignore, since the command carries none. A second submission of the same accepted
+/// invitationId is the idempotent-replay path on the DERIVED membershipId, not a privilege question
+/// (M3, named mutant: if the handler derived any field differently, this test's assertions on the
+/// recorded event would fail).
 #[tokio::test]
 async fn the_two_lane_accept_derives_the_grant_from_the_invitation() {
     let Some(db) = crate::common::TestDb::acquire("restaurant_invitation_two_lane").await else { return };
@@ -272,83 +281,108 @@ async fn the_two_lane_accept_derives_the_grant_from_the_invitation() {
     let identity = ScriptedIdentity::new("owner@pizzaroma.fr", "auth-two-lane");
     accept(&pool, &identity, invitation_id, "sb-magic-token-abc").await.expect("accept");
 
-    let membership_id = uuid::Uuid::new_v4();
-    grant_from_invitation(&pool, membership_id, invitation_id).await.expect("grant derives from the invitation");
+    grant_from_invitation(&pool, &identity, invitation_id, "sb-magic-token-abc")
+        .await
+        .expect("grant derives from the invitation");
 
+    let membership_id = restaurant_membership_id_for_invitation(RestaurantInvitationId(invitation_id));
     let store = PgEventStore::new(pool.clone());
-    let (events, _version) = store.load(&format!("RestaurantMembership-{membership_id}")).await.expect("load membership stream");
+    let (events, _version) = store.load(&format!("RestaurantMembership-{}", membership_id.0)).await.expect("load membership stream");
     let DomainEvent::RestaurantAccessGranted(granted) = events.first().expect("one event") else {
         panic!("expected RestaurantAccessGranted, got {:?}", events.first());
     };
-    assert_eq!(granted.scope_id.0, restaurant_id, "scopeId derived from the invitation, not a client copy");
-    assert_eq!(granted.member_id.0, member_id, "memberId derived from the invitation, not a client copy");
-    assert_eq!(granted.authority, MemberAuthority::OPERATOR, "authority derived from the invitation, not a client copy");
-    assert_eq!(granted.auth_subject.0, "auth-two-lane", "authSubject derived from the ACCEPTED fact, not a client copy");
+    assert_eq!(granted.scope_id.0, restaurant_id, "scopeId derived from the invitation");
+    assert_eq!(granted.member_id.0, member_id, "memberId derived from the invitation (never held elsewhere)");
+    assert_eq!(granted.authority, MemberAuthority::OPERATOR, "authority derived from the invitation");
+    assert_eq!(granted.auth_subject.0, "auth-two-lane", "authSubject derived from the ACCEPTED fact / the grant leg's own proof");
     assert_eq!(granted.basis, AccessBasis::MEMBER_INVITATION);
 
-    // A second submission for the same accepted invitationId is idempotent-replay (a DIFFERENT
-    // membershipId still names the SAME already-granted relationship's proof; the underlying
-    // GrantRestaurantAccess.membershipId idempotency key governs, so this call targets the SAME
-    // membershipId to prove replay, not a fresh grant).
-    grant_from_invitation(&pool, membership_id, invitation_id).await.expect("idempotent replay, not rejected");
-    let (events_after, _) = store.load(&format!("RestaurantMembership-{membership_id}")).await.expect("reload");
-    assert_eq!(events_after.len(), 1, "no second RestaurantAccessGranted for the same membershipId");
+    // A second submission for the same accepted invitationId is idempotent-replay: the DERIVED
+    // membershipId names the SAME stream, so this is ONE fact for the whole invitation, never two
+    // (vernon B1: an accepted invitation must yield at most one membership).
+    grant_from_invitation(&pool, &identity, invitation_id, "sb-magic-token-abc")
+        .await
+        .expect("idempotent replay, not rejected");
+    let (events_after, _) = store.load(&format!("RestaurantMembership-{}", membership_id.0)).await.expect("reload");
+    assert_eq!(events_after.len(), 1, "no second RestaurantAccessGranted for the same accepted invitation");
 }
 
-/// M3b (named mutant, stronger than the derivation assertions above): the client's OWN copies of
-/// scopeId/memberId/authority/authSubject on the grant leg are actively WRONG here, and the
-/// handler must still land the invitation's values -- planted by having the handler prefer
-/// `cmd.member_id` when present (`cmd.member_id.unwrap_or(invitation.member_id)`), which this test
-/// catches (unlike the derivation test above, whose command always sends `None`).
+/// vernon B2 (the caller-is-the-subject proof): a stranger who learns the invitationId and proves
+/// their OWN valid token (a DIFFERENT auth subject than the one who accepted) gains nothing --
+/// refused identically to an unknown invitation, never a hint that this one belongs to someone else.
 #[tokio::test]
-async fn client_supplied_fields_on_the_grant_leg_are_ignored() {
-    let Some(db) = crate::common::TestDb::acquire("restaurant_invitation_ignore_client_fields").await else { return };
+async fn a_stranger_with_their_own_valid_token_gains_nothing() {
+    let Some(db) = crate::common::TestDb::acquire("restaurant_invitation_stranger_grant").await else { return };
     let pool = db.pool();
     let invitation_id = uuid::Uuid::new_v4();
-    let restaurant_id = uuid::Uuid::new_v4();
-    let member_id = uuid::Uuid::new_v4();
-    invite(&pool, invitation_id, restaurant_id, member_id, "owner@pizzaroma.fr", MemberAuthority::MANAGER, true)
+    invite(&pool, invitation_id, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), "owner@pizzaroma.fr", MemberAuthority::MANAGER, true)
         .await
         .expect("invite");
-    let identity = ScriptedIdentity::new("owner@pizzaroma.fr", "auth-real");
-    accept(&pool, &identity, invitation_id, "sb-magic-token-abc").await.expect("accept");
+    let owner = ScriptedIdentity::new("owner@pizzaroma.fr", "auth-owner");
+    accept(&pool, &owner, invitation_id, "sb-magic-token-abc").await.expect("accept");
 
-    let membership_id = uuid::Uuid::new_v4();
+    let stranger = ScriptedIdentity::new("stranger@example.com", "auth-stranger");
+    let err = grant_from_invitation(&pool, &stranger, invitation_id, "sb-magic-token-stranger")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DomainError::Rejected { code, .. } if code == "RestaurantInvitationNotAcceptable"));
+
+    // Nothing was granted: the membership stream the (correct) derivation would target stays empty.
+    let membership_id = restaurant_membership_id_for_invitation(RestaurantInvitationId(invitation_id));
     let store = PgEventStore::new(pool.clone());
-    let auth_subjects = infrastructure::PgAuthSubjectReservationRepository::new(pool.clone());
-    grant_restaurant_access(
-        &store,
-        &auth_subjects,
-        GrantRestaurantAccess {
-            membership_id: MembershipId(membership_id),
-            scope_type: Some(domain::generated::scalars::ScopeType::RESTAURANT),
-            scope_id: Some(RestaurantId(uuid::Uuid::new_v4())), // WRONG, must be ignored
-            member_id: Some(MemberId(uuid::Uuid::new_v4())),    // WRONG, must be ignored
-            auth_subject: Some(domain::generated::scalars::AuthSubject("attacker-supplied".into())), // WRONG, must be ignored
-            authority: Some(MemberAuthority::OPERATOR),          // WRONG (invitation says MANAGER), must be ignored
-            basis: AccessBasis::MEMBER_INVITATION,
-            invitation_id: Some(RestaurantInvitationId(invitation_id)),
-        },
-        &actor(),
-        true,
-    )
-    .await
-    .expect("grant derives from the invitation, not the client's fields");
+    let (events, _) = store.load(&format!("RestaurantMembership-{}", membership_id.0)).await.expect("load");
+    assert!(events.is_empty(), "a stranger's own valid token must grant nothing");
+}
 
-    let (events, _) = store.load(&format!("RestaurantMembership-{membership_id}")).await.expect("load");
+/// young B1: a re-hire (or a person joining a second restaurant) whose auth subject already holds
+/// a memberId from an EARLIER accepted invitation gets the grant with the EXISTING memberId, never
+/// the second invitation's freshly-minted one -- no `MemberAuthSubjectAlreadyBound` after a
+/// terminal accept, with no retry available.
+#[tokio::test]
+async fn a_rehire_reuses_the_held_member_id() {
+    let Some(db) = crate::common::TestDb::acquire("restaurant_invitation_rehire").await else { return };
+    let pool = db.pool();
+    let first_invitation = uuid::Uuid::new_v4();
+    let first_member = uuid::Uuid::new_v4();
+    invite(&pool, first_invitation, uuid::Uuid::new_v4(), first_member, "person@example.com", MemberAuthority::OPERATOR, true)
+        .await
+        .expect("first invite");
+    let person = ScriptedIdentity::new("person@example.com", "auth-person");
+    accept(&pool, &person, first_invitation, "sb-magic-token-first").await.expect("first accept");
+    grant_from_invitation(&pool, &person, first_invitation, "sb-magic-token-first")
+        .await
+        .expect("first grant");
+
+    // A SECOND restaurant invites the SAME person (SAME email, SAME resulting auth subject once
+    // accepted) with a FRESH, DIFFERENT minted memberId.
+    let second_invitation = uuid::Uuid::new_v4();
+    let second_restaurant = uuid::Uuid::new_v4();
+    let second_member = uuid::Uuid::new_v4();
+    assert_ne!(first_member, second_member);
+    invite(&pool, second_invitation, second_restaurant, second_member, "person@example.com", MemberAuthority::MANAGER, true)
+        .await
+        .expect("second invite");
+    accept(&pool, &person, second_invitation, "sb-magic-token-first").await.expect("second accept");
+    grant_from_invitation(&pool, &person, second_invitation, "sb-magic-token-first")
+        .await
+        .expect("second grant reuses the held memberId");
+
+    let second_membership_id = restaurant_membership_id_for_invitation(RestaurantInvitationId(second_invitation));
+    let store = PgEventStore::new(pool.clone());
+    let (events, _) = store.load(&format!("RestaurantMembership-{}", second_membership_id.0)).await.expect("load second");
     let DomainEvent::RestaurantAccessGranted(granted) = events.first().expect("one event") else {
         panic!("expected RestaurantAccessGranted");
     };
-    assert_eq!(granted.scope_id.0, restaurant_id);
-    assert_eq!(granted.member_id.0, member_id);
+    assert_eq!(granted.member_id.0, first_member, "the SECOND grant must reuse the FIRST invitation's memberId");
+    assert_ne!(granted.member_id.0, second_member, "never the second invitation's freshly-minted memberId");
+    assert_eq!(granted.scope_id.0, second_restaurant);
     assert_eq!(granted.authority, MemberAuthority::MANAGER);
-    assert_eq!(granted.auth_subject.0, "auth-real");
 }
 
-/// M4 (named mutant): the grant leg's proof is invitationId-presence + ACCEPTED status, never a
-/// client-supplied authSubject -- an invitation that was never accepted refuses the grant leg
-/// identically to an unknown invitationId (no enumeration oracle carried into the grant leg
-/// either).
+/// M4 (named mutant): the grant leg's proof is invitationId-presence + ACCEPTED status + the
+/// caller's own proved subject matching the accepted one, never anything else -- an invitation
+/// that was never accepted refuses the grant leg identically to an unknown invitationId (no
+/// enumeration oracle carried into the grant leg either).
 #[tokio::test]
 async fn grant_from_an_unaccepted_invitation_is_refused() {
     let Some(db) = crate::common::TestDb::acquire("restaurant_invitation_grant_unaccepted").await else { return };
@@ -357,36 +391,15 @@ async fn grant_from_an_unaccepted_invitation_is_refused() {
     invite(&pool, invitation_id, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), "owner@pizzaroma.fr", MemberAuthority::MANAGER, true)
         .await
         .expect("invite, never accepted");
-    let err = grant_from_invitation(&pool, uuid::Uuid::new_v4(), invitation_id).await.unwrap_err();
+    let identity = ScriptedIdentity::new("owner@pizzaroma.fr", "auth-owner");
+    let err = grant_from_invitation(&pool, &identity, invitation_id, "sb-magic-token-abc").await.unwrap_err();
     assert!(matches!(err, DomainError::Rejected { code, .. } if code == "RestaurantInvitationNotAcceptable"));
-
-    let missing_proof = {
-        let store = PgEventStore::new(pool.clone());
-        let auth_subjects = infrastructure::PgAuthSubjectReservationRepository::new(pool.clone());
-        grant_restaurant_access(
-            &store,
-            &auth_subjects,
-            GrantRestaurantAccess {
-                membership_id: MembershipId(uuid::Uuid::new_v4()),
-                scope_type: None,
-                scope_id: None,
-                member_id: None,
-                auth_subject: None,
-                authority: None,
-                basis: AccessBasis::MEMBER_INVITATION,
-                invitation_id: None,
-            },
-            &actor(),
-            true,
-        )
-        .await
-        .unwrap_err()
-    };
-    assert!(matches!(missing_proof, DomainError::Rejected { code, .. } if code == "InvitationProofRequired"));
 }
 
-/// The invite door gates the invite leg only; the revoke leg is NEVER gated (M5, named mutant: a
-/// door check accidentally added to `revoke_restaurant_invitation` would make this red).
+/// The invite door gates the invite leg only; the revoke leg is NEVER gated. M5's shape is
+/// COMPILER-ENFORCED rather than mutant-tested (round 1 correction, beck): `revoke_restaurant_
+/// invitation`'s signature carries no boolean gate parameter at all, so a door check on that path
+/// is structurally unspellable -- there is no mutant to plant.
 #[tokio::test]
 async fn the_door_refuses_invite_but_not_revoke() {
     let Some(db) = crate::common::TestDb::acquire("restaurant_invitation_door").await else { return };

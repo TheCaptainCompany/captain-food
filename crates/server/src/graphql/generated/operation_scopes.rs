@@ -117,6 +117,7 @@ pub const OPERATION_SCOPES: &[(&str, &str, &str)] = &[
     ("mutation", "markProspectCold", "network"),
     ("mutation", "recordProspectReply", "network"),
     ("mutation", "grantRestaurantAccess", "network"),
+    ("mutation", "grantRestaurantAccessByInvitation", "network"),
     ("mutation", "revokeRestaurantAccess", "network"),
     ("mutation", "requestMemberSignInLink", "network"),
     ("mutation", "confirmMemberSignIn", "network"),

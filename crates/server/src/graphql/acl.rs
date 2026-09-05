@@ -208,6 +208,65 @@ impl Guard for StandingGuard {
     }
 }
 
+/// The MANAGER-authority door (#639 part C step 6-iv round 2, ADR-20260905-101349 §2 amendment):
+/// a SECOND, orthogonal question from `RoleGuard` — chained `.and(..)` on the two operations that
+/// declare it (`InviteRestaurantMember`/`RevokeRestaurantInvitation`), never on every RESTAURANT
+/// operation, unlike `StandingGuard`'s blanket application. Genuine protection on the only
+/// REACHABLE production path: the mailbox itself has no independent authority check yet
+/// (`crates/infrastructure/src/mailbox/handler.rs::resolve_actor` has no RESTAURANT branch, #144 —
+/// that file is FENCED for this dispatch), so this is a real belt, not defense-in-depth over an
+/// already-enforced door.
+///
+/// Resolves authority from [`application::queries::MemberAuthorityRepository`] — the ALREADY-
+/// LANDED `member` identity bridge (6-i/6-ii) joined to the write-side `domain_events` log itself,
+/// NEVER the `RestaurantRoster` projection round 2 adds (young: a roster rebuild window must never
+/// change what this write-path guard accepts). Fails CLOSED on every negative: no resolved
+/// `ReadScope::Restaurant`, no `Principal` subject, no repository wired, or a resolved authority
+/// that is not the required one — all four are the SAME typed FORBIDDEN, no enumeration of which.
+pub struct AuthorityGuard {
+    required: domain::generated::scalars::MemberAuthority,
+}
+
+impl AuthorityGuard {
+    pub fn new(required: domain::generated::scalars::MemberAuthority) -> Self {
+        Self { required }
+    }
+}
+
+impl Guard for AuthorityGuard {
+    async fn check(&self, ctx: &Context<'_>) -> Result<()> {
+        use application::queries::{MemberAuthorityRepository, ReadScope};
+
+        let forbidden = || {
+            Err(async_graphql::Error::new(
+                "forbidden: this operation needs a higher authority".to_string(),
+            )
+            .extend_with(|_, e| {
+                e.set("code", "FORBIDDEN");
+            }))
+        };
+        let Some(ReadScope::Restaurant(restaurant_id)) = ctx.data_opt::<ReadScope>() else {
+            return forbidden();
+        };
+        let Some(principal) = ctx.data_opt::<crate::auth::Principal>() else {
+            return forbidden();
+        };
+        let Some(sub) = principal.user_id() else {
+            return forbidden();
+        };
+        let Some(repo) = ctx.data_opt::<std::sync::Arc<dyn MemberAuthorityRepository>>() else {
+            return forbidden();
+        };
+        let resolved = repo
+            .authority_for_subject(domain::generated::scalars::AuthSubject(sub.to_string()), *restaurant_id)
+            .await;
+        match resolved {
+            Ok(Some(authority)) if authority == self.required => Ok(()),
+            _ => forbidden(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod standing_guard_cell_tests {
     use super::*;
@@ -277,5 +336,175 @@ mod standing_guard_cell_tests {
             e.extensions.as_ref().is_some_and(|ext| ext.get("reason").is_some_and(|r| r.to_string().contains("RIDER_RESTRICTED")))
         });
         assert!(denied_after, "the CELL must refuse even though ReadScope stayed ACTIVE: {:?}", resp.errors);
+    }
+}
+
+#[cfg(test)]
+mod authority_guard_tests {
+    //! #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment): `AuthorityGuard` tested
+    //! independently of the UI, through the REAL mutation resolver (`inviteRestaurantMember`) so
+    //! the guard chain actually runs, never a bare unit call on the guard struct alone.
+    use super::*;
+    use application::queries::{MemberAuthorityRepository, ReadScope};
+    use domain::generated::scalars::{AuthSubject, MemberAuthority, RestaurantId};
+    use domain::shared::errors::DomainError;
+
+    /// True when the error is a FORBIDDEN rejection — the `crates/server/tests/graphql_acl.rs`
+    /// precedent, duplicated here because that integration-test file cannot see this unit module.
+    fn is_forbidden(err: &async_graphql::ServerError) -> bool {
+        serde_json::to_value(err)
+            .ok()
+            .and_then(|v| v.get("extensions").and_then(|e| e.get("code")).cloned())
+            == Some(serde_json::json!("FORBIDDEN"))
+    }
+
+    /// A scriptable authority double: `Some(_)` answers the ONE (subject, restaurant) pair it was
+    /// built with, `None` for every other combination -- so a wrong subject or a wrong restaurant
+    /// is indistinguishable from "no repository wired" at the guard.
+    struct ScriptedAuthority {
+        subject: &'static str,
+        restaurant: uuid::Uuid,
+        authority: MemberAuthority,
+    }
+
+    #[async_trait::async_trait]
+    impl MemberAuthorityRepository for ScriptedAuthority {
+        async fn authority_for_subject(
+            &self,
+            auth_subject: AuthSubject,
+            restaurant_id: RestaurantId,
+        ) -> Result<Option<MemberAuthority>, DomainError> {
+            Ok((auth_subject.0 == self.subject && restaurant_id.0 == self.restaurant)
+                .then_some(self.authority))
+        }
+    }
+
+    fn invite_mutation() -> String {
+        format!(
+            r#"mutation {{ inviteRestaurantMember(input: {{
+                invitationId: "{}", restaurantId: "{}", invitedEmail: "colleague@example.com",
+                authority: OPERATOR, memberId: "{}"
+            }}) {{ messageId }} }}"#,
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4()
+        )
+    }
+
+    fn member_principal(sub: &str) -> (crate::auth::Principal, crate::auth::ActingRole) {
+        let principal = crate::auth::Principal::member_binding(sub.to_string(), true);
+        let role = principal.acting_role(RequestRole::Restaurant);
+        (principal, role)
+    }
+
+    /// A MANAGER is admitted past the guard (a real resolver error past it — no wired mailbox in
+    /// this no-DB schema — is expected and is NOT a FORBIDDEN).
+    #[tokio::test]
+    async fn manager_is_admitted() {
+        let schema = crate::graphql::schema::build_schema(None, None, None);
+        let restaurant_id = uuid::Uuid::from_u128(0x1234);
+        let (principal, role) = member_principal("manager-sub");
+        let repo: std::sync::Arc<dyn MemberAuthorityRepository> = std::sync::Arc::new(ScriptedAuthority {
+            subject: "manager-sub",
+            restaurant: restaurant_id,
+            authority: MemberAuthority::MANAGER,
+        });
+        let resp = schema
+            .execute(
+                async_graphql::Request::new(invite_mutation())
+                    .data(role)
+                    .data(principal)
+                    .data(ReadScope::Restaurant(RestaurantId(restaurant_id)))
+                    .data(repo),
+            )
+            .await;
+        assert!(!resp.errors.is_empty(), "expected an error past the guard (no wired mailbox)");
+        assert!(!is_forbidden(&resp.errors[0]), "a MANAGER must pass the guard: {:?}", resp.errors[0]);
+    }
+
+    /// An OPERATOR is refused — the exact case the SDL prose (`InviteRestaurantMember.description`)
+    /// promises and the round-1 finding said had no enforcement anywhere.
+    #[tokio::test]
+    async fn operator_is_refused() {
+        let schema = crate::graphql::schema::build_schema(None, None, None);
+        let restaurant_id = uuid::Uuid::from_u128(0x1234);
+        let (principal, role) = member_principal("operator-sub");
+        let repo: std::sync::Arc<dyn MemberAuthorityRepository> = std::sync::Arc::new(ScriptedAuthority {
+            subject: "operator-sub",
+            restaurant: restaurant_id,
+            authority: MemberAuthority::OPERATOR,
+        });
+        let resp = schema
+            .execute(
+                async_graphql::Request::new(invite_mutation())
+                    .data(role)
+                    .data(principal)
+                    .data(ReadScope::Restaurant(RestaurantId(restaurant_id)))
+                    .data(repo),
+            )
+            .await;
+        assert_eq!(resp.errors.len(), 1, "expected one error: {:?}", resp.errors);
+        assert!(is_forbidden(&resp.errors[0]), "an OPERATOR must be FORBIDDEN: {:?}", resp.errors[0]);
+    }
+
+    /// No repository wired at all fails CLOSED — never an unauthenticated bypass.
+    #[tokio::test]
+    async fn no_repository_wired_fails_closed() {
+        let schema = crate::graphql::schema::build_schema(None, None, None);
+        let restaurant_id = uuid::Uuid::from_u128(0x1234);
+        let (principal, role) = member_principal("manager-sub");
+        let resp = schema
+            .execute(
+                async_graphql::Request::new(invite_mutation())
+                    .data(role)
+                    .data(principal)
+                    .data(ReadScope::Restaurant(RestaurantId(restaurant_id))),
+            )
+            .await;
+        assert_eq!(resp.errors.len(), 1, "expected one error: {:?}", resp.errors);
+        assert!(is_forbidden(&resp.errors[0]), "no repository must fail closed: {:?}", resp.errors[0]);
+    }
+
+    /// A caller with no resolved `ReadScope::Restaurant` at all (the RoleGuard-refused paths never
+    /// reach here in production, but the guard itself must not panic or silently admit) fails
+    /// CLOSED too.
+    #[tokio::test]
+    async fn no_restaurant_scope_fails_closed() {
+        let schema = crate::graphql::schema::build_schema(None, None, None);
+        let (principal, role) = member_principal("manager-sub");
+        let repo: std::sync::Arc<dyn MemberAuthorityRepository> = std::sync::Arc::new(ScriptedAuthority {
+            subject: "manager-sub",
+            restaurant: uuid::Uuid::from_u128(0x1234),
+            authority: MemberAuthority::MANAGER,
+        });
+        let resp = schema
+            .execute(async_graphql::Request::new(invite_mutation()).data(role).data(principal).data(repo))
+            .await;
+        assert_eq!(resp.errors.len(), 1, "expected one error: {:?}", resp.errors);
+        assert!(is_forbidden(&resp.errors[0]), "no ReadScope::Restaurant must fail closed: {:?}", resp.errors[0]);
+    }
+
+    /// The wrong RESTAURANT for an otherwise-genuine MANAGER is refused identically — the guard
+    /// checks the (subject, restaurant) PAIR, never the subject alone.
+    #[tokio::test]
+    async fn manager_of_a_different_restaurant_is_refused() {
+        let schema = crate::graphql::schema::build_schema(None, None, None);
+        let (principal, role) = member_principal("manager-sub");
+        let repo: std::sync::Arc<dyn MemberAuthorityRepository> = std::sync::Arc::new(ScriptedAuthority {
+            subject: "manager-sub",
+            restaurant: uuid::Uuid::from_u128(0x1234),
+            authority: MemberAuthority::MANAGER,
+        });
+        let resp = schema
+            .execute(
+                async_graphql::Request::new(invite_mutation())
+                    .data(role)
+                    .data(principal)
+                    .data(ReadScope::Restaurant(RestaurantId(uuid::Uuid::from_u128(0x5678))))
+                    .data(repo),
+            )
+            .await;
+        assert_eq!(resp.errors.len(), 1, "expected one error: {:?}", resp.errors);
+        assert!(is_forbidden(&resp.errors[0]), "a different restaurant must be FORBIDDEN: {:?}", resp.errors[0]);
     }
 }

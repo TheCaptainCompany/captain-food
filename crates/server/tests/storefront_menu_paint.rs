@@ -295,6 +295,17 @@ impl application::queries::RiderRosterReadRepository for Empty {
         Ok(None)
     }
 }
+
+#[async_trait]
+impl application::queries::MemberAuthorityRepository for Empty {
+    async fn authority_for_subject(
+        &self,
+        _s: domain::generated::scalars::AuthSubject,
+        _r: ds::RestaurantId,
+    ) -> Result<Option<domain::generated::scalars::MemberAuthority>, DomainError> {
+        Ok(None)
+    }
+}
 #[async_trait]
 impl application::queries::OrderConversationReadRepository for Empty {
     async fn by_order(&self, _o: ds::OrderId) -> Result<Option<OrderConversationRow>, DomainError> {
@@ -394,6 +405,7 @@ fn schema() -> CaptainSchema {
             deliveries: Arc::new(Empty),
             rider_restrictions: Arc::new(Empty),
             rider_roster: Arc::new(Empty),
+            member_authority: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),

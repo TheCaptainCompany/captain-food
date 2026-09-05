@@ -295,11 +295,16 @@ mutations:
   # --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
   # ADR-20260905-101349 §1/§6) -- ships DARK behind RUN_MEMBER_ACCESS_GRANT (default false); no
   # query in 6-i (the roster is 6-iv).
-  # #639 part C step 6-iv adds PUBLIC: the invitation accept's SECOND command (basis:
-  # MEMBER_INVITATION) is dispatched by the accepting person, who holds no OTHER credential yet.
   grantRestaurantAccess:
     command: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
-    roles: [ADMIN, PUBLIC]   # the target is payload (memberId/scopeId), the actor is the envelope -- no `derived:`
+    roles: [ADMIN]
+    slice: V0
+
+  # Round 2 (ADR-20260905-101349 §2 amendment): the PUBLIC second half of the two-lane accept is
+  # its OWN mutation now -- one name, one door (reviewer/vernon/evans/graphql B1).
+  grantRestaurantAccessByInvitation:
+    command: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+    roles: [PUBLIC]
     slice: V0
 
   revokeRestaurantAccess:

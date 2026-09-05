@@ -827,10 +827,26 @@ fixtures:
     data: { invitationId: "invitation-1" }
   # The GRANT leg's outcome, entirely DERIVED from restaurantInvitationSent/restaurantInvitationAccepted
   # above (scopeId/memberId/authority from the SENT fact, authSubject from the ACCEPTED fact) --
-  # never from whatever a client happened to also send on GrantRestaurantAccess.
+  # never from a client-supplied field, since GrantRestaurantAccessByInvitation carries none of
+  # them. `membershipId` is UUIDv5-DERIVED from invitationId (round 2) -- "membership-from-
+  # invitation-1" is the fixture-pool label that computes the SAME derivation
+  # (`behaviour_support::uid`'s `deliv-1` precedent), never a free-standing id.
   restaurantAccessGrantedFromInvitation:
     type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
-    data: { membershipId: "membership-10", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-10", authSubject: "auth-supabase-1", authority: "OPERATOR", basis: "MEMBER_INVITATION" }
+    data: { membershipId: "membership-from-invitation-1", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-10", authSubject: "auth-supabase-1", authority: "OPERATOR", basis: "MEMBER_INVITATION" }
+
+  # Round 2 (young B1): "auth-rehire" already holds an EXISTING memberId (the
+  # SpecAuthSubjectReservations seed) -- a SECOND, unrelated invitation to the SAME person mints a
+  # FRESH memberId that must never be used; the grant must land the HELD one instead.
+  restaurantInvitationSentToRehire:
+    type: { $ref: 'events.yaml#/RestaurantInvitationSent' }
+    data: { invitationId: "invitation-5", restaurantId: "resto-2", invitedEmail: "rehire@example.com", authority: "MANAGER", memberId: "member-fresh-rehire" }
+  restaurantInvitationAcceptedByRehire:
+    type: { $ref: 'events.yaml#/RestaurantInvitationAccepted' }
+    data: { invitationId: "invitation-5", authSubject: "auth-rehire" }
+  restaurantAccessGrantedToRehire:
+    type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
+    data: { membershipId: "membership-from-invitation-5", scopeType: "RESTAURANT", scopeId: "resto-2", principalKind: "MEMBER", memberId: "member-existing-rehire", authSubject: "auth-rehire", authority: "MANAGER", basis: "MEMBER_INVITATION" }
 
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
@@ -4348,52 +4364,72 @@ tests:
     thrown:
       - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }
 
-  # --- GrantRestaurantAccess on basis: MEMBER_INVITATION (#639 part C step 6-iv, the two-lane
-  # accept's SECOND command, cross-stream: given seeds the RestaurantInvitation-{id} stream, when
-  # dispatches on the RestaurantMembership stream) -------------------------------------------------
+  # --- GrantRestaurantAccessByInvitation (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+  # amendment): the two-lane accept's SECOND, PUBLIC-only command, its own door -- cross-stream:
+  # given seeds the RestaurantInvitation-{id} stream, when dispatches on the RestaurantMembership
+  # stream. `token: "sb-magic-token-abc"` proves "auth-supabase-1" (FakeIdentity's default). ------
   TestGrantRestaurantAccessFromInvitation:
-    name: "The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from the client's copies"
+    name: "The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from a client copy, and its membershipId is UUIDv5-derived"
     rules:
       - { $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }
-      - { $ref: 'rules.yaml#/RestaurantAccessBasisAcceptedSetIsNarrower' }
+      - { $ref: 'rules.yaml#/RestaurantAccessGrantByInvitationDerivesMembershipId' }
     actor: { $ref: 'actors.yaml#/RestaurantMembership' }
     given:
       - { $ref: '#/fixtures/restaurantInvitationSent' }
       - { $ref: '#/fixtures/restaurantInvitationAccepted' }
     when:
-      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
-      data: { membershipId: "membership-10", basis: "MEMBER_INVITATION", invitationId: "invitation-1" }
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-abc" }
       gates:
         - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
     then:
       - { $ref: '#/fixtures/restaurantAccessGrantedFromInvitation' }
 
-  TestGrantRestaurantAccessMissingInvitationProofIsRejected:
-    name: "GrantRestaurantAccess on basis: MEMBER_INVITATION with no invitationId is rejected"
-    rules: [{ $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }]
-    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
-    given: []
-    when:
-      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
-      data: { membershipId: "membership-11", basis: "MEMBER_INVITATION" }
-      gates:
-        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
-    thrown:
-      - { $ref: 'errors.yaml#/InvitationProofRequired' }
-
-  TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected:
-    name: "GrantRestaurantAccess on basis: MEMBER_INVITATION naming an invitation that was never accepted is rejected, identically to an unknown one"
+  TestGrantRestaurantAccessByInvitationFromUnacceptedInvitationIsRejected:
+    name: "GrantRestaurantAccessByInvitation naming an invitation that was never accepted is rejected, identically to an unknown one"
     rules: [{ $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }]
     actor: { $ref: 'actors.yaml#/RestaurantMembership' }
     given:
       - { $ref: '#/fixtures/restaurantInvitationSent' }
     when:
-      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
-      data: { membershipId: "membership-12", basis: "MEMBER_INVITATION", invitationId: "invitation-1" }
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-abc" }
       gates:
         - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  TestGrantRestaurantAccessByInvitationWrongSubjectIsRejected:
+    name: "A caller proving a DIFFERENT subject than the one who accepted is refused identically to an unknown invitation -- the caller-is-the-subject proof"
+    rules: [{ $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+      - { $ref: '#/fixtures/restaurantInvitationAccepted' }
+    when:
+      # "sb-magic-token-customer-login" proves "auth-supabase-customer" (FakeIdentity), NOT the
+      # "auth-supabase-1" the invitation was accepted by -- a valid token, but for someone else.
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-customer-login" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  TestGrantRestaurantAccessByInvitationReusesHeldMemberId:
+    name: "A re-hire (or a person joining a second restaurant) whose auth subject already holds a memberId gets the grant with the EXISTING memberId, never the invitation's freshly-minted one"
+    rules: [{ $ref: 'rules.yaml#/RestaurantAccessGrantByInvitationReusesTheHeldMemberId' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSentToRehire' }
+      - { $ref: '#/fixtures/restaurantInvitationAcceptedByRehire' }
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+      data: { invitationId: "invitation-5", token: "sb-magic-token-rehire" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    then:
+      - { $ref: '#/fixtures/restaurantAccessGrantedToRehire' }
 
   # ----------------------- RestaurantInvitation: the roster and the invitation (#639 part C step
   # 6-iv, ADR-20260905-101349 §2/§3) -----------------------------------------------------------

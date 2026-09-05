@@ -17,7 +17,7 @@ use actor_client::supervision::MailboxLaneRepository;
 use application::queries::{
     CartReadRepository, CatalogReadRepository, CustomerCreditReadRepository, CustomerReadRepository,
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
-    DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
+    DeliveryReadRepository, MemberAuthorityRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, RiderRestrictionReadRepository,
     RiderRosterReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
@@ -50,6 +50,9 @@ pub struct ReadDeps {
     pub rider_restrictions: Arc<dyn RiderRestrictionReadRepository>,
     /// #639 part C step 4-iii-A (ADR-20260904-152807 §1/§4): the `riders`/`rider` source.
     pub rider_roster: Arc<dyn RiderRosterReadRepository>,
+    /// #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment): `AuthorityGuard`'s
+    /// source of truth (the write-side log, never the roster projection).
+    pub member_authority: Arc<dyn MemberAuthorityRepository>,
     pub refunds: Arc<dyn RefundReadRepository>,
     pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
@@ -175,6 +178,7 @@ pub fn build_schema_for_scope(
             deliveries,
             rider_restrictions,
             rider_roster,
+            member_authority,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -198,6 +202,7 @@ pub fn build_schema_for_scope(
         builder = builder.data(deliveries);
         builder = builder.data(rider_restrictions);
         builder = builder.data(rider_roster);
+        builder = builder.data(member_authority);
         builder = builder.data(refunds);
         builder = builder.data(delivery_satisfaction);
         builder = builder.data(delivery_partner_availabilities);

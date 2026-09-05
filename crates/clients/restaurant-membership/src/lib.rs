@@ -32,6 +32,7 @@ mod sealed {
 
 impl sealed::Sealed for domain::generated::commands::ConfirmMemberSignIn {}
 impl sealed::Sealed for domain::generated::commands::GrantRestaurantAccess {}
+impl sealed::Sealed for domain::generated::commands::GrantRestaurantAccessByInvitation {}
 impl sealed::Sealed for domain::generated::commands::RequestMemberSignInLink {}
 impl sealed::Sealed for domain::generated::commands::RevokeRestaurantAccess {}
 
@@ -49,6 +50,10 @@ impl RestaurantMembershipCommand for domain::generated::commands::ConfirmMemberS
 
 impl RestaurantMembershipCommand for domain::generated::commands::GrantRestaurantAccess {
     const MESSAGE_TYPE: &'static str = "GrantRestaurantAccess";
+}
+
+impl RestaurantMembershipCommand for domain::generated::commands::GrantRestaurantAccessByInvitation {
+    const MESSAGE_TYPE: &'static str = "GrantRestaurantAccessByInvitation";
 }
 
 impl RestaurantMembershipCommand for domain::generated::commands::RequestMemberSignInLink {

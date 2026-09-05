@@ -199,26 +199,33 @@ RestaurantMembership:
     # rule `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of either an
     # ERROR, and `pm-emits-human-only-event` makes a `receives[].emits:` of RestaurantAccessGranted
     # (or RestaurantAccessRevoked) an ERROR too -- no PM inbox may declare either.
-    # #639 part C step 6-iv: PUBLIC is added HERE, not swapped in -- the ADMIN hand-provisioning
-    # door (basis: CAPTAIN_ONBOARDING) and the invitation accept's SECOND command (basis:
-    # MEMBER_INVITATION, an unauthenticated caller with no other credential yet) are two DIFFERENT
-    # callers of the SAME aggregate action, per the AccessBasis vocabulary's own design (6-i's
-    # comment: "the day MEMBER_INVITATION is accepted, it arrives as 6-iv's second command"). No
-    # per-basis acting split exists in this DSL, so both keys admit the message; the basis-specific
-    # invariant (a PUBLIC caller may only use MEMBER_INVITATION, proven by invitationId) is
-    # enforced in the handler, not here.
+    # Round 2 REVERT (ADR-20260905-101349 §2 amendment, reviewer/vernon/evans/graphql B1): the
+    # round-1 PUBLIC widening of THIS message is undone -- `GrantRestaurantAccess` is ADMIN-only
+    # again, because per-field authz cannot express "PUBLIC only for basis: MEMBER_INVITATION".
+    # The invitation accept's second command is its OWN message below, PUBLIC, with its OWN
+    # payload -- one name, one door (ADR-20260803-234035 compiler-first).
     - message: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
       requires:
         acting:
           ADMIN: any
-          PUBLIC: any
       emits: [{ $ref: 'events.yaml#/RestaurantAccessGranted' }]
       throws:
         - { $ref: 'errors.yaml#/MemberAccessGrantDoorClosed' }
         - { $ref: 'errors.yaml#/AccessBasisNotYetAccepted' }
         - { $ref: 'errors.yaml#/MemberAuthSubjectAlreadyBound' }
-        - { $ref: 'errors.yaml#/InvitationProofRequired' }
+    # Round 2 (ADR-20260905-101349 §2 amendment): the PUBLIC second half of the two-lane accept,
+    # its OWN message on the SAME aggregate/stream/lane -- no `requires: acting` (an unauthenticated
+    # caller has no credential yet; the `AcceptRestaurantInvitation`/`RequestMemberSignInLink`
+    # precedent below). Emits the SAME event as the ADMIN door above.
+    - message: { $ref: 'commands.yaml#/GrantRestaurantAccessByInvitation' }
+      emits: [{ $ref: 'events.yaml#/RestaurantAccessGranted' }]
+      throws:
+        - { $ref: 'errors.yaml#/MemberAccessGrantDoorClosed' }
+        - { $ref: 'errors.yaml#/MemberAuthSubjectAlreadyBound' }
         - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+      effect: "Verify the magic-link token with the auth provider (the SAME token the invitation-accept leg proved); derive scopeType/scopeId/memberId/authority from the RestaurantInvitation stream invitationId names, requiring it to be terminal ACCEPTED with acceptedAuthSubject equal to the just-proved subject; membershipId is UUIDv5-derived from invitationId, never client-supplied."
     - message: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
       requires:
         acting:
@@ -287,18 +294,19 @@ RestaurantInvitation:
     # The MANAGER-authority door (#639 part C step 6-iv, §8.2): `roles: [RESTAURANT]` at the API.
     # Authority is not a `requires: acting` predicate this DSL can express (acting matches an
     # IDENTITY field against the aggregate's own state, never a business attribute read from a
-    # DIFFERENT aggregate's read model) -- STOP finding, recorded in the hand-back: enforcing it in
-    # THIS aggregate's pure command handler needs the acting MEMBER's identity to reach the
-    # handler, which requires `crates/infrastructure/src/mailbox/handler.rs::resolve_actor` to gain
-    # a RESTAURANT branch (the #144 bridge, the SAME gap `Actor.domain_id` already documents as
-    # unbridged for RESTAURANT/RIDER) -- and that file is FENCED for this dispatch (no inbox.rs arm,
-    # no configuration-key threading). Enforced instead where this session CAN reach: a hand-written
-    # GraphQL `AuthorityGuard` (`crates/server/src/graphql/acl.rs`, the `StandingGuard` composition
-    # precedent) resolving the caller's own authority through the ALREADY-LANDED, non-fenced
-    # `MemberIdentityRepository` (6-ii) plus a NEW roster read -- genuine protection on the only
-    # REACHABLE production path (the mailbox is not independently reachable by an external caller),
-    # but not a second, aggregate-level belt. Closing #144 for RESTAURANT commands generally is
-    # follow-up work, not this slice's.
+    # DIFFERENT aggregate's log) -- round 1's STOP finding. Round 2 (ADR-20260905-101349 §2
+    # amendment) BUILDS the guard where this session CAN reach: a hand-written GraphQL
+    # `AuthorityGuard` (`crates/server/src/graphql/acl.rs`, the `StandingGuard` composition
+    # precedent) resolving the caller's own authority through
+    # `application::queries::MemberAuthorityRepository` -- the ALREADY-LANDED `member` identity
+    # bridge (6-i/6-ii) joined to the WRITE-SIDE `domain_events` log itself, NEVER the
+    # `RestaurantRoster` projection this round adds (young: a roster rebuild window must never
+    # change what this write-path guard accepts) -- genuine protection on the only REACHABLE
+    # production path (the mailbox is not independently reachable by an external caller), but not
+    # a second, aggregate-level belt: `crates/infrastructure/src/mailbox/handler.rs::resolve_actor`
+    # still has no RESTAURANT branch (the #144 bridge, the SAME gap `Actor.domain_id` already
+    # documents as unbridged for RESTAURANT/RIDER, and that file stays FENCED for this dispatch).
+    # Closing #144 for RESTAURANT commands generally is follow-up work, not this slice's.
     - message: { $ref: 'commands.yaml#/InviteRestaurantMember' }
       emits: [{ $ref: 'events.yaml#/RestaurantInvitationSent' }]
       throws:
