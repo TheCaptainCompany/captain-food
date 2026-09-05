@@ -89,7 +89,12 @@ opened on the write side alone re-creates §7.2 with a nicer button. The fold is
    RESTAURANT_NOT_READY | FOOD_DAMAGED | VEHICLE_OR_INJURY | OTHER`), required on the command,
    nullable on the event (old rows carry none); `issue` becomes an optional note bounded to 300
    characters on the command (the event keeps its 1000 bound so stored rows parse), prompted on the
-   rider screen as *facts only, no description of persons*; `ResolveDeliveryIssue.resolution`
+   rider screen as *facts only, no description of persons* (**amended 2026-09-05 at 4-iii-A's
+   round 3, ux + reviewer + legal**: the rider sheet no longer carries the note — `text_area` has no
+   renderer arm, so an unconditional note would have been an inert box; the field stays nullable and
+   reachable by support callers, and the prompt returns with the arm,
+   [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm"](https://github.com/TheCaptainCompany/captain-food/issues/888));
+   `ResolveDeliveryIssue.resolution`
    likewise: a closed **`DeliveryIssueResolution`** (`REASSIGNED | DELIVERED_BY_RESTAURANT |
    CANCELLED | OTHER`) plus a 300-character note. Both notes are personal data of the customer
    inside another aggregate's stream: covered by the order's tombstone
@@ -112,7 +117,8 @@ opened on the write side alone re-creates §7.2 with a nicer button. The fold is
    pool), and operations with `roles:` omitted are unaffected by restriction by construction.
 7. **One control, two exits** (ux-designer): `job_detail` gets a secondary *"Un problème"* beside
    the primary; one sheet that ROUTES — two buttons, *"Je continue, mais…"* opening the report
-   sheet (3-i's kind chips, note, confirm) and *"Je ne peux pas continuer"* opening the handback
+   sheet (3-i's kind chips, note, confirm — **the note removed 2026-09-05 at 4-iii-A's round 3**,
+   see §4; six kind chips and confirm remain) and *"Je ne peux pas continuer"* opening the handback
    sheet (**amended 2026-09-04 at 3-ii's checkpoint, ux**: the SDUI has no client-side
    re-evaluation of conditions on form fields, so an exit chosen by a chip can gate nothing —
    the one runtime toggle is `open_bottom_sheet`; #872 carries the gap); the handback sheet asks

@@ -1057,3 +1057,29 @@ is itself the argument: **a list that grows has no business stating its own leng
   0`. Before reusing a `tests.yaml` fixture verbatim inside a raw `domain_events` INSERT for a
   DB-gated test, substitute a real UUID for every UUID-scalar field the fixture spells as a
   placeholder.
+
+## 19f. What round 3 of #639 part C step 4-iii-A taught the card template and the test bed (2026-09-05)
+
+- **A dispatch card's clippy gate must be CI's clippy command, not a stricter one.** The 4-iii-A
+  round-3 card said `cargo clippy -p captain-food-codegen --all-targets -- -D warnings`; CI's `lint`
+  job runs `cargo clippy --workspace --all-targets -- -D clippy::disallowed-methods`
+  (`.github/workflows/ci.yml`, the #388 env-mutation ban) and nothing else, and `-D warnings` is red
+  on `main` itself (88 `useless_vec`, pre-existing). The executor spent a ceiling-round cycle proving
+  the gate unpassable at the base commit before running the narrower set. Card defect, coordinator's:
+  copy the gate line from the workflow file, never from memory.
+- **`git stash`-ing a spec file to force a red run does NOT re-run codegen.**
+  `crates/web/src/generated/screens.rs` is checked-in output; stashing the YAML alone leaves the stale
+  generated Rust in place, so a render test "passes red" against unregenerated code and proves nothing.
+  Run `make generate` between every stash/revert and the test run. Cost: one wasted run, caught only
+  because a pass while stashed looked suspicious.
+- **An `ORDER BY` tie-break can fail to show red with the tie-break removed** when the table has two
+  rows: a sequential scan + sort on identical small input is observably stable run to run, though
+  Postgres guarantees nothing. A "quote it red" instruction on a tie-break test needs an adversarial
+  row count or a plan-forcing trick; otherwise the executor must record the non-reproduction, as the
+  4-iii-A round-3 hand-back did, rather than claim a red it never saw.
+- **A card-stated count is UNVERIFIED input** (ADR-20260817-105845): the round-3 card said "four kind
+  chips"; `DeliveryIssueKind` has six. The executor read the spec before writing the assertion — the
+  right move — but the number should not have been on the card at all.
+- **The card must list `loop-budget.sh start`** as step one, or the ledger ends with an integrity
+  refusal and a hand-entered elapsed time; the executor protocol's precondition is not inherited by an
+  ad-hoc round card.
