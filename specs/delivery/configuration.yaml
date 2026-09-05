@@ -25,6 +25,26 @@ keys:
       Everything a repo secret would have given, minus the opacity.
 
 
+  # #639 part C step 4-iii-B (ADR-20260904-152807 §8): the debounce on the rider-custody dead-man
+  # gauge's PAGE, wired to `delivery_handback_watch_tick` exactly the way `DELIVERY_OFFER_MAX_TTL_SECONDS`
+  # is wired to `DeliveryOfferTimeoutWorker` above — passed in by the composition root from the
+  # resolved `Config`, never read from the environment by the worker itself.
+  RIDER_RESTRICTED_CUSTODY_MAX_AGE_SECONDS:
+    type: int
+    default: 1800
+    gates: >
+      UNVERIFIED input (ADR-20260817-105845: a dispatch card may not state a derived number
+      without naming its antecedents, and any bare number it does state is marked UNVERIFIED
+      input) — no antecedent justifies 1800 specifically. `DELIVERY_OFFER_MAX_TTL_SECONDS` bounds
+      how long ONE delivery channel may sit on an offer before escalation, and nothing is offered
+      here; the ETA it protects is per-job, not per-restriction. The gauge
+      `rider_restricted_holding_job_age_seconds` (`specs/observability.yaml` rider-restriction
+      contract) is already the ACTION TRIGGER at any non-zero value — a restricted rider is, by
+      construction, still holding food the moment this gauge leaves 0 — so this key is only a
+      DEBOUNCE on the info event's `threshold_exceeded` field, never a door and never a
+      `decisionRow:` key. Revisit once a real incident or a measured age distribution exists.
+
+
   # #639 part C step 4-iii-A (ADR-20260904-152807 §7): the release gate as a MECHANISM, not prose —
   # "no production RestrictRider before #874" was prose until this key, its decision row and its
   # codegen test existed together. Consumed at the WRITE door only (`restrict_rider`'s handler):

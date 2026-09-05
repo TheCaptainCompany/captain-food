@@ -89,6 +89,10 @@ client-cart = { path = "../clients/cart" }
 # `testing` feature is what exposes InMemoryMetricExporter. Versions pinned to server's.
 opentelemetry = { version = "0.32", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
+# #639 part C step 4-iii-B: the `rider_custody_deadman_metric.rs` info-event capture (the
+# `skip_trace_visibility.rs` idiom, `crates/server/tests/`) — proves the `rider.restricted.holding_job`
+# EVENT is emitted, not merely that the gauge is. Version pinned to server's.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "json", "env-filter", "registry"] }
 
 # D6 lint floor (PROP-20260802-130500, #302): a BOUNDARY crate restates the workspace baseline
 # and additionally denies `unreachable_pub` -- on a boundary, a `pub` item nobody outside uses is

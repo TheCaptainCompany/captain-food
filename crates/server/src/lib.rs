@@ -1288,9 +1288,15 @@ pub async fn router() -> Router {
                     // healthy system, so the only way to know it works is to have watched it work
                     // before the day it is needed. Non-fenced (ADR-20260904-015903 §10) — beside
                     // the offer-timeout worker below, never inside the fenced mailbox handler.
+                    // Since #639 part C step 4-iii-B (ADR-20260904-152807 §8) the SAME tick also
+                    // emits the rider-custody dead-man gauge -- the ceiling comes from the DECLARED
+                    // configuration, resolved once above, the same reason the delivery-offer
+                    // timeout worker below is handed its own resolved ceiling rather than reading
+                    // the environment itself.
                     infrastructure::spawn_delivery_handback_watch(
                         pool.clone(),
                         infrastructure::delivery_handback_watch::default_sweep_interval(),
+                        config.rider_restricted_custody_max_age_seconds,
                     );
 
                     // (The startup Stripe-fact backfill runs INLINE before the saga runner

@@ -100,7 +100,7 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
     let restaurant = uuid::Uuid::new_v4();
 
     // ── (a) PRESENCE — an empty database still emits ONE point at 0.
-    delivery_handback_watch_tick(&pool).await.expect("a tick over an empty database");
+    delivery_handback_watch_tick(&pool, 1800).await.expect("a tick over an empty database");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::DELIVERY_HANDED_BACK_UNREASSIGNED_AGE_SECONDS),
@@ -194,7 +194,7 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
     )
     .await;
 
-    delivery_handback_watch_tick(&pool).await.expect("a tick with one stranded and one reassigned job");
+    delivery_handback_watch_tick(&pool, 1800).await.expect("a tick with one stranded and one reassigned job");
     let s = spy.drain();
     assert_eq!(
         s.points(metric::DELIVERY_HANDED_BACK_UNREASSIGNED_AGE_SECONDS),
@@ -204,7 +204,7 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
     );
 
     // ── (c) SECOND TICK over unchanged state -- delta temporality re-emits every tick.
-    delivery_handback_watch_tick(&pool).await.expect("a second tick");
+    delivery_handback_watch_tick(&pool, 1800).await.expect("a second tick");
     assert_eq!(
         spy.drain().points(metric::DELIVERY_HANDED_BACK_UNREASSIGNED_AGE_SECONDS),
         vec![(std::collections::BTreeMap::new(), 1800.0)],
@@ -221,7 +221,7 @@ async fn a_stranded_handback_ages_a_reassignment_clears_it() {
         t0 + Duration::minutes(10),
     )
     .await;
-    delivery_handback_watch_tick(&pool).await.expect("a tick after recovery");
+    delivery_handback_watch_tick(&pool, 1800).await.expect("a tick after recovery");
     assert_eq!(
         spy.drain().points(metric::DELIVERY_HANDED_BACK_UNREASSIGNED_AGE_SECONDS),
         vec![(std::collections::BTreeMap::new(), 0.0)],

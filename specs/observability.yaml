@@ -733,6 +733,41 @@ rider-restriction:
     # `scope_membership_lag_positions` and `read_authorization::lag_positions` too) — not fixed
     # here (architect-owned issue).
     - { name: "rider_standing_lag_positions", type: gauge, attributes: [] }
+    # #639 part C step 4-iii-B (ADR-20260904-152807 §8): THE RIDER-CUSTODY DEAD-MAN'S SWITCH — "how
+    # long has a RESTRICTED rider still held food?" (a restriction revokes future job offers; it
+    # never releases food already in the rider's hands). Age in seconds of the OLDEST stranded row
+    # — a job in ASSIGNED | PICKED_UP | OUT_FOR_DELIVERY (the same held set `held_by_rider(s)` uses,
+    # `crates/infrastructure/src/persistence/delivery.rs`) whose rider is RESTRICTED, joined through
+    # `RiderRestriction` (the read model, never the internal `Rider` row) ON `rider_id` — literally
+    # `rider_restriction.standing = 'RESTRICTED'`, never `effective_at IS NOT NULL` (a
+    # `RiderReinstated` LEAVES `effective_at` populated as history, so that predicate would page
+    # forever after every reinstatement — dba, pre-code read). Anchored on `now - effective_at`: a
+    # job accepted after `effective_at` overstates the age, the safe direction. Emitted EVERY sweep,
+    # 0 when the population is empty (the ADR-20260810-231300 defect class again: a monitor that
+    # fires only when a signal ARRIVES goes quiet exactly when it should scream). NO `rider_id`
+    # label (cardinality and a person's identity on OTLP) — the rider and job ids ride an INFO
+    # event `rider.restricted.holding_job` instead (`rider_id`, `delivery_job_id`, `age_seconds`),
+    # joined by aggregate ids — no `correlation_id` on a timer tick, a recorded divergence from the
+    # #748 shape.
+    # LIVENESS PROOF: `delivery_handback_sweep_heartbeat_total` (the `custody-handback` contract,
+    # below) — emitted from the SAME `delivery_handback_watch_tick`, after this gauge and before
+    # the heartbeat, so the heartbeat now certifies both gauges' sweep completed.
+    # SEVERITY: PAGE-class (prose — the observability grammar has no `severity:` field: contract
+    # keys are exactly feature/criticality/workflow/run_identity/spans/metrics/business_metrics/
+    # status_rules/latency_budget/error_budget, and an unknown key is silently ignored by the
+    # validator). ALERT ROUTE: the recorded known gap — naming one is not this contract's to do
+    # (`docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml`).
+    - name: "rider_restricted_holding_job_age_seconds"
+      type: gauge
+      attributes: []
+      thresholds:
+        # UNVERIFIED input (ADR-20260817-105845): no antecedent justifies 1800 specifically — see
+        # the key's own `gates:` prose in `specs/delivery/configuration.yaml`. `derived_from` names
+        # the antecedent so the number here must actually equal the key's declared default (the
+        # #870 300-vs-900 lesson, generalised by the codegen test below).
+        - max_age_seconds: 1800
+          derived_from:
+            - { $ref: 'configuration.yaml#/keys/RIDER_RESTRICTED_CUSTODY_MAX_AGE_SECONDS' }
 
   status_rules:
     success:
@@ -1570,6 +1605,10 @@ custody-handback:
             - { $ref: 'configuration.yaml#/keys/DELIVERY_OFFER_MAX_TTL_SECONDS' }
     # The sweep's own LIVENESS — incremented once per COMPLETED sweep, never before. Same shape and
     # same reason as `payment_birth_gap_sweep_heartbeat_total` / `order_lane_watch_heartbeat_total`.
+    # Since #639 part C step 4-iii-B this heartbeat certifies TWO gauges' sweep completed, not one:
+    # the handback gauge above AND `rider-restriction`'s `rider_restricted_holding_job_age_seconds`
+    # — both are emitted from the same `delivery_handback_watch_tick`, before this counter, so a
+    # responder reading only this contract is not misled about what the heartbeat covers.
     - { name: "delivery_handback_sweep_heartbeat_total", type: counter, attributes: [] }
 
   status_rules:

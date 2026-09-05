@@ -274,6 +274,8 @@ pub struct Config {
     pub route_order_delivery_completion_through_lane: bool,
     /// DEFAULT `900`. Hard ceiling, in seconds, on how long ONE delivery channel may sit on an offer before the timeout worker escalates to the next ranked channel. Set it too high and a channel that never answers holds an accepted order hostage past the ETA the customer was shown; set it too low and a partner that would have accepted gets pulled off the job. NOT a repo secret, deliberately, though it was asked for as one (2026-07-29). It is a NON-SECRET tuning number, and a non-secret in Actions secrets is unreadable configuration — you could not open this repo and learn what ceiling production applies, which is the whole failure this file exists to end (and `config-nonsecret-from-secret` rejects it). The `default` here IS the CI-supplied value: it is baked into the artifact, printed in the boot report, and overridable per profile by adding a `deploy:` block, or in seconds during an incident by setting the env var. Everything a repo secret would have given, minus the opacity.
     pub delivery_offer_max_ttl_seconds: i64,
+    /// DEFAULT `1800`. UNVERIFIED input (ADR-20260817-105845: a dispatch card may not state a derived number without naming its antecedents, and any bare number it does state is marked UNVERIFIED input) — no antecedent justifies 1800 specifically. `DELIVERY_OFFER_MAX_TTL_SECONDS` bounds how long ONE delivery channel may sit on an offer before escalation, and nothing is offered here; the ETA it protects is per-job, not per-restriction. The gauge `rider_restricted_holding_job_age_seconds` (`specs/observability.yaml` rider-restriction contract) is already the ACTION TRIGGER at any non-zero value — a restricted rider is, by construction, still holding food the moment this gauge leaves 0 — so this key is only a DEBOUNCE on the info event's `threshold_exceeded` field, never a door and never a `decisionRow:` key. Revisit once a real incident or a measured age distribution exists.
+    pub rider_restricted_custody_max_age_seconds: i64,
     /// DEFAULT `false`. The restrict door (#639 part C step 4-iii-A, ADR-20260904-152807 §7). ON, `restrictRider` appends `RiderRestricted` as normal. OFF, the handler refuses BEFORE touching the store with the typed `RiderRestrictionDoorClosed` rejection — a supervisable row, never a silent no-op. `reinstateRider` is NEVER gated by this key: releasing a restriction is always safe to allow. The key never reaches the read side — `StandingGuard` keeps refusing an already-RESTRICTED rider's write-side doors with the key OFF, because turning the release gate off must never re-open doors a standing restriction already closed. Three preconditions gate the flip, named in `docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml` (open): an ADMIN can reach `/system/riders` from a browser (step 6's magic-link door + System host routing), the SMS notice to the restricted rider (#874) and an alert route named for the dead-man gauge `rider_restricted_holding_job_age_seconds` (slice B). While that row is `open`, a codegen test refuses any `deploy.production` value other than `"false"` (`decision-row-open-key-must-be-off`) — the `RUN_SIRENE_WORKER` lesson (prose said STOPPED while the deploy value said `true`, unreconciled) made executable. Flipping the default is a SEPARATE recorded decision that closes the row (gate-then-stabilize, ADR-20260808-144738).
     pub run_rider_restriction_door: bool,
     /// DEFAULT `true`. Delivery-offer timeout loop. OFF, an offer nobody answers is never expired and the order waits on a rider who is not coming.
@@ -449,6 +451,7 @@ impl Config {
             .map(|v| parse_bool("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", &v, false))
             .unwrap_or(false);
         let delivery_offer_max_ttl_seconds = raw("DELIVERY_OFFER_MAX_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
+        let rider_restricted_custody_max_age_seconds = raw("RIDER_RESTRICTED_CUSTODY_MAX_AGE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(1800);
         let run_rider_restriction_door = raw("RUN_RIDER_RESTRICTION_DOOR")
             .or_else(|| baked("RUN_RIDER_RESTRICTION_DOOR", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_RIDER_RESTRICTION_DOOR", &v, false))
@@ -572,6 +575,7 @@ impl Config {
                 route_credit_grant_through_lane,
                 route_order_delivery_completion_through_lane,
                 delivery_offer_max_ttl_seconds,
+                rider_restricted_custody_max_age_seconds,
                 run_rider_restriction_door,
                 run_delivery_offer_timeout,
                 avelo37_api_key,
@@ -652,6 +656,7 @@ impl Config {
         out.push_str(&format!("  ROUTE_CREDIT_GRANT_THROUGH_LANE = {}\n", self.route_credit_grant_through_lane));
         out.push_str(&format!("  ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE = {}\n", self.route_order_delivery_completion_through_lane));
         out.push_str(&format!("  DELIVERY_OFFER_MAX_TTL_SECONDS = {}\n", self.delivery_offer_max_ttl_seconds));
+        out.push_str(&format!("  RIDER_RESTRICTED_CUSTODY_MAX_AGE_SECONDS = {}\n", self.rider_restricted_custody_max_age_seconds));
         out.push_str(&format!("  RUN_RIDER_RESTRICTION_DOOR = {}\n", self.run_rider_restriction_door));
         out.push_str(&format!("  RUN_DELIVERY_OFFER_TIMEOUT = {}\n", self.run_delivery_offer_timeout));
         out.push_str(&format!("  AVELO37_API_KEY            = {}\n", if self.avelo37_api_key.is_some() { "set" } else { "unset" }));
@@ -670,7 +675,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 59;
+pub const KEY_COUNT: usize = 60;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -721,6 +726,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ROUTE_CREDIT_GRANT_THROUGH_LANE",
     "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
     "DELIVERY_OFFER_MAX_TTL_SECONDS",
+    "RIDER_RESTRICTED_CUSTODY_MAX_AGE_SECONDS",
     "RUN_RIDER_RESTRICTION_DOOR",
     "RUN_DELIVERY_OFFER_TIMEOUT",
     "AVELO37_API_KEY",

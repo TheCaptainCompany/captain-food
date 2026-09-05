@@ -1453,6 +1453,93 @@ keys:
         );
     }
 
+    /// A `thresholds[]` entry whose `derived_from` names exactly ONE configuration key must carry
+    /// the SAME number as that key's own declared `default` (#639 part C step 4-iii-B, the #870
+    /// 300-vs-900 lesson generalised — beck's card item F5). `derived_from` names the antecedent
+    /// so it can be checked at all; a threshold that drifts from the key it claims to derive from
+    /// is exactly the defect review round 2 on #870 caught by hand (300 written where the
+    /// referenced key's own default said 900), and nothing stopped it from happening again.
+    ///
+    /// Scoped to a SINGLE-key `derived_from`: some thresholds (the birth-gap `retry_pending`
+    /// reason, ~line 386) are a FORMULA over several antecedents (`base * (2^cap - 1)`), and no
+    /// one key's default equals the formula's result — that shape is out of this test's scope, by
+    /// construction (`derived.len() != 1` is skipped), not silently passed.
+    #[test]
+    fn a_single_key_threshold_equals_that_keys_declared_default() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+
+        let defaults: BTreeMap<String, String> = parse_config_keys(&model)
+            .into_iter()
+            .filter_map(|k| k.default.map(|d| (k.name, d)))
+            .collect();
+        assert!(!defaults.is_empty(), "no defaulted config keys parsed");
+
+        let obs = model
+            .defs
+            .get("observability.yaml")
+            .and_then(|x| x.as_mapping())
+            .expect("observability.yaml parses as a mapping");
+
+        let mut checked = 0usize;
+        let mut mismatches: Vec<String> = Vec::new();
+        for (fk, contract) in obs {
+            let Some(feature) = fk.as_str() else { continue };
+            for kind in ["metrics", "business_metrics"] {
+                let Some(seq) = contract.get(kind).and_then(|x| x.as_sequence()) else { continue };
+                for m in seq {
+                    let name = m.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                    let Some(thresholds) = m.get("thresholds").and_then(|t| t.as_sequence()) else {
+                        continue;
+                    };
+                    for th in thresholds {
+                        let Some(th_map) = th.as_mapping() else { continue };
+                        let Some(derived) = th_map.get("derived_from").and_then(|d| d.as_sequence())
+                        else {
+                            continue;
+                        };
+                        if derived.len() != 1 {
+                            continue; // a formula over several antecedents -- out of scope, see doc comment
+                        }
+                        let Some(key_name) = derived[0]
+                            .get("$ref")
+                            .and_then(|r| r.as_str())
+                            .and_then(|r| r.rsplit('/').next())
+                        else {
+                            continue;
+                        };
+                        let Some(default) = defaults.get(key_name) else { continue };
+                        for (tk, tv) in th_map {
+                            let Some(tk) = tk.as_str() else { continue };
+                            if tk == "derived_from" || tk == "reason" {
+                                continue;
+                            }
+                            let value_str = match tv {
+                                Value::Number(n) => n.to_string(),
+                                Value::String(s) => s.clone(),
+                                _ => continue,
+                            };
+                            checked += 1;
+                            if &value_str != default {
+                                mismatches.push(format!(
+                                    "{feature}.{kind} metric '{name}' threshold {tk}={value_str} \
+                                     != {key_name}'s declared default {default}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 0, "no single-key thresholds[] entries found to check");
+        assert!(
+            mismatches.is_empty(),
+            "a threshold names a config key as its antecedent (`derived_from`) but does not equal \
+             that key's declared default -- the #870 lesson, generalised:\n{}",
+            mismatches.join("\n")
+        );
+    }
+
     /// Collect `const SOME_NAME: &str = "SOME_KEY";` bindings whose VALUE looks like an environment key,
     /// as `ident -> key`. Gathered tree-wide before scanning, because the const and the `env::var` that
     /// consumes it are usually in different modules of the same crate.

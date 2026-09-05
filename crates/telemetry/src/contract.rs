@@ -334,6 +334,15 @@ pub mod metric {
     /// projector group — while it lags, a restricted rider is still GRANTED, so "immediately" is a
     /// measured claim only with this gauge.
     pub const RIDER_STANDING_LAG_POSITIONS: &str = "rider_standing_lag_positions";
+    /// `rider-restriction` contract (#639 part C step 4-iii-B, ADR-20260904-152807 §8): THE
+    /// RIDER-CUSTODY DEAD-MAN'S SWITCH — the age in seconds of the OLDEST stranded row (a job in
+    /// ASSIGNED | PICKED_UP | OUT_FOR_DELIVERY whose rider is RESTRICTED, literally
+    /// `rider_restriction.standing = 'RESTRICTED'`), anchored on `now - effective_at`, 0 when the
+    /// population is empty. NO `rider_id` label — the info event `rider.restricted.holding_job`
+    /// carries it, joined by aggregate ids. Emitted every sweep from
+    /// `delivery_handback_watch_tick`, certified by [`DELIVERY_HANDBACK_SWEEP_HEARTBEAT_TOTAL`].
+    pub const RIDER_RESTRICTED_HOLDING_JOB_AGE_SECONDS: &str =
+        "rider_restricted_holding_job_age_seconds";
     /// `rider-identity` contract (#639 part C step 2c-i): the RIDER claim stamp
     /// (`identity.stamp_rider_claim`) failed -- a DEFECT counter, attribute `reason`
     /// (not_configured | claim_conflict | provider_error). The `customer_claim_stamp_failed_total`
