@@ -28,6 +28,7 @@ planned workspace run, not after one fails. Note `target/release` does not exist
 cold build. In the session where this happened it bought two full rebuilds. Delete only when writes
 are actually failing, and prefer dropping `incremental`/`deps` over the whole `target/`.
 **The squeeze now lands AFTER `make test-crates`, at the clippy/wasm step that follows it (2026-09-05, #899: 6.7 GB → 2.6 GB inside one gate sequence; 510 MB free once mid-`cargo test`):** re-check `df -h /home/user` before the DB suite AND again before clippy/wasm, not once at dispatch; `rm -rf target/debug/incremental` recovered 6–12 GB each time without a cold rebuild.
+**Never redirect a full `cargo test --workspace` / `make test-crates` run to an uncapped log file under the scratchpad (2026-09-05, #901 round 2):** the scratchpad, `/tmp` and `/home/user` share one disk whose REAL ceiling is ~38–40 GB (not the 252 GB `df` prints), and a workspace test log filled it, breaking every shell command until the log was deleted and `target/debug/{deps,incremental}` purged. Use the Bash tool's own `run_in_background` (a self-managed output file) — never a hand-rolled `nohup … &> file &`.
 
 **Check `target/release` FIRST (2026-08-04):** it was **1.2G** in a session that only ever ran debug
 gates — `make rust`, `cargo test --workspace` and the codegen all build debug, so `rm -rf

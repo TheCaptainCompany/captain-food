@@ -240,6 +240,13 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
    for a recorder that appends to ONE stream and cannot reject (Recorded/NoChange only) — the
    `RecordLeg::Order` shape**; the `OrderAcceptanceTimeout` shape (early return, richer outcome,
    applies `schedules:`) stays fenced. No routing, fencing or catch-all machinery is touched.
+   **Fourth carve-out recorded 2026-09-05 (PR #901 round 3; accepted by vernon and reviewer at the ceiling
+   re-check; the touch was directed by the coordinator's card — a card defect banked)**: the fence also admits
+   **a clock parameter on the birth-gap MONITOR's SQL (`crates/infrastructure/src/mailbox/birth_gap_watch.rs`:
+   an explicit `now` bound into its three age queries, production passing `Utc::now()`)** — a read-only monitor
+   (three SELECTs, no lease, no fencing token, no lane, no dispatch arm, no transaction); the age gauge becomes
+   replay-neutral and its test deterministic. No routing, fencing or catch-all machinery is touched. The fence
+   self-check is a path grep, so this line exists precisely so the next executor's check still reads true.
 9. **Observability, split by what emits it.** In **4-i**: the `rider-identity` contract's
    `rider.identity.resolve` span gains the attribute `business.standing` (`ACTIVE | RESTRICTED`,
    on `result=resolved` only — an attribute on the wide event, never a label on the histogram, so
