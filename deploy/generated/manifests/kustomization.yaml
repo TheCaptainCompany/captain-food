@@ -20,6 +20,7 @@ resources:
   - bins/actor-reclamation.yaml
   - bins/actor-restaurant.yaml
   - bins/actor-restaurant-account.yaml
+  - bins/actor-restaurant-invitation.yaml
   - bins/actor-restaurant-membership.yaml
   - bins/actor-rider.yaml
   - bins/adapter-avelo37.yaml

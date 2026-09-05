@@ -837,3 +837,55 @@ async fn a_role_refusal_carries_no_reason_extension() {
         "a RoleGuard refusal must carry no `reason` extension — got: {ext:?}"
     );
 }
+
+/// #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment, reviewer B1 STOP finding): the
+/// round-1 shape let a PUBLIC caller reach `grantRestaurantAccess` at all (a per-field `basis`
+/// check inside the handler, never a schema-level door) — an anonymous caller could mint a MANAGER
+/// membership on any scope for any subject. The fix is COMPILER-FIRST at the schema level: the
+/// field is simply ABSENT from every non-ADMIN role's SDL, `grantRestaurantAccessByInvitation` is
+/// its own PUBLIC-only field, and no role sees both.
+#[tokio::test]
+async fn grant_restaurant_access_is_admin_only_and_the_invitation_leg_is_its_own_public_field() {
+    let schema = schema();
+    const GRANT: &str = r#"mutation { grantRestaurantAccess(input: {
+        membershipId: "00000000-0000-0000-0000-00000000000e",
+        scopeType: RESTAURANT,
+        scopeId: "00000000-0000-0000-0000-00000000000f",
+        memberId: "00000000-0000-0000-0000-000000000010",
+        authSubject: "auth-1",
+        authority: MANAGER,
+        basis: CAPTAIN_ONBOARDING
+    }) { messageId } }"#;
+
+    let non_admin = vec![
+        RequestRole::Public,
+        RequestRole::Customer,
+        RequestRole::Restaurant,
+        RequestRole::RestaurantAccount,
+        RequestRole::Rider,
+        RequestRole::External,
+    ];
+    for role in non_admin {
+        let resp = execute_as(&schema, role, GRANT).await;
+        assert!(!resp.errors.is_empty(), "grantRestaurantAccess: expected an error for {role:?}");
+        assert!(is_forbidden(&resp.errors[0]), "grantRestaurantAccess must be FORBIDDEN for {role:?}: {:?}", resp.errors[0]);
+    }
+    let resp = execute_as(&schema, RequestRole::Admin, GRANT).await;
+    assert!(!resp.errors.is_empty(), "expected an error past the guard for ADMIN (no wired store)");
+    assert!(!is_forbidden(&resp.errors[0]), "grantRestaurantAccess must pass the guard for ADMIN: {:?}", resp.errors[0]);
+
+    // The field itself is absent from every non-ADMIN role's introspected SDL — not merely
+    // refused at execution.
+    let (_q, admin_m) = introspected_fields(&schema, RequestRole::Admin).await;
+    assert!(admin_m.contains(&"grantRestaurantAccess".into()), "grantRestaurantAccess missing for ADMIN: {admin_m:?}");
+    assert!(
+        !admin_m.contains(&"grantRestaurantAccessByInvitation".into()),
+        "grantRestaurantAccessByInvitation ([PUBLIC] only) must not leak into ADMIN's schema: {admin_m:?}"
+    );
+    let (_q, public_m) = introspected_fields(&schema, RequestRole::Public).await;
+    assert!(!public_m.contains(&"grantRestaurantAccess".into()), "grantRestaurantAccess leaked to PUBLIC introspection");
+    assert!(
+        public_m.contains(&"grantRestaurantAccessByInvitation".into()),
+        "grantRestaurantAccessByInvitation missing for PUBLIC: {public_m:?}"
+    );
+}

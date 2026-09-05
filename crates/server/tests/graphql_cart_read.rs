@@ -413,6 +413,40 @@ impl application::queries::RiderRosterReadRepository for Empty {
         Ok(None)
     }
 }
+
+#[async_trait]
+impl application::queries::MemberAuthorityRepository for Empty {
+    async fn authority_for_subject(
+        &self,
+        _s: domain::generated::scalars::AuthSubject,
+        _r: ds::RestaurantId,
+    ) -> Result<Option<domain::generated::scalars::MemberAuthority>, DomainError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+impl application::queries::RestaurantRosterReadRepository for Empty {
+    async fn by_scope(
+        &self,
+        _s: ds::RestaurantId,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<application::queries::RestaurantRosterRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+#[async_trait]
+impl application::queries::RestaurantInvitationListReadRepository for Empty {
+    async fn by_scope(
+        &self,
+        _s: ds::RestaurantId,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<application::queries::RestaurantInvitationListRow>, DomainError> {
+        Ok(vec![])
+    }
+}
 #[async_trait]
 impl application::queries::OrderConversationReadRepository for Empty {
     async fn by_order(&self, _o: ds::OrderId) -> Result<Option<OrderConversationRow>, DomainError> {
@@ -501,6 +535,9 @@ fn schema_over(carts: Vec<CartRow>, restaurant: ds::RestaurantId) -> CaptainSche
             deliveries: Arc::new(Empty),
             rider_restrictions: Arc::new(Empty),
             rider_roster: Arc::new(Empty),
+            member_authority: Arc::new(Empty),
+            restaurant_roster: Arc::new(Empty),
+            restaurant_invitations: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -964,6 +1001,9 @@ async fn storefront_router(carts: Vec<CartRow>) -> axum::Router {
             deliveries: Arc::new(Empty),
             rider_restrictions: Arc::new(Empty),
             rider_roster: Arc::new(Empty),
+            member_authority: Arc::new(Empty),
+            restaurant_roster: Arc::new(Empty),
+            restaurant_invitations: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),

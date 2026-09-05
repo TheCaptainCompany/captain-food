@@ -255,6 +255,40 @@ impl application::queries::RiderRosterReadRepository for Empty {
 }
 
 #[async_trait]
+impl application::queries::MemberAuthorityRepository for Empty {
+    async fn authority_for_subject(
+        &self,
+        _s: domain::generated::scalars::AuthSubject,
+        _r: ds::RestaurantId,
+    ) -> Result<Option<domain::generated::scalars::MemberAuthority>, DomainError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+impl application::queries::RestaurantRosterReadRepository for Empty {
+    async fn by_scope(
+        &self,
+        _s: ds::RestaurantId,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<application::queries::RestaurantRosterRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+#[async_trait]
+impl application::queries::RestaurantInvitationListReadRepository for Empty {
+    async fn by_scope(
+        &self,
+        _s: ds::RestaurantId,
+        _limit: i64,
+        _offset: i64,
+    ) -> Result<Vec<application::queries::RestaurantInvitationListRow>, DomainError> {
+        Ok(vec![])
+    }
+}
+
+#[async_trait]
 impl application::queries::OrderConversationReadRepository for Empty {
     async fn by_order(
         &self,
@@ -524,6 +558,9 @@ fn schema_over_with_deliveries(
             deliveries,
             rider_restrictions: Arc::new(Empty),
             rider_roster: Arc::new(Empty),
+            member_authority: Arc::new(Empty),
+            restaurant_roster: Arc::new(Empty),
+            restaurant_invitations: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),
@@ -1295,6 +1332,9 @@ fn schema_over_spy(spy: SpyOrders) -> CaptainSchema {
             deliveries: Arc::new(InMemoryDeliveries(Arc::new(Mutex::new(None)))),
             rider_restrictions: Arc::new(Empty),
             rider_roster: Arc::new(Empty),
+            member_authority: Arc::new(Empty),
+            restaurant_roster: Arc::new(Empty),
+            restaurant_invitations: Arc::new(Empty),
             refunds: Arc::new(Empty),
             delivery_satisfaction: Arc::new(Empty),
             delivery_partner_availabilities: Arc::new(Empty),

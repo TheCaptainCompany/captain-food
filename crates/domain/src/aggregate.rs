@@ -12,7 +12,8 @@
 use crate::generated::events::DomainEvent;
 use crate::generated::scalars::{
     CartId, CatalogId, CustomerId, DeliveryJobId, DeliveryPartnerRegistrationId, MembershipId,
-    MessageId, OrderId, ReclamationId, RestaurantAccountId, RestaurantId, RiderId,
+    MessageId, OrderId, ReclamationId, RestaurantAccountId, RestaurantId, RestaurantInvitationId,
+    RiderId,
 };
 // A Conversation is keyed by the OrderId (its identity IS its order, #129) — same id type as Order, distinct stream.
 
@@ -85,6 +86,14 @@ impl_aggregate!(
     MembershipId,
     "RestaurantMembership",
     crate::restaurant_membership::fold
+);
+// #639 part C step 6-iv (ADR-20260905-101349 §2/§3): its own aggregate, its own stream, keyed by
+// its own invitationId — distinct from the RestaurantMembership it may precede.
+impl_aggregate!(
+    crate::restaurant_invitation::RestaurantInvitationState,
+    RestaurantInvitationId,
+    "RestaurantInvitation",
+    crate::restaurant_invitation::fold
 );
 
 #[cfg(test)]

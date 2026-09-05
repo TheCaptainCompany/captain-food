@@ -510,7 +510,7 @@ mod tests {
             }
         }
         for screen in Surface::RestaurantBackoffice.screens() {
-            if screen.id == "sign_in" || screen.id == "sign_in_return" || screen.id == "not_linked" {
+            if screen.id == "sign_in" || screen.id == "sign_in_return" || screen.id == "not_linked" || screen.id == "invitation_accept" {
                 assert_eq!(Surface::RestaurantBackoffice.role_for(screen), Role::Public, "{}", screen.id);
             } else {
                 assert_eq!(

@@ -62,6 +62,8 @@
         "PricingPolicy",
         "ProspectionPipeline",
         "Restaurant",
+        "RestaurantInvitationList",
+        "RestaurantRoster",
         "Rider",
         "RiderRestriction",
         "RiderRoster",
@@ -227,6 +229,20 @@
       "placement": "declared",
       "databases": [
         "captain_write"
+      ]
+    },
+    "RestaurantInvitationList": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "RestaurantRoster": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
       ]
     },
     "Rider": {

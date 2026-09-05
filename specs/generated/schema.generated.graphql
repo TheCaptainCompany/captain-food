@@ -106,6 +106,7 @@ scalar MarginPercent
 scalar TimeOfDay
 scalar ProspectionScore
 scalar MembershipId
+scalar RestaurantInvitationId
 scalar CartLineId
 scalar StarRating
 scalar RatingComment
@@ -483,6 +484,14 @@ enum AccessBasis {
 enum AccessRevocationGround {
   LEFT_THE_RESTAURANT
   ACCESS_NO_LONGER_NEEDED
+}
+
+enum RestaurantInvitationStatus {
+  PENDING
+  ACCEPTED_PENDING_ACCESS
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
 enum ThumbRating {
@@ -986,6 +995,27 @@ type Prospect {
   lastContactedAt: DateTime
   repliedAt: DateTime
   restaurant: Restaurant!
+}
+
+type RestaurantRosterEntry {
+  membershipId: MembershipId!
+  memberId: MemberId!
+  authority: MemberAuthority!
+  since: DateTime!
+}
+
+type RestaurantRosterConnection {
+  items: [RestaurantRosterEntry!]!
+  viewerAuthority: MemberAuthority!
+}
+
+type RestaurantInvitationEntry {
+  invitationId: RestaurantInvitationId!
+  invitedEmail: EmailAddress!
+  authority: MemberAuthority!
+  status: RestaurantInvitationStatus!
+  expiresAt: DateTime
+  createdAt: DateTime!
 }
 
 type Cart {
@@ -1605,6 +1635,11 @@ input GrantRestaurantAccessInput {
   basis: AccessBasis!
 }
 
+input GrantRestaurantAccessByInvitationInput {
+  invitationId: RestaurantInvitationId!
+  token: EmailVerificationToken!
+}
+
 input RevokeRestaurantAccessInput {
   membershipId: MembershipId!
   ground: AccessRevocationGround!
@@ -1616,6 +1651,23 @@ input RequestMemberSignInLinkInput {
 }
 
 input ConfirmMemberSignInInput {
+  token: EmailVerificationToken!
+}
+
+input InviteRestaurantMemberInput {
+  invitationId: RestaurantInvitationId!
+  restaurantId: RestaurantId!
+  invitedEmail: EmailAddress!
+  authority: MemberAuthority!
+  memberId: MemberId!
+}
+
+input RevokeRestaurantInvitationInput {
+  invitationId: RestaurantInvitationId!
+}
+
+input AcceptRestaurantInvitationInput {
+  invitationId: RestaurantInvitationId!
   token: EmailVerificationToken!
 }
 
@@ -1855,6 +1907,16 @@ input ProspectionPipelineQueryInput {
   status: ProspectPipelineStatus
 }
 
+input RestaurantRosterQueryInput {
+  limit: PageLimit
+  offset: PageOffset
+}
+
+input RestaurantInvitationsQueryInput {
+  limit: PageLimit
+  offset: PageOffset
+}
+
 input CartsQueryInput {
   customerId: CustomerId!
 }
@@ -2061,6 +2123,8 @@ type Query {
   restaurant(input: RestaurantQueryInput!): Restaurant @public @reads(views: ["Restaurant"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
+  restaurantRoster(input: RestaurantRosterQueryInput): RestaurantRosterConnection! @auth(requires: [RESTAURANT]) @reads(views: ["RestaurantRoster"])
+  restaurantInvitations(input: RestaurantInvitationsQueryInput): [RestaurantInvitationEntry!]! @auth(requires: [RESTAURANT]) @reads(views: ["RestaurantInvitationList"])
   carts(input: CartsQueryInput!): [Cart!]! @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
   cart(input: CartQueryInput!): Cart @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
   current: Cart @auth(requires: [PUBLIC, CUSTOMER]) @reads(views: ["Cart"])
@@ -2157,9 +2221,13 @@ type Mutation {
   markProspectCold(input: MarkProspectColdInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
   grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantRestaurantAccess")
+  grantRestaurantAccessByInvitation(input: GrantRestaurantAccessByInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "GrantRestaurantAccessByInvitation")
   revokeRestaurantAccess(input: RevokeRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RevokeRestaurantAccess")
   requestMemberSignInLink(input: RequestMemberSignInLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "RequestMemberSignInLink")
   confirmMemberSignIn(input: ConfirmMemberSignInInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "ConfirmMemberSignIn")
+  inviteRestaurantMember(input: InviteRestaurantMemberInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT]) @command(name: "InviteRestaurantMember")
+  revokeRestaurantInvitation(input: RevokeRestaurantInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT]) @command(name: "RevokeRestaurantInvitation")
+  acceptRestaurantInvitation(input: AcceptRestaurantInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "AcceptRestaurantInvitation")
   addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
   removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
   changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")

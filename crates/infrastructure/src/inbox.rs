@@ -51,6 +51,8 @@ use application::generated::inboxes::{
 };
 // #639 part C step 6-i (ADR-20260905-101349): a SEPARATE `use` line, additive-only (the fence
 // self-check greps for a removed line in this file) rather than editing the block above.
+use application::generated::inboxes::RestaurantInvitationFactInbox;
+use application::generated::inboxes::RestaurantInvitationInbox;
 use application::generated::inboxes::RestaurantMembershipInbox;
 use application::ports::Actor;
 use domain::shared::errors::DomainError;
@@ -130,6 +132,11 @@ pub struct CommandDeps {
     /// `requestMemberSignInLink` and `confirmMemberSignIn` with the typed
     /// `MemberSignInDoorClosed` BEFORE the identity provider is touched at all.
     pub run_member_sign_in_door: bool,
+    /// #639 part C step 6-iv (ADR-20260905-101349 §2/§3): `configuration.yaml#/RUN_RESTAURANT_INVITATION`
+    /// -- the invitation door's release gate, resolved ONCE at the composition root exactly like
+    /// `run_rider_restriction_door` above. OFF (the default) refuses `inviteRestaurantMember` with
+    /// the typed `RestaurantInvitationDoorClosed`; `revokeRestaurantInvitation` never consults it.
+    pub run_restaurant_invitation: bool,
 }
 
 
@@ -214,6 +221,7 @@ pub async fn route(
         ActorInbox::RefundProcess(m) => refund_process(deps, m, actor, env).await,
         ActorInbox::Restaurant(m) => restaurant(deps, m, actor, env).await,
         ActorInbox::RestaurantAccount(m) => restaurant_account(deps, m, actor, env).await,
+        ActorInbox::RestaurantInvitation(m) => restaurant_invitation(deps, m, actor, env).await,
         ActorInbox::RestaurantMembership(m) => restaurant_membership(deps, m, actor, env).await,
         ActorInbox::Rider(m) => rider(deps, m, actor, env).await,
     }
@@ -540,7 +548,10 @@ async fn restaurant_account(
 // `crate::member_sign_in_reasons`, OUT of this file: their `code.as_str()` match can never be
 // exhaustive without a catch-all, and this file's own rule (see the module doc above) forbids one
 // anywhere here.
-use crate::member_sign_in_reasons::{member_sign_in_confirm_result, member_sign_in_reason};
+use crate::member_sign_in_reasons::{
+    member_sign_in_confirm_result, member_sign_in_reason, restaurant_invitation_accept_result,
+    restaurant_invitation_invite_result,
+};
 
 /// The `RestaurantMembership` lane (#639 part C step 6-i, ADR-20260905-101349): the bridge and
 /// the grant. `grantRestaurantAccess` is gated by `RUN_MEMBER_ACCESS_GRANT`, checked FIRST inside
@@ -554,6 +565,10 @@ async fn restaurant_membership(
     let _ = (deps, actor, env);
     match message {
         RestaurantMembershipInbox::GrantRestaurantAccess(cmd) => run(async { application::commands::grant_restaurant_access(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor, deps.run_member_access_grant).await.map(|_| ()) }).await,
+        // Round 2 (ADR-20260905-101349 §2 amendment): the PUBLIC second half of the two-lane
+        // accept, its own message on the SAME lane -- verifies its own token through the SAME
+        // identity port `AcceptRestaurantInvitation`/`ConfirmMemberSignIn` use.
+        RestaurantMembershipInbox::GrantRestaurantAccessByInvitation(cmd) => run(async { application::commands::grant_restaurant_access_by_invitation(deps.store.as_ref(), deps.auth.as_ref(), deps.auth_subjects.as_ref(), cmd, actor, deps.run_member_access_grant).await.map(|_| ()) }).await,
         RestaurantMembershipInbox::RevokeRestaurantAccess(cmd) => run(async { application::commands::revoke_restaurant_access(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         // The member sign-in door (#639 part C step 6-ii, `member-sign-in` contract): gated at
         // BOTH handlers, unlike the grant/revoke asymmetry above. The gate-liveness gauge is
@@ -593,6 +608,86 @@ async fn restaurant_membership(
             }
             outcome
         }
+    }
+}
+
+/// The `RestaurantInvitation` lane (#639 part C step 6-iv, ADR-20260905-101349 §2/§3): the roster
+/// and the invitation. `inviteRestaurantMember` is gated by `RUN_RESTAURANT_INVITATION`, checked
+/// FIRST inside the handler; `revokeRestaurantInvitation` never is. The MANAGER-authority guard
+/// (OPERATOR refused) lives at the GraphQL layer (`crate::graphql` is a server-crate concept, not
+/// reachable from here) -- see the aggregate's `receives:` comment for why (#144 fence). The
+/// `RestaurantInvitationExpired` reminder RECORDS through `fact_route`/`restaurant_invitation_fact`
+/// below (round 2, #902) -- this lane's own arm just names it, unreachable via the COMMAND route in
+/// practice since reminders arrive through the fact route, not this one.
+async fn restaurant_invitation(
+    deps: &CommandDeps,
+    message: RestaurantInvitationInbox,
+    actor: &Actor,
+    env: &RouterEnv,
+) -> InboxOutcome {
+    let _ = env;
+    match message {
+        RestaurantInvitationInbox::InviteRestaurantMember(cmd) => {
+            use tracing::Instrument as _;
+            let authority = format!("{:?}", cmd.authority);
+            telemetry::meters::restaurant_invitation::door_enforcing(deps.run_restaurant_invitation);
+            let span = telemetry::spans::invitation_invite(&actor.correlation_id.to_string(), &authority);
+            let span_clone = span.clone();
+            let outcome = run(async {
+                application::commands::invite_restaurant_member(deps.store.as_ref(), cmd, actor, deps.run_restaurant_invitation)
+                    .await
+                    .map(|_| ())
+            })
+            .instrument(span)
+            .await;
+            let result = match &outcome {
+                InboxOutcome::Handled(Ok(())) => {
+                    telemetry::meters::restaurant_invitation::sent(&authority);
+                    "sent"
+                }
+                InboxOutcome::Handled(Err(e)) => restaurant_invitation_invite_result(e),
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => "technical_error",
+            };
+            telemetry::spans::record_invitation_invite_result(&span_clone, result);
+            outcome
+        }
+        RestaurantInvitationInbox::RevokeRestaurantInvitation(cmd) => {
+            let outcome = run(async {
+                application::commands::revoke_restaurant_invitation(deps.store.as_ref(), cmd, actor).await.map(|_| ())
+            })
+            .await;
+            if matches!(outcome, InboxOutcome::Handled(Ok(()))) {
+                telemetry::meters::restaurant_invitation::revoked();
+            }
+            outcome
+        }
+        RestaurantInvitationInbox::AcceptRestaurantInvitation(cmd) => {
+            use tracing::Instrument as _;
+            let span = telemetry::spans::invitation_accept(&actor.correlation_id.to_string());
+            let span_clone = span.clone();
+            let outcome = run(async {
+                application::commands::accept_restaurant_invitation(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor)
+                    .await
+                    .map(|_| ())
+            })
+            .instrument(span)
+            .await;
+            let result = match &outcome {
+                InboxOutcome::Handled(Ok(())) => {
+                    telemetry::meters::restaurant_invitation::accepted();
+                    "accepted"
+                }
+                InboxOutcome::Handled(Err(e)) => restaurant_invitation_accept_result(e),
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => "technical_error",
+            };
+            telemetry::spans::record_invitation_accept_result(&span_clone, result);
+            outcome
+        }
+        // Round 2 (#902): the RecordLeg now actually records this fact (`restaurant_invitation_fact`
+        // below). Unreachable via the COMMAND route in practice (reminders arrive through
+        // `fact_route`, not this lane), but named rather than absorbed by a wildcard per this
+        // file's own no-catch-all rule.
+        RestaurantInvitationInbox::RestaurantInvitationExpired(_) => InboxOutcome::RecordFact,
     }
 }
 
@@ -678,6 +773,13 @@ pub enum RecordLeg {
     /// `application::commands::record_order_acceptance_timeout` — its own route because its
     /// outcome is richer than `RecordOutcome` and its `schedules:` apply on one arm only (#167).
     OrderAcceptanceTimeout(domain::generated::events::DomainEvent),
+    /// `application::commands::record_inbound_restaurant_invitation_expiry` --
+    /// `RestaurantInvitation-{invitationId}` (#639 part C step 6-iv round 2: wired this round --
+    /// round 1 left this PARKED, citing a fence on `mailbox/handler.rs` that named no concurrent
+    /// claim on the file; the recorder was already written and idempotent, so the honest fix was to
+    /// finish the wiring rather than misuse the `deferred:` allow-list, whose MODELLING vocabulary
+    /// this case never fit).
+    RestaurantInvitation(domain::generated::events::DomainEvent),
 }
 
 impl RecordLeg {
@@ -691,6 +793,7 @@ impl RecordLeg {
             Self::Order(_) => FactRecorder::Order,
             Self::OrderPlaced(_) => FactRecorder::OrderPlaced,
             Self::OrderAcceptanceTimeout(_) => FactRecorder::OrderAcceptanceTimeout,
+            Self::RestaurantInvitation(_) => FactRecorder::RestaurantInvitation,
         }
     }
 
@@ -705,7 +808,8 @@ impl RecordLeg {
             | Self::RestaurantRegistration(e)
             | Self::Order(e)
             | Self::OrderPlaced(e)
-            | Self::OrderAcceptanceTimeout(e) => e.clone(),
+            | Self::OrderAcceptanceTimeout(e)
+            | Self::RestaurantInvitation(e) => e.clone(),
         }
     }
 }
@@ -729,6 +833,9 @@ pub enum FactRecorder {
     /// `application::commands::record_order_acceptance_timeout` — its own route because its
     /// outcome is richer than `RecordOutcome` and its `schedules:` apply on one arm only (#167).
     OrderAcceptanceTimeout,
+    /// `application::commands::record_inbound_restaurant_invitation_expiry` --
+    /// `RestaurantInvitation-{invitationId}` (#639 part C step 6-iv round 2).
+    RestaurantInvitation,
 }
 
 /// A process manager's typed EVENT leg. Typed rather than a `(actor_type, DomainEvent)` string
@@ -803,6 +910,7 @@ pub fn fact_route(fact: ActorFactInbox) -> FactLeg {
         ActorFactInbox::PlaceOrderProcess(m) => place_order_process_fact(m),
         ActorFactInbox::RefundProcess(m) => refund_process_fact(m),
         ActorFactInbox::Restaurant(m) => restaurant_fact(m),
+        ActorFactInbox::RestaurantInvitation(m) => restaurant_invitation_fact(m),
     }
 }
 
@@ -997,6 +1105,23 @@ fn restaurant_fact(message: RestaurantFactInbox) -> FactLeg {
     match message {
         RestaurantFactInbox::RestaurantRegistered(e) => {
             FactLeg::Record(RecordLeg::RestaurantRegistration(E::RestaurantRegistered(e)))
+        }
+    }
+}
+
+/// The `RestaurantInvitation` lane's facts (#639 part C step 6-iv). Round 2 wires the reminder
+/// delivery: `application::commands::record_inbound_restaurant_invitation_expiry` (record iff
+/// PENDING, `NoChange` otherwise -- the `OrderExpired` precedent) now has its `RecordLeg` arm in
+/// `crates/infrastructure/src/mailbox/handler.rs`. Round 1 left this PARKED under `#902`'s
+/// `deferred:` entry, whose reason text ("WIRING, not modelling") never actually fit this file's
+/// MODELLING-only allow-list (`fact_route_gate::a_deferral_reason_is_a_modelling_statement_not_a_
+/// schedule`) -- the honest fix was finishing the wiring, not stretching the vocabulary; the
+/// `deferred:` block is removed from `specs/network/actors.yaml` in the same change.
+fn restaurant_invitation_fact(message: RestaurantInvitationFactInbox) -> FactLeg {
+    use domain::generated::events::DomainEvent as E;
+    match message {
+        RestaurantInvitationFactInbox::RestaurantInvitationExpired(e) => {
+            FactLeg::Record(RecordLeg::RestaurantInvitation(E::RestaurantInvitationExpired(e)))
         }
     }
 }

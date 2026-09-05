@@ -312,6 +312,7 @@ async fn door(identity: ScriptedIdentity, members: ScriptedMembers, seam: Member
         run_rider_restriction_door: false,
         run_member_access_grant: false,
         run_member_sign_in_door: door_open,
+        run_restaurant_invitation: false,
     };
     Door { mailbox, identity, members, sessions, deps, app }
 }

@@ -2287,6 +2287,59 @@ member-sign-in:
   error_budget: { max_error_rate_pct: 1.0 }
 
 # =====================================================================
+# restaurant-invitation -- #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the roster and the
+# invitation. Spans on BOTH legs of the two-lane accept; counters carry NO email/token/invitationId
+# label (PII/opaque-credential-free, the member-sign-in contract's own posture). The mail-hop
+# correlation break is the SAME as 6-ii's: `invite.send`/`accept.confirm` correlate by
+# `business.correlation_id` on THIS side of the send; nothing here traces into the mail provider or
+# the click that lands on `/invitation`. The §12-parked business metric (a persona-activity fold
+# over `domain_events`) is NOT invented here -- this contract is operational telemetry only.
+# =====================================================================
+restaurant-invitation:
+  feature: restaurant-invitation
+  criticality: high
+  workflow:
+    surface: graphql   # read/write seam under a PUBLIC (accept) + RESTAURANT (invite/revoke) path
+
+  run_identity:
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    - name: "invitation.invite"
+      kind: INTERNAL
+      required: false   # only inviteRestaurantMember opens it
+      attributes:
+        - { key: "business.authority", type: string, required: true }   # MANAGER | OPERATOR (the invited authority, never the caller's)
+        - { key: "business.result", type: string, required: true }   # sent | door_closed | rejected
+        - { key: "business.correlation_id", type: string, required: true }
+    - name: "invitation.accept"
+      kind: INTERNAL
+      required: false   # only acceptRestaurantInvitation opens it
+      attributes:
+        - { key: "business.result", type: string, required: true }   # accepted | not_acceptable | token_invalid | token_expired
+        - { key: "business.correlation_id", type: string, required: true }
+
+  metrics:
+    - { name: "restaurant_invitation_sent_total", type: counter, attributes: ["authority"] }
+    - { name: "restaurant_invitation_accepted_total", type: counter, attributes: [] }
+    - { name: "restaurant_invitation_expired_total", type: counter, attributes: [] }
+    - { name: "restaurant_invitation_revoked_total", type: counter, attributes: [] }
+    # GATE LIVENESS (the `member_sign_in_door_enforcing` shape, ADR-20260810-231300): 1 while
+    # RUN_RESTAURANT_INVITATION enforces its refusal on a request, 0 the moment the composition
+    # root boots with the key OFF, registered at BOTH composition roots (the #895 lesson).
+    - { name: "restaurant_invitation_door_enforcing", type: gauge, attributes: [] }
+
+  status_rules:
+    success:
+      required_spans: []   # spans open only on the invite/accept path
+    technical_error:
+      any_span_errors: true
+
+  latency_budget: { max_p95_ms: 400, max_p99_ms: 1200 }
+  error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
 # graphql-limits -- #639 part C step 6-ii (ADR-20260905-101349 §9): the per-role depth/complexity
 # ceiling on EVERY role's schema, riding on the member door's PR because it lands with the entry
 # point it bounds. Zero rejections must not read like "limits not installed" -- the max gauge and

@@ -38,7 +38,9 @@ use domain::generated::commands::{
     UpdateCatalogCategory, UpdateCustomerInfo, UpdateOfferStock, UpdateOptionList, UpdateProduct,
     UpdateRestaurant, UpdateRestaurantAccount, UpdateRestaurantGoogleBusinessProfile, VerifyPhone,
     VerifyGoogleBusinessProfileOrderLink,
-    GrantRestaurantAccess, RevokeRestaurantAccess, RequestMemberSignInLink, ConfirmMemberSignIn,
+    GrantRestaurantAccess, GrantRestaurantAccessByInvitation, RevokeRestaurantAccess,
+    RequestMemberSignInLink, ConfirmMemberSignIn,
+    InviteRestaurantMember, RevokeRestaurantInvitation, AcceptRestaurantInvitation,
 };
 use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
@@ -57,15 +59,18 @@ use domain::generated::events::{
     RestaurantMarkedClosed, RestaurantRegistered, RestaurantRemoved,
     RestaurantSlugConfigured, RestaurantSlugReconfigured, RestaurantUnfavorited, RestaurantUpdated,
     RestaurantAccessGranted, RestaurantAccessRevoked,
+    RestaurantInvitationSent, RestaurantInvitationRevoked, RestaurantInvitationAccepted,
 };
 use domain::generated::scalars::{
     AccessBasis, CatalogId, CurrencyCode, CustomerId, DialingCode, EmailAddress, ExternalReference,
-    MembershipId, NationalPhoneNumber, PhoneNumber, PrincipalKind, RestaurantAccountId,
-    RestaurantId, RestaurantListingStatus, RestaurantStatus, SessionId, StockStatus,
+    MemberId, MembershipId, NationalPhoneNumber, PhoneNumber, PrincipalKind, RestaurantAccountId,
+    RestaurantId, RestaurantInvitationId, RestaurantListingStatus, RestaurantStatus, SessionId,
+    StockStatus,
 };
 use domain::prospect::ProspectState;
 use domain::restaurant::RestaurantState;
 use domain::restaurant_account::RestaurantAccountState;
+use domain::restaurant_invitation::RestaurantInvitationState;
 use domain::restaurant_membership::RestaurantMembershipState;
 use domain::shared::errors::DomainError;
 
@@ -3086,14 +3091,16 @@ fn restaurant_membership_stream(id: &MembershipId) -> String {
 }
 
 /// Handle `commands.yaml#/GrantRestaurantAccess` → emit `events.yaml#/RestaurantAccessGranted`
-/// (#639 part C step 6-i, ADR-20260905-101349 §2/§3/§6).
+/// (#639 part C step 6-i, ADR-20260905-101349 §2/§3/§6). ADMIN-only, round 2 REVERT (see the
+/// command's own description): the PUBLIC accept leg is [`grant_restaurant_access_by_invitation`],
+/// its own command, below.
 ///
 /// Order, each step gating the next (the `restrict_rider` shape):
 /// 1. The door FIRST, before the store is even read (`run_member_access_grant`) -- the first
 ///    hand-provisioned grant about a real Tours human is the irreversible moment that starts every
 ///    legal clock.
-/// 2. The accepted-basis belt: only `CAPTAIN_ONBOARDING` is implemented today: the other three
-///    declared `AccessBasis` values are refused `AccessBasisNotYetAccepted`.
+/// 2. The accepted-basis belt: only `CAPTAIN_ONBOARDING` is implemented on THIS door: every other
+///    declared `AccessBasis` value is refused `AccessBasisNotYetAccepted`.
 /// 3. Idempotency on `membershipId`: an EXISTING membership (granted or already revoked) makes a
 ///    repeat call a no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- `membershipId` is
 ///    REQUIRED and caller-minted, never minted by this handler.
@@ -3110,6 +3117,8 @@ pub async fn grant_restaurant_access(
     // at the composition root (the `run_rider_restriction_door` "when_at" style) -- never a
     // global/env read inside the handler. Checked FIRST, before the store is even touched.
     // `revoke_restaurant_access` never consumes this: releasing access is always safe to allow.
+    // Covers BOTH doors (6-iv): a member-invitation grant is equally the irreversible moment that
+    // starts a real Tours human's legal clock.
     run_member_access_grant: bool,
 ) -> Result<(), DomainError> {
     if !run_member_access_grant {
@@ -3150,6 +3159,118 @@ pub async fn grant_restaurant_access(
         .map(|_| ())
 }
 
+/// The fixed UUIDv5 namespace `GrantRestaurantAccessByInvitation`'s derived `membershipId` hangs
+/// off (round 2, ADR-20260905-101349 §2 amendment). `UNVERIFIED input`: no controlling record
+/// names a UUIDv5 namespace for this derivation (register check, #639 part C step 6-iv round 2) --
+/// named as its own constant so a future record can supersede it without silently reshaping every
+/// already-derived id.
+fn restaurant_invitation_membership_namespace() -> uuid::Uuid {
+    uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        b"https://captain.food/integrations/restaurant-invitation-membership",
+    )
+}
+
+/// The DERIVED `membershipId` for an invitation-based grant -- `UUIDv5(namespace, invitationId)`,
+/// never client-supplied (vernon B1, the `sirene.rs` deterministic-id precedent): stream identity
+/// then enforces "one accepted invitation, at most one membership". `pub` (not `pub(crate)`) so
+/// both the behaviour-test fixture pool ([`crate::behaviour_support::uid`]) and the DB-gated
+/// integration suite (`crates/infrastructure/tests/main/restaurant_invitation.rs`) can compute the
+/// SAME value a `then:`/assertion must match.
+pub fn restaurant_membership_id_for_invitation(invitation_id: RestaurantInvitationId) -> MembershipId {
+    MembershipId(uuid::Uuid::new_v5(&restaurant_invitation_membership_namespace(), invitation_id.0.as_bytes()))
+}
+
+/// Handle `commands.yaml#/GrantRestaurantAccessByInvitation` → emit
+/// `events.yaml#/RestaurantAccessGranted` (round 2, ADR-20260905-101349 §2 amendment; reviewer B1,
+/// vernon B1/B2, evans B1, graphql B1) -- the SECOND command of the two-lane accept, the PUBLIC
+/// door `GrantRestaurantAccess` no longer is. Payload is exactly `{ invitationId, token }`.
+///
+/// 1. `verify_email_token(token)` -> the caller's OWN proved `authSubject` (the SAME identity port
+///    `AcceptRestaurantInvitation` uses).
+/// 2. Fold the `RestaurantInvitation-{invitationId}` stream; refuse with the typed
+///    `RestaurantInvitationNotAcceptable` -- BYTE-IDENTICAL to an unknown `invitationId` -- unless
+///    the invitation is terminal `ACCEPTED` **and** its recorded `acceptedAuthSubject` equals the
+///    just-proved `authSubject` (the CALLER-IS-THE-SUBJECT proof, vernon B2): a stranger who learns
+///    or guesses an `invitationId` for someone else's accepted invitation gains nothing, because
+///    they cannot produce a token that verifies to that OTHER subject.
+/// 3. `membershipId` is DERIVED, never client-supplied: a second call for the same accepted
+///    invitation folds the existing membership and returns the ordinary idempotent no-op.
+/// 4. `memberId` is the CURRENT reservation holder for `(MEMBER, authSubject)` when one already
+///    exists (a re-hire, or a person joining a second restaurant, young B1), else the invitation's
+///    own caller-minted `memberId`.
+/// 5. Emits the SAME `RestaurantAccessGranted` fact as the ADMIN door, `basis: MEMBER_INVITATION`.
+pub async fn grant_restaurant_access_by_invitation(
+    store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    auth_subjects: &dyn AuthSubjectReservationRepository,
+    cmd: GrantRestaurantAccessByInvitation,
+    actor: &Actor,
+    // The SAME door as the ADMIN grant (ADR-20260905-101349 §6): a member-invitation grant is
+    // equally the irreversible moment that starts a real Tours human's legal clock.
+    run_member_access_grant: bool,
+) -> Result<(), DomainError> {
+    if !run_member_access_grant {
+        return Err(reject("MemberAccessGrantDoorClosed", json!({ "scopeId": cmd.invitation_id })));
+    }
+    let verified = auth
+        .verify_email_token(
+            IdentityVerifyEmailTokenInput { token: cmd.token.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    let not_acceptable = || {
+        reject("RestaurantInvitationNotAcceptable", json!({ "invitationId": cmd.invitation_id }))
+    };
+    let (invitation, _) =
+        Repository::new(store).load::<RestaurantInvitationState>(cmd.invitation_id).await?;
+    let Some(invitation) = invitation.filter(|s| s.is_accepted()) else {
+        return Err(not_acceptable());
+    };
+    let accepted_auth_subject = invitation
+        .accepted_auth_subject
+        .clone()
+        .expect("is_accepted() implies accepted_auth_subject is Some");
+    if accepted_auth_subject != verified.auth_ref {
+        // The caller proved a DIFFERENT subject than the one who accepted -- the SAME refusal as
+        // an unknown invitation, no hint that this invitationId belongs to someone else.
+        return Err(not_acceptable());
+    }
+    let membership_id = restaurant_membership_id_for_invitation(cmd.invitation_id);
+    let (state, version) = Repository::new(store).load::<RestaurantMembershipState>(membership_id).await?;
+    if state.is_some() {
+        // Idempotent replay on the derived membershipId: no second fact for the same invitation.
+        return Ok(());
+    }
+    let member_id = match auth_subjects.holder_of(verified.auth_ref.clone(), PrincipalKind::MEMBER).await? {
+        // A re-hire, or a person joining a second restaurant (young B1): reuse the EXISTING member
+        // id their credential already holds -- never the invitation's separately-minted one, which
+        // would otherwise collide on the reservation below.
+        Some(existing) => MemberId(existing),
+        None => invitation.member_id,
+    };
+    if !auth_subjects
+        .reserve(verified.auth_ref.clone(), BoundPrincipal::Member(member_id))
+        .await?
+    {
+        return Err(reject("MemberAuthSubjectAlreadyBound", json!({ "authSubject": verified.auth_ref })));
+    }
+    let event = DomainEvent::RestaurantAccessGranted(RestaurantAccessGranted {
+        membership_id,
+        scope_type: domain::generated::scalars::ScopeType::RESTAURANT,
+        scope_id: invitation.restaurant_id,
+        principal_kind: PrincipalKind::MEMBER,
+        member_id,
+        auth_subject: verified.auth_ref,
+        authority: invitation.authority,
+        basis: AccessBasis::MEMBER_INVITATION,
+    });
+    Repository::new(store)
+        .save(&restaurant_membership_stream(&membership_id), version, &[event], actor)
+        .await
+        .map(|_| ())
+}
+
 /// Handle `commands.yaml#/RevokeRestaurantAccess` → emit `events.yaml#/RestaurantAccessRevoked`
 /// (#639 part C step 6-i, ADR-20260905-101349 §2/§11). NEVER gated: releasing access is always
 /// safe to allow. Never releases the underlying `(MEMBER, authSubject)` reservation (PROP §7) --
@@ -3178,6 +3299,169 @@ pub async fn revoke_restaurant_access(
         .save(&restaurant_membership_stream(&cmd.membership_id), version, &[event], actor)
         .await
         .map(|_| ())
+}
+
+// ================================================================================================
+// RestaurantInvitation aggregate (actors.yaml#/RestaurantInvitation) — the roster and the
+// invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3). Its own aggregate, own stream,
+// own lane; the accept is two commands in two lanes, sequenced by the accepting member's CLIENT,
+// never a process manager (`grant_restaurant_access_by_invitation` above, PUBLIC, is the second
+// half — round 2's split; `grant_restaurant_access` itself is ADMIN-only again and carries no
+// MEMBER_INVITATION branch).
+// ================================================================================================
+
+/// The stream a RestaurantInvitation aggregate lives on.
+fn restaurant_invitation_stream(id: &RestaurantInvitationId) -> String {
+    format!("RestaurantInvitation-{}", id.0)
+}
+
+/// Handle `commands.yaml#/InviteRestaurantMember` → emit `events.yaml#/RestaurantInvitationSent`
+/// (§8.2). Gated by `RUN_RESTAURANT_INVITATION`, checked BEFORE the store is touched (the
+/// `RestrictRider`/`grant_restaurant_access` shape). The MANAGER-authority guard is enforced at
+/// the GraphQL layer (`crates/server/src/graphql/acl.rs::AuthorityGuard`), not here — see the
+/// aggregate's `receives:` comment (actors.yaml) for why (#144, the RESTAURANT identity bridge, is
+/// fenced off this dispatch).
+pub async fn invite_restaurant_member(
+    store: &dyn EventStore,
+    cmd: InviteRestaurantMember,
+    actor: &Actor,
+    run_restaurant_invitation: bool,
+) -> Result<(), DomainError> {
+    if !run_restaurant_invitation {
+        return Err(reject("RestaurantInvitationDoorClosed", json!({ "restaurantId": cmd.restaurant_id })));
+    }
+    // `invitationId`/`memberId` are REQUIRED and CALLER-MINTED (ADR-0034, the
+    // `GrantRestaurantAccess.membershipId` precedent): the mailbox lane address needs the former
+    // present to route at all, and the 6-iv STOP finding corrected the latter from an earlier
+    // handler-mint draft (untestable by this DSL's exact-literal behaviour tests).
+    let invitation_id = cmd.invitation_id;
+    let (state, version) =
+        Repository::new(store).load::<RestaurantInvitationState>(invitation_id).await?;
+    if state.is_some() {
+        // A replayed InviteRestaurantMember on the SAME invitationId: absorbed, not a second
+        // fact (the GrantRestaurantAccess idempotent-replay precedent).
+        return Ok(());
+    }
+    let event = DomainEvent::RestaurantInvitationSent(RestaurantInvitationSent {
+        invitation_id,
+        restaurant_id: cmd.restaurant_id,
+        invited_email: cmd.invited_email,
+        authority: cmd.authority,
+        member_id: cmd.member_id,
+    });
+    Repository::new(store)
+        .save(&restaurant_invitation_stream(&invitation_id), version, &[event], actor)
+        .await
+        .map(|_| ())
+}
+
+/// Handle `commands.yaml#/RevokeRestaurantInvitation` → emit `events.yaml#/RestaurantInvitationRevoked`
+/// (§8.4). NEVER gated: withdrawing an unaccepted offer is always safe to allow.
+pub async fn revoke_restaurant_invitation(
+    store: &dyn EventStore,
+    cmd: RevokeRestaurantInvitation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<RestaurantInvitationState>(cmd.invitation_id, || {
+            reject("RestaurantInvitationNotFound", json!({ "invitationId": cmd.invitation_id }))
+        })
+        .await?;
+    if !state.is_pending() {
+        return Err(reject(
+            "RestaurantInvitationAlreadyRevoked",
+            json!({ "invitationId": cmd.invitation_id }),
+        ));
+    }
+    let event = DomainEvent::RestaurantInvitationRevoked(RestaurantInvitationRevoked {
+        invitation_id: cmd.invitation_id,
+    });
+    Repository::new(store)
+        .save(&restaurant_invitation_stream(&cmd.invitation_id), version, &[event], actor)
+        .await
+        .map(|_| ())
+}
+
+/// Handle `commands.yaml#/AcceptRestaurantInvitation` → emit `events.yaml#/RestaurantInvitationAccepted`
+/// (§8.3) -- the FIRST of the two-lane accept's two commands, never a process manager
+/// (ADR-20260905-101349 §2). Deliberately ONE typed refusal
+/// (`errors.yaml#/RestaurantInvitationNotAcceptable`) for every non-acceptable case -- unknown
+/// invitationId, wrong verified email, already accepted, revoked, expired -- the 6-ii sign-in
+/// door's no-enumeration posture carried here.
+///
+/// Round 2 ordering fix (beck BLOCKING): `verify_email_token` runs UNCONDITIONALLY, BEFORE the
+/// `is_pending()` filter -- the token is spent identically whether the named `invitationId` is
+/// unknown, terminal or genuinely pending, so an unknown/terminal id burns the caller's token
+/// exactly like a pending one does. The round-1 order (filter first) left an observable oracle: a
+/// pending invitation always consumed the token, an unknown/terminal one never did.
+pub async fn accept_restaurant_invitation(
+    store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    cmd: AcceptRestaurantInvitation,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let not_acceptable = || {
+        reject("RestaurantInvitationNotAcceptable", json!({ "invitationId": cmd.invitation_id }))
+    };
+    let verified = auth
+        .verify_email_token(
+            IdentityVerifyEmailTokenInput { token: cmd.token.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    let (state, version) =
+        Repository::new(store).load::<RestaurantInvitationState>(cmd.invitation_id).await?;
+    let Some(state) = state.filter(|s| s.is_pending()) else {
+        return Err(not_acceptable());
+    };
+    let invited = state.invited_email.0.trim().to_lowercase();
+    let proved = verified.email.0.trim().to_lowercase();
+    if invited != proved {
+        return Err(not_acceptable());
+    }
+    let event = DomainEvent::RestaurantInvitationAccepted(RestaurantInvitationAccepted {
+        invitation_id: cmd.invitation_id,
+        auth_subject: verified.auth_ref,
+    });
+    Repository::new(store)
+        .save(&restaurant_invitation_stream(&cmd.invitation_id), version, &[event], actor)
+        .await
+        .map(|_| ())
+}
+
+/// Record the delivered `RestaurantInvitationExpired` reminder on its invitation's stream --
+/// record semantics (ADR-20260810-231300: expiry is a recorded fact, never an engine timer),
+/// analogous to [`record_inbound_order_event`]. Recorded iff the invitation is STILL PENDING;
+/// `NoChange` for an already-terminal invitation (accepted/revoked/expired) or a gone stream --
+/// never a rejection, a deadline's passage cannot be refused.
+///
+/// WIRED to the mailbox's reminder-delivery route as of round 2 (#639 part C step 6-iv):
+/// `crates/infrastructure/src/inbox.rs`'s `RecordLeg::RestaurantInvitation` +
+/// `crates/infrastructure/src/mailbox/handler.rs`'s matching arm. Also exercised directly by
+/// `TestRestaurantInvitationExpiredByPromotionPass` via the behaviour-test bed's generic
+/// `record_fact` (fold correctness).
+pub async fn record_inbound_restaurant_invitation_expiry(
+    store: &dyn EventStore,
+    event: DomainEvent,
+    actor: &Actor,
+) -> Result<crate::payments::RecordOutcome, DomainError> {
+    use crate::payments::RecordOutcome;
+
+    let DomainEvent::RestaurantInvitationExpired(expired) = &event else {
+        return Err(DomainError::Repository(format!(
+            "record_inbound_restaurant_invitation_expiry routed a non-invitation fact: {event:?}"
+        )));
+    };
+    let stream_name = restaurant_invitation_stream(&expired.invitation_id);
+    let (state, version) = Repository::new(store).load::<RestaurantInvitationState>(expired.invitation_id).await?;
+    let Some(state) = state else {
+        return Ok(RecordOutcome::NoChange);
+    };
+    if !state.is_pending() {
+        return Ok(RecordOutcome::NoChange);
+    }
+    Repository::new(store).save(&stream_name, version, &[event], actor).await?;
+    Ok(RecordOutcome::Recorded)
 }
 
 // ================================================================================================

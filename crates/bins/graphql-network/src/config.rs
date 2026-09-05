@@ -292,6 +292,10 @@ pub struct Config {
     pub run_member_access_grant: bool,
     /// DEFAULT `false`. The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §6). ON, both `requestMemberSignInLink` and `confirmMemberSignIn` run their identify/stamp/park flow as designed. OFF, BOTH refuse BEFORE touching the identity provider with the typed `MemberSignInDoorClosed` rejection -- a supervisable row, never a silent no-op. Preconditions gating the flip are named in `docs/decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` (open): 6-i merged (done), the silent `/auth/refresh` retry + `?next=` in the client (#894-class, own issue), email deliverability proven by a hand-dispatched drill (SPF/DKIM/DMARC, founder's), the Supabase DPA/region (founder's), the legal/privacy page the refusal screen links (owner named), and `MEMBER-ACCESS-GRANT-PRECONDITIONS` flipped first (a door with no grant path is a refusal machine).
     pub run_member_sign_in_door: bool,
+    /// DEFAULT `false`. The invitation door (#639 part C step 6-iv, ADR-20260905-101349 §2/§3). ON, `inviteRestaurantMember` sends the invite email and appends `RestaurantInvitationSent` as normal. OFF, the handler refuses BEFORE touching the store with the typed `RestaurantInvitationDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantInvitation` is NEVER gated by this key: withdrawing an offer nobody has accepted yet is always safe to allow. `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg stays behind `RUN_MEMBER_ACCESS_GRANT` (the SAME irreversible-grant gate CAPTAIN_ONBOARDING already uses -- a member-invitation grant is equally the first fact that starts a real Tours human's legal clock, so it is not a separate key). Preconditions gating the flip are named in `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml` (open): the invitation email deliverability drill, `RUN_MEMBER_SIGN_IN_DOOR` flipped FIRST (an invitation nobody can sign in with afterwards is a dead letter), the Art. 13 notice at the invited address (a third party's email typed by a manager -- legal names the instrument), the TTL value below confirmed (not just defaulted), and no seat-count/billing semantics anywhere in this slice.
+    pub run_restaurant_invitation: bool,
+    /// DEFAULT `604800`. UNVERIFIED input (see the comment above this key). How long a `RestaurantInvitation` stays PENDING before the promotion pass delivers `RestaurantInvitationExpired` (`reschedule: keep` -- a redelivered birth never moves the deadline). Proposed default: 7 days (604800s), pending confirmation in `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`.
+    pub restaurant_invitation_ttl_seconds: i64,
 }
 
 impl Config {
@@ -466,6 +470,11 @@ impl Config {
             .or_else(|| baked("RUN_MEMBER_SIGN_IN_DOOR", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_MEMBER_SIGN_IN_DOOR", &v, false))
             .unwrap_or(false);
+        let run_restaurant_invitation = raw("RUN_RESTAURANT_INVITATION")
+            .or_else(|| baked("RUN_RESTAURANT_INVITATION", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_RESTAURANT_INVITATION", &v, false))
+            .unwrap_or(false);
+        let restaurant_invitation_ttl_seconds = raw("RESTAURANT_INVITATION_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(604800);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
                 problems.invalid.push(InvalidKey { name: "DATABASE_URL", scalar: "PostgresUrl", pattern: "^postgres(ql)?://", gates: "Postgres pool: the event store, every read model and every background worker. Unset, /health reports `not_configured` (503) and no worker is constructed at all." });
@@ -564,6 +573,8 @@ impl Config {
                 run_sirene_worker,
                 run_member_access_grant,
                 run_member_sign_in_door,
+                run_restaurant_invitation,
+                restaurant_invitation_ttl_seconds,
             },
             problems,
         )
@@ -575,6 +586,7 @@ impl Config {
     /// constant (ADR-20260731-214500).
     pub fn reminder_windows(&self) -> std::collections::HashMap<&'static str, std::time::Duration> {
         [
+            ("RESTAURANT_INVITATION_TTL_SECONDS", std::time::Duration::from_secs(u64::try_from(self.restaurant_invitation_ttl_seconds).expect("RESTAURANT_INVITATION_TTL_SECONDS must be non-negative"))),
         ]
         .into_iter()
         .collect()
@@ -640,12 +652,14 @@ impl Config {
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  RUN_MEMBER_ACCESS_GRANT    = {}\n", self.run_member_access_grant));
         out.push_str(&format!("  RUN_MEMBER_SIGN_IN_DOOR    = {}\n", self.run_member_sign_in_door));
+        out.push_str(&format!("  RUN_RESTAURANT_INVITATION  = {}\n", self.run_restaurant_invitation));
+        out.push_str(&format!("  RESTAURANT_INVITATION_TTL_SECONDS = {}\n", self.restaurant_invitation_ttl_seconds));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 55;
+pub const KEY_COUNT: usize = 57;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -705,6 +719,8 @@ pub const DECLARED_KEYS: &[&str] = &[
     "RUN_SIRENE_WORKER",
     "RUN_MEMBER_ACCESS_GRANT",
     "RUN_MEMBER_SIGN_IN_DOOR",
+    "RUN_RESTAURANT_INVITATION",
+    "RESTAURANT_INVITATION_TTL_SECONDS",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
@@ -743,4 +759,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MEMBER_ACCESS_GRANT", "production", "false"),
     ("RUN_MEMBER_SIGN_IN_DOOR", "production", "false"),
     ("RUN_MEMBER_SIGN_IN_DOOR", "staging", "false"),
+    ("RUN_RESTAURANT_INVITATION", "production", "false"),
+    ("RUN_RESTAURANT_INVITATION", "staging", "false"),
 ];

@@ -408,6 +408,50 @@ pub fn record_member_signin_confirm_result(span: &Span, result: &str) {
     }
 }
 
+/// `invitation.invite` (`restaurant-invitation` contract, #639 part C step 6-iv): opened by
+/// `inviteRestaurantMember`'s handler. `business.authority` is the INVITED authority (the command's
+/// own `authority` field), never the caller's -- the caller's own authority is not threaded to this
+/// layer (#144 fence, see the hand-back).
+pub fn invitation_invite(correlation_id: &str, authority: &str) -> Span {
+    tracing::info_span!(
+        "invitation.invite",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.authority = authority,
+        business.result = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the invite span's outcome (sent | door_closed | rejected | technical_error).
+/// `technical_error` also sets OTel ERROR status, matching the contract's `technical_error` rule.
+pub fn record_invitation_invite_result(span: &Span, result: &str) {
+    span.record(attr::RESULT, result);
+    if result == "technical_error" {
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
+/// `invitation.accept` (`restaurant-invitation` contract): the two-lane accept's FIRST command.
+pub fn invitation_accept(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "invitation.accept",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the accept span's outcome (accepted | not_acceptable | token_invalid | token_expired |
+/// technical_error). `technical_error` also sets OTel ERROR status.
+pub fn record_invitation_accept_result(span: &Span, result: &str) {
+    span.record(attr::RESULT, result);
+    if result == "technical_error" {
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 // --- late-bound recorders -----------------------------------------------------------------------
 //
 // Each takes the span explicitly rather than using `Span::current()`. After an `.instrument(..).await`

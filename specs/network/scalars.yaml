@@ -217,13 +217,14 @@ AccessBasis:
     declares without external proof (`OWNER_DECLARATION`), or an existing member invites a
     colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`:
     only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would
-    overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only
-    `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a
-    second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with
-    the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day
-    `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept
-    (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager
-    (ADR-20260905-101349 §2).
+    overstate the other three. Step 6-i's `GrantRestaurantAccess` handler accepted only
+    `CAPTAIN_ONBOARDING`; **6-iv adds `MEMBER_INVITATION`**, as the second command of the two-lane
+    accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`, never a process manager,
+    ADR-20260905-101349 §2) -- the handler DERIVES `scopeId`/`memberId`/`authority`/`authSubject`
+    from the invitation's own recorded facts rather than trusting the client's copies
+    (`GrantRestaurantAccess.invitationId` is the sole proof). `GOOGLE_BUSINESS_PROFILE` and
+    `OWNER_DECLARATION` stay declared-but-refused with the typed error
+    `errors.yaml#/AccessBasisNotYetAccepted`.
 
 
 AccessRevocationGround:
@@ -242,3 +243,40 @@ AccessRevocationGround:
     on decode. No free text rides beside either value -- no `note` field exists on
     `RevokeRestaurantAccess`. Counsel review at the checkpoint (ADR-20260905-101349 §11); additive-
     only if it ever grows, same discipline as `RiderRestrictionGround` (counsel can only add).
+
+
+# --- The roster and the invitation: the RestaurantInvitation aggregate (#639 part C step 6-iv,
+# ADR-20260905-101349 §2/§3, PROP-20260831-180622 §6.1) ------------------------------------------
+# Local to `network`, the RestaurantMembership precedent: an invitation is never referenced by
+# another scope's events or commands.
+
+RestaurantInvitationId:
+  type: string
+  format: uuid
+  description: >
+    Identity of one `RestaurantInvitation` (#639 part C step 6-iv) -- one invite of one email
+    address to one restaurant scope. REQUIRED and CALLER-MINTED on `InviteRestaurantMember`, the
+    `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to
+    route at all. Carried as `GrantRestaurantAccess.invitationId` on the accept leg's SECOND
+    command as the sole proof that a grant on `basis: MEMBER_INVITATION` corresponds to a real,
+    ACCEPTED invitation -- the handler derives `scopeId`/`memberId`/`authority`/`authSubject` from
+    the invitation's OWN recorded facts rather than trusting the client's copies of them (6-iv
+    STOP finding: see the hand-back for the full reasoning).
+
+
+RestaurantInvitationStatus:
+  type: string
+  enum: [PENDING, ACCEPTED_PENDING_ACCESS, ACCEPTED, REVOKED, EXPIRED]
+  description: >
+    Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList`
+    read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING),
+    `RestaurantInvitationAccepted` (`ACCEPTED_PENDING_ACCESS` -- round 2, ux/business: the two-lane
+    accept's FIRST leg landed but the SECOND, `GrantRestaurantAccessByInvitation`, has not yet been
+    observed by this projector; its own status, never painted as a plain failure on `/invitation`),
+    `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). The final
+    `ACCEPTED_PENDING_ACCESS` -> `ACCEPTED` transition (once the grant leg's own
+    `RestaurantAccessGranted` fact is observed) is round 2's NAMED GAP, tracked by #902's sibling
+    follow-up -- `RestaurantInvitationList` never regresses a row FROM this state, so the gap is
+    honest under-reporting, never a wrong answer. Terminal once ACCEPTED/REVOKED/EXPIRED -- the
+    write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable`
+    covers every terminal state uniformly, by design: see the no-enumeration note there).
