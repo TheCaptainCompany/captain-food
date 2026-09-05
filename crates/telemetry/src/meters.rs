@@ -769,6 +769,16 @@ pub mod rider_restriction {
         G.get_or_init(|| meter().i64_gauge(metric::RIDER_STANDING_LAG_POSITIONS).build())
     }
 
+    fn holding_job_age_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_gauge(metric::RIDER_RESTRICTED_HOLDING_JOB_AGE_SECONDS)
+                .with_unit("s")
+                .build()
+        })
+    }
+
     /// `rider_restricted_denied_total{operation}` — the `StandingGuard` refused a restricted
     /// rider at the gateway boundary. NO `rider_id` label; pair with an INFO trace event carrying
     /// it (the #748 skip-trace pattern).
@@ -783,6 +793,14 @@ pub mod rider_restriction {
     /// `scope_membership_lag_positions`).
     pub fn lag(positions: i64) {
         lag_gauge().record(positions, &[]);
+    }
+
+    /// `rider_restricted_holding_job_age_seconds` — the age of the OLDEST stranded row (a
+    /// RESTRICTED rider still holding a job), **0 when the class is empty**. Called on EVERY tick
+    /// from `delivery_handback_watch_tick`, empty population included — the same defect class
+    /// ADR-20260810-231300 names. NO `rider_id` label.
+    pub fn holding_job_age(age_seconds: i64) {
+        holding_job_age_gauge().record(age_seconds, &[]);
     }
 }
 

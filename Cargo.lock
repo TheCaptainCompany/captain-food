@@ -2984,6 +2984,7 @@ dependencies = [
  "telemetry",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
