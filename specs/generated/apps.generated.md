@@ -50,7 +50,7 @@ Three states, exhaustive and exclusive. **`honest`** = measured, and the image l
 
 Every workspace crate any app resolves, by the set of boundaries whose apps reach it AND by HOW MANY apps do.
 
-**No crate the apps reach is boundary-EXCLUSIVE: all 44 are linked from apps of two or more boundaries, and 44 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover all 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 58 deployables actually link the crate, and it ranges from 8 to 58.
+**No crate the apps reach is boundary-EXCLUSIVE: all 45 are linked from apps of two or more boundaries, and 45 of them from at least one app of EVERY boundary.** Read that as what it says and no more. The boundary column's ceiling is 6 and one family clears it on its own -- the 8 `graphql-*` subgraphs are one app per scope and between them cover all 6 boundaries, so any crate a single subgraph links already scores the maximum. **The `apps` column is the one with resolution**: it counts how many of the 58 deployables actually link the crate, and it ranges from 8 to 58.
 
 | reached by | apps (of 58) | crates | which |
 |---|---:|---:|---|
@@ -62,9 +62,9 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 12 | 1 | `client-delivery-job` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 10 | 3 | `avelo37-adapter`, `coopcycle-adapter`, `uber-direct-adapter` |
 | 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 9 | 3 | `client-catalog`, `client-restaurant-account`, `hubrise-adapter` |
-| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 8 | 12 | `client-cart`, `client-conversation`, `client-customer`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-place-order-process`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-rider`, `server` |
+| 6 boundaries (catalog, customer, delivery, order, platform, restaurant) | 8 | 13 | `client-cart`, `client-conversation`, `client-customer`, `client-delivery-partner-registration`, `client-mailbox-supervision`, `client-order`, `client-place-order-process`, `client-prospect`, `client-reclamation`, `client-refund-process`, `client-restaurant-membership`, `client-rider`, `server` |
 
-**Reached by no deployable** -- 6 workspace crate(s): `captain-food-codegen`, `captain-food-secret-gate`, `client-customer-credit`, `client-restaurant-membership`, `db-test-gate`, `desktop`. Codegen, gates and the desktop shell are expected here. `client-customer-credit`, `client-restaurant-membership` is not: a generated actor client no app links is either an actor with no caller or a wiring gap, and this is the only artifact that would show it.
+**Reached by no deployable** -- 5 workspace crate(s): `captain-food-codegen`, `captain-food-secret-gate`, `client-customer-credit`, `db-test-gate`, `desktop`. Codegen, gates and the desktop shell are expected here. `client-customer-credit` is not: a generated actor client no app links is either an actor with no caller or a wiring gap, and this is the only artifact that would show it.
 
 ## 4. The apps
 
