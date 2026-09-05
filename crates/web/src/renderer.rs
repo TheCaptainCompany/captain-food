@@ -1804,6 +1804,67 @@ mod tests {
         assert!(html2.contains("data-action=\"hand_back_delivery\""), "handback sheet: confirm missing on PICKED_UP -- {html2}");
     }
 
+    /// Round 3 (#639 part C step 4-iii-A, `screen-condition-on-form-field`): `rider_report_sheet`'s
+    /// `issue_note` (`text_area`, `visible_when: "issue_kind.value == 'OTHER'"`) was DELETED rather
+    /// than un-conditioned — `text_area` has no renderer arm (falls to the generic catch-all,
+    /// `data-c=ty`) and would have painted an inert empty div regardless of which kind chip was
+    /// picked. This proves the sheet still fully works with no kind chosen: all SIX
+    /// `DeliveryIssueKind` chips (the spec's real count — `ADDRESS_NOT_FOUND`,
+    /// `CUSTOMER_UNREACHABLE`, `RESTAURANT_NOT_READY`, `FOOD_DAMAGED`, `VEHICLE_OR_INJURY`,
+    /// `OTHER`), the confirm button, and NO leftover `text_area` node (positive + negative, per
+    /// CLAUDE.md's "never a bare `!contains` alone").
+    #[test]
+    fn the_rider_issue_sheet_has_no_free_text_note_and_renders_its_kind_chips_and_confirm() {
+        let screen = Surface::Rider.screens().iter().find(|s| s.id == "job_detail").unwrap();
+        let mut c = ctx();
+        c.insert_resolved(
+            "delivery.byOrder",
+            json!({
+                "id": "d-1",
+                "status": "ASSIGNED",
+                "pickupAddress": { "line1": "12 rue de la Paix", "postalCode": "37000", "city": "Tours" },
+                "dropoffAddress": { "line1": "4 avenue Foch", "postalCode": "37000", "city": "Tours" },
+                "foodLocation": null,
+                "openIssue": null,
+                "restaurant": { "displayName": "Chez Test" },
+            }),
+        );
+        let html = render_screen_html(screen, Surface::Rider.sheets(), c);
+        assert_eq!(html.matches("data-chip-group=\"issue_kind\"").count(), 6, "all six kind chips must render: {html}");
+        assert!(html.contains("data-action=\"report_delivery_issue\""), "confirm button missing -- {html}");
+        assert!(!html.contains("data-c=\"text_area\""), "the deleted free-text note must never render (no renderer arm) -- {html}");
+    }
+
+    /// R3-3 (#639 part C step 4-iii-A round 3, ux + reviewer): `claim_resolve`'s `refund_amount`
+    /// (`tip_amount_selector`) was rendered unconditionally in round 2 — but `tip_amount_selector`
+    /// ALSO has no renderer arm (falls to the generic catch-all: a bare "Montant" label, no presets,
+    /// no input, no `data-action`), so this put an INERT MONEY-PATH control on a LIVE screen. DELETED
+    /// rather than left inert. Asserts the resolve button still dispatches `resolve_reclamation`
+    /// (`resolve_btn`'s own action, unaffected by the deletion) AND no `tip_amount_selector` node
+    /// remains (positive + negative — quoted RED before the deletion in the round-3 hand-back).
+    #[test]
+    fn the_claim_resolve_screen_has_no_inert_amount_picker_and_still_resolves() {
+        let screen = Surface::RestaurantBackoffice.screens().iter().find(|s| s.id == "claim_resolve").unwrap();
+        let mut c = ctx();
+        c.insert_resolved(
+            "reclamation.byId",
+            json!({
+                "reclamationId": "rec-1",
+                "orderId": "o-1",
+                "category": "FOOD_QUALITY",
+                "description": "Cold food",
+                "status": "OPEN",
+                "resolution": null,
+                "refundAmount": null,
+                "rejectReason": null,
+                "overdue": false,
+            }),
+        );
+        let html = render_screen_html(screen, Surface::RestaurantBackoffice.sheets(), c);
+        assert!(html.contains("data-action=\"resolve_reclamation\""), "resolve button missing -- {html}");
+        assert!(!html.contains("data-c=\"tip_amount_selector\""), "the deleted inert amount picker must never render (no renderer arm) -- {html}");
+    }
+
     /// #639 part C step 4-ii (ADR-20260904-124600 §4): a `standing.mine` fixture per ground, `fr`
     /// locale — every ground's own sentence, BOTH formatted dates (never a raw ISO instant), the
     /// contact address, "contester" in the footer, no `rider_toggle_online` control (no
@@ -2849,9 +2910,11 @@ mod tests {
         let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
         // The ground string ALSO exists as the sheet's own (always-mounted, hidden) chip label —
         // so a bare `contains` would pass vacuously even if the detail's own ground row rendered
-        // too. Restricted-rider tests below (`the_detail_shows_no_count`) prove the RESTRICTED case
-        // shows it TWICE (chip label + detail row); here, reinstated (ACTIVE), it must show ONCE
-        // (the chip label only).
+        // too. `a_restricted_riders_detail_shows_its_ground_twice_and_effective_since` below proves
+        // the RESTRICTED case shows it TWICE (chip label + detail row); here, reinstated (ACTIVE),
+        // it must show ONCE (the chip label only). (Round 3 R3-6, legal: this comment used to name
+        // `the_detail_shows_no_count` as that proof — FALSE, that test only scans for digit-only
+        // text nodes and asserts nothing about the ground string's count; struck.)
         assert_eq!(
             html.matches("Identité non concordante").count(), 1,
             "a reinstated rider must not show the DETAIL ground row (only the sheet's own chip label survives): {html}"
@@ -2983,6 +3046,57 @@ mod tests {
             );
             i = start + lt;
         }
+    }
+
+    /// R3-6 (#639 part C step 4-iii-A round 3, legal): `detail_access_restricted_facts`'s RESTRICTED
+    /// side had NO positive test — deleting the whole `conditional_section` still passed every
+    /// existing test, since `the_detail_shows_no_count` (its own doc comment falsely claimed this
+    /// coverage) only scans for digit-only text nodes. The ground string ALSO exists as the sheet's
+    /// own always-mounted chip label (same trap as `a_reinstated_rider_shows_no_ground_and_shows_reinstated_on`
+    /// above), so a RESTRICTED rider must show it TWICE (chip label + detail row) — a bare `contains`
+    /// would pass vacuously even with the detail row deleted.
+    #[test]
+    fn a_restricted_riders_detail_shows_its_ground_twice_and_effective_since() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "RESTRICTED", "ground": "ACCOUNT_COMPROMISE",
+                "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z", "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert_eq!(
+            html.matches("Compte compromis").count(), 2,
+            "a RESTRICTED rider must show the ground TWICE (the sheet's own chip label + the detail's own row): {html}"
+        );
+        assert!(html.contains("Effectif depuis"), "the detail must show the effective-since row: {html}");
+    }
+
+    /// R3-7 (#639 part C step 4-iii-A round 3, beck + ux): round 2's `reinstate_rider` `inline_error`
+    /// (`rider_detail`'s direct-Tell button, no sheet) was asserted by NOTHING — deleting the node
+    /// still passes every existing test. Asserts it mounts, named for the right action.
+    #[test]
+    fn the_reinstate_rider_inline_error_is_mounted() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "RESTRICTED", "ground": "ACCOUNT_COMPROMISE",
+                "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z", "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert!(
+            html.contains("data-for-action=\"reinstate_rider\""),
+            "the reinstate_rider inline_error must be mounted: {html}"
+        );
     }
 
     /// The `phone_call` control's target prop is `number:` (`crates/web/src/executor.rs`
