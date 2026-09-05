@@ -28,10 +28,27 @@ question: 'What must exist before the invitation door (`inviteRestaurantMember`)
   (non-self-registered) data; and a written confirmation that no seat-count or billing semantics
   attach to an accepted invitation anywhere in the product (business, so a later pricing feature
   does not retroactively find this door doing something it was never scoped for). The MANAGER
-  authority guard on `inviteRestaurantMember`/`revokeRestaurantAccess` (round 2 of the 6-iv card)
-  is now BUILT and enforced -- it narrows who inside a restaurant can open this door but does not by
-  itself close any precondition above. Flipping `RUN_RESTAURANT_INVITATION` to true in production is
-  the decision that closes this row.'
+  authority guard on `inviteRestaurantMember`/`revokeRestaurantInvitation` (round 2 of the 6-iv
+  card; corrected from `revokeRestaurantAccess` round 3 -- the guarded mutation is the INVITATION
+  one) is now BUILT and enforced -- it narrows who inside a restaurant can open this door but does
+  not by itself close any precondition above. Round 3: **neither notice surface is built** -- the
+  invitation email''s content (the Art. 14 carrier) exists nowhere in `specs/**` and the acceptance
+  page (`/invitation`) carries no notice; both are flip preconditions. **Round 3, four more**: (1)
+  the `invitationPreview` consent surface (naming the restaurant/authority to the invitee before
+  they accept) is a flip precondition -- final vision is a PREVIEW READ MODEL keyed by a HASH of
+  the token, never a live `IdentityService` call inside a PUBLIC query (round 2''s own STOP finding:
+  no precedent in this codebase mixes a live auth-provider round trip into a query resolver); (2)
+  nothing SENDS the invitation email yet -- the handler emits the fact and stops; the send leg
+  (naming the restaurant + the invited authority, the Art. 14 first communication itself) is a flip
+  precondition; (3) query spans for `restaurantRoster`/`restaurantInvitations` are a flip
+  precondition ([#903](https://github.com/TheCaptainCompany/captain-food/issues/903)) -- the
+  `*_lag_positions` gauge HALF of this item is now BUILT this round
+  (`restaurant_roster_lag_positions`/`restaurant_invitation_list_lag_positions`), the span half is
+  not; (4) `PgMemberAuthorityRepository`, the `inviteRestaurantMember`/`revokeRestaurantInvitation`
+  guard''s own read path, is tested against Postgres nowhere in this codebase
+  ([#903](https://github.com/TheCaptainCompany/captain-food/issues/903)) -- its fail-open `NOT
+  EXISTS` revocation clause is untested against a real database. Flipping
+  `RUN_RESTAURANT_INVITATION` to true in production is the decision that closes this row.'
 owner: team
 opened: '2026-09-05'
 capacity: team

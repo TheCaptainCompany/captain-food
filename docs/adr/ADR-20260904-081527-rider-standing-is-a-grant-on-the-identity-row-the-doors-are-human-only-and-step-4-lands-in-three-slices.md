@@ -234,6 +234,12 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
    at the write door — the `enforce_service_hours_guard` shape. The handler is the honest write door
    for a release gate: a resolver-seam gate is skipped by every non-GraphQL enqueue path and would
    make the spec's `throws:` a lie. No routing, fencing or catch-all machinery is touched.
+   **Third carve-out recorded 2026-09-05 (PR #901, #639 part C step 6-iv, round 3; confirmed by
+   round-2's vernon, young, graphql-architect, beck and reviewer)**: the fence also admits **one
+   `RecordLeg` variant + its `FactRecorder` + one arm in `crates/infrastructure/src/mailbox/handler.rs`,
+   for a recorder that appends to ONE stream and cannot reject (Recorded/NoChange only) — the
+   `RecordLeg::Order` shape**; the `OrderAcceptanceTimeout` shape (early return, richer outcome,
+   applies `schedules:`) stays fenced. No routing, fencing or catch-all machinery is touched.
 9. **Observability, split by what emits it.** In **4-i**: the `rider-identity` contract's
    `rider.identity.resolve` span gains the attribute `business.standing` (`ACTIVE | RESTRICTED`,
    on `result=resolved` only — an attribute on the wide event, never a label on the histogram, so
@@ -407,3 +413,18 @@ Briefing before any code; **no lens output is legal advice or clearance**.
 - **architect** — five columns not two; five arms not three; `roles:`-omitted operations;
   `op-uncovered-by-story` is an ERROR; the fence globs recorded nowhere; the stale antecedent;
   ADR-20260810-194548 as the origin decision.
+
+## Consulted, §8 third carve-out (2026-09-05, PR #901 round 3)
+
+The `RecordLeg::RestaurantInvitation` shape (#639 part C step 6-iv) was read against the fence
+across round 2's presentation pass and confirmed at round 3 as the third carve-out line above.
+
+- **vernon** — one stream, `Recorded`/`NoChange` only, never a rejection, no state, no message —
+  identical in shape to `RecordLeg::Order`; distinguishes it from `OrderAcceptanceTimeout` (early
+  return, richer outcome, `schedules:`), which stays fenced.
+- **young** — additive-only diff against `origin/main` on the touched fence globs; no routing or
+  dispatch machinery restructured.
+- **graphql-architect** — no schema surface touched by this carve-out; PASS.
+- **beck** — the recorder is idempotent and total; PASS.
+- **reviewer** — carve-out ACCEPTED; the round's only FAIL was the unrelated CI-red clock issue
+  (R3-0), not this carve-out.
