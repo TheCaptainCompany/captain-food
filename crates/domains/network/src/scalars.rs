@@ -150,7 +150,7 @@ pub enum MemberAuthority {
     OPERATOR,
 }
 
-/// WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager (ADR-20260905-101349 §2).
+/// WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. Step 6-i's `GrantRestaurantAccess` handler accepted only `CAPTAIN_ONBOARDING`; **6-iv adds `MEMBER_INVITATION`**, as the second command of the two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`, never a process manager, ADR-20260905-101349 §2) -- the handler DERIVES `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's own recorded facts rather than trusting the client's copies (`GrantRestaurantAccess.invitationId` is the sole proof). `GOOGLE_BUSINESS_PROFILE` and `OWNER_DECLARATION` stay declared-but-refused with the typed error `errors.yaml#/AccessBasisNotYetAccepted`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum AccessBasis {
@@ -170,4 +170,18 @@ pub enum AccessRevocationGround {
     /// failing the whole load. Unspellable at any write door.
     #[serde(other)]
     UNRECOGNISED,
+}
+
+/// Identity of one `RestaurantInvitation` (#639 part C step 6-iv) -- one invite of one email address to one restaurant scope. REQUIRED and CALLER-MINTED on `InviteRestaurantMember`, the `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to route at all. Carried as `GrantRestaurantAccess.invitationId` on the accept leg's SECOND command as the sole proof that a grant on `basis: MEMBER_INVITATION` corresponds to a real, ACCEPTED invitation -- the handler derives `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's OWN recorded facts rather than trusting the client's copies of them (6-iv STOP finding: see the hand-back for the full reasoning).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RestaurantInvitationId(pub uuid::Uuid);
+
+/// Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (ACCEPTED), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum RestaurantInvitationStatus {
+    PENDING,
+    ACCEPTED,
+    REVOKED,
+    EXPIRED,
 }

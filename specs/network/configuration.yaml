@@ -104,6 +104,59 @@ keys:
       staging: "false"
 
 
+  # #639 part C step 6-iv (ADR-20260905-101349 §2/§3, PROP-20260831-180622 §6.1): the invitation
+  # door, mirroring RUN_MEMBER_ACCESS_GRANT's shape. Consumed at the WRITE door only
+  # (`invite_restaurant_member`'s handler, the RestrictRider shape): OFF returns the typed refusal
+  # `RestaurantInvitationDoorClosed` BEFORE the store is touched. `revokeRestaurantInvitation` is
+  # NEVER gated -- withdrawing an unaccepted offer is always safe to allow. `decisionRow` binds this
+  # key to `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`.
+  RUN_RESTAURANT_INVITATION:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: RESTAURANT-INVITATION-PRECONDITIONS
+    gates: >
+      The invitation door (#639 part C step 6-iv, ADR-20260905-101349 §2/§3). ON,
+      `inviteRestaurantMember` sends the invite email and appends `RestaurantInvitationSent` as
+      normal. OFF, the handler refuses BEFORE touching the store with the typed
+      `RestaurantInvitationDoorClosed` rejection -- a supervisable row, never a silent no-op.
+      `revokeRestaurantInvitation` is NEVER gated by this key: withdrawing an offer nobody has
+      accepted yet is always safe to allow. `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg stays
+      behind `RUN_MEMBER_ACCESS_GRANT` (the SAME irreversible-grant gate CAPTAIN_ONBOARDING already
+      uses -- a member-invitation grant is equally the first fact that starts a real Tours human's
+      legal clock, so it is not a separate key). Preconditions gating the flip are named in
+      `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml` (open): the invitation email
+      deliverability drill, `RUN_MEMBER_SIGN_IN_DOOR` flipped FIRST (an invitation nobody can sign
+      in with afterwards is a dead letter), the Art. 13 notice at the invited address (a third
+      party's email typed by a manager -- legal names the instrument), the TTL value below
+      confirmed (not just defaulted), and no seat-count/billing semantics anywhere in this slice.
+    deploy:
+      production: "false"
+      staging: "false"
+
+
+  # UNVERIFIED input (ADR-20260817-105845: a dispatch card may not state a derived number without
+  # its antecedents, and this session has none to derive from -- no cost model, no support-ticket
+  # data, no comparable product's own TTL is on the record). 604800s = 7 days is PROPOSED, not
+  # decided: it mirrors the common "invite link expires in a week" convention (GitHub/Slack-class
+  # products), it is comfortably longer than the email send-abuse wall's own windows
+  # (EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY, hours-to-days), and it is short enough that a MANAGER who
+  # invited the wrong address is not stuck waiting out a stale, still-acceptable offer for months.
+  # The founder's row (`docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`) owns the actual
+  # value; this default only lets the reminder/schedule mechanism compile and test meaningfully.
+  RESTAURANT_INVITATION_TTL_SECONDS:
+    type: int
+    unit: seconds     # typed duration unit (#167 precedent) -- the emitters branch on THIS, never on the name
+    default: 604800
+    gates: >
+      UNVERIFIED input (see the comment above this key). How long a `RestaurantInvitation` stays
+      PENDING before the promotion pass delivers `RestaurantInvitationExpired`
+      (`reschedule: keep` -- a redelivered birth never moves the deadline). Proposed default: 7
+      days (604800s), pending confirmation in
+      `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`.
+
+
   # ===================================================================
   # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
   #

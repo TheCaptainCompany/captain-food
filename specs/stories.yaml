@@ -41,6 +41,16 @@ public_user:
       steps:
         RequestMemberSignInLink: { $ref: 'api.yaml#/mutations/requestMemberSignInLink' }   # identical outcome whether or not the address is on the roster
         ConfirmMemberSignIn: { $ref: 'api.yaml#/mutations/confirmMemberSignIn' }   # identify-only; the session then arrives via POST /auth/session, never in the response
+    AcceptRestaurantMembershipInvitation:
+      description: >
+        As a visitor who received an invitation email, I accept it and become a restaurant member --
+        the two-lane accept's FIRST command, never a process manager (#639 part C step 6-iv,
+        ADR-20260905-101349 §2, PROP-20260831-180622 §8.3). Walked from
+        `restos.captain.food/invitation` (`specs/screens/restaurant_backoffice.yaml`, transport role
+        PUBLIC), then the client dispatches `grantRestaurantAccess` with basis MEMBER_INVITATION
+        itself and signs in via `POST /auth/session`.
+      steps:
+        AcceptInvitation: { $ref: 'api.yaml#/mutations/acceptRestaurantInvitation' }
 
 customer:
   description: An authenticated person who orders food via Captain.Food.
@@ -227,6 +237,11 @@ restaurant_manager:
         ReadInternalNotes: { $ref: 'api.yaml#/queries/orderConversationInternalNotes' }
         EscalateToAdmin: { $ref: 'api.yaml#/mutations/escalateToAdmin' }   # pull an admin in with a reason (#129)
         MuteParticipant: { $ref: 'api.yaml#/mutations/muteParticipant' }   # mute a disruptive role, reason required (#129)
+    ManageTeam:
+      description: As a MANAGER, I invite a colleague by email and withdraw an unaccepted invitation -- self-service staff onboarding, ships dark behind RUN_RESTAURANT_INVITATION (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §8.2/§8.4). The OPERATOR authority never sees this activity's controls (§8.2, resolver-data condition, not a persona split).
+      steps:
+        InviteMember: { $ref: 'api.yaml#/mutations/inviteRestaurantMember' }
+        RevokeInvitation: { $ref: 'api.yaml#/mutations/revokeRestaurantInvitation' }
         UnmuteParticipant: { $ref: 'api.yaml#/mutations/unmuteParticipant' }
     HandleClaims:
       description: As a manager, I decide customers' claims on my orders — resolving or rejecting each (#151).

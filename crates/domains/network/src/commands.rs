@@ -219,17 +219,18 @@ pub struct RecordProspectReply {
 /// Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants.
 /// `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command.
 /// `membershipId` is REQUIRED and CALLER-MINTED: the mailbox lane address declares `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than migrate later. Submitting an already-granted `membershipId` is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship.
-/// The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
+/// The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11). `MEMBER_INVITATION` (6-iv): the client sequences `AcceptRestaurantInvitation` first, then dispatches THIS command carrying only `membershipId` (self-minted), `basis: MEMBER_INVITATION` and `invitationId` -- `scopeType`/`scopeId`/`memberId`/`authSubject`/`authority` are OPTIONAL on the wire for this basis (the client need not know them) because the handler DERIVES every one of them from the `RestaurantInvitation` stream's own recorded facts, never from the client's copies: `invitationId` identifying an invitation already `RestaurantInvitationAccepted` IS the whole proof, because that acceptance itself required the correct one-time token AND the invited email (case-folded) to match the verified one (6-iv STOP finding). A second submission for the same accepted `invitationId` is the ordinary idempotent-replay path above -- never a privilege question, since the derived fields never vary by caller.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GrantRestaurantAccess {
     pub membership_id: MembershipId,
-    pub scope_type: ScopeType,
-    pub scope_id: RestaurantId,
-    pub member_id: MemberId,
-    pub auth_subject: AuthSubject,
-    pub authority: MemberAuthority,
+    pub scope_type: Option<ScopeType>,
+    pub scope_id: Option<RestaurantId>,
+    pub member_id: Option<MemberId>,
+    pub auth_subject: Option<AuthSubject>,
+    pub authority: Option<MemberAuthority>,
     pub basis: AccessBasis,
+    pub invitation_id: Option<RestaurantInvitationId>,
 }
 
 /// End one `RestaurantMembership` (ADR-20260905-101349 §2/§11). Revocation of ACCESS is never release of the underlying `(MEMBER, authSubject)` reservation (§4, PROP §7): the human stays bound to their `MemberId` forever, so a later re-invitation cannot mint a second person for the same credential. `ground` is the closed, additive-only `AccessRevocationGround` -- no free-text field exists on this command, on purpose (the ADR-20260904-014136 precedent: a stored performance-keyed reason is the strongest requalification exhibit a labour dispute could ask for). Never gated: releasing access is always safe to allow (the `ReinstateRider`/ `RestrictRider` asymmetry, ADR-20260904-152807 §7).
@@ -238,6 +239,32 @@ pub struct GrantRestaurantAccess {
 pub struct RevokeRestaurantAccess {
     pub membership_id: MembershipId,
     pub ground: AccessRevocationGround,
+}
+
+/// A restaurant MANAGER invites a colleague by email (§8.2). `roles: [RESTAURANT]` at the API, with a MANAGER-authority guard the OPERATOR authority never satisfies -- the control is ABSENT for OPERATOR in the `/equipe` UI (a resolver-data condition, never a form-field condition) AND refused again at the server (a GraphQL `AuthorityGuard`, `crates/server/src/graphql/acl.rs`). `memberId` is REQUIRED and CALLER-MINTED -- the ADR-0034 doctrine every other id in this DSL follows (client/ACL-generated, idempotent replay by construction), corrected from an earlier handler-mint draft of this command (6-iv STOP finding: a handler-random mint is untestable by this DSL's exact-literal behaviour-test comparison AND breaks ADR-0034, so the client mints it at invite time instead -- "ours, so it exists before any credential does" is satisfied either way, since the platform still mints it before the invitee ever authenticates). The SAME id is then available to stamp on `RestaurantAccessGranted` at the end of the two-lane accept without a second mint. `invitationId` is ALSO REQUIRED and CALLER-MINTED, the `GrantRestaurantAccess.membershipId` precedent: the mailbox lane address needs it present to route at all. Gated by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (default false), checked BEFORE the store is touched -- an invitation nobody can accept yet is a dead letter, and an unsendable email is worse than no invitation at all. Schedules `RestaurantInvitationExpired` at `configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS` out, `reschedule: keep` (the `OrderAcceptanceTimedOut` shape -- a redelivered birth never moves the deadline).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteRestaurantMember {
+    pub invitation_id: RestaurantInvitationId,
+    pub restaurant_id: RestaurantId,
+    pub invited_email: EmailAddress,
+    pub authority: MemberAuthority,
+    pub member_id: MemberId,
+}
+
+/// Withdraw a pending invitation before it is accepted (§8.4's revoke sheet, the same authority guard as `InviteRestaurantMember`). NEVER gated: withdrawing an offer nobody has accepted yet is always safe to allow (the `RevokeRestaurantAccess`/`RestrictRider` asymmetry). A revoked invitation's `AcceptRestaurantInvitation` is refused identically to an unknown or expired one (`errors.yaml#/RestaurantInvitationNotAcceptable`) -- no enumeration oracle at the accept door.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeRestaurantInvitation {
+    pub invitation_id: RestaurantInvitationId,
+}
+
+/// The invited person accepts (§8.3, `roles: [PUBLIC]`) -- identify-only, the first of the two-lane accept's two commands (never a process manager, ADR-20260905-101349 §2). The token is the magic link `InviteRestaurantMember`'s handler sent to `invitedEmail`; verified through the SAME identity port `ConfirmMemberSignIn`/`ConfirmEmailVerification` use. `RestaurantInvitationAccepted.authSubject` is `verify_email_token`'s OUTPUT, never a payload field here (the `ClaimRestaurantListing.accountId` contrast is step 7, not this slice). The invited email must equal the verified email, case-folded, else the SAME typed refusal as every other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked" (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client sequences `GrantRestaurantAccess(basis: MEMBER_INVITATION)` itself once this returns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptRestaurantInvitation {
+    pub invitation_id: RestaurantInvitationId,
+    pub token: EmailVerificationToken,
 }
 
 /// Ask the auth provider to send an email magic link (the same `send_email_magic_link` port RequestEmailVerification uses, and the same email send-abuse wall shape as the rider door's SMS guard -- ADR-20260905-101349 §9). Emits no event, and MUST NOT reveal whether the address is on the restaurateur roster: the handler never consults the `Member` bridge, so the outcome is identical for a roster address and a stranger's (no enumeration oracle).

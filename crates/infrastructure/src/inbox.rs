@@ -51,6 +51,8 @@ use application::generated::inboxes::{
 };
 // #639 part C step 6-i (ADR-20260905-101349): a SEPARATE `use` line, additive-only (the fence
 // self-check greps for a removed line in this file) rather than editing the block above.
+use application::generated::inboxes::RestaurantInvitationFactInbox;
+use application::generated::inboxes::RestaurantInvitationInbox;
 use application::generated::inboxes::RestaurantMembershipInbox;
 use application::ports::Actor;
 use domain::shared::errors::DomainError;
@@ -130,6 +132,11 @@ pub struct CommandDeps {
     /// `requestMemberSignInLink` and `confirmMemberSignIn` with the typed
     /// `MemberSignInDoorClosed` BEFORE the identity provider is touched at all.
     pub run_member_sign_in_door: bool,
+    /// #639 part C step 6-iv (ADR-20260905-101349 §2/§3): `configuration.yaml#/RUN_RESTAURANT_INVITATION`
+    /// -- the invitation door's release gate, resolved ONCE at the composition root exactly like
+    /// `run_rider_restriction_door` above. OFF (the default) refuses `inviteRestaurantMember` with
+    /// the typed `RestaurantInvitationDoorClosed`; `revokeRestaurantInvitation` never consults it.
+    pub run_restaurant_invitation: bool,
 }
 
 
@@ -214,6 +221,7 @@ pub async fn route(
         ActorInbox::RefundProcess(m) => refund_process(deps, m, actor, env).await,
         ActorInbox::Restaurant(m) => restaurant(deps, m, actor, env).await,
         ActorInbox::RestaurantAccount(m) => restaurant_account(deps, m, actor, env).await,
+        ActorInbox::RestaurantInvitation(m) => restaurant_invitation(deps, m, actor, env).await,
         ActorInbox::RestaurantMembership(m) => restaurant_membership(deps, m, actor, env).await,
         ActorInbox::Rider(m) => rider(deps, m, actor, env).await,
     }
@@ -596,6 +604,106 @@ async fn restaurant_membership(
     }
 }
 
+/// The `RestaurantInvitation` lane (#639 part C step 6-iv, ADR-20260905-101349 §2/§3): the roster
+/// and the invitation. `inviteRestaurantMember` is gated by `RUN_RESTAURANT_INVITATION`, checked
+/// FIRST inside the handler; `revokeRestaurantInvitation` never is. The MANAGER-authority guard
+/// (OPERATOR refused) lives at the GraphQL layer (`crate::graphql` is a server-crate concept, not
+/// reachable from here) -- see the aggregate's `receives:` comment for why (#144 fence). The
+/// `RestaurantInvitationExpired` reminder is PARKED `Unrecorded` (see `fact_route`/
+/// `restaurant_invitation_fact` below and the DSL's `deferred:` -- issue #902): the door's OWN
+/// gate is what matters for `inviteRestaurantMember`/`acceptRestaurantInvitation`, not this park.
+async fn restaurant_invitation(
+    deps: &CommandDeps,
+    message: RestaurantInvitationInbox,
+    actor: &Actor,
+    env: &RouterEnv,
+) -> InboxOutcome {
+    let _ = env;
+    match message {
+        RestaurantInvitationInbox::InviteRestaurantMember(cmd) => {
+            use tracing::Instrument as _;
+            let authority = format!("{:?}", cmd.authority);
+            telemetry::meters::restaurant_invitation::door_enforcing(deps.run_restaurant_invitation);
+            let span = telemetry::spans::invitation_invite(&actor.correlation_id.to_string(), &authority);
+            let span_clone = span.clone();
+            let outcome = run(async {
+                application::commands::invite_restaurant_member(deps.store.as_ref(), cmd, actor, deps.run_restaurant_invitation)
+                    .await
+                    .map(|_| ())
+            })
+            .instrument(span)
+            .await;
+            let result = match &outcome {
+                InboxOutcome::Handled(Ok(())) => {
+                    telemetry::meters::restaurant_invitation::sent(&authority);
+                    "sent"
+                }
+                InboxOutcome::Handled(Err(e)) => match e {
+                    domain::shared::errors::DomainError::Rejected { code, .. }
+                        if code == "RestaurantInvitationDoorClosed" =>
+                    {
+                        "door_closed"
+                    }
+                    domain::shared::errors::DomainError::Rejected { .. } => "rejected",
+                    _ => "technical_error",
+                },
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => "technical_error",
+            };
+            telemetry::spans::record_invitation_invite_result(&span_clone, result);
+            outcome
+        }
+        RestaurantInvitationInbox::RevokeRestaurantInvitation(cmd) => {
+            let outcome = run(async {
+                application::commands::revoke_restaurant_invitation(deps.store.as_ref(), cmd, actor).await.map(|_| ())
+            })
+            .await;
+            if matches!(outcome, InboxOutcome::Handled(Ok(()))) {
+                telemetry::meters::restaurant_invitation::revoked();
+            }
+            outcome
+        }
+        RestaurantInvitationInbox::AcceptRestaurantInvitation(cmd) => {
+            use tracing::Instrument as _;
+            let span = telemetry::spans::invitation_accept(&actor.correlation_id.to_string());
+            let span_clone = span.clone();
+            let outcome = run(async {
+                application::commands::accept_restaurant_invitation(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor)
+                    .await
+                    .map(|_| ())
+            })
+            .instrument(span)
+            .await;
+            let result = match &outcome {
+                InboxOutcome::Handled(Ok(())) => {
+                    telemetry::meters::restaurant_invitation::accepted();
+                    "accepted"
+                }
+                InboxOutcome::Handled(Err(e)) => match e {
+                    domain::shared::errors::DomainError::Rejected { code, .. }
+                        if code == "InvalidVerificationToken" =>
+                    {
+                        "token_invalid"
+                    }
+                    domain::shared::errors::DomainError::Rejected { code, .. }
+                        if code == "VerificationCodeExpired" =>
+                    {
+                        "token_expired"
+                    }
+                    domain::shared::errors::DomainError::Rejected { .. } => "not_acceptable",
+                    _ => "technical_error",
+                },
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => "technical_error",
+            };
+            telemetry::spans::record_invitation_accept_result(&span_clone, result);
+            outcome
+        }
+        // #902: the RecordLeg wiring is fenced off this dispatch. Unreachable via the COMMAND
+        // route in practice (reminders arrive through `fact_route` below), but named rather than
+        // absorbed by a wildcard per this file's own no-catch-all rule.
+        RestaurantInvitationInbox::RestaurantInvitationExpired(_) => InboxOutcome::RecordFact,
+    }
+}
+
 /// The `Rider` lane.
 async fn rider(
     deps: &CommandDeps,
@@ -803,6 +911,7 @@ pub fn fact_route(fact: ActorFactInbox) -> FactLeg {
         ActorFactInbox::PlaceOrderProcess(m) => place_order_process_fact(m),
         ActorFactInbox::RefundProcess(m) => refund_process_fact(m),
         ActorFactInbox::Restaurant(m) => restaurant_fact(m),
+        ActorFactInbox::RestaurantInvitation(m) => restaurant_invitation_fact(m),
     }
 }
 
@@ -997,6 +1106,19 @@ fn restaurant_fact(message: RestaurantFactInbox) -> FactLeg {
     match message {
         RestaurantFactInbox::RestaurantRegistered(e) => {
             FactLeg::Record(RecordLeg::RestaurantRegistration(E::RestaurantRegistered(e)))
+        }
+    }
+}
+
+/// The `RestaurantInvitation` lane's facts (#639 part C step 6-iv). PARKED, never recorded here:
+/// `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready, but
+/// wiring its `RecordLeg` variant needs a match arm in `crates/infrastructure/src/mailbox/handler.rs`,
+/// fenced off this dispatch (issue #902) -- the `deferred:` declaration this mirrors
+/// (`specs/network/actors.yaml#/RestaurantInvitation/receives`).
+fn restaurant_invitation_fact(message: RestaurantInvitationFactInbox) -> FactLeg {
+    match message {
+        RestaurantInvitationFactInbox::RestaurantInvitationExpired(_) => {
+            unrecorded(RestaurantInvitationFactInbox::ACTOR_TYPE, "RestaurantInvitationExpired")
         }
     }
 }

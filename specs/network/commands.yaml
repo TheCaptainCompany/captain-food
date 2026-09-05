@@ -467,23 +467,41 @@ GrantRestaurantAccess:
     RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the
     first hand-provisioned grant about a real Tours human is the irreversible moment that starts
     every legal clock (ADR-20260905-101349 §6/§11).
+    `MEMBER_INVITATION` (6-iv): the client sequences `AcceptRestaurantInvitation` first, then
+    dispatches THIS command carrying only `membershipId` (self-minted), `basis: MEMBER_INVITATION`
+    and `invitationId` -- `scopeType`/`scopeId`/`memberId`/`authSubject`/`authority` are OPTIONAL
+    on the wire for this basis (the client need not know them) because the handler DERIVES every
+    one of them from the `RestaurantInvitation` stream's own recorded facts, never from the
+    client's copies: `invitationId` identifying an invitation already `RestaurantInvitationAccepted`
+    IS the whole proof, because that acceptance itself required the correct one-time token AND the
+    invited email (case-folded) to match the verified one (6-iv STOP finding). A second submission
+    for the same accepted `invitationId` is the ordinary idempotent-replay path above -- never a
+    privilege question, since the derived fields never vary by caller.
   type: object
   properties:
     membershipId:
       $ref: 'scalars.yaml#/MembershipId'
     scopeType:
       $ref: 'scalars.yaml#/ScopeType'
+      nullable: true
     scopeId:
       $ref: 'scalars.yaml#/RestaurantId'
+      nullable: true
     memberId:
       $ref: 'scalars.yaml#/MemberId'
+      nullable: true
     authSubject:
       $ref: 'scalars.yaml#/AuthSubject'
+      nullable: true
     authority:
       $ref: 'scalars.yaml#/MemberAuthority'
+      nullable: true
     basis:
       $ref: 'scalars.yaml#/AccessBasis'
-  required: [membershipId, scopeType, scopeId, memberId, authSubject, authority, basis]
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+      nullable: true
+  required: [membershipId, basis]
 
 
 RevokeRestaurantAccess:
@@ -503,6 +521,86 @@ RevokeRestaurantAccess:
     ground:
       $ref: 'scalars.yaml#/AccessRevocationGround'
   required: [membershipId, ground]
+
+
+# --- The roster and the invitation: the RestaurantInvitation aggregate (#639 part C step 6-iv,
+# ADR-20260905-101349 §2/§3, PROP-20260831-180622 §6.1/§8.2-§8.3) --------------------------------
+# Its own aggregate, own stream (`RestaurantInvitation-{invitationId}`), own lane -- FORK 1 Option A
+# again: a targeted revoke needs its own identity distinct from the RestaurantMembership it may
+# precede (6-i). InviteRestaurantMember's CALLER-MINTED MemberId names the invited person "ours,
+# so it exists before any credential does" (ADR-20260905-101349 §4's reservation precedent,
+# applied one step earlier): the same MemberId rides on the eventual GrantRestaurantAccess.
+
+InviteRestaurantMember:
+  description: >
+    A restaurant MANAGER invites a colleague by email (§8.2). `roles: [RESTAURANT]` at the API,
+    with a MANAGER-authority guard the OPERATOR authority never satisfies -- the control is ABSENT
+    for OPERATOR in the `/equipe` UI (a resolver-data condition, never a form-field condition) AND
+    refused again at the server (a GraphQL `AuthorityGuard`, `crates/server/src/graphql/acl.rs`).
+    `memberId` is REQUIRED and CALLER-MINTED -- the ADR-0034 doctrine every other id in this DSL
+    follows (client/ACL-generated, idempotent replay by construction), corrected from an earlier
+    handler-mint draft of this command (6-iv STOP finding: a handler-random mint is untestable by
+    this DSL's exact-literal behaviour-test comparison AND breaks ADR-0034, so the client mints it
+    at invite time instead -- "ours, so it exists before any credential does" is satisfied either
+    way, since the platform still mints it before the invitee ever authenticates). The SAME id is
+    then available to stamp on `RestaurantAccessGranted` at the end of the two-lane accept without
+    a second mint. `invitationId` is ALSO REQUIRED and CALLER-MINTED, the
+    `GrantRestaurantAccess.membershipId` precedent: the mailbox lane address needs it present to
+    route at all. Gated by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (default false),
+    checked BEFORE the store is touched -- an invitation nobody can accept yet is a dead letter,
+    and an unsendable email is worse than no invitation at all. Schedules
+    `RestaurantInvitationExpired` at `configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS`
+    out, `reschedule: keep` (the `OrderAcceptanceTimedOut` shape -- a redelivered birth never moves
+    the deadline).
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+    restaurantId:
+      $ref: 'scalars.yaml#/RestaurantId'
+    invitedEmail:
+      $ref: 'scalars.yaml#/EmailAddress'
+    authority:
+      $ref: 'scalars.yaml#/MemberAuthority'
+    memberId:
+      $ref: 'scalars.yaml#/MemberId'
+  required: [invitationId, restaurantId, invitedEmail, authority, memberId]
+
+
+RevokeRestaurantInvitation:
+  description: >
+    Withdraw a pending invitation before it is accepted (§8.4's revoke sheet, the same authority
+    guard as `InviteRestaurantMember`). NEVER gated: withdrawing an offer nobody has accepted yet is
+    always safe to allow (the `RevokeRestaurantAccess`/`RestrictRider` asymmetry). A revoked
+    invitation's `AcceptRestaurantInvitation` is refused identically to an unknown or expired one
+    (`errors.yaml#/RestaurantInvitationNotAcceptable`) -- no enumeration oracle at the accept door.
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+  required: [invitationId]
+
+
+AcceptRestaurantInvitation:
+  description: >
+    The invited person accepts (§8.3, `roles: [PUBLIC]`) -- identify-only, the first of the
+    two-lane accept's two commands (never a process manager, ADR-20260905-101349 §2). The token is
+    the magic link `InviteRestaurantMember`'s handler sent to `invitedEmail`; verified through the
+    SAME identity port `ConfirmMemberSignIn`/`ConfirmEmailVerification` use.
+    `RestaurantInvitationAccepted.authSubject` is `verify_email_token`'s OUTPUT, never a payload
+    field here (the `ClaimRestaurantListing.accountId` contrast is step 7, not this slice). The
+    invited email must equal the verified email, case-folded, else the SAME typed refusal as every
+    other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes
+    "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked"
+    (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client
+    sequences `GrantRestaurantAccess(basis: MEMBER_INVITATION)` itself once this returns.
+  type: object
+  properties:
+    invitationId:
+      $ref: 'scalars.yaml#/RestaurantInvitationId'
+    token:
+      $ref: 'scalars.yaml#/EmailVerificationToken'
+  required: [invitationId, token]
 
 
 # --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) -----------------

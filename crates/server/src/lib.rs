@@ -1120,6 +1120,8 @@ pub async fn router() -> Router {
                         run_member_access_grant: config.run_member_access_grant,
                         // #639 part C step 6-ii: the member sign-in door, the SAME shape.
                         run_member_sign_in_door: config.run_member_sign_in_door,
+                        // #639 part C step 6-iv: the invitation door, the SAME shape.
+                        run_restaurant_invitation: config.run_restaurant_invitation,
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1616,6 +1618,14 @@ pub async fn router() -> Router {
         config.run_member_sign_in_door,
     );
     telemetry::meters::member_sign_in::door_enforcing(config.run_member_sign_in_door);
+    // #639 part C step 6-iv: the invitation door's OWN fleet-parity declaration and liveness
+    // gauge, unconditional at BOTH composition roots from birth (the `RUN_MEMBER_SIGN_IN_DOOR`
+    // precedent above -- never left inside an `if let Some(pool)` branch to begin with).
+    telemetry::meters::runtime::declare_flag(
+        "RUN_RESTAURANT_INVITATION",
+        config.run_restaurant_invitation,
+    );
+    telemetry::meters::restaurant_invitation::door_enforcing(config.run_restaurant_invitation);
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
     // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside

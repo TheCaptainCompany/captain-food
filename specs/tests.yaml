@@ -805,6 +805,33 @@ fixtures:
     type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
     data: { membershipId: "membership-3", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-3", authSubject: "auth-supabase-customer", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
 
+  # #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the invitation fixtures. The FakeIdentity
+  # double's `verify_email_token` always proves "johnny@example.com" for any token except
+  # "bad-token" (behaviour_support::FakeIdentity) -- `invitedEmail` below matches it deliberately,
+  # so the accept-flow tests exercise the email-match branch honestly rather than always hitting
+  # the mismatch refusal.
+  restaurantInvitationSent:
+    type: { $ref: 'events.yaml#/RestaurantInvitationSent' }
+    data: { invitationId: "invitation-1", restaurantId: "resto-1", invitedEmail: "johnny@example.com", authority: "OPERATOR", memberId: "member-10" }
+  restaurantInvitationSentToStranger:
+    type: { $ref: 'events.yaml#/RestaurantInvitationSent' }
+    data: { invitationId: "invitation-2", restaurantId: "resto-1", invitedEmail: "someone-else@example.com", authority: "MANAGER", memberId: "member-11" }
+  restaurantInvitationAccepted:
+    type: { $ref: 'events.yaml#/RestaurantInvitationAccepted' }
+    data: { invitationId: "invitation-1", authSubject: "auth-supabase-1" }
+  restaurantInvitationRevoked:
+    type: { $ref: 'events.yaml#/RestaurantInvitationRevoked' }
+    data: { invitationId: "invitation-1" }
+  restaurantInvitationExpired:
+    type: { $ref: 'events.yaml#/RestaurantInvitationExpired' }
+    data: { invitationId: "invitation-1" }
+  # The GRANT leg's outcome, entirely DERIVED from restaurantInvitationSent/restaurantInvitationAccepted
+  # above (scopeId/memberId/authority from the SENT fact, authSubject from the ACCEPTED fact) --
+  # never from whatever a client happened to also send on GrantRestaurantAccess.
+  restaurantAccessGrantedFromInvitation:
+    type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
+    data: { membershipId: "membership-10", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-10", authSubject: "auth-supabase-1", authority: "OPERATOR", basis: "MEMBER_INVITATION" }
+
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
 # =====================================================================
@@ -4320,6 +4347,203 @@ tests:
       data: { membershipId: "membership-1", ground: "ACCESS_NO_LONGER_NEEDED" }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }
+
+  # --- GrantRestaurantAccess on basis: MEMBER_INVITATION (#639 part C step 6-iv, the two-lane
+  # accept's SECOND command, cross-stream: given seeds the RestaurantInvitation-{id} stream, when
+  # dispatches on the RestaurantMembership stream) -------------------------------------------------
+  TestGrantRestaurantAccessFromInvitation:
+    name: "The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from the client's copies"
+    rules:
+      - { $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }
+      - { $ref: 'rules.yaml#/RestaurantAccessBasisAcceptedSetIsNarrower' }
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+      - { $ref: '#/fixtures/restaurantInvitationAccepted' }
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-10", basis: "MEMBER_INVITATION", invitationId: "invitation-1" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    then:
+      - { $ref: '#/fixtures/restaurantAccessGrantedFromInvitation' }
+
+  TestGrantRestaurantAccessMissingInvitationProofIsRejected:
+    name: "GrantRestaurantAccess on basis: MEMBER_INVITATION with no invitationId is rejected"
+    rules: [{ $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-11", basis: "MEMBER_INVITATION" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/InvitationProofRequired' }
+
+  TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected:
+    name: "GrantRestaurantAccess on basis: MEMBER_INVITATION naming an invitation that was never accepted is rejected, identically to an unknown one"
+    rules: [{ $ref: 'rules.yaml#/MemberInvitationGrantDerivesFromInvitation' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-12", basis: "MEMBER_INVITATION", invitationId: "invitation-1" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  # ----------------------- RestaurantInvitation: the roster and the invitation (#639 part C step
+  # 6-iv, ADR-20260905-101349 §2/§3) -----------------------------------------------------------
+  TestRestaurantInvitationSent:
+    name: "A restaurant member invites a colleague by email"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationGatedBeforeStore' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/InviteRestaurantMember' }
+      data: { invitationId: "invitation-1", restaurantId: "resto-1", invitedEmail: "johnny@example.com", authority: "OPERATOR", memberId: "member-10" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_RESTAURANT_INVITATION' }
+    then:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+
+  TestInviteRestaurantMemberDoorClosed:
+    name: "inviteRestaurantMember is refused by the door key while it is OFF (the production default), before the store is even touched"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationGatedBeforeStore' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/InviteRestaurantMember' }
+      data: { invitationId: "invitation-1", restaurantId: "resto-1", invitedEmail: "johnny@example.com", authority: "OPERATOR", memberId: "member-10" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationDoorClosed' }
+
+  TestRestaurantInvitationRevoked:
+    name: "A pending invitation is withdrawn"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationRevocationIsFinal' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+    when:
+      type: { $ref: 'commands.yaml#/RevokeRestaurantInvitation' }
+      data: { invitationId: "invitation-1" }
+    then:
+      - { $ref: '#/fixtures/restaurantInvitationRevoked' }
+
+  TestRevokeUnknownRestaurantInvitationIsRejected:
+    name: "Revoking an unknown invitationId is rejected"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationRevocationIsFinal' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RevokeRestaurantInvitation' }
+      data: { invitationId: "invitation-404" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotFound' }
+
+  TestRevokeAlreadyRevokedRestaurantInvitationIsRejected:
+    name: "Revoking an already-revoked invitation is rejected"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationRevocationIsFinal' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+      - { $ref: '#/fixtures/restaurantInvitationRevoked' }
+    when:
+      type: { $ref: 'commands.yaml#/RevokeRestaurantInvitation' }
+      data: { invitationId: "invitation-1" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationAlreadyRevoked' }
+
+  TestRestaurantInvitationAccepted:
+    name: "The invited person accepts, with the verified email matching the invited one"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationAcceptIsUniformlyRefused' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-abc" }
+    then:
+      - { $ref: '#/fixtures/restaurantInvitationAccepted' }
+
+  # The no-enumeration property: an unknown invitationId, a wrong invited/verified email, an
+  # already-accepted, a revoked, and an expired invitation ALL refuse identically.
+  TestAcceptUnknownRestaurantInvitationIsRejected:
+    name: "Accepting an unknown invitationId is refused, revealing nothing"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationAcceptIsUniformlyRefused' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      data: { invitationId: "invitation-404", token: "sb-magic-token-abc" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  TestAcceptRestaurantInvitationWrongEmailIsRejected:
+    name: "Accepting with a verified email that does not match the invited one is refused, identically to an unknown invitation"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationAcceptIsUniformlyRefused' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSentToStranger' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      data: { invitationId: "invitation-2", token: "sb-magic-token-abc" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  TestAcceptAlreadyAcceptedRestaurantInvitationIsRejected:
+    name: "A second accept of the same invitation is refused"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationAcceptIsUniformlyRefused' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+      - { $ref: '#/fixtures/restaurantInvitationAccepted' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-abc" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  TestAcceptRevokedRestaurantInvitationIsRejected:
+    name: "Accepting a revoked invitation is refused, identically to an unknown one"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationAcceptIsUniformlyRefused' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+      - { $ref: '#/fixtures/restaurantInvitationRevoked' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-abc" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
+
+  TestRestaurantInvitationExpiredByPromotionPass:
+    name: "The promotion pass delivers the TTL: a still-pending invitation records its expiry"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationExpiryIsARecordedFact' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+    when:
+      type: { $ref: 'events.yaml#/RestaurantInvitationExpired' }
+      data: { invitationId: "invitation-1" }
+    then:
+      - { $ref: '#/fixtures/restaurantInvitationExpired' }
+
+  TestAcceptExpiredRestaurantInvitationIsRejected:
+    name: "Accepting an expired invitation is refused, identically to an unknown one"
+    rules: [{ $ref: 'rules.yaml#/RestaurantInvitationAcceptIsUniformlyRefused' }]
+    actor: { $ref: 'actors.yaml#/RestaurantInvitation' }
+    given:
+      - { $ref: '#/fixtures/restaurantInvitationSent' }
+      - { $ref: '#/fixtures/restaurantInvitationExpired' }
+    when:
+      type: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
+      data: { invitationId: "invitation-1", token: "sb-magic-token-abc" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantInvitationNotAcceptable' }
 
   # --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) ---------------
   # The email transposition of the rider door's phone-OTP pair (2c-i). The fake identity's

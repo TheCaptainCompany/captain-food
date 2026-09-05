@@ -1,0 +1,34 @@
+key: RESTAURANT-INVITATION-PRECONDITIONS
+status: open
+question: 'What must exist before the invitation door (`inviteRestaurantMember`) is opened in
+  production, now that step 6-iv lands the `RestaurantInvitation` aggregate and the two-lane accept
+  behind `RUN_RESTAURANT_INVITATION`? Five preconditions are named (ADR-20260905-101349 §11/§12,
+  6-iv dispatch card): the invitation email deliverability drill (SPF/DKIM/DMARC, the same class of
+  hand-dispatched proof `MEMBER-SIGN-IN-DOOR-PRECONDITIONS` required for the sign-in link); the
+  member sign-in door (`RUN_MEMBER_SIGN_IN_DOOR`) flipped FIRST -- an invitation nobody can sign in
+  with afterwards is a dead letter, mirroring `MEMBER-ACCESS-GRANT-PRECONDITIONS`''s own dependency
+  on 6-ii; the Art. 13 notice at the INVITED address (a third party''s personal email typed by a
+  restaurant manager who is not the data subject -- legal names the instrument and the timing);
+  the TTL value `RESTAURANT_INVITATION_TTL_SECONDS` confirmed rather than defaulted (currently
+  `UNVERIFIED input`, proposed 604800s/7 days); and a written confirmation that no seat-count or
+  billing semantics attach to an accepted invitation anywhere in the product (business, so a later
+  pricing feature does not retroactively find this door doing something it was never scoped for).
+  Flipping `RUN_RESTAURANT_INVITATION` to true in production is the decision that closes this row.'
+owner: team
+opened: '2026-09-05'
+capacity: team
+register: docs/adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md
+evidence: 'The `MEMBER-ACCESS-GRANT-PRECONDITIONS`/`MEMBER-SIGN-IN-DOOR-PRECONDITIONS` precedent
+  shows the shape: a key alone is not enough, prose and the deploy value can disagree unreconciled
+  (the RUN_SIRENE_WORKER lesson) -- so this row names the key AND the preconditions, and the
+  codegen rule `decision-row-open-key-must-be-off` refuses any production value other than "false"
+  while the row is open. `GrantRestaurantAccess`''s `MEMBER_INVITATION` leg is deliberately NOT
+  gated by a second key: it stays behind the EXISTING `RUN_MEMBER_ACCESS_GRANT`
+  (`MEMBER-ACCESS-GRANT-PRECONDITIONS`, already open), because a member-invitation grant is exactly
+  as irreversible a fact about a real Tours human as a hand-provisioned one -- the same legal
+  clocks start either way, so it is the same door.'
+note: 'This row cannot close before `MEMBER-ACCESS-GRANT-PRECONDITIONS` AND
+  `MEMBER-SIGN-IN-DOOR-PRECONDITIONS` both close, since the invite-then-accept-then-grant chain is
+  only as safe as its weakest already-open link. 6-iv ships dark (no reachable UI without the door
+  open, per RUN_SIRENE_WORKER discipline: intent, not accident) -- resuming is a preconditions
+  review plus one flag flip, never a code change.'

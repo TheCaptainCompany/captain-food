@@ -180,6 +180,15 @@
       ],
       "path": "crates/bins/actor-restaurant-account"
     },
+    "actor-restaurant-invitation": {
+      "actor": "RestaurantInvitation",
+      "kind": "aggregate",
+      "domain_crates": [
+        "domain-common",
+        "domain-network"
+      ],
+      "path": "crates/bins/actor-restaurant-invitation"
+    },
     "actor-restaurant-membership": {
       "actor": "RestaurantMembership",
       "kind": "aggregate",

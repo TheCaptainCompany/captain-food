@@ -156,6 +156,46 @@ pub const RESTAURANT_MEMBERSHIP_ALREADY_REVOKED: ErrorDef = ErrorDef {
     message_fr: "Cette adhésion restaurant a déjà été révoquée.",
 };
 
+/// The invitation door is closed by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (#639 part C step 6-iv) -- a declared, supervisable refusal while the preconditions (`docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`) are open, never a silent no-op. `revokeRestaurantInvitation` is NEVER gated: withdrawing an offer nobody has accepted yet is always safe to allow.
+/// Context: `restaurantId`.
+pub const RESTAURANT_INVITATION_DOOR_CLOSED: ErrorDef = ErrorDef {
+    code: "RestaurantInvitationDoorClosed",
+    message_en: "Inviting restaurant members is not yet enabled in this environment.",
+    message_fr: "L'invitation de membres du restaurant n'est pas encore activée dans cet environnement.",
+};
+
+/// No `RestaurantInvitation` exists for this `invitationId` (`revokeRestaurantInvitation` only -- the caller is authenticated staff, so this leg MAY name the miss; the PUBLIC accept leg never does, see `RestaurantInvitationNotAcceptable`).
+/// Context: `invitationId`.
+pub const RESTAURANT_INVITATION_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "RestaurantInvitationNotFound",
+    message_en: "This invitation was not found.",
+    message_fr: "Cette invitation est introuvable.",
+};
+
+/// The invitation was already revoked or already accepted -- `revokeRestaurantInvitation` on a non-pending invitation is rejected rather than silently re-recorded.
+/// Context: `invitationId`.
+pub const RESTAURANT_INVITATION_ALREADY_REVOKED: ErrorDef = ErrorDef {
+    code: "RestaurantInvitationAlreadyRevoked",
+    message_en: "This invitation is no longer pending.",
+    message_fr: "Cette invitation n'est plus en attente.",
+};
+
+/// `AcceptRestaurantInvitation` is refused (#639 part C step 6-iv) -- deliberately ONE error for five distinct causes (unknown `invitationId`, invited-email/verified-email mismatch, already accepted, revoked, expired), never distinguished, the 6-ii sign-in door's no-enumeration posture carried to the invitation door: a stranger holding a guessed or borrowed `invitationId` must learn nothing about which of the five is true. Never thrown by `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg (that leg only reads an ALREADY-accepted invitation, and its own absence there is the same error, by construction -- see the command's description).
+/// Context: `invitationId`.
+pub const RESTAURANT_INVITATION_NOT_ACCEPTABLE: ErrorDef = ErrorDef {
+    code: "RestaurantInvitationNotAcceptable",
+    message_en: "This invitation link is no longer valid.",
+    message_fr: "Ce lien d'invitation n'est plus valide.",
+};
+
+/// `GrantRestaurantAccess` named `basis: MEMBER_INVITATION` but carried no `invitationId` -- the one proof that basis accepts. A client bug (the two-lane accept always supplies it), never a stranger-reachable path (the mutation still requires `roles: [ADMIN, PUBLIC]`, but PUBLIC has no OTHER way to reach `RestaurantAccessGranted`).
+/// Context: `membershipId`.
+pub const INVITATION_PROOF_REQUIRED: ErrorDef = ErrorDef {
+    code: "InvitationProofRequired",
+    message_en: "This grant is missing its invitation proof.",
+    message_fr: "Cet octroi n'a pas de preuve d'invitation.",
+};
+
 /// The magic-link token verified (the email is genuinely proven), but no `Member` row exists for this auth subject in `Member.auth_subject` (the step-6-i bridge) -- the not-yet-linked refusal (PROP-20260831-180622 §8.5, the rider door's `RiderNotRegistered` precedent). NOTHING is stamped and NOTHING is created; the session is still parked so the refusal screen can offer "Se déconnecter" against a real cookie. `email` carries the VERIFIED address (the token's output, never client input) so the refusal screen can print it.
 /// Context: `email`, `supportContact`.
 pub const MEMBER_NOT_LINKED: ErrorDef = ErrorDef {

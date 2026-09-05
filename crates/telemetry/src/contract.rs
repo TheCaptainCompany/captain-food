@@ -397,6 +397,21 @@ pub mod metric {
     /// enforces its refusal on a request, 0 the moment the composition root boots with the key OFF.
     pub const MEMBER_SIGN_IN_DOOR_ENFORCING: &str = "member_sign_in_door_enforcing";
 
+    // --- restaurant-invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3) ----------------
+    /// `inviteRestaurantMember`'s outcome, attribute `authority` (the INVITED authority, never the
+    /// caller's).
+    pub const RESTAURANT_INVITATION_SENT_TOTAL: &str = "restaurant_invitation_sent_total";
+    /// `acceptRestaurantInvitation`'s ACCEPTED outcome.
+    pub const RESTAURANT_INVITATION_ACCEPTED_TOTAL: &str = "restaurant_invitation_accepted_total";
+    /// The TTL reminder's recorded expiry.
+    pub const RESTAURANT_INVITATION_EXPIRED_TOTAL: &str = "restaurant_invitation_expired_total";
+    /// `revokeRestaurantInvitation`'s recorded withdrawal.
+    pub const RESTAURANT_INVITATION_REVOKED_TOTAL: &str = "restaurant_invitation_revoked_total";
+    /// GATE LIVENESS (the `member_sign_in_door_enforcing` shape): 1 while
+    /// `RUN_RESTAURANT_INVITATION` enforces its refusal on a request, 0 the moment the composition
+    /// root boots with the key OFF.
+    pub const RESTAURANT_INVITATION_DOOR_ENFORCING: &str = "restaurant_invitation_door_enforcing";
+
     // --- graphql-limits (#639 part C step 6-ii, ADR-20260905-101349 §9) --------------------------
 
     /// Refused BEFORE any resolver runs, attributes `role` + `reason` (depth | complexity).

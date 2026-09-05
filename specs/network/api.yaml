@@ -295,9 +295,11 @@ mutations:
   # --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
   # ADR-20260905-101349 §1/§6) -- ships DARK behind RUN_MEMBER_ACCESS_GRANT (default false); no
   # query in 6-i (the roster is 6-iv).
+  # #639 part C step 6-iv adds PUBLIC: the invitation accept's SECOND command (basis:
+  # MEMBER_INVITATION) is dispatched by the accepting person, who holds no OTHER credential yet.
   grantRestaurantAccess:
     command: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
-    roles: [ADMIN]   # the target is payload (memberId/scopeId), the actor is the envelope -- no `derived:`
+    roles: [ADMIN, PUBLIC]   # the target is payload (memberId/scopeId), the actor is the envelope -- no `derived:`
     slice: V0
 
   revokeRestaurantAccess:
@@ -317,5 +319,22 @@ mutations:
 
   confirmMemberSignIn:
     command: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+    roles: [PUBLIC]
+    slice: V0
+
+  # --- The roster and the invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3,
+  # PROP-20260831-180622 §8.2-§8.3) -- ships DARK behind RUN_RESTAURANT_INVITATION.
+  inviteRestaurantMember:
+    command: { $ref: 'commands.yaml#/InviteRestaurantMember' }
+    roles: [RESTAURANT]   # MANAGER-authority guard at the server (crates/server/src/graphql/acl.rs)
+    slice: V0
+
+  revokeRestaurantInvitation:
+    command: { $ref: 'commands.yaml#/RevokeRestaurantInvitation' }
+    roles: [RESTAURANT]
+    slice: V0
+
+  acceptRestaurantInvitation:
+    command: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
     roles: [PUBLIC]
     slice: V0

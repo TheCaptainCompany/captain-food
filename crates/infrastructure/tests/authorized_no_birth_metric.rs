@@ -282,6 +282,7 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>, closed: Arc<Atomi
         run_rider_restriction_door: false,
         run_member_access_grant: false,
         run_member_sign_in_door: false,
+        run_restaurant_invitation: false,
         store: Arc::new(GatedOrderReads {
             inner: Arc::new(PgEventStore::new(pool.clone())),
             closed,

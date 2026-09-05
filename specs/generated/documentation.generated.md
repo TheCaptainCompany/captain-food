@@ -38,6 +38,7 @@ A visitor browsing Captain.Food without being logged in.
 |  | ConfirmRiderSignIn | [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) |
 | 🧭 **SignInAsRestaurantManager** | RequestMemberSignInLink | [✏️ `requestMemberSignInLink`](#mutation-requestmembersigninlink) |
 |  | ConfirmMemberSignIn | [✏️ `confirmMemberSignIn`](#mutation-confirmmembersignin) |
+| 🧭 **AcceptRestaurantMembershipInvitation** | AcceptInvitation | [✏️ `acceptRestaurantInvitation`](#mutation-acceptrestaurantinvitation) |
 
 <a id="story-customer"></a>
 ### 🎬 `customer` · 🙋 `CUSTOMER` · 🗣️ `fr-FR`
@@ -164,6 +165,8 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | ReadInternalNotes | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
 |  | EscalateToAdmin | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
 |  | MuteParticipant | [✏️ `muteParticipant`](#mutation-muteparticipant) |
+| 🧭 **ManageTeam** | InviteMember | [✏️ `inviteRestaurantMember`](#mutation-inviterestaurantmember) |
+|  | RevokeInvitation | [✏️ `revokeRestaurantInvitation`](#mutation-revokerestaurantinvitation) |
 |  | UnmuteParticipant | [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) |
 | 🧭 **HandleClaims** | WorkClaimsQueue | [🔎 `restaurantReclamations`](#query-restaurantreclamations) |
 |  | ResolveClaim | [✏️ `resolveReclamation`](#mutation-resolvereclamation) |
@@ -255,7 +258,7 @@ A delivery partner (already integrated: a known catalog channel) acting as an EX
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(32)_
+### 🧰 API operations _(35)_
 
 <a id="query-restaurantdeliveries"></a>
 #### 🔎 Query: `restaurantDeliveries`
@@ -478,7 +481,7 @@ The refund queue (RefundProcess): refunds opened for decision, with their lifecy
 #### ✏️ Mutation: `grantRestaurantAccess`
 
 - **Command**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) → handled by [🎭 `RestaurantMembership`](#actor-restaurantmembership)
-- **Roles**: ADMIN · **slice** V0
+- **Roles**: ADMIN, PUBLIC · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
 <a id="mutation-revokerestaurantaccess"></a>
@@ -499,6 +502,27 @@ The refund queue (RefundProcess): refunds opened for decision, with their lifecy
 #### ✏️ Mutation: `confirmMemberSignIn`
 
 - **Command**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) → handled by [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Roles**: PUBLIC · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-inviterestaurantmember"></a>
+#### ✏️ Mutation: `inviteRestaurantMember`
+
+- **Command**: [📩 `InviteRestaurantMember`](#command-inviterestaurantmember) → handled by [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Roles**: RESTAURANT · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-revokerestaurantinvitation"></a>
+#### ✏️ Mutation: `revokeRestaurantInvitation`
+
+- **Command**: [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation) → handled by [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Roles**: RESTAURANT · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-acceptrestaurantinvitation"></a>
+#### ✏️ Mutation: `acceptRestaurantInvitation`
+
+- **Command**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) → handled by [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
 - **Roles**: PUBLIC · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
@@ -555,7 +579,7 @@ A B2B prospect (NON_PARTNER listing) with its computed score and outreach state 
 | <a id="type-prospect--lastcontactedat"></a>`lastContactedAt` | `string` _date-time_ | ⬜ |
 | <a id="type-prospect--repliedat"></a>`repliedAt` | `string` _date-time_ | ⬜ |
 
-### 🎭 Actors _(4)_
+### 🎭 Actors _(5)_
 
 <a id="actor-restaurantaccount"></a>
 #### 🎭 Actor: `RestaurantAccount`
@@ -629,10 +653,42 @@ _🧩 aggregate_ — The bridge and the grant (#639 part C step 6-i, ADR-2026090
 
 | Receives | Emits → | Throws |
 | --- | --- | --- |
-| [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) | [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound) |
+| [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) | [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound), [⛔ `InvitationProofRequired`](#error-invitationproofrequired), [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable) |
 | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) | [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked) | [⛔ `RestaurantMembershipNotFound`](#error-restaurantmembershipnotfound), [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked) |
 | [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) | _Delegate to the auth provider: send an email magic link, REFUSING when the email send-abuse wall says so. Never consults the Member bridge (no enumeration oracle). No event._ | [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted), [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed) |
 | [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) | _Verify the magic-link token with the auth provider, look the proved subject up in the Member bridge (auth_subject -> member_id, step 6-i): no member -> MemberNotLinked, nothing stamped, the session still parked so the refusal screen has a real cookie; a member -> stamp { role: MEMBER } on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `MemberNotLinked`](#error-membernotlinked), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `MemberSignInRequiresSession`](#error-membersigninrequiressession), [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed) |
+
+<a id="actor-restaurantinvitation"></a>
+#### 🎭 Actor: `RestaurantInvitation`
+
+_🧩 aggregate_ — The roster and the invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §6.1): one restaurant MANAGER's invite of one email address to one restaurant scope. Its OWN aggregate, OWN stream (`RestaurantInvitation-{invitationId}`), OWN lane -- FORK 1 Option A again: a targeted revoke needs its own identity distinct from the `RestaurantMembership` it may precede (6-i). The accept is TWO commands in TWO lanes, sequenced by the accepting member's CLIENT, never a process manager: `AcceptRestaurantInvitation` here, then `GrantRestaurantAccess(basis: MEMBER_INVITATION)` on the membership stream.
+
+
+| Receives | Emits → | Throws |
+| --- | --- | --- |
+| [📩 `InviteRestaurantMember`](#command-inviterestaurantmember) | [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), ⏰ schedules `RestaurantInvitationExpired` | [⛔ `RestaurantInvitationDoorClosed`](#error-restaurantinvitationdoorclosed) |
+| [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation) | [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked) | [⛔ `RestaurantInvitationNotFound`](#error-restaurantinvitationnotfound), [⛔ `RestaurantInvitationAlreadyRevoked`](#error-restaurantinvitationalreadyrevoked) |
+| [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) | [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted) | [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable), [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired) |
+| ⏰ `RestaurantInvitationExpired` _(reminder)_ | [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired) | — |
+
+Reminders (self-scheduled facts — ADR-20260731-214500):
+
+| Reminder | Payload | After | Reschedule |
+| --- | --- | --- | --- |
+| ⏰ `RestaurantInvitationExpired` | [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired) | ⚙️ `RESTAURANT_INVITATION_TTL_SECONDS` | keep |
+
+Lifecycle (generated from the declared state machine):
+
+```mermaid
+stateDiagram-v2
+  [*] --> PENDING : RestaurantInvitationSent
+  PENDING --> ACCEPTED : RestaurantInvitationAccepted
+  PENDING --> REVOKED : RestaurantInvitationRevoked
+  PENDING --> EXPIRED : RestaurantInvitationExpired
+  ACCEPTED --> [*]
+  REVOKED --> [*]
+  EXPIRED --> [*]
+```
 
 ### 🗄️ Views (read models) _(4)_
 
@@ -723,7 +779,7 @@ _🧩 aggregate_ — The bridge and the grant (#639 part C step 6-i, ADR-2026090
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(24)_
+### 📩 Commands _(27)_
 
 <a id="command-registerrestaurantaccount"></a>
 #### 📩 Command: `RegisterRestaurantAccount`
@@ -1050,21 +1106,22 @@ Record that a prospect replied (CRM/admin or inbound), stopping the sequence.
 <a id="command-grantrestaurantaccess"></a>
 #### 📩 Command: `GrantRestaurantAccess`
 
-Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants. `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command. `membershipId` is REQUIRED and CALLER-MINTED: the mailbox lane address declares `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than migrate later. Submitting an already-granted `membershipId` is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship. The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
+Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants. `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command. `membershipId` is REQUIRED and CALLER-MINTED: the mailbox lane address declares `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than migrate later. Submitting an already-granted `membershipId` is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship. The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11). `MEMBER_INVITATION` (6-iv): the client sequences `AcceptRestaurantInvitation` first, then dispatches THIS command carrying only `membershipId` (self-minted), `basis: MEMBER_INVITATION` and `invitationId` -- `scopeType`/`scopeId`/`memberId`/`authSubject`/`authority` are OPTIONAL on the wire for this basis (the client need not know them) because the handler DERIVES every one of them from the `RestaurantInvitation` stream's own recorded facts, never from the client's copies: `invitationId` identifying an invitation already `RestaurantInvitationAccepted` IS the whole proof, because that acceptance itself required the correct one-time token AND the invited email (case-folded) to match the verified one (6-iv STOP finding). A second submission for the same accepted `invitationId` is the ordinary idempotent-replay path above -- never a privilege question, since the derived fields never vary by caller.
 
 - **Dispatched by**: [✏️ `grantRestaurantAccess`](#mutation-grantrestaurantaccess) · **handled by** [🎭 `RestaurantMembership`](#actor-restaurantmembership)
 - **Emits**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
-- **Throws**: [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound)
+- **Throws**: [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound), [⛔ `InvitationProofRequired`](#error-invitationproofrequired), [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <a id="command-grantrestaurantaccess--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
-| <a id="command-grantrestaurantaccess--scopetype"></a>`scopeType` | [🔤 `ScopeType`](#scalar-scopetype) | ✅ |  |
-| <a id="command-grantrestaurantaccess--scopeid"></a>`scopeId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
-| <a id="command-grantrestaurantaccess--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ✅ |  |
-| <a id="command-grantrestaurantaccess--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
-| <a id="command-grantrestaurantaccess--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |  |
+| <a id="command-grantrestaurantaccess--scopetype"></a>`scopeType` | [🔤 `ScopeType`](#scalar-scopetype) | ⬜ |  |
+| <a id="command-grantrestaurantaccess--scopeid"></a>`scopeId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ⬜ |  |
+| <a id="command-grantrestaurantaccess--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ⬜ |  |
+| <a id="command-grantrestaurantaccess--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ⬜ |  |
+| <a id="command-grantrestaurantaccess--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ⬜ |  |
 | <a id="command-grantrestaurantaccess--basis"></a>`basis` | [🔤 `AccessBasis`](#scalar-accessbasis) | ✅ |  |
+| <a id="command-grantrestaurantaccess--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ⬜ |  |
 
 <a id="command-revokerestaurantaccess"></a>
 #### 📩 Command: `RevokeRestaurantAccess`
@@ -1079,6 +1136,50 @@ End one `RestaurantMembership` (ADR-20260905-101349 §2/§11). Revocation of ACC
 | --- | --- | --- | --- |
 | <a id="command-revokerestaurantaccess--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
 | <a id="command-revokerestaurantaccess--ground"></a>`ground` | [🔤 `AccessRevocationGround`](#scalar-accessrevocationground) | ✅ |  |
+
+<a id="command-inviterestaurantmember"></a>
+#### 📩 Command: `InviteRestaurantMember`
+
+A restaurant MANAGER invites a colleague by email (§8.2). `roles: [RESTAURANT]` at the API, with a MANAGER-authority guard the OPERATOR authority never satisfies -- the control is ABSENT for OPERATOR in the `/equipe` UI (a resolver-data condition, never a form-field condition) AND refused again at the server (a GraphQL `AuthorityGuard`, `crates/server/src/graphql/acl.rs`). `memberId` is REQUIRED and CALLER-MINTED -- the ADR-0034 doctrine every other id in this DSL follows (client/ACL-generated, idempotent replay by construction), corrected from an earlier handler-mint draft of this command (6-iv STOP finding: a handler-random mint is untestable by this DSL's exact-literal behaviour-test comparison AND breaks ADR-0034, so the client mints it at invite time instead -- "ours, so it exists before any credential does" is satisfied either way, since the platform still mints it before the invitee ever authenticates). The SAME id is then available to stamp on `RestaurantAccessGranted` at the end of the two-lane accept without a second mint. `invitationId` is ALSO REQUIRED and CALLER-MINTED, the `GrantRestaurantAccess.membershipId` precedent: the mailbox lane address needs it present to route at all. Gated by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (default false), checked BEFORE the store is touched -- an invitation nobody can accept yet is a dead letter, and an unsendable email is worse than no invitation at all. Schedules `RestaurantInvitationExpired` at `configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS` out, `reschedule: keep` (the `OrderAcceptanceTimedOut` shape -- a redelivered birth never moves the deadline).
+
+- **Dispatched by**: [✏️ `inviteRestaurantMember`](#mutation-inviterestaurantmember) · **handled by** [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Emits**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **Throws**: [⛔ `RestaurantInvitationDoorClosed`](#error-restaurantinvitationdoorclosed)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-inviterestaurantmember--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+| <a id="command-inviterestaurantmember--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="command-inviterestaurantmember--invitedemail"></a>`invitedEmail` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |  |
+| <a id="command-inviterestaurantmember--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |  |
+| <a id="command-inviterestaurantmember--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ✅ |  |
+
+<a id="command-revokerestaurantinvitation"></a>
+#### 📩 Command: `RevokeRestaurantInvitation`
+
+Withdraw a pending invitation before it is accepted (§8.4's revoke sheet, the same authority guard as `InviteRestaurantMember`). NEVER gated: withdrawing an offer nobody has accepted yet is always safe to allow (the `RevokeRestaurantAccess`/`RestrictRider` asymmetry). A revoked invitation's `AcceptRestaurantInvitation` is refused identically to an unknown or expired one (`errors.yaml#/RestaurantInvitationNotAcceptable`) -- no enumeration oracle at the accept door.
+
+- **Dispatched by**: [✏️ `revokeRestaurantInvitation`](#mutation-revokerestaurantinvitation) · **handled by** [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Emits**: [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked)
+- **Throws**: [⛔ `RestaurantInvitationNotFound`](#error-restaurantinvitationnotfound), [⛔ `RestaurantInvitationAlreadyRevoked`](#error-restaurantinvitationalreadyrevoked)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-revokerestaurantinvitation--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+
+<a id="command-acceptrestaurantinvitation"></a>
+#### 📩 Command: `AcceptRestaurantInvitation`
+
+The invited person accepts (§8.3, `roles: [PUBLIC]`) -- identify-only, the first of the two-lane accept's two commands (never a process manager, ADR-20260905-101349 §2). The token is the magic link `InviteRestaurantMember`'s handler sent to `invitedEmail`; verified through the SAME identity port `ConfirmMemberSignIn`/`ConfirmEmailVerification` use. `RestaurantInvitationAccepted.authSubject` is `verify_email_token`'s OUTPUT, never a payload field here (the `ClaimRestaurantListing.accountId` contrast is step 7, not this slice). The invited email must equal the verified email, case-folded, else the SAME typed refusal as every other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked" (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client sequences `GrantRestaurantAccess(basis: MEMBER_INVITATION)` itself once this returns.
+
+- **Dispatched by**: [✏️ `acceptRestaurantInvitation`](#mutation-acceptrestaurantinvitation) · **handled by** [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Emits**: [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted)
+- **Throws**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable), [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-acceptrestaurantinvitation--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+| <a id="command-acceptrestaurantinvitation--token"></a>`token` | [🔤 `EmailVerificationToken`](#scalar-emailverificationtoken) | ✅ |  |
 
 <a id="command-requestmembersigninlink"></a>
 #### 📩 Command: `RequestMemberSignInLink`
@@ -1107,7 +1208,7 @@ Verify the magic-link token with the auth provider, then IDENTIFY the member: th
 | --- | --- | --- | --- |
 | <a id="command-confirmmembersignin--token"></a>`token` | [🔤 `EmailVerificationToken`](#scalar-emailverificationtoken) | ✅ |  |
 
-### ⚡ Events _(23)_
+### ⚡ Events _(27)_
 
 <a id="event-restaurantaccountregistered"></a>
 #### ⚡ Event: `RestaurantAccountRegistered`
@@ -1480,6 +1581,63 @@ A `RestaurantMembership` ended (ADR-20260905-101349 §2/§11). Never releases th
 | <a id="event-restaurantaccessrevoked--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
 | <a id="event-restaurantaccessrevoked--ground"></a>`ground` | [🔤 `AccessRevocationGround`](#scalar-accessrevocationground) | ✅ |  |
 
+<a id="event-restaurantinvitationsent"></a>
+#### ⚡ Event: `RestaurantInvitationSent`
+
+A restaurant MANAGER invited a colleague by email (§8.2). `memberId` is CALLER-MINTED (the ADR-0034 doctrine, `commands.yaml#/InviteRestaurantMember`'s own note) -- the person this invitation names exists from this fact forward, before any credential proves who they are. Business payload only (ADR-0041): the inviting member is envelope `domain_events.user_id`.
+
+- **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantinvitationsent--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+| <a id="event-restaurantinvitationsent--restaurantid"></a>`restaurantId` | [🔤 `RestaurantId`](#scalar-restaurantid) | ✅ |  |
+| <a id="event-restaurantinvitationsent--invitedemail"></a>`invitedEmail` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |  |
+| <a id="event-restaurantinvitationsent--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |  |
+| <a id="event-restaurantinvitationsent--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ✅ |  |
+
+<a id="event-restaurantinvitationrevoked"></a>
+#### ⚡ Event: `RestaurantInvitationRevoked`
+
+A pending invitation was withdrawn before acceptance (§8.4).
+
+- **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantinvitationrevoked--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+
+<a id="event-restaurantinvitationaccepted"></a>
+#### ⚡ Event: `RestaurantInvitationAccepted`
+
+The invited person accepted (§8.3) -- the first of the two-lane accept's two commands. `authSubject` is `verify_email_token`'s OUTPUT, never a client-supplied field (the same boundary-crossing discipline as `RestaurantAccessGranted.authSubject`).
+
+- **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantinvitationaccepted--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+| <a id="event-restaurantinvitationaccepted--authsubject"></a>`authSubject` | [🔤 `AuthSubject`](#scalar-authsubject) | ✅ |  |
+
+<a id="event-restaurantinvitationexpired"></a>
+#### ⚡ Event: `RestaurantInvitationExpired`
+
+The invitation's TTL (`configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECONDS`) elapsed while still pending -- a recorded fact delivered by the promotion pass (ADR-20260810-231300: expiry is a scheduled reminder, never an engine timer), never appended over an already-terminal invitation (accepted/revoked/expired).
+
+- **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
+- **Consumed by**: —
+- **Projected into**: —
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="event-restaurantinvitationexpired--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |  |
+
 ### 📦 Entities _(7)_
 
 <a id="entity-openinghoursslot"></a>
@@ -1583,7 +1741,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(30)_
+### 🔤 Scalars _(31)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -1615,10 +1773,11 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-restaurantlistkey"></a>🔤 `RestaurantListKey` | enum (ORDER_AGAIN \| RECOMMENDED \| TOP_DEALS \| GREEN_PACKAGING) | Named, read-side-curated/personalized discovery shelf for the restaurants query. The read model resolves the actual member restaurants (editorial rules / customer history); the client just asks for a list by key.  |
 | <a id="scalar-membershipid"></a>🔤 `MembershipId` | string _uuid_ | Identity of one `RestaurantMembership` grant (#639 part C step 6-i) -- the relationship between one `MemberId` and one restaurant scope, NOT the person (`MemberId`, `specs/common/scalars.yaml`) and NOT the ScopeMembership ACL row's derived key (normally a UUIDv5 over the natural key, database/tables/projection_tables.yaml#/ScopeMembership) -- EXCEPT the MEMBER arm, which reuses this id VERBATIM as that row's own PK instead of re-deriving one, because it is already a stable, unique identifier minted once by this aggregate (see the table's own rule for why). REQUIRED and CALLER-MINTED on `GrantRestaurantAccess`: the mailbox lane address needs it present to route at all; resubmitting the same id makes a second grant call idempotent (rules.yaml#/RestaurantAccessGrantIsIdempotent).  |
 | <a id="scalar-memberauthority"></a>🔤 `MemberAuthority` | enum (MANAGER \| OPERATOR) | What a member may do within the restaurant scope they hold access to (ADR-20260905-101349 §3, evans). `ADMINISTRATOR` was refused: it collides with `restaurant_manager`, an existing word already meaning "the person who runs one shop", and would give a second population the same stem. Two values, additive-only forever: a change of authority is a revoke followed by a new grant, never a `MemberAuthorityChanged` event (`*Updated` carrying a capability is the `RiderStatusChanged` shape this scope refuses to reincarnate, PROP-20260831-180622 §6).  |
-| <a id="scalar-accessbasis"></a>🔤 `AccessBasis` | enum (CAPTAIN_ONBOARDING \| GOOGLE_BUSINESS_PROFILE \| OWNER_DECLARATION \| MEMBER_INVITATION) | WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager (ADR-20260905-101349 §2).  |
+| <a id="scalar-accessbasis"></a>🔤 `AccessBasis` | enum (CAPTAIN_ONBOARDING \| GOOGLE_BUSINESS_PROFILE \| OWNER_DECLARATION \| MEMBER_INVITATION) | WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. Step 6-i's `GrantRestaurantAccess` handler accepted only `CAPTAIN_ONBOARDING`; **6-iv adds `MEMBER_INVITATION`**, as the second command of the two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`, never a process manager, ADR-20260905-101349 §2) -- the handler DERIVES `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's own recorded facts rather than trusting the client's copies (`GrantRestaurantAccess.invitationId` is the sole proof). `GOOGLE_BUSINESS_PROFILE` and `OWNER_DECLARATION` stay declared-but-refused with the typed error `errors.yaml#/AccessBasisNotYetAccepted`.  |
 | <a id="scalar-accessrevocationground"></a>🔤 `AccessRevocationGround` | enum (LEFT_THE_RESTAURANT \| ACCESS_NO_LONGER_NEEDED) | WHY a `RestaurantAccessRevoked` fact was recorded -- the smallest closed set naming no work-performance ground (the ADR-20260904-014136 precedent, legal-graded: a stored decline/performance-keyed reason is the strongest requalification exhibit a labour tribunal could ask for, so none is offered). `LEFT_THE_RESTAURANT` (the member's own departure -- resignation, end of contract) and `ACCESS_NO_LONGER_NEEDED` (the restaurant's own operational call -- a role changed, a device was reassigned) are the two ordinary paths. `UNRECOGNISED` is the read-only catch-all (`#[serde(other)]`, unspellable at the command door -- the same shape `RiderRestrictionGround` carries): without it a future stored value fails the whole stream load on decode. No free text rides beside either value -- no `note` field exists on `RevokeRestaurantAccess`. Counsel review at the checkpoint (ADR-20260905-101349 §11); additive- only if it ever grows, same discipline as `RiderRestrictionGround` (counsel can only add).  |
+| <a id="scalar-restaurantinvitationid"></a>🔤 `RestaurantInvitationId` | string _uuid_ | Identity of one `RestaurantInvitation` (#639 part C step 6-iv) -- one invite of one email address to one restaurant scope. REQUIRED and CALLER-MINTED on `InviteRestaurantMember`, the `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to route at all. Carried as `GrantRestaurantAccess.invitationId` on the accept leg's SECOND command as the sole proof that a grant on `basis: MEMBER_INVITATION` corresponds to a real, ACCEPTED invitation -- the handler derives `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's OWN recorded facts rather than trusting the client's copies of them (6-iv STOP finding: see the hand-back for the full reasoning).  |
 
-### ⛔ Errors _(22)_
+### ⛔ Errors _(27)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -1641,11 +1800,16 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-memberauthsubjectalreadybound"></a>⛔ `MemberAuthSubjectAlreadyBound` | The login credential (`authSubject`) is already bound to ANOTHER member id: the write-side reservation `(MEMBER, authSubject)` in `database/tables/reservations.yaml#/ auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C step 6-i, ADR-20260905-101349 §4). The binding is never released by a revoke, so the remedy is to grant the EXISTING member id, never a new one.  | 🇬🇧 This login is already linked to a restaurant member. Grant the existing member instead. | 🇫🇷 Cette identité de connexion est déjà liée à un membre. Accordez l'accès au membre existant. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) |
 | <a id="error-restaurantmembershipnotfound"></a>⛔ `RestaurantMembershipNotFound` | No `RestaurantMembership` exists for this `membershipId` (#639 part C step 6-i). | 🇬🇧 This restaurant membership was not found. | 🇫🇷 Cette adhésion restaurant est introuvable. | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) |
 | <a id="error-restaurantmembershipalreadyrevoked"></a>⛔ `RestaurantMembershipAlreadyRevoked` | The `RestaurantMembership` was already revoked (#639 part C step 6-i) -- revocation is a fact that happens once; a second `RevokeRestaurantAccess` on the same `membershipId` is rejected rather than silently re-recorded (the Art. 11-log style: the log is never overwritten).  | 🇬🇧 This restaurant membership was already revoked. | 🇫🇷 Cette adhésion restaurant a déjà été révoquée. | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) |
+| <a id="error-restaurantinvitationdoorclosed"></a>⛔ `RestaurantInvitationDoorClosed` | The invitation door is closed by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (#639 part C step 6-iv) -- a declared, supervisable refusal while the preconditions (`docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`) are open, never a silent no-op. `revokeRestaurantInvitation` is NEVER gated: withdrawing an offer nobody has accepted yet is always safe to allow.  | 🇬🇧 Inviting restaurant members is not yet enabled in this environment. | 🇫🇷 L'invitation de membres du restaurant n'est pas encore activée dans cet environnement. | [📩 `InviteRestaurantMember`](#command-inviterestaurantmember) |
+| <a id="error-restaurantinvitationnotfound"></a>⛔ `RestaurantInvitationNotFound` | No `RestaurantInvitation` exists for this `invitationId` (`revokeRestaurantInvitation` only -- the caller is authenticated staff, so this leg MAY name the miss; the PUBLIC accept leg never does, see `RestaurantInvitationNotAcceptable`). | 🇬🇧 This invitation was not found. | 🇫🇷 Cette invitation est introuvable. | [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation) |
+| <a id="error-restaurantinvitationalreadyrevoked"></a>⛔ `RestaurantInvitationAlreadyRevoked` | The invitation was already revoked or already accepted -- `revokeRestaurantInvitation` on a non-pending invitation is rejected rather than silently re-recorded. | 🇬🇧 This invitation is no longer pending. | 🇫🇷 Cette invitation n'est plus en attente. | [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation) |
+| <a id="error-restaurantinvitationnotacceptable"></a>⛔ `RestaurantInvitationNotAcceptable` | `AcceptRestaurantInvitation` is refused (#639 part C step 6-iv) -- deliberately ONE error for five distinct causes (unknown `invitationId`, invited-email/verified-email mismatch, already accepted, revoked, expired), never distinguished, the 6-ii sign-in door's no-enumeration posture carried to the invitation door: a stranger holding a guessed or borrowed `invitationId` must learn nothing about which of the five is true. Never thrown by `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg (that leg only reads an ALREADY-accepted invitation, and its own absence there is the same error, by construction -- see the command's description).  | 🇬🇧 This invitation link is no longer valid. | 🇫🇷 Ce lien d'invitation n'est plus valide. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
+| <a id="error-invitationproofrequired"></a>⛔ `InvitationProofRequired` | `GrantRestaurantAccess` named `basis: MEMBER_INVITATION` but carried no `invitationId` -- the one proof that basis accepts. A client bug (the two-lane accept always supplies it), never a stranger-reachable path (the mutation still requires `roles: [ADMIN, PUBLIC]`, but PUBLIC has no OTHER way to reach `RestaurantAccessGranted`).  | 🇬🇧 This grant is missing its invitation proof. | 🇫🇷 Cet octroi n'a pas de preuve d'invitation. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) |
 | <a id="error-membernotlinked"></a>⛔ `MemberNotLinked` | The magic-link token verified (the email is genuinely proven), but no `Member` row exists for this auth subject in `Member.auth_subject` (the step-6-i bridge) -- the not-yet-linked refusal (PROP-20260831-180622 §8.5, the rider door's `RiderNotRegistered` precedent). NOTHING is stamped and NOTHING is created; the session is still parked so the refusal screen can offer "Se déconnecter" against a real cookie. `email` carries the VERIFIED address (the token's output, never client input) so the refusal screen can print it.  | 🇬🇧 Your account is not yet linked to a restaurant. Write to {supportContact}. | 🇫🇷 Votre compte n'est pas encore relié à un restaurant. Écrivez-nous à {supportContact}. | [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 | <a id="error-membersigninrequiressession"></a>⛔ `MemberSignInRequiresSession` | The sign-in confirmation arrived with no `X-SESSION-ID` (the rider door's #852 B1 precedent). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId. So the door refuses BEFORE the token is spent (the link stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's (the SDUI client always sends the header, so a restaurateur never sees this).  | 🇬🇧 Sign-in needs a browser session. Reload the page and try again. | 🇫🇷 La connexion nécessite une session de navigation. Rechargez la page et réessayez. | [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 | <a id="error-membersignindoorclosed"></a>⛔ `MemberSignInDoorClosed` | `RUN_MEMBER_SIGN_IN_DOOR` is OFF (`configuration.yaml`, default false) -- the member sign-in door refuses BEFORE touching the identity provider (ADR-20260905-101349 §6/§F): the writer key flips only after the preconditions in `decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` are met.  | 🇬🇧 Restaurant sign-in is not yet available. | 🇫🇷 La connexion restaurateur n'est pas encore disponible. | [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 
-### 📐 Business rules _(32)_
+### 📐 Business rules _(37)_
 
 <a id="rule-accountregistrationvalidcurrencyuniqueref"></a>
 #### 📐 Rule: `AccountRegistrationValidCurrencyUniqueRef`
@@ -1839,7 +2003,7 @@ _RevokeRestaurantAccess on an unknown membershipId is rejected (RestaurantMember
 <a id="rule-grantrestaurantaccessisahumanact"></a>
 #### 📐 Rule: `GrantRestaurantAccessIsAHumanAct`
 
-_GrantRestaurantAccess and RevokeRestaurantAccess are roles: [ADMIN] with requires: acting: { ADMIN: any } and no EXTERNAL key -- Captain provisions by hand, the human is the process manager (PROP-20260831-180622 §6.2 Q1); no process manager may `send` either (validator pm-sends-human-only-command) (#639 part C step 6-i, ADR-20260905-101349 §1)._
+_RevokeRestaurantAccess is roles: [ADMIN] with requires: acting: { ADMIN: any }; GrantRestaurantAccess is roles: [ADMIN, PUBLIC] with requires: acting: { ADMIN: any, PUBLIC: any } (6-iv adds the invitation-accept caller) -- neither carries an EXTERNAL key, so both stay human-only (Captain provisions by hand, or a real person accepts an invitation; a process manager may `send` neither, validator pm-sends-human-only-command) (#639 part C step 6-i/6-iv, ADR-20260905-101349 §1/§2)._
 
 - **Verified by**: [🧪 `TestRestaurantAccessGranted`](#test-testrestaurantaccessgranted)
 
@@ -1853,9 +2017,44 @@ _GrantRestaurantAccess refuses with the typed MemberAccessGrantDoorClosed BEFORE
 <a id="rule-restaurantaccessbasisacceptedsetisnarrower"></a>
 #### 📐 Rule: `RestaurantAccessBasisAcceptedSetIsNarrower`
 
-_AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three with the typed AccessBasisNotYetAccepted (#639 part C step 6-i, ADR-20260905-101349 §3)._
+_AccessBasis declares four values; GrantRestaurantAccess's handler accepts CAPTAIN_ONBOARDING and MEMBER_INVITATION (6-iv) and refuses the other two with the typed AccessBasisNotYetAccepted (#639 part C step 6-i/6-iv, ADR-20260905-101349 §3)._
 
-- **Verified by**: [🧪 `TestRestaurantAccessGranted`](#test-testrestaurantaccessgranted), [🧪 `TestGrantRestaurantAccessBasisNotYetAccepted`](#test-testgrantrestaurantaccessbasisnotyetaccepted)
+- **Verified by**: [🧪 `TestRestaurantAccessGranted`](#test-testrestaurantaccessgranted), [🧪 `TestGrantRestaurantAccessBasisNotYetAccepted`](#test-testgrantrestaurantaccessbasisnotyetaccepted), [🧪 `TestGrantRestaurantAccessFromInvitation`](#test-testgrantrestaurantaccessfrominvitation)
+
+<a id="rule-restaurantinvitationexpiryisarecordedfact"></a>
+#### 📐 Rule: `RestaurantInvitationExpiryIsARecordedFact`
+
+_RestaurantInvitationExpired is scheduled at RESTAURANT_INVITATION_TTL_SECONDS out (reschedule: keep) and delivered by the promotion pass as a recorded fact -- never an engine timer (ADR-20260810-231300); only a STILL-PENDING invitation records it, with record semantics (#639 part C step 6-iv)._
+
+- **Verified by**: [🧪 `TestRestaurantInvitationExpiredByPromotionPass`](#test-testrestaurantinvitationexpiredbypromotionpass)
+
+<a id="rule-restaurantinvitationrevocationisfinal"></a>
+#### 📐 Rule: `RestaurantInvitationRevocationIsFinal`
+
+_RevokeRestaurantInvitation on an unknown invitationId is rejected (RestaurantInvitationNotFound); on an already-revoked one it is rejected (RestaurantInvitationAlreadyRevoked) rather than silently re-recorded (#639 part C step 6-iv, the RestaurantMembershipRevocationIsFinal precedent)._
+
+- **Verified by**: [🧪 `TestRestaurantInvitationRevoked`](#test-testrestaurantinvitationrevoked), [🧪 `TestRevokeUnknownRestaurantInvitationIsRejected`](#test-testrevokeunknownrestaurantinvitationisrejected), [🧪 `TestRevokeAlreadyRevokedRestaurantInvitationIsRejected`](#test-testrevokealreadyrevokedrestaurantinvitationisrejected)
+
+<a id="rule-restaurantinvitationgatedbeforestore"></a>
+#### 📐 Rule: `RestaurantInvitationGatedBeforeStore`
+
+_InviteRestaurantMember refuses with the typed RestaurantInvitationDoorClosed BEFORE the store is touched while configuration.yaml#/keys/RUN_RESTAURANT_INVITATION is off; RevokeRestaurantInvitation is never gated -- withdrawing an unaccepted offer is always safe to allow (#639 part C step 6-iv)._
+
+- **Verified by**: [🧪 `TestRestaurantInvitationSent`](#test-testrestaurantinvitationsent), [🧪 `TestInviteRestaurantMemberDoorClosed`](#test-testinviterestaurantmemberdoorclosed)
+
+<a id="rule-restaurantinvitationacceptisuniformlyrefused"></a>
+#### 📐 Rule: `RestaurantInvitationAcceptIsUniformlyRefused`
+
+_AcceptRestaurantInvitation refuses an unknown invitationId, a wrong invited/verified email, an already-accepted, a revoked, and an expired invitation with the SAME typed error (RestaurantInvitationNotAcceptable) and the same shape -- no enumeration oracle for a stranger holding any invitationId (#639 part C step 6-iv, the 6-ii sign-in door's no-enumeration posture carried)._
+
+- **Verified by**: [🧪 `TestRestaurantInvitationAccepted`](#test-testrestaurantinvitationaccepted), [🧪 `TestAcceptUnknownRestaurantInvitationIsRejected`](#test-testacceptunknownrestaurantinvitationisrejected), [🧪 `TestAcceptRestaurantInvitationWrongEmailIsRejected`](#test-testacceptrestaurantinvitationwrongemailisrejected), [🧪 `TestAcceptAlreadyAcceptedRestaurantInvitationIsRejected`](#test-testacceptalreadyacceptedrestaurantinvitationisrejected), [🧪 `TestAcceptRevokedRestaurantInvitationIsRejected`](#test-testacceptrevokedrestaurantinvitationisrejected), [🧪 `TestAcceptExpiredRestaurantInvitationIsRejected`](#test-testacceptexpiredrestaurantinvitationisrejected)
+
+<a id="rule-memberinvitationgrantderivesfrominvitation"></a>
+#### 📐 Rule: `MemberInvitationGrantDerivesFromInvitation`
+
+_GrantRestaurantAccess on basis: MEMBER_INVITATION derives scopeType/scopeId/memberId/authSubject/authority from the RestaurantInvitation stream identified by invitationId -- never from the client-supplied copies of those fields on the command -- and requires that invitation to be RestaurantInvitationAccepted; missing invitationId is InvitationProofRequired, any other invitation state is RestaurantInvitationNotAcceptable (#639 part C step 6-iv, ADR-20260905-101349 §2)._
+
+- **Verified by**: [🧪 `TestGrantRestaurantAccessFromInvitation`](#test-testgrantrestaurantaccessfrominvitation), [🧪 `TestGrantRestaurantAccessMissingInvitationProofIsRejected`](#test-testgrantrestaurantaccessmissinginvitationproofisrejected), [🧪 `TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected`](#test-testgrantrestaurantaccessfromunacceptedinvitationisrejected)
 
 <a id="rule-membersigninidentifiesonly"></a>
 #### 📐 Rule: `MemberSignInIdentifiesOnly`
@@ -1871,7 +2070,7 @@ _requestMemberSignInLink and confirmMemberSignIn both refuse with the typed Memb
 
 - **Verified by**: [🧪 `TestMemberRequestSignInLinkDoorClosed`](#test-testmemberrequestsigninlinkdoorclosed), [🧪 `TestMemberConfirmSignInDoorClosed`](#test-testmemberconfirmsignindoorclosed)
 
-### 🧪 Tests _(4)_
+### 🧪 Tests _(5)_
 
 **[🎭 `RestaurantAccount`](#actor-restaurantaccount)**
 
@@ -2361,6 +2560,36 @@ _Revoking an already-revoked membership is rejected — the Art. 11-log style lo
 - **Thrown**: [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked)
 - **Verifies**: [📐 `RestaurantMembershipRevocationIsFinal`](#rule-restaurantmembershiprevocationisfinal)
 
+<a id="test-testgrantrestaurantaccessfrominvitation"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessFromInvitation`
+
+_The invitation accept's second command derives the grant's fields from the ACCEPTED invitation, never from the client's copies_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted)
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Then**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **Verifies**: [📐 `MemberInvitationGrantDerivesFromInvitation`](#rule-memberinvitationgrantderivesfrominvitation), [📐 `RestaurantAccessBasisAcceptedSetIsNarrower`](#rule-restaurantaccessbasisacceptedsetisnarrower)
+
+<a id="test-testgrantrestaurantaccessmissinginvitationproofisrejected"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessMissingInvitationProofIsRejected`
+
+_GrantRestaurantAccess on basis: MEMBER_INVITATION with no invitationId is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Thrown**: [⛔ `InvitationProofRequired`](#error-invitationproofrequired)
+- **Verifies**: [📐 `MemberInvitationGrantDerivesFromInvitation`](#rule-memberinvitationgrantderivesfrominvitation)
+
+<a id="test-testgrantrestaurantaccessfromunacceptedinvitationisrejected"></a>
+#### 🧪 Test: `TestGrantRestaurantAccessFromUnacceptedInvitationIsRejected`
+
+_GrantRestaurantAccess on basis: MEMBER_INVITATION naming an invitation that was never accepted is rejected, identically to an unknown one_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **When**: [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess)
+- **Thrown**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
+- **Verifies**: [📐 `MemberInvitationGrantDerivesFromInvitation`](#rule-memberinvitationgrantderivesfrominvitation)
+
 <a id="test-testmemberrequestsigninlink"></a>
 #### 🧪 Test: `TestMemberRequestSignInLink`
 
@@ -2450,6 +2679,128 @@ _confirmMemberSignIn is refused by the door key while it is OFF (the production 
 - **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
 - **Thrown**: [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed)
 - **Verifies**: [📐 `MemberSignInGatedBeforeStore`](#rule-membersigningatedbeforestore)
+
+**[🎭 `RestaurantInvitation`](#actor-restaurantinvitation)**
+
+<a id="test-testrestaurantinvitationsent"></a>
+#### 🧪 Test: `TestRestaurantInvitationSent`
+
+_A restaurant member invites a colleague by email_
+
+- **Given**: _(none)_
+- **When**: [📩 `InviteRestaurantMember`](#command-inviterestaurantmember)
+- **Then**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **Verifies**: [📐 `RestaurantInvitationGatedBeforeStore`](#rule-restaurantinvitationgatedbeforestore)
+
+<a id="test-testinviterestaurantmemberdoorclosed"></a>
+#### 🧪 Test: `TestInviteRestaurantMemberDoorClosed`
+
+_inviteRestaurantMember is refused by the door key while it is OFF (the production default), before the store is even touched_
+
+- **Given**: _(none)_
+- **When**: [📩 `InviteRestaurantMember`](#command-inviterestaurantmember)
+- **Thrown**: [⛔ `RestaurantInvitationDoorClosed`](#error-restaurantinvitationdoorclosed)
+- **Verifies**: [📐 `RestaurantInvitationGatedBeforeStore`](#rule-restaurantinvitationgatedbeforestore)
+
+<a id="test-testrestaurantinvitationrevoked"></a>
+#### 🧪 Test: `TestRestaurantInvitationRevoked`
+
+_A pending invitation is withdrawn_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **When**: [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation)
+- **Then**: [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked)
+- **Verifies**: [📐 `RestaurantInvitationRevocationIsFinal`](#rule-restaurantinvitationrevocationisfinal)
+
+<a id="test-testrevokeunknownrestaurantinvitationisrejected"></a>
+#### 🧪 Test: `TestRevokeUnknownRestaurantInvitationIsRejected`
+
+_Revoking an unknown invitationId is rejected_
+
+- **Given**: _(none)_
+- **When**: [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationNotFound`](#error-restaurantinvitationnotfound)
+- **Verifies**: [📐 `RestaurantInvitationRevocationIsFinal`](#rule-restaurantinvitationrevocationisfinal)
+
+<a id="test-testrevokealreadyrevokedrestaurantinvitationisrejected"></a>
+#### 🧪 Test: `TestRevokeAlreadyRevokedRestaurantInvitationIsRejected`
+
+_Revoking an already-revoked invitation is rejected_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked)
+- **When**: [📩 `RevokeRestaurantInvitation`](#command-revokerestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationAlreadyRevoked`](#error-restaurantinvitationalreadyrevoked)
+- **Verifies**: [📐 `RestaurantInvitationRevocationIsFinal`](#rule-restaurantinvitationrevocationisfinal)
+
+<a id="test-testrestaurantinvitationaccepted"></a>
+#### 🧪 Test: `TestRestaurantInvitationAccepted`
+
+_The invited person accepts, with the verified email matching the invited one_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **When**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation)
+- **Then**: [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted)
+- **Verifies**: [📐 `RestaurantInvitationAcceptIsUniformlyRefused`](#rule-restaurantinvitationacceptisuniformlyrefused)
+
+<a id="test-testacceptunknownrestaurantinvitationisrejected"></a>
+#### 🧪 Test: `TestAcceptUnknownRestaurantInvitationIsRejected`
+
+_Accepting an unknown invitationId is refused, revealing nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
+- **Verifies**: [📐 `RestaurantInvitationAcceptIsUniformlyRefused`](#rule-restaurantinvitationacceptisuniformlyrefused)
+
+<a id="test-testacceptrestaurantinvitationwrongemailisrejected"></a>
+#### 🧪 Test: `TestAcceptRestaurantInvitationWrongEmailIsRejected`
+
+_Accepting with a verified email that does not match the invited one is refused, identically to an unknown invitation_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **When**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
+- **Verifies**: [📐 `RestaurantInvitationAcceptIsUniformlyRefused`](#rule-restaurantinvitationacceptisuniformlyrefused)
+
+<a id="test-testacceptalreadyacceptedrestaurantinvitationisrejected"></a>
+#### 🧪 Test: `TestAcceptAlreadyAcceptedRestaurantInvitationIsRejected`
+
+_A second accept of the same invitation is refused_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted)
+- **When**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
+- **Verifies**: [📐 `RestaurantInvitationAcceptIsUniformlyRefused`](#rule-restaurantinvitationacceptisuniformlyrefused)
+
+<a id="test-testacceptrevokedrestaurantinvitationisrejected"></a>
+#### 🧪 Test: `TestAcceptRevokedRestaurantInvitationIsRejected`
+
+_Accepting a revoked invitation is refused, identically to an unknown one_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked)
+- **When**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
+- **Verifies**: [📐 `RestaurantInvitationAcceptIsUniformlyRefused`](#rule-restaurantinvitationacceptisuniformlyrefused)
+
+<a id="test-testrestaurantinvitationexpiredbypromotionpass"></a>
+#### 🧪 Test: `TestRestaurantInvitationExpiredByPromotionPass`
+
+_The promotion pass delivers the TTL: a still-pending invitation records its expiry_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent)
+- **When**: [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired)
+- **Then**: [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired)
+- **Verifies**: [📐 `RestaurantInvitationExpiryIsARecordedFact`](#rule-restaurantinvitationexpiryisarecordedfact)
+
+<a id="test-testacceptexpiredrestaurantinvitationisrejected"></a>
+#### 🧪 Test: `TestAcceptExpiredRestaurantInvitationIsRejected`
+
+_Accepting an expired invitation is refused, identically to an unknown one_
+
+- **Given**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired)
+- **When**: [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation)
+- **Thrown**: [⛔ `RestaurantInvitationNotAcceptable`](#error-restaurantinvitationnotacceptable)
+- **Verifies**: [📐 `RestaurantInvitationAcceptIsUniformlyRefused`](#rule-restaurantinvitationacceptisuniformlyrefused)
 
 ### 📡 Observability _(1)_
 
@@ -12316,7 +12667,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(65)_
+### 🔤 Scalars _(66)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -12385,6 +12736,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-erasureparkreason"></a>🔤 `ErasureParkReason` | enum (OPEN_ORDER \| FUNDS_IN_FLIGHT) | Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.  |
+| <a id="scalar-restaurantinvitationstatus"></a>🔤 `RestaurantInvitationStatus` | enum (PENDING \| ACCEPTED \| REVOKED \| EXPIRED) | Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (ACCEPTED), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).  |
 
 ### ⛔ Errors _(20)_
 
@@ -12406,12 +12758,12 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
 | <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
 | <a id="error-invalidverificationcode"></a>⛔ `InvalidVerificationCode` | The SMS OTP code does not match (rejected by Supabase Auth). | 🇬🇧 The verification code is incorrect. Please try again. | 🇫🇷 Le code de vérification est incorrect. Veuillez réessayer. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
-| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
-| <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
+| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
+| <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin), [📩 `AcceptRestaurantInvitation`](#command-acceptrestaurantinvitation) |
 | <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in here yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(16)_
+### 📡 Observability _(17)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -12832,6 +13184,32 @@ _criticality: **high**_
 | `claims.stamp` | `CLIENT` | ⬜ | — | — |
 
 - **Metrics**: `member_identity_resolve_ms` _(histogram)_, `member_identity_not_found_total` _(counter)_, `member_identity_lookup_failed_total` _(counter)_, `member_identity_lookup_source_total` _(counter)_, `member_sign_in_link_requested_total` _(counter)_, `member_sign_in_confirmed_total` _(counter)_, `member_claim_stamp_failed_total` _(counter)_, `member_sign_in_refused_total` _(counter)_, `member_sign_in_door_enforcing` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 400ms · p99 ≤ 1200ms · error rate ≤ 1%
+
+<a id="obs-restaurant-invitation"></a>
+#### 📡 Contract: `restaurant-invitation`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `invitation.invite` | `INTERNAL` | ⬜ | — | `business.authority`*, `business.result`*, `business.correlation_id`* |
+| `invitation.accept` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`* |
+
+- **Metrics**: `restaurant_invitation_sent_total` _(counter)_, `restaurant_invitation_accepted_total` _(counter)_, `restaurant_invitation_expired_total` _(counter)_, `restaurant_invitation_revoked_total` _(counter)_, `restaurant_invitation_door_enforcing` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
 - **SLOs**: p95 ≤ 400ms · p99 ≤ 1200ms · error rate ≤ 1%
 
@@ -14187,7 +14565,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 
 | Context | Description | Aggregates / process managers |
 | --- | --- | --- |
-| 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `RestaurantMembership`](#actor-restaurantmembership) |
+| 🔲 `restaurant` | Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff). | [🎭 `RestaurantAccount`](#actor-restaurantaccount), [🎭 `Restaurant`](#actor-restaurant), [🎭 `Prospect`](#actor-prospect), [🎭 `RestaurantMembership`](#actor-restaurantmembership), [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) |
 | 🔲 `catalog` | Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import. | [🎭 `Catalog`](#actor-catalog) |
 | 🔲 `order` | Cart selection → checkout → order lifecycle, incl. the checkout & refund sagas (the V0 risk point: external Stripe) and the per-order in-app conversation (#129). | [🎭 `Cart`](#actor-cart), [🎭 `Order`](#actor-order), [🎭 `Payment`](#actor-payment), [🎭 `Conversation`](#actor-conversation), [🎭 `Reclamation`](#actor-reclamation), [🎭 `CustomerCredit`](#actor-customercredit) · [🎭 `PlaceOrderProcess`](#actor-placeorderprocess), [🎭 `PaymentSettlementProcess`](#actor-paymentsettlementprocess), [🎭 `RefundProcess`](#actor-refundprocess), [🎭 `ReclamationProcess`](#actor-reclamationprocess) |
 | 🔲 `platform` | Platform operations (cross-cutting, ADMIN-performed): supervision of the write-path actor mailbox itself — operator interventions recorded as facts on supervision streams (#315). No customer-facing surface; the system.captain.food ops screens are its UI. | [🎭 `MailboxSupervision`](#actor-mailboxsupervision) |
@@ -14235,6 +14613,7 @@ read models they CONSUME outside GraphQL -- every read model must have a declare
 | 🧱 `actor-restaurant` | Rust — mailbox worker bin | Drains Restaurant lanes; appends its domain events.<br>realizes: [🎭 `Restaurant`](#actor-restaurant) |
 | 🧱 `actor-prospect` | Rust — mailbox worker bin | Drains Prospect lanes; appends its domain events.<br>realizes: [🎭 `Prospect`](#actor-prospect) |
 | 🧱 `actor-restaurant-membership` | Rust — mailbox worker bin | Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT.<br>realizes: [🎭 `RestaurantMembership`](#actor-restaurantmembership) |
+| 🧱 `actor-restaurant-invitation` | Rust — mailbox worker bin | Drains RestaurantInvitation lanes (#639 part C step 6-iv, ADR-20260905-101349 §2/§3); appends its domain events and schedules the TTL reminder. Ships dark behind RUN_RESTAURANT_INVITATION.<br>realizes: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) |
 | 🧱 `actor-catalog` | Rust — mailbox worker bin | Drains Catalog lanes (incl. HubRise imports); appends its domain events.<br>realizes: [🎭 `Catalog`](#actor-catalog) |
 | 🧱 `actor-customer` | Rust — mailbox worker bin | Drains Customer lanes; appends its domain events.<br>realizes: [🎭 `Customer`](#actor-customer) |
 | 🧱 `actor-cart` | Rust — mailbox worker bin | Drains Cart lanes; appends its domain events.<br>realizes: [🎭 `Cart`](#actor-cart) |

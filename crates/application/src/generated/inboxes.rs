@@ -3098,6 +3098,161 @@ impl RestaurantAccountInbox {
     }
 }
 
+/// GENERATED from `actors.yaml#/RestaurantInvitation/receives` — the CLOSED set of messages the `RestaurantInvitation`
+/// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
+/// each variant carrying its typed payload.
+///
+/// Adding a `receives:` entry adds a variant here, and the human-owned `match` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides what the new
+/// message DOES. That compile error is the whole point: before #771 the same omission shipped
+/// green and surfaced as a `FAILED "unroutable command type"` row in production.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RestaurantInvitationInbox {
+    /// COMMAND `AcceptRestaurantInvitation`.
+    AcceptRestaurantInvitation(domain::generated::commands::AcceptRestaurantInvitation),
+    /// COMMAND `InviteRestaurantMember`.
+    InviteRestaurantMember(domain::generated::commands::InviteRestaurantMember),
+    /// REMINDER `RestaurantInvitationExpired` — HANDLER DEFERRED (actors.yaml `deferred:`): WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above); only its DELIVERY is parked until the fence lifts. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/902.
+    RestaurantInvitationExpired(domain::generated::events::RestaurantInvitationExpired),
+    /// COMMAND `RevokeRestaurantInvitation`.
+    RevokeRestaurantInvitation(domain::generated::commands::RevokeRestaurantInvitation),
+}
+
+impl RestaurantInvitationInbox {
+    /// The actors.yaml key this inbox belongs to — the `inbound_messages.actor_type` a row
+    /// must carry to be parseable here.
+    pub const ACTOR_TYPE: &'static str = "RestaurantInvitation";
+
+    /// Every message type this actor DECLARES it receives, in emission order — the
+    /// operator-facing answer to "is this row's type one we know?" without constructing a value.
+    pub const DECLARED: &'static [&'static str] = &["AcceptRestaurantInvitation", "InviteRestaurantMember", "RestaurantInvitationExpired", "RevokeRestaurantInvitation"];
+
+    /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
+    /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
+    ///
+    /// An UNDECLARED message type is NOT an error about this payload — during a rolling deploy an
+    /// old consumer legitimately meets a message type a newer producer already emits. The caller
+    /// must treat it as TRANSIENT (retry, then park loudly), never as a terminal failure:
+    /// terminal-failing it buries a paid order.
+    pub fn parse(
+        message_type: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Self, InboxParseError> {
+        match message_type {
+            "AcceptRestaurantInvitation" => serde_json::from_value::<domain::generated::commands::AcceptRestaurantInvitation>(payload.clone())
+                .map(Self::AcceptRestaurantInvitation)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "AcceptRestaurantInvitation",
+                    detail: e.to_string(),
+                }),
+            "InviteRestaurantMember" => serde_json::from_value::<domain::generated::commands::InviteRestaurantMember>(payload.clone())
+                .map(Self::InviteRestaurantMember)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "InviteRestaurantMember",
+                    detail: e.to_string(),
+                }),
+            "RestaurantInvitationExpired" => match serde_json::from_value::<domain::generated::events::DomainEvent>(payload.clone()) {
+                Ok(domain::generated::events::DomainEvent::RestaurantInvitationExpired(e)) => Ok(Self::RestaurantInvitationExpired(e)),
+                Ok(other) => Err(InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RestaurantInvitationExpired",
+                    detail: format!(
+                        "row message_type is 'RestaurantInvitationExpired' but the staged DomainEvent is {other:?}"
+                    ),
+                }),
+                Err(e) => Err(InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RestaurantInvitationExpired",
+                    detail: e.to_string(),
+                }),
+            },
+            "RevokeRestaurantInvitation" => serde_json::from_value::<domain::generated::commands::RevokeRestaurantInvitation>(payload.clone())
+                .map(Self::RevokeRestaurantInvitation)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RevokeRestaurantInvitation",
+                    detail: e.to_string(),
+                }),
+            other => Err(InboxParseError::UndeclaredMessage {
+                actor_type: Self::ACTOR_TYPE,
+                message_type: other.to_string(),
+            }),
+        }
+    }
+
+    /// The wire `message_type` this value came from — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::AcceptRestaurantInvitation(_) => "AcceptRestaurantInvitation",
+            Self::InviteRestaurantMember(_) => "InviteRestaurantMember",
+            Self::RestaurantInvitationExpired(_) => "RestaurantInvitationExpired",
+            Self::RevokeRestaurantInvitation(_) => "RevokeRestaurantInvitation",
+        }
+    }
+
+    /// The message kind — a total projection of the variant set.
+    pub fn kind(&self) -> InboxKind {
+        match self {
+            Self::AcceptRestaurantInvitation(_) => InboxKind::Command,
+            Self::InviteRestaurantMember(_) => InboxKind::Command,
+            Self::RestaurantInvitationExpired(_) => InboxKind::Reminder,
+            Self::RevokeRestaurantInvitation(_) => InboxKind::Command,
+        }
+    }
+}
+
+/// GENERATED — the FACT half of `RestaurantInvitation`'s inbox: every `receives:` entry of kind FACT or
+/// REMINDER, and nothing else. The fact-record route matches on THIS, so a COMMAND variant is
+/// unspellable there and no arm ever needs a lane wildcard (#780).
+///
+/// Adding a `receives:` FACT adds a variant here, and the human-owned `fact_route` in
+/// `infrastructure::inbox` then fails to compile with E0004 until someone decides whether the
+/// aggregate records it. Before #780 the same omission shipped green: the fact route was a match
+/// over `DomainEvent` ending in `_ => Failed("no delivery route")`, so a declared fact nobody
+/// consumed was LOST with a terminal verdict — invisible to the poison queue and refused by
+/// `RequeueMailboxMessage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RestaurantInvitationFactInbox {
+    /// REMINDER `RestaurantInvitationExpired` — HANDLER DEFERRED (actors.yaml `deferred:`): WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above); only its DELIVERY is parked until the fence lifts. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/902.
+    RestaurantInvitationExpired(domain::generated::events::RestaurantInvitationExpired),
+}
+
+impl RestaurantInvitationFactInbox {
+    /// The actors.yaml key this fact inbox belongs to — the lane a row must be ON.
+    pub const ACTOR_TYPE: &'static str = "RestaurantInvitation";
+
+    /// The wire `message_type` — a total projection of the variant set.
+    pub fn message_type(&self) -> &'static str {
+        match self {
+            Self::RestaurantInvitationExpired(_) => "RestaurantInvitationExpired",
+        }
+    }
+
+    /// The carried business fact as the tagged `DomainEvent` the recorders take.
+    /// A total projection: the variant IS the tag, so this can never disagree with
+    /// `message_type()` the way a re-parse of the raw payload could.
+    pub fn into_domain_event(self) -> domain::generated::events::DomainEvent {
+        match self {
+            Self::RestaurantInvitationExpired(e) => domain::generated::events::DomainEvent::RestaurantInvitationExpired(e),
+        }
+    }
+}
+
+impl RestaurantInvitationInbox {
+    /// The FACT half of this lane's inbox, or `None` for a COMMAND — a total projection of the
+    /// variant set, generated for the same reason `message_type()` is: it carries no decision.
+    pub fn into_fact(self) -> Option<RestaurantInvitationFactInbox> {
+        match self {
+            Self::AcceptRestaurantInvitation(_) => None,
+            Self::InviteRestaurantMember(_) => None,
+            Self::RestaurantInvitationExpired(e) => Some(RestaurantInvitationFactInbox::RestaurantInvitationExpired(e)),
+            Self::RevokeRestaurantInvitation(_) => None,
+        }
+    }
+}
+
 /// GENERATED from `actors.yaml#/RestaurantMembership/receives` — the CLOSED set of messages the `RestaurantMembership`
 /// actor's ONE mailbox queue can carry, spanning every kind (COMMAND / inbound FACT / REMINDER),
 /// each variant carrying its typed payload.
@@ -3362,6 +3517,8 @@ pub enum ActorInbox {
     Restaurant(RestaurantInbox),
     /// A row on a `RestaurantAccount` lane.
     RestaurantAccount(RestaurantAccountInbox),
+    /// A row on a `RestaurantInvitation` lane.
+    RestaurantInvitation(RestaurantInvitationInbox),
     /// A row on a `RestaurantMembership` lane.
     RestaurantMembership(RestaurantMembershipInbox),
     /// A row on a `Rider` lane.
@@ -3394,6 +3551,7 @@ impl ActorInbox {
             "RefundProcess" => RefundProcessInbox::parse(message_type, payload).map(Self::RefundProcess),
             "Restaurant" => RestaurantInbox::parse(message_type, payload).map(Self::Restaurant),
             "RestaurantAccount" => RestaurantAccountInbox::parse(message_type, payload).map(Self::RestaurantAccount),
+            "RestaurantInvitation" => RestaurantInvitationInbox::parse(message_type, payload).map(Self::RestaurantInvitation),
             "RestaurantMembership" => RestaurantMembershipInbox::parse(message_type, payload).map(Self::RestaurantMembership),
             "Rider" => RiderInbox::parse(message_type, payload).map(Self::Rider),
             other => Err(InboxParseError::UnknownActor { actor_type: other.to_string() }),
@@ -3419,6 +3577,7 @@ impl ActorInbox {
             Self::RefundProcess(_) => RefundProcessInbox::ACTOR_TYPE,
             Self::Restaurant(_) => RestaurantInbox::ACTOR_TYPE,
             Self::RestaurantAccount(_) => RestaurantAccountInbox::ACTOR_TYPE,
+            Self::RestaurantInvitation(_) => RestaurantInvitationInbox::ACTOR_TYPE,
             Self::RestaurantMembership(_) => RestaurantMembershipInbox::ACTOR_TYPE,
             Self::Rider(_) => RiderInbox::ACTOR_TYPE,
         }
@@ -3443,6 +3602,7 @@ impl ActorInbox {
             Self::RefundProcess(m) => m.message_type(),
             Self::Restaurant(m) => m.message_type(),
             Self::RestaurantAccount(m) => m.message_type(),
+            Self::RestaurantInvitation(m) => m.message_type(),
             Self::RestaurantMembership(m) => m.message_type(),
             Self::Rider(m) => m.message_type(),
         }
@@ -3467,6 +3627,7 @@ impl ActorInbox {
             Self::RefundProcess(m) => m.kind(),
             Self::Restaurant(m) => m.kind(),
             Self::RestaurantAccount(m) => m.kind(),
+            Self::RestaurantInvitation(m) => m.kind(),
             Self::RestaurantMembership(m) => m.kind(),
             Self::Rider(m) => m.kind(),
         }
@@ -3503,6 +3664,8 @@ pub enum ActorFactInbox {
     RefundProcess(RefundProcessFactInbox),
     /// A FACT row on a `Restaurant` lane.
     Restaurant(RestaurantFactInbox),
+    /// A FACT row on a `RestaurantInvitation` lane.
+    RestaurantInvitation(RestaurantInvitationFactInbox),
 }
 
 impl ActorFactInbox {
@@ -3521,6 +3684,7 @@ impl ActorFactInbox {
             Self::PlaceOrderProcess(_) => PlaceOrderProcessFactInbox::ACTOR_TYPE,
             Self::RefundProcess(_) => RefundProcessFactInbox::ACTOR_TYPE,
             Self::Restaurant(_) => RestaurantFactInbox::ACTOR_TYPE,
+            Self::RestaurantInvitation(_) => RestaurantInvitationFactInbox::ACTOR_TYPE,
         }
     }
 
@@ -3536,6 +3700,7 @@ impl ActorFactInbox {
             Self::PlaceOrderProcess(m) => m.message_type(),
             Self::RefundProcess(m) => m.message_type(),
             Self::Restaurant(m) => m.message_type(),
+            Self::RestaurantInvitation(m) => m.message_type(),
         }
     }
 
@@ -3551,6 +3716,7 @@ impl ActorFactInbox {
             Self::PlaceOrderProcess(m) => m.into_domain_event(),
             Self::RefundProcess(m) => m.into_domain_event(),
             Self::Restaurant(m) => m.into_domain_event(),
+            Self::RestaurantInvitation(m) => m.into_domain_event(),
         }
     }
 }
@@ -3586,6 +3752,7 @@ impl ActorInbox {
             Self::Restaurant(m) => m.into_fact().map(ActorFactInbox::Restaurant),
             // The `RestaurantAccount` lane declares no fact.
             Self::RestaurantAccount(_) => None,
+            Self::RestaurantInvitation(m) => m.into_fact().map(ActorFactInbox::RestaurantInvitation),
             // The `RestaurantMembership` lane declares no fact.
             Self::RestaurantMembership(_) => None,
             // The `Rider` lane declares no fact.
@@ -3627,6 +3794,7 @@ pub const DECLARED_FACTS: &[(&str, &str)] = &[
     ("PlaceOrderProcess", "PaymentFailed"),
     ("RefundProcess", "PaymentRefunded"),
     ("Restaurant", "RestaurantRegistered"),
+    ("RestaurantInvitation", "RestaurantInvitationExpired"),
 ];
 
 /// Messages an actor DECLARES it receives whose handler is deliberately not built yet
@@ -3648,4 +3816,5 @@ pub const DEFERRED_MESSAGES: &[(&str, &str, &str, &str)] = &[
     ("DeliveryJob", "DeliveryDispatchFailed", "MODELLING: the PENDING->FAILED transition is declared, but no \"already reflected\" rule is -- on redelivery the job is already FAILED, the transition lookup is None, and the recorder turns that into a retry loop instead of a DUPLICATE.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
     ("DeliveryJob", "DeliveryOfferTimedOut", "MODELLING: not in the lifecycle transition table, so the recorder refuses it as an illegal transition; and job status cannot answer \"already reflected?\" because one job may legitimately time out on several ranked channels -- the dedupe key is the offer, not the status.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
     ("DeliveryJob", "DeliveryRequested", "MODELLING: the job's BIRTH, and record_inbound_delivery_event's idempotency is fold-based -- a birth has no fold to consult and there is no birthless structural-equality fallback, so a redelivery would append a second birth and apply `initial` twice.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
+    ("RestaurantInvitation", "RestaurantInvitationExpired", "WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above); only its DELIVERY is parked until the fence lifts.", "https://github.com/TheCaptainCompany/captain-food/issues/902"),
 ];

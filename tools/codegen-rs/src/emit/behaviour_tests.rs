@@ -34,6 +34,7 @@ pub(crate) const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("CustomerCredit", "customerId", true),   // id = customerId (a per-customer store-credit ledger; #158)
     ("MailboxSupervision", "targetMessageId", true),   // id = the SUPERVISED row's messageId (#315)
     ("RestaurantMembership", "membershipId", true),   // #639 part C step 6-i (ADR-20260905-101349)
+    ("RestaurantInvitation", "invitationId", true),   // #639 part C step 6-iv (ADR-20260905-101349 §2/§3)
 ];
 
 pub(crate) fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {
@@ -294,6 +295,10 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     // the identity provider is touched at all.
     ("RequestMemberSignInLink", "RUN_MEMBER_SIGN_IN_DOOR", "run_member_sign_in_door"),
     ("ConfirmMemberSignIn", "RUN_MEMBER_SIGN_IN_DOOR", "run_member_sign_in_door"),
+    // #639 part C step 6-iv (ADR-20260905-101349 §2/§3): the invitation door's release gate, read
+    // at the WRITE door only -- `revokeRestaurantInvitation` never consumes it (the
+    // RestrictRider/ReinstateRider asymmetry).
+    ("InviteRestaurantMember", "RUN_RESTAURANT_INVITATION", "run_restaurant_invitation"),
 ];
 
 /// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
@@ -389,6 +394,16 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         }
         "ConfirmMemberSignIn" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor(), run_member_sign_in_door).await", snake)
+        }
+        // The roster and the invitation (#639 part C step 6-iv): InviteRestaurantMember takes the
+        // door gate; RevokeRestaurantInvitation falls through to the default `(store, cmd, actor)`
+        // arm below (never gated); AcceptRestaurantInvitation verifies the magic-link token
+        // through the SAME identity port ConfirmMemberSignIn uses.
+        "InviteRestaurantMember" => {
+            format!("crate::commands::{}(&bed.store, cmd, &support::actor(), run_restaurant_invitation).await", snake)
+        }
+        "AcceptRestaurantInvitation" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor()).await", snake)
         }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }

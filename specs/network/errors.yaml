@@ -216,6 +216,70 @@ RestaurantMembershipAlreadyRevoked:
     fr: "Cette adhésion restaurant a déjà été révoquée."
 
 
+# --- The roster and the invitation: the RestaurantInvitation aggregate (#639 part C step 6-iv,
+# ADR-20260905-101349 §2/§3) -----------------------------------------------------------------
+
+RestaurantInvitationDoorClosed:
+  description: >
+    The invitation door is closed by `configuration.yaml#/keys/RUN_RESTAURANT_INVITATION` (#639
+    part C step 6-iv) -- a declared, supervisable refusal while the preconditions
+    (`docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`) are open, never a silent no-op.
+    `revokeRestaurantInvitation` is NEVER gated: withdrawing an offer nobody has accepted yet is
+    always safe to allow.
+  context:
+    restaurantId: { $ref: 'scalars.yaml#/RestaurantId' }
+  messages:
+    en: "Inviting restaurant members is not yet enabled in this environment."
+    fr: "L'invitation de membres du restaurant n'est pas encore activée dans cet environnement."
+
+
+RestaurantInvitationNotFound:
+  description: "No `RestaurantInvitation` exists for this `invitationId` (`revokeRestaurantInvitation` only -- the caller is authenticated staff, so this leg MAY name the miss; the PUBLIC accept leg never does, see `RestaurantInvitationNotAcceptable`)."
+  context:
+    invitationId: { $ref: 'scalars.yaml#/RestaurantInvitationId' }
+  messages:
+    en: "This invitation was not found."
+    fr: "Cette invitation est introuvable."
+
+
+RestaurantInvitationAlreadyRevoked:
+  description: "The invitation was already revoked or already accepted -- `revokeRestaurantInvitation` on a non-pending invitation is rejected rather than silently re-recorded."
+  context:
+    invitationId: { $ref: 'scalars.yaml#/RestaurantInvitationId' }
+  messages:
+    en: "This invitation is no longer pending."
+    fr: "Cette invitation n'est plus en attente."
+
+
+RestaurantInvitationNotAcceptable:
+  description: >
+    `AcceptRestaurantInvitation` is refused (#639 part C step 6-iv) -- deliberately ONE error for
+    five distinct causes (unknown `invitationId`, invited-email/verified-email mismatch, already
+    accepted, revoked, expired), never distinguished, the 6-ii sign-in door's no-enumeration
+    posture carried to the invitation door: a stranger holding a guessed or borrowed `invitationId`
+    must learn nothing about which of the five is true. Never thrown by `GrantRestaurantAccess`'s
+    `MEMBER_INVITATION` leg (that leg only reads an ALREADY-accepted invitation, and its own
+    absence there is the same error, by construction -- see the command's description).
+  context:
+    invitationId: { $ref: 'scalars.yaml#/RestaurantInvitationId' }
+  messages:
+    en: "This invitation link is no longer valid."
+    fr: "Ce lien d'invitation n'est plus valide."
+
+
+InvitationProofRequired:
+  description: >
+    `GrantRestaurantAccess` named `basis: MEMBER_INVITATION` but carried no `invitationId` -- the
+    one proof that basis accepts. A client bug (the two-lane accept always supplies it), never a
+    stranger-reachable path (the mutation still requires `roles: [ADMIN, PUBLIC]`, but PUBLIC has
+    no OTHER way to reach `RestaurantAccessGranted`).
+  context:
+    membershipId: { $ref: 'scalars.yaml#/MembershipId' }
+  messages:
+    en: "This grant is missing its invitation proof."
+    fr: "Cet octroi n'a pas de preuve d'invitation."
+
+
 # --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) -----------------
 
 MemberNotLinked:

@@ -106,6 +106,7 @@ scalar MarginPercent
 scalar TimeOfDay
 scalar ProspectionScore
 scalar MembershipId
+scalar RestaurantInvitationId
 scalar CartLineId
 scalar StarRating
 scalar RatingComment
@@ -483,6 +484,13 @@ enum AccessBasis {
 enum AccessRevocationGround {
   LEFT_THE_RESTAURANT
   ACCESS_NO_LONGER_NEEDED
+}
+
+enum RestaurantInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
 enum ThumbRating {
@@ -1597,12 +1605,13 @@ input RecordProspectReplyInput {
 
 input GrantRestaurantAccessInput {
   membershipId: MembershipId!
-  scopeType: ScopeType!
-  scopeId: RestaurantId!
-  memberId: MemberId!
-  authSubject: AuthSubject!
-  authority: MemberAuthority!
+  scopeType: ScopeType
+  scopeId: RestaurantId
+  memberId: MemberId
+  authSubject: AuthSubject
+  authority: MemberAuthority
   basis: AccessBasis!
+  invitationId: RestaurantInvitationId
 }
 
 input RevokeRestaurantAccessInput {
@@ -1616,6 +1625,23 @@ input RequestMemberSignInLinkInput {
 }
 
 input ConfirmMemberSignInInput {
+  token: EmailVerificationToken!
+}
+
+input InviteRestaurantMemberInput {
+  invitationId: RestaurantInvitationId!
+  restaurantId: RestaurantId!
+  invitedEmail: EmailAddress!
+  authority: MemberAuthority!
+  memberId: MemberId!
+}
+
+input RevokeRestaurantInvitationInput {
+  invitationId: RestaurantInvitationId!
+}
+
+input AcceptRestaurantInvitationInput {
+  invitationId: RestaurantInvitationId!
   token: EmailVerificationToken!
 }
 
@@ -2156,10 +2182,13 @@ type Mutation {
   recordProspectContact(input: RecordProspectContactInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RecordProspectContact")
   markProspectCold(input: MarkProspectColdInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
-  grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantRestaurantAccess")
+  grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, PUBLIC]) @command(name: "GrantRestaurantAccess")
   revokeRestaurantAccess(input: RevokeRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RevokeRestaurantAccess")
   requestMemberSignInLink(input: RequestMemberSignInLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "RequestMemberSignInLink")
   confirmMemberSignIn(input: ConfirmMemberSignInInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "ConfirmMemberSignIn")
+  inviteRestaurantMember(input: InviteRestaurantMemberInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT]) @command(name: "InviteRestaurantMember")
+  revokeRestaurantInvitation(input: RevokeRestaurantInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [RESTAURANT]) @command(name: "RevokeRestaurantInvitation")
+  acceptRestaurantInvitation(input: AcceptRestaurantInvitationInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "AcceptRestaurantInvitation")
   addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
   removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
   changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")

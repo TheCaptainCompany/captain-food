@@ -13,6 +13,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
     match command_type {
         "AcceptDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "AcceptOrder" => Some(("Order", Some("orderId"), 5)),
+        "AcceptRestaurantInvitation" => Some(("RestaurantInvitation", Some("invitationId"), 5)),
         "ActivateRestaurant" => Some(("Restaurant", Some("restaurantId"), 5)),
         "AddCartLine" => Some(("Cart", Some("cartId"), 5)),
         "AddCatalogCategory" => Some(("Catalog", Some("catalogId"), 5)),
@@ -54,6 +55,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "GrantRestaurantAccess" => Some(("RestaurantMembership", Some("membershipId"), 5)),
         "HandBackDelivery" => Some(("DeliveryJob", Some("deliveryJobId"), 5)),
         "ImportCatalog" => Some(("Catalog", Some("catalogId"), 5)),
+        "InviteRestaurantMember" => Some(("RestaurantInvitation", Some("invitationId"), 5)),
         "MarkOrderDelivered" => Some(("Order", Some("orderId"), 5)),
         "MarkOrderReady" => Some(("Order", Some("orderId"), 5)),
         "MarkProspectCold" => Some(("Prospect", Some("restaurantId"), 5)),
@@ -100,6 +102,7 @@ pub fn mailbox_address(command_type: &str) -> Option<(&'static str, Option<&'sta
         "RestrictRider" => Some(("Rider", Some("riderId"), 5)),
         "RevokeDeliveryPartnerAvailability" => Some(("DeliveryPartnerRegistration", Some("registrationId"), 5)),
         "RevokeRestaurantAccess" => Some(("RestaurantMembership", Some("membershipId"), 5)),
+        "RevokeRestaurantInvitation" => Some(("RestaurantInvitation", Some("invitationId"), 5)),
         "SetCustomerAddress" => Some(("Customer", Some("customerId"), 5)),
         "SetCustomerPaymentMethod" => Some(("Customer", Some("customerId"), 5)),
         "SetCustomerPreferences" => Some(("Customer", Some("customerId"), 5)),
@@ -145,6 +148,7 @@ pub const ACTOR_MAILBOXES: &[(&str, u16)] = &[
     ("RefundProcess", 5),
     ("Restaurant", 5),
     ("RestaurantAccount", 5),
+    ("RestaurantInvitation", 5),
     ("RestaurantMembership", 5),
     ("Rider", 5),
 ];
@@ -173,6 +177,7 @@ pub const ACTOR_INBOUND_FACTS: &[(&str, &[&str])] = &[
     ("RefundProcess", &["PaymentRefunded"]),
     ("Restaurant", &["RestaurantRegistered"]),
     ("RestaurantAccount", &[]),
+    ("RestaurantInvitation", &[]),
     ("RestaurantMembership", &[]),
     ("Rider", &[]),
 ];

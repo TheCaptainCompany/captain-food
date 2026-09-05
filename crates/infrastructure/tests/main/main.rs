@@ -46,6 +46,7 @@ mod prospection_projection;
 mod referential_policies;
 mod restaurant_locations_by_account;
 mod restaurant_projection;
+mod restaurant_invitation;
 mod restaurant_membership;
 mod restaurant_write_path;
 mod retention_sweep;
