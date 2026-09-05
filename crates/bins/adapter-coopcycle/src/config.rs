@@ -280,6 +280,8 @@ pub struct Config {
     pub email_max_sends_per_address_per_day: i64,
     /// DEFAULT `200`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_DAY_GLOBAL verbatim, itself "a deliberately conservative guess, not a costed number"). Total magic-link sends allowed platform-wide per rolling day, across every address and every caller of `send_email_magic_link`. Once spent, every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` -- turning real requests away is a correct trade against runaway sending-domain reputation damage, but only because the refusal is loud (`email_send_refused_total{reason=global_ceiling}`, logged at ERROR).
     pub email_max_sends_per_day_global: i64,
+    /// Round 2 R2-V1 (legal, Art. 5(1)(e) storage limitation): the per-address send-abuse buckets above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that table a second, unbounded store of personal data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret, never the address itself. Unset, a fixed DEV-ONLY key is used (`application::email_guard:: DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever reaches that table without this key set; set it before any real email address does.
+    pub email_quota_key_hmac_secret: Option<String>,
     /// DEFAULT `50`. UNVERIFIED input (ADR-20260905-101349 §9): the per-role GraphQL depth/complexity ceiling is `codegen-emitted max x (100 + this) / 100` -- the emitted max is the deepest/most complex GENERATED client document that role's screens actually bind (`tools/codegen-rs`'s `graphql-limits` emitter over `crates/web/src/generated/data_layer.rs`'s `ResolverKey::selection()`), and this percentage is the safety margin above that observed real traffic before a request is refused. 50% is a round, unresearched starting margin -- wide enough that an ordinary screen fragment addition does not immediately trip the ratchet, narrow enough that an order-of-magnitude pathological query still refuses. Never a public-only limit: it applies to the ceiling computed for EVERY role.
     pub graphql_limit_headroom_percent: i64,
     /// JSON array of self-hosted CoopCycle co-op instances (per-instance OAuth2 client + token URL) — a federation registry rather than one endpoint, which is why it is a JSON document and not a set of scalar keys. Unset or empty, the adapter is not configured; SET BUT UNPARSABLE is an `Err` the operator must see, because a typo would otherwise read as "no co-ops configured" and quietly drop a whole delivery channel.
@@ -439,6 +441,7 @@ impl Config {
         let email_max_sends_per_address_per_hour = raw("EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3);
         let email_max_sends_per_address_per_day = raw("EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
         let email_max_sends_per_day_global = raw("EMAIL_MAX_SENDS_PER_DAY_GLOBAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(200);
+        let email_quota_key_hmac_secret = raw("EMAIL_QUOTA_KEY_HMAC_SECRET");
         let graphql_limit_headroom_percent = raw("GRAPHQL_LIMIT_HEADROOM_PERCENT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(50);
         let coopcycle_instances = raw("COOPCYCLE_INSTANCES");
         if let Some(v) = Some(database_url.as_str()) {
@@ -533,6 +536,7 @@ impl Config {
                 email_max_sends_per_address_per_hour,
                 email_max_sends_per_address_per_day,
                 email_max_sends_per_day_global,
+                email_quota_key_hmac_secret,
                 graphql_limit_headroom_percent,
                 coopcycle_instances,
             },
@@ -605,6 +609,7 @@ impl Config {
         out.push_str(&format!("  EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR = {}\n", self.email_max_sends_per_address_per_hour));
         out.push_str(&format!("  EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY = {}\n", self.email_max_sends_per_address_per_day));
         out.push_str(&format!("  EMAIL_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.email_max_sends_per_day_global));
+        out.push_str(&format!("  EMAIL_QUOTA_KEY_HMAC_SECRET = {}\n", if self.email_quota_key_hmac_secret.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  GRAPHQL_LIMIT_HEADROOM_PERCENT = {}\n", self.graphql_limit_headroom_percent));
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
         out
@@ -612,7 +617,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 51;
+pub const KEY_COUNT: usize = 52;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -666,6 +671,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR",
     "EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY",
     "EMAIL_MAX_SENDS_PER_DAY_GLOBAL",
+    "EMAIL_QUOTA_KEY_HMAC_SECRET",
     "GRAPHQL_LIMIT_HEADROOM_PERCENT",
     "COOPCYCLE_INSTANCES",
 ];

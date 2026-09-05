@@ -979,6 +979,22 @@ keys:
       damage, but only because the refusal is loud
       (`email_send_refused_total{reason=global_ceiling}`, logged at ERROR).
 
+  EMAIL_QUOTA_KEY_HMAC_SECRET:
+    type: string
+    secret: true
+    gates: >
+      Round 2 R2-V1 (legal, Art. 5(1)(e) storage limitation): the per-address send-abuse buckets
+      above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table --
+      storing the RAW address there would make that table a second, unbounded store of personal
+      data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret,
+      never the address itself. Unset, a fixed DEV-ONLY key is used (`application::email_guard::
+      DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever
+      reaches that table without this key set; set it before any real email address does.
+    deploy:
+      from_secret:
+        production: EMAIL_QUOTA_KEY_HMAC_SECRET
+        staging: EMAIL_QUOTA_KEY_HMAC_SECRET
+
   GRAPHQL_LIMIT_HEADROOM_PERCENT:
     type: int
     default: 50

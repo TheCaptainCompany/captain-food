@@ -54,7 +54,9 @@ mod tests {
 
     #[tokio::test]
     async fn the_per_address_cap_refuses_the_next_send() {
-        let policy = EmailSendPolicy { max_per_address_per_hour: 1, ..EmailSendPolicy::default() };
+        // `from_config`, not the struct-update literal: `hmac_key` (round 2 R2-V1) is a private
+        // field, deliberately not settable from outside `application::email_guard`.
+        let policy = EmailSendPolicy::from_config(Some(1), None, None, None);
         let a = EmailSendAuthorizer::new(policy, Box::new(InMemorySmsQuotaStore::default()));
         let email = EmailAddress("owner@pizzaroma.fr".into());
         a.authorize(&email).await.expect("first send authorised");

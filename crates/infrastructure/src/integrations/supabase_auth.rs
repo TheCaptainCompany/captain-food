@@ -150,10 +150,13 @@ pub struct SupabaseIdentityService {
     send_guard: Option<std::sync::Arc<crate::sms_authorization::SmsSendAuthorizer>>,
     /// The email send-abuse wall (#639 part C step 6-ii, ADR-20260905-101349 §9) — UNLIKE
     /// `send_guard` above, this IS the authoritative wall: there is no separate inbound hook where
-    /// an email becomes a euro, so `send_email_magic_link` is the only enforcement point. `None`
-    /// leaves this adapter unguarded (a composition-root wiring gap, never the default posture);
-    /// see [`Self::with_email_guard`].
-    email_guard: Option<std::sync::Arc<crate::email_authorization::EmailSendAuthorizer>>,
+    /// an email becomes a euro, so `send_email_magic_link` is the only enforcement point. Round 2
+    /// R2-V1 (compiler-first, ADR-20260803-234035): NON-`Option`, so this struct cannot be
+    /// constructed without one — [`Self::from_parts`] seeds an in-memory, process-local instance
+    /// (best-effort, resets on restart, degraded but never unguarded) and
+    /// [`Self::with_email_guard`] swaps in the durable shared-counter one when a database is
+    /// available. An unguarded sender is now a type this crate cannot spell.
+    email_guard: std::sync::Arc<crate::email_authorization::EmailSendAuthorizer>,
 }
 
 /// The raw environment inputs of [`SupabaseIdentityService::from_env`], read verbatim
@@ -201,7 +204,13 @@ impl SupabaseIdentityService {
             admin_key: parts.secret_key.filter(|s| !s.is_empty()),
             http: reqwest::Client::new(),
             send_guard: None,
-            email_guard: None,
+            // Round 2 R2-V1: NEVER `None` — a process-local, in-memory-backed guard by default
+            // (degraded but never absent), replaced by the durable shared-counter one wherever a
+            // database is available (`with_email_guard`, below).
+            email_guard: std::sync::Arc::new(crate::email_authorization::EmailSendAuthorizer::new(
+                application::email_guard::EmailSendPolicy::default(),
+                Box::new(application::sms_guard::InMemorySmsQuotaStore::default()),
+            )),
         })
     }
 
@@ -217,15 +226,15 @@ impl SupabaseIdentityService {
         self
     }
 
-    /// Attach the email send-abuse wall (#639 part C step 6-ii) — the SAME builder shape as
-    /// [`Self::with_send_guard`], for the same reason. UNLIKE the SMS guard, `None` here means
-    /// EVERY `send_email_magic_link` call is unguarded (there is no separate hook-path wall for
-    /// email) -- the composition root wires this whenever it wires the identity service at all.
+    /// Replace the default in-memory email guard (`from_parts`) with the durable, shared-counter
+    /// one — the composition root calls this wherever a database is available. UNLIKE
+    /// `with_send_guard`, there is no "leave it unset" posture: [`Self::email_guard`] is never
+    /// absent (round 2 R2-V1), only ever upgraded from process-local to durable.
     pub fn with_email_guard(
         mut self,
         guard: std::sync::Arc<crate::email_authorization::EmailSendAuthorizer>,
     ) -> Self {
-        self.email_guard = Some(guard);
+        self.email_guard = guard;
         self
     }
 
@@ -890,9 +899,13 @@ impl IdentityService for SupabaseIdentityService {
         // anything in this product sends a magic-link email, so both `RequestEmailVerification`
         // and `RequestMemberSignInLink` are guarded uniformly here -- and UNLIKE the SMS guard
         // this IS the authoritative wall (no separate hook path spends the euro for email).
-        if let Some(guard) = self.email_guard.as_ref() {
-            guard.authorize(&input.email).await.map_err(|refusal| refusal.into_domain_error())?;
-        }
+        // Round 2 R2-V1: UNCONDITIONAL — `email_guard` is never absent (compiler-first), so there
+        // is no "unguarded" branch left to fall through to; a database-less deployment still
+        // enforces its own process-local (in-memory) window, degraded but never bypassed.
+        self.email_guard
+            .authorize(&input.email)
+            .await
+            .map_err(|refusal| refusal.into_domain_error())?;
         self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())
     }
 
@@ -992,6 +1005,71 @@ mod tests {
         };
         let svc = SupabaseIdentityService::from_parts(empty_admin).expect("constructed");
         assert!(svc.admin_key.is_none(), "empty secret key is unset -> stamp fails closed");
+    }
+
+    /// Round 2 R2-V1 (vernon): `RequestMemberSignInLink` declares `THROWS VerificationSendLimitReached`
+    /// (`specs/network/actors.yaml`) but nothing produced it — `send_email_magic_link` is the ONLY
+    /// enforcement point (no separate hook path spends the euro for email), so this exercises it
+    /// through the REAL adapter (not the test harness's scripted double, which never touches the
+    /// guard at all): a per-address DAILY cap of 0 refuses on the FIRST send, before any network
+    /// call (`base_url` points nowhere reachable — reaching it would fail this test for a
+    /// different reason).
+    #[tokio::test]
+    async fn send_email_magic_link_refuses_with_verification_send_limit_reached_once_the_daily_cap_is_spent() {
+        let svc = SupabaseIdentityService::from_parts(SupabaseEnv {
+            url: Some("https://unreachable.invalid".into()),
+            publishable_key: Some("anon-key".into()),
+            secret_key: None,
+        })
+        .expect("constructed")
+        .with_email_guard(std::sync::Arc::new(crate::email_authorization::EmailSendAuthorizer::new(
+            application::email_guard::EmailSendPolicy::from_config(None, Some(0), None, None),
+            Box::new(application::sms_guard::InMemorySmsQuotaStore::default()),
+        )));
+        let err = svc
+            .send_email_magic_link(
+                IdentitySendEmailMagicLinkInput {
+                    email: EmailAddress("owner@pizzaroma.fr".into()),
+                    locale: None,
+                },
+                &ServiceCallMeta::new(uuid::Uuid::nil()),
+            )
+            .await
+            .expect_err("the daily cap is already spent (limit 0)");
+        assert!(
+            matches!(&err, DomainError::Rejected { code, .. } if code == "VerificationSendLimitReached"),
+            "expected VerificationSendLimitReached, got {err:?}"
+        );
+    }
+
+    /// The other declared THROWS, the SAME shape: a platform-wide daily ceiling of 0 refuses
+    /// EVERY send, including a never-before-seen address, before any network call.
+    #[tokio::test]
+    async fn send_email_magic_link_refuses_with_verification_send_capacity_exhausted_once_the_global_ceiling_is_spent() {
+        let svc = SupabaseIdentityService::from_parts(SupabaseEnv {
+            url: Some("https://unreachable.invalid".into()),
+            publishable_key: Some("anon-key".into()),
+            secret_key: None,
+        })
+        .expect("constructed")
+        .with_email_guard(std::sync::Arc::new(crate::email_authorization::EmailSendAuthorizer::new(
+            application::email_guard::EmailSendPolicy::from_config(None, None, Some(0), None),
+            Box::new(application::sms_guard::InMemorySmsQuotaStore::default()),
+        )));
+        let err = svc
+            .send_email_magic_link(
+                IdentitySendEmailMagicLinkInput {
+                    email: EmailAddress("never-seen@pizzaroma.fr".into()),
+                    locale: None,
+                },
+                &ServiceCallMeta::new(uuid::Uuid::nil()),
+            )
+            .await
+            .expect_err("the global ceiling is already spent (limit 0)");
+        assert!(
+            matches!(&err, DomainError::Rejected { code, .. } if code == "VerificationSendCapacityExhausted"),
+            "expected VerificationSendCapacityExhausted, got {err:?}"
+        );
     }
 
     /// The shallow-merge rule of services.yaml `identity.stamp_customer_claim`, pinned on the

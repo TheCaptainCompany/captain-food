@@ -73,6 +73,14 @@ impl EmailSendRefusal {
     }
 }
 
+/// The DEV-ONLY fallback HMAC key (round 2 R2-V1, legal Art. 5(1)(e) storage limitation): storing
+/// the RAW email address as the `sms_send_quota` row's key would make that shared counter table a
+/// second, unbounded store of personal data with no retention story of its own. Reachable ONLY
+/// when `EMAIL_QUOTA_KEY_HMAC_SECRET` (`specs/common/configuration.yaml`) is unset — staging and
+/// production are `secret: true`/`from_secret`, so this literal never signs a real address there;
+/// it exists so a database-less dev/test run still exercises the SAME hashed-key code path.
+const DEV_ONLY_HMAC_KEY: &[u8] = b"captain-food-dev-only-email-quota-hmac-key-DO-NOT-USE-IN-PRODUCTION";
+
 /// The pure send policy: per-address caps + the global ceiling. No allowlist -- unlike SMS, email
 /// carries no destination-country cost variance to contain.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +88,9 @@ pub struct EmailSendPolicy {
     pub max_per_address_per_hour: i32,
     pub max_per_address_per_day: i32,
     pub max_per_day_global: i32,
+    /// HMAC-SHA256 key hashing the address before it becomes a quota-store row key (never the
+    /// raw address itself — see [`DEV_ONLY_HMAC_KEY`]).
+    hmac_key: Vec<u8>,
 }
 
 impl Default for EmailSendPolicy {
@@ -88,17 +99,22 @@ impl Default for EmailSendPolicy {
             max_per_address_per_hour: DEFAULT_MAX_PER_ADDRESS_PER_HOUR,
             max_per_address_per_day: DEFAULT_MAX_PER_ADDRESS_PER_DAY,
             max_per_day_global: DEFAULT_MAX_SENDS_PER_DAY_GLOBAL,
+            hmac_key: DEV_ONLY_HMAC_KEY.to_vec(),
         }
     }
 }
 
 impl EmailSendPolicy {
-    /// Build from the resolved configuration ints. `None` falls back to the default; a
-    /// non-positive cap is taken verbatim (it IS the per-address kill switch).
+    /// Build from the resolved configuration ints + the resolved
+    /// `EMAIL_QUOTA_KEY_HMAC_SECRET`. `None` for any of the four falls back to the default (a
+    /// non-positive cap is taken verbatim -- it IS the per-address kill switch; an unset/empty
+    /// `hmac_secret` falls back to [`DEV_ONLY_HMAC_KEY`], which staging/production never reach
+    /// because the key is `required` there).
     pub fn from_config(
         max_per_address_per_hour: Option<i32>,
         max_per_address_per_day: Option<i32>,
         max_per_day_global: Option<i32>,
+        hmac_secret: Option<&str>,
     ) -> Self {
         let default = Self::default();
         Self {
@@ -106,6 +122,11 @@ impl EmailSendPolicy {
                 .unwrap_or(default.max_per_address_per_hour),
             max_per_address_per_day: max_per_address_per_day.unwrap_or(default.max_per_address_per_day),
             max_per_day_global: max_per_day_global.unwrap_or(default.max_per_day_global),
+            hmac_key: hmac_secret
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.as_bytes().to_vec())
+                .unwrap_or(default.hmac_key),
         }
     }
 
@@ -113,18 +134,32 @@ impl EmailSendPolicy {
     /// `phone:*` / `global:day` keys when the two share one counter store.
     const GLOBAL_DAY_KEY: &'static str = "email:global:day";
 
+    /// HMAC-SHA256(email) as lowercase hex — the ONLY form of the address that reaches the shared
+    /// `sms_send_quota` table (legal, Art. 5(1)(e)): deterministic (the same address always hits
+    /// the same bucket) but not reversible without the key, and not equal to a plain unkeyed hash
+    /// (which a rainbow table over common local-parts/domains would defeat).
+    fn hashed_address(&self, email: &EmailAddress) -> String {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.hmac_key)
+            .expect("HMAC accepts a key of any length");
+        mac.update(email.0.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
     /// The bucket claims for one send to `email`, in enforcement order (the per-address buckets
     /// before the global ceiling, so a per-address refusal never burns the global budget).
     fn claims(&self, email: &EmailAddress) -> Vec<QuotaClaim> {
+        let hashed = self.hashed_address(email);
         vec![
             QuotaClaim {
-                key: format!("email:{}:hour", email.0),
+                key: format!("email:{hashed}:hour"),
                 window_seconds: HOUR_SECONDS,
                 limit: self.max_per_address_per_hour,
                 backoff_seconds: vec![],
             },
             QuotaClaim {
-                key: format!("email:{}:day", email.0),
+                key: format!("email:{hashed}:day"),
                 window_seconds: DAY_SECONDS,
                 limit: self.max_per_address_per_day,
                 backoff_seconds: vec![],
@@ -178,6 +213,31 @@ mod tests {
         let policy = EmailSendPolicy::default();
         let email = EmailAddress("owner@pizzaroma.fr".into());
         policy.authorize(&store, &email, 0).await.expect("first send authorised");
+    }
+
+    /// Round 2 R2-V1 (legal, Art. 5(1)(e)): the RAW address must never appear in the persisted
+    /// quota key -- a plain SHA-256 (no key) would still leak it to anyone willing to hash every
+    /// plausible address (a dictionary/rainbow-table attack a KEYED hash defeats).
+    #[test]
+    fn the_quota_key_never_contains_the_raw_address_and_is_stable_and_keyed() {
+        let policy = EmailSendPolicy::default();
+        let email = EmailAddress("owner@pizzaroma.fr".into());
+        let hashed = policy.hashed_address(&email);
+        assert!(!hashed.contains("owner"), "the raw local-part leaked into the quota key: {hashed}");
+        assert!(!hashed.contains("pizzaroma"), "the raw domain leaked into the quota key: {hashed}");
+        assert_eq!(hashed, policy.hashed_address(&email), "the SAME address must hash to the SAME bucket");
+
+        let other = EmailAddress("stranger@example.com".into());
+        assert_ne!(hashed, policy.hashed_address(&other), "distinct addresses must hash apart");
+
+        // KEYED: two policies differing only in `hmac_secret` must hash the SAME address
+        // DIFFERENTLY (an unkeyed hash, e.g. plain SHA-256, would agree regardless of secret).
+        let other_key = EmailSendPolicy::from_config(None, None, None, Some("a-different-secret"));
+        assert_ne!(
+            hashed,
+            other_key.hashed_address(&email),
+            "the hash must depend on the configured key, not just the address"
+        );
     }
 
     #[tokio::test]

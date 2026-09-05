@@ -888,7 +888,8 @@ fn main() {
         ("mutation.rs", emit_server_mutation(&model)),
         ("subscription.rs", emit_server_subscription(&model)),
         ("operation_scopes.rs", emit_server_operation_scopes(&model)),
-        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod types;\npub mod inputs;\npub mod acl;\npub mod query;\npub mod mutation;\npub mod subscription;\npub mod operation_scopes;\n".to_string()),
+        ("limits.rs", emit_server_graphql_limits(&model)),
+        ("mod.rs", "// GENERATED module index — do not edit by hand.\npub mod scalars;\npub mod types;\npub mod inputs;\npub mod acl;\npub mod query;\npub mod mutation;\npub mod subscription;\npub mod operation_scopes;\npub mod limits;\n".to_string()),
     ] {
         let path = srv_gen.join(name);
         if let Err(e) = fs::write(&path, content) {

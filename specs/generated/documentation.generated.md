@@ -12829,7 +12829,7 @@ _criticality: **high**_
 | `member.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason` |
 | `member.signin.link_request` | `INTERNAL` | ⬜ | — | `business.correlation_id`* |
 | `member.signin.confirm` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`* |
-| `claims.stamp` | `INTERNAL` | ⬜ | — | — |
+| `claims.stamp` | `CLIENT` | ⬜ | — | — |
 
 - **Metrics**: `member_identity_resolve_ms` _(histogram)_, `member_identity_not_found_total` _(counter)_, `member_identity_lookup_failed_total` _(counter)_, `member_identity_lookup_source_total` _(counter)_, `member_sign_in_link_requested_total` _(counter)_, `member_sign_in_confirmed_total` _(counter)_, `member_claim_stamp_failed_total` _(counter)_, `member_sign_in_refused_total` _(counter)_, `member_sign_in_door_enforcing` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
@@ -13195,7 +13195,24 @@ _Surface_ **`restaurant_backoffice.yaml`**
 
 **Gaps**
 - ⚠️ The link-expiry countdown and the 60s-delayed 'Renvoyer un lien' re-enable (PROP-20260831-180622 §8.1) need a client-side timer/countdown primitive this DSL does not declare anywhere yet -- the resend control below is always active (calling the SAME identify-only action again is harmless: the wall is server-side, ADR-20260905-101349 §9) rather than a fake-disabled control that renders and does nothing.
-- ⚠️ The magic-link RETURN route (`/sign-in/return`, binding `confirmMemberSignIn`) is not built in this change: extracting `?token=` from the opened link's URL and orchestrating confirm -> POST /auth/session -> navigate is client sequencing this DSL declares no query-string-to-variable grammar for, and needs a hand-written page (the `checkout.rs`/`HandWrittenScreen` shape) this change's budget did not reach. `confirmMemberSignIn` is on the API (Q7) and covered by the behaviour-test suite and the transport-level door test, but no screen calls it yet -- named here rather than silently unreachable.
+- ⚠️ Round 2 R2-L1 (legal, grade (b), counsel to confirm): Art. 13 information is owed AT COLLECTION -- the moment an address is typed and this form's mutation fires, whether or not it turns out to be a roster address (the no-enumeration-oracle design means Captain has already processed a non-member's address by the time any refusal could show it a notice). This screen carries no Art. 13 notice/link yet; MEMBER-SIGN-IN-DOOR-PRECONDITIONS names it as a precondition of the flip, not resolved here.
+
+<a id="screen-sign_in_return"></a>
+### 📱 `sign_in_return` · `/sign-in/return` · 🚫 not SDUI — Query-string token extraction + acceptance-first confirm/claim/route sequencing -- a hand-written page, the checkout/order_tracking precedent. · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Signing you in…                          │
+├──────────────────────────────────────────┤
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `confirm_member_sign_in` | [✏️ `confirmMemberSignIn`](#mutation-confirmmembersignin) |
+
+**Gaps**
+- ⚠️ `?next=` return-to-screen (ADR-20260905-101349 §13) is a NAMED DEPENDENCY of flipping RUN_MEMBER_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the orders queue), never back to whatever page the 401 originated from. MEMBER-SIGN-IN-DOOR-PRECONDITIONS names the follow-up.
 
 <a id="screen-not_linked"></a>
 ### 📱 `not_linked` · `/sign-in/not-linked` · 📱 SDUI · ⇄ /public/graphql
@@ -13219,6 +13236,7 @@ _Surface_ **`restaurant_backoffice.yaml`**
 - ⚠️ Printing the VERIFIED address (ux, ADR-20260905-101349 §10): `MemberNotLinked`'s context carries `email`, but no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, and no screen anywhere binds one (the rider door's inline_error pattern renders a MESSAGE, not a structured context field, and only inline to the ORIGINATING screen, never a navigated-to one). The body text below is the static two sentences of the §8.5 mockup; the address is not interpolated until a cross-screen error-context binding exists.
 - ⚠️ SUPPORT_CONTACT is a resolved DEPLOYMENT configuration value (`configuration.yaml`), never a translation string, and no screen anywhere in this DSL binds a config key as `{{ }}` resolver data -- inventing that grammar here is out of this card's scope, so the support address is named by the STATIC translation string below (which a deploy must keep in step with the configured key by hand until such a binding exists) rather than a dynamic `{{ config.* }}` placeholder.
 - ⚠️ The legal/privacy link (LCEN 6-III + Art. 13, legal): no legal/privacy page exists on this surface yet, so the target is this line rather than a dead route.
+- ⚠️ Round 2 R2-U3: `sign_out` (`kind: auth`) has no client wiring yet (#94) -- `crates/web/src/executor.rs` renders any `kind: auth` action as `ActionPlan::Disabled`, so this screen's ONLY control was previously dead (a control that renders and does nothing, #888). The exit is a plain `navigate → /sign-in` instead (`ActionKind::Client`, live today): it does not clear the parked/rotated session, only leaves the refusal screen -- the real sign-out wiring (#94) is the named follow-up, not built here.
 
 _Surface_ **`restaurant_frontoffice.yaml`**
 
@@ -13826,18 +13844,25 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-sign_in-email_placeholder"></a>`back.sign_in.email_placeholder` | — | you@your-restaurant.com | vous@votre-restaurant.fr |
 | <a id="translation-back-sign_in-request_link"></a>`back.sign_in.request_link` | — | Send my sign-in link | Recevoir mon lien de connexion |
 | <a id="translation-back-sign_in-sending"></a>`back.sign_in.sending` | — | Sending… | Envoi en cours… |
+| <a id="translation-back-sign_in-open_on_device"></a>`back.sign_in.open_on_device` | — | We'll send you a link. Open it on this device. | Nous vous envoyons un lien. Ouvrez-le sur cet appareil. |
 | <a id="translation-back-sign_in-no_password"></a>`back.sign_in.no_password` | — | No password: the link replaces it. | Aucun mot de passe : le lien remplace le mot de passe. |
 | <a id="translation-back-sign_in-support_lead"></a>`back.sign_in.support_lead` | — | A problem? support@captain.food | Un problème ? support@captain.food |
 | <a id="translation-back-sign_in-confirmation_title"></a>`back.sign_in.confirmation_title` | — | Check your email | Vérifiez vos e-mails |
-| <a id="translation-back-sign_in-confirmation_body"></a>`back.sign_in.confirmation_body` | — | If this address is registered, a link has just been sent to it. | Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse. |
+| <a id="translation-back-sign_in-confirmation_body"></a>`back.sign_in.confirmation_body` | — | If this address is registered, a link has just been sent to: | Si cette adresse est enregistrée, un lien vient d'être envoyé à : |
 | <a id="translation-back-sign_in-expiry_note"></a>`back.sign_in.expiry_note` | — | The link expires in 15 minutes. | Le lien expire dans 15 minutes. |
 | <a id="translation-back-sign_in-resend"></a>`back.sign_in.resend` | — | Resend a link | Renvoyer un lien |
+| <a id="translation-back-sign_in-close"></a>`back.sign_in.close` | — | Close | Fermer |
 | <a id="translation-back-not_linked-title"></a>`back.not_linked.title` | — | Your account is not yet linked to a restaurant. | Votre compte n'est pas encore relié à un restaurant. |
 | <a id="translation-back-not_linked-body"></a>`back.not_linked.body` | — | Your address is verified, but no restaurant access is associated with it yet. | Votre adresse est bien vérifiée, mais aucun accès restaurant n'y est associé pour l'instant. |
 | <a id="translation-back-not_linked-write_to_us"></a>`back.not_linked.write_to_us` | — | Write to us and we will make the link: | Écrivez-nous et nous ferons le lien : |
 | <a id="translation-back-not_linked-support_contact"></a>`back.not_linked.support_contact` | — | support@captain.food | support@captain.food |
 | <a id="translation-back-not_linked-precise"></a>`back.not_linked.precise` | — | Please specify the name and address of your establishment. | Précisez le nom et l'adresse de votre établissement. |
 | <a id="translation-back-not_linked-sign_out"></a>`back.not_linked.sign_out` | — | Sign out | Se déconnecter |
+| <a id="translation-back-sign_in_return-title"></a>`back.sign_in_return.title` | — | Signing you in… | Connexion en cours… |
+| <a id="translation-back-sign_in_return-working"></a>`back.sign_in_return.working` | — | Please wait, we're checking your link… | Merci de patienter, nous vérifions votre lien… |
+| <a id="translation-back-sign_in_return-no_token"></a>`back.sign_in_return.no_token` | — | This link is incomplete. Please request a new one. | Ce lien est incomplet. Merci d'en demander un nouveau. |
+| <a id="translation-back-sign_in_return-failed"></a>`back.sign_in_return.failed` | — | This link is invalid or has expired. Please request a new one. | Ce lien est invalide ou a expiré. Merci d'en demander un nouveau. |
+| <a id="translation-back-sign_in_return-back_to_sign_in"></a>`back.sign_in_return.back_to_sign_in` | — | Back to sign-in | Retour à la connexion |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |

@@ -31,18 +31,27 @@ pub enum HandWrittenScreen {
     Checkout,
     /// `restaurant_frontoffice.yaml#/screens/order_tracking` — `tracking.rs`.
     OrderTracking,
+    /// `restaurant_backoffice.yaml#/screens/sign_in_return` (#639 part C step 6-ii round 2,
+    /// R2-D/R2-R2) — `sign_in_return.rs`. Query-string token extraction + the acceptance-first
+    /// confirm/claim/route sequencing this DSL declares no binding grammar for, the SAME reasons
+    /// `Checkout`/`OrderTracking` are hand-written.
+    SignInReturn,
 }
 
 impl HandWrittenScreen {
     /// Every variant — the half of the correspondence the const proof walks forward.
-    pub const ALL: &'static [HandWrittenScreen] =
-        &[HandWrittenScreen::Checkout, HandWrittenScreen::OrderTracking];
+    pub const ALL: &'static [HandWrittenScreen] = &[
+        HandWrittenScreen::Checkout,
+        HandWrittenScreen::OrderTracking,
+        HandWrittenScreen::SignInReturn,
+    ];
 
     /// The generated `Screen::id` this variant owns.
     pub const fn screen_id(self) -> &'static str {
         match self {
             HandWrittenScreen::Checkout => "checkout",
             HandWrittenScreen::OrderTracking => "order_tracking",
+            HandWrittenScreen::SignInReturn => "sign_in_return",
         }
     }
 
@@ -180,6 +189,10 @@ impl HandWrittenScreen {
                 crate::tracking::TrackingState::from_context(order_id_of(matched), ctx),
                 locale,
             ),
+            // The token lives in the query string, which SSR never sees (`RouteMatch` strips it —
+            // "query strings are the caller's to strip"): the shell is a STATIC working message,
+            // and the real work happens in the browser (`mount`, below).
+            HandWrittenScreen::SignInReturn => crate::sign_in_return::render_sign_in_return_html(locale),
         }
     }
 }
@@ -241,6 +254,9 @@ pub mod mount {
                 HandWrittenScreen::Checkout => mount_checkout(tenant, locale, ctx),
                 HandWrittenScreen::OrderTracking => {
                     mount_tracking(matched, transport, origin, role, session, locale, ctx)
+                }
+                HandWrittenScreen::SignInReturn => {
+                    mount_sign_in_return(transport, origin, session, locale)
                 }
             }
         });
@@ -472,6 +488,65 @@ pub mod mount {
                 }
             }),
         );
+    }
+
+    /// The magic-link RETURN landing (#639 part C step 6-ii round 2, R2-D/R2-R2): read `?token=`
+    /// off the URL the mail client opened, dispatch `confirmMemberSignIn` (acceptance-first),
+    /// poll its outcome, claim the parked session cookie (the `MemberNotLinked` leg parks one
+    /// too, §8.5, so "Se déconnecter" has a real cookie there as well), then leave the page —
+    /// a full navigation, not an SPA route change, since this page never mounts the router.
+    fn mount_sign_in_return(transport: HttpTransport, origin: String, session: SessionId, locale: String) {
+        use crate::sign_in_return::{SignInReturnScreen, SignInReturnScreenProps, SignInReturnState};
+
+        let state = RwSignal::new(SignInReturnState::Working);
+        {
+            let locale = locale.clone();
+            leptos::mount::mount_to_body(move || {
+                let locale = locale.clone();
+                view! {
+                    {move || SignInReturnScreen(SignInReturnScreenProps { state: state.get(), locale: locale.clone() })}
+                }
+            });
+        }
+
+        let Some(token) = crate::sign_in_return::token_from_location() else {
+            state.set(SignInReturnState::NoToken);
+            return;
+        };
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let mut input = serde_json::Map::new();
+            input.insert("token".into(), serde_json::json!(token));
+            let outcome = async {
+                let handle = crate::actions::dispatch(
+                    &transport,
+                    crate::generated::data_layer::ActionKey::ConfirmMemberSignIn,
+                    input,
+                )
+                .await?;
+                handle.resolve(&transport).await
+            }
+            .await;
+            match outcome {
+                Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
+                    crate::auth::claim_session(&origin, message_id, session).await;
+                    crate::sign_in_return::navigate_away(&origin, "/");
+                }
+                Ok(crate::actions::ActionOutcome::Rejected { message_id, error_code, .. }) => {
+                    // Best-effort: nothing was parked for every OTHER rejection (M5's shape), so
+                    // this call is a genuine no-op there — never a reason to branch on it.
+                    crate::auth::claim_session(&origin, message_id, session).await;
+                    if error_code == "MemberNotLinked" {
+                        crate::sign_in_return::navigate_away(&origin, "/sign-in/not-linked");
+                    } else {
+                        state.set(SignInReturnState::Failed);
+                    }
+                }
+                Ok(crate::actions::ActionOutcome::Failed { .. }) | Err(_) => {
+                    state.set(SignInReturnState::Failed);
+                }
+            }
+        });
     }
 }
 

@@ -16833,8 +16833,9 @@ mod screen_roles_gate {
     }
 
     /// The real tree is GREEN under every §26 ERROR. The rider door was the first screen to
-    /// declare a transport role; #639 part C step 6-ii adds the member sign-in door's two PUBLIC
-    /// screens (`sign_in`, `not_linked`) on `restaurant_backoffice.yaml` alongside it.
+    /// declare a transport role; #639 part C step 6-ii adds the member sign-in door's THREE PUBLIC
+    /// screens (`sign_in`, `sign_in_return` — round 2's magic-link return landing —, `not_linked`)
+    /// on `restaurant_backoffice.yaml` alongside it.
     #[test]
     fn the_real_corpus_is_clean_and_the_rider_door_is_the_one_declared_transport_role() {
         let model = real_model();
@@ -16870,6 +16871,7 @@ mod screen_roles_gate {
             declared,
             vec![
                 "screens/restaurant_backoffice.yaml/sign_in".to_string(),
+                "screens/restaurant_backoffice.yaml/sign_in_return".to_string(),
                 "screens/restaurant_backoffice.yaml/not_linked".to_string(),
                 "screens/rider.yaml/sign_in".to_string(),
             ]
@@ -19666,6 +19668,55 @@ mod derive_null_gate {
                      to relax"
                 );
             }
+        }
+    }
+}
+
+/// #639 part C step 6-ii round 2 (R2-E, ADR-20260905-101349 §9): the per-role GraphQL
+/// depth/complexity ceilings — a direct, single-file drift check on TOP of `check-drift`'s
+/// whole-tree diff, because this file's own text names WHY a red here means (the card's own
+/// words): "the constants are stale" (a screen's `resolvers:` changed since the last `make
+/// generate`) or the checked-in headroom has been misconfigured to shrink below what a real
+/// document needs.
+mod graphql_role_limits_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// Recomputing `limits.rs` from the CURRENT spec/screens must reproduce the checked-in file
+    /// byte-for-byte — the direct expression of "reds when the constants are stale": add a
+    /// resolver, deepen a selection, or rename a role without running `make generate` and this
+    /// fails with a readable diff, not a silent drift `check-drift` would ALSO catch tree-wide but
+    /// less legibly.
+    #[test]
+    fn the_checked_in_limits_file_matches_a_fresh_recomputation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = real_model();
+        let fresh = emit_server_graphql_limits(&model);
+        let checked_in = std::fs::read_to_string(
+            root.join("crates/server/src/graphql/generated/limits.rs"),
+        )
+        .expect("crates/server/src/graphql/generated/limits.rs exists (run `make generate`)");
+        assert_eq!(
+            fresh, checked_in,
+            "crates/server/src/graphql/generated/limits.rs is STALE relative to the current specs \
+             -- run `make generate` and commit the regenerated file in the same change"
+        );
+    }
+
+    /// Every role's ceiling is at least the declared floor, and every role the closed
+    /// `scalars.yaml#/UserType` set names gets ONE (no role silently dropped from the table).
+    #[test]
+    fn every_role_gets_at_least_the_declared_floor() {
+        let model = real_model();
+        let limits = compute_graphql_role_limits(&model);
+        assert_eq!(limits.len(), GRAPHQL_ROLES.len(), "every declared role must get exactly one row");
+        for l in &limits {
+            assert!(l.max_depth >= GRAPHQL_LIMIT_FLOOR, "{}: depth below the floor", l.role);
+            assert!(l.max_complexity >= GRAPHQL_LIMIT_FLOOR, "{}: complexity below the floor", l.role);
         }
     }
 }

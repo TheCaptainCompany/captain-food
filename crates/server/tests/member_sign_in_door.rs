@@ -123,9 +123,6 @@ struct ScriptedIdentity {
     member_stamps: Mutex<Vec<String>>,
     /// Subjects the provider ALREADY holds with a customer claim: the member stamp refuses them.
     holds_customer_claim: Vec<String>,
-    /// M1's mutant hook: when `true`, `verify_email_token` returns a DIFFERENT auth_ref for the
-    /// roster address than for the stranger's — the mutant (1) must catch.
-    distinct_response_mutant: bool,
 }
 
 fn subject_of(email: &str) -> String {
@@ -174,14 +171,8 @@ impl IdentityService for ScriptedIdentity {
         // The token IS the email in this harness (`token_of`, below) -- deterministic, so the
         // enumeration test can drive a roster address and a stranger's through the SAME leg.
         let email = input.token.0.trim_start_matches("token-for-").to_string();
-        let auth_ref = if self.distinct_response_mutant && email == "stranger@example.com" {
-            // M1: a distinct subject for the stranger -- the enumeration oracle mutant.
-            "sub-DISTINCT-STRANGER".to_string()
-        } else {
-            subject_of(&email)
-        };
         Ok(IdentityVerifyEmailTokenOutput {
-            auth_ref: AuthSubject(auth_ref),
+            auth_ref: AuthSubject(subject_of(&email)),
             email: EmailAddress(email),
             access_token: Some("pre-stamp.access".into()),
             refresh_token: Some("pre-stamp.refresh".into()),
@@ -442,29 +433,18 @@ async fn the_link_request_answers_identically_for_a_member_and_a_stranger_and_ne
     );
 }
 
-/// M1, planted directly on the SCRIPTED PORT rather than production code (the enumeration
-/// property is a request-leg guarantee the handler itself holds by never calling `verify`/bridge
-/// at all -- there is no branch in `request_member_sign_in_link` to plant a distinct-response
-/// mutant on, so this pins the harness's own honesty: if the identity double ever answered
-/// differently per address, the assertion above would catch it).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn m1_a_distinct_verify_response_per_address_is_caught_by_the_enumeration_assertion() {
-    let identity = ScriptedIdentity { distinct_response_mutant: true, ..Default::default() };
-    // Exercise the MUTANT directly (not through the request leg, which never calls verify): if
-    // verify_email_token ever answered a stranger differently, confirm's stamp/park behaviour
-    // would diverge observably -- proving the mutant is catchable, without requiring the handler
-    // itself to expose a hook to plant it on.
-    let a = identity.verify_email_token(
-        IdentityVerifyEmailTokenInput { token: domain::generated::scalars::EmailVerificationToken(token_of(MEMBER_EMAIL)) },
-        &ServiceCallMeta::new(uuid::Uuid::nil()),
-    ).await.unwrap();
-    let b = identity.verify_email_token(
-        IdentityVerifyEmailTokenInput { token: domain::generated::scalars::EmailVerificationToken(token_of(STRANGER_EMAIL)) },
-        &ServiceCallMeta::new(uuid::Uuid::nil()),
-    ).await.unwrap();
-    assert_ne!(a.auth_ref.0, b.auth_ref.0, "the mutant is live: a distinct auth_ref per address");
-    // REVERTED shape (mutant OFF) is what the door actually runs, proven by the test above.
-}
+// M1 ("a distinct response for an unknown address") is recorded here as STRUCTURALLY NOT
+// MUTATION-TESTABLE at the request leg (round 2, R2-B1): `request_member_sign_in_link` (see
+// `crates/application/src/commands.rs`) has no branch that reads whether the address is on the
+// roster — it calls `send_email_magic_link` unconditionally and returns the SAME acceptance
+// shape regardless — so there is no per-address behaviour to plant a distinct-response mutant
+// ON. That absence of a branch IS the enumeration-oracle guarantee, not a gap in coverage: a
+// mutant that introduced such a branch would be caught by
+// `the_link_request_answers_identically_for_a_member_and_a_stranger_and_never_consults_the_bridge`
+// below, which is the real (and only) test of this property. A prior revision of this file
+// asserted on the test DOUBLE's own scripted "distinct response" flag rather than on anything
+// the handler could produce — a tautology (it could never fail unless the double's own dead
+// code path were exercised) — and has been deleted rather than kept as false assurance.
 
 // ─── (2) a known member: MEMBER role only, parked session, and the door opens ───────────────────
 

@@ -599,9 +599,13 @@
     "en": "Delivery satisfaction",
     "fr": "Satisfaction livraison"
   },
+  "back.sign_in.close": {
+    "en": "Close",
+    "fr": "Fermer"
+  },
   "back.sign_in.confirmation_body": {
-    "en": "If this address is registered, a link has just been sent to it.",
-    "fr": "Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse."
+    "en": "If this address is registered, a link has just been sent to:",
+    "fr": "Si cette adresse est enregistrée, un lien vient d'être envoyé à :"
   },
   "back.sign_in.confirmation_title": {
     "en": "Check your email",
@@ -627,6 +631,10 @@
     "en": "No password: the link replaces it.",
     "fr": "Aucun mot de passe : le lien remplace le mot de passe."
   },
+  "back.sign_in.open_on_device": {
+    "en": "We'll send you a link. Open it on this device.",
+    "fr": "Nous vous envoyons un lien. Ouvrez-le sur cet appareil."
+  },
   "back.sign_in.request_link": {
     "en": "Send my sign-in link",
     "fr": "Recevoir mon lien de connexion"
@@ -646,6 +654,26 @@
   "back.sign_in.title": {
     "en": "Sign in to your restaurant space",
     "fr": "Connectez-vous à votre espace restaurant"
+  },
+  "back.sign_in_return.back_to_sign_in": {
+    "en": "Back to sign-in",
+    "fr": "Retour à la connexion"
+  },
+  "back.sign_in_return.failed": {
+    "en": "This link is invalid or has expired. Please request a new one.",
+    "fr": "Ce lien est invalide ou a expiré. Merci d'en demander un nouveau."
+  },
+  "back.sign_in_return.no_token": {
+    "en": "This link is incomplete. Please request a new one.",
+    "fr": "Ce lien est incomplet. Merci d'en demander un nouveau."
+  },
+  "back.sign_in_return.title": {
+    "en": "Signing you in…",
+    "fr": "Connexion en cours…"
+  },
+  "back.sign_in_return.working": {
+    "en": "Please wait, we're checking your link…",
+    "fr": "Merci de patienter, nous vérifions votre lien…"
   },
   "back.storefront.consequences.redirect": {
     "en": "Your old address redirects here, so printed menus and QR codes keep working.",

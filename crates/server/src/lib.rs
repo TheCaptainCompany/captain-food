@@ -86,6 +86,17 @@ mod hosts;
 /// The role-as-path ACL seam (RequestRole/RoleGuard, ADR-0006), re-exported so integration tests can
 /// execute the schema under a specific role (the HTTP layer injects it from the URL path).
 pub use graphql::acl as graphql_acl;
+/// The per-role GraphQL depth/complexity ceilings (#639 part C step 6-ii round 2, R2-E),
+/// re-exported so the DB-gated behaviour tests can derive their boundary documents from the SAME
+/// emitted constants the runtime extension enforces — never a hand-spelled number
+/// (ADR-20260817-105845).
+pub use graphql::generated::limits as graphql_generated_limits;
+/// The extension type itself, re-exported for the SAME reason: `QueryLimits::effective_max_depth`/
+/// `effective_max_complexity` are the POST-HEADROOM values `parse_query` actually enforces, and a
+/// test deriving its boundary document from the raw generated constant alone would silently pass
+/// against the RAW number while the runtime enforces raw×headroom — this is the antecedent that
+/// avoids that drift.
+pub use graphql::query_limits::QueryLimits;
 pub use graphql::session as graphql_session;
 /// The request locale for human-readable GraphQL text (#639 2c-ii) -- injectable by a
 /// schema-level test exactly as the transport injects it.
@@ -425,6 +436,7 @@ pub(crate) fn email_send_guard(
         Some(config.email_max_sends_per_address_per_hour as i32),
         Some(config.email_max_sends_per_address_per_day as i32),
         Some(config.email_max_sends_per_day_global as i32),
+        config.email_quota_key_hmac_secret.as_deref(),
     );
     tracing::info!(
         binding = "email_send_guard",
@@ -1146,12 +1158,14 @@ pub async fn router() -> Router {
                         "RUN_MEMBER_ACCESS_GRANT",
                         config.run_member_access_grant,
                     );
-                    // #639 part C step 6-ii, the same fleet-parity shape.
-                    telemetry::meters::runtime::declare_flag(
-                        "RUN_MEMBER_SIGN_IN_DOOR",
-                        config.run_member_sign_in_door,
-                    );
-                    telemetry::meters::member_sign_in::door_enforcing(config.run_member_sign_in_door);
+                    // #639 part C step 6-ii: `RUN_MEMBER_SIGN_IN_DOOR`'s fleet-parity declaration
+                    // and its `door_enforcing` liveness gauge moved OUT of this `if let Some(pool)`
+                    // branch in round 2 (R2-F1) to the unconditional composition root beside
+                    // `RUN_RIDER_RESTRICTION_SOCKET_CLOSE`, below — a monolith booting with no
+                    // `DATABASE_URL` emitted no timeseries for this gate at all, indistinguishable
+                    // from "not running the new build" (the exact defect `RUN_RIDER_RESTRICTION_
+                    // SOCKET_CLOSE` already fixed once). `standalone.rs` already registered it
+                    // unconditionally, so the two composition roots had drifted.
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a
                     // sweep timer so idle actors leave memory on schedule (not only when
@@ -1588,6 +1602,16 @@ pub async fn router() -> Router {
         "RUN_RIDER_RESTRICTION_SOCKET_CLOSE",
         config.run_rider_restriction_socket_close,
     );
+    // #639 part C step 6-ii (round 2, R2-F1): the sign-in door's OWN fleet-parity declaration and
+    // its `door_enforcing` liveness gauge, moved HERE from inside the `if let Some(pool)` branch
+    // above — a monolith booting with no `DATABASE_URL` must still declare this flag and emit this
+    // gauge (the `RUN_RIDER_RESTRICTION_SOCKET_CLOSE` precedent just above; `standalone.rs`
+    // already did this unconditionally, so the two composition roots had drifted).
+    telemetry::meters::runtime::declare_flag(
+        "RUN_MEMBER_SIGN_IN_DOOR",
+        config.run_member_sign_in_door,
+    );
+    telemetry::meters::member_sign_in::door_enforcing(config.run_member_sign_in_door);
     // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
     // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
     // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside

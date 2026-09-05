@@ -4051,6 +4051,18 @@ pub async fn confirm_member_sign_in(
     let Some(session_id) = session_id else {
         return Err(reject("MemberSignInRequiresSession", json!({})));
     };
+    // Round 2 R2-R3 (reviewer): moved ABOVE `verify_email_token` -- a misconfiguration must never
+    // burn the single-use link. `support_contact` is needed only for the `MemberNotLinked`
+    // refusal's context below, but checking it before the token is spent means a deploy missing
+    // `SUPPORT_CONTACT` fails the SAME way on every attempt (never "your one link is gone AND the
+    // deploy is broken").
+    let Some(support_contact) = support_contact else {
+        return Err(DomainError::Repository(
+            "SUPPORT_CONTACT unset -- the member sign-in door cannot name a support route, so it \
+             refuses (configuration.yaml#/SUPPORT_CONTACT: required, no default)"
+                .into(),
+        ));
+    };
     let verified = auth
         .verify_email_token(
             IdentityVerifyEmailTokenInput { token: cmd.token.clone() },
@@ -4064,13 +4076,6 @@ pub async fn confirm_member_sign_in(
     // session is STILL parked below, unlike the rider door: an authenticated-but-unlinked person
     // still needs a real cookie for "Se déconnecter" to mean something.
     let member_id = members.member_id_by_auth_subject(auth_ref.clone()).await?;
-    let Some(support_contact) = support_contact else {
-        return Err(DomainError::Repository(
-            "SUPPORT_CONTACT unset -- the member sign-in door cannot name a support route, so it \
-             refuses (configuration.yaml#/SUPPORT_CONTACT: required, no default)"
-                .into(),
-        ));
-    };
 
     if member_id.is_some() {
         // STAMP → rotate → park (the #437 ordering): `{ role: MEMBER }` and nothing else. A

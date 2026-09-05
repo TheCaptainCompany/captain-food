@@ -214,7 +214,7 @@ pub mod captain_frontoffice {
     ];
 }
 
-/// `specs/screens/restaurant_backoffice.yaml` — 11 screen(s).
+/// `specs/screens/restaurant_backoffice.yaml` — 12 screen(s).
 pub mod restaurant_backoffice {
     use super::*;
 
@@ -540,10 +540,25 @@ pub mod restaurant_backoffice {
                 Node { kind: ComponentKind::EmailInput, props: &[("id", PropValue::Text("member_email")), ("label", PropValue::I18n("back.sign_in.email_label")), ("placeholder", PropValue::I18n("back.sign_in.email_placeholder")), ("autofocus", PropValue::Text("true"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("member_request_link")), ("label", PropValue::I18n("back.sign_in.request_link")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending")), ("action.on_success.type", PropValue::Text("open_bottom_sheet")), ("action.on_success.sheet_id", PropValue::Text("member_sign_in_confirmation_sheet"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("member_request_error")), ("for_action", PropValue::Text("request_member_sign_in_link"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.open_on_device"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.no_password"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.support_lead"))], children: &[], branches: &[] }
             ], branches: &[] }
         ],
+        },
+        Screen {
+            id: "sign_in_return",
+            route: "/sign-in/return",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: false,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[],
         },
         Screen {
             id: "not_linked",
@@ -563,7 +578,7 @@ pub mod restaurant_backoffice {
             Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.write_to_us"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.support_contact"))], children: &[], branches: &[] },
             Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.precise"))], children: &[], branches: &[] },
-            Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("not_linked_sign_out")), ("label", PropValue::I18n("back.not_linked.sign_out")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("sign_out")), ("action.redirect", PropValue::Text("/sign-in"))], children: &[], branches: &[] }
+            Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("not_linked_sign_out")), ("label", PropValue::I18n("back.not_linked.sign_out")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("navigate")), ("action.route", PropValue::Text("/sign-in"))], children: &[], branches: &[] }
         ],
         },
     ];
@@ -577,10 +592,12 @@ pub mod restaurant_backoffice {
                 Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("resolve_issue_error")), ("for_action", PropValue::Text("resolve_delivery_issue"))], children: &[], branches: &[] }
             ], branches: &[] } },
         Sheet { id: "member_sign_in_confirmation_sheet", node:
-            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("member_sign_in_confirmation_sheet")), ("title", PropValue::I18n("back.sign_in.confirmation_title")), ("drag_to_close", PropValue::Text("false"))], children: &[
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("member_sign_in_confirmation_sheet")), ("title", PropValue::I18n("back.sign_in.confirmation_title")), ("drag_to_close", PropValue::Text("true"))], children: &[
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.confirmation_body"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::Binding("member_email.value")), ("style.weight", PropValue::Text("bold"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.expiry_note"))], children: &[], branches: &[] },
-                Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_resend_link")), ("label", PropValue::I18n("back.sign_in.resend")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending"))], children: &[], branches: &[] }
+                Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_resend_link")), ("label", PropValue::I18n("back.sign_in.resend")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_sign_in_confirmation_close")), ("label", PropValue::I18n("back.sign_in.close")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }
             ], branches: &[] } },
     ];
 }

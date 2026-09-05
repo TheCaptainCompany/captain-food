@@ -2245,10 +2245,14 @@ member-sign-in:
       kind: INTERNAL
       required: false   # only confirmMemberSignIn opens it
       attributes:
-        - { key: "business.result", type: string, required: true }   # linked | not_linked | token_invalid | token_expired | lookup_failed
+        # Round 2 R2-O2: widened from five to the true nine values the mapper
+        # (`crates/infrastructure/src/member_sign_in_reasons.rs::member_sign_in_confirm_result`,
+        # plus the handler's own "linked" on success) actually yields -- all bounded, PII-free
+        # (typed error codes / a fixed success token, never an email/token/messageId).
+        - { key: "business.result", type: string, required: true }   # linked | not_linked | token_invalid | token_expired | lookup_failed | door_closed | requires_session | claim_conflict | rejected
         - { key: "business.correlation_id", type: string, required: true }
     - name: "claims.stamp"
-      kind: INTERNAL
+      kind: CLIENT   # round 2 R2-O1: matches customer-identification's own "claims.stamp" (:~1016)
       required: false   # shared with customer/rider claim stamps -- opened only on the MEMBER stamp attempt here
 
   metrics:

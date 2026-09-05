@@ -32,6 +32,7 @@ pub mod pending;
 pub mod renderer;
 pub mod router;
 pub mod session;
+pub mod sign_in_return;
 pub mod stripe;
 pub mod subscriptions;
 pub mod tracking;

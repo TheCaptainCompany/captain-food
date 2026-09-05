@@ -28,3 +28,16 @@ code_refs:
     used_by: crates/web/src/renderer.rs
   - key: common.error.retry
     used_by: crates/web/src/renderer.rs
+  # The magic-link RETURN landing (crates/web/src/sign_in_return.rs, #639 part C step 6-ii round 2,
+  # R2-D/R2-R2) is a non-SDUI, hand-written render path (query-string token extraction + the
+  # acceptance-first confirm/claim/route sequencing): its terminal states resolve these keys as
+  # `&'static str` literals, not through a screen tree. (back.sign_in_return.title IS screen-$ref'd
+  # from restaurant_backoffice.yaml, so the screen already marks it used.)
+  - key: back.sign_in_return.working
+    used_by: crates/web/src/sign_in_return.rs
+  - key: back.sign_in_return.no_token
+    used_by: crates/web/src/sign_in_return.rs
+  - key: back.sign_in_return.failed
+    used_by: crates/web/src/sign_in_return.rs
+  - key: back.sign_in_return.back_to_sign_in
+    used_by: crates/web/src/sign_in_return.rs
