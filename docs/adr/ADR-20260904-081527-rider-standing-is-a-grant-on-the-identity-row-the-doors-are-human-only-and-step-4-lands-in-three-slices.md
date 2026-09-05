@@ -228,6 +228,12 @@ below by the option that keeps the seam a pure, clock-free, replay-neutral fold.
    `tools/codegen-rs/src/emit/pm_orchestrators.rs`, `specs/*/processmanager.yaml` — so the
    executor's self-check can be run as written. The rule replaces per-arm re-carving; the fence
    otherwise stands.
+   **Carve-out recorded 2026-09-05 (PR #885, step 4-iii-A; nine lenses read the diff)**: the fence
+   also admits ONE `CommandDeps` field plus its threading (the arm's argument in `inbox.rs`, the
+   `env_flag` init in `mailbox/standalone.rs`) for a DECLARED configuration key a handler consumes
+   at the write door — the `enforce_service_hours_guard` shape. The handler is the honest write door
+   for a release gate: a resolver-seam gate is skipped by every non-GraphQL enqueue path and would
+   make the spec's `throws:` a lie. No routing, fencing or catch-all machinery is touched.
 9. **Observability, split by what emits it.** In **4-i**: the `rider-identity` contract's
    `rider.identity.resolve` span gains the attribute `business.standing` (`ACTIVE | RESTRICTED`,
    on `result=resolved` only — an attribute on the wide event, never a label on the histogram, so

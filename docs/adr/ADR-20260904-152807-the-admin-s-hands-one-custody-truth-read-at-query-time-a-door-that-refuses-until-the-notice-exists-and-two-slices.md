@@ -193,7 +193,11 @@ act).
    packet of ADR-081527 gains **Q6** (retention period and acceptable form of the `RIDER_REQUESTED`
    message), **Q7** (does the rider have a right to know WHICH human decided — Art. 15 GDPR
    recipients vs the admin's own data), **Q8** (is the admin's preview + confirm sufficient evidence
-   of a human decision, or is a logged acknowledgement needed); the return-leg pay exposure stays
+   of a human decision, or is a logged acknowledgement needed), **Q6-bis** (acceptable form,
+   location and retention for the filed `RIDER_REQUESTED` message where it may carry Art. 9 data —
+   health or family reasons routinely accompany "please restrict me") and **Q9** (must a REFUSED
+   restriction attempt — a closed-door REJECTED mailbox row holding `riderId` + `ground` — be
+   retained, and for how long, given it is not an Art. 11 decision); the return-leg pay exposure stays
    named, unpriced (rider pay has no record). Card defects banked: the worker path; the nav-depth gap
    listed as open; (b) presented as live; `PageOffset`'s scope.
 
