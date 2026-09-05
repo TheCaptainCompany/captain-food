@@ -3,7 +3,10 @@
 //! exactly (`crates/server/src/graphql/scope_slice.rs`), refusing an over-deep/over-complex
 //! document BEFORE any resolver runs, keyed on the request's [`crate::auth::ActingRole`] — the
 //! staff host is authenticated, not trusted, so the limit applies to EVERY role's schema, never
-//! `/public` only (the M4 mutant this file's own tests plant and revert).
+//! `/public` only — `crates/server/tests/graphql_role_limits.rs`'s
+//! `the_complexity_ceiling_genuinely_differs_by_role` is the standing regression test for this;
+//! the M4 "collapsed to PUBLIC" mutant was planted by hand against this file and reverted, seen
+//! red on that same test (round 2's hand-back quotes the message).
 //!
 //! **Why a custom extension and not `Schema::build(..).limit_depth()/.limit_complexity()`**: those
 //! are baked at SCHEMA-BUILD time on the ONE master `CaptainSchema` every role shares
