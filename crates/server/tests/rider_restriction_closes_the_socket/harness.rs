@@ -30,7 +30,10 @@ use infrastructure::{
     UnverifiedGbpOrderLinkProbe,
 };
 use server::graphql_acl::RequestRole;
-use server::{AuthContext, CustomerIdentitySource, IdentitySources, PgRiderIdentity, RiderIdentitySource};
+use server::{
+    AuthContext, CustomerIdentitySource, IdentitySources, LookupFailureReason, PgRiderIdentity,
+    ResolveRiderIdentity, RiderIdentityResolution, RiderIdentitySource,
+};
 use sqlx::PgPool;
 use tokio_tungstenite::tungstenite::client::ClientRequestBuilder;
 use tokio_tungstenite::tungstenite::protocol::frame::CloseFrame;
@@ -225,13 +228,12 @@ pub fn spawn_mailbox_workers(
     }
 }
 
-/// #639 part C step 5's own roster injection point: `Real` is the production Postgres repository;
-/// `AlwaysErr` is the harness's stand-in for scenario (6c) — a lookup that always fails, so the
-/// watcher's Lagged re-derivation exercises ADR-20260904-124600 §3's "a lookup error never
-/// terminates" without needing to actually break Postgres mid-test.
+/// #639 part C step 5's own roster injection point — the ADMIN `riders`/`rider` queries only.
+/// Round 2 R2-0 moved the watcher's Lagged re-derivation OFF this read model entirely (onto the
+/// identity seam, [`FirstResolveThenAlwaysErr`] below), so the only variant left is the real
+/// Postgres repository: nothing in this suite injects a roster failure any more.
 pub enum Roster {
     Real(PgPool),
-    AlwaysErr,
 }
 
 #[async_trait]
@@ -243,7 +245,6 @@ impl RiderRosterReadRepository for Roster {
                     .all()
                     .await
             }
-            Roster::AlwaysErr => Err(DomainError::Repository("harness: roster lookup always fails".into())),
         }
     }
     async fn by_id(&self, rider_id: RiderId) -> Result<Option<RiderRosterRow>, DomainError> {
@@ -253,7 +254,37 @@ impl RiderRosterReadRepository for Roster {
                     .by_id(rider_id)
                     .await
             }
-            Roster::AlwaysErr => Err(DomainError::Repository("harness: roster lookup always fails".into())),
+        }
+    }
+}
+
+/// #639 part C step 5 round 2 (R2-0): the watcher's Lagged/Closed re-derivation now reads through
+/// the SAME identity seam `connection_init` resolves through, so scenario (6c)'s "a lookup error
+/// never terminates" (ADR-20260904-124600 §3) must inject the failure THERE. The connection's own
+/// initial `connection_init` resolution (the FIRST call) must still succeed against real Postgres
+/// — a rider that never connects as a rider proves nothing about the re-derivation — and every
+/// call after that (the watcher's bounded retries) fails, never a static always-err resolver.
+pub struct FirstResolveThenAlwaysErr {
+    real: PgRiderIdentity,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl FirstResolveThenAlwaysErr {
+    pub fn new(pool: PgPool) -> Self {
+        Self {
+            real: PgRiderIdentity::new(Arc::new(PgRiderRepository::new(pool))),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl ResolveRiderIdentity for FirstResolveThenAlwaysErr {
+    async fn resolve(&self, auth_subject: &str) -> RiderIdentityResolution {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            self.real.resolve(auth_subject).await
+        } else {
+            RiderIdentityResolution::LookupFailed(LookupFailureReason::Repository)
         }
     }
 }
@@ -439,12 +470,20 @@ pub async fn flood_other_riders_restricted(bus: &infrastructure::EventBus, n: us
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 }
 
+/// The production rider-identity seam over a real Postgres pool — every scenario except (6c).
+pub fn real_rider_identity(pool: &PgPool) -> Arc<dyn ResolveRiderIdentity> {
+    Arc::new(PgRiderIdentity::new(Arc::new(PgRiderRepository::new(pool.clone()))))
+}
+
 // ─── the WS server + client (§9: the real transport this record's own test needs) ───────────────
 
+/// `rider_identity` is the SAME seam the watcher's Lagged/Closed re-derivation now reads through
+/// (R2-0): [`real_rider_identity`] for every scenario except (6c), which hands in
+/// [`FirstResolveThenAlwaysErr`] instead.
 pub async fn bind_ws_server(
     schema: server::graphql_schema::CaptainSchema,
-    pool: &PgPool,
     socket_close_gate: bool,
+    rider_identity: Arc<dyn ResolveRiderIdentity>,
 ) -> std::net::SocketAddr {
     let auth = AuthContext::from_config(jwks_endpoint().await, TEST_SUPABASE_URL.into());
     let app = server::graphql_routes_with_socket_close_gate(
@@ -452,9 +491,7 @@ pub async fn bind_ws_server(
         server::TenantLookup(None),
         IdentitySources {
             customer: CustomerIdentitySource::Claim,
-            rider: RiderIdentitySource::new(Arc::new(PgRiderIdentity::new(Arc::new(
-                PgRiderRepository::new(pool.clone()),
-            )))),
+            rider: RiderIdentitySource::new(rider_identity),
         },
         server::graphql_rider_socket::RunRiderRestrictionSocketClose(socket_close_gate),
     )

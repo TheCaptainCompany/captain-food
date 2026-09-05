@@ -39,11 +39,12 @@ pub struct EventBus {
     /// same envelope alongside the instant `publish` stamped it — t0 for
     /// `rider_restriction_socket_close_latency_ms`, never `occurred_at` (cross-host skew post-#358).
     /// A second broadcast rather than widening [`AppendedEvent`] or [`EventBus::subscribe`]'s
-    /// return type: both are constructed/consumed by generated resolvers and the mailbox delivery
-    /// path (`crates/infrastructure/src/mailbox/handler.rs`, fenced) as plain struct literals with
-    /// no `..Default::default()` spread, so adding a field there would not compile without editing
-    /// fenced/generated code. [`EventBus::subscribe_with_publish_instant`] is the ONLY new surface;
-    /// every existing publisher/subscriber is untouched.
+    /// return type: both are constructed as plain struct literals, with no `..Default::default()`
+    /// spread, at `crates/infrastructure/src/persistence/event_store.rs` (not fenced) and inside
+    /// the mailbox delivery path (`crates/infrastructure/src/mailbox/handler.rs`, FENCED) — only
+    /// the LATTER site is why a widened literal cannot compile without editing fenced code; nothing
+    /// here is constructed by a generated resolver. [`EventBus::subscribe_with_publish_instant`] is
+    /// the ONLY new surface; every existing publisher/subscriber is untouched.
     tx_timed: broadcast::Sender<(AppendedEvent, std::time::Instant)>,
 }
 
@@ -58,9 +59,15 @@ impl EventBus {
     /// Broadcast an appended-event envelope. Best effort: with no live subscribers (or a closed
     /// channel) this is a no-op — the append itself has already committed. The timed channel is
     /// stamped and sent FIRST, so its instant always precedes (never follows) any subscriber's
-    /// receipt on the plain channel.
+    /// receipt on the plain channel. Round 2 R2-7: the timed channel's clone + send is skipped
+    /// entirely when it has zero subscribers (the plain `OrderPlaced`-etc. case, every publish
+    /// today outside the rider-restriction watcher) — `broadcast::Sender::send` already reports
+    /// that as `Err` and is a no-op, but the clone before it was not, and every single-instance
+    /// publish pays it regardless.
     pub fn publish(&self, event: AppendedEvent) {
-        let _ = self.tx_timed.send((event.clone(), std::time::Instant::now()));
+        if self.tx_timed.receiver_count() > 0 {
+            let _ = self.tx_timed.send((event.clone(), std::time::Instant::now()));
+        }
         let _ = self.tx.send(event);
     }
 

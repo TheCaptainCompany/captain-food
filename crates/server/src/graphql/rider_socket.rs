@@ -16,7 +16,6 @@
 //! `GraphQLWebSocket::new_with_pair` call — it applies to every WS connection of every role, not
 //! only riders, so it does not belong to a rider-only module.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::ws::{CloseFrame, Message};
@@ -40,12 +39,21 @@ pub struct RunRiderRestrictionSocketClose(pub bool);
 #[derive(Clone)]
 pub struct RiderStandingCell(watch::Sender<RiderStanding>);
 
+/// The `Receiver` half `StandingGuard` reads (§2) — a newtype for the SAME TypeId-collision reason
+/// [`RiderStandingCell`] got one over the `Sender` half (round 2 R2-5): a bare
+/// `watch::Receiver<RiderStanding>` keyed into `async_graphql::Data` by TypeId alone would collide
+/// with any OTHER `watch::Receiver<RiderStanding>` a future feature ever injects on the same
+/// connection — the type, not a doc comment, is what keeps this one addressable.
+#[derive(Clone)]
+pub struct RiderStandingWatch(pub watch::Receiver<RiderStanding>);
+
 impl RiderStandingCell {
-    /// Seed the cell from the resolved `ReadScope::Rider.standing` and hand back the `Receiver`
-    /// half for the connection's `Data` — `StandingGuard` reads THAT, never the sender.
-    pub fn seeded(initial: RiderStanding) -> (Self, watch::Receiver<RiderStanding>) {
+    /// Seed the cell from the resolved `ReadScope::Rider.standing` and hand back the
+    /// [`RiderStandingWatch`] half for the connection's `Data` — `StandingGuard` reads THAT, never
+    /// the sender.
+    pub fn seeded(initial: RiderStanding) -> (Self, RiderStandingWatch) {
         let (tx, rx) = watch::channel(initial);
-        (Self(tx), rx)
+        (Self(tx), RiderStandingWatch(rx))
     }
 
     /// The ONLY write this type permits.
@@ -88,19 +96,26 @@ const LAGGED_REDERIVE_RETRY_BACKOFF_MS: u64 = 50;
 /// One re-derivation attempt set: RESTRICTED closes, ACTIVE keeps watching, a lookup error (after
 /// bounded retry) counts `missed` and keeps the socket open — never terminates on an
 /// infrastructure failure (ADR-20260904-124600 §3, farley: a false close at peak is a delivery
-/// outage).
+/// outage). Round 2 R2-0: re-derives through the SAME identity seam `connection_init` resolved
+/// through ([`crate::auth::current_rider_standing`]), keyed on the connection's own auth SUBJECT —
+/// never `RiderRoster`, a separate projector checkpoint group whose own lag would fail this OPEN.
 async fn rederive_once_bounded(
-    rider_id: RiderId,
-    roster: &dyn application::queries::RiderRosterReadRepository,
+    rider_auth_subject: &str,
+    identity: &crate::auth::RiderIdentitySource,
 ) -> RiderStanding {
     use crate::auth::{current_rider_standing, RiderStandingLookup};
 
     for attempt in 0..LAGGED_REDERIVE_RETRY_ATTEMPTS {
-        match current_rider_standing(rider_id, roster).await {
+        match current_rider_standing(rider_auth_subject, identity).await {
             RiderStandingLookup::Standing(standing) => return standing,
-            // No `Rider` row (or none projected yet) is not a lookup failure — the rider was never
-            // granted anything, so there is nothing to restrict; treat as ACTIVE (keep watching).
-            RiderStandingLookup::NotFound => return RiderStanding::ACTIVE,
+            // No row for this subject through the SAME seam the grant came from (R2-0/R2-6): there
+            // is nothing to restrict, but the identity that backed this connection is GONE — count
+            // it distinctly from a lookup failure (never conflated: one is "nobody to ask", the
+            // other is "could not ask") and keep watching.
+            RiderStandingLookup::NotFound => {
+                telemetry::meters::rider_restriction::socket_close_missed("not_found");
+                return RiderStanding::ACTIVE;
+            }
             RiderStandingLookup::LookupFailed => {
                 if attempt + 1 < LAGGED_REDERIVE_RETRY_ATTEMPTS {
                     tokio::time::sleep(std::time::Duration::from_millis(
@@ -136,9 +151,10 @@ async fn push_close(close_tx: &mut mpsc::Sender<Message>) {
 pub async fn watch(
     mut fact_rx: broadcast::Receiver<(AppendedEvent, Instant)>,
     rider_id: RiderId,
+    rider_auth_subject: String,
     standing: RiderStandingCell,
     mut close_tx: mpsc::Sender<Message>,
-    roster: Arc<dyn application::queries::RiderRosterReadRepository>,
+    identity: crate::auth::RiderIdentitySource,
     connection_correlation_id: uuid::Uuid,
 ) {
     use broadcast::error::RecvError;
@@ -165,9 +181,6 @@ pub async fn watch(
                 // this is `==`, so `Rider-600D` can never match `Rider-600Dxyz` or vice versa.
                 if evt.stream_name == wanted_stream && evt.event_type == restricted_type {
                     standing.restrict();
-                    telemetry::meters::rider_restriction::socket_close_latency_ms(
-                        published_at.elapsed().as_secs_f64() * 1000.0,
-                    );
                     telemetry::meters::rider_restriction::socket_close("closed");
                     tracing::info!(
                         fact_correlation_id = %evt.correlation_id,
@@ -175,13 +188,19 @@ pub async fn watch(
                         "rider.restricted.socket_terminated"
                     );
                     push_close(&mut close_tx).await;
+                    // R2-10: the clock stops AFTER the sink push, not before — the contract names
+                    // "the time from the fact landing ... to the Close frame being pushed into the
+                    // transport sink" as the measured span, so the push itself must be inside it.
+                    telemetry::meters::rider_restriction::socket_close_latency_ms(
+                        published_at.elapsed().as_secs_f64() * 1000.0,
+                    );
                     return;
                 }
                 // Another rider's fact, or a different event type on this rider's stream (e.g.
                 // RiderReinstated): keep watching.
             }
             Err(RecvError::Lagged(_)) => {
-                if rederive_once_bounded(rider_id, roster.as_ref()).await == RiderStanding::RESTRICTED {
+                if rederive_once_bounded(&rider_auth_subject, &identity).await == RiderStanding::RESTRICTED {
                     standing.restrict();
                     telemetry::meters::rider_restriction::socket_close("closed");
                     tracing::info!(
@@ -198,7 +217,7 @@ pub async fn watch(
                 // The bus itself is gone: no future envelope can ever arrive, so this is the
                 // LAST chance to notice a missed restriction — one final bounded re-derivation,
                 // then the task ends either way.
-                if rederive_once_bounded(rider_id, roster.as_ref()).await == RiderStanding::RESTRICTED {
+                if rederive_once_bounded(&rider_auth_subject, &identity).await == RiderStanding::RESTRICTED {
                     standing.restrict();
                     telemetry::meters::rider_restriction::socket_close("closed");
                     tracing::info!(
@@ -242,13 +261,13 @@ mod tests {
     #[test]
     fn the_standing_cell_can_only_ever_be_restricted() {
         let (cell, rx) = RiderStandingCell::seeded(RiderStanding::ACTIVE);
-        assert_eq!(*rx.borrow(), RiderStanding::ACTIVE);
+        assert_eq!(*rx.0.borrow(), RiderStanding::ACTIVE);
         cell.restrict();
-        assert_eq!(*rx.borrow(), RiderStanding::RESTRICTED);
+        assert_eq!(*rx.0.borrow(), RiderStanding::RESTRICTED);
         // A second call (e.g. a re-derivation confirming what the fact already set) is a no-op,
         // never a panic — and there is no `activate`/`set` method to call instead: RESTRICTED is
         // the only value `RiderStandingCell` can ever produce beyond the seed.
         cell.restrict();
-        assert_eq!(*rx.borrow(), RiderStanding::RESTRICTED);
+        assert_eq!(*rx.0.borrow(), RiderStanding::RESTRICTED);
     }
 }

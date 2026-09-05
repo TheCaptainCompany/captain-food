@@ -30,6 +30,8 @@
 #[path = "rider_restriction_closes_the_socket/harness.rs"]
 mod harness;
 
+use std::sync::Arc;
+
 use harness::*;
 
 // ─── (1) an idle rider socket is closed when the restriction fact is appended ───────────────────
@@ -45,7 +47,7 @@ async fn an_idle_rider_socket_is_closed_when_the_restriction_fact_is_appended() 
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone(), bus.clone());
     let schema = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
-    let addr = bind_ws_server(schema.clone(), &pool, true).await;
+    let addr = bind_ws_server(schema.clone(), true, real_rider_identity(&pool)).await;
 
     let rider_id = uuid::Uuid::new_v4();
     let sub = "auth-socket-close-1";
@@ -75,7 +77,7 @@ async fn another_riders_restriction_does_not_close_this_socket_and_the_cell_stay
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone(), bus.clone());
     let schema = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
-    let addr = bind_ws_server(schema.clone(), &pool, true).await;
+    let addr = bind_ws_server(schema.clone(), true, real_rider_identity(&pool)).await;
 
     let watched_id = uuid::Uuid::new_v4();
     let watched_sub = "auth-other-watched-1";
@@ -139,7 +141,7 @@ async fn a_guarded_op_over_the_real_socket_is_never_admitted_once_the_fact_lands
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone(), bus.clone());
     let schema = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
-    let addr = bind_ws_server(schema.clone(), &pool, true).await;
+    let addr = bind_ws_server(schema.clone(), true, real_rider_identity(&pool)).await;
 
     let rider_id = uuid::Uuid::new_v4();
     let sub = "auth-cell-refuses-first-1";
@@ -184,7 +186,7 @@ async fn reconnecting_with_restricted_standing_admits_the_carve_set_and_refuses_
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone(), bus.clone());
     let schema = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
-    let addr = bind_ws_server(schema.clone(), &pool, true).await;
+    let addr = bind_ws_server(schema.clone(), true, real_rider_identity(&pool)).await;
 
     let rider_id = uuid::Uuid::new_v4();
     let sub = "auth-reconnect-1";
@@ -224,7 +226,7 @@ async fn gate_off_the_socket_stays_open_and_the_guard_reads_read_scope() {
     spawn_mailbox_workers(&pool, status_bus.clone(), bus.clone());
     let schema = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
     // The GATE, OFF — the one difference from scenario (1).
-    let addr = bind_ws_server(schema.clone(), &pool, false).await;
+    let addr = bind_ws_server(schema.clone(), false, real_rider_identity(&pool)).await;
 
     let rider_id = uuid::Uuid::new_v4();
     let sub = "auth-gate-off-1";
@@ -276,7 +278,7 @@ async fn lagged_re_derives_once_active_continues_restricted_closes_lookup_error_
     // (6a) ACTIVE: the rider is registered but never restricted -- a flood of OTHER riders' facts
     // must lag this receiver past the capacity without ever closing it.
     let schema_active = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
-    let addr_active = bind_ws_server(schema_active.clone(), &pool, true).await;
+    let addr_active = bind_ws_server(schema_active.clone(), true, real_rider_identity(&pool)).await;
     let active_rider = uuid::Uuid::new_v4();
     let active_sub = "auth-lagged-active-1";
     seed_rider(&pool, active_rider, active_sub).await;
@@ -292,7 +294,7 @@ async fn lagged_re_derives_once_active_continues_restricted_closes_lookup_error_
     // socket must still close even though the FACT itself was skipped. This is the mutant M3
     // catches: "Lagged treated as continue" would leave this socket open forever.
     let schema_restricted = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
-    let addr_restricted = bind_ws_server(schema_restricted.clone(), &pool, true).await;
+    let addr_restricted = bind_ws_server(schema_restricted.clone(), true, real_rider_identity(&pool)).await;
     let restricted_rider = uuid::Uuid::new_v4();
     let restricted_sub = "auth-lagged-restricted-1";
     seed_rider(&pool, restricted_rider, restricted_sub).await;
@@ -312,13 +314,21 @@ async fn lagged_re_derives_once_active_continues_restricted_closes_lookup_error_
     let frame = expect_close(&mut ws_restricted, std::time::Duration::from_secs(10)).await;
     assert_eq!(u16::from(frame.code), shared_types::RIDER_RESTRICTED_SOCKET_CLOSE_CODE);
 
-    // (6c) a lookup error on re-derivation never terminates (ADR-20260904-124600 §3) -- the
-    // harness's stand-in for the lookup returns `Err` unconditionally.
-    let schema_err = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::AlwaysErr);
-    let addr_err = bind_ws_server(schema_err.clone(), &pool, true).await;
+    // (6c) a lookup error on re-derivation never terminates (ADR-20260904-124600 §3) -- round 2
+    // R2-0 moved the re-derivation onto the IDENTITY seam, so the harness's stand-in
+    // (`FirstResolveThenAlwaysErr`) lets the connection's own `connection_init` resolve for real
+    // (it must actually become a rider connection) and fails every call after that -- exactly the
+    // watcher's bounded retries, never the initial connect.
+    let schema_err = schema_over(&pool, status_bus.clone(), bus.clone(), Roster::Real(pool.clone()));
     let err_rider = uuid::Uuid::new_v4();
     let err_sub = "auth-lagged-lookup-failed-1";
     seed_rider(&pool, err_rider, err_sub).await;
+    let addr_err = bind_ws_server(
+        schema_err.clone(),
+        true,
+        Arc::new(FirstResolveThenAlwaysErr::new(pool.clone())),
+    )
+    .await;
     let mut ws_err = connect_and_init(addr_err, err_sub).await;
     flood_other_riders_restricted(&bus, 8).await;
     assert!(

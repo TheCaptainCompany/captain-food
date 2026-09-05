@@ -870,6 +870,39 @@ pub mod rider_restriction {
         WATCH_LIVE_COUNT.fetch_add(delta, Ordering::Relaxed);
         let _ = watch_live_gauge();
     }
+
+    #[cfg(test)]
+    mod watch_live_tests {
+        use super::*;
+
+        /// Round 2 R2-3: proving the REAL OTel export reads 0 with no watcher alive needs a spy
+        /// meter provider installed in its OWN process — OTel's meter provider is a process-global
+        /// `OnceLock` (the `rider_restriction_socket_close_missed_total` hand-back note applies
+        /// here too), a guarantee this parallel in-crate test cannot give. This is the
+        /// REGISTRATION-side proof instead: `watch_live_delta(0)` — the exact call the composition
+        /// root makes before any watcher can spawn — never panics with nothing alive, is idempotent
+        /// to call again, and the underlying live count it feeds the gauge's callback genuinely
+        /// reads 0 until a watcher increments it and 0 again once the matching decrement runs
+        /// (`LiveGuard`'s `Drop` in `rider_socket.rs`).
+        #[test]
+        fn watch_live_delta_zero_registers_and_never_moves_the_count_with_no_watcher_alive() {
+            let before = WATCH_LIVE_COUNT.load(Ordering::Relaxed);
+            watch_live_delta(0);
+            assert_eq!(
+                WATCH_LIVE_COUNT.load(Ordering::Relaxed),
+                before,
+                "a zero delta must never move the live count -- only register the gauge"
+            );
+            watch_live_delta(1);
+            assert_eq!(WATCH_LIVE_COUNT.load(Ordering::Relaxed), before + 1);
+            watch_live_delta(-1);
+            assert_eq!(
+                WATCH_LIVE_COUNT.load(Ordering::Relaxed),
+                before,
+                "the matching decrement (the watcher's LiveGuard::drop) returns it to 0"
+            );
+        }
+    }
 }
 
 /// Technical metrics for the `customer-identification` contract (#437).

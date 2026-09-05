@@ -375,7 +375,6 @@ async fn graphql_get(
         } else {
             None
         };
-        let watcher_schema = schema.clone();
         let watcher_close_tx = close_tx.clone();
         // Set once, iff the watcher spawns — so it can be aborted with the connection (vernon: no
         // leaked receiver per dead socket) rather than outliving `.serve()`.
@@ -417,23 +416,29 @@ async fn graphql_get(
                 // #639 part C step 5 §2/§6: the connection-local standing cell + the watcher —
                 // RIDER + gate ON only. Equality on the connection's OWN rider id only (security,
                 // all lenses) is `rider_socket::watch`'s job, not this closure's.
+                //
+                // Round 2 R2-0: the watcher's Lagged/Closed re-derivation re-resolves through the
+                // SAME identity seam (`identity.rider`) this very connection just resolved
+                // through, keyed on the SAME auth subject — never `RiderRosterReadRepository`, a
+                // separate projector checkpoint group. `ReadScope::Rider` is only ever produced
+                // alongside `Identity::Rider` (`resolve_rider_scope`), so `rider_auth_subject()`
+                // is structurally `Some` here; the `if let` is the defensive, fail-SAFE reading of
+                // that invariant (skip spawning rather than panic) rather than an `.expect`.
                 if socket_close.0 {
                     if let application::queries::ReadScope::Rider { id, standing } = &scope {
-                        if let (Some(fact_rx), Some(roster)) = (
-                            fact_rx.take(),
-                            watcher_schema
-                                .data::<Arc<dyn application::queries::RiderRosterReadRepository>>()
-                                .cloned(),
-                        ) {
+                        if let (Some(fact_rx), Some(sub)) =
+                            (fact_rx.take(), principal.rider_auth_subject().map(str::to_owned))
+                        {
                             let (cell, standing_rx) =
                                 super::rider_socket::RiderStandingCell::seeded(*standing);
                             data.insert(standing_rx);
                             let handle = tokio::spawn(super::rider_socket::watch(
                                 fact_rx,
                                 *id,
+                                sub,
                                 cell,
                                 watcher_close_tx.clone(),
-                                roster,
+                                identity.rider.clone(),
                                 correlation.0,
                             ));
                             *watcher_handle_for_init.lock().unwrap_or_else(|e| e.into_inner()) =

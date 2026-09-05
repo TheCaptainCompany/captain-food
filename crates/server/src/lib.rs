@@ -1504,6 +1504,15 @@ pub async fn router() -> Router {
         "RUN_RIDER_RESTRICTION_SOCKET_CLOSE",
         config.run_rider_restriction_socket_close,
     );
+    // Round 2 R2-3 (ADR-20260905-065415 §7/§8, the `otp_send_guard_enforcing` precedent): register
+    // the inverted dead-man's switch HERE, at the composition root, before any watcher can ever
+    // spawn — without this call the gauge's `ObservableGauge` callback is registered only inside
+    // `rider_socket::watch`, so "gate ON, nobody connected yet" (or the watcher never spawning at
+    // all) reports NO timeseries instead of the declared 0, which is the exact defect class
+    // CLAUDE.md names: a monitor that can only fire once a signal arrives goes quiet exactly when
+    // it should scream. `watch_live_delta(0)` is a genuine no-op on the live count and idempotent
+    // to call again from the watcher itself.
+    telemetry::meters::rider_restriction::watch_live_delta(0);
     base.merge(graphql::routes::graphql_routes_with_socket_close_gate(
         schema,
         tenant_lookup.clone(),

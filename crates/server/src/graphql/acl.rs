@@ -160,10 +160,12 @@ impl Guard for StandingGuard {
         // one is present (RIDER, gate ON), reads FIRST — per-yield freshness with zero I/O,
         // push-fed by the socket watcher; `ReadScope` is the fallback (gate OFF, or a transport
         // with no cell at all, e.g. a plain HTTP request). ONE emitted place closes queries,
-        // mutations and subscriptions alike.
+        // mutations and subscriptions alike. Round 2 R2-5: keyed by the [`RiderStandingWatch`]
+        // newtype, never the bare `watch::Receiver<RiderStanding>` — the SAME TypeId-collision
+        // reason the sender half (`RiderStandingCell`) already had one.
         let standing = ctx
-            .data_opt::<tokio::sync::watch::Receiver<domain::generated::scalars::RiderStanding>>()
-            .map(|cell| *cell.borrow())
+            .data_opt::<super::rider_socket::RiderStandingWatch>()
+            .map(|cell| *cell.0.borrow())
             .unwrap_or(*scope_standing);
         if standing == domain::generated::scalars::RiderStanding::ACTIVE {
             return Ok(());
