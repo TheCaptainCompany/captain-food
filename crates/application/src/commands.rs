@@ -3095,8 +3095,8 @@ fn restaurant_membership_stream(id: &MembershipId) -> String {
 /// 2. The accepted-basis belt: only `CAPTAIN_ONBOARDING` is implemented today: the other three
 ///    declared `AccessBasis` values are refused `AccessBasisNotYetAccepted`.
 /// 3. Idempotency on `membershipId`: an EXISTING membership (granted or already revoked) makes a
-///    repeat call a no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- absent, the handler
-///    mints a fresh one.
+///    repeat call a no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- `membershipId` is
+///    REQUIRED and caller-minted, never minted by this handler.
 /// 4. The write-side reservation `(MEMBER, authSubject)` in 2a's `auth_subject_reservations`
 ///    table (`rules.yaml#/MemberAuthSubjectBoundOnce`), reserved BEFORE appending -- an orphan
 ///    reservation is re-driven by the same caller re-submitting with the same membershipId; an

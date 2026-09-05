@@ -450,9 +450,9 @@ GrantRestaurantAccess:
     aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId`
     directly; a future scope type widens the union rather than reshaping this command.
 
-    `membershipId` is REQUIRED and CALLER-MINTED (round-2 vernon+young finding, R2-3 -- the same
-    defect from two sides): the mailbox lane address declares `Some("membershipId")` and
-    `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is
+    `membershipId` is REQUIRED and CALLER-MINTED: the mailbox lane address declares
+    `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a
+    handler-side mint branch is
     DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the
     membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a
     sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than
