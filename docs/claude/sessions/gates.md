@@ -1109,3 +1109,13 @@ is itself the argument: **a list that grows has no business stating its own leng
   auto-closed at the #892 merge although part C had two steps left. Card constraint for multi-step issues: the PR
   body says `Refs #NN` and contains no `Closes`/`Fixes`/`Resolves` before `#NN` anywhere — the coordinator greps the
   body before the ready flip; the closing PR says `Closes` on purpose and only once.
+
+### 19d. A stash pop that CONFLICTS leaves markers that `git add -A` will happily commit (2026-09-05)
+
+**Cost**: conflict markers on `main` for about a minute in `docs/STATUS.md` and a PROP row, pushed with the
+`--bypass` the docs-only flow enjoys — no CI stands between a docs push and `main`. The sequence was
+`git stash && git fetch && git checkout --detach origin/main && git stash pop && ... && git add -A && git commit && git push`
+chained with `&&` — but `git stash pop` exits **0 on a conflict** when the index merge "succeeds with conflicts",
+so the chain continued and committed `<<<<<<< Updated upstream`. **Rule**: after any stash pop / merge / rebase in a
+docs worktree, gate the commit on `! git grep -qE '^(<<<<<<<|>>>>>>>)' -- docs specs` (the same negative-grep shape
+as §19c), and prefer re-applying record edits by script onto a fresh `origin/main` over stashing them across a fetch.
