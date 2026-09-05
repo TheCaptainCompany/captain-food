@@ -103,6 +103,35 @@ types:
       lastContactedAt: { type: string, format: date-time, nullable: true }
       repliedAt: { type: string, format: date-time, nullable: true }
 
+  # --- The roster and the invitation (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+  # amendment, PROP-20260831-180622 §6.4/§6.5) -----------------------------------------------------
+  RestaurantRosterEntry:
+    description: "One row of the restaurant's own team roster (`/team`, §8.2): a granted membership. No display name/email today (YAGNI, the `Member` precedent) -- a declared screen gap."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/RestaurantRoster' }]
+    properties:
+      membershipId: { $ref: 'scalars.yaml#/MembershipId' }   # revoke is keyed on it -- MUST be exposed (round-1 graphql finding)
+      memberId: { $ref: 'scalars.yaml#/MemberId' }
+      authority: { $ref: 'scalars.yaml#/MemberAuthority' }
+      since: { type: string, format: date-time }
+
+  RestaurantRosterConnection:
+    description: "The `restaurantRoster` page, WITH the viewer's own authority riding alongside it -- the ONLY expressible MANAGER condition for the `/team` screen's Invite/Revoke controls (ux/graphql): resolver DATA on the connection, never a second `roles:` list, never a per-row field."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/RestaurantRoster' }]
+    properties:
+      items: { $ref: '#/types/RestaurantRosterEntry', array: true }
+      viewerAuthority: { $ref: 'scalars.yaml#/MemberAuthority' }
+
+  RestaurantInvitationEntry:
+    description: "One row of the restaurant's own pending/accepted/revoked/expired invitation list (`/team`, §8.2)."
+    reads: [{ $ref: 'database/tables/projection_tables.yaml#/RestaurantInvitationList' }]
+    properties:
+      invitationId: { $ref: 'scalars.yaml#/RestaurantInvitationId' }
+      invitedEmail: { $ref: 'scalars.yaml#/EmailAddress' }
+      authority: { $ref: 'scalars.yaml#/MemberAuthority' }
+      status: { $ref: 'scalars.yaml#/RestaurantInvitationStatus' }
+      expiresAt: { type: string, format: date-time, nullable: true }
+      createdAt: { type: string, format: date-time }
+
 queries:
 
   favoriteRestaurants:
@@ -164,6 +193,32 @@ queries:
     returns: { $ref: '#/types/Prospect', array: true }
     roles: [ADMIN]
     slice: V1
+
+  # --- The roster and the invitation (#639 part C step 6-iv round 2, PROP-20260831-180622 §6.5):
+  # FLAT, no args beyond paging -- the restaurant comes from `ReadScope::Restaurant`, NEVER an
+  # argument (a caller cannot ask to see another restaurant's team). ---------------------------
+  restaurantRoster:
+    description: >
+      The caller's own restaurant team (`/team`, §8.2) -- MANAGER and OPERATOR both read it;
+      `viewerAuthority` on the connection is the ONLY expressible MANAGER condition, never a
+      second `roles:` list. `limit` clamps server-side (`PageLimit`); `offset` absent = 0.
+    args:
+      limit: { $ref: 'scalars.yaml#/PageLimit' }
+      offset: { $ref: 'scalars.yaml#/PageOffset' }
+    returns: { $ref: '#/types/RestaurantRosterConnection' }
+    roles: [RESTAURANT]
+    slice: V0
+
+  restaurantInvitations:
+    description: >
+      The caller's own restaurant's invitation list -- pending/accepted-pending-access/accepted/
+      revoked/expired (`/team`, §8.2). `limit` clamps server-side; `offset` absent = 0.
+    args:
+      limit: { $ref: 'scalars.yaml#/PageLimit' }
+      offset: { $ref: 'scalars.yaml#/PageOffset' }
+    returns: { $ref: '#/types/RestaurantInvitationEntry', array: true }
+    roles: [RESTAURANT]
+    slice: V0
 
 mutations:
 

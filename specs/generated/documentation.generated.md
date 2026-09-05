@@ -166,9 +166,11 @@ Runs a SINGLE location (HubRise location): handles the live order queue. Assigne
 |  | ReadInternalNotes | [🔎 `orderConversationInternalNotes`](#query-orderconversationinternalnotes) |
 |  | EscalateToAdmin | [✏️ `escalateToAdmin`](#mutation-escalatetoadmin) |
 |  | MuteParticipant | [✏️ `muteParticipant`](#mutation-muteparticipant) |
-|  | UnmuteParticipant | [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) |
-| 🧭 **ManageTeam** | InviteMember | [✏️ `inviteRestaurantMember`](#mutation-inviterestaurantmember) |
+| 🧭 **ManageTeam** | ViewRoster | [🔎 `restaurantRoster`](#query-restaurantroster) |
+|  | ViewInvitations | [🔎 `restaurantInvitations`](#query-restaurantinvitations) |
+|  | InviteMember | [✏️ `inviteRestaurantMember`](#mutation-inviterestaurantmember) |
 |  | RevokeInvitation | [✏️ `revokeRestaurantInvitation`](#mutation-revokerestaurantinvitation) |
+|  | UnmuteParticipant | [✏️ `unmuteParticipant`](#mutation-unmuteparticipant) |
 | 🧭 **HandleClaims** | WorkClaimsQueue | [🔎 `restaurantReclamations`](#query-restaurantreclamations) |
 |  | ResolveClaim | [✏️ `resolveReclamation`](#mutation-resolvereclamation) |
 |  | RejectClaim | [✏️ `rejectReclamation`](#mutation-rejectreclamation) |
@@ -259,7 +261,7 @@ A delivery partner (already integrated: a known catalog channel) acting as an EX
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(36)_
+### 🧰 API operations _(38)_
 
 <a id="query-restaurantdeliveries"></a>
 #### 🔎 Query: `restaurantDeliveries`
@@ -307,6 +309,26 @@ B2B prospection pipeline (admin): scored prospects, optionally filtered by minim
 - **Input**: 🧩 `ProspectionPipelineQueryInput` — `minScore?`: [🔤 `ProspectionScore`](#scalar-prospectionscore), `status?`: [🔤 `ProspectPipelineStatus`](#scalar-prospectpipelinestatus)
 - **Returns**: [🧩 `Prospect`](#type-prospect) (list) · **reads** [🗄️ `ProspectionPipeline`](#view-prospectionpipeline)
 - **Roles**: ADMIN · **slice** V1
+
+<a id="query-restaurantroster"></a>
+#### 🔎 Query: `restaurantRoster`
+
+The caller's own restaurant team (`/team`, §8.2) -- MANAGER and OPERATOR both read it; `viewerAuthority` on the connection is the ONLY expressible MANAGER condition, never a second `roles:` list. `limit` clamps server-side (`PageLimit`); `offset` absent = 0.
+
+
+- **Input**: 🧩 `RestaurantRosterQueryInput` — `limit?`: [🔤 `PageLimit`](#scalar-pagelimit), `offset?`: [🔤 `PageOffset`](#scalar-pageoffset)
+- **Returns**: [🧩 `RestaurantRosterConnection`](#type-restaurantrosterconnection) · **reads** [🗄️ `RestaurantRoster`](#view-restaurantroster)
+- **Roles**: RESTAURANT · **slice** V0
+
+<a id="query-restaurantinvitations"></a>
+#### 🔎 Query: `restaurantInvitations`
+
+The caller's own restaurant's invitation list -- pending/accepted-pending-access/accepted/ revoked/expired (`/team`, §8.2). `limit` clamps server-side; `offset` absent = 0.
+
+
+- **Input**: 🧩 `RestaurantInvitationsQueryInput` — `limit?`: [🔤 `PageLimit`](#scalar-pagelimit), `offset?`: [🔤 `PageOffset`](#scalar-pageoffset)
+- **Returns**: [🧩 `RestaurantInvitationEntry`](#type-restaurantinvitationentry) (list) · **reads** [🗄️ `RestaurantInvitationList`](#view-restaurantinvitationlist)
+- **Roles**: RESTAURANT · **slice** V0
 
 <a id="query-restaurantdeliverysatisfaction"></a>
 #### 🔎 Query: `restaurantDeliverySatisfaction`
@@ -534,7 +556,7 @@ The refund queue (RefundProcess): refunds opened for decision, with their lifecy
 - **Roles**: PUBLIC · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
-### 🧩 Output types _(2)_
+### 🧩 Output types _(5)_
 
 <a id="type-restaurant"></a>
 #### 🧩 Type: `Restaurant`
@@ -586,6 +608,48 @@ A B2B prospect (NON_PARTNER listing) with its computed score and outreach state 
 | <a id="type-prospect--contactscount"></a>`contactsCount` | `integer` | ✅ |
 | <a id="type-prospect--lastcontactedat"></a>`lastContactedAt` | `string` _date-time_ | ⬜ |
 | <a id="type-prospect--repliedat"></a>`repliedAt` | `string` _date-time_ | ⬜ |
+
+<a id="type-restaurantrosterentry"></a>
+#### 🧩 Type: `RestaurantRosterEntry`
+
+One row of the restaurant's own team roster (`/team`, §8.2): a granted membership. No display name/email today (YAGNI, the `Member` precedent) -- a declared screen gap.
+
+- **Read model**: [🗄️ `RestaurantRoster`](#view-restaurantroster)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-restaurantrosterentry--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |
+| <a id="type-restaurantrosterentry--memberid"></a>`memberId` | [🔤 `MemberId`](#scalar-memberid) | ✅ |
+| <a id="type-restaurantrosterentry--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |
+| <a id="type-restaurantrosterentry--since"></a>`since` | `string` _date-time_ | ✅ |
+
+<a id="type-restaurantrosterconnection"></a>
+#### 🧩 Type: `RestaurantRosterConnection`
+
+The `restaurantRoster` page, WITH the viewer's own authority riding alongside it -- the ONLY expressible MANAGER condition for the `/team` screen's Invite/Revoke controls (ux/graphql): resolver DATA on the connection, never a second `roles:` list, never a per-row field.
+
+- **Read model**: [🗄️ `RestaurantRoster`](#view-restaurantroster)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-restaurantrosterconnection--items"></a>`items` | [[🧩 `RestaurantRosterEntry`](#type-restaurantrosterentry)] | ✅ |
+| <a id="type-restaurantrosterconnection--viewerauthority"></a>`viewerAuthority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |
+
+<a id="type-restaurantinvitationentry"></a>
+#### 🧩 Type: `RestaurantInvitationEntry`
+
+One row of the restaurant's own pending/accepted/revoked/expired invitation list (`/team`, §8.2).
+
+- **Read model**: [🗄️ `RestaurantInvitationList`](#view-restaurantinvitationlist)
+
+| Field | Type | Required |
+| --- | --- | --- |
+| <a id="type-restaurantinvitationentry--invitationid"></a>`invitationId` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | ✅ |
+| <a id="type-restaurantinvitationentry--invitedemail"></a>`invitedEmail` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |
+| <a id="type-restaurantinvitationentry--authority"></a>`authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | ✅ |
+| <a id="type-restaurantinvitationentry--status"></a>`status` | [🔤 `RestaurantInvitationStatus`](#scalar-restaurantinvitationstatus) | ✅ |
+| <a id="type-restaurantinvitationentry--expiresat"></a>`expiresAt` | `string` _date-time_ | ⬜ |
+| <a id="type-restaurantinvitationentry--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |
 
 ### 🎭 Actors _(5)_
 
@@ -699,7 +763,7 @@ stateDiagram-v2
   EXPIRED --> [*]
 ```
 
-### 🗄️ Views (read models) _(4)_
+### 🗄️ Views (read models) _(6)_
 
 <a id="view-restaurant"></a>
 #### 🗄️ View: `Restaurant`
@@ -785,6 +849,43 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- |
 | `member_id` | [🔤 `MemberId`](#scalar-memberid) | [⚡ `RestaurantAccessGranted`.`memberId`](#event-restaurantaccessgranted--memberid) | PK | Keyed on the DOMAIN person id, never `membershipId` (the grant relationship) -- resolved by the projection worker from the PAYLOAD, not from the stream name: the aggregate that authors this event is `RestaurantMembership-{membershipId}`, a DIFFERENT identity from the row this table keys on (the same cross-stream shape as `ScopeMembership`'s `RestaurantListingClaimed` arm). |
 | `auth_subject` | [🔤 `AuthSubject`](#scalar-authsubject) | [⚡ `RestaurantAccessGranted`.`authSubject`](#event-restaurantaccessgranted--authsubject) | unique | The login credential this person resolves through (6-ii's seam). UNIQUE, no other index (deliberately no `index: true` beside `unique:` -- the two are separate emitter passes and would emit a redundant second btree, the `Rider.auth_ref` precedent) -- see the table rule. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-restaurantroster"></a>
+#### 🗄️ View: `RestaurantRoster`
+
+- **Source**: [🎭 `RestaurantMembership`](#actor-restaurantmembership) · 🛶 V0
+- **Note**: The MANAGER's/OPERATOR's own restaurant team list (`/team`, §8.2). ONE creating arm (`RestaurantAccessGranted` only, the `Member` precedent) -- `RestaurantAccessRevoked` touches NOTHING here YET (named gap, round 2 scope cut): a revoked colleague stays listed until the revoke-removal follow-up lands, tracked beside #902. No `display_name`/email column (YAGNI, the `Member` precedent exactly): nothing in this event stream carries one for a `CAPTAIN_ONBOARDING` grant, and inventing a cross-stream join to the invitation's `invitedEmail` for the `MEMBER_INVITATION` basis ONLY would make the same column mean two different things depending on how a row was born -- the `/team` screen names this a `gaps:` entry rather than paint a partial truth. 
+- **Rules**: Rebuild = checkpoint reset, never TRUNCATE (dba, PROP §6.4): upsert keyed on `membershipId` with the ONE creating arm, so a from-zero replay rewrites every row in place and no member is hidden mid-rebuild. TRUNCATE + reset would hide every member closed for the length of the drain. No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `RiderRoster`/`Member` precedent): a stray value fails the ONE row's projection rather than halting the whole group. Predicates over this table are GRANT tests only (PROP §6.4) -- a row's ABSENCE is never the correctness signal (indistinguishable from 'not yet replayed' vs 'revoked' vs 'never granted'); every assertion is a positive existence + value check.
+- **Fed by**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `membership_id` | [🔤 `MembershipId`](#scalar-membershipid) | [⚡ `RestaurantAccessGranted`.`membershipId`](#event-restaurantaccessgranted--membershipid) | PK | Keyed on the GRANT relationship, not the person -- graphql: revoke is keyed on membershipId, so it MUST be exposed (round-1 graphql finding). |
+| `scope_id` | [🔤 `RestaurantId`](#scalar-restaurantid) | [⚡ `RestaurantAccessGranted`.`scopeId`](#event-restaurantaccessgranted--scopeid) | — | The tenant scope this row is visible under -- `restaurantRoster`'s query never takes it as an argument (`ReadScope::Restaurant` supplies it, PROP §6.5), this column is what the WHERE clause filters on. |
+| `member_id` | [🔤 `MemberId`](#scalar-memberid) | [⚡ `RestaurantAccessGranted`.`memberId`](#event-restaurantaccessgranted--memberid) | — |  |
+| `authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | [⚡ `RestaurantAccessGranted`.`authority`](#event-restaurantaccessgranted--authority) | — | The ONLY expressible MANAGER condition for the `/team` screen's Invite/Revoke controls is resolver DATA on the viewer's OWN row (`viewerAuthority` on the connection), never a second `roles:` list (ux/graphql). |
+| `since` | `timestamptz` | [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | — | The occurred_at of the granting fact (an occurrence timestamp, no payload field) -- the `RiderRoster.reinstated_at` precedent, hand-written Compute hook. |
+| `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
+<a id="view-restaurantinvitationlist"></a>
+#### 🗄️ View: `RestaurantInvitationList`
+
+- **Source**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation) · 🛶 V0
+- **Note**: The MANAGER's/OPERATOR's own pending/accepted/revoked/expired invitation list (`/team`, §8.2). Status-shaped: EVERY declared `RestaurantInvitation` event updates the SAME row in place (`scalars.yaml#/RestaurantInvitationStatus` names the closed set, including the round-2 `ACCEPTED_PENDING_ACCESS` state and its named gap to plain `ACCEPTED`). 
+- **Rules**: Rebuild = TRUNCATE + reset TOGETHER (dba, PROP §6.4, the `RiderRoster` precedent, opposite of `RestaurantRoster`'s): status is grant-shaped (a later fact OVERWRITES an earlier one on the SAME row, never accumulates), so a checkpoint-only reset without truncating would leave a stale REVOKED/EXPIRED row's status untouched if the replay window somehow skipped rewriting it -- truncating first guarantees every row's status is freshly derived from a full chronological replay. No CHECK constraint (`DbFaultPolicy::Skip` semantics): a stray value fails the ONE row's projection rather than halting the whole group. Predicates over this table are GRANT tests only (PROP §6.4) -- no `NOT EXISTS` anywhere; every assertion is a positive existence + status-value check. Retention: `UNVERIFIED input` (register check, dba) -- no controlling record names a ceiling for how long a REVOKED/EXPIRED/ACCEPTED row stays listed; named here so a future record can supersede the current forever-retained default without silently reshaping the table.
+- **Fed by**: [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted), [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked), [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired)
+
+| Column | Type | Sourced from | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `invitation_id` | [🔤 `RestaurantInvitationId`](#scalar-restaurantinvitationid) | [⚡ `RestaurantInvitationSent`.`invitationId`](#event-restaurantinvitationsent--invitationid) | PK |  |
+| `scope_id` | [🔤 `RestaurantId`](#scalar-restaurantid) | [⚡ `RestaurantInvitationSent`.`restaurantId`](#event-restaurantinvitationsent--restaurantid) | — |  |
+| `invited_email` | [🔤 `EmailAddress`](#scalar-emailaddress) | [⚡ `RestaurantInvitationSent`.`invitedEmail`](#event-restaurantinvitationsent--invitedemail) | — |  |
+| `authority` | [🔤 `MemberAuthority`](#scalar-memberauthority) | [⚡ `RestaurantInvitationSent`.`authority`](#event-restaurantinvitationsent--authority) | — |  |
+| `status` | [🔤 `RestaurantInvitationStatus`](#scalar-restaurantinvitationstatus) | [⚡ `RestaurantInvitationSent`](#event-restaurantinvitationsent), [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted), [⚡ `RestaurantInvitationRevoked`](#event-restaurantinvitationrevoked), [⚡ `RestaurantInvitationExpired`](#event-restaurantinvitationexpired) | — | Mechanically derived (a literal map, the `RiderRoster.standing` precedent) -- every arm OVERWRITES in place, matching the aggregate's own terminal-once lifecycle. |
+| `expires_at` | `timestamptz` | ⚠️ _(none)_ | nullable | COMPLEX by declaration (empty `from:`, the generator's own occurred_at-vs-parsed-string classifier has no THIRD case for 'occurred_at plus a configuration offset', tools/codegen-rs/src/emit/projectors.rs::classify_column) -- a hand-written Compute hook computes SENT's occurred_at + RESTAURANT_INVITATION_TTL_SECONDS, the SAME configuration key the aggregate's own `reminders:` schedule reads. The resulting `view-column-no-source` WARNING is accepted (warning-baseline.json), named here so the next reader does not mistake it for an oversight. Nullable only because every OTHER event arm preserves the prior value (never actually null once born). |
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
@@ -1576,7 +1677,7 @@ A `MemberId` was granted access to a restaurant scope (ADR-20260905-101349 §2/�
 
 - **Emitted by**: [🎭 `RestaurantMembership`](#actor-restaurantmembership)
 - **Consumed by**: —
-- **Projected into**: [🗄️ `Member`](#view-member), [🗄️ `ScopeMembership`](#view-scopemembership)
+- **Projected into**: [🗄️ `Member`](#view-member), [🗄️ `RestaurantRoster`](#view-restaurantroster), [🗄️ `ScopeMembership`](#view-scopemembership)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1610,7 +1711,7 @@ A restaurant MANAGER invited a colleague by email (§8.2). `memberId` is CALLER-
 
 - **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `RestaurantInvitationList`](#view-restaurantinvitationlist)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1627,7 +1728,7 @@ A pending invitation was withdrawn before acceptance (§8.4).
 
 - **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `RestaurantInvitationList`](#view-restaurantinvitationlist)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1640,7 +1741,7 @@ The invited person accepted (§8.3) -- the first of the two-lane accept's two co
 
 - **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `RestaurantInvitationList`](#view-restaurantinvitationlist)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1654,7 +1755,7 @@ The invitation's TTL (`configuration.yaml#/keys/RESTAURANT_INVITATION_TTL_SECOND
 
 - **Emitted by**: [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
 - **Consumed by**: —
-- **Projected into**: —
+- **Projected into**: [🗄️ `RestaurantInvitationList`](#view-restaurantinvitationlist)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1763,7 +1864,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="entity-restaurant--createdby"></a>`createdBy` | [🔤 `UserId`](#scalar-userid) | ✅ |  |
 | <a id="entity-restaurant--createdat"></a>`createdAt` | `string` _date-time_ | ✅ |  |
 
-### 🔤 Scalars _(31)_
+### 🔤 Scalars _(32)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -1798,6 +1899,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-accessbasis"></a>🔤 `AccessBasis` | enum (CAPTAIN_ONBOARDING \| GOOGLE_BUSINESS_PROFILE \| OWNER_DECLARATION \| MEMBER_INVITATION) | WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. Step 6-i's `GrantRestaurantAccess` handler accepted only `CAPTAIN_ONBOARDING`; **6-iv adds `MEMBER_INVITATION`**, as the second command of the two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`, never a process manager, ADR-20260905-101349 §2) -- the handler DERIVES `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's own recorded facts rather than trusting the client's copies (`GrantRestaurantAccess.invitationId` is the sole proof). `GOOGLE_BUSINESS_PROFILE` and `OWNER_DECLARATION` stay declared-but-refused with the typed error `errors.yaml#/AccessBasisNotYetAccepted`.  |
 | <a id="scalar-accessrevocationground"></a>🔤 `AccessRevocationGround` | enum (LEFT_THE_RESTAURANT \| ACCESS_NO_LONGER_NEEDED) | WHY a `RestaurantAccessRevoked` fact was recorded -- the smallest closed set naming no work-performance ground (the ADR-20260904-014136 precedent, legal-graded: a stored decline/performance-keyed reason is the strongest requalification exhibit a labour tribunal could ask for, so none is offered). `LEFT_THE_RESTAURANT` (the member's own departure -- resignation, end of contract) and `ACCESS_NO_LONGER_NEEDED` (the restaurant's own operational call -- a role changed, a device was reassigned) are the two ordinary paths. `UNRECOGNISED` is the read-only catch-all (`#[serde(other)]`, unspellable at the command door -- the same shape `RiderRestrictionGround` carries): without it a future stored value fails the whole stream load on decode. No free text rides beside either value -- no `note` field exists on `RevokeRestaurantAccess`. Counsel review at the checkpoint (ADR-20260905-101349 §11); additive- only if it ever grows, same discipline as `RiderRestrictionGround` (counsel can only add).  |
 | <a id="scalar-restaurantinvitationid"></a>🔤 `RestaurantInvitationId` | string _uuid_ | Identity of one `RestaurantInvitation` (#639 part C step 6-iv) -- one invite of one email address to one restaurant scope. REQUIRED and CALLER-MINTED on `InviteRestaurantMember`, the `MembershipId`/`GrantRestaurantAccess` precedent: the mailbox lane address needs it present to route at all. Carried as `GrantRestaurantAccess.invitationId` on the accept leg's SECOND command as the sole proof that a grant on `basis: MEMBER_INVITATION` corresponds to a real, ACCEPTED invitation -- the handler derives `scopeId`/`memberId`/`authority`/`authSubject` from the invitation's OWN recorded facts rather than trusting the client's copies of them (6-iv STOP finding: see the hand-back for the full reasoning).  |
+| <a id="scalar-restaurantinvitationstatus"></a>🔤 `RestaurantInvitationStatus` | enum (PENDING \| ACCEPTED_PENDING_ACCESS \| ACCEPTED \| REVOKED \| EXPIRED) | Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (`ACCEPTED_PENDING_ACCESS` -- round 2, ux/business: the two-lane accept's FIRST leg landed but the SECOND, `GrantRestaurantAccessByInvitation`, has not yet been observed by this projector; its own status, never painted as a plain failure on `/invitation`), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). The final `ACCEPTED_PENDING_ACCESS` -> `ACCEPTED` transition (once the grant leg's own `RestaurantAccessGranted` fact is observed) is round 2's NAMED GAP, tracked by #902's sibling follow-up -- `RestaurantInvitationList` never regresses a row FROM this state, so the gap is honest under-reporting, never a wrong answer. Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).  |
 
 ### ⛔ Errors _(26)_
 
@@ -12712,7 +12814,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(66)_
+### 🔤 Scalars _(65)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -12781,7 +12883,6 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
 | <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-erasureparkreason"></a>🔤 `ErasureParkReason` | enum (OPEN_ORDER \| FUNDS_IN_FLIGHT) | Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.  |
-| <a id="scalar-restaurantinvitationstatus"></a>🔤 `RestaurantInvitationStatus` | enum (PENDING \| ACCEPTED \| REVOKED \| EXPIRED) | Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (ACCEPTED), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).  |
 
 ### ⛔ Errors _(20)_
 

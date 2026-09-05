@@ -47,6 +47,8 @@ pub use persistence::{
     PgRestaurantRepository, PgRiderRepository, PgMemberRepository, PgMemberAuthorityRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
     PgUberSplitPolicyRepository,
 };
+pub use persistence::restaurant_roster_store::PgRestaurantRosterRepository;
+pub use persistence::restaurant_invitation_list_store::PgRestaurantInvitationListRepository;
 pub use deletion::{DeletionEngine, DeletionEngineStatus};
 pub use process_manager::{ProcessManagerRunner, ProcessManagerStatus};
 pub use projection::{ProjectionStatus, ProjectionWorker};

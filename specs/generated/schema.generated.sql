@@ -435,6 +435,29 @@ CREATE TABLE Member (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE RestaurantRoster (
+  membership_id UUID PRIMARY KEY,
+  scope_id UUID NOT NULL,
+  member_id UUID NOT NULL,
+  authority TEXT NOT NULL,
+  since TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS restaurantroster_scope_id_member_id_idx ON RestaurantRoster (scope_id, member_id);
+
+CREATE TABLE RestaurantInvitationList (
+  invitation_id UUID PRIMARY KEY,
+  scope_id UUID NOT NULL,
+  invited_email TEXT NOT NULL,
+  authority TEXT NOT NULL,
+  status TEXT NOT NULL,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS restaurantinvitationlist_scope_id_status_created_at_idx ON RestaurantInvitationList (scope_id, status, created_at);
+
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,

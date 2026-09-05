@@ -899,6 +899,62 @@ pub(crate) fn wired_query_body(name: &str) -> Option<&'static str> {
         "uberSplitPolicy" => Some(
             "        let repo = ctx.data::<std::sync::Arc<dyn application::queries::UberSplitPolicyReadRepository>>()?;\n        let rows = repo.list().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;\n        Ok(rows.into_iter().map(UberSplitPolicy::from).collect())",
         ),
+        // #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment, PROP §6.5): flat, no
+        // args beyond paging -- the restaurant comes from `ReadScope::Restaurant`, never an
+        // argument. `viewerAuthority` rides on the CONNECTION (ux/graphql: the ONLY expressible
+        // MANAGER condition), resolved through the SAME `MemberAuthorityRepository` the
+        // `AuthorityGuard` uses -- never the roster row itself (a roster rebuild must never change
+        // what a DIFFERENT member's own authority reads as).
+        "restaurantRoster" => Some(
+"        let Some(application::queries::ReadScope::Restaurant(scope_id)) = ctx.data_opt::<application::queries::ReadScope>() else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let Some(subject) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id()) else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let authority_repo = ctx.data::<std::sync::Arc<dyn application::queries::MemberAuthorityRepository>>()?;
+        let Some(viewer_authority) = authority_repo
+            .authority_for_subject(domain::generated::scalars::AuthSubject(subject.to_string()), *scope_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let roster = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantRosterReadRepository>>()?;
+        let limit = input.as_ref().and_then(|i| i.limit).map(|v| v.0).filter(|l| *l > 0).unwrap_or(50).min(200);
+        let offset = input.and_then(|i| i.offset).map(|v| v.0).filter(|o| *o >= 0).unwrap_or(0);
+        let rows = roster.by_scope(*scope_id, limit, offset).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let items = rows
+            .into_iter()
+            .map(|r| RestaurantRosterEntry {
+                membership_id: r.membership_id.into(),
+                member_id: r.member_id.into(),
+                authority: r.authority.into(),
+                since: r.since,
+            })
+            .collect();
+        Ok(RestaurantRosterConnection { items, viewer_authority: viewer_authority.into() })",
+        ),
+        "restaurantInvitations" => Some(
+"        let Some(application::queries::ReadScope::Restaurant(scope_id)) = ctx.data_opt::<application::queries::ReadScope>() else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let invitations = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantInvitationListReadRepository>>()?;
+        let limit = input.as_ref().and_then(|i| i.limit).map(|v| v.0).filter(|l| *l > 0).unwrap_or(50).min(200);
+        let offset = input.and_then(|i| i.offset).map(|v| v.0).filter(|o| *o >= 0).unwrap_or(0);
+        let rows = invitations.by_scope(*scope_id, limit, offset).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RestaurantInvitationEntry {
+                invitation_id: r.invitation_id.into(),
+                invited_email: r.invited_email.into(),
+                authority: r.authority.into(),
+                status: r.status.into(),
+                expires_at: r.expires_at,
+                created_at: r.created_at,
+            })
+            .collect())",
+        ),
         _ => None,
     }
 }

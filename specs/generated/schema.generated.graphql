@@ -488,6 +488,7 @@ enum AccessRevocationGround {
 
 enum RestaurantInvitationStatus {
   PENDING
+  ACCEPTED_PENDING_ACCESS
   ACCEPTED
   REVOKED
   EXPIRED
@@ -994,6 +995,27 @@ type Prospect {
   lastContactedAt: DateTime
   repliedAt: DateTime
   restaurant: Restaurant!
+}
+
+type RestaurantRosterEntry {
+  membershipId: MembershipId!
+  memberId: MemberId!
+  authority: MemberAuthority!
+  since: DateTime!
+}
+
+type RestaurantRosterConnection {
+  items: [RestaurantRosterEntry!]!
+  viewerAuthority: MemberAuthority!
+}
+
+type RestaurantInvitationEntry {
+  invitationId: RestaurantInvitationId!
+  invitedEmail: EmailAddress!
+  authority: MemberAuthority!
+  status: RestaurantInvitationStatus!
+  expiresAt: DateTime
+  createdAt: DateTime!
 }
 
 type Cart {
@@ -1885,6 +1907,16 @@ input ProspectionPipelineQueryInput {
   status: ProspectPipelineStatus
 }
 
+input RestaurantRosterQueryInput {
+  limit: PageLimit
+  offset: PageOffset
+}
+
+input RestaurantInvitationsQueryInput {
+  limit: PageLimit
+  offset: PageOffset
+}
+
 input CartsQueryInput {
   customerId: CustomerId!
 }
@@ -2091,6 +2123,8 @@ type Query {
   restaurant(input: RestaurantQueryInput!): Restaurant @public @reads(views: ["Restaurant"])
   restaurantLocationsByAccount(input: RestaurantLocationsByAccountQueryInput!): [Restaurant!]! @auth(requires: [ADMIN, RESTAURANT_ACCOUNT]) @reads(views: ["Restaurant"])
   prospectionPipeline(input: ProspectionPipelineQueryInput): [Prospect!]! @auth(requires: [ADMIN]) @reads(views: ["ProspectionPipeline"])
+  restaurantRoster(input: RestaurantRosterQueryInput): RestaurantRosterConnection! @auth(requires: [RESTAURANT]) @reads(views: ["RestaurantRoster"])
+  restaurantInvitations(input: RestaurantInvitationsQueryInput): [RestaurantInvitationEntry!]! @auth(requires: [RESTAURANT]) @reads(views: ["RestaurantInvitationList"])
   carts(input: CartsQueryInput!): [Cart!]! @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
   cart(input: CartQueryInput!): Cart @auth(requires: [CUSTOMER, ADMIN]) @reads(views: ["Cart"])
   current: Cart @auth(requires: [PUBLIC, CUSTOMER]) @reads(views: ["Cart"])

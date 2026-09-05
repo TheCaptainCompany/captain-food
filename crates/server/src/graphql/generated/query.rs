@@ -490,6 +490,60 @@ impl QueryRoot {
             .filter_map(|p| by_id.get(&p.restaurant_id.0).cloned().map(|r| Prospect::from((p, Restaurant::at(r, now, horizon)))))
             .collect())
     }
+    /// The caller's own restaurant team (`/team`, §8.2) -- MANAGER and OPERATOR both read it; `viewerAuthority` on the connection is the ONLY expressible MANAGER condition, never a second `roles:` list. `limit` clamps server-side (`PageLimit`); `offset` absent = 0.
+    #[graphql(name = "restaurantRoster", guard = "RoleGuard::new(ALLOW_RESTAURANT).and(StandingGuard::new(&[], \"restaurantRoster\"))", visible = "visible_restaurant")]
+    async fn restaurant_roster(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantRosterQueryInput>) -> async_graphql::Result<RestaurantRosterConnection> {
+        let Some(application::queries::ReadScope::Restaurant(scope_id)) = ctx.data_opt::<application::queries::ReadScope>() else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let Some(subject) = ctx.data_opt::<crate::auth::Principal>().and_then(|p| p.user_id()) else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let authority_repo = ctx.data::<std::sync::Arc<dyn application::queries::MemberAuthorityRepository>>()?;
+        let Some(viewer_authority) = authority_repo
+            .authority_for_subject(domain::generated::scalars::AuthSubject(subject.to_string()), *scope_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+        else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let roster = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantRosterReadRepository>>()?;
+        let limit = input.as_ref().and_then(|i| i.limit).map(|v| v.0).filter(|l| *l > 0).unwrap_or(50).min(200);
+        let offset = input.and_then(|i| i.offset).map(|v| v.0).filter(|o| *o >= 0).unwrap_or(0);
+        let rows = roster.by_scope(*scope_id, limit, offset).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let items = rows
+            .into_iter()
+            .map(|r| RestaurantRosterEntry {
+                membership_id: r.membership_id.into(),
+                member_id: r.member_id.into(),
+                authority: r.authority.into(),
+                since: r.since,
+            })
+            .collect();
+        Ok(RestaurantRosterConnection { items, viewer_authority: viewer_authority.into() })
+    }
+    /// The caller's own restaurant's invitation list -- pending/accepted-pending-access/accepted/ revoked/expired (`/team`, §8.2). `limit` clamps server-side; `offset` absent = 0.
+    #[graphql(name = "restaurantInvitations", guard = "RoleGuard::new(ALLOW_RESTAURANT).and(StandingGuard::new(&[], \"restaurantInvitations\"))", visible = "visible_restaurant")]
+    async fn restaurant_invitations(&self, ctx: &async_graphql::Context<'_>, input: Option<RestaurantInvitationsQueryInput>) -> async_graphql::Result<Vec<RestaurantInvitationEntry>> {
+        let Some(application::queries::ReadScope::Restaurant(scope_id)) = ctx.data_opt::<application::queries::ReadScope>() else {
+            return Err(super::mutation::forbidden_error());
+        };
+        let invitations = ctx.data::<std::sync::Arc<dyn application::queries::RestaurantInvitationListReadRepository>>()?;
+        let limit = input.as_ref().and_then(|i| i.limit).map(|v| v.0).filter(|l| *l > 0).unwrap_or(50).min(200);
+        let offset = input.and_then(|i| i.offset).map(|v| v.0).filter(|o| *o >= 0).unwrap_or(0);
+        let rows = invitations.by_scope(*scope_id, limit, offset).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RestaurantInvitationEntry {
+                invitation_id: r.invitation_id.into(),
+                invited_email: r.invited_email.into(),
+                authority: r.authority.into(),
+                status: r.status.into(),
+                expires_at: r.expires_at,
+                created_at: r.created_at,
+            })
+            .collect())
+    }
     /// A customer's carts (one OPEN cart per restaurant). Ownership enforced server-side (#144): for a CUSTOMER caller the customerId argument is IGNORED and forced to the caller's own identity (resolved once per request from the verified principal); only ADMIN reads another customer's carts. An unresolvable caller identity yields an empty list, never a fall-through to the client-supplied filter.
     #[graphql(name = "carts", guard = "RoleGuard::new(ALLOW_CUSTOMER_ADMIN).and(StandingGuard::new(&[], \"carts\"))", visible = "visible_customer_admin")]
     async fn carts(&self, ctx: &async_graphql::Context<'_>, input: CartsQueryInput) -> async_graphql::Result<Vec<Cart>> {

@@ -219,6 +219,10 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
     );
     let member_authority: Arc<dyn application::queries::MemberAuthorityRepository> =
         Arc::new(infrastructure::PgMemberAuthorityRepository::new(pool.clone()));
+    let restaurant_roster: Arc<dyn application::queries::RestaurantRosterReadRepository> =
+        Arc::new(infrastructure::PgRestaurantRosterRepository::new(pool.clone()));
+    let restaurant_invitations: Arc<dyn application::queries::RestaurantInvitationListReadRepository> =
+        Arc::new(infrastructure::PgRestaurantInvitationListRepository::new(pool.clone()));
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
@@ -260,6 +264,8 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             rider_restrictions,
             rider_roster,
             member_authority,
+            restaurant_roster,
+            restaurant_invitations,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,

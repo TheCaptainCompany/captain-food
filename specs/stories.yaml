@@ -242,8 +242,10 @@ restaurant_manager:
         EscalateToAdmin: { $ref: 'api.yaml#/mutations/escalateToAdmin' }   # pull an admin in with a reason (#129)
         MuteParticipant: { $ref: 'api.yaml#/mutations/muteParticipant' }   # mute a disruptive role, reason required (#129)
     ManageTeam:
-      description: As a MANAGER, I invite a colleague by email and withdraw an unaccepted invitation -- self-service staff onboarding, ships dark behind RUN_RESTAURANT_INVITATION (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §8.2/§8.4). The OPERATOR authority never sees this activity's controls (§8.2, resolver-data condition, not a persona split).
+      description: As a MANAGER, I see my restaurant's roster and invitation list, invite a colleague by email, and withdraw an unaccepted invitation -- self-service staff onboarding, ships dark behind RUN_RESTAURANT_INVITATION (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §8.2/§8.4). The OPERATOR authority sees the roster but never this activity's Invite/Revoke controls (§8.2, resolver-data condition on viewerAuthority, not a persona split).
       steps:
+        ViewRoster: { $ref: 'api.yaml#/queries/restaurantRoster' }
+        ViewInvitations: { $ref: 'api.yaml#/queries/restaurantInvitations' }
         InviteMember: { $ref: 'api.yaml#/mutations/inviteRestaurantMember' }
         RevokeInvitation: { $ref: 'api.yaml#/mutations/revokeRestaurantInvitation' }
         UnmuteParticipant: { $ref: 'api.yaml#/mutations/unmuteParticipant' }

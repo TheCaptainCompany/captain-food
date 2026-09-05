@@ -176,11 +176,12 @@ pub enum AccessRevocationGround {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RestaurantInvitationId(pub uuid::Uuid);
 
-/// Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (ACCEPTED), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).
+/// Read-side status of a `RestaurantInvitation` (#639 part C step 6-iv, `RestaurantInvitationList` read model, PROP §6.4) -- derived by folding `RestaurantInvitationSent` (PENDING), `RestaurantInvitationAccepted` (`ACCEPTED_PENDING_ACCESS` -- round 2, ux/business: the two-lane accept's FIRST leg landed but the SECOND, `GrantRestaurantAccessByInvitation`, has not yet been observed by this projector; its own status, never painted as a plain failure on `/invitation`), `RestaurantInvitationRevoked` (REVOKED) and `RestaurantInvitationExpired` (EXPIRED). The final `ACCEPTED_PENDING_ACCESS` -> `ACCEPTED` transition (once the grant leg's own `RestaurantAccessGranted` fact is observed) is round 2's NAMED GAP, tracked by #902's sibling follow-up -- `RestaurantInvitationList` never regresses a row FROM this state, so the gap is honest under-reporting, never a wrong answer. Terminal once ACCEPTED/REVOKED/EXPIRED -- the write side never re-opens a closed invitation (`errors.yaml#/RestaurantInvitationNotAcceptable` covers every terminal state uniformly, by design: see the no-enumeration note there).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum RestaurantInvitationStatus {
     PENDING,
+    ACCEPTED_PENDING_ACCESS,
     ACCEPTED,
     REVOKED,
     EXPIRED,

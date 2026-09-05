@@ -1538,6 +1538,24 @@ pub struct ProspectionPipelineQueryInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]
+pub struct RestaurantRosterQueryInput {
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+    #[graphql(name = "offset")]
+    pub offset: Option<PageOffset>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationsQueryInput {
+    #[graphql(name = "limit")]
+    pub limit: Option<PageLimit>,
+    #[graphql(name = "offset")]
+    pub offset: Option<PageOffset>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
 pub struct CartsQueryInput {
     #[graphql(name = "customerId")]
     pub customer_id: CustomerId,

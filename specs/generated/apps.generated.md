@@ -111,7 +111,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `projector-comms` | order | scope `comms`: 0 View_* + 1 projection table(s) | comms | **all 8** | **fat +7** | `bin_runtime` | 12 | -- |
 | `projector-customer` | customer | scope `customer`: 1 View_* + 1 projection table(s) | customer | **all 8** | **fat +7** | `bin_runtime` | 12 | -- |
 | `projector-delivery` | delivery | scope `delivery`: 2 View_* + 3 projection table(s) | delivery | **all 8** | **fat +7** | `bin_runtime` | 16 | -- |
-| `projector-network` | restaurant | scope `network`: 0 View_* + 4 projection table(s) | network | **all 8** | **fat +7** | `bin_runtime` | 12 | -- |
+| `projector-network` | restaurant | scope `network`: 0 View_* + 6 projection table(s) | network | **all 8** | **fat +7** | `bin_runtime` | 12 | -- |
 | `projector-ordering` | order | scope `ordering`: 2 View_* + 3 projection table(s) | ordering | **all 8** | **fat +7** | `bin_runtime` | 12 | -- |
 | `projector-payments` | order | scope `payments`: 1 View_* + 1 projection table(s) | payments | **all 8** | **fat +7** | `bin_runtime` | 14 | -- |
 
@@ -142,7 +142,7 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 | `graphql-comms` | order | scope `comms`: 2 quer(ies), 6 mutation(s), 0 subscription(s) | comms | **all 8** | **fat +7** | `bin_runtime`, `server` | 12 | -- |
 | `graphql-customer` | customer | scope `customer`: 2 quer(ies), 17 mutation(s), 0 subscription(s) | customer | **all 8** | **fat +7** | `bin_runtime`, `server` | 12 | -- |
 | `graphql-delivery` | delivery | scope `delivery`: 7 quer(ies), 17 mutation(s), 0 subscription(s) | delivery | **all 8** | **fat +7** | `bin_runtime`, `server` | 16 | -- |
-| `graphql-network` | restaurant | scope `network`: 5 quer(ies), 28 mutation(s), 0 subscription(s) | network | **all 8** | **fat +7** | `bin_runtime`, `server` | 12 | -- |
+| `graphql-network` | restaurant | scope `network`: 7 quer(ies), 28 mutation(s), 0 subscription(s) | network | **all 8** | **fat +7** | `bin_runtime`, `server` | 12 | -- |
 | `graphql-ordering` | order | scope `ordering`: 9 quer(ies), 21 mutation(s), 1 subscription(s) | ordering | **all 8** | **fat +7** | `bin_runtime`, `server` | 12 | -- |
 | `graphql-payments` | order | scope `payments`: 6 quer(ies), 2 mutation(s), 1 subscription(s) | payments | **all 8** | **fat +7** | `bin_runtime`, `server` | 14 | -- |
 
@@ -150,13 +150,13 @@ Every workspace crate any app resolves, by the set of boundaries whose apps reac
 
 | app | boundary | hosts | declared | resolved | honest | via | secrets | missing |
 |---|---|---|---|---|---|---|---:|---|
-| `gateway-admin` | platform | `/admin/graphql`: routes 144 field(s) to 8 subgraph(s); 76 authorized for ADMIN | -- | -- | yes | -- | 11 | -- |
-| `gateway-customer` | customer | `/customer/graphql`: routes 144 field(s) to 8 subgraph(s); 46 authorized for CUSTOMER | -- | -- | yes | -- | 11 | -- |
-| `gateway-external` | platform | `/external/graphql`: routes 144 field(s) to 8 subgraph(s); 10 authorized for EXTERNAL | -- | -- | yes | -- | 11 | -- |
-| `gateway-public` | customer | `/public/graphql`: routes 144 field(s) to 8 subgraph(s); 13 authorized for PUBLIC | -- | -- | yes | -- | 11 | -- |
-| `gateway-restaurant` | restaurant | `/restaurant/graphql`: routes 144 field(s) to 8 subgraph(s); 36 authorized for RESTAURANT | -- | -- | yes | -- | 11 | -- |
-| `gateway-restaurant-account` | restaurant | `/restaurant-account/graphql`: routes 144 field(s) to 8 subgraph(s); 55 authorized for RESTAURANT_ACCOUNT | -- | -- | yes | -- | 11 | -- |
-| `gateway-rider` | delivery | `/rider/graphql`: routes 144 field(s) to 8 subgraph(s); 17 authorized for RIDER | -- | -- | yes | -- | 11 | -- |
+| `gateway-admin` | platform | `/admin/graphql`: routes 146 field(s) to 8 subgraph(s); 76 authorized for ADMIN | -- | -- | yes | -- | 11 | -- |
+| `gateway-customer` | customer | `/customer/graphql`: routes 146 field(s) to 8 subgraph(s); 46 authorized for CUSTOMER | -- | -- | yes | -- | 11 | -- |
+| `gateway-external` | platform | `/external/graphql`: routes 146 field(s) to 8 subgraph(s); 10 authorized for EXTERNAL | -- | -- | yes | -- | 11 | -- |
+| `gateway-public` | customer | `/public/graphql`: routes 146 field(s) to 8 subgraph(s); 13 authorized for PUBLIC | -- | -- | yes | -- | 11 | -- |
+| `gateway-restaurant` | restaurant | `/restaurant/graphql`: routes 146 field(s) to 8 subgraph(s); 38 authorized for RESTAURANT | -- | -- | yes | -- | 11 | -- |
+| `gateway-restaurant-account` | restaurant | `/restaurant-account/graphql`: routes 146 field(s) to 8 subgraph(s); 55 authorized for RESTAURANT_ACCOUNT | -- | -- | yes | -- | 11 | -- |
+| `gateway-rider` | delivery | `/rider/graphql`: routes 146 field(s) to 8 subgraph(s); 17 authorized for RIDER | -- | -- | yes | -- | 11 | -- |
 
 ### `fo` -- 2 app(s)
 

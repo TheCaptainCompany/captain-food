@@ -19,7 +19,8 @@ use application::queries::{
     DeliveryPartnerAvailabilityReadRepository, DeliverySatisfactionReadRepository,
     DeliveryReadRepository, MemberAuthorityRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
-    RefundReadRepository, RestaurantReadRepository, RiderRestrictionReadRepository,
+    RefundReadRepository, RestaurantInvitationListReadRepository, RestaurantReadRepository,
+    RestaurantRosterReadRepository, RiderRestrictionReadRepository,
     RiderRosterReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 
@@ -53,6 +54,10 @@ pub struct ReadDeps {
     /// #639 part C step 6-iv round 2 (ADR-20260905-101349 §2 amendment): `AuthorityGuard`'s
     /// source of truth (the write-side log, never the roster projection).
     pub member_authority: Arc<dyn MemberAuthorityRepository>,
+    /// The `restaurantRoster` source.
+    pub restaurant_roster: Arc<dyn RestaurantRosterReadRepository>,
+    /// The `restaurantInvitations` source.
+    pub restaurant_invitations: Arc<dyn RestaurantInvitationListReadRepository>,
     pub refunds: Arc<dyn RefundReadRepository>,
     pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
@@ -179,6 +184,8 @@ pub fn build_schema_for_scope(
             rider_restrictions,
             rider_roster,
             member_authority,
+            restaurant_roster,
+            restaurant_invitations,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -203,6 +210,8 @@ pub fn build_schema_for_scope(
         builder = builder.data(rider_restrictions);
         builder = builder.data(rider_roster);
         builder = builder.data(member_authority);
+        builder = builder.data(restaurant_roster);
+        builder = builder.data(restaurant_invitations);
         builder = builder.data(refunds);
         builder = builder.data(delivery_satisfaction);
         builder = builder.data(delivery_partner_availabilities);

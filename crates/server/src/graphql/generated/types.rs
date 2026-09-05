@@ -959,6 +959,49 @@ pub struct Prospect {
     pub restaurant: Restaurant,
 }
 
+/// One row of the restaurant's own team roster (`/team`, §8.2): a granted membership. No display name/email today (YAGNI, the `Member` precedent) -- a declared screen gap.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantRosterEntry {
+    #[graphql(name = "membershipId")]
+    pub membership_id: MembershipId,
+    #[graphql(name = "memberId")]
+    pub member_id: MemberId,
+    #[graphql(name = "authority")]
+    pub authority: MemberAuthority,
+    #[graphql(name = "since")]
+    pub since: chrono::DateTime<chrono::Utc>,
+}
+
+/// The `restaurantRoster` page, WITH the viewer's own authority riding alongside it -- the ONLY expressible MANAGER condition for the `/team` screen's Invite/Revoke controls (ux/graphql): resolver DATA on the connection, never a second `roles:` list, never a per-row field.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantRosterConnection {
+    #[graphql(name = "items")]
+    #[serde(default)]
+    pub items: Vec<RestaurantRosterEntry>,
+    #[graphql(name = "viewerAuthority")]
+    pub viewer_authority: MemberAuthority,
+}
+
+/// One row of the restaurant's own pending/accepted/revoked/expired invitation list (`/team`, §8.2).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RestaurantInvitationEntry {
+    #[graphql(name = "invitationId")]
+    pub invitation_id: RestaurantInvitationId,
+    #[graphql(name = "invitedEmail")]
+    pub invited_email: EmailAddress,
+    #[graphql(name = "authority")]
+    pub authority: MemberAuthority,
+    #[graphql(name = "status")]
+    pub status: RestaurantInvitationStatus,
+    #[graphql(name = "expiresAt")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[graphql(name = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// A customer's in-progress selection for a single restaurant. The stored read model is a money-free pure fold (identity, status, repricing inputs); every priced field below — lines, totalAmount, breakdown, uberComparison — is computed AT READ TIME from the live catalog by the same `price_cart` authority the write path uses, so the cart always shows the LIVE price and the ONE authoritative freeze stays at checkout (rules.yaml#/CheckoutSnapshotFrozenAtIntent; PROP-20260810-231500 Option B, ADR-20260810-112836).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]

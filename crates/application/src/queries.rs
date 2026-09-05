@@ -43,6 +43,12 @@ pub use crate::generated::rows::RiderRestrictionRow;
 /// The admin's rider roster (#639 part C step 4-iii-A, ADR-20260904-152807 §1) — the source of
 /// `riders`/`rider`.
 pub use crate::generated::rows::RiderRosterRow;
+/// The restaurant's own team roster (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+/// amendment) — the source of `restaurantRoster`.
+pub use crate::generated::rows::RestaurantRosterRow;
+/// The restaurant's own invitation list (#639 part C step 6-iv round 2) — the source of
+/// `restaurantInvitations`.
+pub use crate::generated::rows::RestaurantInvitationListRow;
 
 /// Optional filters for public restaurant discovery — mirrors the `restaurants` query args in api.yaml.
 /// V0 applies a subset (the rest are accepted and ignored until the read model backs them).
@@ -492,6 +498,28 @@ pub trait RiderRestrictionReadRepository: Send + Sync {
 pub trait RiderRosterReadRepository: Send + Sync {
     async fn all(&self) -> Result<Vec<RiderRosterRow>, DomainError>;
     async fn by_id(&self, rider_id: RiderId) -> Result<Option<RiderRosterRow>, DomainError>;
+}
+
+/// The `restaurantRoster` source (#639 part C step 6-iv round 2, PROP §6.5) — flat, scoped, paged.
+#[async_trait]
+pub trait RestaurantRosterReadRepository: Send + Sync {
+    async fn by_scope(
+        &self,
+        scope_id: RestaurantId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RestaurantRosterRow>, DomainError>;
+}
+
+/// The `restaurantInvitations` source (#639 part C step 6-iv round 2, PROP §6.5) — flat, scoped, paged.
+#[async_trait]
+pub trait RestaurantInvitationListReadRepository: Send + Sync {
+    async fn by_scope(
+        &self,
+        scope_id: RestaurantId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RestaurantInvitationListRow>, DomainError>;
 }
 
 /// Optional filters for the order list — mirrors the `orders` query args in api.yaml
