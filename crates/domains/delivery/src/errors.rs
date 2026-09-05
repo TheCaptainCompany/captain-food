@@ -138,11 +138,3 @@ pub const RIDER_RESTRICTION_GROUND_UNRECOGNISED: ErrorDef = ErrorDef {
     message_en: "That restriction ground is not recognised.",
     message_fr: "Ce motif de restriction n'est pas reconnu.",
 };
-
-/// The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
-/// Context: `authRef`.
-pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {
-    code: "AuthSubjectHoldsAnotherRole",
-    message_en: "This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet.",
-    message_fr: "Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur.",
-};

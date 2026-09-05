@@ -26,8 +26,8 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use serde_json::json;
 use server::{
     graphql_acl::RequestRole, CustomerIdentityResolution, CustomerIdentitySource, IdentitySources,
-    LookupFailureReason, ResolveCustomerIdentity, ResolveRiderIdentity, RiderIdentityResolution,
-    RiderIdentitySource,
+    LookupFailureReason, MemberIdentitySource, NoDatabaseMemberIdentity, ResolveCustomerIdentity,
+    ResolveRiderIdentity, RiderIdentityResolution, RiderIdentitySource,
 };
 
 /// TEST-ONLY ES256 keypair -- the same material as `crates/server/src/auth.rs`'s own suite,
@@ -104,7 +104,11 @@ impl ResolveRiderIdentity for NoRiderRows {
 
 /// The seams under test: the CUSTOMER one as scripted, the RIDER one inert.
 fn sources(customer: CustomerIdentitySource) -> IdentitySources {
-    IdentitySources { customer, rider: RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)) }
+    IdentitySources {
+        customer,
+        rider: RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)),
+        member: MemberIdentitySource::new(std::sync::Arc::new(NoDatabaseMemberIdentity)),
+    }
 }
 
 /// Every data point of `metric_name` in the LATEST export, as `(attribute value, count)` — the

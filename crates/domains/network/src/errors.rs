@@ -155,3 +155,25 @@ pub const RESTAURANT_MEMBERSHIP_ALREADY_REVOKED: ErrorDef = ErrorDef {
     message_en: "This restaurant membership was already revoked.",
     message_fr: "Cette adhésion restaurant a déjà été révoquée.",
 };
+
+/// The magic-link token verified (the email is genuinely proven), but no `Member` row exists for this auth subject in `Member.auth_subject` (the step-6-i bridge) -- the not-yet-linked refusal (PROP-20260831-180622 §8.5, the rider door's `RiderNotRegistered` precedent). NOTHING is stamped and NOTHING is created; the session is still parked so the refusal screen can offer "Se déconnecter" against a real cookie. `email` carries the VERIFIED address (the token's output, never client input) so the refusal screen can print it.
+/// Context: `email`, `supportContact`.
+pub const MEMBER_NOT_LINKED: ErrorDef = ErrorDef {
+    code: "MemberNotLinked",
+    message_en: "Your account is not yet linked to a restaurant. Write to {supportContact}.",
+    message_fr: "Votre compte n'est pas encore relié à un restaurant. Écrivez-nous à {supportContact}.",
+};
+
+/// The sign-in confirmation arrived with no `X-SESSION-ID` (the rider door's #852 B1 precedent). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId. So the door refuses BEFORE the token is spent (the link stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's (the SDUI client always sends the header, so a restaurateur never sees this).
+pub const MEMBER_SIGN_IN_REQUIRES_SESSION: ErrorDef = ErrorDef {
+    code: "MemberSignInRequiresSession",
+    message_en: "Sign-in needs a browser session. Reload the page and try again.",
+    message_fr: "La connexion nécessite une session de navigation. Rechargez la page et réessayez.",
+};
+
+/// `RUN_MEMBER_SIGN_IN_DOOR` is OFF (`configuration.yaml`, default false) -- the member sign-in door refuses BEFORE touching the identity provider (ADR-20260905-101349 §6/§F): the writer key flips only after the preconditions in `decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` are met.
+pub const MEMBER_SIGN_IN_DOOR_CLOSED: ErrorDef = ErrorDef {
+    code: "MemberSignInDoorClosed",
+    message_en: "Restaurant sign-in is not yet available.",
+    message_fr: "La connexion restaurateur n'est pas encore disponible.",
+};

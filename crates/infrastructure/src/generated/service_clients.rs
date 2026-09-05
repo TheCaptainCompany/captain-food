@@ -187,4 +187,7 @@ impl IdentityService for HttpIdentityService {
     async fn verify_email_token(&self, input: IdentityVerifyEmailTokenInput, meta: &ServiceCallMeta) -> Result<IdentityVerifyEmailTokenOutput, DomainError> {
         post_call(&self.http, &self.base_url, "/services/identity/verify-email-token", input, meta).await
     }
+    async fn stamp_member_claim(&self, input: IdentityStampMemberClaimInput, meta: &ServiceCallMeta) -> Result<(), DomainError> {
+        post_call(&self.http, &self.base_url, "/services/identity/stamp-member-claim", input, meta).await
+    }
 }

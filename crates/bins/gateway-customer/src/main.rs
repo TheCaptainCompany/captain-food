@@ -137,6 +137,8 @@ const COMPOSITION: &[(&str, &str, &str)] = &[
     ("mutation", "recordProspectReply", "network"),
     ("mutation", "grantRestaurantAccess", "network"),
     ("mutation", "revokeRestaurantAccess", "network"),
+    ("mutation", "requestMemberSignInLink", "network"),
+    ("mutation", "confirmMemberSignIn", "network"),
     ("mutation", "addCartLine", "ordering"),
     ("mutation", "removeCartLine", "ordering"),
     ("mutation", "changeCartLineQuantity", "ordering"),

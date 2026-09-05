@@ -17,7 +17,7 @@ use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
     IdentityRefreshSessionInput, IdentityRefreshSessionOutput, IdentityStampCustomerClaimInput,
-    IdentityStampRiderClaimInput,
+    IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
     IdentityVerifyPhoneOtpOutput, ServiceCallMeta,
 };
 use async_trait::async_trait;
@@ -115,6 +115,16 @@ impl IdentityService for FailClosedIdentityService {
         // TODO(integration): verify the magic-link token server-side with Supabase Auth.
         Err(DomainError::rejected("InvalidVerificationToken", json!({})))
     }
+
+    async fn stamp_member_claim(
+        &self,
+        _input: IdentityStampMemberClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // Fail CLOSED like the other two stamps (services.yaml identity.stamp_member_claim,
+        // #639 part C step 6-ii): never pretend to have stamped -- the caller then parks nothing.
+        Err(not_configured("member claim stamp"))
+    }
 }
 
 // ─── The real Supabase Auth adapter (#117, PROP-20260724-225804) ────────────────────────────────
@@ -138,6 +148,12 @@ pub struct SupabaseIdentityService {
     /// `None` leaves this adapter unguarded, which is safe ONLY because the authoritative guard is on
     /// the hook path where the euro is actually spent; see [`Self::with_send_guard`].
     send_guard: Option<std::sync::Arc<crate::sms_authorization::SmsSendAuthorizer>>,
+    /// The email send-abuse wall (#639 part C step 6-ii, ADR-20260905-101349 §9) — UNLIKE
+    /// `send_guard` above, this IS the authoritative wall: there is no separate inbound hook where
+    /// an email becomes a euro, so `send_email_magic_link` is the only enforcement point. `None`
+    /// leaves this adapter unguarded (a composition-root wiring gap, never the default posture);
+    /// see [`Self::with_email_guard`].
+    email_guard: Option<std::sync::Arc<crate::email_authorization::EmailSendAuthorizer>>,
 }
 
 /// The raw environment inputs of [`SupabaseIdentityService::from_env`], read verbatim
@@ -185,6 +201,7 @@ impl SupabaseIdentityService {
             admin_key: parts.secret_key.filter(|s| !s.is_empty()),
             http: reqwest::Client::new(),
             send_guard: None,
+            email_guard: None,
         })
     }
 
@@ -197,6 +214,18 @@ impl SupabaseIdentityService {
         guard: std::sync::Arc<crate::sms_authorization::SmsSendAuthorizer>,
     ) -> Self {
         self.send_guard = Some(guard);
+        self
+    }
+
+    /// Attach the email send-abuse wall (#639 part C step 6-ii) — the SAME builder shape as
+    /// [`Self::with_send_guard`], for the same reason. UNLIKE the SMS guard, `None` here means
+    /// EVERY `send_email_magic_link` call is unguarded (there is no separate hook-path wall for
+    /// email) -- the composition root wires this whenever it wires the identity service at all.
+    pub fn with_email_guard(
+        mut self,
+        guard: std::sync::Arc<crate::email_authorization::EmailSendAuthorizer>,
+    ) -> Self {
+        self.email_guard = Some(guard);
         self
     }
 
@@ -594,6 +623,151 @@ impl SupabaseIdentityService {
     }
 }
 
+// ─── The member claim stamp (#639 part C step 6-ii, services.yaml identity.stamp_member_claim) ───
+
+/// The member admin PUT body — PURE and `pub` for the same reason as [`stamp_rider_put_body`]: it
+/// is the WIRE SHAPE, and `server::auth`'s verifier reads it. The whole `captain_food` object is
+/// `{ "role": "MEMBER" }` and NOTHING else — no `member_id`, no id of any kind
+/// (ADR-20260905-101349 §7, ADR-20260818-004646): the member's binding resolves on every request
+/// from OUR Postgres (`Member.auth_subject -> member_id`, the 6-i bridge, then `ScopeMembership`
+/// for the restaurant scope), and a stamped id would be a cache the platform cannot invalidate. A
+/// THIRD, DISTINCT function beside [`stamp_put_body`]/[`stamp_rider_put_body`] — never a parameter
+/// on either (ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile time).
+pub fn stamp_member_put_body() -> Value {
+    json!({
+        "app_metadata": {
+            PRODUCT_CLAIM_KEY: {
+                "role": "MEMBER",
+            }
+        }
+    })
+}
+
+/// What [`SupabaseIdentityService::stamp_member_inner`] does after reading the auth user's current
+/// `app_metadata` — the PURE decision, unit-tested with constructed metadata. Its own type rather
+/// than a role arm on [`StampDecision`]/[`RiderStampDecision`]: no stamper shares a branch.
+#[derive(Debug, PartialEq, Eq)]
+enum MemberStampDecision {
+    /// Already exactly `{ role: MEMBER }` → idempotent no-op (a redelivered ConfirmMemberSignIn
+    /// must not re-write).
+    Noop,
+    /// Write [`stamp_member_put_body`] — a fresh user (no `captain_food` object, or an empty one).
+    Put,
+    /// The subject already holds a `captain_food` object that is NOT the one this stamper writes.
+    /// The provider replaces the object WHOLESALE, so a PUT would ERASE it: refused, never an
+    /// overwrite, until PROP-20260831-180622's `one-subject-one-role` Concern is decided.
+    HoldsOtherClaims,
+}
+
+/// The idempotence/refusal decision on the CURRENT provider metadata, before any write. Reads ONLY
+/// inside [`PRODUCT_CLAIM_KEY`] (the flat pre-#519 keys beside it are inert, as for the customer).
+fn stamp_member_decision(metadata: &Value) -> MemberStampDecision {
+    let Some(ours) = metadata.get(PRODUCT_CLAIM_KEY).and_then(Value::as_object) else {
+        return MemberStampDecision::Put;
+    };
+    if ours.is_empty() {
+        return MemberStampDecision::Put;
+    }
+    let exactly_the_member_role =
+        ours.len() == 1 && ours.get("role").and_then(Value::as_str) == Some("MEMBER");
+    if exactly_the_member_role {
+        MemberStampDecision::Noop
+    } else {
+        MemberStampDecision::HoldsOtherClaims
+    }
+}
+
+/// Why a member claim stamp failed — each variant is one bounded `reason` label of
+/// `member_claim_stamp_failed_total` (contract `member-sign-in`).
+#[derive(Debug)]
+enum MemberStampFailure {
+    /// `SUPABASE_SECRET_KEY` absent: fail CLOSED, never pretend to have stamped.
+    NotConfigured,
+    /// The subject already holds another claim object — the one-subject-one-role refusal.
+    ClaimConflict { auth_ref: String },
+    /// Transport failure, non-2xx admin response, or a malformed provider payload.
+    Provider(String),
+}
+
+impl MemberStampFailure {
+    fn reason(&self) -> &'static str {
+        match self {
+            MemberStampFailure::NotConfigured => "not_configured",
+            MemberStampFailure::ClaimConflict { .. } => "claim_conflict",
+            MemberStampFailure::Provider(_) => "provider_error",
+        }
+    }
+
+    fn into_domain_error(self) -> DomainError {
+        match self {
+            MemberStampFailure::NotConfigured => not_configured("member claim stamp"),
+            MemberStampFailure::ClaimConflict { auth_ref } => {
+                DomainError::rejected("AuthSubjectHoldsAnotherRole", json!({ "authRef": auth_ref }))
+            }
+            MemberStampFailure::Provider(detail) => {
+                DomainError::Repository(format!("supabase member claim stamp: {detail}"))
+            }
+        }
+    }
+}
+
+impl SupabaseIdentityService {
+    /// The member stamp core (#639 part C step 6-ii): GET the auth user's current `app_metadata`
+    /// (the decision PRECEDES any write, as for rider/customer), then PUT
+    /// [`stamp_member_put_body`]. Redelivery-idempotent (already `{ role: MEMBER }` → no-op); any
+    /// OTHER claim object present → [`MemberStampFailure::ClaimConflict`], never an overwrite.
+    async fn stamp_member_inner(
+        &self,
+        input: &IdentityStampMemberClaimInput,
+    ) -> Result<(), MemberStampFailure> {
+        let Some(admin_key) = self.admin_key.as_deref() else {
+            return Err(MemberStampFailure::NotConfigured);
+        };
+        let url = format!("{}/auth/v1/admin/users/{}", self.base_url, input.auth_ref.0);
+
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .send()
+            .await
+            .map_err(|e| MemberStampFailure::Provider(format!("admin get transport: {e}")))?;
+        let status = resp.status();
+        let user: Value = resp.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(MemberStampFailure::Provider(format!("admin get {}: {user}", status.as_u16())));
+        }
+
+        let metadata = user.get("app_metadata").cloned().unwrap_or_else(|| json!({}));
+        match stamp_member_decision(&metadata) {
+            MemberStampDecision::HoldsOtherClaims => {
+                return Err(MemberStampFailure::ClaimConflict { auth_ref: input.auth_ref.0.clone() });
+            }
+            MemberStampDecision::Noop => return Ok(()),
+            MemberStampDecision::Put => {}
+        }
+
+        let resp = self
+            .http
+            .put(&url)
+            .timeout(ADMIN_HTTP_TIMEOUT)
+            .header("apikey", admin_key)
+            .header("Authorization", format!("Bearer {admin_key}"))
+            .json(&stamp_member_put_body())
+            .send()
+            .await
+            .map_err(|e| MemberStampFailure::Provider(format!("admin put transport: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            return Err(MemberStampFailure::Provider(format!("admin put {}: {body}", status.as_u16())));
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl IdentityService for SupabaseIdentityService {
     async fn send_phone_otp(
@@ -712,6 +886,13 @@ impl IdentityService for SupabaseIdentityService {
         input: IdentitySendEmailMagicLinkInput,
         _meta: &ServiceCallMeta,
     ) -> Result<(), DomainError> {
+        // THE EMAIL SEND-ABUSE WALL (#639 part C step 6-ii, ADR-20260905-101349 §9): the ONE way
+        // anything in this product sends a magic-link email, so both `RequestEmailVerification`
+        // and `RequestMemberSignInLink` are guarded uniformly here -- and UNLIKE the SMS guard
+        // this IS the authoritative wall (no separate hook path spends the euro for email).
+        if let Some(guard) = self.email_guard.as_ref() {
+            guard.authorize(&input.email).await.map_err(|refusal| refusal.into_domain_error())?;
+        }
         self.post("otp", json!({ "email": input.email.0 }), None, None).await.map(|_| ())
     }
 
@@ -741,6 +922,23 @@ impl IdentityService for SupabaseIdentityService {
             access_token: str_field(&v, "access_token"),
             refresh_token: str_field(&v, "refresh_token"),
             expires_in: v.get("expires_in").and_then(Value::as_i64),
+        })
+    }
+
+    async fn stamp_member_claim(
+        &self,
+        input: IdentityStampMemberClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The SAME `claims.stamp` CLIENT span as the customer/rider stamps (it is the identity
+        // ACL's admin GET+PUT, whichever role it writes); the DEFECT counter is the
+        // `member-sign-in` contract's own, never the customer's/rider's population.
+        let span = telemetry::spans::claims_stamp();
+        let result = self.stamp_member_inner(&input).instrument(span.clone()).await;
+        telemetry::spans::record_claims_stamp_result(&span, result.is_ok());
+        result.map_err(|failure| {
+            telemetry::meters::member_sign_in::claim_stamp_failed(failure.reason());
+            failure.into_domain_error()
         })
     }
 }
@@ -916,6 +1114,41 @@ mod tests {
             stamp_rider_decision(&meta(json!({ "role": "RIDER", "rider_id": "r" }))),
             RiderStampDecision::HoldsOtherClaims,
             "a RIDER role travelling with an id is not the shape this stamper writes -- refused, not repaired"
+        );
+    }
+
+    /// M2 (#639 part C step 6-ii card, H): "the stamper writes `member_id`" -- this is the test
+    /// that REDS if the mutant is applied. Pinned exactly like `stamp_rider_put_body_is_the_role_
+    /// and_nothing_else`: exactly ONE top-level key, the role hardcoded MEMBER, and nothing else
+    /// inside `captain_food` -- no `member_id`, no id of any kind (ADR-20260905-101349 §7).
+    #[test]
+    fn stamp_member_put_body_is_the_role_and_nothing_else() {
+        let body = stamp_member_put_body();
+        let md = body["app_metadata"].as_object().expect("app_metadata object");
+        assert_eq!(md.len(), 1, "exactly ONE top-level key (#519)");
+        let ours = md[PRODUCT_CLAIM_KEY].as_object().expect("the captain_food object");
+        assert_eq!(ours["role"], json!("MEMBER"));
+        assert_eq!(ours.len(), 1, "M2: the role and NOTHING else -- no member_id, no id of any kind");
+    }
+
+    /// The member stamp never overwrites: exactly `{ role: MEMBER }` is a no-op, and ANY other
+    /// claim object is refused (the one-subject-one-role collision, PROP-20260831-180622 Concern).
+    #[test]
+    fn stamp_member_decision_refuses_any_other_claim_object() {
+        let meta = |claims: Value| json!({ PRODUCT_CLAIM_KEY: claims });
+        assert_eq!(stamp_member_decision(&meta(json!({ "role": "MEMBER" }))), MemberStampDecision::Noop);
+        assert_eq!(stamp_member_decision(&json!({})), MemberStampDecision::Put);
+        assert_eq!(stamp_member_decision(&meta(json!({}))), MemberStampDecision::Put);
+        let customer = meta(json!({ "role": "CUSTOMER", "customer_id": "00000000-0000-0000-0000-000000000437" }));
+        assert_eq!(
+            stamp_member_decision(&customer),
+            MemberStampDecision::HoldsOtherClaims,
+            "a restaurateur who also orders dinner is unrepresentable today: refuse, never erase the customer claim"
+        );
+        assert_eq!(
+            stamp_member_decision(&meta(json!({ "role": "MEMBER", "member_id": "m" }))),
+            MemberStampDecision::HoldsOtherClaims,
+            "M2's shape: a MEMBER role travelling with an id is not what this stamper writes -- refused, not repaired"
         );
     }
 

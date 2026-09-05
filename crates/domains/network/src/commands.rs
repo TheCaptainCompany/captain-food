@@ -7,6 +7,7 @@ use crate::scalars::*;
 use crate::entities::*;
 use domain_common::entities::*;
 use domain_common::scalars::*;
+use domain_customer::scalars::*;
 
 /// Admin creates a restaurant ACCOUNT (HubRise: restaurant) that will own one or more locations. Account-level facts (legal entity, billing contact, currency, default tax, timezone) live here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -237,4 +238,19 @@ pub struct GrantRestaurantAccess {
 pub struct RevokeRestaurantAccess {
     pub membership_id: MembershipId,
     pub ground: AccessRevocationGround,
+}
+
+/// Ask the auth provider to send an email magic link (the same `send_email_magic_link` port RequestEmailVerification uses, and the same email send-abuse wall shape as the rider door's SMS guard -- ADR-20260905-101349 §9). Emits no event, and MUST NOT reveal whether the address is on the restaurateur roster: the handler never consults the `Member` bridge, so the outcome is identical for a roster address and a stranger's (no enumeration oracle).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestMemberSignInLink {
+    pub email: EmailAddress,
+    pub locale: Option<Locale>,
+}
+
+/// Verify the magic-link token with the auth provider, then IDENTIFY the member: the proved auth subject is looked up in the `Member` bridge (`auth_subject -> member_id`, the step-6-i projection); no member -> the session is still parked (so "Se déconnecter" is meaningful on the not-yet-linked refusal screen, §8.5) but NOTHING is stamped and `MemberNotLinked` is thrown (the rider door's `RiderNotRegistered` precedent, step 2c-i); a member -> the MEMBER role claim is stamped (`identity.stamp_member_claim`, `{ role: MEMBER }` and nothing else) and the post-stamp provider session is parked for cookie pickup via POST /auth/session -- the credential is never in the GraphQL response. Emits no event. The beneficiary is the OUTPUT of `verify_email_token` (the proven email), never a payload field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmMemberSignIn {
+    pub token: EmailVerificationToken,
 }

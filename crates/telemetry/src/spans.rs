@@ -338,6 +338,76 @@ pub fn record_rider_identity_resolve_result(
     }
 }
 
+/// `member.identity.resolve` (#639 part C step 6-ii), the [`rider_identity_resolve`] shape
+/// transposed to the MEMBER seam.
+pub fn member_identity_resolve(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "member.identity.resolve",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        business.failure_reason = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the member seam's typed outcome — the [`record_rider_identity_resolve_result`] shape,
+/// with no `standing` field (a member carries none).
+pub fn record_member_identity_resolve_result(span: &Span, result: &str, reason: Option<&str>) {
+    span.record(attr::RESULT, result);
+    if let Some(reason) = reason {
+        span.record(attr::FAILURE_REASON, reason);
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
+/// `graphql.limits.refused` (`graphql-limits` contract, #639 part C step 6-ii): opened ONLY when
+/// the per-role extension actually refuses a document, before any resolver runs. An accepted
+/// request never opens this span -- the histograms/gauge under the same contract cover it.
+pub fn graphql_limits_refused(role: &str, reason: &str, correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "graphql.limits.refused",
+        otel.kind = "internal",
+        business.role = role,
+        business.reason = reason,
+        business.correlation_id = correlation_id,
+    )
+}
+
+/// `member.signin.link_request` (`member-sign-in` contract, #639 part C step 6-ii): opened by
+/// `requestMemberSignInLink`'s handler. No `business.result` field — the handler's outcome is
+/// identical whether or not the address is on the roster (no enumeration oracle), so nothing here
+/// may vary with that fact.
+pub fn member_signin_link_request(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "member.signin.link_request",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+    )
+}
+
+/// `member.signin.confirm` (`member-sign-in` contract): the ONE span whose `business.result` names
+/// the whole outcome space -- linked | not_linked | token_invalid | token_expired | lookup_failed.
+pub fn member_signin_confirm(correlation_id: &str) -> Span {
+    tracing::info_span!(
+        "member.signin.confirm",
+        otel.kind = "internal",
+        business.correlation_id = correlation_id,
+        business.result = Empty,
+        otel.status_code = Empty,
+    )
+}
+
+/// Record the confirm span's outcome. `lookup_failed` also sets OTel ERROR status, matching the
+/// contract's `technical_error` rule; every other result (including the ordinary refusals
+/// `not_linked`/`token_invalid`/`token_expired`) is a business outcome, never a technical error.
+pub fn record_member_signin_confirm_result(span: &Span, result: &str) {
+    span.record(attr::RESULT, result);
+    if result == "lookup_failed" {
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
 // --- late-bound recorders -----------------------------------------------------------------------
 //
 // Each takes the span explicitly rather than using `Span::current()`. After an `.instrument(..).await`

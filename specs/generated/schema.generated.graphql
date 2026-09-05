@@ -1610,6 +1610,15 @@ input RevokeRestaurantAccessInput {
   ground: AccessRevocationGround!
 }
 
+input RequestMemberSignInLinkInput {
+  email: EmailAddress!
+  locale: Locale
+}
+
+input ConfirmMemberSignInInput {
+  token: EmailVerificationToken!
+}
+
 input AddCartLineInput {
   cartId: CartId!
   restaurantId: RestaurantId!
@@ -2149,6 +2158,8 @@ type Mutation {
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
   grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantRestaurantAccess")
   revokeRestaurantAccess(input: RevokeRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RevokeRestaurantAccess")
+  requestMemberSignInLink(input: RequestMemberSignInLinkInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "RequestMemberSignInLink")
+  confirmMemberSignIn(input: ConfirmMemberSignInInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [PUBLIC]) @command(name: "ConfirmMemberSignIn")
   addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
   removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
   changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")

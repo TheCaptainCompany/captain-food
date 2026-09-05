@@ -31,8 +31,8 @@ use async_trait::async_trait;
 use domain::generated::scalars::RiderId;
 use serde_json::{json, Value};
 use server::{
-    CustomerIdentitySource, IdentitySources, ResolveRiderIdentity, RiderIdentityResolution,
-    RiderIdentitySource,
+    CustomerIdentitySource, IdentitySources, MemberIdentitySource, NoDatabaseMemberIdentity,
+    ResolveRiderIdentity, RiderIdentityResolution, RiderIdentitySource,
 };
 use tower::ServiceExt;
 
@@ -108,6 +108,7 @@ async fn router(outcome: RiderIdentityResolution) -> axum::Router {
         IdentitySources {
             customer: CustomerIdentitySource::Claim,
             rider: RiderIdentitySource::new(std::sync::Arc::new(ScriptedRiderTable(outcome))),
+            member: MemberIdentitySource::new(std::sync::Arc::new(NoDatabaseMemberIdentity)),
         },
     )
     .layer(axum::Extension(server::AuthContext::from_config(

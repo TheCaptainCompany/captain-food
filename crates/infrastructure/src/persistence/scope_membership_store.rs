@@ -13,8 +13,8 @@
 //! verbatim, [`crate::persistence::enum_sql`]), self-describing without a lookup join.
 
 use application::projectors::scope_membership::membership_id;
-use application::queries::{ReadScope, ScopeMembershipRepository};
-use domain::generated::scalars::{ScopeType, UserType};
+use application::queries::{MemberRestaurantScopeRepository, ReadScope, ScopeMembershipRepository};
+use domain::generated::scalars::{MemberId, RestaurantId, ScopeType, UserType};
 use domain::shared::errors::DomainError;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -170,6 +170,22 @@ pub async fn scopes_for(
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
+/// Every restaurant scope this MEMBER holds (#639 part C step 6-ii, ADR-20260905-101349 §C): the
+/// literal `member_type = 'MEMBER'` text -- the SAME `grant_member`/`revoke_member` exception this
+/// file already carries, never `UserType::to_text()` (that enum has no `MEMBER` value, by design).
+pub async fn restaurant_ids_for_member(pool: &PgPool, member_id: Uuid) -> Result<Vec<Uuid>, DomainError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT scope_id FROM scopemembership \
+          WHERE member_type = 'MEMBER' AND member_id = $1 AND scope_type = $2",
+    )
+    .bind(member_id)
+    .bind(ScopeType::RESTAURANT.to_text())
+    .fetch_all(pool)
+    .await
+    .map_err(db_err)?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// The [`ScopeMembershipRepository`] adapter — the one implementation both transports share
 /// (GraphQL resolvers filter through it, a by-id fetch checks through it).
 pub struct PgScopeMembershipRepository {
@@ -218,6 +234,13 @@ impl ScopeMembershipRepository for PgScopeMembershipRepository {
             return Ok(Vec::new());
         };
         scopes_for(&self.pool, member_type, member_id, scope_type).await
+    }
+}
+
+#[async_trait::async_trait]
+impl MemberRestaurantScopeRepository for PgScopeMembershipRepository {
+    async fn restaurant_ids_for_member(&self, member_id: MemberId) -> Result<Vec<RestaurantId>, DomainError> {
+        Ok(restaurant_ids_for_member(&self.pool, member_id.0).await?.into_iter().map(RestaurantId).collect())
     }
 }
 

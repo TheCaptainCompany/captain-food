@@ -431,6 +431,21 @@ pub trait RiderIdentityRepository: Send + Sync {
     ) -> Result<Option<(RiderId, RiderStanding)>, DomainError>;
 }
 
+/// Read port over the `Member` projection's identity bridge (#639 part C step 6-ii,
+/// ADR-20260905-101349 §7/§C): the verified auth subject -> `member_id`, read by
+/// `confirm_member_sign_in`'s handler (identify-only: no member -> `MemberNotLinked`, nothing
+/// created). A separate, narrower question from the request seam's `ReadScope` resolution
+/// (`crates/server/src/auth.rs`'s `ResolveMemberIdentity`, which additionally needs the restaurant
+/// scope) -- this port answers only "is this login bound to a member at all", the `Rider`/
+/// `RiderIdentityRepository` precedent's shape.
+#[async_trait]
+pub trait MemberIdentityRepository: Send + Sync {
+    /// The member bound to this verified auth subject, or `None` when no `RestaurantAccessGranted`
+    /// has ever been projected for it. `member.auth_subject UNIQUE` is what makes a bare
+    /// `fetch_optional` honest (the `Rider.auth_ref` precedent) -- never `LIMIT 1`.
+    async fn member_id_by_auth_subject(&self, auth_subject: AuthSubject) -> Result<Option<MemberId>, DomainError>;
+}
+
 /// Read port over the `RiderRestriction` attribution table (#639 part C step 4-i,
 /// ADR-20260904-081527 §2/§4) — the source of `myStanding`.
 #[async_trait]
@@ -947,6 +962,21 @@ impl ReadScope {
             ReadScope::Admin | ReadScope::System | ReadScope::Public => None,
         }
     }
+}
+
+/// Read port answering "which restaurant scope(s) does this member hold" (#639 part C step 6-ii,
+/// ADR-20260905-101349 §C) -- `ScopeMembership` rows whose `member_type` is the literal `MEMBER`
+/// text (the 6-i note: `UserType` stays exactly the seven-role enum, so this is its own narrow
+/// port rather than a `ReadScope::member()` arm). Read by the request seam ONLY, never by a
+/// GraphQL query.
+#[async_trait]
+pub trait MemberRestaurantScopeRepository: Send + Sync {
+    /// Every restaurant this member holds access to, via the `(member_type='MEMBER', member_id)`
+    /// index. V0 supports exactly ONE grant per member (6-i's `CAPTAIN_ONBOARDING` basis); a
+    /// caller with zero or more-than-one row fails closed rather than guessing which to pick
+    /// (`resolve_read_scope`'s job, never this port's) -- picking a row by order is an elevation
+    /// decision made by row order, the same rule the `Rider.auth_ref UNIQUE` precedent enforces.
+    async fn restaurant_ids_for_member(&self, member_id: MemberId) -> Result<Vec<RestaurantId>, DomainError>;
 }
 
 /// The one authorization question, asked the same way by every surface (#144).

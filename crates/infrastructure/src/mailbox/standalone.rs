@@ -141,6 +141,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // as the gates below (this crate cannot read the generated Config); empty is unset, and
         // unset makes the door fail closed, loudly.
         riders: Arc::new(crate::PgRiderRepository::new(pool.clone())),
+        // #639 part C step 6-ii: the member sign-in door's identity bridge (the `member` table
+        // the request seam reads too) -- the `riders` port's precedent, above.
+        members: Arc::new(crate::PgMemberRepository::new(pool.clone())),
         support_contact: std::env::var("SUPPORT_CONTACT")
             .ok()
             .map(|v| v.trim().to_string())
@@ -214,6 +217,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // #639 part C step 6-i (ADR-20260905-101349 §6, the recorded §8 carve-out: one field plus
         // its threading): the staff access grant door, same ENV-GATED posture, same default (OFF).
         run_member_access_grant: env_flag("RUN_MEMBER_ACCESS_GRANT", false),
+        // #639 part C step 6-ii (ADR-20260905-101349 §6): the member sign-in door, same
+        // ENV-GATED posture, same default (OFF).
+        run_member_sign_in_door: env_flag("RUN_MEMBER_SIGN_IN_DOOR", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -246,6 +252,14 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         "RUN_MEMBER_ACCESS_GRANT",
         deps.run_member_access_grant,
     );
+    // #639 part C step 6-ii (ADR-20260905-101349 §6), the same fleet-parity shape.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_MEMBER_SIGN_IN_DOOR",
+        deps.run_member_sign_in_door,
+    );
+    // The gate-liveness gauge (the #895 lesson): registered at the composition root so "zero
+    // refusals" and "the door has been off since boot" are distinguishable from the start.
+    telemetry::meters::member_sign_in::door_enforcing(deps.run_member_sign_in_door);
     deps
 }
 

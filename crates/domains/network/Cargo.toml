@@ -16,6 +16,7 @@ description = "Captain.Food `network` scope: generated domain types (scalars, en
 
 [dependencies]
 domain-common = { path = "../common" }
+domain-customer = { path = "../customer" }
 serde = { workspace = true }
 uuid = { workspace = true }
 

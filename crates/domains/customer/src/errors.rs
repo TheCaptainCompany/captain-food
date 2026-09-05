@@ -4,13 +4,6 @@
 
 use domain_common::errors::ErrorDef;
 
-/// The email magic-link token failed server-side verification with Supabase Auth.
-pub const INVALID_VERIFICATION_TOKEN: ErrorDef = ErrorDef {
-    code: "InvalidVerificationToken",
-    message_en: "This email verification link is invalid or has already been used.",
-    message_fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé.",
-};
-
 /// The email is already linked to another customer.
 /// Context: `email`.
 pub const EMAIL_ALREADY_IN_USE: ErrorDef = ErrorDef {

@@ -51,8 +51,8 @@ use domain::shared::errors::DomainError;
 use infrastructure::inbox::{route, CommandDeps, InboxOutcome, RouterEnv};
 use infrastructure::{
     FailClosedGoogleOwnershipVerifier, FailClosedPaymentGateway, PgAuthSubjectReservationRepository,
-    PgCatalogRepository, PgCustomerRepository, PgProspectionRepository, PgRestaurantRepository,
-    PgSlugReservationRepository, UnverifiedGbpOrderLinkProbe,
+    PgCatalogRepository, PgCustomerRepository, PgMemberRepository, PgProspectionRepository,
+    PgRestaurantRepository, PgSlugReservationRepository, UnverifiedGbpOrderLinkProbe,
 };
 use serde_json::{json, Value};
 use server::{
@@ -216,6 +216,13 @@ impl IdentityService for ScriptedIdentity {
     ) -> Result<IdentityVerifyEmailTokenOutput, DomainError> {
         panic!("the rider door never verifies email")
     }
+    async fn stamp_member_claim(
+        &self,
+        _input: application::generated::services::IdentityStampMemberClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        panic!("the rider door never stamps MEMBER")
+    }
 }
 
 /// The `Rider` read model's bridge, scripted: the known logins, and a COUNT of consultations — the
@@ -324,6 +331,7 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         IdentitySources {
             customer: CustomerIdentitySource::Claim,
             rider: RiderIdentitySource::new(Arc::new(ScriptedSeam(seam))),
+            member: server::MemberIdentitySource::new(Arc::new(server::NoDatabaseMemberIdentity)),
         },
     )
     .layer(axum::Extension(server::AuthContext::from_config(
@@ -358,9 +366,11 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
             mark_order_delivered_to_order: false,
         },
         riders: riders_port,
+        members: Arc::new(PgMemberRepository::new(unused.clone())),
         support_contact: Some(EmailAddress(SUPPORT.into())),
         run_rider_restriction_door: false,
         run_member_access_grant: false,
+        run_member_sign_in_door: false,
     };
     Door { mailbox, identity, riders, sessions, deps, app }
 }

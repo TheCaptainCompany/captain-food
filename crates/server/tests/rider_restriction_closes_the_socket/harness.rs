@@ -31,8 +31,9 @@ use infrastructure::{
 };
 use server::graphql_acl::RequestRole;
 use server::{
-    AuthContext, CustomerIdentitySource, IdentitySources, LookupFailureReason, PgRiderIdentity,
-    ResolveRiderIdentity, RiderIdentityResolution, RiderIdentitySource,
+    AuthContext, CustomerIdentitySource, IdentitySources, LookupFailureReason,
+    MemberIdentitySource, NoDatabaseMemberIdentity, PgRiderIdentity, ResolveRiderIdentity,
+    RiderIdentityResolution, RiderIdentitySource,
 };
 use sqlx::PgPool;
 use tokio_tungstenite::tungstenite::client::ClientRequestBuilder;
@@ -176,9 +177,11 @@ pub fn spawn_mailbox_workers(
         // the staged-delivery flow) but kept for parity with the real composition root.
         store: Arc::new(PgEventStore::with_bus(pool.clone(), event_bus.clone())),
         riders: Arc::new(PgRiderRepository::new(pool.clone())),
+        members: Arc::new(infrastructure::PgMemberRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: true,
         run_member_access_grant: false,
+        run_member_sign_in_door: false,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
@@ -493,6 +496,7 @@ pub async fn bind_ws_server(
         IdentitySources {
             customer: CustomerIdentitySource::Claim,
             rider: RiderIdentitySource::new(rider_identity),
+            member: MemberIdentitySource::new(std::sync::Arc::new(NoDatabaseMemberIdentity)),
         },
         server::graphql_rider_socket::RunRiderRestrictionSocketClose(socket_close_gate),
     )

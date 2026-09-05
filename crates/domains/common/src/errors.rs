@@ -174,3 +174,18 @@ pub const VERIFICATION_CODE_EXPIRED: ErrorDef = ErrorDef {
     message_en: "The verification code has expired. Please request a new one.",
     message_fr: "Le code de vérification a expiré. Veuillez en demander un nouveau.",
 };
+
+/// The email magic-link token failed server-side verification with Supabase Auth.
+pub const INVALID_VERIFICATION_TOKEN: ErrorDef = ErrorDef {
+    code: "InvalidVerificationToken",
+    message_en: "This email verification link is invalid or has already been used.",
+    message_fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé.",
+};
+
+/// The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
+/// Context: `authRef`.
+pub const AUTH_SUBJECT_HOLDS_ANOTHER_ROLE: ErrorDef = ErrorDef {
+    code: "AuthSubjectHoldsAnotherRole",
+    message_en: "This login is already used for another kind of Captain.Food account and cannot sign in here yet.",
+    message_fr: "Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici.",
+};

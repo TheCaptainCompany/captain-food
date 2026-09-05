@@ -54,6 +54,10 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
     // wall stays the `/auth/sms-hook` route, which the monolith still hosts.
     let (config, _) = crate::generated::config::Config::resolve();
     let sms_guard = Some(crate::sms_send_guard(&pool, &config));
+    // #639 part C step 6-ii: the email send-abuse wall, the SAME every-bin-shares-one-counter
+    // posture as `sms_guard` above -- and here it IS the authoritative wall (no separate hook
+    // path spends the euro for email).
+    let email_guard = Some(crate::email_send_guard(&pool, &config));
     // #639 part C step 4-ii (ADR-20260904-124600 §4): the SAME `SUPPORT_CONTACT` parse the
     // monolith's `router()` does — a subgraph bin serves the same resolvers over the same
     // configuration, no logic fork (#385 D8).
@@ -67,6 +71,7 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
         &status_bus,
         &nudges,
         sms_guard,
+        email_guard,
         crate::graphql::service_clock::ServiceWindowHorizon::from_seconds(
             config.service_window_validity_horizon_seconds,
         ),
@@ -92,6 +97,14 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
             crate::auth::PgRiderIdentity::new(std::sync::Arc::new(
                 infrastructure::PgRiderRepository::new(pool.clone()),
             )),
+        )),
+        // The MEMBER seam has no gate either (#639 part C step 6-ii): Postgres, over the
+        // `Member` bridge + `ScopeMembership`, in every bin that mounts `/restaurant/graphql`.
+        member: crate::auth::MemberIdentitySource::new(std::sync::Arc::new(
+            crate::auth::PgMemberIdentity::new(
+                std::sync::Arc::new(infrastructure::PgMemberRepository::new(pool.clone())),
+                std::sync::Arc::new(infrastructure::persistence::scope_membership_store::PgScopeMembershipRepository::new(pool.clone())),
+            ),
         )),
     };
     let schema = crate::graphql_schema::build_schema_for_scope(

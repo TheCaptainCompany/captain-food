@@ -187,9 +187,11 @@ async fn deliver_once(pool: &PgPool) -> u64 {
     let deps = CommandDeps {
         // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        members: Arc::new(infrastructure::PgMemberRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: false,
         run_member_access_grant: false,
+        run_member_sign_in_door: false,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),

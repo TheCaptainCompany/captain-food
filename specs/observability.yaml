@@ -2206,3 +2206,124 @@ mailbox-delivery:
   # webhook latency — that spans the provider hop and belongs to the workflow contracts.
   latency_budget: { max_p95_ms: 250, max_p99_ms: 1000 }
   error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
+# member-sign-in -- #639 part C step 6-ii (ADR-20260905-101349 §10): the restaurateur's email
+# sign-in door, the `rider-identity`/`otp_send_guard_enforcing` shape transposed to email. OTLP
+# only (no BAM): the anonymous door has no bounded-population beneficiary a fold could serve, and
+# an `on_roster` label would CREATE the enumeration oracle the door exists to deny -- so this
+# section declares NO metric ever carrying an email, a token or a messageId as a label.
+# `correlation_id` breaks across the mail hop exactly as the SMS one breaks across the SMS hook:
+# the join is hashed-email + a time window, prose only, never a stored/emitted key.
+# =====================================================================
+member-sign-in:
+  feature: member-sign-in
+  criticality: high
+  workflow:
+    surface: graphql   # read/write seam under a PUBLIC path -- no single command/saga/aggregate
+
+  run_identity:
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    # ONE per restaurant-path resolution through the MEMBER seam, the `rider.identity.resolve`
+    # shape transposed -- INSIDE auth.read_scope's span, never emitted for any other role.
+    - name: "member.identity.resolve"
+      kind: INTERNAL
+      required: false
+      attributes:
+        - { key: "business.result", type: string, required: true }   # resolved | not_found | lookup_failed
+        - { key: "business.correlation_id", type: string, required: true }
+        - { key: "business.failure_reason", type: string, required: false }
+    - name: "member.signin.link_request"
+      kind: INTERNAL
+      required: false   # only requestMemberSignInLink opens it
+      attributes:
+        - { key: "business.correlation_id", type: string, required: true }
+    - name: "member.signin.confirm"
+      kind: INTERNAL
+      required: false   # only confirmMemberSignIn opens it
+      attributes:
+        - { key: "business.result", type: string, required: true }   # linked | not_linked | token_invalid | token_expired | lookup_failed
+        - { key: "business.correlation_id", type: string, required: true }
+    - name: "claims.stamp"
+      kind: INTERNAL
+      required: false   # shared with customer/rider claim stamps -- opened only on the MEMBER stamp attempt here
+
+  metrics:
+    # The MEMBER seam's own resolution metrics -- the `rider_identity_*` shape, never that
+    # contract's own series (a paging rule keyed on rider_identity_lookup_failed_total must not go
+    # quiet because members started failing on a differently-named seam).
+    - { name: "member_identity_resolve_ms", type: histogram, attributes: ["result"] }
+    - { name: "member_identity_not_found_total", type: counter, attributes: [] }
+    - { name: "member_identity_lookup_failed_total", type: counter, attributes: ["reason"] }
+    - { name: "member_identity_lookup_source_total", type: counter, attributes: ["source"] }
+    - { name: "member_sign_in_link_requested_total", type: counter, attributes: ["result"] }
+    - { name: "member_sign_in_confirmed_total", type: counter, attributes: ["result"] }
+    # DEFECT counter, the rider_claim_stamp_failed_total pattern under THIS contract's own name --
+    # never ordinary user error, each one a linked member whose confirmed sign-in issued no
+    # credential. `reason` bounded: not_configured | claim_conflict | provider_error.
+    - { name: "member_claim_stamp_failed_total", type: counter, attributes: ["reason"] }
+    - { name: "member_sign_in_refused_total", type: counter, attributes: ["reason"] }
+    # GATE LIVENESS (the `otp_send_guard_enforcing` shape, ADR-20260810-231300): 1 while
+    # RUN_MEMBER_SIGN_IN_DOOR enforces its refusal on a request, 0 the moment the composition root
+    # boots with the key OFF -- so "zero refusals tonight" and "the door has been off since the
+    # last deploy" are distinguishable, registered at the composition root (the #895 lesson: a
+    # boot-time `true` never refreshed proves the process started, not that the gate is live).
+    - { name: "member_sign_in_door_enforcing", type: gauge, attributes: [] }
+
+  status_rules:
+    success:
+      required_spans: []   # spans open only on the member sign-in path
+    technical_error:
+      any_span_errors: true
+
+  latency_budget: { max_p95_ms: 400, max_p99_ms: 1200 }
+  error_budget: { max_error_rate_pct: 1.0 }
+
+# =====================================================================
+# graphql-limits -- #639 part C step 6-ii (ADR-20260905-101349 §9): the per-role depth/complexity
+# ceiling on EVERY role's schema, riding on the member door's PR because it lands with the entry
+# point it bounds. Zero rejections must not read like "limits not installed" -- the max gauge and
+# the observed histograms are what tell the two apart.
+# =====================================================================
+graphql-limits:
+  feature: graphql-limits
+  criticality: medium
+  workflow:
+    surface: graphql   # the parse_query extension, ahead of every resolver, every role
+
+  run_identity:
+    - { name: correlation_id, source: "request.correlation_id", required: true }
+    - { name: trace_id, source: "otel.trace_id", required: true }
+
+  spans:
+    # Opened ONLY when the extension actually refuses a document -- an accepted request emits the
+    # histograms/gauge below and no span, so a healthy peak does not open one per request.
+    - name: "graphql.limits.refused"
+      kind: INTERNAL
+      required: false
+      attributes:
+        - { key: "business.role", type: string, required: true }
+        - { key: "business.reason", type: string, required: true }   # depth | complexity
+        - { key: "business.correlation_id", type: string, required: true }
+
+  metrics:
+    # Refused BEFORE any resolver runs; `reason` is bounded depth|complexity, `role` the acting role.
+    - { name: "graphql_request_rejected_total", type: counter, attributes: ["role", "reason"] }
+    - { name: "graphql_query_depth", type: histogram, attributes: ["role"] }
+    - { name: "graphql_query_complexity", type: histogram, attributes: ["role"] }
+    # The CONFIGURED ceiling this process is enforcing, per role/kind -- so a deploy that silently
+    # regenerated a lower limit shows up as a moved gauge rather than a mystery refusal spike.
+    - { name: "graphql_limit_max", type: gauge, attributes: ["role", "kind"] }
+
+  # No `technical_error` rule: a refusal here is the limiter working as designed (a business
+  # outcome), never a technical error -- there is no failure mode this span's own construction
+  # could set `otel.status_code` for (the `obs-technical-error-unreachable` shape this avoids).
+  status_rules:
+    success:
+      required_spans: []
+
+  latency_budget: { max_p95_ms: 5, max_p99_ms: 20 }
+  error_budget: { max_error_rate_pct: 5.0 }

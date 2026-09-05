@@ -205,14 +205,3 @@ RiderRestrictionGroundUnrecognised:
     fr: "Ce motif de restriction n'est pas reconnu."
 
 
-AuthSubjectHoldsAnotherRole:
-  description: >
-    The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a
-    restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object
-    wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of
-    PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
-  context:
-    authRef: { $ref: 'scalars.yaml#/AuthSubject' }
-  messages:
-    en: "This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet."
-    fr: "Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur."

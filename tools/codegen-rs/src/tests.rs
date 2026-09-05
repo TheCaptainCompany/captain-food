@@ -5690,19 +5690,26 @@ Catalog:
         let states = emit_domain_states(&model);
         let committed_states = std::fs::read_to_string(root.join("crates/domain/src/generated/states.rs")).expect("committed states.rs");
         assert_eq!(states, committed_states, "states.rs must stay byte-identical across the typed-requires migration");
-        // 0 errors, and the CALIBRATION holds: exactly THREE commands legitimately lack their
+        // 0 errors, and the CALIBRATION holds: exactly FIVE commands legitimately lack their
         // identity property, and they are the ones a caller WITHOUT a credential sends — the id
         // is minted (or resolved) server-side, so the lane is addressing-only: the customer's
-        // RequestPhoneVerification, and the rider sign-in door's RequestRiderSignInCode /
+        // RequestPhoneVerification, the rider sign-in door's RequestRiderSignInCode /
         // ConfirmRiderSignIn (#639 part C step 2c-i: the caller cannot know a riderId before it
-        // signs in). That is why identity-property-not-on-command is a WARN, not an error (§2d
-        // doc). An EXACT inventory by name, never a floor: a fourth is a decision taken here.
+        // signs in), and the member sign-in door's RequestMemberSignInLink / ConfirmMemberSignIn
+        // (#639 part C step 6-ii, same shape: no membershipId exists before the seam resolves
+        // one). That is why identity-property-not-on-command is a WARN, not an error (§2d
+        // doc). An EXACT inventory by name, never a floor: a sixth is a decision taken here.
         let Report { issues, .. } = validate(&model);
         for i in &issues {
             assert!(i.level != Level::Error, "real specs must stay 0-error: {} at {}: {}", i.rule, i.location, i.message);
         }
-        const LEGITIMATELY_UNADDRESSED: [&str; 3] =
-            ["RequestPhoneVerification", "RequestRiderSignInCode", "ConfirmRiderSignIn"];
+        const LEGITIMATELY_UNADDRESSED: [&str; 5] = [
+            "RequestPhoneVerification",
+            "RequestRiderSignInCode",
+            "ConfirmRiderSignIn",
+            "RequestMemberSignInLink",
+            "ConfirmMemberSignIn",
+        ];
         let mut inventory: Vec<(String, &str)> = issues
             .iter()
             .filter(|i| i.rule == "identity-property-not-on-command")
@@ -5720,6 +5727,8 @@ Catalog:
             inventory,
             vec![
                 ("actors.yaml/Customer".to_string(), "RequestPhoneVerification"),
+                ("actors.yaml/RestaurantMembership".to_string(), "ConfirmMemberSignIn"),
+                ("actors.yaml/RestaurantMembership".to_string(), "RequestMemberSignInLink"),
                 ("actors.yaml/Rider".to_string(), "ConfirmRiderSignIn"),
                 ("actors.yaml/Rider".to_string(), "RequestRiderSignInCode"),
             ],
@@ -16823,8 +16832,9 @@ mod screen_roles_gate {
             .collect()
     }
 
-    /// The real tree is GREEN under every §26 ERROR, and the rider door is the one screen that
-    /// declares a transport role — the capability exists and is exercised exactly once today.
+    /// The real tree is GREEN under every §26 ERROR. The rider door was the first screen to
+    /// declare a transport role; #639 part C step 6-ii adds the member sign-in door's two PUBLIC
+    /// screens (`sign_in`, `not_linked`) on `restaurant_backoffice.yaml` alongside it.
     #[test]
     fn the_real_corpus_is_clean_and_the_rider_door_is_the_one_declared_transport_role() {
         let model = real_model();
@@ -16856,7 +16866,14 @@ mod screen_roles_gate {
                     .unwrap_or_default()
             })
             .collect();
-        assert_eq!(declared, vec!["screens/rider.yaml/sign_in".to_string()]);
+        assert_eq!(
+            declared,
+            vec![
+                "screens/restaurant_backoffice.yaml/sign_in".to_string(),
+                "screens/restaurant_backoffice.yaml/not_linked".to_string(),
+                "screens/rider.yaml/sign_in".to_string(),
+            ]
+        );
     }
 
     /// RED on the planted defect the rule exists for: `graphql_role: PUBLIC` on the RIDER job list,

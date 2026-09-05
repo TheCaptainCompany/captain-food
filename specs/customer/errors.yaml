@@ -15,14 +15,6 @@ description: >
 # generic failure: a rate limit shown as "code incorrect" is a lie at the highest-friction tap in the
 # funnel. `errors.yaml#/RateLimited` (common) covers the fourth state, the one with a countdown.
 
-InvalidVerificationToken:
-  description: "The email magic-link token failed server-side verification with Supabase Auth."
-  context: {}
-  messages:
-    en: "This email verification link is invalid or has already been used."
-    fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé."
-
-
 EmailAlreadyInUse:
   description: "The email is already linked to another customer."
   context:

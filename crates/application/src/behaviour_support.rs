@@ -43,9 +43,9 @@ use crate::pm_state::{
 use crate::ports::{Actor, EventStore, GbpOrderLinkProbe, GoogleOwnershipVerifier};
 use crate::process_managers::test_support::MemStore;
 use crate::queries::{
-    CartReadRepository, CatalogReadRepository, CustomerReadRepository, OfferView, OrderFilter,
-    OrderReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantFilter,
-    RestaurantReadRepository, RiderIdentityRepository,
+    CartReadRepository, CatalogReadRepository, CustomerReadRepository, MemberIdentityRepository,
+    OfferView, OrderFilter, OrderReadRepository, ProspectFilter, ProspectionReadRepository,
+    RestaurantFilter, RestaurantReadRepository, RiderIdentityRepository,
 };
 use crate::repository::Repository;
 
@@ -125,6 +125,10 @@ pub struct TestBed {
     /// The `Rider` read model's identity bridge (`auth_ref -> rider_id`, #639 part C step 2b) the
     /// rider sign-in door identifies through — fed by seeded `RiderRegistered` facts.
     pub riders: SpecRiders,
+    /// The `Member` read model's identity bridge (`auth_subject -> member_id`, #639 part C step
+    /// 6-ii) the member sign-in door identifies through — fed by seeded `RestaurantAccessGranted`
+    /// facts.
+    pub members: SpecMembers,
     /// `SUPPORT_CONTACT` as the composition root resolves it (required, no default —
     /// ADR-20260830-213135); the bed carries the decided string so the refusal can name it.
     pub support_contact: SpecSupportContact,
@@ -262,6 +266,10 @@ impl TestBed {
             // --- Rider identity bridge (#639 part C step 2b) ------------------------------------
             DomainEvent::RiderRegistered(e) => {
                 self.riders.bind(&e.auth_ref.0, e.rider_id);
+            }
+            // --- Member identity bridge (#639 part C step 6-ii) -----------------------------
+            DomainEvent::RestaurantAccessGranted(e) => {
+                self.members.bind(&e.auth_subject.0, e.member_id);
             }
             DomainEvent::CustomerRegistered(e) => {
                 self.customers.upsert(crate::queries::CustomerRow {
@@ -997,6 +1005,37 @@ impl SpecRiders {
     }
 }
 
+/// The `Member` read model's identity bridge as a fake (#639 part C step 6-ii): `auth_subject ->
+/// member_id`, bound by seeded `RestaurantAccessGranted` facts. The `SpecRiders` precedent.
+#[derive(Default)]
+pub struct SpecMembers {
+    rows: Mutex<Vec<(String, MemberId)>>,
+}
+
+impl SpecMembers {
+    fn bind(&self, auth_subject: &str, member_id: MemberId) {
+        let mut rows = self.rows.lock().unwrap();
+        rows.retain(|(a, _)| a != auth_subject);
+        rows.push((auth_subject.to_string(), member_id));
+    }
+}
+
+#[async_trait]
+impl MemberIdentityRepository for SpecMembers {
+    async fn member_id_by_auth_subject(
+        &self,
+        auth_subject: AuthSubject,
+    ) -> Result<Option<MemberId>, DomainError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(a, _)| *a == auth_subject.0)
+            .map(|(_, id)| *id))
+    }
+}
+
 #[async_trait]
 impl RiderIdentityRepository for SpecRiders {
     async fn rider_id_by_auth_subject(
@@ -1397,13 +1436,42 @@ impl IdentityService for FakeIdentity {
         if input.token.0 == "bad-token" {
             return Err(DomainError::rejected("InvalidVerificationToken", serde_json::json!({})));
         }
+        // #639 part C step 6-ii: the ONE-SUBJECT-ONE-ROLE collision sentinel token, proving the
+        // SAME auth subject `stamp_rider_claim`'s fixture already treats as CUSTOMER-stamped
+        // (`FAKE_CUSTOMER_STAMPED_SUBJECT`) — the member door's `riderRegisteredOnCustomerLogin`
+        // precedent.
+        let auth_ref = if input.token.0 == "sb-magic-token-customer-login" {
+            AuthSubject(FAKE_CUSTOMER_STAMPED_SUBJECT.into())
+        } else {
+            AuthSubject("auth-supabase-1".into())
+        };
         Ok(IdentityVerifyEmailTokenOutput {
-            auth_ref: AuthSubject("auth-supabase-1".into()),
+            auth_ref,
             email: EmailAddress("johnny@example.com".into()),
             access_token: Some("fake.access.jwt".into()),
             refresh_token: Some("fake.refresh".into()),
             expires_in: Some(3600),
         })
+    }
+    async fn stamp_member_claim(
+        &self,
+        input: crate::generated::services::IdentityStampMemberClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        // The one-subject-one-role refusal, the `stamp_rider_claim` precedent: a login the
+        // provider already holds with ANOTHER claim object is refused, never overwritten.
+        let mut stamped = self.stamped.lock().expect("fake identity mutex");
+        let member_only = serde_json::json!({ "captain_food": { "role": "MEMBER" } });
+        let holds_other = input.auth_ref.0 == FAKE_CUSTOMER_STAMPED_SUBJECT
+            || stamped.as_ref().is_some_and(|held| *held != member_only);
+        if holds_other {
+            return Err(DomainError::rejected(
+                "AuthSubjectHoldsAnotherRole",
+                serde_json::json!({ "authRef": input.auth_ref.0 }),
+            ));
+        }
+        *stamped = Some(member_only);
+        Ok(())
     }
 }
 

@@ -777,6 +777,11 @@ fn fx_restaurant_access_revoked() -> DomainEvent {
     DomainEvent::RestaurantAccessRevoked(evs::RestaurantAccessRevoked { membership_id: sc::MembershipId(support::uid("membership-1")), ground: sc::AccessRevocationGround::LEFT_THE_RESTAURANT })
 }
 
+/// tests.yaml#/fixtures/restaurantAccessGrantedOnCustomerLogin — events.yaml#/RestaurantAccessGranted
+fn fx_restaurant_access_granted_on_customer_login() -> DomainEvent {
+    DomainEvent::RestaurantAccessGranted(evs::RestaurantAccessGranted { membership_id: sc::MembershipId(support::uid("membership-3")), scope_type: sc::ScopeType::RESTAURANT, scope_id: sc::RestaurantId(support::uid("resto-1")), principal_kind: sc::PrincipalKind::MEMBER, member_id: sc::MemberId(support::uid("member-3")), auth_subject: sc::AuthSubject("auth-supabase-customer".into()), authority: sc::MemberAuthority::MANAGER, basis: sc::AccessBasis::CAPTAIN_ONBOARDING })
+}
+
 /// Read-model baseline canned from the fixture pool: the catalog offers pricing reads and
 /// the canonical OrderTracking rows the saga legs read (`read_order`) — state the spec's
 /// GIVEN (an event list) cannot express but its cases assume.
@@ -4817,6 +4822,144 @@ async fn test_revoke_already_revoked_restaurant_membership_is_rejected() {
     let err = result.expect_err("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &err, &["RestaurantMembershipAlreadyRevoked"]);
     bed.assert_appended("TestRevokeAlreadyRevokedRestaurantMembershipIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberRequestSignInLink — "Sends an email magic link to a restaurateur's address; emits nothing"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_request_sign_in_link() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestMemberSignInLink { email: sc::EmailAddress("owner@pizzaroma.fr".into()), locale: Some(sc::Locale("fr-FR".into())) };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::request_member_sign_in_link(&bed.store, &bed.identity, cmd, &support::actor(), run_member_sign_in_door).await;
+    let _ = result.expect("TestMemberRequestSignInLink: the spec expects acceptance");
+    bed.assert_appended("TestMemberRequestSignInLink", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberRequestSignInLinkForStrangerIsIdentical — "Sends an email magic link to an address on no roster, identically; emits nothing"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_request_sign_in_link_for_stranger_is_identical() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestMemberSignInLink { email: sc::EmailAddress("stranger@example.com".into()), locale: None };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::request_member_sign_in_link(&bed.store, &bed.identity, cmd, &support::actor(), run_member_sign_in_door).await;
+    let _ = result.expect("TestMemberRequestSignInLinkForStrangerIsIdentical: the spec expects acceptance");
+    bed.assert_appended("TestMemberRequestSignInLinkForStrangerIsIdentical", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberRequestSignInLinkDoorClosed — "requestMemberSignInLink is refused by the door key while it is OFF (the production default), before the identity provider is touched"
+/// rules: MemberSignInGatedBeforeStore
+#[tokio::test]
+async fn test_member_request_sign_in_link_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RequestMemberSignInLink { email: sc::EmailAddress("owner@pizzaroma.fr".into()), locale: None };
+    let run_member_sign_in_door: bool = false;
+    let result = crate::commands::request_member_sign_in_link(&bed.store, &bed.identity, cmd, &support::actor(), run_member_sign_in_door).await;
+    let err = result.expect_err("TestMemberRequestSignInLinkDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestMemberRequestSignInLinkDoorClosed", &err, &["MemberSignInDoorClosed"]);
+    bed.assert_appended("TestMemberRequestSignInLinkDoorClosed", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberConfirmSignInUnknownEmailIsRejected — "Refuses member sign-in for a verified email that no member is bound to; creates nothing"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_confirm_sign_in_unknown_email_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmMemberSignIn { token: sc::EmailVerificationToken("sb-magic-token-unlinked".into()) };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::confirm_member_sign_in(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_member_sign_in_door).await;
+    let err = result.expect_err("TestMemberConfirmSignInUnknownEmailIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestMemberConfirmSignInUnknownEmailIsRejected", &err, &["MemberNotLinked"]);
+    bed.assert_appended("TestMemberConfirmSignInUnknownEmailIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberConfirmSignInIdentifies — "Verifying the magic-link token for a bound member is accepted and appends nothing -- identify-only, never register"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_confirm_sign_in_identifies() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmMemberSignIn { token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::confirm_member_sign_in(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_member_sign_in_door).await;
+    let _ = result.expect("TestMemberConfirmSignInIdentifies: the spec expects acceptance");
+    bed.assert_appended("TestMemberConfirmSignInIdentifies", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberConfirmSignInInvalidTokenIsRejected — "Rejects member sign-in when the magic-link token is invalid or expired"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_confirm_sign_in_invalid_token_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmMemberSignIn { token: sc::EmailVerificationToken("bad-token".into()) };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::confirm_member_sign_in(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_member_sign_in_door).await;
+    let err = result.expect_err("TestMemberConfirmSignInInvalidTokenIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestMemberConfirmSignInInvalidTokenIsRejected", &err, &["InvalidVerificationToken", "VerificationCodeExpired"]);
+    bed.assert_appended("TestMemberConfirmSignInInvalidTokenIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected — "Refuses member sign-in when the verified login already holds another role's claim; overwrites nothing"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_confirm_sign_in_subject_holding_another_role_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-3")), vec![fx_restaurant_access_granted_on_customer_login()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmMemberSignIn { token: sc::EmailVerificationToken("sb-magic-token-customer-login".into()) };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::confirm_member_sign_in(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_member_sign_in_door).await;
+    let err = result.expect_err("TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected", &err, &["AuthSubjectHoldsAnotherRole"]);
+    bed.assert_appended("TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberConfirmSignInWithoutSessionIsRejected — "Refuses member sign-in when the request carries no session to own the parked credential; spends no token, parks nothing"
+/// rules: MemberSignInIdentifiesOnly
+#[tokio::test]
+async fn test_member_confirm_sign_in_without_session_is_rejected() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmMemberSignIn { token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
+    let run_member_sign_in_door: bool = true;
+    let result = crate::commands::confirm_member_sign_in(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor(), run_member_sign_in_door).await;
+    let err = result.expect_err("TestMemberConfirmSignInWithoutSessionIsRejected: the spec expects a typed rejection");
+    support::assert_thrown("TestMemberConfirmSignInWithoutSessionIsRejected", &err, &["MemberSignInRequiresSession"]);
+    bed.assert_appended("TestMemberConfirmSignInWithoutSessionIsRejected", &before, &[]);
+}
+
+/// tests.yaml#/tests/TestMemberConfirmSignInDoorClosed — "confirmMemberSignIn is refused by the door key while it is OFF (the production default), before the identity provider is touched"
+/// rules: MemberSignInGatedBeforeStore
+#[tokio::test]
+async fn test_member_confirm_sign_in_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    bed.seed(&format!("RestaurantMembership-{}", support::uid("membership-1")), vec![fx_restaurant_access_granted()]).await;
+    let before = bed.snapshot();
+    let cmd = cmds::ConfirmMemberSignIn { token: sc::EmailVerificationToken("sb-magic-token-abc".into()) };
+    let run_member_sign_in_door: bool = false;
+    let result = crate::commands::confirm_member_sign_in(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, Some(sc::SessionId(support::uid("session-1"))), &support::actor(), run_member_sign_in_door).await;
+    let err = result.expect_err("TestMemberConfirmSignInDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestMemberConfirmSignInDoorClosed", &err, &["MemberSignInDoorClosed"]);
+    bed.assert_appended("TestMemberConfirmSignInDoorClosed", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestPaymentAuthorizationOrphanIsFlagged — "An authorization matching no checkout run aborts the saga with a typed error (never a silent skip)"

@@ -609,6 +609,7 @@ mod tests {
             rider: crate::auth::RiderIdentitySource::new(Arc::new(WsScriptedRiderResolver(
                 crate::auth::RiderIdentityResolution::NoMapping,
             ))),
+            member: crate::auth::MemberIdentitySource::new(Arc::new(crate::auth::NoDatabaseMemberIdentity)),
         }
     }
 
@@ -910,6 +911,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
                 crate::auth::CustomerIdentityResolution::Resolved(CustomerId(right_id)),
             ))),
             rider: claim_only_sources().rider,
+            member: claim_only_sources().member,
         };
         let (_, acting, _, scope) =
             authorize_and_resolve_scope(&auth, RequestRole::Customer, &headers, &identity)
@@ -960,6 +962,7 @@ vZXPOa4xJAt5OT8zMSblfCEwtW2hRANCAARto0Dk75fxl2IyLx89vwvjUWkJAb/p
             rider: crate::auth::RiderIdentitySource::new(Arc::new(WsScriptedRiderResolver(
                 crate::auth::RiderIdentityResolution::Resolved((RiderId(right_id), domain::generated::scalars::RiderStanding::ACTIVE)),
             ))),
+            member: claim_only_sources().member,
         };
         let (_, acting, _, scope) =
             authorize_and_resolve_scope(&auth, RequestRole::Rider, &headers, &identity)

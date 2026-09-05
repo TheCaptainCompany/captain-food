@@ -248,6 +248,27 @@ identity:
       errors:
         - { $ref: 'errors.yaml#/InvalidVerificationToken' }
         - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+    stamp_member_claim:
+      description: >
+        Write the MEMBER role claim onto the provider-side auth user identified by `authRef`
+        (#639 part C step 6-ii, ADR-20260905-101349 §7): sets `app_metadata.captain_food`
+        = `{ role: MEMBER }` -- the role and NOTHING else. No `member_id`, no id of any kind
+        (ADR-20260818-004646): the member's binding resolves on every request from OUR Postgres
+        (`Member.auth_subject -> member_id`, step 6-i's bridge, then `ScopeMembership` for the
+        restaurant scope), and a stamped id would be a cache the platform cannot invalidate. A
+        THIRD stamper beside `stamp_customer_claim`/`stamp_rider_claim`, not a parameter on either
+        (#437, ADR-20260818-101500: one stamper per role, each hardcoded, selected at compile
+        time). The provider REPLACES the `captain_food` object wholesale (the shallow-merge rule
+        of `stamp_customer_claim`), so stamping MEMBER on a subject that already carries another
+        role's claim would ERASE that claim: a subject holding a non-MEMBER claim is REFUSED with
+        `AuthSubjectHoldsAnotherRole` -- fail closed, never an overwrite. Idempotent on redelivery
+        (already exactly `{ role: MEMBER }` -> no-op). FAIL-CLOSED on the credential like the
+        other two stamps: without `SUPABASE_SECRET_KEY` it errors, and the caller then parks
+        nothing (an unstamped token is never parked).
+      input:
+        authRef: { $ref: 'scalars.yaml#/AuthSubject' }
+      errors:
+        - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
   binding: local
   expose: false
   implementations:

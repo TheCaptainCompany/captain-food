@@ -511,6 +511,7 @@ fn rider_seam(outcome: server::RiderIdentityResolution) -> server::IdentitySourc
     server::IdentitySources {
         customer: server::CustomerIdentitySource::Claim,
         rider: server::RiderIdentitySource::new(std::sync::Arc::new(ScriptedRiderTable(outcome))),
+        member: server::MemberIdentitySource::new(std::sync::Arc::new(server::NoDatabaseMemberIdentity)),
     }
 }
 

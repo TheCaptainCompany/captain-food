@@ -304,3 +304,18 @@ mutations:
     command: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
     roles: [ADMIN]
     slice: V0
+
+  # --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10, Q7) -- both
+  # PUBLIC mutations (the `verifyPhone`/rider-door precedent: a door absent from the SDL does not
+  # exist for a client; the caller has no credential yet, so no OTHER role could ever apply).
+  # `roles: [PUBLIC]` is KEPT, never omitted -- omitted is MORE public than `[PUBLIC]`. Ships DARK
+  # behind RUN_MEMBER_SIGN_IN_DOOR (default false).
+  requestMemberSignInLink:
+    command: { $ref: 'commands.yaml#/RequestMemberSignInLink' }
+    roles: [PUBLIC]
+    slice: V0
+
+  confirmMemberSignIn:
+    command: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+    roles: [PUBLIC]
+    slice: V0

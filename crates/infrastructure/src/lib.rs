@@ -15,8 +15,10 @@ pub mod generated;
 pub mod inbox;
 pub mod integrations;
 pub mod mailbox;
+pub mod member_sign_in_reasons;
 pub mod persistence;
 pub mod process_manager;
+pub mod email_authorization;
 pub mod sms_authorization;
 pub mod projection;
 
@@ -25,6 +27,7 @@ pub use integrations::google::{FailClosedGoogleOwnershipVerifier, UnverifiedGbpO
 pub use integrations::payments::FailClosedPaymentGateway;
 pub use integrations::ovh_sms::OvhSmsClient;
 pub use sms_authorization::{AuthorizedSmsRecipient, SmsSendAuthorizer};
+pub use email_authorization::EmailSendAuthorizer;
 pub use integrations::supabase_sms_hook;
 pub use integrations::supabase_auth::{FailClosedIdentityService, SupabaseIdentityService};
 pub use integrations::delivery_gateway::CompositeDeliveryGateway;
@@ -41,7 +44,7 @@ pub use persistence::{
     PgEventStore, PgOrderConversationRepository, PgOrderRepository,
     PgPricingPolicyRepository,
     PgProspectionRepository, PgReclamationRepository, PgRefundQueueRepository,
-    PgRestaurantRepository, PgRiderRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
+    PgRestaurantRepository, PgRiderRepository, PgMemberRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
     PgUberSplitPolicyRepository,
 };
 pub use deletion::{DeletionEngine, DeletionEngineStatus};

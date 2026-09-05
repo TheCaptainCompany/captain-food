@@ -122,9 +122,10 @@ pub use auth::ActingRole;
 /// stay module-private — only `AuthContext::authorize` produces one).
 pub use auth::{
     resolve_read_scope, CustomerIdentityResolution, CustomerIdentitySource, IdentityResolution,
-    IdentitySources, LookupFailureReason, NoDatabaseRiderIdentity, PgCustomerIdentity,
-    PgRiderIdentity, ResolveCustomerIdentity, ResolveRiderIdentity, RiderIdentityResolution,
-    RiderIdentitySource,
+    IdentitySources, LookupFailureReason, MemberIdentityResolution, MemberIdentitySource,
+    NoDatabaseMemberIdentity, NoDatabaseRiderIdentity, PgCustomerIdentity, PgMemberIdentity,
+    PgRiderIdentity, ResolveCustomerIdentity, ResolveMemberIdentity, ResolveRiderIdentity,
+    RiderIdentityResolution, RiderIdentitySource,
 };
 /// The schema composition surface (build_schema/ReadDeps/WriteDeps), re-exported so integration tests
 /// (and the embedding `desktop` shell) can build the master schema over their own adapters.
@@ -343,6 +344,7 @@ pub struct AppState {
 /// `auth_provider` and the `/auth/refresh` route.
 fn identity_service_impl(
     send_guard: Option<Arc<infrastructure::SmsSendAuthorizer>>,
+    email_guard: Option<Arc<infrastructure::EmailSendAuthorizer>>,
 ) -> Arc<dyn application::generated::services::IdentityService> {
     match infrastructure::SupabaseIdentityService::from_env() {
         Some(adapter) => {
@@ -351,8 +353,15 @@ fn identity_service_impl(
             // authoritative wall is the `/auth/sms-hook` route, because that is where the euro is
             // actually spent; a guard missing HERE costs a provider round-trip and a vaguer refusal
             // message, never an unbounded bill.
-            match send_guard {
-                Some(guard) => Arc::new(adapter.with_send_guard(guard)),
+            let adapter = match send_guard {
+                Some(guard) => adapter.with_send_guard(guard),
+                None => adapter,
+            };
+            // The email guard (#639 part C step 6-ii) is UNLIKE the SMS one: this IS the
+            // authoritative wall (no separate hook path spends the euro for email), so a missing
+            // guard here means every send is genuinely unguarded, not merely un-shed early.
+            match email_guard {
+                Some(guard) => Arc::new(adapter.with_email_guard(guard)),
                 None => Arc::new(adapter),
             }
         }
@@ -404,6 +413,32 @@ pub(crate) fn sms_send_guard(
     ))
 }
 
+/// Build the email send-abuse wall (#639 part C step 6-ii, ADR-20260905-101349 §9) over the SAME
+/// shared Postgres counter as the SMS wall (`sms_send_quota`) -- the store is generic on the quota
+/// key, so this guard's `email:`-namespaced buckets never collide with the SMS wall's `phone:*` /
+/// `global:day` keys. The `sms_send_guard` shape, transposed.
+pub(crate) fn email_send_guard(
+    pool: &PgPool,
+    config: &generated::config::Config,
+) -> Arc<infrastructure::EmailSendAuthorizer> {
+    let policy = application::email_guard::EmailSendPolicy::from_config(
+        Some(config.email_max_sends_per_address_per_hour as i32),
+        Some(config.email_max_sends_per_address_per_day as i32),
+        Some(config.email_max_sends_per_day_global as i32),
+    );
+    tracing::info!(
+        binding = "email_send_guard",
+        per_address_hour = policy.max_per_address_per_hour,
+        per_address_day = policy.max_per_address_per_day,
+        global_day = policy.max_per_day_global,
+        "email send-abuse wall wired against the SHARED sms_send_quota counter (#639 part C step 6-ii)"
+    );
+    Arc::new(infrastructure::EmailSendAuthorizer::new(
+        policy,
+        Box::new(infrastructure::persistence::PgSmsQuotaStore::new(pool.clone())),
+    ))
+}
+
 /// The read/write dependency graph of the GraphQL surface, built over one pool — the ONE
 /// composition both the monolith `router()` and the `graphql-{scope}` subgraph bins (#385
 /// API-tier wiring, PROP-20260807-174246 D8) perform, extracted so a subgraph bin serves the
@@ -430,6 +465,9 @@ pub fn build_graphql_di(
     mailbox_nudges: &Arc<infrastructure::persistence::mailbox_store::MailboxNudges>,
     // #516: the OTP send guards, so the identity ACL can shed a doomed request with a typed reason.
     sms_guard: Option<Arc<infrastructure::SmsSendAuthorizer>>,
+    // #639 part C step 6-ii: the email send-abuse wall -- UNLIKE `sms_guard`, this IS the
+    // authoritative wall for `send_email_magic_link` (no separate hook path spends the euro).
+    email_guard: Option<Arc<infrastructure::EmailSendAuthorizer>>,
     // RSO-1: the service-window validity horizon (SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS), read
     // from the caller's Config ONCE — a parameter, so every bin passes its own configured value.
     service_window_horizon: graphql::service_clock::ServiceWindowHorizon,
@@ -525,7 +563,7 @@ pub fn build_graphql_di(
         // ACL adapter (#117) when SUPABASE_URL + PUBLISHABLE_KEY are set, else the
         // fail-closed stand-in (auth stays anonymous-only — the Stripe env-gate pattern).
         auth_provider: infrastructure::generated::service_bindings::identity_service(
-            || identity_service_impl(sms_guard.clone()),
+            || identity_service_impl(sms_guard.clone(), email_guard.clone()),
         )
         .expect("identity service binding (services.yaml)"),
         // The `payment` service resolved through the GENERATED topology binding
@@ -631,6 +669,9 @@ pub async fn router() -> Router {
     // the Postgres resolver over the `Rider` projection's `auth_ref` bridge.
     let mut rider_identity_source =
         auth::RiderIdentitySource::new(Arc::new(auth::NoDatabaseRiderIdentity));
+    // The MEMBER seam (#639 part C step 6-ii) has no claim path either, the SAME reasoning.
+    let mut member_identity_source =
+        auth::MemberIdentitySource::new(Arc::new(auth::NoDatabaseMemberIdentity));
     // Cookie-pickup parking (#112): the real Pg store when DB + AUTH_SESSION_KEY are set, else the
     // fail-closed no-op (parking succeeds, claiming yields nothing → no cookie, anonymous still works).
     let mut auth_sessions: Arc<dyn application::auth_sessions::AuthSessionStore> =
@@ -640,6 +681,12 @@ pub async fn router() -> Router {
     // meaningful is SHARED state in Postgres. With no database, `/auth/sms-hook` 503s rather than
     // sending unguarded: fail-closed, since an unguarded send path is the failure being prevented.
     let mut sms_guard: Option<Arc<infrastructure::SmsSendAuthorizer>> = None;
+    // The email send-abuse wall (#639 part C step 6-ii) — the SAME "Some only once a pool exists"
+    // posture as `sms_guard`: without a database there is no shared counter, so
+    // `send_email_magic_link` stays UNGUARDED rather than failing closed (this door has no
+    // separate hook-path wall the way SMS does, so "no pool" already means "no real send" via the
+    // fail-closed identity stand-in below).
+    let mut email_guard: Option<Arc<infrastructure::EmailSendAuthorizer>> = None;
     // `SUPPORT_CONTACT` (#639 part C step 2c-i; ADR-20260830-213135: required, NO default), resolved
     // ONCE here from the declared configuration and handed to the rider sign-in door as a value.
     // Empty = unset (development only — staging/production refuse to boot without it): the door
@@ -704,12 +751,14 @@ pub async fn router() -> Router {
                 // logic fork. Everything below this call is monolith-only hosting (workers,
                 // ingestors, SSR) that the bins re-home family by family.
                 sms_guard = Some(sms_send_guard(&pool, &config));
+                email_guard = Some(email_send_guard(&pool, &config));
                 let di = build_graphql_di(
                     &pool,
                     &event_bus,
                     &operation_status_bus,
                     &mailbox_nudges,
                     sms_guard.clone(),
+                    email_guard.clone(),
                     graphql::service_clock::ServiceWindowHorizon::from_seconds(
                         config.service_window_validity_horizon_seconds,
                     ),
@@ -735,6 +784,16 @@ pub async fn router() -> Router {
                     Arc::new(infrastructure::PgRiderRepository::new(pool.clone()));
                 rider_identity_source = auth::RiderIdentitySource::new(Arc::new(
                     auth::PgRiderIdentity::new(rider_repository.clone()),
+                ));
+                // #639 part C step 6-ii: the member sign-in door's bridge (`member` table) + the
+                // restaurant scope lookup (`scopemembership`) -- the SAME shared repository the
+                // command deps below reuse (vernon/evans: reuse the port, never re-derive it).
+                let member_repository: Arc<dyn application::queries::MemberIdentityRepository> =
+                    Arc::new(infrastructure::PgMemberRepository::new(pool.clone()));
+                let member_scopes: Arc<dyn application::queries::MemberRestaurantScopeRepository> =
+                    Arc::new(infrastructure::persistence::scope_membership_store::PgScopeMembershipRepository::new(pool.clone()));
+                member_identity_source = auth::MemberIdentitySource::new(Arc::new(
+                    auth::PgMemberIdentity::new(member_repository.clone(), member_scopes),
                 ));
                 // The HubRise connect flow (wired below) shares the restaurant read model.
                 let hubrise_restaurants = di.restaurants.clone();
@@ -969,7 +1028,7 @@ pub async fn router() -> Router {
                         prospection: Arc::new(PgProspectionRepository::new(pool.clone())),
                         catalogs: Arc::new(PgCatalogRepository::new(pool.clone())),
                         auth: infrastructure::generated::service_bindings::identity_service(
-                            || identity_service_impl(sms_guard.clone()),
+                            || identity_service_impl(sms_guard.clone(), email_guard.clone()),
                         )
                         .expect("identity service binding (services.yaml)"),
                         customers: Arc::new(PgCustomerRepository::new(pool.clone())),
@@ -978,6 +1037,8 @@ pub async fn router() -> Router {
                         // SAME bridge the request seam reads, and names the support route the
                         // declared configuration resolved once above.
                         riders: rider_repository.clone(),
+                        // #639 part C step 6-ii: the member sign-in door's SAME-shape bridge.
+                        members: member_repository.clone(),
                         support_contact: support_contact.clone(),
                         // The SAME conditional Stripe binding the resolver side and the saga runner
                         // use (#272 Runtime D1): the mailbox workers execute the payment-dependent
@@ -1041,6 +1102,8 @@ pub async fn router() -> Router {
                         // #639 part C step 6-i (ADR-20260905-101349 §6): the staff access grant
                         // door, the SAME resolved-once-here shape.
                         run_member_access_grant: config.run_member_access_grant,
+                        // #639 part C step 6-ii: the member sign-in door, the SAME shape.
+                        run_member_sign_in_door: config.run_member_sign_in_door,
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1083,6 +1146,12 @@ pub async fn router() -> Router {
                         "RUN_MEMBER_ACCESS_GRANT",
                         config.run_member_access_grant,
                     );
+                    // #639 part C step 6-ii, the same fleet-parity shape.
+                    telemetry::meters::runtime::declare_flag(
+                        "RUN_MEMBER_SIGN_IN_DOOR",
+                        config.run_member_sign_in_door,
+                    );
+                    telemetry::meters::member_sign_in::door_enforcing(config.run_member_sign_in_door);
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a
                     // sweep timer so idle actors leave memory on schedule (not only when
@@ -1484,7 +1553,7 @@ pub async fn router() -> Router {
     let auth_routes_state = auth_routes::AuthRoutesState {
         sessions: Some(auth_sessions.clone()),
         identity: infrastructure::generated::service_bindings::identity_service(|| {
-            identity_service_impl(sms_guard.clone())
+            identity_service_impl(sms_guard.clone(), email_guard.clone())
         })
         .expect("identity service binding (services.yaml)"),
         // The Supabase Send-SMS hook → OVH delivery (#118): both the OVH client and the hook secret
@@ -1531,7 +1600,11 @@ pub async fn router() -> Router {
     base.merge(graphql::routes::graphql_routes_with_socket_close_gate(
         schema,
         tenant_lookup.clone(),
-        auth::IdentitySources { customer: customer_identity_source, rider: rider_identity_source },
+        auth::IdentitySources {
+            customer: customer_identity_source,
+            rider: rider_identity_source,
+            member: member_identity_source,
+        },
         graphql::rider_socket::RunRiderRestrictionSocketClose(
             config.run_rider_restriction_socket_close,
         ),
