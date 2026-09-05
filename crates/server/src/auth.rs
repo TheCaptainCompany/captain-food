@@ -2556,6 +2556,35 @@ async fn resolve_rider_scope(
     (Principal { identity }, scope)
 }
 
+/// The outcome of [`current_rider_standing`] — a genuine three-way answer, never collapsed to
+/// `Option`: `NotFound` (no `Rider` row, or none projected yet) and `LookupFailed` (the read model
+/// could not be asked) are DIFFERENT facts a caller must tell apart (ADR-20260904-124600 §3: a
+/// lookup error never asserts a restriction).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiderStandingLookup {
+    Standing(domain::generated::scalars::RiderStanding),
+    NotFound,
+    LookupFailed,
+}
+
+/// The standing-by-id read (#639 part C step 5, ADR-20260905-065415 §4; ADR-20260904-124600 §3
+/// "one function, three callers"): given a rider's OWN id (never a subject — this is a
+/// POST-resolution re-check, not an initial bind), read the CURRENT standing straight from the
+/// `RiderRoster` read model. Built here, once, so the socket watcher's Lagged/Closed
+/// re-derivation (the caller landed in this record), the not-yet-built page-GET leg (#894) and any
+/// future per-request recheck never grow a second lookup (auth.rs is where the card says to find
+/// it — never a fourth copy). A bounded read-model Ask (vernon/dba), never a second grant.
+pub async fn current_rider_standing(
+    rider_id: domain::generated::scalars::RiderId,
+    roster: &dyn application::queries::RiderRosterReadRepository,
+) -> RiderStandingLookup {
+    match roster.by_id(rider_id).await {
+        Ok(Some(row)) => RiderStandingLookup::Standing(row.standing),
+        Ok(None) => RiderStandingLookup::NotFound,
+        Err(_) => RiderStandingLookup::LookupFailed,
+    }
+}
+
 /// [`resolve_identity_scope`] under the contract's `auth.read_scope` span (ONE per request),
 /// stamped with the request's correlation id. This is the transport entry point; the function
 /// above resolves the CUSTOMER-Postgres arm, delegating everything else to [`read_scope`], the pure

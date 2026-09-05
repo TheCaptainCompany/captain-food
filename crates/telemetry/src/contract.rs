@@ -350,6 +350,25 @@ pub mod metric {
     /// no credential. `claim_conflict` is the one-subject-one-role refusal (PROP-20260831-180622
     /// Concern): fail closed, never an overwrite.
     pub const RIDER_CLAIM_STAMP_FAILED_TOTAL: &str = "rider_claim_stamp_failed_total";
+    /// `rider-restriction` contract (#639 part C step 5, ADR-20260905-065415 §8), behind
+    /// `RUN_RIDER_RESTRICTION_SOCKET_CLOSE`: the socket watcher's own outcome, attribute `outcome`
+    /// (closed | no_open_socket | missed). NO `rider_id` label — the nested INFO event
+    /// `rider.restricted.socket_terminated` carries it.
+    pub const RIDER_RESTRICTION_SOCKET_CLOSE_TOTAL: &str = "rider_restriction_socket_close_total";
+    /// `rider-restriction` contract (step 5): t0 = the `EventBus` publish instant, never
+    /// `occurred_at` (cross-host skew post-#358) — time from the fact landing on this process's bus
+    /// to the Close frame entering the transport sink.
+    pub const RIDER_RESTRICTION_SOCKET_CLOSE_LATENCY_MS: &str =
+        "rider_restriction_socket_close_latency_ms";
+    /// `rider-restriction` contract (step 5): a Lagged/Closed re-derivation could not complete after
+    /// bounded retry (ADR-20260904-124600 §3: a lookup error never terminates) — the socket STAYS
+    /// open. Attribute `reason` (lookup_failed today).
+    pub const RIDER_RESTRICTION_SOCKET_CLOSE_MISSED_TOTAL: &str =
+        "rider_restriction_socket_close_missed_total";
+    /// `rider-restriction` contract (step 5): THE WATCHER'S OWN LIVENESS PROOF — the
+    /// `otp_send_guard_enforcing` inverted dead-man precedent. 1 while at least one watcher task is
+    /// alive in this process, 0 the instant none is; re-asserted every export cycle.
+    pub const RIDER_RESTRICTION_SOCKET_WATCH_LIVE: &str = "rider_restriction_socket_watch_live";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

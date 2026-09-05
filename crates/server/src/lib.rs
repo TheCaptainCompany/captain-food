@@ -98,6 +98,13 @@ pub use graphql::tenant as graphql_tenant;
 /// `graphql_routes` production runs. Every cart test before it injected `ReadScope` by hand, which
 /// is exactly why a dead auth leg could survive a green suite.
 pub use graphql::routes::graphql_routes;
+/// #639 part C step 5 (ADR-20260905-065415): [`graphql_routes`] with the socket-close gate as an
+/// explicit parameter — the composition root and the socket-close DB-gated test both need it ON;
+/// every other existing caller keeps using [`graphql_routes`] (gate OFF, unchanged).
+pub use graphql::routes::graphql_routes_with_socket_close_gate;
+/// #639 part C step 5: the gate newtype + the connection-local standing cell, re-exported so the
+/// socket-close DB-gated test can build a real WS server with the gate ON.
+pub use graphql::rider_socket as graphql_rider_socket;
 /// The JWT verifier the edge authorizes through — the PATH-level test builds one over a loopback
 /// JWKS, so its request is authenticated the way a browser's is.
 pub use auth::AuthContext;
@@ -1490,10 +1497,20 @@ pub async fn router() -> Router {
         ),
     };
 
-    base.merge(graphql::routes::graphql_routes(
+    // #639 part C step 5 (ADR-20260905-065415 §6): fleet-parity evidence for the socket-close
+    // gate, the `RUN_RIDER_RESTRICTION_DOOR` precedent — a rolling deploy in which half the fleet
+    // closes a restricted rider's socket and half does not would otherwise be invisible.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_RIDER_RESTRICTION_SOCKET_CLOSE",
+        config.run_rider_restriction_socket_close,
+    );
+    base.merge(graphql::routes::graphql_routes_with_socket_close_gate(
         schema,
         tenant_lookup.clone(),
         auth::IdentitySources { customer: customer_identity_source, rider: rider_identity_source },
+        graphql::rider_socket::RunRiderRestrictionSocketClose(
+            config.run_rider_restriction_socket_close,
+        ),
     ))
         // Internal trigger (ADR-0045): the CI ingestion pings this to wake the SIRENE sync worker.
         .merge(graphql::routes::sirene_internal_routes(sirene_worker))

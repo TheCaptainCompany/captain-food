@@ -802,6 +802,74 @@ pub mod rider_restriction {
     pub fn holding_job_age(age_seconds: i64) {
         holding_job_age_gauge().record(age_seconds, &[]);
     }
+
+    // ─── #639 part C step 5 (ADR-20260905-065415 §8): the socket-close contract ─────────────────
+
+    fn socket_close_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::RIDER_RESTRICTION_SOCKET_CLOSE_TOTAL).build())
+    }
+
+    fn socket_close_latency_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter()
+                .f64_histogram(metric::RIDER_RESTRICTION_SOCKET_CLOSE_LATENCY_MS)
+                .with_unit("ms")
+                .build()
+        })
+    }
+
+    fn socket_close_missed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> =
+            OnceLock::new();
+        C.get_or_init(|| {
+            meter().u64_counter(metric::RIDER_RESTRICTION_SOCKET_CLOSE_MISSED_TOTAL).build()
+        })
+    }
+
+    /// `rider_restriction_socket_close_total{outcome}` — `outcome` bounded: closed |
+    /// no_open_socket | missed. NO `rider_id` label.
+    pub fn socket_close(outcome: &str) {
+        socket_close_counter().add(1, &[KeyValue::new("outcome", outcome.to_string())]);
+    }
+
+    /// `rider_restriction_socket_close_latency_ms` — recorded only on the `closed` outcome; t0 is
+    /// the `EventBus` publish instant (never `occurred_at`).
+    pub fn socket_close_latency_ms(latency_ms: f64) {
+        socket_close_latency_histogram().record(latency_ms, &[]);
+    }
+
+    /// `rider_restriction_socket_close_missed_total{reason}` — a Lagged/Closed re-derivation could
+    /// not complete after bounded retry; the socket stayed open (ADR-20260904-124600 §3).
+    pub fn socket_close_missed(reason: &str) {
+        socket_close_missed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// The watcher registry's live count, re-read by the gauge callback on every export cycle.
+    static WATCH_LIVE_COUNT: AtomicI64 = AtomicI64::new(0);
+
+    fn watch_live_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::RIDER_RESTRICTION_SOCKET_WATCH_LIVE)
+                .with_callback(|observer| {
+                    let alive = WATCH_LIVE_COUNT.load(Ordering::Relaxed) > 0;
+                    observer.observe(i64::from(alive), &[]);
+                })
+                .build()
+        })
+    }
+
+    /// Declare one more (`delta = 1`) or one fewer (`delta = -1`) live watcher task — call at spawn
+    /// and at exit. The `otp_send_guard_enforcing` inverted dead-man precedent: re-asserted every
+    /// export cycle by the callback, so a process that dies stops contributing with no timer of our
+    /// own, and "zero closes" can never be confused with "the watcher never spawns".
+    pub fn watch_live_delta(delta: i64) {
+        WATCH_LIVE_COUNT.fetch_add(delta, Ordering::Relaxed);
+        let _ = watch_live_gauge();
+    }
 }
 
 /// Technical metrics for the `customer-identification` contract (#437).

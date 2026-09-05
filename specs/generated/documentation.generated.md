@@ -12145,7 +12145,7 @@ _criticality: **high**_
 | --- | --- | --- | --- | --- |
 | `rider.standing.denied` | `INTERNAL` | ⬜ | — | `business.operation`*, `business.correlation_id`* |
 
-- **Metrics**: `rider_restricted_denied_total` _(counter)_, `rider_standing_lag_positions` _(gauge)_, `rider_restricted_holding_job_age_seconds` _(gauge)_ · **Business metrics**: —
+- **Metrics**: `rider_restricted_denied_total` _(counter)_, `rider_standing_lag_positions` _(gauge)_, `rider_restricted_holding_job_age_seconds` _(gauge)_, `rider_restriction_socket_close_total` _(counter)_, `rider_restriction_socket_close_latency_ms` _(histogram)_, `rider_restriction_socket_close_missed_total` _(counter)_, `rider_restriction_socket_watch_live` _(gauge)_ · **Business metrics**: —
 - **Status rules**: success ⇐ spans []
 - **SLOs**: p95 ≤ 15ms · p99 ≤ 50ms · error rate ≤ 0.1%
 

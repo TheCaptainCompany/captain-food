@@ -674,8 +674,11 @@ rider-identity:
 # gateway boundary, the first guard-level emitter (today a plain FORBIDDEN emits nothing) -- and the
 # projection lag gauge, because while the Rider projector lags a restricted rider is still GRANTED
 # and "immediately" is a measured claim only with this gauge. An already-open WS subscription NEVER
-# fires the counter -- standing resolves once at connection_init (step 5's problem, documented not
-# fixed).
+# fires the DENIAL counter -- standing resolves once at connection_init; step 5 (ADR-20260905-065415)
+# closes that gap for the RIDER socket specifically -- a connection-local standing cell the guard
+# reads first, and the socket is TERMINATED (4403) the moment a RESTRICTED fact lands, behind
+# RUN_RIDER_RESTRICTION_SOCKET_CLOSE (default off, ships dark). The new metrics below are that
+# closure's own contract, additive to this file's existing section.
 # =====================================================================
 rider-restriction:
   feature: rider-restriction
@@ -768,6 +771,40 @@ rider-restriction:
         - max_age_seconds: 1800
           derived_from:
             - { $ref: 'configuration.yaml#/keys/RIDER_RESTRICTED_CUSTODY_MAX_AGE_SECONDS' }
+
+    # #639 part C step 5 (ADR-20260905-065415 §8), behind RUN_RIDER_RESTRICTION_SOCKET_CLOSE.
+    # `outcome` bounded: closed (the 4403 close was pushed, whether triggered by the live fact
+    # match or by a Lagged/Closed re-derivation that confirmed RESTRICTED) | no_open_socket
+    # (declared, RESERVED — a cross-process "this rider had no live watcher anywhere" fact needs
+    # the BUS-1/#385 cross-process bus this slice does not carry; unreachable while the EventBus is
+    # in-process) | missed (a Lagged/Closed re-derivation could not complete after bounded retry,
+    # ADR-124600 §3 — the socket stays open). NO `rider_id` label — the nested INFO event below
+    # carries it.
+    - { name: "rider_restriction_socket_close_total", type: counter, attributes: ["outcome"] }
+    # t0 = the EventBus publish instant (`EventBus::subscribe_with_publish_instant`), never
+    # `occurred_at` (cross-host skew post-#358) — the time from the fact landing on this process's
+    # bus to the Close frame being pushed into the transport sink. No attributes: a distribution
+    # metric, not a per-outcome one. Recorded ONLY when the close was triggered by the live fact
+    # match — a Lagged/Closed re-derivation has no bus-publish instant to measure from (the fact
+    # that caused it may be arbitrarily old by the time the gap is noticed), so that `closed`
+    # sample carries no latency observation.
+    - { name: "rider_restriction_socket_close_latency_ms", type: histogram, attributes: [] }
+    # `reason` bounded: lookup_failed (the read-model Ask errored after bounded retry) — the ONE
+    # value today; declared with an attribute for the same reason `rider_claim_stamp_failed_total`
+    # is, so a second reason never needs a second counter.
+    - { name: "rider_restriction_socket_close_missed_total", type: counter, attributes: ["reason"] }
+    # THE WATCHER'S OWN LIVENESS PROOF (the `otp_send_guard_enforcing` inverted dead-man precedent):
+    # 1 while at least one rider-restriction watcher task is alive in this process, 0 the instant
+    # none is — re-asserted on every export cycle (an ObservableGauge, never a synchronous one), so
+    # "zero closes" and "the watcher never spawns" stay distinguishable. A second instance existing
+    # at all is BUS-1's (the EventBus is in-process, ADR §7); this gauge is what would notice one
+    # going silent.
+    - { name: "rider_restriction_socket_watch_live", type: gauge, attributes: [] }
+    # NESTED INFO EVENT (prose — this grammar has no `events:` key, the `rider.restricted.
+    # holding_job` precedent above): `rider.restricted.socket_terminated`, emitted at the same
+    # point as the `closed` outcome above, carrying the FACT's correlation_id (the RiderRestricted
+    # command's) and the CONNECTION's (`request.correlation_id`) — two distinct ids, both joinable,
+    # never merged into one. No `rider_id` label on the counter; this event is where it rides.
 
   status_rules:
     success:

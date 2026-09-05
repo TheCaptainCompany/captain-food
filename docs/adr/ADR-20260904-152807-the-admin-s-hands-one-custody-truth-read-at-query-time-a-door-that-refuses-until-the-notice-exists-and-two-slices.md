@@ -248,3 +248,9 @@ Briefing before any code; **no lens output is legal advice or clearance**.
 - **architect** — the three card corrections; (a) final-vision-first; join at read; two slices; no
   open PR on `system.yaml`; #654 as slice B's merge fence; nothing outranks 4-iii; the gate as a
   mechanism.
+
+**Addendum (step 5, 2026-09-05):** the counsel packet's Q6–Q8 gains a ninth question, posed by
+[ADR-20260905-065415](ADR-20260905-065415-the-restriction-fact-terminates-the-rider-s-socket-a-connection-local-standing-read-inside-the-guard-and-one-writer-to-the-transport.md)
+§11 — *does abrupt loss of the working channel before the statement of reasons is displayed
+constitute the decision taking effect without its accompanying statement under Art. 11(3)?* — not
+answered here, and no lens output above is legal advice or clearance for it either.

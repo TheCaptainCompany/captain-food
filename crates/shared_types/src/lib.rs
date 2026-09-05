@@ -16,6 +16,20 @@ use serde::{Deserialize, Serialize};
 /// rejection.
 pub const RIDER_RESTRICTED: &str = "RIDER_RESTRICTED";
 
+/// The graphql-transport-ws close code the restriction fact terminates a rider's socket with
+/// (#639 part C step 5, ADR-20260905-065415 §3): the protocol's OWN `Forbidden` code, which
+/// async-graphql never emits itself, so a client can tell "the platform closed this on purpose"
+/// from an ordinary transport drop. Named beside [`RIDER_RESTRICTED`] because both are the ONE
+/// signal a restricted rider's socket carries — the reason string is deliberately the SAME token,
+/// never a hand-copied duplicate a future edit could drift from.
+pub const RIDER_RESTRICTED_SOCKET_CLOSE_CODE: u16 = 4403;
+
+/// The close reason: a short English token, never a French sentence and never legal wording (the
+/// legal-specialist condition, ADR-20260905-065415 §3) — the statement of grounds lives on the
+/// `/restricted` screen (ADR-20260904-124600 §4), not on a close frame most clients never surface
+/// to a human. Reuses [`RIDER_RESTRICTED`] verbatim rather than a second literal that could drift.
+pub const RIDER_RESTRICTED_SOCKET_CLOSE_REASON: &str = RIDER_RESTRICTED;
+
 /// Minimal health/readiness DTO — a placeholder proving the crate compiles and is consumable downstream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HealthDto {

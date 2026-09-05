@@ -236,6 +236,8 @@ pub struct Config {
     pub run_process_managers: bool,
     /// DEFAULT `true`. Push wake for the drain loops (ADR-20260802-200416): one dedicated LISTEN connection turns each committed append's pg_notify into an immediate drain of the projector AND the saga runner, replacing the 1.5 s poll as the primary signal (~70,900 idle queries/hour -> ~120). OFF, both loops fall back to unassisted 1.5 s polling — correct but bandwidth-expensive; the escape hatch for a deployment behind a TRANSACTION-mode pooler, which silently cannot carry LISTEN (session pooler required, e.g. Supabase port 5432).
     pub run_event_push: bool,
+    /// DEFAULT `false`. The restriction fact terminates the rider's socket (#639 part C step 5, ADR-20260905-065415 §6). ON, a RIDER connection's `connection_init` spawns the connection-local watcher (matching this rider's OWN `RiderRestricted` fact on the in-process EventBus), seeds the connection-local standing cell `StandingGuard` reads first, and pushes a 4403 Close frame the moment the fact lands or a re-derivation confirms RESTRICTED. OFF, no watcher is spawned, no close is ever sent, and `StandingGuard` reads `ReadScope` exactly as before this record — the one-writer WS sink refactor itself (ADR §3) is STRUCTURAL and ALWAYS ON, unaffected by this key. Ships DARK (production/staging `"false"`): the restrict door itself is pinned off (`RUN_RIDER_RESTRICTION_DOOR`) and the rider population is zero (ADR-20260817-105844), so this key protects nothing today; flipping it is a SEPARATE, one-line ADR after a smoke, never bundled with this key's introduction.
+    pub run_rider_restriction_socket_close: bool,
     /// DEFAULT `true`. Push wake for the actor mailbox (PROP-20260802-223522 D1/D2, ADR-20260802-224532): the PgMailbox door raises pg_notify('inbound_messages', actor_type) inside every enqueue transaction, and one dedicated LISTEN connection per consuming process turns it into an immediate nudge of that actor type's worker — including ACROSS processes, so a standalone adapter's recorded fact wakes the monolith's worker on commit instead of waiting out the heartbeat (up to 10 s on the payment path). While push is confirmed live the full drain pass stretches to the 60 s safety net; lease renewal (beat) stays on MAILBOX_HEARTBEAT_SECONDS unconditionally. OFF — or whenever the listener is down — workers fall back to full passes at the heartbeat cadence: exactly the pre-push behaviour, never worse. Liveness is CANARY-VERIFIED, not assumed: the listener notifies itself on the same channel every canary interval and drops to down (mailbox_push_down_total{reason}) when the echo does not come back within the next interval — this catches the transaction-mode pooler's failure mode, where LISTEN registers but silently delivers nothing (session pooler required, e.g. Supabase port 5432 — same constraint as RUN_EVENT_PUSH).
     pub run_mailbox_push: bool,
     /// DEFAULT `5`. Poison bound (PROP-20260802-223522 D4): a delivery whose completion transaction fails with an infrastructure error (the status flip aborts with it, so nothing is recorded on the row) increments inbound_messages.attempts OUTSIDE the failed transaction; at this cap the row flips to terminal FAILED with the error recorded and the lane's head-of-line unblocks. Counts only actual delivery attempts — a lane that cannot be claimed consumes none, and re-attempts back off EXPONENTIALLY (ADR-20260803-002712 Q2): attempt N schedules the next try base * 2^(N-1) seconds out, base = the heartbeat (10s -> 20s -> 40s -> 80s -> 160s, ~5 min to terminal at cap 5), because push-driven retries have no natural cadence: without pacing, a nudge storm at Friday peak could burn the whole cap on a seconds-long transient blip (review #314 MAJOR-3). 0 = no cap: the pre-#313 infinite-retry behaviour, kept as the rollback lever. Handler REJECTED/FAILED verdicts are terminal on the first attempt and never involve this cap. A poison flip is an OPERATOR EVENT: counted (mailbox_poison_failed_total{actor_type}) and surfaced per lane on the ADMIN mailboxLanes supervision query (retryingAttempts/poisoned).
@@ -387,6 +389,10 @@ impl Config {
             .or_else(|| baked("RUN_EVENT_PUSH", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_EVENT_PUSH", &v, true))
             .unwrap_or(true);
+        let run_rider_restriction_socket_close = raw("RUN_RIDER_RESTRICTION_SOCKET_CLOSE")
+            .or_else(|| baked("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", &v, false))
+            .unwrap_or(false);
         let run_mailbox_push = raw("RUN_MAILBOX_PUSH")
             .or_else(|| baked("RUN_MAILBOX_PUSH", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_MAILBOX_PUSH", &v, true))
@@ -504,6 +510,7 @@ impl Config {
                 run_projector,
                 run_process_managers,
                 run_event_push,
+                run_rider_restriction_socket_close,
                 run_mailbox_push,
                 mailbox_max_delivery_attempts,
                 run_deletion_engine,
@@ -573,6 +580,7 @@ impl Config {
         out.push_str(&format!("  RUN_PROJECTOR              = {}\n", self.run_projector));
         out.push_str(&format!("  RUN_PROCESS_MANAGERS       = {}\n", self.run_process_managers));
         out.push_str(&format!("  RUN_EVENT_PUSH             = {}\n", self.run_event_push));
+        out.push_str(&format!("  RUN_RIDER_RESTRICTION_SOCKET_CLOSE = {}\n", self.run_rider_restriction_socket_close));
         out.push_str(&format!("  RUN_MAILBOX_PUSH           = {}\n", self.run_mailbox_push));
         out.push_str(&format!("  MAILBOX_MAX_DELIVERY_ATTEMPTS = {}\n", self.mailbox_max_delivery_attempts));
         out.push_str(&format!("  RUN_DELETION_ENGINE        = {}\n", self.run_deletion_engine));
@@ -599,7 +607,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 48;
+pub const KEY_COUNT: usize = 49;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -631,6 +639,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "RUN_PROJECTOR",
     "RUN_PROCESS_MANAGERS",
     "RUN_EVENT_PUSH",
+    "RUN_RIDER_RESTRICTION_SOCKET_CLOSE",
     "RUN_MAILBOX_PUSH",
     "MAILBOX_MAX_DELIVERY_ATTEMPTS",
     "RUN_DELETION_ENGINE",
@@ -679,6 +688,8 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_PROCESS_MANAGERS", "staging", "true"),
     ("RUN_EVENT_PUSH", "production", "true"),
     ("RUN_EVENT_PUSH", "staging", "true"),
+    ("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", "production", "false"),
+    ("RUN_RIDER_RESTRICTION_SOCKET_CLOSE", "staging", "false"),
     ("RUN_MAILBOX_PUSH", "production", "true"),
     ("RUN_MAILBOX_PUSH", "staging", "true"),
     ("RUN_RETENTION_SWEEP", "production", "true"),

@@ -153,10 +153,19 @@ impl Guard for StandingGuard {
     async fn check(&self, ctx: &Context<'_>) -> Result<()> {
         use application::queries::ReadScope;
         let scope = ctx.data_opt::<ReadScope>();
-        let ReadScope::Rider { id, standing } = scope.unwrap_or(&ReadScope::Public) else {
+        let ReadScope::Rider { id, standing: scope_standing } = scope.unwrap_or(&ReadScope::Public) else {
             return Ok(());
         };
-        if *standing == domain::generated::scalars::RiderStanding::ACTIVE {
+        // #639 part C step 5 (ADR-20260905-065415 §2): the connection-local standing cell, when
+        // one is present (RIDER, gate ON), reads FIRST — per-yield freshness with zero I/O,
+        // push-fed by the socket watcher; `ReadScope` is the fallback (gate OFF, or a transport
+        // with no cell at all, e.g. a plain HTTP request). ONE emitted place closes queries,
+        // mutations and subscriptions alike.
+        let standing = ctx
+            .data_opt::<tokio::sync::watch::Receiver<domain::generated::scalars::RiderStanding>>()
+            .map(|cell| *cell.borrow())
+            .unwrap_or(*scope_standing);
+        if standing == domain::generated::scalars::RiderStanding::ACTIVE {
             return Ok(());
         }
         if self.carve.contains(&RequestRole::Rider) {
@@ -194,5 +203,77 @@ impl Guard for StandingGuard {
             e.set("code", "FORBIDDEN");
             e.set("reason", shared_types::RIDER_RESTRICTED);
         }))
+    }
+}
+
+#[cfg(test)]
+mod standing_guard_cell_tests {
+    use super::*;
+    use application::queries::ReadScope;
+    use domain::generated::scalars::{RiderId, RiderStanding};
+
+    fn acting(role: RequestRole) -> crate::auth::ActingRole {
+        crate::auth::Principal::role_binding(role, "test-subject".to_string(), Some(uuid::Uuid::from_u128(0x0505)))
+            .acting_role(role)
+    }
+
+    /// #639 part C step 5 (ADR-20260905-065415 §2), the mutant M4 the checkpoint requires red
+    /// ("the standing cell read once at connect instead of live"): `ReadScope::Rider.standing`
+    /// stays ACTIVE for the connection's WHOLE life (exactly as the real WS transport freezes it
+    /// at `connection_init`) while the connection-local cell — the SAME `RiderStandingCell` type
+    /// `rider_socket::watch` uses — flips to RESTRICTED mid-connection. `StandingGuard` must read
+    /// the CELL first: the guard admits `acceptDelivery` before `restrict()`, and refuses it after,
+    /// on the IDENTICAL frozen `ReadScope`. Deterministic and race-free (unlike a live WS/watcher
+    /// integration test, which the watcher — an in-process broadcast wakeup — reliably wins against
+    /// any real network round trip, so it cannot observe this property reliably; that end-to-end
+    /// race is documented in `rider_restriction_closes_the_socket.rs`).
+    #[tokio::test]
+    async fn the_cell_refuses_before_read_scope_ever_changes() {
+        let schema = crate::graphql::schema::build_schema(None, None, None);
+        let rider_id = RiderId(uuid::Uuid::from_u128(0x6394_5A));
+        // Frozen for the WHOLE test — never mutated, exactly like the real WS connection's
+        // `ReadScope::Rider` copy baked into `Data` at `connection_init`.
+        let frozen_active = ReadScope::Rider { id: rider_id, standing: RiderStanding::ACTIVE };
+        let (cell, standing_rx) = super::super::rider_socket::RiderStandingCell::seeded(RiderStanding::ACTIVE);
+
+        let accept = || {
+            format!(
+                r#"mutation {{ acceptDelivery(input: {{ deliveryJobId: "{}" }}) {{ messageId }} }}"#,
+                uuid::Uuid::new_v4()
+            )
+        };
+
+        // BEFORE `restrict()`: admitted (whatever fails past the guard is unrelated to standing).
+        let resp = schema
+            .execute(
+                async_graphql::Request::new(accept())
+                    .data(acting(RequestRole::Rider))
+                    .data(frozen_active.clone())
+                    .data(standing_rx.clone()),
+            )
+            .await;
+        let denied_before = resp.errors.iter().any(|e| e.extensions.as_ref().is_some_and(|ext| {
+            ext.get("reason").is_some_and(|r| r.to_string().contains("RIDER_RESTRICTED"))
+        }));
+        assert!(!denied_before, "ACTIVE cell must admit: {:?}", resp.errors);
+
+        // The fact lands on the CELL — `ReadScope` (`frozen_active`) is NEVER touched again.
+        cell.restrict();
+
+        // AFTER `restrict()`, same frozen ReadScope: refused. Under mutant M4 (the guard reading
+        // `ctx.data_opt::<ReadScope>()`'s stale copy, or ignoring the cell entirely) this assertion
+        // reds, because `frozen_active.standing` is still, and forever, `ACTIVE`.
+        let resp = schema
+            .execute(
+                async_graphql::Request::new(accept())
+                    .data(acting(RequestRole::Rider))
+                    .data(frozen_active)
+                    .data(standing_rx),
+            )
+            .await;
+        let denied_after = resp.errors.iter().any(|e| {
+            e.extensions.as_ref().is_some_and(|ext| ext.get("reason").is_some_and(|r| r.to_string().contains("RIDER_RESTRICTED")))
+        });
+        assert!(denied_after, "the CELL must refuse even though ReadScope stayed ACTIVE: {:?}", resp.errors);
     }
 }

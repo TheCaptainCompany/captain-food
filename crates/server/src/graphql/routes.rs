@@ -49,6 +49,9 @@ pub struct GraphqlState {
     /// step 2b) domain identity come from for THIS request — resolved ONCE at startup/config-load
     /// and cloned into every request's state; `resolve_read_scope` never falls back per request.
     identity: crate::auth::IdentitySources,
+    /// #639 part C step 5 (ADR-20260905-065415 §6): `RUN_RIDER_RESTRICTION_SOCKET_CLOSE`, resolved
+    /// ONCE at the composition root — the route never reads the environment.
+    socket_close: super::rider_socket::RunRiderRestrictionSocketClose,
 }
 
 /// Mount `/{role}/graphql` for the seven roles (unknown role segments 404). Returns a `Router<()>` (the
@@ -58,10 +61,30 @@ pub struct GraphqlState {
 /// `CustomerIdentitySource::Claim` for the default behaviour, `Postgres(..)` once
 /// `RESOLVE_CUSTOMER_IDENTITY_FROM_POSTGRES` is set) AND the RIDER seam, which has no choice to
 /// make — it is Postgres or nothing (#639 part C step 2b).
+///
+/// The rider-restriction socket-close gate defaults OFF (matching production/staging deploy) —
+/// callers that need it ON (the composition root; the socket-close test) use
+/// [`graphql_routes_with_socket_close_gate`] instead, so every EXISTING call site (subgraph bins,
+/// the scripted-seam test fixtures) keeps compiling unchanged.
 pub fn graphql_routes(
     schema: CaptainSchema,
     tenants: crate::hosts::TenantLookup,
     identity: crate::auth::IdentitySources,
+) -> Router {
+    graphql_routes_with_socket_close_gate(
+        schema,
+        tenants,
+        identity,
+        super::rider_socket::RunRiderRestrictionSocketClose(false),
+    )
+}
+
+/// [`graphql_routes`] with the socket-close gate as an explicit parameter (#639 part C step 5).
+pub fn graphql_routes_with_socket_close_gate(
+    schema: CaptainSchema,
+    tenants: crate::hosts::TenantLookup,
+    identity: crate::auth::IdentitySources,
+    socket_close: super::rider_socket::RunRiderRestrictionSocketClose,
 ) -> Router {
     Router::new()
         .route("/{role}/graphql", get(graphql_get).post(graphql_handler))
@@ -74,7 +97,7 @@ pub fn graphql_routes(
         // Convenience: bare paths redirect to the PUBLIC role (307 preserves method/body for POST).
         .route("/graphql", any(|| async { Redirect::temporary("/public/graphql") }))
         .route("/voyager", any(|| async { Redirect::temporary("/public/voyager") }))
-        .with_state(GraphqlState { schema, tenants, identity })
+        .with_state(GraphqlState { schema, tenants, identity, socket_close })
         .layer(axum::middleware::map_response(private_no_store))
 }
 
@@ -151,7 +174,8 @@ async fn graphql_handler(
     headers: HeaderMap,
     req: GraphQLRequest,
 ) -> Response {
-    let GraphqlState { schema, tenants, identity } = state;
+    // `socket_close` is the WS leg's gate only — POST never touches it.
+    let GraphqlState { schema, tenants, identity, socket_close: _ } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -301,7 +325,7 @@ async fn graphql_get(
     Path(role_seg): Path<String>,
     req: Request,
 ) -> Response {
-    let GraphqlState { schema, tenants, identity } = state;
+    let GraphqlState { schema, tenants, identity, socket_close } = state;
     let Some(role) = RequestRole::from_segment(&role_seg) else {
         return (StatusCode::NOT_FOUND, "unknown role path").into_response();
     };
@@ -323,8 +347,43 @@ async fn graphql_get(
         )
         .into_response();
     };
-    upgrade.protocols(ALL_WEBSOCKET_PROTOCOLS).on_upgrade(move |stream| async move {
-        GraphQLWebSocket::new(stream, schema, protocol)
+    upgrade.protocols(ALL_WEBSOCKET_PROTOCOLS).on_upgrade(move |socket| async move {
+        use futures::{SinkExt as _, StreamExt as _};
+
+        // #639 part C step 5 §3 (ADR-20260905-065415, STRUCTURAL — every WS connection of every
+        // role, ungated): an `mpsc::Sender<Message>` stands in for the real `SplitSink`, and this
+        // ONE forwarder task is the ONLY thing that ever touches it — exactly one writer to the
+        // transport, ordered. The rider-restriction watcher (spawned below, gated) shares the same
+        // channel: whichever of the two pushes a frame, the forwarder is what writes it.
+        let (real_sink, real_stream) = socket.split();
+        let (close_tx, mut close_rx) = futures::channel::mpsc::channel::<axum::extract::ws::Message>(16);
+        let forwarder = tokio::spawn(async move {
+            let mut real_sink = real_sink;
+            while let Some(msg) = close_rx.next().await {
+                if real_sink.send(msg).await.is_err() {
+                    break;
+                }
+            }
+            let _ = real_sink.close().await;
+        });
+
+        // §1 (young): subscribe BEFORE resolving who is connecting — a fact appended between
+        // resolve and subscribe must not be lost. Gate OFF skips this (and everything below)
+        // entirely: no watcher, no close, zero added footprint, matching production/staging.
+        let mut fact_rx = if socket_close.0 {
+            schema.data::<infrastructure::EventBus>().map(|bus| bus.subscribe_with_publish_instant())
+        } else {
+            None
+        };
+        let watcher_schema = schema.clone();
+        let watcher_close_tx = close_tx.clone();
+        // Set once, iff the watcher spawns — so it can be aborted with the connection (vernon: no
+        // leaked receiver per dead socket) rather than outliving `.serve()`.
+        let watcher_handle: Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let watcher_handle_for_init = watcher_handle.clone();
+
+        GraphQLWebSocket::new_with_pair(close_tx, real_stream, schema, protocol)
             .on_connection_init(move |payload| async move {
                 let headers = ws_auth_headers(headers, &payload);
                 // One correlation id per CONNECTION here (the socket is the request): every
@@ -354,6 +413,35 @@ async fn graphql_get(
                 // element of the shared `authorize_and_resolve_scope` result.
                 data.insert(acting);
                 data.insert(correlation);
+
+                // #639 part C step 5 §2/§6: the connection-local standing cell + the watcher —
+                // RIDER + gate ON only. Equality on the connection's OWN rider id only (security,
+                // all lenses) is `rider_socket::watch`'s job, not this closure's.
+                if socket_close.0 {
+                    if let application::queries::ReadScope::Rider { id, standing } = &scope {
+                        if let (Some(fact_rx), Some(roster)) = (
+                            fact_rx.take(),
+                            watcher_schema
+                                .data::<Arc<dyn application::queries::RiderRosterReadRepository>>()
+                                .cloned(),
+                        ) {
+                            let (cell, standing_rx) =
+                                super::rider_socket::RiderStandingCell::seeded(*standing);
+                            data.insert(standing_rx);
+                            let handle = tokio::spawn(super::rider_socket::watch(
+                                fact_rx,
+                                *id,
+                                cell,
+                                watcher_close_tx.clone(),
+                                roster,
+                                correlation.0,
+                            ));
+                            *watcher_handle_for_init.lock().unwrap_or_else(|e| e.into_inner()) =
+                                Some(handle);
+                        }
+                    }
+                }
+
                 // Deliberately NO `RequestNow` here (RSO-1): a socket lives for hours, so a
                 // connection-scoped clock would serve every later operation a stale "now". On
                 // this transport "the request" is each operation, and `service_clock::evaluation`
@@ -375,7 +463,14 @@ async fn graphql_get(
                 Ok(data)
             })
             .serve()
-            .await
+            .await;
+
+        // The connection ended (however it ended): the watcher, if one was ever spawned, ends
+        // with it — never leaked past the socket it watched for (vernon).
+        if let Some(handle) = watcher_handle.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            handle.abort();
+        }
+        let _ = forwarder.await;
     })
 }
 
