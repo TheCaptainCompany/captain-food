@@ -1,0 +1,34 @@
+key: ADMIN-DOOR-PRECONDITIONS
+status: open
+question: 'What must exist before `RUN_PLATFORM_ACCESS_GRANT` (step 6-v, the platform grant + the ADMIN seam
+  binding) is flipped and, after it, before the System host is routed behind auth (step 6-iii), per
+  ADR-20260905-223957? Named at the 2026-09-05 briefing (thirteen lenses): (1) the first admin is a RECORDED
+  ACT -- the one-shot bootstrap dispatches `GrantPlatformAccess` (basis CAPTAIN_ONBOARDING) through the mailbox,
+  subject from a secret never the repo, idempotent (running twice appends one fact), inside an OTLP-wired process,
+  leaving the Art. 5(2) artifact (who, when, basis, authority) -- never a projection row, SQL or a data migration
+  (vernon, young, farley, beck, legal, observability); (2) the seam refuses an unbound ADMIN token -- `Identity::Admin`
+  is unspellable without a live `PlatformMembership` grant -- proven red-first (beck); (3) Art. 13 information at
+  collection for Captain''s own admin (NOT the restaurant colleague''s Art. 14), and a SECOND Art. 30 entry with
+  Captain as sole controller over its own worker, incl. admin action logs and their retention (grade (b), counsel
+  verifies the CNIL access-log doctrine) -- the founder''s, external: no entity capacity is recorded and no Art. 30
+  register artifact exists in the repo (legal); (4) the labour posture of the first admin (employee / associe /
+  mandataire under the SAS -- the SCIC conversion is deferred to M18) -- counsel + founder, upstream of the lawful
+  basis (legal, business); (5) the `admin-sign-in` observability contract and the two dead-man gauges at BOTH
+  composition roots, plus farley''s codegen test that every `RUN_*` key is declared unconditionally at both roots
+  with the same default; flip evidence: both gauges 1 across a deploy window, at least one `resolved`, zero
+  `admin_claim_stamp_failed_total`, `read_authorization_bridge_unresolved_total{role="ADMIN"}` flat (observability);
+  (6) for 6-iii: the System sign-in and both refusal screens exist as their OWN screens, the anonymous browser
+  receives the sign-in shell and never the board (ux); (7) the `?next=` return-to-screen + silent refresh retry
+  (#904) so the 19:40 lockout does not strand the only person who can make a customer whole (ux, business);
+  (8) revocation of platform access is a follow-up once a second admin exists (holub) -- until then the row says so.'
+owner: team
+opened: '2026-09-05'
+capacity: team
+register: docs/adr/ADR-20260905-223957-the-admin-door-in-two-slices-a-platform-membership-binds-the-admin-seam-then-the-system-host-is-routed.md
+evidence: 'Today `crates/server/src/auth.rs:~308` mints `Identity::Admin { sub }` from the token role alone and
+  `ReadScope::Admin` is `ScopePredicate::All` over 77 ADMIN operations (graphql-architect, verified 2026-09-05) --
+  a role claim is the only thing between an anonymous token and a cross-tenant read. Nothing flips while production
+  is suspended (ADR-20260817-105844).'
+note: 'External items are the founder''s (controller entity, the Art. 30 register, the labour posture, the first
+  admin''s identifier held as a secret); no lens output is legal advice or clearance. Items (1)-(2) and (5) land
+  with 6-v; (6) with 6-iii; (3)-(4), (7)-(8) are flip preconditions, not code in these slices.'

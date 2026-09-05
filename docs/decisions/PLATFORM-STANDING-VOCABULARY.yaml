@@ -1,0 +1,20 @@
+key: PLATFORM-STANDING-VOCABULARY
+status: decided
+question: 'How is an ADMIN''s standing on the platform modelled and named -- a `ScopeType::PLATFORM` value on the
+  existing `ScopeMembership` (one aggregate generalised), or its own relationship with its own aggregate, event and
+  bridge, and which word names the principal?'
+owner: team
+opened: '2026-09-05'
+decided: '2026-09-05'
+decided_by: ADR-20260905-223957
+capacity: team
+register: docs/adr/ADR-20260905-223957-the-admin-door-in-two-slices-a-platform-membership-binds-the-admin-seam-then-the-system-host-is-routed.md
+evidence: '**Its own relationship: a `PlatformMembership` aggregate, its own stream and event (`PlatformAccessGranted`),
+  a `PlatformMember` bridge; `ScopeType` is untouched (PRINCIPALS-MEMBER stands; RLS-SEQ finding (3) respected);
+  `RestaurantAccessGranted` is not reused (its `scopeId` is a `RestaurantId`); the word stays ADMIN, never a
+  synonym, never "staff" in an identifier; the grant basis records an operational act (`CAPTAIN_ONBOARDING`),
+  never a corporate status.** Mechanism is shared (seam reader, bridge recipe, own projector group from 0);
+  vocabulary is forked. Split: vernon for generalising; evans, young, dba, business, graphql-architect for the
+  own relationship; resolved by the rule that a split takes the option reversing no decided record.'
+note: 'Consulted: the thirteen-lens block in the ADR. Revocation of platform access is deferred until a second
+  admin exists (holub) -- see ADMIN-DOOR-PRECONDITIONS (8).'
