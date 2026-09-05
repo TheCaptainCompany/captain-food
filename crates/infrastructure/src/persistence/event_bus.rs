@@ -35,24 +35,54 @@ pub struct AppendedEvent {
 #[derive(Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<AppendedEvent>,
+    /// #639 part C step 5 (ADR-20260905-065415 §8): a SECOND, purely additive channel carrying the
+    /// same envelope alongside the instant `publish` stamped it — t0 for
+    /// `rider_restriction_socket_close_latency_ms`, never `occurred_at` (cross-host skew post-#358).
+    /// A second broadcast rather than widening [`AppendedEvent`] or [`EventBus::subscribe`]'s
+    /// return type: both are constructed as plain struct literals, with no `..Default::default()`
+    /// spread, at `crates/infrastructure/src/persistence/event_store.rs` (not fenced) and inside
+    /// the mailbox delivery path (`crates/infrastructure/src/mailbox/handler.rs`, FENCED) — only
+    /// the LATTER site is why a widened literal cannot compile without editing fenced code; nothing
+    /// here is constructed by a generated resolver. [`EventBus::subscribe_with_publish_instant`] is
+    /// the ONLY new surface; every existing publisher/subscriber is untouched.
+    tx_timed: broadcast::Sender<(AppendedEvent, std::time::Instant)>,
 }
 
 impl EventBus {
     /// A bus retaining up to `capacity` in-flight messages per subscriber before it lags.
     pub fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
-        Self { tx }
+        let (tx_timed, _) = broadcast::channel(capacity);
+        Self { tx, tx_timed }
     }
 
     /// Broadcast an appended-event envelope. Best effort: with no live subscribers (or a closed
-    /// channel) this is a no-op — the append itself has already committed.
+    /// channel) this is a no-op — the append itself has already committed. The timed channel is
+    /// stamped and sent FIRST, so its instant always precedes (never follows) any subscriber's
+    /// receipt on the plain channel. Round 2 R2-7: the timed channel's clone + send is skipped
+    /// entirely when it has zero subscribers (the plain `OrderPlaced`-etc. case, every publish
+    /// today outside the rider-restriction watcher) — `broadcast::Sender::send` already reports
+    /// that as `Err` and is a no-op, but the clone before it was not, and every single-instance
+    /// publish pays it regardless.
     pub fn publish(&self, event: AppendedEvent) {
+        if self.tx_timed.receiver_count() > 0 {
+            let _ = self.tx_timed.send((event.clone(), std::time::Instant::now()));
+        }
         let _ = self.tx.send(event);
     }
 
     /// A fresh receiver seeing every envelope published from now on.
     pub fn subscribe(&self) -> broadcast::Receiver<AppendedEvent> {
         self.tx.subscribe()
+    }
+
+    /// A fresh receiver seeing every envelope published from now on, paired with the `Instant`
+    /// [`EventBus::publish`] stamped it with (#639 part C step 5) — the rider-restriction socket
+    /// watcher's ONLY consumer today; nothing else in the tree reads it.
+    pub fn subscribe_with_publish_instant(
+        &self,
+    ) -> broadcast::Receiver<(AppendedEvent, std::time::Instant)> {
+        self.tx_timed.subscribe()
     }
 }
 
@@ -94,5 +124,26 @@ mod tests {
         assert_eq!(got.event_type, "OrderAccepted");
         assert_eq!(got.correlation_id, correlation);
         assert_eq!(got.position, 2);
+    }
+
+    /// #639 part C step 5: the additive timed channel carries the SAME envelope, stamped with an
+    /// instant taken before the plain channel's own send — so a subscriber reading it sees a t0
+    /// that never postdates its own receipt.
+    #[tokio::test]
+    async fn subscribe_with_publish_instant_carries_the_same_envelope_and_a_preceding_instant() {
+        let bus = EventBus::default();
+        let mut timed_rx = bus.subscribe_with_publish_instant();
+        let before = std::time::Instant::now();
+        bus.publish(AppendedEvent {
+            stream_name: "Rider-x".into(),
+            event_type: "RiderRestricted".into(),
+            correlation_id: uuid::Uuid::new_v4(),
+            position: 3,
+        });
+        let (got, published_at) = timed_rx.recv().await.expect("timed envelope");
+        assert_eq!(got.stream_name, "Rider-x");
+        assert_eq!(got.event_type, "RiderRestricted");
+        assert!(published_at >= before, "stamped no earlier than the call into publish()");
+        assert!(published_at.elapsed().as_secs() < 5, "stamped at publish time, not later");
     }
 }

@@ -541,6 +541,29 @@ keys:
       staging: "true"
 
 
+  RUN_RIDER_RESTRICTION_SOCKET_CLOSE:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: RIDER-RESTRICTION-PRECONDITIONS
+    gates: >
+      The restriction fact terminates the rider's socket (#639 part C step 5,
+      ADR-20260905-065415 §6). ON, a RIDER connection's `connection_init` spawns the
+      connection-local watcher (matching this rider's OWN `RiderRestricted` fact on the in-process
+      EventBus), seeds the connection-local standing cell `StandingGuard` reads first, and pushes a
+      4403 Close frame the moment the fact lands or a re-derivation confirms RESTRICTED. OFF, no
+      watcher is spawned, no close is ever sent, and `StandingGuard` reads `ReadScope` exactly as
+      before this record — the one-writer WS sink refactor itself (ADR §3) is STRUCTURAL and
+      ALWAYS ON, unaffected by this key. Ships DARK (production/staging `"false"`): the restrict
+      door itself is pinned off (`RUN_RIDER_RESTRICTION_DOOR`) and the rider population is zero
+      (ADR-20260817-105844), so this key protects nothing today; flipping it is a SEPARATE,
+      one-line ADR after a smoke, never bundled with this key's introduction.
+    deploy:
+      production: "false"
+      staging: "false"
+
+
   RUN_MAILBOX_PUSH:
     type: bool
     scalar:

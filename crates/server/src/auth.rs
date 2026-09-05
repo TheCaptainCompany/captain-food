@@ -334,6 +334,22 @@ impl Principal {
         }
     }
 
+    /// The verified auth subject of a RESOLVED rider — `Some` only for [`Identity::Rider`] (the
+    /// seam's positive outcome), never for [`Identity::Unbound`] even when its `role` is Rider.
+    /// #639 part C step 5 round 2 (ADR-20260905-065415 §4, R2-0): the socket watcher's Lagged/Closed
+    /// re-derivation must re-resolve through the SAME seam the connection resolved through
+    /// ([`current_rider_standing`]), which needs the SUBJECT that resolution used — [`user_id`]
+    /// above answers a broader question (any authenticated subject, Unbound included) that this
+    /// call site must not accept.
+    ///
+    /// [`user_id`]: Self::user_id
+    pub fn rider_auth_subject(&self) -> Option<&str> {
+        match &self.identity {
+            Identity::Rider { sub } => Some(sub),
+            _ => None,
+        }
+    }
+
     /// The verified role this caller IS — DERIVED from the identity, so it can never disagree with
     /// the claim beside it. This is the role the mutation envelope stamps into
     /// `domain_events.user_type` (ADR-0041: the acting user is envelope metadata).
@@ -2556,6 +2572,42 @@ async fn resolve_rider_scope(
     (Principal { identity }, scope)
 }
 
+/// The outcome of [`current_rider_standing`] — a genuine three-way answer, never collapsed to
+/// `Option`: `NotFound` (no `Rider` row, or none projected yet) and `LookupFailed` (the read model
+/// could not be asked) are DIFFERENT facts a caller must tell apart (ADR-20260904-124600 §3: a
+/// lookup error never asserts a restriction).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiderStandingLookup {
+    Standing(domain::generated::scalars::RiderStanding),
+    NotFound,
+    LookupFailed,
+}
+
+/// The standing-by-subject read (#639 part C step 5, ADR-20260905-065415 §4; ADR-20260904-124600
+/// §3 "one function, three callers"): re-derive through the SAME seam `connection_init` resolved
+/// through ([`RiderIdentitySource`] / [`ResolveRiderIdentity::resolve`]) — never `RiderRoster`,
+/// which is a SEPARATE projector checkpoint group from the `Rider` row the connection's own
+/// standing came from (`specs/database/tables/projection_tables.yaml`'s note on the roster
+/// checkpoint: a reset there "would re-grant every restricted rider ACTIVE for the length of the
+/// drain", exactly the fail-OPEN this function must never produce). Takes the connection's OWN
+/// verified auth SUBJECT (never a rider id alone — this is a POST-resolution re-check through the
+/// identity bridge, not a raw id lookup) so the socket watcher's Lagged/Closed re-derivation (the
+/// caller landed in this record), the not-yet-built page-GET leg (#894) and any future per-request
+/// recheck never grow a second lookup (auth.rs is where the card says to find it — never a fourth
+/// copy, and never a fourth read model).
+pub async fn current_rider_standing(
+    auth_subject: &str,
+    source: &RiderIdentitySource,
+) -> RiderStandingLookup {
+    match source.0.resolve(auth_subject).await {
+        RiderIdentityResolution::Resolved((_, standing)) => RiderStandingLookup::Standing(standing),
+        // No row for this subject through the SAME seam the grant came from: there is nothing to
+        // restrict (never a lookup failure — the caller counts this distinctly, R2-6).
+        RiderIdentityResolution::NoMapping => RiderStandingLookup::NotFound,
+        RiderIdentityResolution::LookupFailed(_) => RiderStandingLookup::LookupFailed,
+    }
+}
+
 /// [`resolve_identity_scope`] under the contract's `auth.read_scope` span (ONE per request),
 /// stamped with the request's correlation id. This is the transport entry point; the function
 /// above resolves the CUSTOMER-Postgres arm, delegating everything else to [`read_scope`], the pure
@@ -2923,5 +2975,62 @@ mod read_scope_tests {
         assert_eq!(scope, ReadScope::Public);
         assert_eq!(principal.acting_role(RequestRole::Rider).get(), RequestRole::Public);
         assert_eq!(principal.recorded_role(), RequestRole::Public);
+    }
+
+    // ---- #639 part C step 5, ROUND 2 (ADR-20260905-065415 §4, R2-0) ----
+
+    /// The Lagged/Closed re-derivation reads the IDENTITY seam — the one `connection_init` itself
+    /// resolved through — never `RiderRoster`, a SEPARATE projector checkpoint group that can lag
+    /// or rebuild independently and would fail the whole point OPEN: before this fix,
+    /// `current_rider_standing` took a `RiderRosterReadRepository` and this test's assertion failed
+    /// with `Standing(ACTIVE)` against a roster stand-in scripted to answer exactly that, while the
+    /// identity seam below answers RESTRICTED — the re-derivation must terminate on the LATTER.
+    #[tokio::test]
+    async fn the_rederivation_terminates_through_the_identity_seam_never_the_roster() {
+        struct RestrictedThroughIdentitySeamOnly(uuid::Uuid);
+
+        #[async_trait::async_trait]
+        impl ResolveRiderIdentity for RestrictedThroughIdentitySeamOnly {
+            async fn resolve(&self, _auth_subject: &str) -> RiderIdentityResolution {
+                // The connection's OWN seam says RESTRICTED — a lagging/rebuilding `RiderRoster`
+                // that would still answer ACTIVE for the same rider (the checkpoint-drain scenario
+                // `specs/database/tables/projection_tables.yaml` names) must never leak through,
+                // because nothing in this function can reach it any more.
+                RiderIdentityResolution::Resolved((
+                    RiderId(self.0),
+                    domain::generated::scalars::RiderStanding::RESTRICTED,
+                ))
+            }
+        }
+
+        let rider_id = uuid::Uuid::from_u128(0x600D);
+        let source = RiderIdentitySource::new(Arc::new(RestrictedThroughIdentitySeamOnly(rider_id)));
+
+        let outcome = current_rider_standing("auth-subject-irrelevant-to-this-seam", &source).await;
+
+        assert_eq!(
+            outcome,
+            RiderStandingLookup::Standing(domain::generated::scalars::RiderStanding::RESTRICTED),
+            "the re-derivation must terminate through the identity seam, not a lagging roster read"
+        );
+    }
+
+    /// `NoMapping` through the identity seam (the row this subject was granted through is gone) is
+    /// `NotFound`, never `LookupFailed` — ADR-20260904-124600 §3: there is nothing to restrict, and
+    /// this is NOT an infrastructure error the caller must retry.
+    #[tokio::test]
+    async fn no_mapping_through_the_identity_seam_is_not_found_never_a_lookup_failure() {
+        struct NoRowForThisSubject;
+
+        #[async_trait::async_trait]
+        impl ResolveRiderIdentity for NoRowForThisSubject {
+            async fn resolve(&self, _auth_subject: &str) -> RiderIdentityResolution {
+                RiderIdentityResolution::NoMapping
+            }
+        }
+
+        let source = RiderIdentitySource::new(Arc::new(NoRowForThisSubject));
+        let outcome = current_rider_standing("auth-subject-with-no-row", &source).await;
+        assert_eq!(outcome, RiderStandingLookup::NotFound);
     }
 }

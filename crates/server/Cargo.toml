@@ -92,6 +92,12 @@ jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 # The in-process SSR transport (#92) implements web's object-safe async Transport seam.
 async-trait = { workspace = true }
+# #639 part C step 5 (ADR-20260905-065415 §3): the one-writer WS sink refactor — an
+# `mpsc::Sender<Message>` stands in for the real `SplitSink`, so exactly one forwarder task owns
+# the transport. Already in Cargo.lock transitively (async-graphql-axum's own `futures-util`);
+# named directly here because production code (`graphql/routes.rs`) now depends on it, not only
+# generated glue.
+futures = "0.3"
 
 [dev-dependencies]
 # The #474 database-test gate: DB-gated suites are REQUIRED by default and skip only under an
@@ -117,6 +123,11 @@ actor_client = { path = "../actor_client", features = ["test-fixtures"] }
 # event is asserted VISIBLE under the deployed default filter (LOG_LEVEL=info) — the blocking
 # checkpoint finding was a `debug!` behind that filter, i.e. a promise the trace never kept.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "json", "env-filter", "registry"] }
+# #639 part C step 5 (ADR-20260905-065415 §9): the real graphql-transport-ws client for
+# `rider_restriction_closes_the_socket.rs` — already in Cargo.lock transitively (axum's own `ws`
+# feature), so this adds no new crate family, only a direct dev-dependency edge for the test that
+# actually speaks the protocol from the outside.
+tokio-tungstenite = "0.29"
 
 # D6 lint floor (PROP-20260802-130500, #302): inherit the workspace [lints] baseline.
 [lints]

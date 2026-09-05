@@ -12,6 +12,9 @@ pub mod generated;
 /// transport boundary, read back by the generated `operationStatus` legs to localize
 /// `Operation.message` from the row's typed error context.
 pub mod locale;
+/// The restriction fact terminates the rider's socket (#639 part C step 5,
+/// ADR-20260905-065415): the connection-local standing cell, the watcher task and the gate.
+pub mod rider_socket;
 pub mod routes;
 pub mod schema;
 /// The subgraph scope slice (#385 API-tier wiring, D8): a `graphql-{scope}` bin serves the
