@@ -734,7 +734,7 @@ _🧩 aggregate_ — The bridge and the grant (#639 part C step 6-i, ADR-2026090
 <a id="actor-restaurantinvitation"></a>
 #### 🎭 Actor: `RestaurantInvitation`
 
-_🧩 aggregate_ — The roster and the invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §6.1): one restaurant MANAGER's invite of one email address to one restaurant scope. Its OWN aggregate, OWN stream (`RestaurantInvitation-{invitationId}`), OWN lane -- FORK 1 Option A again: a targeted revoke needs its own identity distinct from the `RestaurantMembership` it may precede (6-i). The accept is TWO commands in TWO lanes, sequenced by the accepting member's CLIENT, never a process manager: `AcceptRestaurantInvitation` here, then `GrantRestaurantAccess(basis: MEMBER_INVITATION)` on the membership stream.
+_🧩 aggregate_ — The roster and the invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3, PROP-20260831-180622 §6.1): one restaurant MANAGER's invite of one email address to one restaurant scope. Its OWN aggregate, OWN stream (`RestaurantInvitation-{invitationId}`), OWN lane -- FORK 1 Option A again: a targeted revoke needs its own identity distinct from the `RestaurantMembership` it may precede (6-i). The accept is TWO commands in TWO lanes, sequenced by the accepting member's CLIENT, never a process manager: `AcceptRestaurantInvitation` here, then `GrantRestaurantAccessByInvitation` (PUBLIC, round 2's split, ADR-20260905-101349 §2 amendment) on the membership stream.
 
 
 | Receives | Emits → | Throws |
@@ -1293,7 +1293,7 @@ Withdraw a pending invitation before it is accepted (§8.4's revoke sheet, the s
 <a id="command-acceptrestaurantinvitation"></a>
 #### 📩 Command: `AcceptRestaurantInvitation`
 
-The invited person accepts (§8.3, `roles: [PUBLIC]`) -- identify-only, the first of the two-lane accept's two commands (never a process manager, ADR-20260905-101349 §2). The token is the magic link `InviteRestaurantMember`'s handler sent to `invitedEmail`; verified through the SAME identity port `ConfirmMemberSignIn`/`ConfirmEmailVerification` use. `RestaurantInvitationAccepted.authSubject` is `verify_email_token`'s OUTPUT, never a payload field here (the `ClaimRestaurantListing.accountId` contrast is step 7, not this slice). The invited email must equal the verified email, case-folded, else the SAME typed refusal as every other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked" (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client sequences `GrantRestaurantAccess(basis: MEMBER_INVITATION)` itself once this returns.
+The invited person accepts (§8.3, `roles: [PUBLIC]`) -- identify-only, the first of the two-lane accept's two commands (never a process manager, ADR-20260905-101349 §2). The token is the magic link `InviteRestaurantMember`'s handler sent to `invitedEmail`; verified through the SAME identity port `ConfirmMemberSignIn`/`ConfirmEmailVerification` use. `RestaurantInvitationAccepted.authSubject` is `verify_email_token`'s OUTPUT, never a payload field here (the `ClaimRestaurantListing.accountId` contrast is step 7, not this slice). The invited email must equal the verified email, case-folded, else the SAME typed refusal as every other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked" (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client sequences `GrantRestaurantAccessByInvitation` (PUBLIC, `{invitationId, token}`, round 2's split -- ADR-20260905-101349 §2 amendment) itself once this returns.
 
 - **Dispatched by**: [✏️ `acceptRestaurantInvitation`](#mutation-acceptrestaurantinvitation) · **handled by** [🎭 `RestaurantInvitation`](#actor-restaurantinvitation)
 - **Emits**: [⚡ `RestaurantInvitationAccepted`](#event-restaurantinvitationaccepted)
@@ -1870,7 +1870,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | --- | --- | --- |
 | <a id="scalar-cityname"></a>🔤 `CityName` | string |  |
 | <a id="scalar-cuisinecategory"></a>🔤 `CuisineCategory` | enum (FAST_FOOD \| PIZZA \| TRADITIONAL \| BISTRONOMIC \| FOOD_TRUCK) | A restaurant's SINGLE primary/representative cuisine bucket, used only to select ONE Uber Eats mark-up coefficient in View_UberEstimationPolicy (ADR-0024): FAST_FOOD 1.30, PIZZA 1.35, TRADITIONAL 1.40, BISTRONOMIC 1.45, FOOD_TRUCK 1.35. NOT for discovery — a restaurant may belong to several cuisines for browsing/filtering; that is the multi-valued `Restaurant.tags`. This is deliberately one value because the estimate needs a single coefficient.  |
-| <a id="scalar-memberid"></a>🔤 `MemberId` | string _uuid_ | A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.  |
+| <a id="scalar-memberid"></a>🔤 `MemberId` | string _uuid_ | A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C). Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo. Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change. #639 part C step 6-iv, round 2: a `MemberId` can now be minted at INVITATION time, for a person who has typed no address of their own and may never acquire an `AuthSubject` at all (an invitation that is revoked or left to expire). `GrantRestaurantAccessByInvitation` derives it (UUIDv5 of the invitation's own id, never caller-supplied) so the identifier exists before the bridge to an `AuthSubject` does; the bridge is completed only on acceptance, at which point this same id is the one the accepting person's future grants and sign-ins resolve to.  |
 | <a id="scalar-principalkind"></a>🔤 `PrincipalKind` | enum (CUSTOMER \| RESTAURANT \| RESTAURANT_ACCOUNT \| RIDER \| MEMBER) | WHAT KIND OF PRINCIPAL acts -- the vocabulary `ScopeMembership.member_type` is really typed by, and the first half of the rider sign-in reservation key `(principal_kind, auth_subject)`. One member per entry in `actors.yaml`'s `principals` map, plus `MEMBER`. A NEW scalar with NO stored history: nothing has ever been written with this type, so `MEMBER` costs no upcaster, no re-attribution of past events, and no migration. That is the whole reason the vocabulary is added here rather than onto `UserType` (see the note above). `PUBLIC`, `ADMIN` and `EXTERNAL` are absent on purpose, exactly as they are absent from `principals`: they have no resolved domain identity, so they can never be a member of anything and can never satisfy an `acting` entry other than the explicit `any` keyword. NOT `ScopeType`, which is untouched by this change: `ScopeType` names the kind of protected INSTANCE one belongs to (`ORDER`, `RESTAURANT`), whereas this names the kind of party doing the belonging. A member is not a thing others are members of.  |
 | <a id="scalar-restaurantaccountid"></a>🔤 `RestaurantAccountId` | string _uuid_ | Restaurant account (HubRise: restaurant) — groups one or more Restaurant locations. |
 | <a id="scalar-userid"></a>🔤 `UserId` | string _uuid_ |  |
@@ -13645,6 +13645,35 @@ _Surface_ **`restaurant_backoffice.yaml`**
 **Gaps**
 - ⚠️ PARTIAL_REFUND has no UI path until a renderer arm lands for `tip_amount_selector` (round 3, #639 part C step 4-iii-A R3-3): the amount picker was DELETED rather than rendered inert, since `tip_amount_selector` has no renderer arm (falls to the generic catch-all — a bare label, no presets, no input, no `data-action`) and an inert money control on a live screen is worse than none — [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — …"](https://github.com/TheCaptainCompany/captain-food/issues/888). `resolve_btn`'s own action still dispatches `resolve_reclamation` for FULL_REFUND/REPLACEMENT/GOODWILL_CREDIT. `refundAmount` currency is hard-coded EUR when the picker returns (V0 Tours is single-currency; View_Reclamation exposes no order currency on the panel); a GOODWILL_CREDIT *amount* is recorded as intent only (the credit ledger is #158, post-V0).
 
+<a id="screen-team"></a>
+### 📱 `team` · `/team` · 📱 SDUI · 🔒 auth
+
+```
+┌──────────────────────────────────────────┐
+│ Team                                     │
+├──────────────────────────────────────────┤
+│ «staff_topbar»                           │
+│ page_header — Team                       │
+│ button — Invite a colleague              │
+│ page_header — Team members               │
+│ list                                     │
+│ page_header — Invitations                │
+│ list                                     │
+│ «staff_nav»                              │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| read | `roster.mine` | [🔎 `restaurantRoster`](#query-restaurantroster) |
+| read | `invitations.mine` | [🔎 `restaurantInvitations`](#query-restaurantinvitations) |
+| write | `revoke_restaurant_invitation` | [✏️ `revokeRestaurantInvitation`](#mutation-revokerestaurantinvitation) |
+| write | `invite_restaurant_member` | [✏️ `inviteRestaurantMember`](#mutation-inviterestaurantmember) |
+
+**Gaps**
+- ⚠️ The per-row Revoke control on the invitation list dispatches `revokeRestaurantInvitation` DIRECTLY off the row, with no confirmation step — `open_bottom_sheet` only toggles a sheet's `hidden` flag and carries no per-row context into it (the SAME #870-class limitation `member_sign_in_confirmation_sheet`'s own `gaps:` line already documents: a `text`/action-variable binding resolves from the SCREEN's own resolver data, never from a DIFFERENT item's row context passed at open time). A confirmation sheet is the card's suggested shape; it cannot correctly bind `invitationId` today without a renderer change this round did not build.
+- ⚠️ No display name/email column on the roster (`RestaurantRoster`'s own `note:`, YAGNI): a row shows `memberId` and `authority` only, never a human name — a real gap for a MANAGER trying to recognise a colleague, named rather than painted with a fabricated column.
+
 <a id="screen-restaurant_profile"></a>
 ### 📱 `restaurant_profile` · `/settings/profile` · 📱 SDUI · 🔒 auth
 
@@ -13738,6 +13767,26 @@ _Surface_ **`restaurant_backoffice.yaml`**
 
 **Gaps**
 - ⚠️ `?next=` return-to-screen (ADR-20260905-101349 §13) is a NAMED DEPENDENCY of flipping RUN_MEMBER_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the orders queue), never back to whatever page the 401 originated from. MEMBER-SIGN-IN-DOOR-PRECONDITIONS names the follow-up.
+
+<a id="screen-invitation_accept"></a>
+### 📱 `invitation_accept` · `/invitation` · 🚫 not SDUI — Query-string token/invitationId extraction + a TWO-command acceptance-first sequence (acceptRestaurantInvitation then grantRestaurantAccessByInvitation) -- the sign_in_return precedent, doubled. · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Joining your team                        │
+├──────────────────────────────────────────┤
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `accept_restaurant_invitation` | [✏️ `acceptRestaurantInvitation`](#mutation-acceptrestaurantinvitation) |
+| write | `grant_restaurant_access_by_invitation` | [✏️ `grantRestaurantAccessByInvitation`](#mutation-grantrestaurantaccessbyinvitation) |
+
+**Gaps**
+- ⚠️ No consent PREVIEW (restaurant name / invited email / authority) before dispatching: `invitationPreview`, the query the card's R2-C section proposed for this, was not built this round (STOPped and reported: it needs a resolver combining live identity-provider verification with a read-model lookup, a shape with no precedent in this codebase's mechanical query-emission pipeline). The page dispatches straight from the URL's token, exactly like `sign_in_return` does for the sign-in door.
+- ⚠️ No REFUSE control: there is nothing to decline before either command runs (no preview to refuse FROM), and once accepted the invitation is spent regardless — a `/sign-in` link is offered on every terminal state instead, the `sign_in_return`/`not_linked` precedent.
+- ⚠️ Terminal states collapse to ONE generic refusal ("this invitation link is no longer valid") for every server-side non-acceptable cause (unknown invitationId, wrong verified email, already accepted BY SOMEONE ELSE, revoked, expired) — this is the SERVER's own no-enumeration property (`errors.yaml#/RestaurantInvitationNotAcceptable` is ONE typed refusal for all five), not a missing state machine: the client cannot route differently on a distinction the server itself never reveals. A SEPARATE state exists for leg 2 failing AFTER leg 1 succeeded (the invitation WAS validly accepted) — that state never says "invalid".
 
 <a id="screen-not_linked"></a>
 ### 📱 `not_linked` · `/sign-in/not-linked` · 📱 SDUI · ⇄ /public/graphql
@@ -14388,6 +14437,38 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-sign_in_return-no_token"></a>`back.sign_in_return.no_token` | — | This link is incomplete. Please request a new one. | Ce lien est incomplet. Merci d'en demander un nouveau. |
 | <a id="translation-back-sign_in_return-failed"></a>`back.sign_in_return.failed` | — | This link is invalid or has expired. Please request a new one. | Ce lien est invalide ou a expiré. Merci d'en demander un nouveau. |
 | <a id="translation-back-sign_in_return-back_to_sign_in"></a>`back.sign_in_return.back_to_sign_in` | — | Back to sign-in | Retour à la connexion |
+| <a id="translation-back-team-title"></a>`back.team.title` | — | Team | Équipe |
+| <a id="translation-back-team-roster_heading"></a>`back.team.roster_heading` | — | Team members | Membres de l'équipe |
+| <a id="translation-back-team-invitations_heading"></a>`back.team.invitations_heading` | — | Invitations | Invitations |
+| <a id="translation-back-team-roster-empty-title"></a>`back.team.roster.empty.title` | — | No team members yet | Aucun membre pour le moment |
+| <a id="translation-back-team-roster-empty-body"></a>`back.team.roster.empty.body` | — | Invite a colleague to give them access. | Invitez un collègue pour lui donner accès. |
+| <a id="translation-back-team-roster-member"></a>`back.team.roster.member` | — | Member | Membre |
+| <a id="translation-back-team-roster-since"></a>`back.team.roster.since` | — | Since | Depuis |
+| <a id="translation-back-team-invitations-empty-title"></a>`back.team.invitations.empty.title` | — | No invitations | Aucune invitation |
+| <a id="translation-back-team-invitations-empty-body"></a>`back.team.invitations.empty.body` | — | Invited colleagues appear here. | Les collègues invités apparaissent ici. |
+| <a id="translation-back-team-invitations-email"></a>`back.team.invitations.email` | — | Email | E-mail |
+| <a id="translation-back-team-invitations-expires"></a>`back.team.invitations.expires` | — | Expires | Expire le |
+| <a id="translation-back-team-authority-manager"></a>`back.team.authority.manager` | — | Manager | Gérant |
+| <a id="translation-back-team-authority-operator"></a>`back.team.authority.operator` | — | Operator | Opérateur |
+| <a id="translation-back-team-status-pending"></a>`back.team.status.pending` | — | Pending | En attente |
+| <a id="translation-back-team-status-accepted_pending_access"></a>`back.team.status.accepted_pending_access` | — | Access being activated | Accès en cours d'activation |
+| <a id="translation-back-team-status-accepted"></a>`back.team.status.accepted` | — | Active | Actif |
+| <a id="translation-back-team-status-revoked"></a>`back.team.status.revoked` | — | Withdrawn | Retirée |
+| <a id="translation-back-team-status-expired"></a>`back.team.status.expired` | — | Expired | Expirée |
+| <a id="translation-back-team-invite-open"></a>`back.team.invite.open` | — | Invite a colleague | Inviter un collègue |
+| <a id="translation-back-team-invite-title"></a>`back.team.invite.title` | — | Invite a colleague | Inviter un collègue |
+| <a id="translation-back-team-invite-email_label"></a>`back.team.invite.email_label` | — | Colleague's email | E-mail du collègue |
+| <a id="translation-back-team-invite-email_placeholder"></a>`back.team.invite.email_placeholder` | — | colleague@example.com | collegue@exemple.fr |
+| <a id="translation-back-team-invite-authority_label"></a>`back.team.invite.authority_label` | — | Role | Rôle |
+| <a id="translation-back-team-invite-confirm"></a>`back.team.invite.confirm` | — | Send invitation | Envoyer l'invitation |
+| <a id="translation-back-team-invite-legal_notice"></a>`back.team.invite.legal_notice` | — | We'll email this address an invitation to join your team on Captain.Food. Your colleague may object to receiving it (see our privacy notice). By continuing, you confirm you are authorised to share this address for this purpose. | Nous enverrons à cette adresse un e-mail d'invitation à rejoindre votre équipe sur Captain.Food. Votre collègue peut s'opposer à la réception de cet e-mail (voir notre politique de confidentialité). En continuant, vous confirmez être autorisé·e à partager cette adresse à cette fin. |
+| <a id="translation-back-team-revoke-confirm"></a>`back.team.revoke.confirm` | — | Withdraw | Retirer |
+| <a id="translation-back-invitation-title"></a>`back.invitation.title` | — | Joining your team | Rejoindre votre équipe |
+| <a id="translation-back-invitation-working"></a>`back.invitation.working` | — | Please wait, we're confirming your invitation… | Merci de patienter, nous confirmons votre invitation… |
+| <a id="translation-back-invitation-no_token"></a>`back.invitation.no_token` | — | This invitation link is incomplete. Please ask for a new one. | Ce lien d'invitation est incomplet. Merci d'en demander un nouveau. |
+| <a id="translation-back-invitation-failed"></a>`back.invitation.failed` | — | This invitation link is no longer valid. Please ask for a new one. | Ce lien d'invitation n'est plus valide. Merci d'en demander un nouveau. |
+| <a id="translation-back-invitation-access_pending"></a>`back.invitation.access_pending` | — | Your invitation is confirmed and your access is being set up. Please try this link again in a moment. | Votre invitation est confirmée et votre accès est en cours de mise en place. Merci de réessayer ce lien dans un instant. |
+| <a id="translation-back-invitation-back_to_sign_in"></a>`back.invitation.back_to_sign_in` | — | Go to sign-in | Aller à la connexion |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |

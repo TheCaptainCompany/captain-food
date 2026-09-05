@@ -353,6 +353,7 @@ pub struct AuthSubject(pub String);
 /// A natural person who may act within some scope -- minted by us, bridged from an `AuthSubject` in our Postgres, never the auth subject itself. The person concept the model lacks today, where `RESTAURANT` is a place standing in for whoever is holding the tablet (#639 part C).
 /// Deliberately not `RestaurantMemberId`: a person is not restaurant-shaped. Scope is an axis on the MEMBERSHIP (the relationship that is identified), so naming the person for one scope width would bake back in the collapse this vocabulary exists to undo.
 /// Declared here in `specs/common/` because it is kernel vocabulary; the aggregates that mint and reference it (`RestaurantInvitation`, `RestaurantMembership`) land in `specs/network/` in a later step of PROP-20260831-180622 and are not part of this change.
+/// #639 part C step 6-iv, round 2: a `MemberId` can now be minted at INVITATION time, for a person who has typed no address of their own and may never acquire an `AuthSubject` at all (an invitation that is revoked or left to expire). `GrantRestaurantAccessByInvitation` derives it (UUIDv5 of the invitation's own id, never caller-supplied) so the identifier exists before the bridge to an `AuthSubject` does; the bridge is completed only on acceptance, at which point this same id is the one the accepting person's future grants and sign-ins resolve to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MemberId(pub uuid::Uuid);
 
