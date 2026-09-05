@@ -1091,3 +1091,10 @@ is itself the argument: **a list that grows has no business stating its own leng
 - **The claim/branch/draft-PR sequence must be the literal first commands on the card**, after the budget
   timer: the 4-iii-B executor implemented first and claimed after (caught before any push). A protocol the
   agent definition carries is not inherited by an ad-hoc card unless the card repeats it in order.
+- **A boolean gate mutant must be flipped at EVERY read site, or it is inert** (#895 round 2, 2026-09-05):
+  `routes.rs` read `socket_close.0` at two sites; flipping only the first left the second's `if let` structurally
+  unreachable and the "always-ON" mutant green. Grep the flag's read sites before planting, and quote the count in
+  the hand-back.
+- **The disk step runs at EVERY round start, not only at dispatch**: round 1's 27 GB `target/` filled the disk mid
+  round 2 on #895 (the same recovery as the 4-iii-A card recorded). Put `df -h /home/user` + the `rm -rf target/`
+  threshold in every round card's first line.
