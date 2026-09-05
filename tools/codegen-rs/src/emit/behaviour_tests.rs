@@ -33,6 +33,7 @@ pub(crate) const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("Reclamation", "reclamationId", true),   // id = reclamationId (its own identity; MULTIPLE claims per order; #151)
     ("CustomerCredit", "customerId", true),   // id = customerId (a per-customer store-credit ledger; #158)
     ("MailboxSupervision", "targetMessageId", true),   // id = the SUPERVISED row's messageId (#315)
+    ("RestaurantMembership", "membershipId", true),   // #639 part C step 6-i (ADR-20260905-101349)
 ];
 
 pub(crate) fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {
@@ -284,6 +285,10 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     // at the WRITE door only — `reinstateRider` never consumes it (ReinstateRider is absent here
     // on purpose).
     ("RestrictRider", "RUN_RIDER_RESTRICTION_DOOR", "run_rider_restriction_door"),
+    // #639 part C step 6-i (ADR-20260905-101349 §6): the staff access grant door's release gate,
+    // read at the WRITE door only — `revokeRestaurantAccess` never consumes it (absent here on
+    // purpose, the `RestrictRider`/`ReinstateRider` asymmetry).
+    ("GrantRestaurantAccess", "RUN_MEMBER_ACCESS_GRANT", "run_member_access_grant"),
 ];
 
 /// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
@@ -324,6 +329,11 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         // sentinel drives the rejection case.
         "RegisterRider" => {
             format!("crate::commands::{}(&bed.store, &bed.auth_subjects, cmd, &support::actor()).await", snake)
+        }
+        // #639 part C step 6-i: the SAME 2a reservation table, gated at the write door
+        // (RUN_MEMBER_ACCESS_GRANT, checked FIRST, before the store is even read).
+        "GrantRestaurantAccess" => {
+            format!("crate::commands::{}(&bed.store, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await", snake)
         }
         // The requeue consults/flips the inbound_messages row through the MailboxRequeue port (#315);
         // the TestBed fake's sentinels drive the poisoned / settled / unknown cases.

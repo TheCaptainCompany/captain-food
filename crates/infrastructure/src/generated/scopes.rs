@@ -25,6 +25,7 @@ pub const ACTOR_SCOPES: &[(&str, &str)] = &[
     ("RefundProcess", "payments"),
     ("Restaurant", "network"),
     ("RestaurantAccount", "network"),
+    ("RestaurantMembership", "network"),
     ("Rider", "delivery"),
 ];
 

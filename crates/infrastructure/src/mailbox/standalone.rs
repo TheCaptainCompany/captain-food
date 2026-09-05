@@ -211,6 +211,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's release gate —
         // same ENV-GATED posture as the rest of this fn, same default (OFF) as the spec.
         run_rider_restriction_door: env_flag("RUN_RIDER_RESTRICTION_DOOR", false),
+        // #639 part C step 6-i (ADR-20260905-101349 §6, the recorded §8 carve-out: one field plus
+        // its threading): the staff access grant door, same ENV-GATED posture, same default (OFF).
+        run_member_access_grant: env_flag("RUN_MEMBER_ACCESS_GRANT", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -235,6 +238,13 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
     telemetry::meters::runtime::declare_flag(
         "RUN_RIDER_RESTRICTION_DOOR",
         deps.run_rider_restriction_door,
+    );
+    // #639 part C step 6-i (ADR-20260905-101349 §6, the #882 fleet-parity lesson, same shape as
+    // RUN_RIDER_RESTRICTION_DOOR above): the monolith declares the same key from its Config, so a
+    // fleet split is visible in `runtime_flag_state`.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_MEMBER_ACCESS_GRANT",
+        deps.run_member_access_grant,
     );
     deps
 }

@@ -120,6 +120,15 @@ pub struct RiderRosterRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The bridge a MEMBER-stamped request resolves through (6-ii, not built here): one row per person who has ever been granted access to at least one restaurant scope. Deliberately holds NOTHING ELSE -- no `display_name` (YAGNI: nothing displays it in 6-i, the roster is 6-iv) and no grant-shaped column (authority/basis/scopeId all live on `RestaurantAccessGranted` in `domain_events` and on `ScopeMembership`, never duplicated here) -- the binding OUTLIVES any one grant, so a column that describes ONE grant does not belong on the person row. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemberRow {
+    pub member_id: MemberId,
+    pub auth_subject: AuthSubject,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatalogRow {
     pub catalog_id: CatalogId,

@@ -290,3 +290,17 @@ mutations:
     command: { $ref: 'commands.yaml#/RecordProspectReply' }
     roles: [ADMIN, EXTERNAL]
     slice: V1
+
+
+  # --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
+  # ADR-20260905-101349 §1/§6) -- ships DARK behind RUN_MEMBER_ACCESS_GRANT (default false); no
+  # query in 6-i (the roster is 6-iv).
+  grantRestaurantAccess:
+    command: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+    roles: [ADMIN]   # the target is payload (memberId/scopeId), the actor is the envelope -- no `derived:`
+    slice: V0
+
+  revokeRestaurantAccess:
+    command: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
+    roles: [ADMIN]
+    slice: V0

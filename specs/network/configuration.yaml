@@ -41,6 +41,39 @@ keys:
       staging: "true"
 
 
+  # #639 part C step 6-i (ADR-20260905-101349 §6): the grant door as a MECHANISM, not prose --
+  # "nothing reachable because no UI exists" is intent, and the first hand-provisioned grant about
+  # a real Tours human is the irreversible moment that starts every legal clock (Art. 14 notice,
+  # Art. 30 entry). Consumed at the WRITE door only (`grant_restaurant_access`'s handler, the
+  # `RestrictRider` shape): OFF returns the typed refusal `MemberAccessGrantDoorClosed` BEFORE the
+  # store is touched; `revokeRestaurantAccess` is NEVER gated -- releasing access is always safe.
+  # `decisionRow` binds this key to `docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml`
+  # explicitly, so the codegen rule `decision-row-open-key-must-be-off` refuses any
+  # `deploy.production` value other than `"false"` while that row stays open (the `RUN_SIRENE_WORKER`
+  # lesson made executable). Flipping the default is a SEPARATE recorded decision that closes the
+  # row (gate-then-stabilize, ADR-20260808-144738). This slice ships dark: no UI exists yet, and
+  # the door (6-ii) is a hard dependency for verification, not compilation (ADR-20260905-101349 §1).
+  RUN_MEMBER_ACCESS_GRANT:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: MEMBER-ACCESS-GRANT-PRECONDITIONS
+    gates: >
+      The staff access grant door (#639 part C step 6-i, ADR-20260905-101349 §6). ON,
+      `grantRestaurantAccess` appends `RestaurantAccessGranted` as normal (subject to the accepted-
+      basis check, `AccessBasisNotYetAccepted`). OFF, the handler refuses BEFORE touching the store
+      with the typed `MemberAccessGrantDoorClosed` rejection -- a supervisable row, never a silent
+      no-op. `revokeRestaurantAccess` is NEVER gated by this key: releasing access is always safe
+      to allow. Preconditions gating the flip are named in
+      `docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml` (open): the Art. 14 notice to the
+      provisioned person, an Art. 30 entry "staff access management", the lifetime reservation
+      written down with its future path, the Supabase DPA/region and Art. 26 items (founder's,
+      external), and 6-ii merged (a grant with no door is a binding nobody can use).
+    deploy:
+      production: "false"
+
+
   # ===================================================================
   # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
   #

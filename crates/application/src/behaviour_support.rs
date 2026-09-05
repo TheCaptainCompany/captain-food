@@ -594,6 +594,13 @@ impl Default for SpecAuthSubjectReservations {
             (PrincipalKind::RIDER, "already-bound".to_string()),
             uuid::Uuid::from_u128(0xB0B),
         );
+        // #639 part C step 6-i (ADR-20260905-101349 §4): the SAME shape, for MEMBER --
+        // `TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected` names a DIFFERENT memberId
+        // than the one holding this row, so the fold alone would accept without this seed.
+        held.insert(
+            (PrincipalKind::MEMBER, "already-bound-member".to_string()),
+            uuid::Uuid::from_u128(0xB0B5757),
+        );
         Self { held: std::sync::Mutex::new(held) }
     }
 }

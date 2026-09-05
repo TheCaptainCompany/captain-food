@@ -103,6 +103,8 @@ pub enum DomainEvent {
     ProspectContacted(ProspectContacted),
     ProspectMarkedCold(ProspectMarkedCold),
     ProspectReplied(ProspectReplied),
+    RestaurantAccessGranted(RestaurantAccessGranted),
+    RestaurantAccessRevoked(RestaurantAccessRevoked),
     CartBoundToCustomer(CartBoundToCustomer),
     CartStarted(CartStarted),
     CartLineAdded(CartLineAdded),

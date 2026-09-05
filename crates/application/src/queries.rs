@@ -13,7 +13,7 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    AuthSubject, CatalogId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
+    AuthSubject, CatalogId, MemberId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
     RiderStanding, ScopeType, SessionId, Slug,
     StockStatus, UserType,
 };
@@ -22,6 +22,9 @@ use domain::shared::errors::DomainError;
 pub use crate::generated::rows::CartRow;
 pub use crate::generated::rows::CatalogRow;
 pub use crate::generated::rows::CustomerCreditBalanceRow;
+/// The staff-authentication bridge (#639 part C step 6-i, ADR-20260905-101349 §5) -- internal,
+/// no GraphQL `reads` target in 6-i; see `infrastructure::persistence::member_store`.
+pub use crate::generated::rows::MemberRow;
 /// Superseded storefront labels (ADR-20260728-011344). Read by `hosts.rs` for the 301, not by any
 /// GraphQL query -- see `projectors::slug_alias`.
 pub use crate::generated::rows::SlugAliasRow;
@@ -92,6 +95,10 @@ pub trait SlugReservationRepository: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundPrincipal {
     Rider(RiderId),
+    /// #639 part C step 6-i (ADR-20260905-101349 §4): the `RestaurantMembership` grant reserves
+    /// `(MEMBER, authSubject)` in this SAME table -- no new reservation table, kind-generic
+    /// already. Revoking a membership never releases the row (the lifetime binding, PROP §7).
+    Member(MemberId),
 }
 
 impl BoundPrincipal {
@@ -99,6 +106,7 @@ impl BoundPrincipal {
     pub fn kind(&self) -> PrincipalKind {
         match self {
             BoundPrincipal::Rider(_) => PrincipalKind::RIDER,
+            BoundPrincipal::Member(_) => PrincipalKind::MEMBER,
         }
     }
 
@@ -106,6 +114,7 @@ impl BoundPrincipal {
     pub fn id(&self) -> uuid::Uuid {
         match self {
             BoundPrincipal::Rider(id) => id.0,
+            BoundPrincipal::Member(id) => id.0,
         }
     }
 }

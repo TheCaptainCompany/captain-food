@@ -49,6 +49,9 @@ use std::sync::Arc;
 use application::generated::inboxes::{
     ActorFactInbox, ActorInbox, CartFactInbox, CatalogFactInbox, CustomerFactInbox, DeliveryJobFactInbox, OrderFactInbox, PaymentFactInbox, PlaceOrderProcessFactInbox, RefundProcessFactInbox, RestaurantFactInbox, CartInbox, CatalogInbox, ConversationInbox, CustomerCreditInbox, CustomerInbox, DeliveryJobInbox, DeliveryPartnerRegistrationInbox, MailboxSupervisionInbox, OrderInbox, PaymentInbox, PlaceOrderProcessInbox, ProspectInbox, ReclamationInbox, RefundProcessInbox, RestaurantAccountInbox, RestaurantInbox, RiderInbox,
 };
+// #639 part C step 6-i (ADR-20260905-101349): a SEPARATE `use` line, additive-only (the fence
+// self-check greps for a removed line in this file) rather than editing the block above.
+use application::generated::inboxes::RestaurantMembershipInbox;
 use application::ports::Actor;
 use domain::shared::errors::DomainError;
 
@@ -112,6 +115,11 @@ pub struct CommandDeps {
     /// parameter, never reads config itself). OFF (the default) refuses `restrictRider` with the
     /// typed `RiderRestrictionDoorClosed`; `reinstateRider` never consults it.
     pub run_rider_restriction_door: bool,
+    /// #639 part C step 6-i (ADR-20260905-101349 §6): `configuration.yaml#/RUN_MEMBER_ACCESS_GRANT`
+    /// -- the staff access grant door, resolved ONCE at the composition root, the SAME carve-out
+    /// shape as `run_rider_restriction_door` above. OFF (the default) refuses `grantRestaurantAccess`
+    /// with the typed `MemberAccessGrantDoorClosed`; `revokeRestaurantAccess` never consults it.
+    pub run_member_access_grant: bool,
 }
 
 
@@ -196,6 +204,7 @@ pub async fn route(
         ActorInbox::RefundProcess(m) => refund_process(deps, m, actor, env).await,
         ActorInbox::Restaurant(m) => restaurant(deps, m, actor, env).await,
         ActorInbox::RestaurantAccount(m) => restaurant_account(deps, m, actor, env).await,
+        ActorInbox::RestaurantMembership(m) => restaurant_membership(deps, m, actor, env).await,
         ActorInbox::Rider(m) => rider(deps, m, actor, env).await,
     }
 }
@@ -514,6 +523,22 @@ async fn restaurant_account(
         RestaurantAccountInbox::DeleteRestaurantAccount(cmd) => run(async { application::commands::delete_restaurant_account(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         RestaurantAccountInbox::RegisterRestaurantAccount(cmd) => run(async { application::commands::register_restaurant_account(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         RestaurantAccountInbox::UpdateRestaurantAccount(cmd) => run(async { application::commands::update_restaurant_account(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+    }
+}
+
+/// The `RestaurantMembership` lane (#639 part C step 6-i, ADR-20260905-101349): the bridge and
+/// the grant. `grantRestaurantAccess` is gated by `RUN_MEMBER_ACCESS_GRANT`, checked FIRST inside
+/// the handler; `revokeRestaurantAccess` never is (releasing access is always safe).
+async fn restaurant_membership(
+    deps: &CommandDeps,
+    message: RestaurantMembershipInbox,
+    actor: &Actor,
+    env: &RouterEnv,
+) -> InboxOutcome {
+    let _ = (deps, actor, env);
+    match message {
+        RestaurantMembershipInbox::GrantRestaurantAccess(cmd) => run(async { application::commands::grant_restaurant_access(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor, deps.run_member_access_grant).await.map(|_| ()) }).await,
+        RestaurantMembershipInbox::RevokeRestaurantAccess(cmd) => run(async { application::commands::revoke_restaurant_access(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
     }
 }
 

@@ -189,6 +189,7 @@ async fn deliver_once(pool: &PgPool) -> u64 {
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: false,
+        run_member_access_grant: false,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),

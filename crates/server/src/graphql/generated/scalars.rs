@@ -3109,6 +3109,104 @@ impl From<RestaurantListKey> for ds::RestaurantListKey {
     }
 }
 
+/// Identity of one `RestaurantMembership` grant (#639 part C step 6-i) -- the relationship between one `MemberId` and one restaurant scope, NOT the person (`MemberId`, `specs/common/scalars.yaml`) and NOT the ScopeMembership ACL row's derived key (normally a UUIDv5 over the natural key, database/tables/projection_tables.yaml#/ScopeMembership) -- EXCEPT the MEMBER arm, which reuses this id VERBATIM as that row's own PK instead of re-deriving one, because it is already a stable, unique identifier minted once by this aggregate (see the table's own rule for why). REQUIRED and CALLER-MINTED on `GrantRestaurantAccess`: the mailbox lane address needs it present to route at all; resubmitting the same id makes a second grant call idempotent (rules.yaml#/RestaurantAccessGrantIsIdempotent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct MembershipId(pub uuid::Uuid);
+async_graphql::scalar!(MembershipId, "MembershipId", "Identity of one `RestaurantMembership` grant (#639 part C step 6-i) -- the relationship between one `MemberId` and one restaurant scope, NOT the person (`MemberId`, `specs/common/scalars.yaml`) and NOT the ScopeMembership ACL row's derived key (normally a UUIDv5 over the natural key, database/tables/projection_tables.yaml#/ScopeMembership) -- EXCEPT the MEMBER arm, which reuses this id VERBATIM as that row's own PK instead of re-deriving one, because it is already a stable, unique identifier minted once by this aggregate (see the table's own rule for why). REQUIRED and CALLER-MINTED on `GrantRestaurantAccess`: the mailbox lane address needs it present to route at all; resubmitting the same id makes a second grant call idempotent (rules.yaml#/RestaurantAccessGrantIsIdempotent).");
+impl From<ds::MembershipId> for MembershipId {
+    fn from(v: ds::MembershipId) -> Self {
+        Self(v.0)
+    }
+}
+impl From<MembershipId> for ds::MembershipId {
+    fn from(v: MembershipId) -> Self {
+        Self(v.0)
+    }
+}
+
+/// What a member may do within the restaurant scope they hold access to (ADR-20260905-101349 §3, evans). `ADMINISTRATOR` was refused: it collides with `restaurant_manager`, an existing word already meaning "the person who runs one shop", and would give a second population the same stem. Two values, additive-only forever: a change of authority is a revoke followed by a new grant, never a `MemberAuthorityChanged` event (`*Updated` carrying a capability is the `RiderStatusChanged` shape this scope refuses to reincarnate, PROP-20260831-180622 §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum MemberAuthority {
+    #[graphql(name = "MANAGER")]
+    MANAGER,
+    #[graphql(name = "OPERATOR")]
+    OPERATOR,
+}
+impl From<ds::MemberAuthority> for MemberAuthority {
+    fn from(v: ds::MemberAuthority) -> Self {
+        match v {
+            ds::MemberAuthority::MANAGER => Self::MANAGER,
+            ds::MemberAuthority::OPERATOR => Self::OPERATOR,
+        }
+    }
+}
+impl From<MemberAuthority> for ds::MemberAuthority {
+    fn from(v: MemberAuthority) -> Self {
+        match v {
+            MemberAuthority::MANAGER => Self::MANAGER,
+            MemberAuthority::OPERATOR => Self::OPERATOR,
+        }
+    }
+}
+
+/// WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager (ADR-20260905-101349 §2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum AccessBasis {
+    #[graphql(name = "CAPTAIN_ONBOARDING")]
+    CAPTAIN_ONBOARDING,
+    #[graphql(name = "GOOGLE_BUSINESS_PROFILE")]
+    GOOGLE_BUSINESS_PROFILE,
+    #[graphql(name = "OWNER_DECLARATION")]
+    OWNER_DECLARATION,
+    #[graphql(name = "MEMBER_INVITATION")]
+    MEMBER_INVITATION,
+}
+impl From<ds::AccessBasis> for AccessBasis {
+    fn from(v: ds::AccessBasis) -> Self {
+        match v {
+            ds::AccessBasis::CAPTAIN_ONBOARDING => Self::CAPTAIN_ONBOARDING,
+            ds::AccessBasis::GOOGLE_BUSINESS_PROFILE => Self::GOOGLE_BUSINESS_PROFILE,
+            ds::AccessBasis::OWNER_DECLARATION => Self::OWNER_DECLARATION,
+            ds::AccessBasis::MEMBER_INVITATION => Self::MEMBER_INVITATION,
+        }
+    }
+}
+impl From<AccessBasis> for ds::AccessBasis {
+    fn from(v: AccessBasis) -> Self {
+        match v {
+            AccessBasis::CAPTAIN_ONBOARDING => Self::CAPTAIN_ONBOARDING,
+            AccessBasis::GOOGLE_BUSINESS_PROFILE => Self::GOOGLE_BUSINESS_PROFILE,
+            AccessBasis::OWNER_DECLARATION => Self::OWNER_DECLARATION,
+            AccessBasis::MEMBER_INVITATION => Self::MEMBER_INVITATION,
+        }
+    }
+}
+
+/// WHY a `RestaurantAccessRevoked` fact was recorded -- the smallest closed set naming no work-performance ground (the ADR-20260904-014136 precedent, legal-graded: a stored decline/performance-keyed reason is the strongest requalification exhibit a labour tribunal could ask for, so none is offered). `LEFT_THE_RESTAURANT` (the member's own departure -- resignation, end of contract) and `ACCESS_NO_LONGER_NEEDED` (the restaurant's own operational call -- a role changed, a device was reassigned) are the two ordinary paths. `UNRECOGNISED` is the read-only catch-all (`#[serde(other)]`, unspellable at the command door -- the same shape `RiderRestrictionGround` carries): without it a future stored value fails the whole stream load on decode. No free text rides beside either value -- no `note` field exists on `RevokeRestaurantAccess`. Counsel review at the checkpoint (ADR-20260905-101349 §11); additive- only if it ever grows, same discipline as `RiderRestrictionGround` (counsel can only add).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, async_graphql::Enum)]
+pub enum AccessRevocationGround {
+    #[graphql(name = "LEFT_THE_RESTAURANT")]
+    LEFT_THE_RESTAURANT,
+    #[graphql(name = "ACCESS_NO_LONGER_NEEDED")]
+    ACCESS_NO_LONGER_NEEDED,
+}
+/// `readOnlyCatchAll`: UNRECOGNISED decodes to `None` — unspellable on the wire, renders null.
+pub fn access_revocation_ground_from_domain(v: ds::AccessRevocationGround) -> Option<AccessRevocationGround> {
+    match v {
+        ds::AccessRevocationGround::LEFT_THE_RESTAURANT => Some(AccessRevocationGround::LEFT_THE_RESTAURANT),
+        ds::AccessRevocationGround::ACCESS_NO_LONGER_NEEDED => Some(AccessRevocationGround::ACCESS_NO_LONGER_NEEDED),
+        ds::AccessRevocationGround::UNRECOGNISED => None,
+    }
+}
+impl From<AccessRevocationGround> for ds::AccessRevocationGround {
+    fn from(v: AccessRevocationGround) -> Self {
+        match v {
+            AccessRevocationGround::LEFT_THE_RESTAURANT => Self::LEFT_THE_RESTAURANT,
+            AccessRevocationGround::ACCESS_NO_LONGER_NEEDED => Self::ACCESS_NO_LONGER_NEEDED,
+        }
+    }
+}
+
 /// Identifies a line within a cart, used to edit its quantity or remove it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CartLineId(pub uuid::Uuid);

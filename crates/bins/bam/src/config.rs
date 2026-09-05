@@ -334,6 +334,8 @@ pub struct Config {
     pub service_window_validity_horizon_seconds: i64,
     /// DEFAULT `false`. SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene. STOPPED since 2026-07-28, and the reason this text used to give ("PAUSED with the CI sweep, issue #220") is STALE: #220 closed the same day, as did the other named bottleneck #218, so the chain has been off for over a month behind a blocker that no longer exists and nobody has re-taken the restart decision. Restarting is NOT a flag flip -- an owner-declared restaurant carries no SIRET, which is the crawl's idempotency key, so un-pausing before that door shares the key manufactures duplicate restaurants; and a self-declared listing currently enters the prospect funnel. Both guards, and the decision itself, are issue #800.
     pub run_sirene_worker: bool,
+    /// DEFAULT `false`. The staff access grant door (#639 part C step 6-i, ADR-20260905-101349 §6). ON, `grantRestaurantAccess` appends `RestaurantAccessGranted` as normal (subject to the accepted- basis check, `AccessBasisNotYetAccepted`). OFF, the handler refuses BEFORE touching the store with the typed `MemberAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantAccess` is NEVER gated by this key: releasing access is always safe to allow. Preconditions gating the flip are named in `docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml` (open): the Art. 14 notice to the provisioned person, an Art. 30 entry "staff access management", the lifetime reservation written down with its future path, the Supabase DPA/region and Art. 26 items (founder's, external), and 6-ii merged (a grant with no door is a binding nobody can use).
+    pub run_member_access_grant: bool,
     /// DEFAULT `false`. The PlaceOrder service-hours guard (RSO-1, DECISIONS §43): ON, a checkout evaluated OUTSIDE_HOURS is refused with errors.yaml#/OutsideServiceHours. OFF (gate-then-stabilize: PlaceOrder is the money path, and openingHours is already writable via UpdateRestaurant and the HubRise/registry imports, so the refuse branch is reachable without any new screen) is SHADOW MODE: the verdict is still computed and frozen onto the CheckoutSnapshot evidence, it just never refuses. OPEN and HOURS_UNDECLARED accept in BOTH positions. The default flips by its own one-line ADR after the shadow form is smoked (the RUN_DELETION_ENGINE precedent). The read-side Restaurant.serviceWindow field is NOT gated — it is additive and nothing binds acceptance to it.
     pub enforce_service_hours_guard: bool,
     /// DEFAULT `true`. The Order-lane BIRTH routing (#588, ADR-20260816-040239 "deliver: is a lane ENQUEUE, not a foreign-stream append"). ON, PlaceOrderProcess's `deliver: OrderPlaced to: Order` step stops calling Repository::save on the Order's stream and instead stages a lane ENQUEUE that the delivery glue turns into an inbound_messages row INSIDE the same fenced transaction; the Order's own lane worker then appends the birth, and it is THAT delivery's Recorded verdict the acceptance deadline is keyed on. ON is WHERE THIS KEY STANDS TODAY: the default flipped from OFF to ON on 2026-08-30 (ADR-20260830-012200, on the founder's LANE-FLIP answer), so every checkout's birth is routed unless somebody sets it OFF. OFF is the LEGACY unrouted birth — the saga appends OrderPlaced (and CartCheckedOut) itself and no Order-lane message exists — which is where this key started and is NOT "current behaviour": turning it OFF is a change, not a no-op. What the ROUTED position does differently from the legacy one, stated plainly (and therefore what setting it OFF gives back): (a) the birth gains one lane hop of latency after the payment authorization commits — the order is still accepted acceptance-first, but the OrderPlaced row appears a beat later; (b) the birth's ENVELOPE changes — user_id/user_type and cause_id come from the mailbox row rather than the saga's system actor (no fold, view or projector reads either, verified in the ADR §2, and stored rows are NEVER backfilled); (c) one aggregate per transaction on the checkout saga's most expensive leg, where the legacy position writes Order-{id} and Cart-{id} in one; (d) the acceptance clock arms at all, which is precondition (5a) of ENFORCE_ACCEPTANCE_TIMEOUT below. ROLLBACK IS A FLIP, NOT A REDEPLOY: set it OFF and the next delivery appends the legacy way; already-routed births stay as they are (reversible in code, not in state — those rows exist). Both the monolith and any standalone worker fleet MUST read the same value; a split fleet would route some births and append others. The flip WAS its own recorded decision (ADR-20260830-012200), and it is scoped to the Order/OrderPlaced pair alone — the other twelve deliver: steps keep the legacy append until each is moved by its own record.
@@ -548,6 +550,10 @@ impl Config {
             .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_SIRENE_WORKER", &v, false))
             .unwrap_or(false);
+        let run_member_access_grant = raw("RUN_MEMBER_ACCESS_GRANT")
+            .or_else(|| baked("RUN_MEMBER_ACCESS_GRANT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_MEMBER_ACCESS_GRANT", &v, false))
+            .unwrap_or(false);
         let enforce_service_hours_guard = raw("ENFORCE_SERVICE_HOURS_GUARD")
             .or_else(|| baked("ENFORCE_SERVICE_HOURS_GUARD", profile).map(str::to_string))
             .map(|v| parse_bool("ENFORCE_SERVICE_HOURS_GUARD", &v, false))
@@ -736,6 +742,7 @@ impl Config {
                 coopcycle_instances,
                 service_window_validity_horizon_seconds,
                 run_sirene_worker,
+                run_member_access_grant,
                 enforce_service_hours_guard,
                 route_order_birth_through_lane,
                 route_replacement_birth_through_lane,
@@ -845,6 +852,7 @@ impl Config {
         out.push_str(&format!("  COOPCYCLE_INSTANCES        = {}\n", self.coopcycle_instances.as_deref().unwrap_or("unset")));
         out.push_str(&format!("  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS = {}\n", self.service_window_validity_horizon_seconds));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
+        out.push_str(&format!("  RUN_MEMBER_ACCESS_GRANT    = {}\n", self.run_member_access_grant));
         out.push_str(&format!("  ENFORCE_SERVICE_HOURS_GUARD = {}\n", self.enforce_service_hours_guard));
         out.push_str(&format!("  ROUTE_ORDER_BIRTH_THROUGH_LANE = {}\n", self.route_order_birth_through_lane));
         out.push_str(&format!("  ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE = {}\n", self.route_replacement_birth_through_lane));
@@ -859,7 +867,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 85;
+pub const KEY_COUNT: usize = 86;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -940,6 +948,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "COOPCYCLE_INSTANCES",
     "SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS",
     "RUN_SIRENE_WORKER",
+    "RUN_MEMBER_ACCESS_GRANT",
     "ENFORCE_SERVICE_HOURS_GUARD",
     "ROUTE_ORDER_BIRTH_THROUGH_LANE",
     "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
@@ -987,6 +996,7 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_DELIVERY_OFFER_TIMEOUT", "staging", "true"),
     ("RUN_SIRENE_WORKER", "production", "true"),
     ("RUN_SIRENE_WORKER", "staging", "true"),
+    ("RUN_MEMBER_ACCESS_GRANT", "production", "false"),
     ("STRIPE_PUBLISHABLE_KEY", "production", "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"),
     ("STRIPE_PUBLISHABLE_KEY", "staging", "pk_test_51Tv3JQ2VGiALBUlDuWbbaqDElXGqg9Pq7hFhabRG8dtVRaDoUj0jEnNgK9CIiMmppCN2Wd7PyGqjKu1wnAWnQSoG00wwBmFkVi"),
 ];

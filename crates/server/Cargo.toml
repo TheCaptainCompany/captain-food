@@ -34,6 +34,7 @@ client-reclamation = { path = "../clients/reclamation" }
 client-refund-process = { path = "../clients/refund-process" }
 client-restaurant = { path = "../clients/restaurant" }
 client-restaurant-account = { path = "../clients/restaurant-account" }
+client-restaurant-membership = { path = "../clients/restaurant-membership" }
 client-rider = { path = "../clients/rider" }
 
 # The generated GraphQL layer wraps the domain scalars/enums (orphan rule: the async-graphql wrapper

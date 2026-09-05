@@ -36,6 +36,19 @@ const MEMBERSHIP_NAMESPACE: Uuid = Uuid::from_u128(0x6ca4_1f0e_9b27_4d55_a3e1_7c
 pub enum MembershipChange {
     Grant { scope_type: ScopeType, scope_id: Uuid, member_type: UserType, member_id: Uuid },
     RevokeRole { scope_type: ScopeType, scope_id: Uuid, member_type: UserType },
+    /// #639 part C step 6-i (ADR-20260905-101349 §2, young): a targeted grant/revoke pair for the
+    /// `RestaurantMembership` aggregate's `MEMBER` arm -- distinct from [`Self::Grant`]/
+    /// [`Self::RevokeRole`] because `member_type` here is the literal `PrincipalKind::MEMBER` text
+    /// stored into a column declared `UserType` (the table's own disambiguating note), and because
+    /// the row's `membership_id` PK is REUSED verbatim from the source event rather than derived —
+    /// which is exactly what lets [`Self::RevokeMembership`] target ONE row with no lookup, never
+    /// the broad role-wide delete `RevokeRole` performs.
+    GrantMember { membership_id: Uuid, scope_type: ScopeType, scope_id: Uuid, member_id: Uuid },
+    /// A TARGETED delete of exactly the row whose `membership_id` equals this value -- never the
+    /// broad `RevokeRole` (which would strip every MEMBER row on the scope, the stale-grant-vs-
+    /// silent-breach reasoning that arm's own doc states does not apply here: a `RestaurantMembership`
+    /// names a person, not a role population, so there is no sibling row sharing this key).
+    RevokeMembership { membership_id: Uuid },
 }
 
 /// Lookups the infrastructure worker resolves before folding (the pure layer cannot do I/O).
@@ -173,6 +186,20 @@ pub fn membership_changes(env: &Envelope, resolved: &Resolved) -> Vec<Membership
             }],
             None => Vec::new(),
         },
+
+        // #639 part C step 6-i (ADR-20260905-101349 §2): the RestaurantMembership grant/revoke
+        // pair. `membership_id` is REUSED verbatim (never derived) from the event -- the
+        // `RestaurantMembership` aggregate already minted a stable, unique id, and reusing it here
+        // is what lets the revoke below target-delete with no lookup.
+        DomainEvent::RestaurantAccessGranted(e) => vec![MembershipChange::GrantMember {
+            membership_id: e.membership_id.0,
+            scope_type: e.scope_type,
+            scope_id: e.scope_id.0,
+            member_id: e.member_id.0,
+        }],
+        DomainEvent::RestaurantAccessRevoked(e) => {
+            vec![MembershipChange::RevokeMembership { membership_id: e.membership_id.0 }]
+        }
 
         // ADMIN holds no rows at all — the guard short-circuits on the role. Storing them would mean
         // a row per admin per instance, unbounded and pointless.
@@ -401,6 +428,50 @@ mod tests {
             }]
         );
         assert!(membership_changes(&claim(None), &Resolved::default()).is_empty());
+    }
+
+    /// #639 part C step 6-i: RestaurantAccessGranted reuses the event's OWN `membershipId` as the
+    /// row PK -- never a UUIDv5 derivation -- which is what lets the revoke arm target-delete with
+    /// no lookup.
+    #[test]
+    fn restaurant_access_granted_reuses_the_event_membership_id() {
+        let membership_id = Uuid::from_u128(77);
+        let member_id = Uuid::from_u128(88);
+        let e: domain::generated::events::RestaurantAccessGranted = serde_json::from_value(serde_json::json!({
+            "membershipId": membership_id,
+            "scopeType": "RESTAURANT",
+            "scopeId": RESTAURANT,
+            "principalKind": "MEMBER",
+            "memberId": member_id,
+            "authSubject": "auth-1",
+            "authority": "MANAGER",
+            "basis": "CAPTAIN_ONBOARDING",
+        }))
+        .expect("RestaurantAccessGranted fixture");
+        assert_eq!(
+            membership_changes(&env(DomainEvent::RestaurantAccessGranted(e)), &Resolved::default()),
+            vec![MembershipChange::GrantMember {
+                membership_id,
+                scope_type: ScopeType::RESTAURANT,
+                scope_id: RESTAURANT,
+                member_id,
+            }]
+        );
+    }
+
+    /// The targeted revoke: keyed on `membershipId` alone, never the broad `RevokeRole`.
+    #[test]
+    fn restaurant_access_revoked_is_a_targeted_delete() {
+        let membership_id = Uuid::from_u128(77);
+        let e: domain::generated::events::RestaurantAccessRevoked = serde_json::from_value(serde_json::json!({
+            "membershipId": membership_id,
+            "ground": "LEFT_THE_RESTAURANT",
+        }))
+        .expect("RestaurantAccessRevoked fixture");
+        assert_eq!(
+            membership_changes(&env(DomainEvent::RestaurantAccessRevoked(e)), &Resolved::default()),
+            vec![MembershipChange::RevokeMembership { membership_id }]
+        );
     }
 
     /// The overwhelmingly common case on the projection hot path: an event with no authorization

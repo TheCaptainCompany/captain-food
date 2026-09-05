@@ -279,6 +279,7 @@ fn deps_over(pool: &PgPool, payments: Arc<dyn PaymentService>, closed: Arc<Atomi
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: false,
+        run_member_access_grant: false,
         store: Arc::new(GatedOrderReads {
             inner: Arc::new(PgEventStore::new(pool.clone())),
             closed,

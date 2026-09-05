@@ -521,6 +521,9 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // this round), so this pin must see it or a regression that drops the call again
             // ships green, exactly the #598 mutation this whole block exists to catch.
             ("RUN_RIDER_RESTRICTION_DOOR", deps.run_rider_restriction_door),
+            // #639 part C step 6-i (ADR-20260905-101349 §6, the #882 fleet-parity lesson, the
+            // SAME shape as the door above): the staff access grant door's own release gate.
+            ("RUN_MEMBER_ACCESS_GRANT", deps.run_member_access_grant),
         ],
     );
 

@@ -790,6 +790,15 @@ fixtures:
     type: { $ref: 'events.yaml#/MailboxMessageRequeued' }
     data: { targetMessageId: "poisoned-1", actorType: "Payment" }
 
+  # --- Staff authentication: the RestaurantMembership aggregate (#639 part C step 6-i,
+  # ADR-20260905-101349 §1-§7) -------------------------------------------------------------
+  restaurantAccessGranted:
+    type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
+    data: { membershipId: "membership-1", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-1", authSubject: "auth-supabase-1", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
+  restaurantAccessRevoked:
+    type: { $ref: 'events.yaml#/RestaurantAccessRevoked' }
+    data: { membershipId: "membership-1", ground: "LEFT_THE_RESTAURANT" }
+
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
 # =====================================================================
@@ -4194,6 +4203,117 @@ tests:
       data: { riderId: "rider-1", status: "AVAILABLE" }
     thrown:
       - { $ref: 'errors.yaml#/RiderAccessRestricted' }
+
+  # ----------------------- RestaurantMembership: the bridge and the grant (#639 part C step 6-i,
+  # ADR-20260905-101349 §1-§7) -----------------------------------------------------------------
+  TestRestaurantAccessGranted:
+    name: "An admin grants a member access to a restaurant scope on the accepted basis"
+    rules:
+      - { $ref: 'rules.yaml#/GrantRestaurantAccessIsAHumanAct' }
+      - { $ref: 'rules.yaml#/RestaurantAccessBasisAcceptedSetIsNarrower' }
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-1", scopeType: "RESTAURANT", scopeId: "resto-1", memberId: "member-1", authSubject: "auth-supabase-1", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    then:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+
+  # #639 part C step 6-i (ADR-20260905-101349 §6): the door defaults OFF (RUN_SIRENE_WORKER
+  # lesson), so every OTHER GrantRestaurantAccess path must gate it ON explicitly to exercise its
+  # OWN assertion rather than the door's -- this is the OFF leg, and no seeded row is needed since
+  # the door check is the FIRST thing the handler does.
+  TestGrantRestaurantAccessDoorClosed:
+    name: "grantRestaurantAccess is refused by the door key while it is OFF (the production default), before the store is even read"
+    rules: [{ $ref: 'rules.yaml#/MemberAccessGrantGatedBeforeStore' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-1", scopeType: "RESTAURANT", scopeId: "resto-1", memberId: "member-1", authSubject: "auth-supabase-1", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
+    thrown:
+      - { $ref: 'errors.yaml#/MemberAccessGrantDoorClosed' }
+
+  TestGrantRestaurantAccessBasisNotYetAccepted:
+    name: "grantRestaurantAccess refuses a declared-but-unimplemented AccessBasis"
+    rules: [{ $ref: 'rules.yaml#/RestaurantAccessBasisAcceptedSetIsNarrower' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-1", scopeType: "RESTAURANT", scopeId: "resto-1", memberId: "member-1", authSubject: "auth-supabase-1", authority: "MANAGER", basis: "OWNER_DECLARATION" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/AccessBasisNotYetAccepted' }
+
+  TestGrantRestaurantAccessTwiceIsIdempotent:
+    name: "Granting the same membershipId twice is a no-op (idempotent)"
+    rules: [{ $ref: 'rules.yaml#/RestaurantAccessGrantIsIdempotent' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-1", scopeType: "RESTAURANT", scopeId: "resto-1", memberId: "member-1", authSubject: "auth-supabase-1", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    then: []
+
+  # The reservation sentinel (behaviour_support::SpecAuthSubjectReservations, the
+  # TestRiderAuthSubjectAlreadyBoundIsRejected precedent): "already-bound" is held by a FOREIGN
+  # member id, so a second GrantRestaurantAccess naming a DIFFERENT memberId on the same
+  # authSubject is rejected before any fact is recorded.
+  TestGrantRestaurantAccessAuthSubjectAlreadyBoundIsRejected:
+    name: "Granting a NEW membershipId with a login already bound to another member is rejected"
+    rules: [{ $ref: 'rules.yaml#/MemberAuthSubjectBoundOnce' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      data: { membershipId: "membership-2", scopeType: "RESTAURANT", scopeId: "resto-2", memberId: "member-2", authSubject: "already-bound-member", authority: "OPERATOR", basis: "CAPTAIN_ONBOARDING" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT' }
+    thrown:
+      - { $ref: 'errors.yaml#/MemberAuthSubjectAlreadyBound' }
+
+  TestRestaurantAccessRevoked:
+    name: "An admin revokes a member's access, citing a closed ground"
+    rules: [{ $ref: 'rules.yaml#/RestaurantMembershipRevocationIsFinal' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
+      data: { membershipId: "membership-1", ground: "LEFT_THE_RESTAURANT" }
+    then:
+      - { $ref: '#/fixtures/restaurantAccessRevoked' }
+
+  TestRevokeUnknownRestaurantMembershipIsRejected:
+    name: "Revoking an unknown membershipId is rejected"
+    rules: [{ $ref: 'rules.yaml#/RestaurantMembershipRevocationIsFinal' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
+      data: { membershipId: "membership-404", ground: "LEFT_THE_RESTAURANT" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantMembershipNotFound' }
+
+  TestRevokeAlreadyRevokedRestaurantMembershipIsRejected:
+    name: "Revoking an already-revoked membership is rejected — the Art. 11-log style log is never overwritten"
+    rules: [{ $ref: 'rules.yaml#/RestaurantMembershipRevocationIsFinal' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+      - { $ref: '#/fixtures/restaurantAccessRevoked' }
+    when:
+      type: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
+      data: { membershipId: "membership-1", ground: "ACCESS_NO_LONGER_NEEDED" }
+    thrown:
+      - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }
 
   # ----------------------- PlaceOrderProcess (error guards) ----------
   TestPaymentAuthorizationOrphanIsFlagged:

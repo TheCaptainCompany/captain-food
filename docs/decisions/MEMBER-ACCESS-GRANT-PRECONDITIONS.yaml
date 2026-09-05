@@ -1,0 +1,47 @@
+key: MEMBER-ACCESS-GRANT-PRECONDITIONS
+status: open
+question: 'What must exist before the staff access grant door (`grantRestaurantAccess`) is opened in
+  production, now that step 6-i lands the `RestaurantMembership` aggregate behind
+  `RUN_MEMBER_ACCESS_GRANT`? Six preconditions are named (ADR-20260905-101349 §11): the Art. 14
+  notice to the person Captain provisions from the owner''s say-so, due at obtaining rather than at
+  sign-in; an Art. 30 entry "staff access management"; the lifetime `(MEMBER, authSubject)`
+  reservation binding written down with its future path (pseudonymise / crypto-shred, never delete);
+  the Supabase DPA and region plus Art. 26 joint-controllership items (founder''s, external); 6-ii
+  merged (a grant with no sign-in door is a binding nobody can use); and an erasure path for a Member
+  exists -- a `deletion:` block or a written manual procedure counsel accepts (Art. 17 + Art. 5(1)(e))
+  -- before the first real grant, because the Member `deletion:` block is owed on the SAME clock as
+  Customer''s (evidence below), and Customer''s clock is ERASURE-LAUNCH-GATE (launch-gating). Flipping
+  `RUN_MEMBER_ACCESS_GRANT` to true in production is the decision that closes this row.'
+owner: team
+opened: '2026-09-05'
+capacity: team
+register: docs/adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md
+evidence: 'PROP-20260831-180622 §6.5 said "no engine to hang on" for the membership stream''s
+  deletion block -- corrected 2026-09-05 (ADR-20260905-101349 §11): a deletion: engine exists
+  (Customer''s block) but is gated off, so the Member block is owed on the SAME clock as
+  Customer''s, not "when an engine appears". The RUN_RIDER_RESTRICTION_DOOR precedent
+  (RIDER-RESTRICTION-PRECONDITIONS) shows the shape: a key alone is not enough, prose and the
+  deploy value can disagree unreconciled (the RUN_SIRENE_WORKER lesson) -- so this row names the
+  key AND the preconditions, and the codegen rule `decision-row-open-key-must-be-off` refuses any
+  production value other than "false" while the row is open. Production is suspended
+  (ADR-20260817-105844) and step 6-i ships dark (no UI, no door) -- that is a fact, not an
+  invariant: the resume is one Argo sync plus 6-ii landing.'
+note: 'The key is consumed at the WRITE door only: grantRestaurantAccess OFF returns the typed
+  refusal MemberAccessGrantDoorClosed before the store is touched; revokeRestaurantAccess is never
+  gated -- releasing access is always safe. 6-i is inventory until 6-ii (ADR-20260905-101349 §1):
+  the grant path has no caller because no admin can sign in yet, so this row cannot close before
+  6-ii merges regardless of the other items. Unlike RIDER-RESTRICTION-PRECONDITIONS, this row
+  has no admin-reachability sub-precondition of its own -- the door IS 6-ii, named directly as
+  item 5 rather than inherited from a separate row. Two more preconditions, found on the round-2
+  review of 6-i itself: the "one live membership per (scope, member)" set invariant is NOT
+  arbitrated by the (MEMBER, authSubject) reservation -- that reservation keys on the login credential,
+  not on the (scope, member) pair, so nothing today stops a second membershipId granting the same
+  member a second row on the same scope; a 6-ii/6-iv-era write-side check closing this is a
+  precondition of the flip (young, round 2). And: the write side must refuse binding a second
+  authSubject onto an already-bound member -- today ON CONFLICT (member_id) DO UPDATE SET
+  auth_subject = EXCLUDED.auth_subject on the Member bridge would rebind a member''s credential
+  silently on a second grant with a fresh membershipId, orphaning the first credential and
+  contradicting "the binding OUTLIVES any one grant"; first-write-wins is the fix landed in 6-i
+  itself (round 2, R2-8), but the write side cannot yet READ the bridge to refuse the second grant
+  command outright (FORK 2: a check, not a lock) -- that refusal is a 6-ii/6-iv-era precondition too
+  (dba, round 2).'

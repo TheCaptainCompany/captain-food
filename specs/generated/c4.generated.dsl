@@ -63,6 +63,9 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       ct_actor_prospect = container "actor-prospect" "Drains Prospect lanes; appends its domain events." "Rust — mailbox worker bin" {
         a_Prospect = component "Prospect" "" "Aggregate"
       }
+      ct_actor_restaurant_membership = container "actor-restaurant-membership" "Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT." "Rust — mailbox worker bin" {
+        a_RestaurantMembership = component "RestaurantMembership" "" "Aggregate"
+      }
       ct_actor_catalog = container "actor-catalog" "Drains Catalog lanes (incl. HubRise imports); appends its domain events." "Rust — mailbox worker bin" {
         a_Catalog = component "Catalog" "" "Aggregate"
       }
@@ -305,6 +308,10 @@ workspace "Captain.Food" "Local-first food ordering & delivery for independent r
       autolayout lr
     }
     component ct_actor_prospect "ActorProspectComponents" {
+      include *
+      autolayout lr
+    }
+    component ct_actor_restaurant_membership "ActorRestaurantMembershipComponents" {
       include *
       autolayout lr
     }

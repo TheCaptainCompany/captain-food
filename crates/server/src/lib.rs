@@ -208,7 +208,12 @@ pub fn wire() -> HealthDto {
 /// (`order_tracking_store::upsert`'s full 39-column list), so a build without the column would fail
 /// every Order-group projection with `column "delivery_handed_back" does not exist` (42703) — the
 /// whole customer tracking read model would stop updating, not just the handback banner.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904160000;
+///
+/// `20260905110000` = `member_bridge_and_scope_membership_grant` (#639 part C step 6-i,
+/// ADR-20260905-101349): the `member` table backs the `Member` projector arm on
+/// `RestaurantAccessGranted`, so a build without it would fail every staff-access grant projection
+/// with `relation "member" does not exist` (42P01) the moment `RUN_MEMBER_ACCESS_GRANT` flips on.
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260905110000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -1033,6 +1038,9 @@ pub async fn router() -> Router {
                         // release gate, resolved ONCE here at the composition root — the handler
                         // takes it as a parameter, exactly like `enforce_service_hours_guard`.
                         run_rider_restriction_door: config.run_rider_restriction_door,
+                        // #639 part C step 6-i (ADR-20260905-101349 §6): the staff access grant
+                        // door, the SAME resolved-once-here shape.
+                        run_member_access_grant: config.run_member_access_grant,
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1067,6 +1075,13 @@ pub async fn router() -> Router {
                     telemetry::meters::runtime::declare_flag(
                         "RUN_RIDER_RESTRICTION_DOOR",
                         config.run_rider_restriction_door,
+                    );
+                    // #639 part C step 6-i (ADR-20260905-101349 §6, the #882 fleet-parity lesson):
+                    // the grant door's own fleet-parity evidence, the standalone composition root
+                    // (`infrastructure::mailbox::standalone_deps`) declares the same key.
+                    telemetry::meters::runtime::declare_flag(
+                        "RUN_MEMBER_ACCESS_GRANT",
+                        config.run_member_access_grant,
                     );
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a

@@ -20,6 +20,7 @@ pub mod event_wake;
 pub mod mailbox_wake;
 pub mod mailbox_lanes;
 pub mod mailbox_store;
+pub mod member_store;
 pub mod order;
 pub mod order_conversation;
 pub mod order_conversation_store;

@@ -179,3 +179,40 @@ Prospect:
       emits: [{ $ref: 'events.yaml#/ProspectReplied' }]
       throws:
         - { $ref: 'errors.yaml#/ProspectNotFound' }
+
+
+RestaurantMembership:
+  type: aggregate
+  identity: { $ref: '#/RestaurantMembership/state/membershipId' }
+  mailbox:
+    partitions: 5            # keyspace WIDTH (workers lease ranges of it) — PROP-20260728-152752 §2
+  description: >
+    The bridge and the grant (#639 part C step 6-i, ADR-20260905-101349 §1-§7): one `MemberId`'s
+    access to one restaurant scope. Its OWN aggregate, its OWN stream (`RestaurantMembership-
+    {membershipId}`), its OWN lane -- FORK 1 Option A (PROP-20260831-180622 §3, young, evans): a
+    targeted revoke needs its own identity distinct from the invitation that may precede it (6-iv)
+    and from the person (`MemberId`) it grants. Captain provisions by hand in V0 -- the human is
+    the process manager (Q1); no saga holds this one bit.
+  receives:
+    # The human-only doors (#639 part C step 6-i, ADR-20260905-101349 §1): `requires: acting:
+    # { ADMIN: any }` -- no EXTERNAL key, so no partner ACL can ever reach these; the validator
+    # rule `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of either an
+    # ERROR, and `pm-emits-human-only-event` makes a `receives[].emits:` of RestaurantAccessGranted
+    # (or RestaurantAccessRevoked) an ERROR too -- no PM inbox may declare either.
+    - message: { $ref: 'commands.yaml#/GrantRestaurantAccess' }
+      requires:
+        acting:
+          ADMIN: any
+      emits: [{ $ref: 'events.yaml#/RestaurantAccessGranted' }]
+      throws:
+        - { $ref: 'errors.yaml#/MemberAccessGrantDoorClosed' }
+        - { $ref: 'errors.yaml#/AccessBasisNotYetAccepted' }
+        - { $ref: 'errors.yaml#/MemberAuthSubjectAlreadyBound' }
+    - message: { $ref: 'commands.yaml#/RevokeRestaurantAccess' }
+      requires:
+        acting:
+          ADMIN: any
+      emits: [{ $ref: 'events.yaml#/RestaurantAccessRevoked' }]
+      throws:
+        - { $ref: 'errors.yaml#/RestaurantMembershipNotFound' }
+        - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }

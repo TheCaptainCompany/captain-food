@@ -115,3 +115,43 @@ pub const PROSPECT_NOT_FOUND: ErrorDef = ErrorDef {
     message_en: "Prospect not found.",
     message_fr: "Prospect introuvable.",
 };
+
+/// The grant door is closed by `configuration.yaml#/keys/RUN_MEMBER_ACCESS_GRANT` (#639 part C step 6-i, ADR-20260905-101349 §6) -- a declared, supervisable refusal while the preconditions (`docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml`) are open, never a silent no-op. The first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock, so the store is never touched while this is off.
+/// Context: `scopeId`.
+pub const MEMBER_ACCESS_GRANT_DOOR_CLOSED: ErrorDef = ErrorDef {
+    code: "MemberAccessGrantDoorClosed",
+    message_en: "Granting restaurant access is not yet enabled in this environment.",
+    message_fr: "L'octroi d'accès restaurant n'est pas encore activé dans cet environnement.",
+};
+
+/// `GrantRestaurantAccess.basis` named a declared but not-yet-implemented door (#639 part C step 6-i, ADR-20260905-101349 §3): only `CAPTAIN_ONBOARDING` is accepted today. `GOOGLE_BUSINESS_PROFILE`, `OWNER_DECLARATION` and `MEMBER_INVITATION` are named in the closed `AccessBasis` set so the vocabulary does not widen a second time when each door lands, but none of the three has a handler yet.
+/// Context: `basis`.
+pub const ACCESS_BASIS_NOT_YET_ACCEPTED: ErrorDef = ErrorDef {
+    code: "AccessBasisNotYetAccepted",
+    message_en: "This access basis is not yet supported.",
+    message_fr: "Ce fondement d'accès n'est pas encore pris en charge.",
+};
+
+/// The login credential (`authSubject`) is already bound to ANOTHER member id: the write-side reservation `(MEMBER, authSubject)` in `database/tables/reservations.yaml#/ auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C step 6-i, ADR-20260905-101349 §4). The binding is never released by a revoke, so the remedy is to grant the EXISTING member id, never a new one.
+/// Context: `authSubject`.
+pub const MEMBER_AUTH_SUBJECT_ALREADY_BOUND: ErrorDef = ErrorDef {
+    code: "MemberAuthSubjectAlreadyBound",
+    message_en: "This login is already linked to a restaurant member. Grant the existing member instead.",
+    message_fr: "Cette identité de connexion est déjà liée à un membre. Accordez l'accès au membre existant.",
+};
+
+/// No `RestaurantMembership` exists for this `membershipId` (#639 part C step 6-i).
+/// Context: `membershipId`.
+pub const RESTAURANT_MEMBERSHIP_NOT_FOUND: ErrorDef = ErrorDef {
+    code: "RestaurantMembershipNotFound",
+    message_en: "This restaurant membership was not found.",
+    message_fr: "Cette adhésion restaurant est introuvable.",
+};
+
+/// The `RestaurantMembership` was already revoked (#639 part C step 6-i) -- revocation is a fact that happens once; a second `RevokeRestaurantAccess` on the same `membershipId` is rejected rather than silently re-recorded (the Art. 11-log style: the log is never overwritten).
+/// Context: `membershipId`.
+pub const RESTAURANT_MEMBERSHIP_ALREADY_REVOKED: ErrorDef = ErrorDef {
+    code: "RestaurantMembershipAlreadyRevoked",
+    message_en: "This restaurant membership was already revoked.",
+    message_fr: "Cette adhésion restaurant a déjà été révoquée.",
+};

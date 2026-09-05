@@ -975,6 +975,39 @@ pub struct RecordProspectReplyInput {
     pub note: Option<String>,
 }
 
+/// Grant a `MemberId` access to a restaurant scope (ADR-20260905-101349 §2/§3/§6). Handled by `RestaurantMembership`, its own aggregate, its own stream, its own lane -- FORK 1 Option A (young, evans): a targeted revoke by `membershipId` needs its own identity, distinct from the invitation that may precede it (6-iv) and from the person (`MemberId`) it grants.
+/// `scopeType` is carried for vocabulary alignment with `ScopeMembership` (#144) even though this aggregate only ever mints a RESTAURANT scope in V0 -- `scopeId` is therefore typed `RestaurantId` directly; a future scope type widens the union rather than reshaping this command.
+/// `membershipId` is REQUIRED and CALLER-MINTED: the mailbox lane address declares `Some("membershipId")` and `declared_identity` errors "unaddressable" when it is absent, so a handler-side mint branch is DEAD over the mailbox in practice, and a second grant omitting the id would duplicate the membership (two streams, two `ScopeMembership` rows -- a targeted revoke would then leave a sibling). Nothing consumes this command yet (dark), so the shape is free to fix now rather than migrate later. Submitting an already-granted `membershipId` is an idempotent no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- never a second event for the same relationship.
+/// The handler ACCEPTS only `basis: CAPTAIN_ONBOARDING` today (Captain provisions by hand; the human is the process manager, PROP-20260831-180622 §6.2 Q1) and REFUSES the other three declared `AccessBasis` values with the typed `AccessBasisNotYetAccepted` (unimplemented, not illegal -- 6-iv accepts `MEMBER_INVITATION`). Gated by `configuration.yaml#/keys/ RUN_MEMBER_ACCESS_GRANT`, checked BEFORE the store is touched (the `RestrictRider` shape): the first hand-provisioned grant about a real Tours human is the irreversible moment that starts every legal clock (ADR-20260905-101349 §6/§11).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantRestaurantAccessInput {
+    #[graphql(name = "membershipId")]
+    pub membership_id: MembershipId,
+    #[graphql(name = "scopeType")]
+    pub scope_type: ScopeType,
+    #[graphql(name = "scopeId")]
+    pub scope_id: RestaurantId,
+    #[graphql(name = "memberId")]
+    pub member_id: MemberId,
+    #[graphql(name = "authSubject")]
+    pub auth_subject: AuthSubject,
+    #[graphql(name = "authority")]
+    pub authority: MemberAuthority,
+    #[graphql(name = "basis")]
+    pub basis: AccessBasis,
+}
+
+/// End one `RestaurantMembership` (ADR-20260905-101349 §2/§11). Revocation of ACCESS is never release of the underlying `(MEMBER, authSubject)` reservation (§4, PROP §7): the human stays bound to their `MemberId` forever, so a later re-invitation cannot mint a second person for the same credential. `ground` is the closed, additive-only `AccessRevocationGround` -- no free-text field exists on this command, on purpose (the ADR-20260904-014136 precedent: a stored performance-keyed reason is the strongest requalification exhibit a labour dispute could ask for). Never gated: releasing access is always safe to allow (the `ReinstateRider`/ `RestrictRider` asymmetry, ADR-20260904-152807 §7).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeRestaurantAccessInput {
+    #[graphql(name = "membershipId")]
+    pub membership_id: MembershipId,
+    #[graphql(name = "ground")]
+    pub ground: AccessRevocationGround,
+}
+
 /// Visitor adds a line to a cart, validated against the live catalog. The client generates the cartId and sends it on every add; the first add for a new cartId creates the cart (idempotently), binding it to the restaurant.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, async_graphql::InputObject)]
 #[serde(rename_all = "camelCase")]

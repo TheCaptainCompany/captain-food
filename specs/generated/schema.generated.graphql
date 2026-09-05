@@ -105,6 +105,7 @@ scalar RestaurantDescription
 scalar MarginPercent
 scalar TimeOfDay
 scalar ProspectionScore
+scalar MembershipId
 scalar CartLineId
 scalar StarRating
 scalar RatingComment
@@ -465,6 +466,23 @@ enum RestaurantListKey {
   RECOMMENDED
   TOP_DEALS
   GREEN_PACKAGING
+}
+
+enum MemberAuthority {
+  MANAGER
+  OPERATOR
+}
+
+enum AccessBasis {
+  CAPTAIN_ONBOARDING
+  GOOGLE_BUSINESS_PROFILE
+  OWNER_DECLARATION
+  MEMBER_INVITATION
+}
+
+enum AccessRevocationGround {
+  LEFT_THE_RESTAURANT
+  ACCESS_NO_LONGER_NEEDED
 }
 
 enum ThumbRating {
@@ -1577,6 +1595,21 @@ input RecordProspectReplyInput {
   note: String
 }
 
+input GrantRestaurantAccessInput {
+  membershipId: MembershipId!
+  scopeType: ScopeType!
+  scopeId: RestaurantId!
+  memberId: MemberId!
+  authSubject: AuthSubject!
+  authority: MemberAuthority!
+  basis: AccessBasis!
+}
+
+input RevokeRestaurantAccessInput {
+  membershipId: MembershipId!
+  ground: AccessRevocationGround!
+}
+
 input AddCartLineInput {
   cartId: CartId!
   restaurantId: RestaurantId!
@@ -2114,6 +2147,8 @@ type Mutation {
   recordProspectContact(input: RecordProspectContactInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "RecordProspectContact")
   markProspectCold(input: MarkProspectColdInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [EXTERNAL, ADMIN]) @command(name: "MarkProspectCold")
   recordProspectReply(input: RecordProspectReplyInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN, EXTERNAL]) @command(name: "RecordProspectReply")
+  grantRestaurantAccess(input: GrantRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "GrantRestaurantAccess")
+  revokeRestaurantAccess(input: RevokeRestaurantAccessInput!, metadata: MetadataInput): MutationAcceptance! @auth(requires: [ADMIN]) @command(name: "RevokeRestaurantAccess")
   addCartLine(input: AddCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "AddCartLine")
   removeCartLine(input: RemoveCartLineInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "RemoveCartLine")
   changeCartLineQuantity(input: ChangeCartLineQuantityInput!, metadata: MetadataInput): MutationAcceptance! @public @command(name: "ChangeCartLineQuantity")

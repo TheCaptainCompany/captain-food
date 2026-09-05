@@ -38,6 +38,7 @@ use domain::generated::commands::{
     UpdateCatalogCategory, UpdateCustomerInfo, UpdateOfferStock, UpdateOptionList, UpdateProduct,
     UpdateRestaurant, UpdateRestaurantAccount, UpdateRestaurantGoogleBusinessProfile, VerifyPhone,
     VerifyGoogleBusinessProfileOrderLink,
+    GrantRestaurantAccess, RevokeRestaurantAccess,
 };
 use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
@@ -55,15 +56,17 @@ use domain::generated::events::{
     RestaurantListingClaimed, RestaurantListingOptedOut, RestaurantListingStatusChanged,
     RestaurantMarkedClosed, RestaurantRegistered, RestaurantRemoved,
     RestaurantSlugConfigured, RestaurantSlugReconfigured, RestaurantUnfavorited, RestaurantUpdated,
+    RestaurantAccessGranted, RestaurantAccessRevoked,
 };
 use domain::generated::scalars::{
-    CatalogId, CurrencyCode, CustomerId, DialingCode, EmailAddress, ExternalReference,
-    NationalPhoneNumber, PhoneNumber, RestaurantAccountId, RestaurantId, RestaurantListingStatus,
-    RestaurantStatus, SessionId, StockStatus,
+    AccessBasis, CatalogId, CurrencyCode, CustomerId, DialingCode, EmailAddress, ExternalReference,
+    MembershipId, NationalPhoneNumber, PhoneNumber, PrincipalKind, RestaurantAccountId,
+    RestaurantId, RestaurantListingStatus, RestaurantStatus, SessionId, StockStatus,
 };
 use domain::prospect::ProspectState;
 use domain::restaurant::RestaurantState;
 use domain::restaurant_account::RestaurantAccountState;
+use domain::restaurant_membership::RestaurantMembershipState;
 use domain::shared::errors::DomainError;
 
 use crate::ports::{
@@ -3069,6 +3072,112 @@ pub async fn record_prospect_reply(
         note: cmd.note,
     });
     Repository::new(store).save(&stream_name, version, &[event], actor).await.map(|_| ())
+}
+
+// ================================================================================================
+// RestaurantMembership aggregate (actors.yaml#/RestaurantMembership) — the bridge and the grant
+// (#639 part C step 6-i, ADR-20260905-101349 §1-§7). One aggregate, one stream, one lane; Captain
+// provisions by hand in V0 -- the human is the process manager (no saga holds this one bit).
+// ================================================================================================
+
+/// The stream a RestaurantMembership aggregate lives on.
+fn restaurant_membership_stream(id: &MembershipId) -> String {
+    format!("RestaurantMembership-{}", id.0)
+}
+
+/// Handle `commands.yaml#/GrantRestaurantAccess` → emit `events.yaml#/RestaurantAccessGranted`
+/// (#639 part C step 6-i, ADR-20260905-101349 §2/§3/§6).
+///
+/// Order, each step gating the next (the `restrict_rider` shape):
+/// 1. The door FIRST, before the store is even read (`run_member_access_grant`) -- the first
+///    hand-provisioned grant about a real Tours human is the irreversible moment that starts every
+///    legal clock.
+/// 2. The accepted-basis belt: only `CAPTAIN_ONBOARDING` is implemented today: the other three
+///    declared `AccessBasis` values are refused `AccessBasisNotYetAccepted`.
+/// 3. Idempotency on `membershipId`: an EXISTING membership (granted or already revoked) makes a
+///    repeat call a no-op (`rules.yaml#/RestaurantAccessGrantIsIdempotent`) -- `membershipId` is
+///    REQUIRED and caller-minted, never minted by this handler.
+/// 4. The write-side reservation `(MEMBER, authSubject)` in 2a's `auth_subject_reservations`
+///    table (`rules.yaml#/MemberAuthSubjectBoundOnce`), reserved BEFORE appending -- an orphan
+///    reservation is re-driven by the same caller re-submitting with the same membershipId; an
+///    event with no reservation would be two members believing they own one login.
+pub async fn grant_restaurant_access(
+    store: &dyn EventStore,
+    auth_subjects: &dyn AuthSubjectReservationRepository,
+    cmd: GrantRestaurantAccess,
+    actor: &Actor,
+    // #639 part C step 6-i (ADR-20260905-101349 §6): the grant door as a mechanism, resolved ONCE
+    // at the composition root (the `run_rider_restriction_door` "when_at" style) -- never a
+    // global/env read inside the handler. Checked FIRST, before the store is even touched.
+    // `revoke_restaurant_access` never consumes this: releasing access is always safe to allow.
+    run_member_access_grant: bool,
+) -> Result<(), DomainError> {
+    if !run_member_access_grant {
+        return Err(reject("MemberAccessGrantDoorClosed", json!({ "scopeId": cmd.scope_id })));
+    }
+    if cmd.basis != AccessBasis::CAPTAIN_ONBOARDING {
+        return Err(reject("AccessBasisNotYetAccepted", json!({ "basis": cmd.basis })));
+    }
+    // `membershipId` is REQUIRED and CALLER-MINTED (round-2 finding, R2-3): the mailbox lane
+    // address needs it present to route at all, so a handler-side mint would be dead code in
+    // practice and a mint-then-lose-the-race would duplicate the membership.
+    let membership_id = cmd.membership_id;
+    let (state, version) = Repository::new(store).load::<RestaurantMembershipState>(membership_id).await?;
+    if state.is_some() {
+        // Idempotent replay on the same membershipId (rules.yaml#/RestaurantAccessGrantIsIdempotent):
+        // no second fact, whatever the membership's current revoked/unrevoked state.
+        return Ok(());
+    }
+    if !auth_subjects
+        .reserve(cmd.auth_subject.clone(), BoundPrincipal::Member(cmd.member_id))
+        .await?
+    {
+        return Err(reject("MemberAuthSubjectAlreadyBound", json!({ "authSubject": cmd.auth_subject })));
+    }
+    let event = DomainEvent::RestaurantAccessGranted(RestaurantAccessGranted {
+        membership_id,
+        scope_type: cmd.scope_type,
+        scope_id: cmd.scope_id,
+        principal_kind: PrincipalKind::MEMBER,
+        member_id: cmd.member_id,
+        auth_subject: cmd.auth_subject,
+        authority: cmd.authority,
+        basis: cmd.basis,
+    });
+    Repository::new(store)
+        .save(&restaurant_membership_stream(&membership_id), version, &[event], actor)
+        .await
+        .map(|_| ())
+}
+
+/// Handle `commands.yaml#/RevokeRestaurantAccess` → emit `events.yaml#/RestaurantAccessRevoked`
+/// (#639 part C step 6-i, ADR-20260905-101349 §2/§11). NEVER gated: releasing access is always
+/// safe to allow. Never releases the underlying `(MEMBER, authSubject)` reservation (PROP §7) --
+/// there is nothing to release here either, by the same construction as `reinstate_rider`.
+pub async fn revoke_restaurant_access(
+    store: &dyn EventStore,
+    cmd: RevokeRestaurantAccess,
+    actor: &Actor,
+) -> Result<(), DomainError> {
+    let (state, version) = Repository::new(store)
+        .require::<RestaurantMembershipState>(cmd.membership_id, || {
+            reject("RestaurantMembershipNotFound", json!({ "membershipId": cmd.membership_id }))
+        })
+        .await?;
+    if state.revoked {
+        return Err(reject(
+            "RestaurantMembershipAlreadyRevoked",
+            json!({ "membershipId": cmd.membership_id }),
+        ));
+    }
+    let event = DomainEvent::RestaurantAccessRevoked(RestaurantAccessRevoked {
+        membership_id: cmd.membership_id,
+        ground: cmd.ground,
+    });
+    Repository::new(store)
+        .save(&restaurant_membership_stream(&cmd.membership_id), version, &[event], actor)
+        .await
+        .map(|_| ())
 }
 
 // ================================================================================================

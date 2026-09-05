@@ -58,6 +58,7 @@
       "tables": [
         "City",
         "Customer",
+        "Member",
         "PricingPolicy",
         "ProspectionPipeline",
         "Restaurant",
@@ -175,6 +176,13 @@
       "placement": "declared",
       "databases": [
         "captain_write"
+      ]
+    },
+    "Member": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
       ]
     },
     "OrderConversation": {

@@ -283,6 +283,30 @@ pub fn project_rider_roster<C: RiderRosterCompute>(c: &C, state: Option<RiderRos
     })
 }
 
+/// Hand-written business logic for `Member`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait MemberCompute {
+}
+
+pub fn project_member<C: MemberCompute>(c: &C, state: Option<MemberRow>, env: &Envelope) -> Option<MemberRow> {
+    let _ = c;
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::RestaurantAccessGranted(e) => Some(MemberRow {
+            member_id: e.member_id.clone(),
+            auth_subject: e.auth_subject.clone(),
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
 /// Hand-written business logic for `Catalog`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait CatalogCompute {
@@ -534,6 +558,45 @@ pub fn project_customer_credit_balance<C: CustomerCreditBalanceCompute>(c: &C, s
             updated_at: env.occurred_at,
         }),
         DomainEvent::CustomerCreditConsumed(_) => { let mut row = state?; let v = c.balance_cents(Some(&row), env); row.balance_cents = v; Some(row) },
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
+/// Hand-written business logic for `ScopeMembership`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait ScopeMembershipCompute {
+    fn membership_id(&self, prev: Option<&ScopeMembershipRow>, env: &Envelope) -> uuid::Uuid;
+    fn scope_type(&self, prev: Option<&ScopeMembershipRow>, env: &Envelope) -> ScopeType;
+    fn scope_id(&self, prev: Option<&ScopeMembershipRow>, env: &Envelope) -> uuid::Uuid;
+    fn member_type(&self, prev: Option<&ScopeMembershipRow>, env: &Envelope) -> UserType;
+    fn member_id(&self, prev: Option<&ScopeMembershipRow>, env: &Envelope) -> uuid::Uuid;
+}
+
+pub fn project_scope_membership<C: ScopeMembershipCompute>(c: &C, state: Option<ScopeMembershipRow>, env: &Envelope) -> Option<ScopeMembershipRow> {
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::OrderPlaced(_) => { let mut row = state?; row.granted_at = env.occurred_at; let v = c.membership_id(Some(&row), env); row.membership_id = v; let v = c.scope_type(Some(&row), env); row.scope_type = v; let v = c.scope_id(Some(&row), env); row.scope_id = v; let v = c.member_type(Some(&row), env); row.member_type = v; let v = c.member_id(Some(&row), env); row.member_id = v; Some(row) },
+        DomainEvent::DeliveryAcceptedByRider(_) => { let mut row = state?; row.granted_at = env.occurred_at; let v = c.membership_id(Some(&row), env); row.membership_id = v; let v = c.scope_id(Some(&row), env); row.scope_id = v; let v = c.member_type(Some(&row), env); row.member_type = v; let v = c.member_id(Some(&row), env); row.member_id = v; Some(row) },
+        DomainEvent::DeliveryCancelled(_) => { let mut row = state?; let v = c.scope_type(Some(&row), env); row.scope_type = v; let v = c.scope_id(Some(&row), env); row.scope_id = v; let v = c.member_type(Some(&row), env); row.member_type = v; Some(row) },
+        DomainEvent::DeliveryDispatchFailed(_) => { let mut row = state?; let v = c.scope_type(Some(&row), env); row.scope_type = v; let v = c.scope_id(Some(&row), env); row.scope_id = v; let v = c.member_type(Some(&row), env); row.member_type = v; Some(row) },
+        DomainEvent::RestaurantRegistered(_) => { let mut row = state?; row.granted_at = env.occurred_at; let v = c.membership_id(Some(&row), env); row.membership_id = v; let v = c.scope_type(Some(&row), env); row.scope_type = v; let v = c.scope_id(Some(&row), env); row.scope_id = v; let v = c.member_type(Some(&row), env); row.member_type = v; let v = c.member_id(Some(&row), env); row.member_id = v; Some(row) },
+        DomainEvent::RestaurantListingClaimed(_) => { let mut row = state?; row.granted_at = env.occurred_at; let v = c.membership_id(Some(&row), env); row.membership_id = v; let v = c.scope_type(Some(&row), env); row.scope_type = v; let v = c.scope_id(Some(&row), env); row.scope_id = v; let v = c.member_type(Some(&row), env); row.member_type = v; let v = c.member_id(Some(&row), env); row.member_id = v; Some(row) },
+        DomainEvent::RestaurantAccessGranted(e) => Some(ScopeMembershipRow {
+            membership_id: c.membership_id(state.as_ref(), env),
+            scope_type: c.scope_type(state.as_ref(), env),
+            scope_id: c.scope_id(state.as_ref(), env),
+            member_type: c.member_type(state.as_ref(), env),
+            member_id: c.member_id(state.as_ref(), env),
+            granted_at: env.occurred_at,
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        DomainEvent::RestaurantAccessRevoked(_) => { let mut row = state?; let v = c.membership_id(Some(&row), env); row.membership_id = v; Some(row) },
         _ => return state,
     };
     next.map(|mut row| {

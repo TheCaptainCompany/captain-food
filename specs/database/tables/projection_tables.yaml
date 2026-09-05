@@ -688,6 +688,45 @@ RiderRoster:
       from: [{ $ref: 'events.yaml#/RiderReinstated' }]
       note: "The occurred_at of the LATEST RiderReinstated fact (an occurrence timestamp, no payload field) — mirrors `RiderRestriction.reinstated_at` exactly; history, not a live flag."
 
+
+# The staff authentication bridge (#639 part C step 6-i, ADR-20260905-101349 §5): `auth_subject ->
+# member_id`, the SAME shape as `Rider`'s `auth_ref -> rider_id` bridge, in the SAME database
+# (`Rider` is delivery-owned, this is network-owned; the pattern generalises across scopes). Its
+# own `ProjectorGroup "Member"` checkpoint from 0 (the `RiderRestriction`/`RiderRoster` #424
+# lesson): a table born after the log is backfilled by replay, never a migration-time copy.
+Member:
+  projector: app
+  aggregate: RestaurantMembership
+  slice: V0
+  internal: true   # an identity/authorization bridge, never a GraphQL `reads` target — the roster (6-iv) reads its OWN table, not this one directly; this is the seam's `auth_subject -> member_id` lookup.
+  database: { $ref: 'database/databases.yaml#/read_common' }
+  note: >
+    The bridge a MEMBER-stamped request resolves through (6-ii, not built here): one row per
+    person who has ever been granted access to at least one restaurant scope. Deliberately holds
+    NOTHING ELSE -- no `display_name` (YAGNI: nothing displays it in 6-i, the roster is 6-iv) and
+    no grant-shaped column (authority/basis/scopeId all live on `RestaurantAccessGranted` in
+    `domain_events` and on `ScopeMembership`, never duplicated here) -- the binding OUTLIVES any
+    one grant, so a column that describes ONE grant does not belong on the person row.
+  rules:
+    - "Rebuild = checkpoint reset, never TRUNCATE (the `Rider`/`RiderRestriction` precedent, PROP-20260831-180622 §6.4): upsert keyed on `member_id` with ONE creating arm (`RestaurantAccessGranted`), so a from-zero replay rewrites every row in place and no member is denied mid-rebuild. TRUNCATE + reset fails every member closed for the length of the drain. This rule holds only while `Member` carries no grant-shaped column (dba) -- the day one is added, the rebuild discipline must be re-examined exactly as `Rider.standing` forced `RiderRoster` to split off with its OWN opposite recipe."
+    - "`auth_subject` is UNIQUE, not merely indexed, and the difference is a security property (the `Rider.auth_ref` precedent): the seam's lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- the constraint converts a silent breach into a visible denial. It does NOT create the invariant: the write-side reservation that does is `database/tables/reservations.yaml#/auth_subject_reservations`, keyed `(principal_kind, auth_subject)` -- `grant_restaurant_access` reserves BEFORE the append, so a duplicate is refused up front and this constraint is the second line, never the first."
+    - "RestaurantAccessRevoked touches NOTHING here (ADR-20260905-101349 §5): the binding a person resolves to outlives any one grant they lose -- revoking access is a `ScopeMembership` fact, never a `Member` fact."
+    - "No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `RiderRoster` precedent): a stray value fails the ONE row's projection rather than halting the whole group."
+    - "ERASURE, named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips (the `Rider`/`ScopeMembership` precedent): `auth_subject` and `member_id` are a natural person's data held OUTSIDE the stream, and the deletion engine deletes streams, not projection rows. The `RestaurantMembership` aggregate declares no `deletion:` block today, so there is nothing to build yet -- but a member tombstone fold is OWED the moment one is declared, on the SAME clock as Customer's (ADR-20260905-101349 §11, MEMBER-ACCESS-GRANT-PRECONDITIONS)."
+  fedBy:
+    - { $ref: 'events.yaml#/RestaurantAccessGranted' }
+  columns:
+    member_id:
+      type: { $ref: 'scalars.yaml#/MemberId' }
+      pk: true
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted/properties/memberId' }]
+      note: "Keyed on the DOMAIN person id, never `membershipId` (the grant relationship) -- resolved by the projection worker from the PAYLOAD, not from the stream name: the aggregate that authors this event is `RestaurantMembership-{membershipId}`, a DIFFERENT identity from the row this table keys on (the same cross-stream shape as `ScopeMembership`'s `RestaurantListingClaimed` arm)."
+    auth_subject:
+      type: { $ref: 'scalars.yaml#/AuthSubject' }
+      from: [{ $ref: 'events.yaml#/RestaurantAccessGranted/properties/authSubject' }]
+      unique: true
+      note: "The login credential this person resolves through (6-ii's seam). UNIQUE, no other index (deliberately no `index: true` beside `unique:` -- the two are separate emitter passes and would emit a redundant second btree, the `Rider.auth_ref` precedent) -- see the table rule."
+
 Catalog:
   projector: app   # nested category→product→offer TREE assembled from an event stream — application logic
   aggregate: Catalog
@@ -1290,7 +1329,10 @@ ScopeMembership:
     - "GRANT on RestaurantRegistered: the restaurant itself and its owning account, scope_type RESTAURANT."
     - "GRANT on RestaurantListingClaimed: the claiming account, scope_type RESTAURANT — the post-registration attachment path. A Sirene-seeded listing registers with NO accountId; without this fold its account would never gain membership and resolve_restaurant_account would find nothing for every subsequent OrderPlaced (review finding, ADR-20260809-160000 addendum)."
     - "ADMIN holds NO rows — the guard short-circuits on the role. Storing them would mean a row per admin per instance, unbounded and pointless."
-    - "membership_id is UUIDv5 over (scope_type, scope_id, member_type, member_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern)."
+    - "membership_id is UUIDv5 over (scope_type, scope_id, member_type, member_id), so re-projecting a grant is an idempotent upsert and revoking needs no lookup — the same inputs always derive the same key (the hubrise_connections.restaurant_account_id pattern). EXCEPTION (#639 part C step 6-i, ADR-20260905-101349 §2): the MEMBER arm reuses `RestaurantAccessGranted.membershipId` VERBATIM as this row's own PK instead of re-deriving it — that id is already a stable, unique identifier minted once by the `RestaurantMembership` aggregate, and reusing it is what lets `RestaurantAccessRevoked` (which carries `membershipId` and NOTHING else identifying the scope) target-delete this ONE row with no lookup."
+    - "GRANT on RestaurantAccessGranted (#639 part C step 6-i, ADR-20260905-101349 §2): ONE row, scope_type RESTAURANT, member_type MEMBER, member_id the event's `memberId` — see the member_id column note for why NOT `membershipId`."
+    - "REVOKE on RestaurantAccessRevoked (#639 part C step 6-i): a TARGETED delete of the ONE row whose `membership_id` equals the event's `membershipId` — NEVER the broad `revoke_role` arm above (which would strip every MEMBER row on the scope). A member table with a per-relationship identity is exactly the case the broad arm's own doc warns about: 'membership' here names a person, not a role population, so a targeted revoke cannot leave a sibling holding stale access — there IS no sibling row sharing this key."
+    - "ADR-20260905-101349 §3, DISAMBIGUATING NOTE (member_id, #639 part C step 6-i): `member_id`'s existing note says 'the DOMAIN id, never the auth subject' — true for MEMBER too, and the domain id here is `MemberId` (the person), never `membershipId` (the grant/relationship). `member_id` therefore now names TWO different things depending on `member_type`: an aggregate's OWN identity (customerId/restaurantId/restaurantAccountId/riderId, each row IS that aggregate) versus a PERSON's identity who is not the scope itself (MEMBER). PROP-20260831-180622 §6.5 names this semantics fix as owed and not built in 6-i; this note is the marker for whoever picks it up."
     - "ERASURE (#194, ADR-20260731-160000): this is an Order-fed read model holding a customer-to-order link — it OWES an OrderExpired tombstone fold (delete the order scope's rows) when the deletion engine lands. Named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips."
   fedBy:
     - { $ref: 'events.yaml#/OrderPlaced' }
@@ -1299,6 +1341,8 @@ ScopeMembership:
     - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
     - { $ref: 'events.yaml#/RestaurantRegistered' }
     - { $ref: 'events.yaml#/RestaurantListingClaimed' }
+    - { $ref: 'events.yaml#/RestaurantAccessGranted' }
+    - { $ref: 'events.yaml#/RestaurantAccessRevoked' }
   indexes:
     - [member_type, member_id, scope_type]   # "everything this member may see" -> list-query filtering
     - [scope_type, scope_id]                       # "who may see this instance" -> audit + revoke sweeps
@@ -1311,7 +1355,9 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
         - { $ref: 'events.yaml#/RestaurantRegistered' }
         - { $ref: 'events.yaml#/RestaurantListingClaimed' }
-      note: "UUIDv5(scope_type|scope_id|member_type|member_id) — derived, never random, so a replayed grant upserts onto itself."
+        - { $ref: 'events.yaml#/RestaurantAccessGranted/properties/membershipId' }
+        - { $ref: 'events.yaml#/RestaurantAccessRevoked/properties/membershipId' }
+      note: "UUIDv5(scope_type|scope_id|member_type|member_id) — derived, never random, so a replayed grant upserts onto itself. EXCEPTION: the MEMBER arm carries the RestaurantAccessGranted/Revoked payload's `membershipId` VERBATIM instead (see the table rule) — a pre-minted, already-unique id, not re-derived."
     scope_type:
       type: { $ref: 'scalars.yaml#/ScopeType' }
       from:
@@ -1320,7 +1366,8 @@ ScopeMembership:
         - { $ref: 'events.yaml#/RestaurantListingClaimed' }
         - { $ref: 'events.yaml#/DeliveryCancelled' }
         - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
-      note: "Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload. The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, member_type) — they write no value, they key a deletion."
+        - { $ref: 'events.yaml#/RestaurantAccessGranted' }
+      note: "Which KIND of instance — ORDER or RESTAURANT. Constant per grant/revoke rule, not read from a payload (RestaurantAccessGranted's OWN `scopeType` payload field is RESTAURANT-only in 6-i, but the column here is still the CONSTANT the fold applies, not a passthrough). The revoke events appear in this lineage because the revoke's DELETE predicate reads exactly (scope_type, scope_id, member_type) — they write no value, they key a deletion. RestaurantAccessRevoked is the ONE exception: its targeted delete keys on `membership_id` alone (see the table rule), so it does not appear here."
     scope_id:
       type: uuid
       from:
@@ -1330,6 +1377,7 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider/properties/orderId' }
         - { $ref: 'events.yaml#/DeliveryDispatchFailed/properties/orderId' }
         - { $ref: 'events.yaml#/DeliveryCancelled' }
+        - { $ref: 'events.yaml#/RestaurantAccessGranted/properties/scopeId' }
       note: "The protected instance: an OrderId or a RestaurantId. DeliveryCancelled carries no orderId — the worker resolves the job's order via View_DeliveryJob before folding."
     member_type:
       type: { $ref: 'scalars.yaml#/UserType' }
@@ -1340,10 +1388,19 @@ ScopeMembership:
         - { $ref: 'events.yaml#/RestaurantListingClaimed' }
         - { $ref: 'events.yaml#/DeliveryCancelled' }
         - { $ref: 'events.yaml#/DeliveryDispatchFailed' }
+        - { $ref: 'events.yaml#/RestaurantAccessGranted' }
       note: >
         In the key deliberately: a rider who is ALSO a customer must hold two distinct memberships, or
         their customer row would let them fetch rider-audience data. The revoke events key their
         deletion by this column (the RIDER role), which is why they appear in its lineage.
+        EXCEPTION (#639 part C step 6-i, ADR-20260905-101349 §3): the constant this column stores
+        for a `RestaurantAccessGranted` fold is the LITERAL text `MEMBER` -- a `PrincipalKind`
+        value written into a column declared `UserType` (this scalar, above), because typing
+        `member_type` as `PrincipalKind` for real would be the retype PROP-20260831-180622 §6.5
+        owns and 6-i does not build (`UserType` stays exactly the seven-role enum it is; adding
+        `MEMBER` there would mint an eighth `/{path}/graphql` role by accident). The stored column
+        is plain TEXT at the DB layer (no FK, no CHECK) so this is representable today; the $ref
+        above documents the column's INTENDED type once §6.5 lands, not its current one.
     member_id:
       type: uuid
       from:
@@ -1352,7 +1409,17 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider/properties/riderId' }
         - { $ref: 'events.yaml#/RestaurantRegistered/properties/restaurantId' }
         - { $ref: 'events.yaml#/RestaurantListingClaimed/properties/accountId' }
-      note: "The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth subject — the sub->domain bridge happens once per request at the edge."
+        - { $ref: 'events.yaml#/RestaurantAccessGranted/properties/memberId' }
+      note: >
+        The DOMAIN id (customerId / restaurantId / restaurantAccountId / riderId), never the auth
+        subject — the sub->domain bridge happens once per request at the edge. DISAMBIGUATING NOTE
+        (#639 part C step 6-i, ADR-20260905-101349 §3, D): for the MEMBER arm this is the person's
+        `MemberId`, NEVER `membershipId` (the grant/relationship `RestaurantAccessGranted` also
+        carries) — every OTHER member_type's value here names an aggregate that IS the scope row
+        itself, while MEMBER is the first case where the value names a PERSON distinct from any
+        scope they hold access to. This column therefore now carries two different KINDS of
+        identity depending on member_type, which PROP-20260831-180622 §6.5 names as an owed
+        semantics fix; 6-i does not build it, and this note is the marker for whoever does.
     granted_at:
       type: timestamptz
       from:
@@ -1360,4 +1427,5 @@ ScopeMembership:
         - { $ref: 'events.yaml#/DeliveryAcceptedByRider' }
         - { $ref: 'events.yaml#/RestaurantRegistered' }
         - { $ref: 'events.yaml#/RestaurantListingClaimed' }
+        - { $ref: 'events.yaml#/RestaurantAccessGranted' }
       note: "When the membership was recorded (the event's occurred_at) — deterministic under replay; preserved on a replayed grant (ON CONFLICT DO NOTHING)."

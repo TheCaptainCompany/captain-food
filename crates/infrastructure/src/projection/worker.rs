@@ -22,14 +22,15 @@ use std::time::Duration;
 
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
-    project_order_conversation, project_order_tracking, project_prospection_pipeline,
-    project_restaurant, project_rider, project_rider_restriction, project_rider_roster,
-    project_slug_alias, Envelope,
+    project_member, project_order_conversation, project_order_tracking,
+    project_prospection_pipeline, project_restaurant, project_rider, project_rider_restriction,
+    project_rider_roster, project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
 use application::projectors::customer::CustomerProjector;
 use application::projectors::customer_credit_balance::CustomerCreditBalanceProjector;
+use application::projectors::member::MemberProjector;
 use application::projectors::order_conversation::OrderConversationProjector;
 use application::projectors::order_tracking::OrderTrackingProjector;
 use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
@@ -40,7 +41,9 @@ use application::projectors::rider_roster::RiderRosterProjector;
 use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
-use domain::generated::scalars::{CartId, CatalogId, CustomerId, OrderId, RestaurantId, RiderId};
+use domain::generated::scalars::{
+    CartId, CatalogId, CustomerId, MemberId, OrderId, RestaurantId, RiderId,
+};
 use domain::shared::errors::DomainError;
 use sqlx::{PgPool, Row};
 use tracing::Instrument as _;
@@ -50,9 +53,9 @@ use application::projectors::scope_membership;
 use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
-    order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
-    rider_restriction_store, rider_roster_store, rider_store, scope_membership_store,
-    slug_alias_store,
+    member_store, order_conversation_store, order_tracking_store, prospection_store,
+    restaurant_store, rider_restriction_store, rider_roster_store, rider_store,
+    scope_membership_store, slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -159,11 +162,21 @@ enum ReadModelProjector {
     /// Keyed by the SUPERSEDED slug from the event payload, not by an aggregate id — one row per
     /// rename, so a restaurant renamed N times leaves N rows on the same stream.
     SlugAlias,
+    /// The staff-authentication bridge (#639 part C step 6-i, ADR-20260905-101349 §5): one row per
+    /// person ever granted access to a restaurant scope. Keyed by the PAYLOAD's `memberId`, not by
+    /// the stream's own aggregate id (`RestaurantMembership-{membershipId}` names the GRANT, not
+    /// the person) — the same cross-stream-key shape as `ScopeMembership`'s `RestaurantListingClaimed`
+    /// arm. Its OWN checkpoint group (see the registry below), born at 0.
+    Member,
     /// SET-shaped (#144): one event GRANTS/REVOKES N membership rows, so there is no
-    /// `load -> project -> upsert` triple and no generated dispatch (`emit_projectors` skips a
-    /// table whose pk lineage carries no property path). The pure fold lives in
-    /// `application::projectors::scope_membership`; this arm resolves its two lookups and applies
-    /// the changes on the batch transaction.
+    /// `load -> project -> upsert` triple; the pure fold lives in
+    /// `application::projectors::scope_membership`, and this arm resolves its lookups and applies
+    /// the changes on the batch transaction. (#639 part C step 6-i: the table's OWN generated
+    /// `project_scope_membership`/`ScopeMembershipCompute` now exist too, once `membership_id`'s
+    /// `from:` lineage gained a property-level ref for the MEMBER arm — the emitter generates per
+    /// TABLE, not per fedBy event, so a table with ANY property-keyed creation event gets a
+    /// dispatch. They are DEAD CODE here: nothing calls them, because a per-row dispatch cannot
+    /// express "one event grants/revokes N rows" for the OTHER five events this table folds.)
     ScopeMembership,
 }
 
@@ -334,6 +347,24 @@ impl ReadModelProjector {
                     slug_alias_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
+            Self::Member => {
+                // Keyed by the PAYLOAD's memberId, never the stream's own aggregate id (the
+                // RestaurantMembership-{membershipId} stream names the GRANT, not the person) --
+                // `aggregate_uuid_of`'s stream-prefix fast path would silently key this row on the
+                // WRONG id, so this arm bypasses it entirely (the OrderTracking/OrderConversation
+                // cross-stream-key precedent, `payload_uuid_of`).
+                let Some(uuid) = payload_uuid_of(env, "memberId") else {
+                    // Only RestaurantAccessGranted feeds this table (fedBy); every other event on
+                    // the RestaurantMembership-% prefix (RestaurantAccessRevoked) carries no
+                    // memberId and touches nothing here by design (ADR-20260905-101349 §5).
+                    return Ok(());
+                };
+                let id = MemberId(uuid);
+                let state = member_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                if let Some(next) = project_member(&MemberProjector, state, env) {
+                    member_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                }
+            }
             Self::ScopeMembership => {
                 // Two lookups the PURE fold cannot do are resolved here and passed in:
                 //   * DeliveryCancelled carries only a deliveryJobId -> which order is it?
@@ -401,6 +432,37 @@ impl ReadModelProjector {
                                     member_type = ?member_type,
                                     error = %e,
                                     "SCOPE-MEMBERSHIP REVOKE FAILED -- if the batch skips this event a STALE GRANT STANDS until a ScopeMembership checkpoint-reset replay"
+                                );
+                                return Err(FoldFault::Database(e));
+                            }
+                        }
+                        scope_membership::MembershipChange::GrantMember {
+                            membership_id,
+                            scope_type,
+                            scope_id,
+                            member_id,
+                        } => {
+                            scope_membership_store::grant_member(
+                                &mut *conn,
+                                *membership_id,
+                                *scope_type,
+                                *scope_id,
+                                *member_id,
+                                env.occurred_at,
+                            )
+                            .await.map_err(FoldFault::Database)?;
+                        }
+                        scope_membership::MembershipChange::RevokeMembership { membership_id } => {
+                            // Same safety posture as the broad REVOKE above: a failed targeted
+                            // delete is a STANDING STALE GRANT on this one row, not stale data.
+                            if let Err(e) =
+                                scope_membership_store::revoke_member(&mut *conn, *membership_id)
+                                    .await
+                            {
+                                tracing::error!(
+                                    membership_id = %membership_id,
+                                    error = %e,
+                                    "SCOPE-MEMBERSHIP TARGETED REVOKE FAILED -- if the batch skips this event a STALE GRANT STANDS until a ScopeMembership checkpoint-reset replay"
                                 );
                                 return Err(FoldFault::Database(e));
                             }
@@ -559,6 +621,16 @@ const REGISTRY: &[ProjectorGroup] = &[
         projectors: &[ReadModelProjector::SlugAlias],
         scope: "network",
     },
+    // The staff-authentication bridge (#639 part C step 6-i, ADR-20260905-101349 §5): its OWN
+    // checkpoint, its OWN group, starting at 0 (the #424 lesson, generalised again) -- a table
+    // born after the log is backfilled by replay, never a migration-time copy. Rebuild by
+    // resetting the `Member` checkpoint, NEVER TRUNCATE (the table's own `rules:`).
+    ProjectorGroup {
+        checkpoint: "Member",
+        stream_prefixes: &["RestaurantMembership-"],
+        projectors: &[ReadModelProjector::Member],
+        scope: "network",
+    },
     // The CustomerCreditBalance read model (#158, Part B of #207): the per-customer store-credit
     // balance, folded from the ledger stream `CustomerCredit-{customerId}` (CustomerCreditGranted /
     // CustomerCreditConsumed). Single-stream, keyed by the customer uuid.
@@ -591,9 +663,13 @@ const REGISTRY: &[ProjectorGroup] = &[
     // owning scope from `stream_prefixes[0]`. And ADDING a prefix to this group later requires
     // deleting the ScopeMembership checkpoint row in the same migration — a prefix joined below an
     // advanced checkpoint is never folded (the #424 lesson).
+    //
+    // FOURTH category added #639 part C step 6-i (ADR-20260905-101349 §2): `RestaurantMembership-`,
+    // the RestaurantAccessGranted/Revoked grant + targeted-revoke arms. The migration
+    // (20260905110000) rewinds this checkpoint to 0 in the SAME change, per the rule stated above.
     ProjectorGroup {
         checkpoint: "ScopeMembership",
-        stream_prefixes: &["Order-", "DeliveryJob-", "Restaurant-"],
+        stream_prefixes: &["Order-", "DeliveryJob-", "Restaurant-", "RestaurantMembership-"],
         projectors: &[ReadModelProjector::ScopeMembership],
         scope: "ordering",
     },
@@ -1095,18 +1171,22 @@ mod tests {
     }
 
     /// The ScopeMembership group's SHAPE is the ordering guarantee (#144): ONE checkpoint over the
-    /// three categories whose interleaving could otherwise fold a revoke before the grant it
-    /// supersedes — a stale grant, the silent-breach failure mode of an ACL cache. Deliberately
-    /// structure-sensitive: forcing the interleaving dynamically costs more than it proves, and the
-    /// structure IS the claim. `"Order-"` first is also load-bearing (the scope-placement test
-    /// derives the owning scope from `stream_prefixes[0]`).
+    /// FOUR categories (a fourth, `RestaurantMembership-`, joined #639 part C step 6-i) whose
+    /// interleaving could otherwise fold a revoke before the grant it supersedes — a stale grant,
+    /// the silent-breach failure mode of an ACL cache. Deliberately structure-sensitive: forcing
+    /// the interleaving dynamically costs more than it proves, and the structure IS the claim.
+    /// `"Order-"` first is also load-bearing (the scope-placement test derives the owning scope
+    /// from `stream_prefixes[0]`).
     #[test]
-    fn scope_membership_folds_three_categories_under_one_checkpoint() {
+    fn scope_membership_folds_four_categories_under_one_checkpoint() {
         let group = REGISTRY
             .iter()
             .find(|g| g.checkpoint == "ScopeMembership")
             .expect("the ScopeMembership ACL index has a registry group");
-        assert_eq!(group.stream_prefixes, &["Order-", "DeliveryJob-", "Restaurant-"]);
+        assert_eq!(
+            group.stream_prefixes,
+            &["Order-", "DeliveryJob-", "Restaurant-", "RestaurantMembership-"]
+        );
         assert_eq!(group.projectors.len(), 1);
         assert!(matches!(group.projectors[0], ReadModelProjector::ScopeMembership));
         assert_eq!(group.scope, "ordering");

@@ -35,6 +35,7 @@ boundedContexts:
       - { $ref: 'actors.yaml#/RestaurantAccount' }
       - { $ref: 'actors.yaml#/Restaurant' }
       - { $ref: 'actors.yaml#/Prospect' }
+      - { $ref: 'actors.yaml#/RestaurantMembership' }
   catalog:
     description: "Catalog tree, products, offers (SKUs), option lists, per-offer stock; HubRise import."
     aggregates:
@@ -244,6 +245,11 @@ containers:
     description: "Drains Prospect lanes; appends its domain events."
     realizes:
       - { $ref: 'actors.yaml#/Prospect' }
+  actor-restaurant-membership:
+    technology: "Rust — mailbox worker bin"
+    description: "Drains RestaurantMembership lanes (#639 part C step 6-i, ADR-20260905-101349); appends its domain events. Ships dark behind RUN_MEMBER_ACCESS_GRANT."
+    realizes:
+      - { $ref: 'actors.yaml#/RestaurantMembership' }
   actor-catalog:
     technology: "Rust — mailbox worker bin"
     description: "Drains Catalog lanes (incl. HubRise imports); appends its domain events."
