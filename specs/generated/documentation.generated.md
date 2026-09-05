@@ -9924,7 +9924,7 @@ Report an issue on a delivery job (rider/support) by its closed KIND, with an op
 | <a id="command-reportdeliveryissue--deliveryjobid"></a>`deliveryJobId` | [🔤 `DeliveryJobId`](#scalar-deliveryjobid) | ✅ |  |
 | <a id="command-reportdeliveryissue--riderid"></a>`riderId` | [🔤 `RiderId`](#scalar-riderid) | ⬜ |  |
 | <a id="command-reportdeliveryissue--kind"></a>`kind` | [🔤 `DeliveryIssueKind`](#scalar-deliveryissuekind) | ✅ |  |
-| <a id="command-reportdeliveryissue--issue"></a>`issue` | `string` | ⬜ | Optional note — facts only, no description of persons (prompted on the rider sheet as such); personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000). |
+| <a id="command-reportdeliveryissue--issue"></a>`issue` | `string` | ⬜ | Optional note — facts only, no description of persons. The rider sheet no longer prompts for it (round 3, #639 part C step 4-iii-A) since text_area has no renderer arm; the field stays reachable for support-initiated reports and is GAP(renderer) until [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — …"](https://github.com/TheCaptainCompany/captain-food/issues/888) lands. Personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000). |
 
 <a id="command-resolvedeliveryissue"></a>
 #### 📩 Command: `ResolveDeliveryIssue`

@@ -553,7 +553,7 @@ pub struct ReportDeliveryIssueInput {
     pub delivery_job_id: DeliveryJobId,
     #[graphql(name = "kind")]
     pub kind: DeliveryIssueKind,
-    /// Optional note — facts only, no description of persons (prompted on the rider sheet as such); personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000).
+    /// Optional note — facts only, no description of persons. The rider sheet no longer prompts for it (round 3, #639 part C step 4-iii-A) since text_area has no renderer arm; the field stays reachable for support-initiated reports and is GAP(renderer) until [#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — …"](https://github.com/TheCaptainCompany/captain-food/issues/888) lands. Personal data inside the order's stream, erased with the order's tombstone (ADR-20260731-160000).
     #[graphql(name = "issue")]
     pub issue: Option<String>,
 }

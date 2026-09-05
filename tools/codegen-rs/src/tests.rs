@@ -16665,9 +16665,27 @@ mod schema_sql_index_naming_gate {
         );
         let create_index_lines: Vec<&str> = sql.lines().filter(|l| l.trim_start().starts_with("CREATE INDEX")).collect();
         assert!(!create_index_lines.is_empty(), "sanity: the corpus must actually declare indexes");
+        let mut names: Vec<&str> = Vec::new();
         for line in &create_index_lines {
             assert!(line.contains("IF NOT EXISTS"), "every CREATE INDEX must carry IF NOT EXISTS: {line}");
+            // dba (correction pass): `IF NOT EXISTS` matches on NAME only, so two DIFFERENT
+            // indexes sharing one generated name would silently yield a MISSING index (the second
+            // `CREATE INDEX IF NOT EXISTS` becomes a silent no-op against the FIRST index, never
+            // creating the second one at all) — a `uniq -d`-style corpus-wide check, not just a
+            // per-table one, since `pg_index_name` is a pure function of (table, cols) and two
+            // DIFFERENT tables could theoretically collide.
+            let name = line.trim_start().trim_start_matches("CREATE INDEX IF NOT EXISTS ").split_whitespace().next().unwrap_or("");
+            names.push(name);
         }
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        let mut dupes: Vec<&str> = Vec::new();
+        for w in sorted.windows(2) {
+            if w[0] == w[1] && !dupes.contains(&w[0]) {
+                dupes.push(w[0]);
+            }
+        }
+        assert!(dupes.is_empty(), "every emitted index NAME must be unique corpus-wide (IF NOT EXISTS matches on name only, so a collision silently drops the second index): {dupes:?}");
     }
 
     /// `pg_index_name` reproduces Postgres's OWN default naming exactly — the property that makes

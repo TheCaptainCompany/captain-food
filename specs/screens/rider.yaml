@@ -124,11 +124,13 @@ bottom_sheets:
         full_width: true
         action: { type: open_bottom_sheet, sheet_id: rider_handback_sheet }
 
-  # 3-i exit: report-only, kind chips (six DeliveryIssueKind values) + OTHER's bounded 300-char note
-  # (the D2 pattern, ADR-20260808-171056) + confirm; tells the restaurant through the read model.
-  # The refusal lands INLINE — never a toast: the rider is never left with a dismissed sheet and no
-  # proof. All content here is UNCONDITIONAL on the sheet's own entry (this sheet IS the CONTINUE
-  # branch — no `issue_exit` gate needed once the router above has already chosen it).
+  # 3-i exit: report-only, six DeliveryIssueKind chips + confirm; tells the restaurant through the
+  # read model. OTHER's bounded free-text note (the D2 pattern, ADR-20260808-171056) is DELETED
+  # rather than shown (round 3, #639 part C step 4-iii-A): `text_area` has no renderer arm and would
+  # paint an inert empty div regardless of which kind chip is picked — the note stays owned by
+  # #888. The refusal lands INLINE — never a toast: the rider is never left with a dismissed sheet
+  # and no proof. All content here is UNCONDITIONAL on the sheet's own entry (this sheet IS the
+  # CONTINUE branch — no `issue_exit` gate needed once the router above has already chosen it).
   rider_report_sheet:
     id: rider_report_sheet
     type: bottom_sheet

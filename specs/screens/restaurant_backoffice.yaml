@@ -539,7 +539,10 @@ screens:
         label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.submit' }
         variant: primary
         # No refundAmount here: this covers FULL_REFUND / REPLACEMENT / GOODWILL_CREDIT (recorded intent).
-        # PARTIAL_REFUND is confirmed through the amount picker's own action above.
+        # PARTIAL_REFUND has no UI path until the amount picker's renderer arm lands
+        # ([#888 "Renderer: `text_area` and `tip_amount_selector` have no arm — …"](https://github.com/TheCaptainCompany/captain-food/issues/888));
+        # this button carries no `inline_error` of its own either
+        # ([#890 "claim_resolve mounts no inline_error for resolve_reclamation"](https://github.com/TheCaptainCompany/captain-food/issues/890)).
         action:
           type: resolve_reclamation
           variables:

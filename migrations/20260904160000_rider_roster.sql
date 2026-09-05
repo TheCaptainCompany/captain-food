@@ -1,7 +1,11 @@
 -- #639 part C step 4-iii-A (ADR-20260904-152807 §1/§3): the admin's rider roster — the source of
 -- the `riders`/`rider` GraphQL queries (`/system/riders`, `/system/riders/:riderId`). DDL MIRRORS
 -- specs/generated/schema.generated.sql (specs/database/tables/projection_tables.yaml#/RiderRoster)
--- -- generated first, copied here, never hand-shaped. Round 2 item 9 (dba) said `CREATE TABLE`
+-- -- generated first, copied here; the two index NAMES below are hand-computed for this
+-- migration's lowercase `rider_roster` table name (the generated schema spells the table
+-- `RiderRoster`, which Postgres's own unquoted-identifier fold turns into `riderroster` with no
+-- underscore -- a pre-existing, unrelated corpus-wide quirk, not this migration's to fix).
+-- Round 2 item 9 (dba) said `CREATE TABLE`
 -- carries `IF NOT EXISTS` while `CREATE INDEX` never does, and would "fail on a duplicate index
 -- name" on a re-run -- FALSE, corrected round 3 (R3-2, dba): the two indexes below were UNNAMED,
 -- so Postgres auto-named them (`..._idx`, then `..._idx1` on a second run) and a re-run SILENTLY

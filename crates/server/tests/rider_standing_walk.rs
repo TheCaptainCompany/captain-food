@@ -872,4 +872,15 @@ async fn the_list_and_the_detail_name_the_same_held_job() {
         list_held, detail_held,
         "the list and the detail must name the SAME held job for one rider (ADR-20260904-152807 §2, one custody truth); seeded jobs were {job_ids:?}"
     );
+    // dba (correction pass): pin the DOCUMENTED tie-break itself, not just "list == detail" — the
+    // two queries could still agree by planner happenstance (observed in this environment even
+    // with the tie-break removed) without either one actually implementing
+    // `ORDER BY requested_at DESC, delivery_job_id DESC`. With a genuine `requested_at` tie, the
+    // contract says the GREATER `delivery_job_id` wins; asserting that exact value makes the
+    // guard falsifiable regardless of what the planner happens to do.
+    let expected_winner = job_ids.iter().max().expect("two seeded jobs").to_string();
+    assert_eq!(
+        list_held, expected_winner,
+        "the tie-break contract (`requested_at DESC, delivery_job_id DESC`) says the GREATER delivery_job_id wins; seeded jobs were {job_ids:?}"
+    );
 }
