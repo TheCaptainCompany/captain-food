@@ -19732,4 +19732,123 @@ mod graphql_role_limits_gate {
             assert!(l.max_complexity >= GRAPHQL_LIMIT_FLOOR, "{}: complexity below the floor", l.role);
         }
     }
+
+    // ─── farley's RUN_* fleet-parity gate (#639 part C step 6-v, ADR-20260905-223957 §5) ─────────
+    // The parity has drifted twice on comments alone (the ADR's own words): a `RUN_*` key
+    // declared once in configuration.yaml must be re-asserted with `declare_flag` at BOTH
+    // composition roots (`crates/server/src/lib.rs` and
+    // `crates/infrastructure/src/mailbox/standalone.rs`), with the SAME default, or a rolling
+    // deploy in which one process's resolved value disagrees with another's is invisible to
+    // `runtime_flag_state`. Derived from the MODEL, never a hand-kept key list.
+    mod run_flag_parity {
+        use super::*;
+
+        fn repo_root() -> std::path::PathBuf {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../")
+        }
+
+        fn read(rel: &str) -> String {
+            std::fs::read_to_string(repo_root().join(rel))
+                .unwrap_or_else(|e| panic!("read {rel}: {e}"))
+        }
+
+        /// Every `RUN_*` boolean key configuration.yaml declares AS A SUPERVISABLE BUSINESS DOOR
+        /// -- filtered on `decisionRow:` (spec-derivable, never a hand-kept name list): the class
+        /// `declare_flag`'s fleet-parity discipline targets is "a per-request/connection
+        /// enforcement gate bound to a preconditions record" (RUN_MEMBER_ACCESS_GRANT,
+        /// RUN_MEMBER_SIGN_IN_DOOR, RUN_RESTAURANT_INVITATION, RUN_RIDER_RESTRICTION_DOOR,
+        /// RUN_RIDER_RESTRICTION_SOCKET_CLOSE, RUN_PLATFORM_ACCESS_GRANT all carry one), never a
+        /// process-topology toggle deciding whether a WHOLE SUBSYSTEM runs in this pod at all
+        /// (RUN_MAILBOX_WORKERS, RUN_PROJECTOR, RUN_PROCESS_MANAGERS, RUN_EVENT_PUSH,
+        /// RUN_MAILBOX_PUSH, RUN_DELETION_ENGINE, RUN_RETENTION_SWEEP,
+        /// RUN_DELIVERY_OFFER_TIMEOUT, RUN_SIRENE_WORKER -- none carries a `decisionRow:` and none
+        /// is a candidate for a rolling-deploy behaviour SPLIT the way a per-request door is,
+        /// verified against the real corpus below rather than assumed).
+        fn declared_run_flags() -> Vec<(String, bool)> {
+            let model = load_model(&repo_root().join("specs")).expect("load real specs");
+            parse_config_keys(&model)
+                .into_iter()
+                .filter(|k| k.name.starts_with("RUN_") && k.ty == "bool" && k.decision_row.is_some())
+                .map(|k| (k.name.clone(), k.default.as_deref() == Some("true")))
+                .collect()
+        }
+
+        #[test]
+        fn every_run_key_is_declared_unconditionally_at_both_composition_roots() {
+            let flags = declared_run_flags();
+            assert!(!flags.is_empty(), "the RUN_* corpus is empty -- this scan is reading nothing");
+
+            let lib_rs = read("crates/server/src/lib.rs");
+            let standalone_rs = read("crates/infrastructure/src/mailbox/standalone.rs");
+
+            let mut missing_monolith = Vec::new();
+            let mut missing_standalone = Vec::new();
+            let mut wrong_standalone_default = Vec::new();
+
+            for (name, default) in &flags {
+                let declare_re = regex::Regex::new(&format!(
+                    r#"declare_flag\(\s*"{}""#,
+                    regex::escape(name)
+                ))
+                .expect("valid regex");
+                if !declare_re.is_match(&lib_rs) {
+                    missing_monolith.push(name.clone());
+                }
+                if !declare_re.is_match(&standalone_rs) {
+                    missing_standalone.push(name.clone());
+                }
+                // The standalone root cannot read the generated `Config` (#639 part C step 6-i
+                // precedent), so it re-derives its default via `env_flag("KEY", <literal>)` --
+                // the ONE place a hand-typed default can quietly diverge from the spec's.
+                let env_re = regex::Regex::new(&format!(
+                    r#"env_flag\(\s*"{}"\s*,\s*(true|false)\s*\)"#,
+                    regex::escape(name)
+                ))
+                .expect("valid regex");
+                match env_re.captures(&standalone_rs) {
+                    Some(caps) => {
+                        let literal = &caps[1] == "true";
+                        if literal != *default {
+                            wrong_standalone_default.push(format!(
+                                "{name}: spec default {default}, standalone.rs env_flag literal {literal}"
+                            ));
+                        }
+                    }
+                    // `run_rider_restriction_door`-class keys (etc.) DO use `env_flag` at this
+                    // root today; a key absent from `standalone_deps` entirely (never resolved
+                    // there) is caught by `missing_standalone` above instead -- not double-counted
+                    // here.
+                    None => {}
+                }
+            }
+
+            assert!(
+                missing_monolith.is_empty(),
+                "declare_flag(\"KEY\", ...) missing at the MONOLITH composition root \
+                 (crates/server/src/lib.rs) for: {}",
+                missing_monolith.join(", ")
+            );
+            assert!(
+                missing_standalone.is_empty(),
+                "declare_flag(\"KEY\", ...) missing at the STANDALONE composition root \
+                 (crates/infrastructure/src/mailbox/standalone.rs) for: {}",
+                missing_standalone.join(", ")
+            );
+            assert!(
+                wrong_standalone_default.is_empty(),
+                "the standalone root's env_flag(..) literal default disagrees with the spec's \
+                 declared default: {}",
+                wrong_standalone_default.join("; ")
+            );
+        }
+
+        /// RED-FIRST evidence (beck): a `declare_flag` call this test's own regex cannot see
+        /// (e.g. a renamed helper) must fail the test above, not pass it vacuously.
+        #[test]
+        fn a_key_absent_from_both_roots_is_caught() {
+            let lib_rs = "fn router() {}";
+            let re = regex::Regex::new(r#"declare_flag\(\s*"RUN_PLATFORM_ACCESS_GRANT""#).unwrap();
+            assert!(!re.is_match(lib_rs), "the planted source must not contain the call");
+        }
+    }
 }

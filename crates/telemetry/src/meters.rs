@@ -1278,6 +1278,63 @@ pub mod member_sign_in {
     }
 }
 
+/// `admin-sign-in` contract (#639 part C step 6-v, ADR-20260905-223957 §5) -- the ADMIN seam
+/// binding. NEVER `email`/`sub`/`admin_id`/`on_roster` label anywhere: the platform population is
+/// 1-3, so any label is near-identifying.
+pub mod admin_identity {
+    use super::*;
+
+    fn resolve_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::ADMIN_IDENTITY_RESOLVE_TOTAL).build())
+    }
+
+    fn granted_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::PLATFORM_ACCESS_GRANTED_TOTAL).build())
+    }
+
+    /// `admin_identity_resolve_total{result}` -- one ADMIN/platform seam resolution (resolved |
+    /// not_found | lookup_failed).
+    pub fn resolved(result: &str) {
+        resolve_counter().add(1, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `platform_access_granted_total{basis}` -- `GrantPlatformAccess` appended
+    /// `PlatformAccessGranted`.
+    pub fn granted(basis: &str) {
+        granted_counter().add(1, &[KeyValue::new("basis", basis.to_string())]);
+    }
+
+    // The gate-liveness gauge (the `member_sign_in::door_enforcing` inverted dead-man shape,
+    // ADR-20260810-231300): `-1` = never declared, `0`/`1` re-asserted on every export cycle.
+    static GRANT_ENFORCING: AtomicI64 = AtomicI64::new(-1);
+
+    fn grant_enforcing_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::PLATFORM_ACCESS_GRANT_ENFORCING)
+                .with_callback(|observer| {
+                    let state = GRANT_ENFORCING.load(Ordering::Relaxed);
+                    if state >= 0 {
+                        observer.observe(state, &[]);
+                    }
+                })
+                .build()
+        })
+    }
+
+    /// Declare the grant door's liveness (`platform_access_grant_enforcing`): 1 while
+    /// `RUN_PLATFORM_ACCESS_GRANT` enforces its refusal on a request, 0 the moment the composition
+    /// root boots with the key OFF. Called at BOTH composition roots, unconditionally (farley's
+    /// `RUN_*` parity codegen test).
+    pub fn grant_enforcing(enforcing: bool) {
+        GRANT_ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
+        let _ = grant_enforcing_gauge();
+    }
+}
+
 /// `restaurant-invitation` contract (#639 part C step 6-iv, ADR-20260905-101349 §2/§3): the roster
 /// and the invitation. Counters carry NO email/token/invitationId label -- the `member_sign_in`
 /// module's own posture.

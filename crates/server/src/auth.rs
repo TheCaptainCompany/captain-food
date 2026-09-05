@@ -129,7 +129,16 @@ enum Identity {
     /// A machine caller on `/external`: the pre-shared service token (no subject) or a Supabase
     /// token whose `captain_food.role` is EXTERNAL.
     External { sub: Option<String> },
-    /// Platform staff. ADMIN carries no domain binding — its scope IS the role.
+    /// Platform staff the request seam RESOLVED — the `Rider`/`Member` shape (#639 part C step
+    /// 6-v, ADR-20260905-223957 §2): the `PlatformMember` bridge answered a row for this subject.
+    /// The SUBJECT and nothing else, by construction: ADMIN carries no domain binding — its scope
+    /// IS the role, so there is no field here for a claim to bind into. **The only producer is the
+    /// seam** ([`resolve_platform_scope`]; [`Principal::role_binding`] mints one for tests) — the
+    /// token verifier ([`Principal::role_path`]) yields [`Identity::Unbound`] for every ADMIN
+    /// token, because a token cannot prove a platform grant it never carries (the #849
+    /// re-presentation's shape, generalised a third time: as first designed this identity would
+    /// have been minted straight from the claimed role, exactly the hole that let a bare
+    /// `role: RIDER` token act RIDER with no row).
     Admin { sub: String },
     Customer { sub: String, customer_id: uuid::Uuid },
     Restaurant { sub: String, restaurant_id: uuid::Uuid },
@@ -305,7 +314,11 @@ impl Principal {
             None => Identity::Unbound { sub: sub.clone(), role: path_role },
         };
         let identity = match path_role {
-            RequestRole::Admin => Identity::Admin { sub },
+            // ADMIN (#639 part C step 6-v, ADR-20260905-223957 §2): a token cannot prove a
+            // platform grant it never carries -- the seam resolves it
+            // (`resolve_platform_scope`), exactly like RIDER/MEMBER. No `bind`: ADMIN carries no
+            // domain claim to bind, only existence.
+            RequestRole::Admin => Identity::Unbound { sub, role: path_role },
             RequestRole::External => Identity::External { sub: Some(sub) },
             RequestRole::Customer => bind(&claims.customer_id, |sub, customer_id| {
                 Identity::Customer { sub, customer_id }
@@ -428,16 +441,20 @@ impl Principal {
     /// PAGE-classed one. Asking both questions is the only form that is right at both ends.
     pub fn bridge_resolved(&self, scope: &application::queries::ReadScope) -> bool {
         match &self.identity {
-            // Nothing to resolve: their scope IS their role (ADMIN), or they have none by design.
-            Identity::Anonymous | Identity::External { .. } | Identity::Admin { .. } => true,
+            // Nothing to resolve: they have none by design.
+            Identity::Anonymous | Identity::External { .. } => true,
             // A binding was presented — did it actually resolve to a scope? Under the default
             // claim path this is a foregone `true`; under Postgres resolution it is the real
-            // question, and `Public` here means the seam said no or could not answer.
+            // question, and `Public` here means the seam said no or could not answer. ADMIN joined
+            // this bucket in #639 part C step 6-v (ADR-20260905-223957 §2): a platform grant is now
+            // a Postgres row the seam resolves, exactly like RIDER/MEMBER, never "their scope IS
+            // their role" by construction alone.
             Identity::Customer { .. }
             | Identity::Restaurant { .. }
             | Identity::RestaurantAccount { .. }
             | Identity::Rider { .. }
-            | Identity::Member { .. } => {
+            | Identity::Member { .. }
+            | Identity::Admin { .. } => {
                 !matches!(scope, application::queries::ReadScope::Public)
             }
             // No binding was presented at all: nothing could have resolved.
@@ -467,6 +484,17 @@ impl Principal {
             };
             return Self { identity };
         }
+        // ADMIN (#639 part C step 6-v, ADR-20260905-223957 §2): the SAME RIDER special case --
+        // the seam's outcome, never a claim. `Some(_)` is "the seam resolved a live
+        // `PlatformMembership` grant" (the id inside is UNUSED: ADMIN carries no domain claim,
+        // only existence matters), `None` is the unbound caller a guard must refuse.
+        if role == RequestRole::Admin {
+            let identity = match binding {
+                Some(_) => Identity::Admin { sub },
+                None => Identity::Unbound { sub, role },
+            };
+            return Self { identity };
+        }
         let binding = binding.map(|id| id.to_string());
         let claims = match role {
             RequestRole::Customer => ProductClaims { customer_id: binding, ..Default::default() },
@@ -476,9 +504,10 @@ impl Principal {
             RequestRole::RestaurantAccount => {
                 ProductClaims { restaurant_account_id: binding, ..Default::default() }
             }
-            // ADMIN, EXTERNAL and PUBLIC carry no domain binding — their arms in `role_path` ignore
-            // the claim object entirely, so an argument here would be dropped, not honoured. RIDER
-            // returned above.
+            // EXTERNAL and PUBLIC carry no domain binding — their arms in `role_path` ignore the
+            // claim object entirely, so an argument here would be dropped, not honoured. ADMIN and
+            // RIDER both returned above (unreachable here, kept named rather than absorbed by a
+            // wildcard).
             RequestRole::Admin
             | RequestRole::External
             | RequestRole::Public
@@ -2477,6 +2506,75 @@ impl ResolveMemberIdentity for NoDatabaseMemberIdentity {
     }
 }
 
+// =====================================================================================
+// The ADMIN/platform seam (#639 part C step 6-v, ADR-20260905-223957 §2) — the RIDER/MEMBER shape,
+// transposed. UNGATED (like both): there is no legacy ADMIN-claim behaviour an OFF state could
+// preserve for this READ path — the door being gated is `RUN_PLATFORM_ACCESS_GRANT` on the WRITE
+// side (`grant_platform_access`); the seam always resolves through Postgres once a grant exists.
+// =====================================================================================
+
+/// The request-seam TRANSLATION from the verified auth subject to "does this subject hold a LIVE
+/// platform grant at all": the `PlatformMember` bridge (`auth_subject -> platformMembershipId`,
+/// step 6-v) answers a row or it does not — there is no second probe the way MEMBER needs one for
+/// its restaurant scope, because ADMIN carries no domain claim: its scope IS the role
+/// (ADR-20260905-223957 §2). Decider/scope logic receives the [`PlatformIdentityResolution`]
+/// RESULT; only implementations of this trait perform I/O.
+#[async_trait::async_trait]
+pub trait ResolvePlatformIdentity: Send + Sync {
+    /// `auth_subject` is the verified Supabase `sub` — already authenticated by
+    /// [`AuthContext::authorize`], never attacker-controlled at this point.
+    async fn resolve(&self, auth_subject: &str) -> PlatformIdentityResolution;
+}
+
+/// The ADMIN/platform seam's outcome: existence only — `Resolved(())` means a LIVE
+/// `PlatformMembership` grant exists for this subject; there is no id to carry beside it (ADMIN
+/// carries no domain claim, unlike [`MemberIdentityResolution`]'s `RestaurantId`).
+pub type PlatformIdentityResolution = IdentityResolution<()>;
+
+/// The Postgres implementation: `PlatformMember.auth_subject -> platformMembershipId`
+/// ([`application::queries::PlatformMemberRepository`]) — a PROJECTION probe, never a fold of a
+/// `PlatformMembership-{id}` stream per request, the `PgMemberIdentity`/`PgRiderIdentity`
+/// precedent.
+pub struct PgPlatformIdentity {
+    members: Arc<dyn application::queries::PlatformMemberRepository>,
+}
+
+impl PgPlatformIdentity {
+    pub fn new(members: Arc<dyn application::queries::PlatformMemberRepository>) -> Self {
+        Self { members }
+    }
+}
+
+#[async_trait::async_trait]
+impl ResolvePlatformIdentity for PgPlatformIdentity {
+    async fn resolve(&self, auth_subject: &str) -> PlatformIdentityResolution {
+        match self
+            .members
+            .platform_membership_id_by_auth_subject(domain::generated::scalars::AuthSubject(
+                auth_subject.to_string(),
+            ))
+            .await
+        {
+            Ok(Some(_)) => PlatformIdentityResolution::Resolved(()),
+            Ok(None) => PlatformIdentityResolution::NoMapping,
+            Err(e) => PlatformIdentityResolution::LookupFailed(LookupFailureReason::from_domain_error(&e)),
+        }
+    }
+}
+
+/// The platform seam of a process booted WITHOUT a database — the `NoDatabaseMemberIdentity`/
+/// `NoDatabaseRiderIdentity` precedent: every resolution is [`IdentityResolution::LookupFailed`],
+/// the PAGE-class outage signal, never a `NoMapping` stand-in (which would report a missing
+/// database as an ordinary provisioning gap).
+pub struct NoDatabasePlatformIdentity;
+
+#[async_trait::async_trait]
+impl ResolvePlatformIdentity for NoDatabasePlatformIdentity {
+    async fn resolve(&self, _auth_subject: &str) -> PlatformIdentityResolution {
+        PlatformIdentityResolution::LookupFailed(LookupFailureReason::Repository)
+    }
+}
+
 /// Where a RIDER's domain identity comes from: **Postgres, always** — there is deliberately no
 /// `Claim` variant and no OFF state. `CustomerIdentitySource::Claim` is a real gate because OFF
 /// reproduces working customer behaviour byte for byte; for RIDER no token has ever carried a
@@ -2508,14 +2606,27 @@ impl MemberIdentitySource {
     }
 }
 
+/// A struct with a private field rather than a bare `Arc` — the [`MemberIdentitySource`] shape:
+/// the only way to hold one is [`PlatformIdentitySource::new`], so a composition root cannot leave
+/// the ADMIN seam unset and have the request path silently fall back to anything.
+#[derive(Clone)]
+pub struct PlatformIdentitySource(Arc<dyn ResolvePlatformIdentity>);
+
+impl PlatformIdentitySource {
+    pub fn new(resolver: Arc<dyn ResolvePlatformIdentity>) -> Self {
+        Self(resolver)
+    }
+}
+
 /// The identity seams a request resolves through, selected ONCE at startup/config-load and cloned
-/// into every request's `GraphqlState` (`crate::graphql::routes`). One value rather than three
-/// parameters so a transport cannot wire the customer seam and forget the rider/member ones.
+/// into every request's `GraphqlState` (`crate::graphql::routes`). One value rather than four
+/// parameters so a transport cannot wire the customer seam and forget the rider/member/platform ones.
 #[derive(Clone)]
 pub struct IdentitySources {
     pub customer: CustomerIdentitySource,
     pub rider: RiderIdentitySource,
     pub member: MemberIdentitySource,
+    pub platform: PlatformIdentitySource,
 }
 
 /// Resolve a verified [`Principal`] into the application's [`application::queries::ReadScope`] —
@@ -2538,6 +2649,10 @@ pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
     use domain::generated::scalars::{CustomerId, RestaurantAccountId, RestaurantId};
 
     match &principal.identity {
+        // #639 part C step 6-v: `Identity::Admin` is now the seam's success-only output
+        // (`resolve_platform_scope`) and never reaches this arm on a real request — reached
+        // directly (a test-built principal), `ReadScope::Admin` is still the honest answer: unlike
+        // Rider/Member, ADMIN carries no per-request id that could be wrong.
         Identity::Admin { .. } => ReadScope::Admin,
         Identity::Restaurant { restaurant_id, .. } => ReadScope::Restaurant(RestaurantId(*restaurant_id)),
         Identity::RestaurantAccount { restaurant_account_id, .. } => {
@@ -2619,6 +2734,14 @@ async fn resolve_identity_scope(
         (Identity::Unbound { sub, role: RequestRole::Restaurant } | Identity::Member { sub }, _) => {
             let sub = sub.clone();
             return resolve_member_scope(sub, correlation_id, &sources.member).await;
+        }
+        // ADMIN (#639 part C step 6-v, ADR-20260905-223957 §2): the SAME shape as RIDER/MEMBER,
+        // ungated on the READ side (there is no legacy ADMIN-claim behaviour to preserve here — no
+        // stamper writes a platform-grant claim, so every Unbound{role: Admin} the seam sees today
+        // came from an ADMIN-role token, and fails closed identically here).
+        (Identity::Unbound { sub, role: RequestRole::Admin } | Identity::Admin { sub }, _) => {
+            let sub = sub.clone();
+            return resolve_platform_scope(sub, correlation_id, &sources.platform).await;
         }
         // Every other combination — the remaining roles, an Unbound/Anonymous caller, or
         // CustomerIdentitySource::Claim (the default) — is the unchanged pure claims function,
@@ -2750,6 +2873,43 @@ async fn resolve_member_scope(
     telemetry::spans::record_member_identity_resolve_result(&span, result, reason);
     telemetry::meters::member_identity::duration(elapsed_ms, result);
     telemetry::meters::member_identity::lookup_source("db");
+    (Principal { identity }, scope)
+}
+
+/// The ADMIN/platform half of [`resolve_identity_scope`] (#639 part C step 6-v,
+/// ADR-20260905-223957 §2), the `resolve_member_scope`/`resolve_rider_scope` shape transposed:
+/// `NoMapping` and `LookupFailed` both fail closed to `Public`; only telemetry tells them apart.
+///
+/// **The one producer of [`Identity::Admin`] on the request path.** A resolved live grant makes an
+/// `Identity::Admin` (acts ADMIN, records ADMIN, reads `ReadScope::Admin`); anything else is
+/// `Identity::Unbound { role: Admin }` (acts PUBLIC, reads `Public`) — the same
+/// unbound-token-cannot-elevate shape the #849 re-presentation fixed for RIDER.
+async fn resolve_platform_scope(
+    sub: String,
+    correlation_id: crate::graphql::session::RequestCorrelationId,
+    source: &PlatformIdentitySource,
+) -> (Principal, application::queries::ReadScope) {
+    use application::queries::ReadScope;
+
+    let span = telemetry::spans::admin_identity_resolve(&correlation_id.0.to_string());
+    let outcome = source.0.resolve(&sub).instrument(span.clone()).await;
+
+    let unbound = || Identity::Unbound { sub: sub.clone(), role: RequestRole::Admin };
+    let (identity, scope, result, reason) = match &outcome {
+        PlatformIdentityResolution::Resolved(()) => {
+            (Identity::Admin { sub: sub.clone() }, ReadScope::Admin, "resolved", None)
+        }
+        PlatformIdentityResolution::NoMapping => {
+            (unbound(), ReadScope::Public, "not_found", None)
+        }
+        PlatformIdentityResolution::LookupFailed(reason) => {
+            (unbound(), ReadScope::Public, "lookup_failed", Some(reason.label()))
+        }
+    };
+    telemetry::spans::record_admin_identity_resolve_result(&span, result, reason);
+    // `admin_identity_resolve_total{result}` -- ONE bounded counter (card F), no latency
+    // histogram: the platform population (1-3) is too small for a distribution to mean anything.
+    telemetry::meters::admin_identity::resolved(result);
     (Principal { identity }, scope)
 }
 
@@ -3046,6 +3206,7 @@ mod read_scope_tests {
                 rows.iter().map(|(sub, id)| (sub.to_string(), *id)).collect(),
             ))),
             member: MemberIdentitySource::new(Arc::new(NoDatabaseMemberIdentity)),
+            platform: PlatformIdentitySource::new(Arc::new(NoDatabasePlatformIdentity)),
         }
     }
 

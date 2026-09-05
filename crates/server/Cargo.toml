@@ -29,6 +29,7 @@ client-delivery-partner-registration = { path = "../clients/delivery-partner-reg
 client-mailbox-supervision = { path = "../clients/mailbox-supervision" }
 client-order = { path = "../clients/order" }
 client-place-order-process = { path = "../clients/place-order-process" }
+client-platform-membership = { path = "../clients/platform-membership" }
 client-prospect = { path = "../clients/prospect" }
 client-reclamation = { path = "../clients/reclamation" }
 client-refund-process = { path = "../clients/refund-process" }

@@ -276,6 +276,8 @@ pub struct Config {
     pub run_member_sign_in_door: bool,
     /// DEFAULT `false`. The invitation door (#639 part C step 6-iv, ADR-20260905-101349 §2/§3). ON, `inviteRestaurantMember` sends the invite email and appends `RestaurantInvitationSent` as normal. OFF, the handler refuses BEFORE touching the store with the typed `RestaurantInvitationDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantInvitation` is NEVER gated by this key: withdrawing an offer nobody has accepted yet is always safe to allow. `GrantRestaurantAccess`'s `MEMBER_INVITATION` leg stays behind `RUN_MEMBER_ACCESS_GRANT` (the SAME irreversible-grant gate CAPTAIN_ONBOARDING already uses -- a member-invitation grant is equally the first fact that starts a real Tours human's legal clock, so it is not a separate key). Preconditions gating the flip are named in `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml` (open): the invitation email deliverability drill, `RUN_MEMBER_SIGN_IN_DOOR` flipped FIRST (an invitation nobody can sign in with afterwards is a dead letter), the Art. 13 notice at the invited address (a third party's email typed by a manager -- legal names the instrument), the TTL value below confirmed (not just defaulted), and no seat-count/billing semantics anywhere in this slice.
     pub run_restaurant_invitation: bool,
+    /// DEFAULT `false`. The platform grant door (#639 part C step 6-v, ADR-20260905-223957 §5). ON, `GrantPlatformAccess` appends `PlatformAccessGranted` as normal (subject to the accepted-basis check). OFF, the handler refuses BEFORE touching the store with the typed `PlatformAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. NO revoke command exists yet to be asymmetric with (ADR-20260905-223957 §3). Preconditions gating the flip are named in `docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml` (open): the one-shot bootstrap landed and idempotent, the seam refusing an unbound ADMIN token proven red-first, the Art. 13/Art. 30 items (founder's, external), the labour posture (founder's), the `admin-sign-in` contract and both dead-man gauges live, and 6-iii's System routing items.
+    pub run_platform_access_grant: bool,
     /// DEFAULT `604800`. UNVERIFIED input (see the comment above this key). How long a `RestaurantInvitation` stays PENDING before the promotion pass delivers `RestaurantInvitationExpired` (`reschedule: keep` -- a redelivered birth never moves the deadline). Proposed default: 7 days (604800s), pending confirmation in `docs/decisions/RESTAURANT-INVITATION-PRECONDITIONS.yaml`.
     pub restaurant_invitation_ttl_seconds: i64,
     /// INSEE portal API key, sent as `X-INSEE-Api-Key-Integration` (no OAuth2 on the 2024+ portal). `SireneClient::from_env` FAILS when it is unset, so a sweep with no token does not silently ingest zero établissements — it refuses. No `deploy` block: this consumer runs in GitHub Actions, which injects the repo secret of the same name directly; the Render sync (which only carries the server service) has nothing to do with it.
@@ -447,6 +449,10 @@ impl Config {
             .or_else(|| baked("RUN_RESTAURANT_INVITATION", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_RESTAURANT_INVITATION", &v, false))
             .unwrap_or(false);
+        let run_platform_access_grant = raw("RUN_PLATFORM_ACCESS_GRANT")
+            .or_else(|| baked("RUN_PLATFORM_ACCESS_GRANT", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_PLATFORM_ACCESS_GRANT", &v, false))
+            .unwrap_or(false);
         let restaurant_invitation_ttl_seconds = raw("RESTAURANT_INVITATION_TTL_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(604800);
         let insee_api_token = raw("INSEE_API_TOKEN");
         let insee_api_base_url = raw("INSEE_API_BASE_URL");
@@ -552,6 +558,7 @@ impl Config {
                 run_member_access_grant,
                 run_member_sign_in_door,
                 run_restaurant_invitation,
+                run_platform_access_grant,
                 restaurant_invitation_ttl_seconds,
                 insee_api_token,
                 insee_api_base_url,
@@ -626,6 +633,7 @@ impl Config {
         out.push_str(&format!("  RUN_MEMBER_ACCESS_GRANT    = {}\n", self.run_member_access_grant));
         out.push_str(&format!("  RUN_MEMBER_SIGN_IN_DOOR    = {}\n", self.run_member_sign_in_door));
         out.push_str(&format!("  RUN_RESTAURANT_INVITATION  = {}\n", self.run_restaurant_invitation));
+        out.push_str(&format!("  RUN_PLATFORM_ACCESS_GRANT  = {}\n", self.run_platform_access_grant));
         out.push_str(&format!("  RESTAURANT_INVITATION_TTL_SECONDS = {}\n", self.restaurant_invitation_ttl_seconds));
         out.push_str(&format!("  INSEE_API_TOKEN            = {}\n", if self.insee_api_token.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INSEE_API_BASE_URL         = {}\n", self.insee_api_base_url.as_deref().unwrap_or("unset")));
@@ -636,7 +644,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 52;
+pub const KEY_COUNT: usize = 53;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -688,6 +696,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "RUN_MEMBER_ACCESS_GRANT",
     "RUN_MEMBER_SIGN_IN_DOOR",
     "RUN_RESTAURANT_INVITATION",
+    "RUN_PLATFORM_ACCESS_GRANT",
     "RESTAURANT_INVITATION_TTL_SECONDS",
     "INSEE_API_TOKEN",
     "INSEE_API_BASE_URL",
@@ -733,4 +742,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_MEMBER_SIGN_IN_DOOR", "staging", "false"),
     ("RUN_RESTAURANT_INVITATION", "production", "false"),
     ("RUN_RESTAURANT_INVITATION", "staging", "false"),
+    ("RUN_PLATFORM_ACCESS_GRANT", "production", "false"),
+    ("RUN_PLATFORM_ACCESS_GRANT", "staging", "false"),
 ];

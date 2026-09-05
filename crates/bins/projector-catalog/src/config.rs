@@ -224,6 +224,8 @@ pub struct Config {
     pub external_api_tokens: Option<String>,
     /// Shared secret for `POST /internal/sirene/drain` and `/internal/inbound/drain` (`x-internal-token`). Unset, both fail closed (503) and the CI sweep cannot wake the worker — the drain then waits for its hourly poll instead of starting in seconds.
     pub internal_trigger_token: Option<String>,
+    /// The one-shot `bootstrap-platform-admin` subcommand's ONLY input: the first admin's verified Supabase auth subject. Read once, at invocation, never logged, never a command payload from a GraphQL client -- the command it dispatches (`GrantPlatformAccess`) is `roles: [ADMIN]` in steady state and unreachable from any public surface. Absent, the subcommand refuses to run and exits non-zero before touching the mailbox; the ordinary server boot never reads this key at all and is never blocked by its absence.
+    pub platform_bootstrap_admin_subject: Option<String>,
     /// DEFAULT `30`. How long a mailbox partition lease lives without renewal (PROP-20260728-152752 §3.1). Too short and healthy workers flap ownership; too long and a crashed worker's partitions sit unserved for that many seconds before takeover — at peak that is paid-order latency. Reader lands with the #242 slice-3 worker.
     pub mailbox_lease_seconds: i64,
     /// DEFAULT `10`. Lease renewal cadence — also the balancing-loop tick (claim free, steal ONE) and the upper bound on the dual-belief window during a steal (§3.1: belief may lag one heartbeat, authority never — the ownership_version fence is commit-time). Keep at roughly a third of MAILBOX_LEASE_SECONDS. Reader lands with the #242 slice-3 worker.
@@ -385,6 +387,7 @@ impl Config {
         let log_level = log_level.unwrap_or_else(|| "info".to_string());
         let external_api_tokens = raw("EXTERNAL_API_TOKENS");
         let internal_trigger_token = raw("INTERNAL_TRIGGER_TOKEN");
+        let platform_bootstrap_admin_subject = raw("PLATFORM_BOOTSTRAP_ADMIN_SUBJECT");
         let mailbox_lease_seconds = raw("MAILBOX_LEASE_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(30);
         let mailbox_heartbeat_seconds = raw("MAILBOX_HEARTBEAT_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(10);
         let actor_activations = raw("ACTOR_ACTIVATIONS")
@@ -534,6 +537,7 @@ impl Config {
                 log_level,
                 external_api_tokens,
                 internal_trigger_token,
+                platform_bootstrap_admin_subject,
                 mailbox_lease_seconds,
                 mailbox_heartbeat_seconds,
                 actor_activations,
@@ -611,6 +615,7 @@ impl Config {
         out.push_str(&format!("  LOG_LEVEL                  = {}\n", self.log_level));
         out.push_str(&format!("  EXTERNAL_API_TOKENS        = {}\n", if self.external_api_tokens.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  INTERNAL_TRIGGER_TOKEN     = {}\n", if self.internal_trigger_token.is_some() { "set" } else { "unset" }));
+        out.push_str(&format!("  PLATFORM_BOOTSTRAP_ADMIN_SUBJECT = {}\n", if self.platform_bootstrap_admin_subject.is_some() { "set" } else { "unset" }));
         out.push_str(&format!("  MAILBOX_LEASE_SECONDS      = {}\n", self.mailbox_lease_seconds));
         out.push_str(&format!("  MAILBOX_HEARTBEAT_SECONDS  = {}\n", self.mailbox_heartbeat_seconds));
         out.push_str(&format!("  ACTOR_ACTIVATIONS          = {}\n", self.actor_activations));
@@ -651,7 +656,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 56;
+pub const KEY_COUNT: usize = 57;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -677,6 +682,7 @@ pub const DECLARED_KEYS: &[&str] = &[
     "LOG_LEVEL",
     "EXTERNAL_API_TOKENS",
     "INTERNAL_TRIGGER_TOKEN",
+    "PLATFORM_BOOTSTRAP_ADMIN_SUBJECT",
     "MAILBOX_LEASE_SECONDS",
     "MAILBOX_HEARTBEAT_SECONDS",
     "ACTOR_ACTIVATIONS",

@@ -26,7 +26,7 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use serde_json::json;
 use server::{
     graphql_acl::RequestRole, CustomerIdentityResolution, CustomerIdentitySource, IdentitySources,
-    LookupFailureReason, MemberIdentitySource, NoDatabaseMemberIdentity, ResolveCustomerIdentity,
+    LookupFailureReason, MemberIdentitySource, NoDatabaseMemberIdentity, PlatformIdentitySource, NoDatabasePlatformIdentity, ResolveCustomerIdentity,
     ResolveRiderIdentity, RiderIdentityResolution, RiderIdentitySource,
 };
 
@@ -108,6 +108,7 @@ fn sources(customer: CustomerIdentitySource) -> IdentitySources {
         customer,
         rider: RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)),
         member: MemberIdentitySource::new(std::sync::Arc::new(NoDatabaseMemberIdentity)),
+            platform: PlatformIdentitySource::new(std::sync::Arc::new(NoDatabasePlatformIdentity)),
     }
 }
 

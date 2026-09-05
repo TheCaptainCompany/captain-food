@@ -332,6 +332,7 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
             customer: CustomerIdentitySource::Claim,
             rider: RiderIdentitySource::new(Arc::new(ScriptedSeam(seam))),
             member: server::MemberIdentitySource::new(Arc::new(server::NoDatabaseMemberIdentity)),
+            platform: server::PlatformIdentitySource::new(std::sync::Arc::new(server::NoDatabasePlatformIdentity)),
         },
     )
     .layer(axum::Extension(server::AuthContext::from_config(
@@ -372,6 +373,8 @@ async fn door(identity: ScriptedIdentity, riders: ScriptedRiders, seam: RiderIde
         run_member_access_grant: false,
         run_member_sign_in_door: false,
         run_restaurant_invitation: false,
+        run_platform_access_grant: false,
+        platform_members: Arc::new(infrastructure::PgPlatformMemberRepository::new(unused.clone())),
     };
     Door { mailbox, identity, riders, sessions, deps, app }
 }

@@ -370,6 +370,32 @@ keys:
         staging: INTERNAL_TRIGGER_TOKEN
 
 
+  # #639 part C step 6-v (ADR-20260905-223957 §3, register check: no record names this key or the
+  # bootstrap's trigger -- declared here with an `UNVERIFIED input` default posture, ADR-20260817-105845):
+  # the first admin's login credential, read by the ONE-SHOT `bootstrap-platform-admin` subcommand
+  # -- a Tours human's identifier in git would be immutable and unerasable (farley), so it travels
+  # as a SECRET, never a repo value and never a GraphQL input. NOT `required:` for ANY profile: the
+  # bootstrap is a deliberately-invoked subcommand, never part of the server's ordinary startup
+  # path, so an absent value must never stop the ordinary server from booting
+  # (ADMIN-DOOR-PRECONDITIONS item 1) -- the founder provisions it only when the bootstrap is
+  # actually run.
+  PLATFORM_BOOTSTRAP_ADMIN_SUBJECT:
+    type: string
+    secret: true
+    required: []
+    gates: >
+      The one-shot `bootstrap-platform-admin` subcommand's ONLY input: the first admin's verified
+      Supabase auth subject. Read once, at invocation, never logged, never a command payload from a
+      GraphQL client -- the command it dispatches (`GrantPlatformAccess`) is `roles: [ADMIN]` in
+      steady state and unreachable from any public surface. Absent, the subcommand refuses to run
+      and exits non-zero before touching the mailbox; the ordinary server boot never reads this key
+      at all and is never blocked by its absence.
+    deploy:
+      from_secret:
+        production: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
+        staging: PLATFORM_BOOTSTRAP_ADMIN_SUBJECT
+
+
   # ===================================================================
   # Actor mailbox + projection runtime (ADR-20260730-231500; PROP-20260728-152752 /
   # PROP-20260730-230803). Declared AHEAD of their readers — the drift gate is one-directional

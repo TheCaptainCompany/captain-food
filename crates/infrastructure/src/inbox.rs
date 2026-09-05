@@ -54,6 +54,9 @@ use application::generated::inboxes::{
 use application::generated::inboxes::RestaurantInvitationFactInbox;
 use application::generated::inboxes::RestaurantInvitationInbox;
 use application::generated::inboxes::RestaurantMembershipInbox;
+// #639 part C step 6-v (ADR-20260905-223957): a SEPARATE `use` line, additive-only (the fence
+// self-check greps for a removed line in this file) rather than editing the block above.
+use application::generated::inboxes::PlatformMembershipInbox;
 use application::ports::Actor;
 use domain::shared::errors::DomainError;
 
@@ -137,6 +140,17 @@ pub struct CommandDeps {
     /// `run_rider_restriction_door` above. OFF (the default) refuses `inviteRestaurantMember` with
     /// the typed `RestaurantInvitationDoorClosed`; `revokeRestaurantInvitation` never consults it.
     pub run_restaurant_invitation: bool,
+    /// #639 part C step 6-v (ADR-20260905-223957 §5): `configuration.yaml#/RUN_PLATFORM_ACCESS_GRANT`
+    /// -- the platform grant door's release gate, resolved ONCE at the composition root, the SAME
+    /// carve-out shape as `run_member_access_grant` above. OFF (the default) refuses
+    /// `GrantPlatformAccess` with the typed `PlatformAccessGrantDoorClosed` for BOTH the hand-issued
+    /// GraphQL door and the one-shot bootstrap dispatch.
+    pub run_platform_access_grant: bool,
+    /// The `PlatformMember` bridge's write-side arbiter (#639 part C step 6-v, ADR-20260905-223957
+    /// §1) -- the `members` port's precedent, transposed: `grant_platform_access`'s handler
+    /// consults it BEFORE appending, since ADMIN is NOT a `PrincipalKind` (PRINCIPALS-MEMBER) and
+    /// reuses no reservation table.
+    pub platform_members: Arc<dyn application::queries::PlatformMemberRepository>,
 }
 
 
@@ -216,6 +230,7 @@ pub async fn route(
         ActorInbox::Order(m) => order(deps, m, actor, env).await,
         ActorInbox::Payment(m) => payment(deps, m, actor, env).await,
         ActorInbox::PlaceOrderProcess(m) => place_order_process(deps, m, actor, env).await,
+        ActorInbox::PlatformMembership(m) => platform_membership(deps, m, actor, env).await,
         ActorInbox::Prospect(m) => prospect(deps, m, actor, env).await,
         ActorInbox::Reclamation(m) => reclamation(deps, m, actor, env).await,
         ActorInbox::RefundProcess(m) => refund_process(deps, m, actor, env).await,
@@ -605,6 +620,44 @@ async fn restaurant_membership(
             telemetry::meters::member_sign_in::confirmed(result);
             if result != "linked" && result != "not_linked" {
                 telemetry::meters::member_sign_in::refused(result);
+            }
+            outcome
+        }
+    }
+}
+
+/// The `PlatformMembership` lane (#639 part C step 6-v, ADR-20260905-223957 §1-§3): the platform
+/// grant and the ADMIN seam binding. `GrantPlatformAccess` is gated by
+/// `RUN_PLATFORM_ACCESS_GRANT`, checked FIRST inside the handler -- for BOTH the hand-issued
+/// GraphQL door and the one-shot bootstrap dispatch (the SAME command, the SAME lane). No revoke
+/// command exists in this slice. The gate-liveness gauge is RE-ASSERTED here, at the dispatch seam
+/// where the gate is actually decided (the #895 lesson: a boot-time value never refreshed proves
+/// the process once started, not that the gate is live).
+async fn platform_membership(
+    deps: &CommandDeps,
+    message: PlatformMembershipInbox,
+    actor: &Actor,
+    env: &RouterEnv,
+) -> InboxOutcome {
+    let _ = env;
+    match message {
+        PlatformMembershipInbox::GrantPlatformAccess(cmd) => {
+            let basis = format!("{:?}", cmd.basis);
+            telemetry::meters::admin_identity::grant_enforcing(deps.run_platform_access_grant);
+            let outcome = run(async {
+                application::commands::grant_platform_access(
+                    deps.store.as_ref(),
+                    deps.platform_members.as_ref(),
+                    cmd,
+                    actor,
+                    deps.run_platform_access_grant,
+                )
+                .await
+                .map(|_| ())
+            })
+            .await;
+            if matches!(&outcome, InboxOutcome::Handled(Ok(()))) {
+                telemetry::meters::admin_identity::granted(&basis);
             }
             outcome
         }
