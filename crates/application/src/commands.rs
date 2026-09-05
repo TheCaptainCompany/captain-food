@@ -3305,8 +3305,9 @@ pub async fn revoke_restaurant_access(
 // RestaurantInvitation aggregate (actors.yaml#/RestaurantInvitation) — the roster and the
 // invitation (#639 part C step 6-iv, ADR-20260905-101349 §2/§3). Its own aggregate, own stream,
 // own lane; the accept is two commands in two lanes, sequenced by the accepting member's CLIENT,
-// never a process manager (`grant_restaurant_access`'s `MEMBER_INVITATION` branch above is the
-// second half).
+// never a process manager (`grant_restaurant_access_by_invitation` above, PUBLIC, is the second
+// half — round 2's split; `grant_restaurant_access` itself is ADMIN-only again and carries no
+// MEMBER_INVITATION branch).
 // ================================================================================================
 
 /// The stream a RestaurantInvitation aggregate lives on.
@@ -3434,11 +3435,11 @@ pub async fn accept_restaurant_invitation(
 /// `NoChange` for an already-terminal invitation (accepted/revoked/expired) or a gone stream --
 /// never a rejection, a deadline's passage cannot be refused.
 ///
-/// NOT WIRED to the mailbox's reminder-delivery route yet: that needs a `RecordLeg` match arm in
-/// `crates/infrastructure/src/mailbox/handler.rs`, which is fenced for this dispatch (#639 part C
-/// step 6-iv STOP finding, see the hand-back) -- this function is ready for that wiring the day it
-/// lands, and is exercised directly by `TestRestaurantInvitationExpiredByPromotionPass` today via
-/// the behaviour-test bed's generic `record_fact` (fold correctness only, not the production route).
+/// WIRED to the mailbox's reminder-delivery route as of round 2 (#639 part C step 6-iv):
+/// `crates/infrastructure/src/inbox.rs`'s `RecordLeg::RestaurantInvitation` +
+/// `crates/infrastructure/src/mailbox/handler.rs`'s matching arm. Also exercised directly by
+/// `TestRestaurantInvitationExpiredByPromotionPass` via the behaviour-test bed's generic
+/// `record_fact` (fold correctness).
 pub async fn record_inbound_restaurant_invitation_expiry(
     store: &dyn EventStore,
     event: DomainEvent,

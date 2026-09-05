@@ -40,3 +40,30 @@ pub fn member_sign_in_confirm_result(e: &DomainError) -> &'static str {
         DomainError::Repository(_) | DomainError::Invariant(_) => "lookup_failed",
     }
 }
+
+/// The `invitation.invite` span's `business.result` — same unavoidable-catch-all reasoning as
+/// this module's header (#639 part C step 6-iv round 2, beck: the two inline `_ =>
+/// "technical_error"` arms this replaces were the `every_arm_of_the_human_owned_router_names_an_
+/// inbox_variant` gate's own no-catch-all-ANYWHERE-in-the-file invariant, missed by round 1).
+pub fn restaurant_invitation_invite_result(e: &DomainError) -> &'static str {
+    match e {
+        DomainError::Rejected { code, .. } => match code.as_str() {
+            "RestaurantInvitationDoorClosed" => "door_closed",
+            _ => "rejected",
+        },
+        DomainError::Repository(_) | DomainError::Invariant(_) => "technical_error",
+    }
+}
+
+/// The `invitation.accept` span's `business.result` — same reasoning.
+pub fn restaurant_invitation_accept_result(e: &DomainError) -> &'static str {
+    match e {
+        DomainError::Rejected { code, .. } => match code.as_str() {
+            "InvalidVerificationToken" => "token_invalid",
+            "VerificationCodeExpired" => "token_expired",
+            "RestaurantInvitationNotAcceptable" => "not_acceptable",
+            _ => "rejected",
+        },
+        DomainError::Repository(_) | DomainError::Invariant(_) => "technical_error",
+    }
+}

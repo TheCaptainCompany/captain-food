@@ -270,7 +270,8 @@ RestaurantInvitation:
     lane -- FORK 1 Option A again: a targeted revoke needs its own identity distinct from the
     `RestaurantMembership` it may precede (6-i). The accept is TWO commands in TWO lanes, sequenced
     by the accepting member's CLIENT, never a process manager: `AcceptRestaurantInvitation` here,
-    then `GrantRestaurantAccess(basis: MEMBER_INVITATION)` on the membership stream.
+    then `GrantRestaurantAccessByInvitation` (PUBLIC, round 2's split, ADR-20260905-101349 §2
+    amendment) on the membership stream.
   lifecycle:
     status: { $ref: 'scalars.yaml#/RestaurantInvitationStatus' }
     initial:
@@ -329,19 +330,13 @@ RestaurantInvitation:
       effect: "Verify the magic-link token with the auth provider; the invited email must equal the verified email, case-folded, and the invitation must be PENDING -- any other outcome is the SAME typed RestaurantInvitationNotAcceptable, no enumeration oracle."
     - message: { $ref: '#/RestaurantInvitation/reminders/RestaurantInvitationExpired' }
       emits: [{ $ref: 'events.yaml#/RestaurantInvitationExpired' }]
-      deferred:
-        reason: >
-          WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry`
-          is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired
-          precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its
-          consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED
-          for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were
-          authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above);
-          only its DELIVERY is parked until the fence lifts.
-        issue: "https://github.com/TheCaptainCompany/captain-food/issues/902"
       effect: >
         The promotion pass delivers the TTL: record the expiry with record semantics iff the
-        invitation is STILL PENDING -- Recorded (PENDING -> EXPIRED), or Ignored (already
-        accepted/revoked, or the stream is gone) / Duplicate (already expired) -- NEVER Rejected
-        (the OrderExpired/OrderAcceptanceTimedOut precedent: a deadline's passage cannot be
-        refused). PARKED (`Unrecorded`) until #902 wires the RecordLeg arm.
+        invitation is STILL PENDING -- Recorded (PENDING -> EXPIRED), or NoChange (already
+        accepted/revoked/expired, or the stream is gone) -- NEVER Rejected (the
+        OrderExpired/OrderAcceptanceTimedOut precedent: a deadline's passage cannot be refused).
+        Round 2 (#639 part C step 6-iv) wires the `RecordLeg::RestaurantInvitation` arm in
+        `crates/infrastructure/src/mailbox/handler.rs` -- round 1 PARKED this delivery citing a
+        fence on that file that named no concurrent claim; the recorder was already written and
+        idempotent, so finishing the wiring was the honest fix (issue #902 tracks the follow-up
+        observability, not the delivery itself, which now exists).

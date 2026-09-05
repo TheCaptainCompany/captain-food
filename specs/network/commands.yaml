@@ -627,7 +627,8 @@ AcceptRestaurantInvitation:
     other terminal state -- `errors.yaml#/RestaurantInvitationNotAcceptable` never distinguishes
     "wrong address" from "unknown invitation" from "already accepted" from "expired" from "revoked"
     (the no-enumeration posture of 6-ii's sign-in door carries here). Emits nothing else: the client
-    sequences `GrantRestaurantAccess(basis: MEMBER_INVITATION)` itself once this returns.
+    sequences `GrantRestaurantAccessByInvitation` (PUBLIC, `{invitationId, token}`, round 2's split
+    -- ADR-20260905-101349 §2 amendment) itself once this returns.
   type: object
   properties:
     invitationId:

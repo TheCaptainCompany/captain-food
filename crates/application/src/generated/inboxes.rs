@@ -3112,7 +3112,7 @@ pub enum RestaurantInvitationInbox {
     AcceptRestaurantInvitation(domain::generated::commands::AcceptRestaurantInvitation),
     /// COMMAND `InviteRestaurantMember`.
     InviteRestaurantMember(domain::generated::commands::InviteRestaurantMember),
-    /// REMINDER `RestaurantInvitationExpired` — HANDLER DEFERRED (actors.yaml `deferred:`): WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above); only its DELIVERY is parked until the fence lifts. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/902.
+    /// REMINDER `RestaurantInvitationExpired`.
     RestaurantInvitationExpired(domain::generated::events::RestaurantInvitationExpired),
     /// COMMAND `RevokeRestaurantInvitation`.
     RevokeRestaurantInvitation(domain::generated::commands::RevokeRestaurantInvitation),
@@ -3215,7 +3215,7 @@ impl RestaurantInvitationInbox {
 /// `RequeueMailboxMessage`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RestaurantInvitationFactInbox {
-    /// REMINDER `RestaurantInvitationExpired` — HANDLER DEFERRED (actors.yaml `deferred:`): WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above); only its DELIVERY is parked until the fence lifts. Tracked by https://github.com/TheCaptainCompany/captain-food/issues/902.
+    /// REMINDER `RestaurantInvitationExpired`.
     RestaurantInvitationExpired(domain::generated::events::RestaurantInvitationExpired),
 }
 
@@ -3827,5 +3827,4 @@ pub const DEFERRED_MESSAGES: &[(&str, &str, &str, &str)] = &[
     ("DeliveryJob", "DeliveryDispatchFailed", "MODELLING: the PENDING->FAILED transition is declared, but no \"already reflected\" rule is -- on redelivery the job is already FAILED, the transition lookup is None, and the recorder turns that into a retry loop instead of a DUPLICATE.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
     ("DeliveryJob", "DeliveryOfferTimedOut", "MODELLING: not in the lifecycle transition table, so the recorder refuses it as an illegal transition; and job status cannot answer \"already reflected?\" because one job may legitimately time out on several ranked channels -- the dedupe key is the offer, not the status.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
     ("DeliveryJob", "DeliveryRequested", "MODELLING: the job's BIRTH, and record_inbound_delivery_event's idempotency is fold-based -- a birth has no fold to consult and there is no birthless structural-equality fallback, so a redelivery would append a second birth and apply `initial` twice.", "https://github.com/TheCaptainCompany/captain-food/issues/787"),
-    ("RestaurantInvitation", "RestaurantInvitationExpired", "WIRING, not modelling: `application::commands::record_inbound_restaurant_invitation_expiry` is written and ready (record iff PENDING, NoChange otherwise -- the OrderExpired precedent), but delivering it needs a `RecordLeg::RestaurantInvitation` variant + its consuming match arm in `crates/infrastructure/src/mailbox/handler.rs`, which was FENCED for the 6-iv dispatch (only an additive `inbox.rs` arm and one `CommandDeps` field were authorized carve-outs). The TTL is genuinely scheduled (`reminders:`/`schedules:` above); only its DELIVERY is parked until the fence lifts.", "https://github.com/TheCaptainCompany/captain-food/issues/902"),
 ];
