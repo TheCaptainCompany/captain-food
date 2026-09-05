@@ -13,7 +13,8 @@ use domain::generated::scalars::{
     MoneyCents, OptionId, OptionListId, OptionName, OrderId, OrderStatus, PhoneNumber, ProductId,
     ProductName, ProspectPipelineStatus, Quantity, ReclamationCategory, ReclamationDescription,
     ReclamationId, ReclamationReason, ReclamationResolution, ReclamationStatus, RefundId,
-    AuthSubject, CatalogId, MemberAuthority, MemberId, PrincipalKind, RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
+    AuthSubject, CatalogId, MemberAuthority, MemberId, PlatformMembershipId, PrincipalKind,
+    RefundStatus, RestaurantAccountId, RestaurantId, RiderId,
     RiderStanding, ScopeType, SessionId, Slug,
     StockStatus, UserType,
 };
@@ -25,6 +26,9 @@ pub use crate::generated::rows::CustomerCreditBalanceRow;
 /// The staff-authentication bridge (#639 part C step 6-i, ADR-20260905-101349 §5) -- internal,
 /// no GraphQL `reads` target in 6-i; see `infrastructure::persistence::member_store`.
 pub use crate::generated::rows::MemberRow;
+/// The platform grant bridge (#639 part C step 6-v, ADR-20260905-223957 §1/§2) -- internal, no
+/// GraphQL `reads` target; see `infrastructure::persistence::platform_member_store`.
+pub use crate::generated::rows::PlatformMemberRow;
 /// Superseded storefront labels (ADR-20260728-011344). Read by `hosts.rs` for the 301, not by any
 /// GraphQL query -- see `projectors::slug_alias`.
 pub use crate::generated::rows::SlugAliasRow;
@@ -478,6 +482,25 @@ pub trait MemberAuthorityRepository: Send + Sync {
         auth_subject: AuthSubject,
         restaurant_id: RestaurantId,
     ) -> Result<Option<MemberAuthority>, DomainError>;
+}
+
+/// Read port over the `PlatformMember` bridge (#639 part C step 6-v, ADR-20260905-223957 §1/§2):
+/// the write-side arbiter `grant_platform_access`'s handler consults BEFORE appending (ADMIN is
+/// NOT a `PrincipalKind`, so this reuses no reservation table -- the `MemberIdentityRepository`
+/// shape, transposed to the read the WRITE side needs rather than the seam's). The seam's OWN read
+/// (`ResolvePlatformIdentity`, `crates/server/src/auth.rs`) is a SEPARATE, narrower question
+/// (exists at all, for THIS subject) built over the SAME projection, the `MemberIdentityRepository`/
+/// seam split precedent.
+#[async_trait]
+pub trait PlatformMemberRepository: Send + Sync {
+    /// The `platformMembershipId` this auth subject already holds a LIVE grant under, or `None`
+    /// when no `PlatformAccessGranted` has ever been projected for it. `platform_member.auth_subject
+    /// UNIQUE` is what makes a bare `fetch_optional` honest (the `Member.auth_subject` precedent)
+    /// -- never `LIMIT 1`.
+    async fn platform_membership_id_by_auth_subject(
+        &self,
+        auth_subject: AuthSubject,
+    ) -> Result<Option<PlatformMembershipId>, DomainError>;
 }
 
 /// Read port over the `RiderRestriction` attribution table (#639 part C step 4-i,

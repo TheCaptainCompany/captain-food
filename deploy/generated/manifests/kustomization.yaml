@@ -16,6 +16,7 @@ resources:
   - bins/actor-mailbox-supervision.yaml
   - bins/actor-order.yaml
   - bins/actor-payment.yaml
+  - bins/actor-platform-membership.yaml
   - bins/actor-prospect.yaml
   - bins/actor-reclamation.yaml
   - bins/actor-restaurant.yaml

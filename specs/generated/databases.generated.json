@@ -59,6 +59,7 @@
         "City",
         "Customer",
         "Member",
+        "PlatformMember",
         "PricingPolicy",
         "ProspectionPipeline",
         "Restaurant",
@@ -199,6 +200,13 @@
       "placement": "declared",
       "databases": [
         "read_order"
+      ]
+    },
+    "PlatformMember": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
       ]
     },
     "PricingPolicy": {

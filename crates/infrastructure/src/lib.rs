@@ -45,7 +45,7 @@ pub use persistence::{
     PgPricingPolicyRepository,
     PgProspectionRepository, PgReclamationRepository, PgRefundQueueRepository,
     PgRestaurantRepository, PgRiderRepository, PgMemberRepository, PgMemberAuthorityRepository, PgSlugReservationRepository, PgUberEstimationPolicyRepository,
-    PgUberSplitPolicyRepository,
+    PgUberSplitPolicyRepository, PgPlatformMemberRepository,
 };
 pub use persistence::restaurant_roster_store::PgRestaurantRosterRepository;
 pub use persistence::restaurant_invitation_list_store::PgRestaurantInvitationListRepository;

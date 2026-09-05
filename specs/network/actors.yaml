@@ -340,3 +340,40 @@ RestaurantInvitation:
         fence on that file that named no concurrent claim; the recorder was already written and
         idempotent, so finishing the wiring was the honest fix (issue #902 tracks the follow-up
         observability, not the delivery itself, which now exists).
+
+
+PlatformMembership:
+  type: aggregate
+  identity: { $ref: '#/PlatformMembership/state/platformMembershipId' }
+  mailbox:
+    partitions: 1   # platform grants are rare and human-paced (population 1-3) -- the MailboxSupervision precedent (specs/common/actors.yaml)
+  description: >
+    The platform grant and the ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957
+    §1-§3): one `authSubject`'s access to the PLATFORM ITSELF. Its OWN aggregate, its OWN stream
+    (`PlatformMembership-{platformMembershipId}`), its OWN lane -- platform standing is its OWN
+    relationship, never a `ScopeType` widening (PRINCIPALS-MEMBER, RLS-SEQ finding (3): untouched)
+    and never `RestaurantAccessGranted` reused (that event's `scopeId` is `$ref RestaurantId`, a
+    platform grant on it would be permanently false history). The FIRST admin is a recorded ACT
+    through the ordinary mailbox enqueue path (the one-shot bootstrap, ADR-20260905-223957 §3),
+    never a row, never SQL, never a data migration; every SUBSEQUENT admin is hand-issued by an
+    existing one through the ordinary `roles: [ADMIN]` GraphQL door. NO revoke command in this
+    slice (§3): deferred until a second admin exists -- a named follow-up, not a hidden gap.
+  receives:
+    # The human-only door (ADR-20260905-223957 §3): `requires: acting: { ADMIN: any }` -- no
+    # EXTERNAL key, so no partner ACL can ever reach this; the validator rule
+    # `pm-sends-human-only-command` makes a `processmanager.yaml` `sends:` of this command an
+    # ERROR, and `pm-emits-human-only-event` makes a `receives[].emits:` of PlatformAccessGranted
+    # an ERROR too -- no PM inbox may declare either. The FIRST grant reaches this same receiver
+    # through the mailbox directly (the bootstrap's actor envelope names it ADMIN), never through
+    # the GraphQL door `roles: [ADMIN]` gates -- there is no chicken-and-egg here because the DSL
+    # `requires: acting` is a declared authorization shape, not a per-message identity comparison
+    # this aggregate has any state to compare against (ADMIN has no `principals:` entry, `any` is
+    # the only legal keyword).
+    - message: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+      requires:
+        acting:
+          ADMIN: any
+      emits: [{ $ref: 'events.yaml#/PlatformAccessGranted' }]
+      throws:
+        - { $ref: 'errors.yaml#/PlatformAccessGrantDoorClosed' }
+        - { $ref: 'errors.yaml#/PlatformAccessAlreadyGranted' }

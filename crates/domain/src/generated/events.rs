@@ -109,6 +109,7 @@ pub enum DomainEvent {
     RestaurantInvitationRevoked(RestaurantInvitationRevoked),
     RestaurantInvitationAccepted(RestaurantInvitationAccepted),
     RestaurantInvitationExpired(RestaurantInvitationExpired),
+    PlatformAccessGranted(PlatformAccessGranted),
     CartBoundToCustomer(CartBoundToCustomer),
     CartStarted(CartStarted),
     CartLineAdded(CartLineAdded),

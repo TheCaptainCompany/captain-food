@@ -41,6 +41,7 @@ use domain::generated::commands::{
     GrantRestaurantAccess, GrantRestaurantAccessByInvitation, RevokeRestaurantAccess,
     RequestMemberSignInLink, ConfirmMemberSignIn,
     InviteRestaurantMember, RevokeRestaurantInvitation, AcceptRestaurantInvitation,
+    GrantPlatformAccess,
 };
 use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
@@ -60,13 +61,15 @@ use domain::generated::events::{
     RestaurantSlugConfigured, RestaurantSlugReconfigured, RestaurantUnfavorited, RestaurantUpdated,
     RestaurantAccessGranted, RestaurantAccessRevoked,
     RestaurantInvitationSent, RestaurantInvitationRevoked, RestaurantInvitationAccepted,
+    PlatformAccessGranted,
 };
 use domain::generated::scalars::{
     AccessBasis, CatalogId, CurrencyCode, CustomerId, DialingCode, EmailAddress, ExternalReference,
-    MemberId, MembershipId, NationalPhoneNumber, PhoneNumber, PrincipalKind, RestaurantAccountId,
-    RestaurantId, RestaurantInvitationId, RestaurantListingStatus, RestaurantStatus, SessionId,
-    StockStatus,
+    MemberId, MembershipId, NationalPhoneNumber, PhoneNumber, PlatformMembershipId, PrincipalKind,
+    RestaurantAccountId, RestaurantId, RestaurantInvitationId, RestaurantListingStatus,
+    RestaurantStatus, SessionId, StockStatus,
 };
+use domain::platform_membership::PlatformMembershipState;
 use domain::prospect::ProspectState;
 use domain::restaurant::RestaurantState;
 use domain::restaurant_account::RestaurantAccountState;
@@ -79,8 +82,8 @@ use crate::ports::{
 };
 use crate::queries::{
     CustomerReadRepository, ProspectFilter, ProspectionReadRepository, RestaurantReadRepository,
-    AuthSubjectReservationRepository, BoundPrincipal, RiderIdentityRepository,
-    SlugReservationRepository,
+    AuthSubjectReservationRepository, BoundPrincipal, PlatformMemberRepository,
+    RiderIdentityRepository, SlugReservationRepository,
 };
 
 // --- Cart / Order / DeliveryJob / PlaceOrderProcess (checkout→order→delivery flow, ADR-0046 round 2) ---
@@ -3297,6 +3300,94 @@ pub async fn revoke_restaurant_access(
     });
     Repository::new(store)
         .save(&restaurant_membership_stream(&cmd.membership_id), version, &[event], actor)
+        .await
+        .map(|_| ())
+}
+
+// ================================================================================================
+// PlatformMembership aggregate (actors.yaml#/PlatformMembership) — the platform grant and the
+// ADMIN seam binding (#639 part C step 6-v, ADR-20260905-223957 §1-§3). Its own aggregate, its own
+// stream, its own lane -- platform standing is its OWN relationship, never a `ScopeType` widening
+// (PRINCIPALS-MEMBER: untouched) and never `RestaurantAccessGranted` reused. No revoke command in
+// this slice.
+// ================================================================================================
+
+/// The stream a PlatformMembership aggregate lives on.
+fn platform_membership_stream(id: &PlatformMembershipId) -> String {
+    format!("PlatformMembership-{}", id.0)
+}
+
+/// Handle `commands.yaml#/GrantPlatformAccess` → emit `events.yaml#/PlatformAccessGranted`
+/// (ADR-20260905-223957 §1/§2/§3). `roles: [ADMIN]` in steady state; the FIRST admin never reaches
+/// this handler through the GraphQL door -- the one-shot bootstrap dispatches the SAME command
+/// through the mailbox directly, with an actor envelope naming itself as the acting principal.
+///
+/// Order, each step gating the next (the `grant_restaurant_access` shape):
+/// 1. The door FIRST, before the store is even read (`run_platform_access_grant`) -- every
+///    platform grant, hand-issued or bootstrap-dispatched, is the irreversible moment that starts
+///    a real Tours human's legal clock.
+/// 2. Idempotency on `platformMembershipId`: an EXISTING membership makes a repeat call a no-op
+///    (`rules.yaml#/PlatformAccessGrantIsIdempotent`) -- `platformMembershipId` is REQUIRED and
+///    caller-minted (or bootstrap-derived), never minted by this handler.
+/// 3. The bridge arbiter: ADMIN is NOT a `PrincipalKind` (PRINCIPALS-MEMBER), so this reuses no
+///    write-side reservation table -- the `PlatformMember` bridge's `auth_subject UNIQUE` is the
+///    arbiter, consulted here BEFORE appending (the register check's "two arbiters" question,
+///    ADR-20260905-223957 §1): this is a projection READ, not the reservation's synchronous
+///    write-then-check, so it narrows the race window to the round trip between this read and the
+///    append rather than closing it atomically. Honest limit, recorded rather than hidden: two
+///    concurrent grants for the SAME authSubject under two DIFFERENT platformMembershipIds could
+///    both pass this check before either commits. The population this command serves is Captain's
+///    own admins (1-3, hand-provisioned, ADR-20260905-223957 context) -- a genuinely concurrent
+///    double-submission for one subject is not a shape production traffic produces, and the
+///    bridge's own `auth_subject UNIQUE` constraint (`database/tables/projection_tables.yaml#/
+///    PlatformMember`) is the FINAL arbiter at projection time: a genuine double-grant surfaces as
+///    a projector conflict to investigate, never a silently accepted second subject-to-membership
+///    binding in the read model ADMIN resolution actually uses.
+pub async fn grant_platform_access(
+    store: &dyn EventStore,
+    platform_members: &dyn PlatformMemberRepository,
+    cmd: GrantPlatformAccess,
+    actor: &Actor,
+    // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door as a mechanism,
+    // resolved ONCE at the composition root (the `run_member_access_grant` shape) -- never a
+    // global/env read inside the handler. Checked FIRST, before the store is even touched. Covers
+    // BOTH doors: the hand-issued GraphQL mutation and the one-shot bootstrap dispatch.
+    run_platform_access_grant: bool,
+) -> Result<(), DomainError> {
+    if !run_platform_access_grant {
+        return Err(reject(
+            "PlatformAccessGrantDoorClosed",
+            json!({ "authSubject": cmd.auth_subject }),
+        ));
+    }
+    let platform_membership_id = cmd.platform_membership_id;
+    let (state, version) =
+        Repository::new(store).load::<PlatformMembershipState>(platform_membership_id).await?;
+    if state.is_some() {
+        // Idempotent replay on the same platformMembershipId
+        // (rules.yaml#/PlatformAccessGrantIsIdempotent) -- no second fact. The SAME shape a re-run
+        // of the one-shot bootstrap relies on (its id is deterministically derived from
+        // authSubject, so running it twice always lands here).
+        return Ok(());
+    }
+    if let Some(existing) = platform_members
+        .platform_membership_id_by_auth_subject(cmd.auth_subject.clone())
+        .await?
+    {
+        if existing != platform_membership_id {
+            return Err(reject(
+                "PlatformAccessAlreadyGranted",
+                json!({ "authSubject": cmd.auth_subject }),
+            ));
+        }
+    }
+    let event = DomainEvent::PlatformAccessGranted(PlatformAccessGranted {
+        platform_membership_id,
+        auth_subject: cmd.auth_subject,
+        basis: cmd.basis,
+    });
+    Repository::new(store)
+        .save(&platform_membership_stream(&platform_membership_id), version, &[event], actor)
         .await
         .map(|_| ())
 }

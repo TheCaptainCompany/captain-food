@@ -677,3 +677,46 @@ ConfirmMemberSignIn:
     token:
       $ref: 'scalars.yaml#/EmailVerificationToken'
   required: [token]
+
+
+# --- The platform grant and the ADMIN seam binding (#639 part C step 6-v,
+# ADR-20260905-223957 §1-§3) -----------------------------------------------------------------
+
+GrantPlatformAccess:
+  description: >
+    Grant one `authSubject` access to the PLATFORM itself (ADR-20260905-223957 §1/§2/§3). Handled
+    by `PlatformMembership`, its own aggregate, its own stream, its own lane -- platform standing is
+    its OWN relationship, never a `ScopeType` widening (PRINCIPALS-MEMBER untouched) and never
+    `RestaurantAccessGranted` reused (that event's `scopeId` is restaurant-typed). `roles: [ADMIN]`
+    in steady state (§3): the ordinary GraphQL door for a SECOND admin, hand-issued by an existing
+    one. The FIRST admin is never reached through this GraphQL door at all -- the one-shot bootstrap
+    dispatches this SAME command through the ordinary mailbox enqueue path, with an actor envelope
+    naming the bootstrap as the acting principal, so no public "claim the first admin" path ever
+    exists (ADR-20260905-223957 §3, the rejected alternative).
+
+    `platformMembershipId` is REQUIRED and CALLER-MINTED, the `MembershipId`/`GrantRestaurantAccess`
+    precedent: the mailbox lane address needs it present to route at all. Submitting an
+    already-granted `platformMembershipId` is an idempotent no-op
+    (`rules.yaml#/PlatformAccessGrantIsIdempotent`) -- never a second event for the same stream. A
+    grant whose `authSubject` already holds a LIVE platform membership on a DIFFERENT
+    `platformMembershipId` is refused with the typed `PlatformAccessAlreadyGranted` -- the
+    `PlatformMember` bridge's `auth_subject UNIQUE` is the arbiter, checked by the handler before
+    appending (ADMIN is not a `PrincipalKind`, so this reuses no reservation table, unlike the
+    MEMBER arm).
+
+    The handler accepts only `basis: CAPTAIN_ONBOARDING` -- the only value `PlatformAccessBasis`
+    declares (evans: an operational act, never a corporate status). Gated by
+    `configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT`, checked BEFORE the store is touched (the
+    `RUN_MEMBER_ACCESS_GRANT` shape): every platform grant is the irreversible moment that starts a
+    real Tours human's legal clock. NO revoke command exists yet (ADR-20260905-223957 §3):
+    revocation of platform access is deferred until a second admin exists -- a named follow-up, not
+    a hidden gap.
+  type: object
+  properties:
+    platformMembershipId:
+      $ref: 'scalars.yaml#/PlatformMembershipId'
+    authSubject:
+      $ref: 'scalars.yaml#/AuthSubject'
+    basis:
+      $ref: 'scalars.yaml#/PlatformAccessBasis'
+  required: [platformMembershipId, authSubject, basis]

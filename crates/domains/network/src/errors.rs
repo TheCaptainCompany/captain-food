@@ -209,3 +209,19 @@ pub const MEMBER_SIGN_IN_DOOR_CLOSED: ErrorDef = ErrorDef {
     message_en: "Restaurant sign-in is not yet available.",
     message_fr: "La connexion restaurateur n'est pas encore disponible.",
 };
+
+/// The platform grant door is closed by `configuration.yaml#/keys/RUN_PLATFORM_ACCESS_GRANT` (#639 part C step 6-v, ADR-20260905-223957 §5) -- a declared, supervisable refusal while the preconditions (`docs/decisions/ADMIN-DOOR-PRECONDITIONS.yaml`) are open, never a silent no-op. Every platform grant, hand-issued or bootstrap-dispatched, is an irreversible act about a real Tours human that starts every legal clock -- the store is never touched while this is off.
+/// Context: `authSubject`.
+pub const PLATFORM_ACCESS_GRANT_DOOR_CLOSED: ErrorDef = ErrorDef {
+    code: "PlatformAccessGrantDoorClosed",
+    message_en: "Granting platform access is not yet enabled in this environment.",
+    message_fr: "L'octroi d'accès à la plateforme n'est pas encore activé dans cet environnement.",
+};
+
+/// This `authSubject` already holds a LIVE `PlatformMembership` on a DIFFERENT `platformMembershipId` (#639 part C step 6-v, ADR-20260905-223957 §1): the `PlatformMember` bridge's `auth_subject UNIQUE` is the arbiter, checked by the handler before appending (ADMIN is NOT a `PrincipalKind`, PRINCIPALS-MEMBER, so this reuses no reservation table). A resubmission of the SAME `platformMembershipId` is a DIFFERENT outcome -- the idempotent no-op the fold already grants, never this refusal.
+/// Context: `authSubject`.
+pub const PLATFORM_ACCESS_ALREADY_GRANTED: ErrorDef = ErrorDef {
+    code: "PlatformAccessAlreadyGranted",
+    message_en: "This login already holds platform access under a different membership.",
+    message_fr: "Cette identité de connexion dispose déjà d'un accès plateforme sous une autre adhésion.",
+};

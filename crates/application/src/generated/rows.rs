@@ -129,6 +129,15 @@ pub struct MemberRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// The bridge an ADMIN-stamped request resolves through (`resolve_platform_scope`, 6-v): one row per `authSubject` who has ever been granted platform access. Deliberately holds NOTHING ELSE -- no `display_name`, no `basis` duplicate (that lives on `PlatformAccessGranted` in `domain_events` alone) -- the seam's read is EXISTS-shaped (a live grant or not), never a read of grant metadata. 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlatformMemberRow {
+    pub platform_membership_id: PlatformMembershipId,
+    pub auth_subject: AuthSubject,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// The MANAGER's/OPERATOR's own restaurant team list (`/team`, §8.2). ONE creating arm (`RestaurantAccessGranted`, the `Member` precedent) and, round 3 (dba BLOCKING), ONE deleting arm (`RestaurantAccessRevoked` -- ADDITIVE to the creating arm, never a replacement, a real DELETE keyed on `membershipId` rather than a soft-status column, the `ScopeMembership` targeted-revoke precedent). No `display_name`/email column (YAGNI, the `Member` precedent exactly): nothing in this event stream carries one for a `CAPTAIN_ONBOARDING` grant, and inventing a cross-stream join to the invitation's `invitedEmail` for the `MEMBER_INVITATION` basis ONLY would make the same column mean two different things depending on how a row was born -- the `/team` screen names this a `gaps:` entry rather than paint a partial truth. 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RestaurantRosterRow {

@@ -398,3 +398,13 @@ mutations:
     command: { $ref: 'commands.yaml#/AcceptRestaurantInvitation' }
     roles: [PUBLIC]
     slice: V0
+
+
+  # --- The platform grant and the ADMIN seam binding (#639 part C step 6-v,
+  # ADR-20260905-223957 §1-§3) -- ships DARK behind RUN_PLATFORM_ACCESS_GRANT (default false). The
+  # FIRST admin never reaches this door (the one-shot bootstrap dispatches through the mailbox
+  # directly); every SUBSEQUENT admin is hand-issued through it.
+  grantPlatformAccess:
+    command: { $ref: 'commands.yaml#/GrantPlatformAccess' }
+    roles: [ADMIN]
+    slice: V0

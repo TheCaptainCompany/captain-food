@@ -307,6 +307,30 @@ pub fn project_member<C: MemberCompute>(c: &C, state: Option<MemberRow>, env: &E
     })
 }
 
+/// Hand-written business logic for `PlatformMember`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait PlatformMemberCompute {
+}
+
+pub fn project_platform_member<C: PlatformMemberCompute>(c: &C, state: Option<PlatformMemberRow>, env: &Envelope) -> Option<PlatformMemberRow> {
+    let _ = c;
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::PlatformAccessGranted(e) => Some(PlatformMemberRow {
+            platform_membership_id: e.platform_membership_id.clone(),
+            auth_subject: e.auth_subject.clone(),
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
 /// Hand-written business logic for `RestaurantRoster`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait RestaurantRosterCompute {

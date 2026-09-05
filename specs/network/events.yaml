@@ -587,3 +587,32 @@ RestaurantInvitationExpired:
     invitationId:
       $ref: 'scalars.yaml#/RestaurantInvitationId'
   required: [invitationId]
+
+
+# --- The platform grant and the ADMIN seam binding (#639 part C step 6-v,
+# ADR-20260905-223957 §1-§3) -----------------------------------------------------------------
+
+PlatformAccessGranted:
+  description: >
+    One `authSubject` was granted access to the PLATFORM itself (#639 part C step 6-v,
+    ADR-20260905-223957 §1) -- own relationship, own stream, own event: NEVER
+    `events.yaml#/RestaurantAccessGranted` (that event's `scopeId` is `$ref RestaurantId`, so a
+    platform grant on it would be permanently false history) and NEVER a `ScopeType` widening
+    (PRINCIPALS-MEMBER: untouched; RLS-SEQ finding (3): no widening). Business payload only
+    (ADR-0041): the acting principal (a hand-issuing admin, or the one-shot bootstrap) is envelope
+    `domain_events.user_id`, never a field here. No `principalKind`/`scopeType`/`scopeId` --
+    ADMIN carries no domain claim, its scope IS the role (ADR-20260905-223957 §2), so there is
+    nothing here to bind to. No provider term (`sub`, `app_metadata`, `accessToken`) rides in this
+    payload -- `authSubject` is the kernel `AuthSubject` scalar.
+  type: object
+  properties:
+    platformMembershipId:
+      $ref: 'scalars.yaml#/PlatformMembershipId'
+    authSubject:
+      $ref: 'scalars.yaml#/AuthSubject'
+    basis:
+      $ref: 'scalars.yaml#/PlatformAccessBasis'
+  required:
+    - platformMembershipId
+    - authSubject
+    - basis

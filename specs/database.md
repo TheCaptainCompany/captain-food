@@ -414,6 +414,21 @@ DDL for these tables is generated to `specs/generated/views.generated.sql`.
 | `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
+### `PlatformMember` · 🛶 V0 · 🔒 internal · source aggregate `PlatformMembership`
+
+- **Consumed by**: command handlers / auth resolution (no GraphQL query).
+- **Fed by**: `PlatformAccessGranted`
+- **Rules**: Rebuild = checkpoint reset, never TRUNCATE (the `Member` precedent, PROP-20260831-180622 §6.4): upsert keyed on `platform_membership_id` with ONE creating arm (`PlatformAccessGranted`), so a from-zero replay rewrites every row in place and no admin is denied mid-rebuild. TRUNCATE + reset locks every admin out for the length of the drain -- for a population of 1-3 that is the entire platform's back office. `auth_subject` is UNIQUE, not merely indexed, and the difference is a security property (the `Member.auth_subject`/`Rider.auth_ref` precedent): the seam's lookup is `fetch_optional`, which on multiplicity returns an ARBITRARY row -- the constraint converts a silent breach into a visible denial. It is the SOLE arbiter of the one-subject-one-platform-membership invariant (PRINCIPALS-MEMBER: ADMIN is not a PrincipalKind, so this reuses no reservation table) -- the write-side handler consults this SAME bridge, read-before-append, as its own first line; see `rules.yaml#/PlatformAuthSubjectResolvesToOneMembership` for the honesty limit of that ordering. No CHECK constraint (`DbFaultPolicy::Skip` semantics, the `Member`/`RiderRoster` precedent): a stray value fails the ONE row's projection rather than halting the whole group. ERASURE, named here so the #194 sweep cannot miss an app-projected table the generated dispatch skips (the `Member`/`Rider` precedent): `auth_subject` and `platform_membership_id` are a natural person's data held OUTSIDE the stream. The `PlatformMembership` aggregate declares no `deletion:` block today (no revoke command exists yet, ADR-20260905-223957 §3) -- a tombstone fold is owed the moment one is declared.
+- **Note**: The bridge an ADMIN-stamped request resolves through (`resolve_platform_scope`, 6-v): one row per `authSubject` who has ever been granted platform access. Deliberately holds NOTHING ELSE -- no `display_name`, no `basis` duplicate (that lives on `PlatformAccessGranted` in `domain_events` alone) -- the seam's read is EXISTS-shaped (a live grant or not), never a read of grant metadata.
+
+
+| Column | Type | SQL | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `platform_membership_id` | `PlatformMembershipId` | `UUID` | PK | Keyed on the grant relationship's OWN minted id -- unlike `Member`, ADMIN has no separate person-id scalar distinct from the grant, so the row's PK IS the aggregate's own identity (the stream is `PlatformMembership-{platformMembershipId}`, same value). |
+| `auth_subject` | `AuthSubject` | `TEXT` | unique | The login credential this admin resolves through (the seam, `resolve_platform_scope`). UNIQUE, no other index (deliberately no `index: true` beside `unique:`, the `Member.auth_subject` precedent) -- see the table rule. |
+| `created_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+| `updated_at` | `timestamptz` | `TIMESTAMPTZ` | — | technical — stamped from event.occurred_at (implicit on every read model) |
+
 ### `RestaurantRoster` · 🛶 V0 · source aggregate `RestaurantMembership`
 
 - **Fed by**: `RestaurantAccessGranted`, `RestaurantAccessRevoked`

@@ -435,6 +435,13 @@ CREATE TABLE Member (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE PlatformMember (
+  platform_membership_id UUID PRIMARY KEY,
+  auth_subject TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE RestaurantRoster (
   membership_id UUID PRIMARY KEY,
   scope_id UUID NOT NULL,

@@ -11,7 +11,7 @@ Resolved from [`specs/database/databases.yaml`](../database/databases.yaml) and 
 | `captain_write` | `captain-write` | `migrator` | pitr | `CityDeliveryRanking` · `DeliveryChannelCatalog` · `RestaurantDispatchConfig` · `RuntimePosture` · `auth_sessions` · `auth_subject_reservations` · `cart_binding_process_manager` · `delivery_dispatch_process_manager` · `domain_events` · `domain_stream` · `inbound_messages` · `mailbox_partitions` · `payment_process_manager` · `refund_process_manager` · `slug_reservations` · `sms_send_quota` |
 | `read_order` | `read-order` | `migrator` | replay | `Cart` · `CustomerCreditBalance` · `OrderConversation` · `OrderTracking` · `PricingPolicy` · `ScopeMembership` · `UberEstimationPolicy` · `UberSplitPolicy` |
 | `read_catalog` | `read-catalog` | `migrator` | replay | `Catalog` · `PricingPolicy` · `ScopeMembership` · `UberEstimationPolicy` · `UberSplitPolicy` |
-| `read_common` | `read-common` | `migrator` | replay | `City` · `Customer` · `Member` · `PricingPolicy` · `ProspectionPipeline` · `Restaurant` · `RestaurantInvitationList` · `RestaurantRoster` · `Rider` · `RiderRestriction` · `RiderRoster` · `ScopeMembership` · `SlugAlias` · `UberEstimationPolicy` · `UberSplitPolicy` |
+| `read_common` | `read-common` | `migrator` | replay | `City` · `Customer` · `Member` · `PlatformMember` · `PricingPolicy` · `ProspectionPipeline` · `Restaurant` · `RestaurantInvitationList` · `RestaurantRoster` · `Rider` · `RiderRestriction` · `RiderRoster` · `ScopeMembership` · `SlugAlias` · `UberEstimationPolicy` · `UberSplitPolicy` |
 | `tracking` | `tracking` | `migrator` | backup-required | *(none yet — see the catalog's entry for what its first table owes)* |
 | `adapter_stripe` | `adapter-stripe` | `adapter_stripe` | refetch | `external_stripe_events` |
 | `adapter_hubrise` | `adapter-hubrise` | `adapter_hubrise` | backup-required | `external_hubrise_callbacks` · `hubrise_connection_locations` · `hubrise_connections` |
@@ -36,6 +36,7 @@ Every table of a covered kind, with its resolved database SET (a set even while 
 | `Member` | projection table | declared | `read_common` |
 | `OrderConversation` | projection table | declared | `read_order` |
 | `OrderTracking` | projection table | declared | `read_order` |
+| `PlatformMember` | projection table | declared | `read_common` |
 | `PricingPolicy` | referential table | replicated | `read_order` · `read_catalog` · `read_common` |
 | `ProspectionPipeline` | projection table | declared | `read_common` |
 | `Restaurant` | projection table | declared | `read_common` |

@@ -35,6 +35,7 @@ pub(crate) const BT_AGGREGATES: &[(&str, &str, bool)] = &[
     ("MailboxSupervision", "targetMessageId", true),   // id = the SUPERVISED row's messageId (#315)
     ("RestaurantMembership", "membershipId", true),   // #639 part C step 6-i (ADR-20260905-101349)
     ("RestaurantInvitation", "invitationId", true),   // #639 part C step 6-iv (ADR-20260905-101349 §2/§3)
+    ("PlatformMembership", "platformMembershipId", true),   // #639 part C step 6-v (ADR-20260905-223957 §1)
 ];
 
 pub(crate) fn bt_agg(actor: &str) -> Option<(&'static str, &'static str, bool)> {
@@ -302,6 +303,9 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     // at the WRITE door only -- `revokeRestaurantInvitation` never consumes it (the
     // RestrictRider/ReinstateRider asymmetry).
     ("InviteRestaurantMember", "RUN_RESTAURANT_INVITATION", "run_restaurant_invitation"),
+    // #639 part C step 6-v (ADR-20260905-223957 §5): the platform grant door's release gate, read
+    // at the write door only -- no revoke command exists yet to be asymmetric with.
+    ("GrantPlatformAccess", "RUN_PLATFORM_ACCESS_GRANT", "run_platform_access_grant"),
 ];
 
 /// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
@@ -413,6 +417,12 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         // across to the RestaurantInvitation stream and the 2a reservation table.
         "GrantRestaurantAccessByInvitation" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, &bed.auth_subjects, cmd, &support::actor(), run_member_access_grant).await", snake)
+        }
+        // The platform grant and the ADMIN seam binding (#639 part C step 6-v,
+        // ADR-20260905-223957 §1): the handler checks the `PlatformMember` bridge (the arbiter,
+        // never the 2a reservation table -- ADMIN is not a PrincipalKind) before appending.
+        "GrantPlatformAccess" => {
+            format!("crate::commands::{}(&bed.store, &bed.platform_members, cmd, &support::actor(), run_platform_access_grant).await", snake)
         }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }

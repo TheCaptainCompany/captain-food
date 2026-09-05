@@ -18,6 +18,7 @@ pub mod customer_credit_balance;
 pub mod member;
 pub mod order_conversation;
 pub mod order_tracking;
+pub mod platform_member;
 pub mod prospection_pipeline;
 pub mod restaurant;
 pub mod restaurant_invitation_list;
