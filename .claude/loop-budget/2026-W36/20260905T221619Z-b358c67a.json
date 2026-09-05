@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 2160,
+  "recordedAt": "2026-09-05T22:16:19.827Z",
+  "branch": "639-staff-auth-roster-invitation",
+  "note": "PR #901 round 3 (R3-0..R3-9), 639-staff-auth-roster-invitation -- start timer was not opened at run start (executor error), duration estimated from the round-3 dispatch card's write timestamp (21:40:03Z) to hand-back (22:16:04Z)"
+}
