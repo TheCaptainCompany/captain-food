@@ -526,81 +526,131 @@ fn item_badge_view(node: &Node, row_ctx: &RenderContext) -> Option<AnyView> {
 
 /// The `item_components.N.*` per-item templates of a List (#725): each row renders the declared
 /// component sequence against its own context. `None` = the node declares none (the plain-line
-/// List shape). Supported types mirror the tiered markup rule: `info_row`/`badge` (label+value
-/// rows), `text`, and `button` (the full action DOM contract via the prefixed parser — the
-/// mailbox requeue intervention, #315). Anything else renders the tagged generic label+value
-/// container. `variant_when` is out of scope here, as at the #472 briefing (evans).
+/// List shape).
 fn item_component_views(node: &Node, row_ctx: &RenderContext) -> Option<Vec<AnyView>> {
     node.prop("item_components.0.type")?;
-    let mut out: Vec<AnyView> = Vec::new();
+    Some(render_item_entries(node, "item_components", row_ctx))
+}
+
+/// Does an item-components-style entry exist at `prefix` at all (a `type` prop present there)?
+/// The one presence check shared by the top-level scan and any nested `conditional_section`
+/// branch scan below — a `type` value the corpus does not carry is "no more entries", never a
+/// render decision.
+fn item_entry_type(node: &Node, prefix: &str) -> Option<&'static str> {
+    match node.prop(&format!("{prefix}.type")) {
+        Some(PropValue::Text(ty)) => Some(ty),
+        _ => None,
+    }
+}
+
+/// Every item-components-style entry declared under `prefix` (`item_components` at the top level,
+/// `item_components.{i}.if_true`/`if_false` one level into a nested `conditional_section`),
+/// rendered against `row_ctx`, in declared order, skipping any entry a `visible_when` hides.
+fn render_item_entries(node: &Node, prefix: &str, row_ctx: &RenderContext) -> Vec<AnyView> {
+    let mut out = Vec::new();
     for i in 0..32 {
-        let key = |suffix: &str| format!("item_components.{i}.{suffix}");
-        let Some(PropValue::Text(ty)) = node.prop(&key("type")) else { break };
-        match eval_condition_prop(node, &key("visible_when"), row_ctx, false) {
-            Some(Err(expr)) => {
-                out.push(condition_error_marker(expr));
-                continue;
-            }
-            Some(Ok(false)) => continue, // hidden on THIS row — fail closed like every condition
-            Some(Ok(true)) | None => {}
+        let entry_prefix = format!("{prefix}.{i}");
+        if item_entry_type(node, &entry_prefix).is_none() {
+            break;
         }
-        let label = prop_text(node, &key("label"), row_ctx);
-        match ty {
-            "text" => {
-                let value = item_prop_text(node, &key("value"), row_ctx);
-                out.push(view! { <p data-c=ty>{value}</p> }.into_any());
-            }
-            "button" => {
-                let (action_attrs, disabled_reason) =
-                    crate::executor::button_attrs_prefixed(node, row_ctx, &key("action"));
-                let get = |k: &str| {
-                    action_attrs.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone())
-                };
-                use crate::executor::attrs;
-                let variant = prop_text(node, &key("variant"), row_ctx);
-                let disabled = disabled_reason.is_some();
-                out.push(
-                    view! {
-                        <button
-                            data-c=ty
-                            data-variant=variant
-                            data-action=get(attrs::ACTION)
-                            data-vars=get(attrs::VARS)
-                            data-var-bindings=get(attrs::VAR_BINDINGS)
-                            data-loading=get(attrs::LOADING)
-                            data-on-success=get(attrs::ON_SUCCESS)
-                            data-route=get(attrs::ROUTE)
-                            data-sheet=get(attrs::SHEET)
-                            disabled=disabled
-                            title=disabled_reason
-                        >
-                            {label}
-                        </button>
-                    }
-                    .into_any(),
-                );
-            }
-            // A per-item `{ type: badge, text:, variant:, visible_when: }` entry (#639 part C
-            // step 4-iii-A's roster list) — the SAME shape and reasoning as the top-level
-            // `ComponentKind::Badge` arm: `text`, never `label`/`value`, resolved per-row. Guarded
-            // on the declared field so the mailbox lanes screen's older `label:`/`value:` per-item
-            // badge (`item_components.N.type: badge`) keeps its existing rendering unchanged.
-            "badge" if node.prop(&key("text")).is_some() => {
-                let text = item_prop_text(node, &key("text"), row_ctx);
-                let variant = item_prop_text(node, &key("variant"), row_ctx);
-                out.push(view! { <span data-c=ty data-variant=variant>{text}</span> }.into_any());
-            }
-            // info_row, and any other labelled value template.
-            _ => {
-                let value = item_prop_text(node, &key("value"), row_ctx);
-                out.push(
-                    view! { <div data-c=ty><span>{label}</span><span>{value}</span></div> }
-                        .into_any(),
-                );
-            }
+        if let Some(view) = render_item_entry(node, &entry_prefix, row_ctx) {
+            out.push(view);
         }
     }
-    Some(out)
+    out
+}
+
+/// One `item_components`-style entry at `prefix`, against `row_ctx`. Supported types mirror the
+/// tiered markup rule: `info_row`/`badge` (label+value rows), `text`, `button` (the full action
+/// DOM contract via the prefixed parser — the mailbox requeue intervention, #315), and — round 3
+/// (#639 part C step 6-iv, ux) — `conditional_section`: the corpus's ONLY compound-condition
+/// grammar is NESTING (`rider.yaml:~449,463`'s conditional_section-in-conditional_section, the
+/// "no `&&`" grammar generalised into a per-row entry), so a per-row control gated on more than
+/// the one comparison a bare `visible_when` can express (e.g. "PENDING invitations only") nests a
+/// `conditional_section` around it instead of inventing a second condition slot. Anything else
+/// renders the tagged generic label+value container. `variant_when` is out of scope, as at the
+/// #472 briefing (evans). `None` = hidden on this row (a `visible_when: false`, or an
+/// unevaluatable/false nested `condition:`) — the caller skips it, never a "no such entry" signal
+/// (that is [`item_entry_type`]'s job).
+fn render_item_entry(node: &Node, prefix: &str, row_ctx: &RenderContext) -> Option<AnyView> {
+    let key = |suffix: &str| format!("{prefix}.{suffix}");
+    let ty = item_entry_type(node, prefix)?;
+    match eval_condition_prop(node, &key("visible_when"), row_ctx, false) {
+        Some(Err(expr)) => return Some(condition_error_marker(expr)),
+        Some(Ok(false)) => return None, // hidden on THIS row — fail closed like every condition
+        Some(Ok(true)) | None => {}
+    }
+    let label = prop_text(node, &key("label"), row_ctx);
+    match ty {
+        "conditional_section" => match eval_condition_verdict(node, &key("condition"), row_ctx) {
+            Some(Err(expr)) => Some(condition_error_marker(expr)),
+            verdict => {
+                // Mutual exclusion, same as the top-level `ComponentKind::ConditionalSection`
+                // (#725, beck's trap): EXACTLY ONE branch renders; unevaluatable fails CLOSED to
+                // NEITHER, never a silent default-true.
+                let chosen = match verdict {
+                    Some(Ok(Some(true))) => Some("if_true"),
+                    Some(Ok(Some(false))) => Some("if_false"),
+                    _ => None,
+                };
+                let views = chosen
+                    .map(|branch| render_item_entries(node, &key(branch), row_ctx))
+                    .unwrap_or_default();
+                Some(view! { <span data-c=ty>{views}</span> }.into_any())
+            }
+        },
+        "text" => {
+            let value = item_prop_text(node, &key("value"), row_ctx);
+            Some(view! { <p data-c=ty>{value}</p> }.into_any())
+        }
+        "button" => {
+            let (action_attrs, disabled_reason) =
+                crate::executor::button_attrs_prefixed(node, row_ctx, &key("action"));
+            let get =
+                |k: &str| action_attrs.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone());
+            use crate::executor::attrs;
+            let variant = prop_text(node, &key("variant"), row_ctx);
+            let disabled = disabled_reason.is_some();
+            Some(
+                view! {
+                    <button
+                        data-c=ty
+                        data-variant=variant
+                        data-action=get(attrs::ACTION)
+                        data-vars=get(attrs::VARS)
+                        data-var-bindings=get(attrs::VAR_BINDINGS)
+                        data-loading=get(attrs::LOADING)
+                        data-on-success=get(attrs::ON_SUCCESS)
+                        data-route=get(attrs::ROUTE)
+                        data-sheet=get(attrs::SHEET)
+                        disabled=disabled
+                        title=disabled_reason
+                    >
+                        {label}
+                    </button>
+                }
+                .into_any(),
+            )
+        }
+        // A per-item `{ type: badge, text:, variant:, visible_when: }` entry (#639 part C
+        // step 4-iii-A's roster list) — the SAME shape and reasoning as the top-level
+        // `ComponentKind::Badge` arm: `text`, never `label`/`value`, resolved per-row. Guarded
+        // on the declared field so the mailbox lanes screen's older `label:`/`value:` per-item
+        // badge (`item_components.N.type: badge`) keeps its existing rendering unchanged.
+        "badge" if node.prop(&key("text")).is_some() => {
+            let text = item_prop_text(node, &key("text"), row_ctx);
+            let variant = item_prop_text(node, &key("variant"), row_ctx);
+            Some(view! { <span data-c=ty data-variant=variant>{text}</span> }.into_any())
+        }
+        // info_row, and any other labelled value template.
+        _ => {
+            let value = item_prop_text(node, &key("value"), row_ctx);
+            Some(
+                view! { <div data-c=ty><span>{label}</span><span>{value}</span></div> }
+                    .into_any(),
+            )
+        }
+    }
 }
 
 /// Whether the item-list binding this node renders from FAILED for real (#472) — checked on the
@@ -2477,6 +2527,52 @@ mod tests {
         // Fail-closed per-item condition: no errorCode == null row here, so the error info_row
         // renders (visible_when "item.errorCode != null" is true for the poisoned row).
         assert!(html.contains("CAP_EXCEEDED"), "{html}");
+    }
+
+    /// Round 3 (#639 part C step 6-iv, ux BLOCKING): before this round the `/team` invitation
+    /// list's "Retirer" button rendered on EVERY row — ACCEPTED/ACCEPTED_PENDING_ACCESS/REVOKED/
+    /// EXPIRED included — because `visible_when` alone can only express ONE comparison
+    /// (`roster.viewerAuthority == 'MANAGER'`), never a compound "PENDING and MANAGER". Nesting a
+    /// `conditional_section` (`condition: "item.status == 'PENDING'"`) around it — the corpus's
+    /// only conjunction grammar (`rider.yaml`'s conditional_section-in-conditional_section) — is
+    /// what [`render_item_entry`]'s new `"conditional_section"` arm exists to make real: two rows,
+    /// one PENDING and one REVOKED, and the button renders on exactly the PENDING one.
+    #[test]
+    fn team_invitation_row_revoke_button_renders_only_on_a_pending_row() {
+        let screen = crate::generated::screens::restaurant_backoffice::SCREENS
+            .iter()
+            .find(|s| s.id == "team")
+            .expect("the /team screen");
+        let mut c = ctx();
+        c.insert_resolved(
+            "roster.mine",
+            json!({ "items": [], "viewerAuthority": "MANAGER" }),
+        );
+        c.insert_resolved(
+            "invitations.mine",
+            json!([
+                { "invitationId": "inv-pending", "invitedEmail": "a@example.com",
+                  "authority": "OPERATOR", "status": "PENDING",
+                  "expiresAt": "2026-09-12T00:00:00Z", "createdAt": "2026-09-05T00:00:00Z" },
+                { "invitationId": "inv-revoked", "invitedEmail": "b@example.com",
+                  "authority": "OPERATOR", "status": "REVOKED",
+                  "expiresAt": "2026-09-12T00:00:00Z", "createdAt": "2026-09-05T00:00:00Z" },
+            ]),
+        );
+        let html = render_screen_html(screen, &[], c);
+        assert_eq!(
+            html.matches("data-action=\"revoke_restaurant_invitation\"").count(),
+            1,
+            "exactly one Retirer control -- the PENDING row's, never the REVOKED row's: {html}"
+        );
+        assert!(
+            html.contains("&quot;invitationId&quot;:&quot;inv-pending&quot;"),
+            "the ONE rendered control carries the PENDING row's own id: {html}"
+        );
+        assert!(
+            !html.contains("inv-revoked&quot;"),
+            "the REVOKED row's id never reaches a revoke control's variables: {html}"
+        );
     }
 
     // ── #729/#730: error-state granularity is the RESOLVER, never the shared root ──────────────

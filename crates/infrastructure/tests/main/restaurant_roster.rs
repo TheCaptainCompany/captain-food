@@ -3,11 +3,12 @@
 //! (the table's own `rules:`) -- plus the flat, GRANT-shaped predicates the query serves. No
 //! predicate here is ever a revocation test (PROP §6.4).
 
-use application::commands::grant_restaurant_access;
+use application::commands::{grant_restaurant_access, revoke_restaurant_access};
 use application::ports::Actor;
-use domain::generated::commands::GrantRestaurantAccess;
+use domain::generated::commands::{GrantRestaurantAccess, RevokeRestaurantAccess};
 use domain::generated::scalars::{
-    AccessBasis, AuthSubject, MemberAuthority, MemberId, MembershipId, RestaurantId, ScopeType,
+    AccessBasis, AccessRevocationGround, AuthSubject, MemberAuthority, MemberId, MembershipId,
+    RestaurantId, ScopeType,
 };
 use infrastructure::{PgAuthSubjectReservationRepository, PgEventStore, ProjectionWorker};
 use sqlx::{PgPool, Row};
@@ -121,4 +122,72 @@ async fn one_membership_leaves_a_colleagues_roster_row_intact() {
 
     assert!(roster_row(&pool, membership_a).await.is_some());
     assert!(roster_row(&pool, membership_b).await.is_some());
+}
+
+async fn revoke(
+    pool: &PgPool,
+    membership_id: uuid::Uuid,
+) -> Result<(), domain::shared::errors::DomainError> {
+    let store = PgEventStore::new(pool.clone());
+    revoke_restaurant_access(
+        &store,
+        RevokeRestaurantAccess {
+            membership_id: MembershipId(membership_id),
+            ground: AccessRevocationGround::ACCESS_NO_LONGER_NEEDED,
+        },
+        &actor(),
+    )
+    .await
+}
+
+/// Round 3 (#639 part C step 6-iv, dba BLOCKING): the ADDITIVE `RestaurantAccessRevoked` DELETE
+/// arm -- grant -> revoke -> the row is GONE, never a stale listing (the exact defect round 2
+/// left named: "a revoked colleague stays listed until the revoke-removal follow-up lands").
+#[tokio::test]
+async fn a_revoke_deletes_the_roster_row() {
+    let Some(db) = crate::common::TestDb::acquire("restaurant_roster_revoke_deletes").await else { return };
+    let pool = db.pool();
+    let (membership, scope, member) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    grant(&pool, membership, scope, member, "auth-roster-revoke", MemberAuthority::OPERATOR)
+        .await
+        .expect("grant");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (grant)");
+    assert!(roster_row(&pool, membership).await.is_some(), "row exists right after the grant");
+
+    revoke(&pool, membership).await.expect("revoke");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (revoke)");
+    assert!(
+        roster_row(&pool, membership).await.is_none(),
+        "the revoked membership's row is GONE, never a stale listing"
+    );
+}
+
+/// The rebuild recipe stays deterministic under the table's OWN discipline
+/// (checkpoint-reset-never-TRUNCATE) even with the new delete arm in the replay: a
+/// granted-then-revoked membership must replay back to the SAME absent state, not resurrect the
+/// row a naive "TRUNCATE lost my delete" bug would produce.
+#[tokio::test]
+async fn checkpoint_reset_replay_reproduces_the_revoked_absence() {
+    let Some(db) = crate::common::TestDb::acquire("restaurant_roster_revoke_replay").await else { return };
+    let pool = db.pool();
+    let (membership, scope, member) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    grant(&pool, membership, scope, member, "auth-roster-revoke-replay", MemberAuthority::MANAGER)
+        .await
+        .expect("grant");
+    revoke(&pool, membership).await.expect("revoke");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (grant + revoke, first drain)");
+    assert!(roster_row(&pool, membership).await.is_none(), "absent right after the first drain");
+
+    let reset = sqlx::query("UPDATE projection_checkpoint SET position = 0 WHERE projector = 'RestaurantRoster'")
+        .execute(&pool)
+        .await
+        .expect("rewind the RestaurantRoster checkpoint");
+    assert_eq!(reset.rows_affected(), 1, "the projector name must match the registered 'RestaurantRoster' group");
+
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (replay)");
+    assert!(
+        roster_row(&pool, membership).await.is_none(),
+        "a full replay of grant-then-revoke reproduces the SAME absence -- deterministic, never a \
+         resurrected row"
+    );
 }

@@ -222,7 +222,7 @@ back.team.invitations.empty.title:     { messages: { en: "No invitations", fr: "
 back.team.invitations.empty.body:      { messages: { en: "Invited colleagues appear here.", fr: "Les collègues invités apparaissent ici." } }
 back.team.invitations.email:           { messages: { en: "Email", fr: "E-mail" } }
 back.team.invitations.expires:         { messages: { en: "Expires", fr: "Expire le" } }
-back.team.authority.manager:           { messages: { en: "Manager", fr: "Gérant" } }
+back.team.authority.manager:           { messages: { en: "Manager", fr: "Responsable" } }
 back.team.authority.operator:          { messages: { en: "Operator", fr: "Opérateur" } }
 back.team.status.pending:              { messages: { en: "Pending", fr: "En attente" } }
 back.team.status.accepted_pending_access: { messages: { en: "Access being activated", fr: "Accès en cours d'activation" } }
@@ -246,5 +246,5 @@ back.invitation.title:            { messages: { en: "Joining your team", fr: "Re
 back.invitation.working:          { messages: { en: "Please wait, we're confirming your invitation…", fr: "Merci de patienter, nous confirmons votre invitation…" } }
 back.invitation.no_token:         { messages: { en: "This invitation link is incomplete. Please ask for a new one.", fr: "Ce lien d'invitation est incomplet. Merci d'en demander un nouveau." } }
 back.invitation.failed:           { messages: { en: "This invitation link is no longer valid. Please ask for a new one.", fr: "Ce lien d'invitation n'est plus valide. Merci d'en demander un nouveau." } }
-back.invitation.access_pending:   { messages: { en: "Your invitation is confirmed and your access is being set up. Please try this link again in a moment.", fr: "Votre invitation est confirmée et votre accès est en cours de mise en place. Merci de réessayer ce lien dans un instant." } }
+back.invitation.access_pending:   { messages: { en: "Your invitation is confirmed and your access is being set up. Once it is ready, sign in below.", fr: "Votre invitation est confirmée et votre accès est en cours de mise en place. Une fois prêt, connectez-vous ci-dessous." } }
 back.invitation.back_to_sign_in:  { messages: { en: "Go to sign-in", fr: "Aller à la connexion" } }

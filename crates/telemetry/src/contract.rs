@@ -411,6 +411,12 @@ pub mod metric {
     /// `RUN_RESTAURANT_INVITATION` enforces its refusal on a request, 0 the moment the composition
     /// root boots with the key OFF.
     pub const RESTAURANT_INVITATION_DOOR_ENFORCING: &str = "restaurant_invitation_door_enforcing";
+    /// Round 3: the `RestaurantRoster` projector group's own replay lag (the
+    /// `rider_standing_lag_positions` shape).
+    pub const RESTAURANT_ROSTER_LAG_POSITIONS: &str = "restaurant_roster_lag_positions";
+    /// Round 3: the `RestaurantInvitationList` projector group's own replay lag.
+    pub const RESTAURANT_INVITATION_LIST_LAG_POSITIONS: &str =
+        "restaurant_invitation_list_lag_positions";
 
     // --- graphql-limits (#639 part C step 6-ii, ADR-20260905-101349 §9) --------------------------
 

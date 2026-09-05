@@ -384,8 +384,31 @@ impl ReadModelProjector {
                 // membershipId matches the stream's own aggregate id -- the fast path.
                 let id = MembershipId(aggregate_uuid_of(env, "RestaurantMembership-", "membershipId")?);
                 let state = restaurant_roster_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
-                if let Some(next) = project_restaurant_roster(&RestaurantRosterProjector, state, env) {
-                    restaurant_roster_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                let had_row = state.is_some();
+                match project_restaurant_roster(&RestaurantRosterProjector, state, env) {
+                    Some(next) => {
+                        restaurant_roster_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                    }
+                    // Round 3 (#639 part C step 6-iv, dba BLOCKING): the table's declared
+                    // `tombstone:` (`RestaurantAccessRevoked`) -- the mechanical dispatch above
+                    // already answers `None` for it; this is where `None` becomes an actual
+                    // DELETE rather than a silent no-op, ADDITIVE to the GRANT arm (the table's
+                    // own `rules:`), the `scope_membership_store::revoke_member` shape. A failed
+                    // delete is a STALE LISTING standing on this one row until the next
+                    // checkpoint-reset replay -- same safety posture as ScopeMembership's targeted
+                    // revoke above. Guarded on `had_row`: a revoke arriving with no prior roster
+                    // row (never observed live, but not excluded by the fold) deletes nothing.
+                    None if had_row => {
+                        if let Err(e) = restaurant_roster_store::delete(&mut *conn, id).await {
+                            tracing::error!(
+                                membership_id = %id.0,
+                                error = %e,
+                                "RESTAURANT ROSTER REVOKE-DELETE FAILED -- a revoked member stays LISTED until a RestaurantRoster checkpoint-reset replay"
+                            );
+                            return Err(FoldFault::Database(e));
+                        }
+                    }
+                    None => {}
                 }
             }
             Self::RestaurantInvitationList => {
@@ -998,6 +1021,14 @@ impl ProjectionWorker {
             // fixed here — architect-owned issue).
             if group.checkpoint == "Rider" {
                 telemetry::meters::rider_restriction::lag(pending.len() as i64);
+            }
+            // Round 3 (obs, #639 part C step 6-iv): the SAME shape for the two projector groups
+            // this slice's round 2 added — their replay lag had zero emit sites until now.
+            if group.checkpoint == "RestaurantRoster" {
+                telemetry::meters::restaurant_invitation::roster_lag(pending.len() as i64);
+            }
+            if group.checkpoint == "RestaurantInvitationList" {
+                telemetry::meters::restaurant_invitation::invitation_list_lag(pending.len() as i64);
             }
             if pending.is_empty() {
                 return Ok(());

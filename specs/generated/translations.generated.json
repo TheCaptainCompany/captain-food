@@ -392,8 +392,8 @@
     "fr": "Tableau des livraisons"
   },
   "back.invitation.access_pending": {
-    "en": "Your invitation is confirmed and your access is being set up. Please try this link again in a moment.",
-    "fr": "Votre invitation est confirmée et votre accès est en cours de mise en place. Merci de réessayer ce lien dans un instant."
+    "en": "Your invitation is confirmed and your access is being set up. Once it is ready, sign in below.",
+    "fr": "Votre invitation est confirmée et votre accès est en cours de mise en place. Une fois prêt, connectez-vous ci-dessous."
   },
   "back.invitation.back_to_sign_in": {
     "en": "Go to sign-in",
@@ -745,7 +745,7 @@
   },
   "back.team.authority.manager": {
     "en": "Manager",
-    "fr": "Gérant"
+    "fr": "Responsable"
   },
   "back.team.authority.operator": {
     "en": "Operator",

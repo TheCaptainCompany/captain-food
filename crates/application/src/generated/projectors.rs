@@ -325,6 +325,7 @@ pub fn project_restaurant_roster<C: RestaurantRosterCompute>(c: &C, state: Optio
             created_at: env.occurred_at,
             updated_at: env.occurred_at,
         }),
+        DomainEvent::RestaurantAccessRevoked(_) => None,
         _ => return state,
     };
     next.map(|mut row| {

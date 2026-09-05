@@ -7,9 +7,11 @@
 //! computed, cross-stream or accumulated column to own. It exists because the generated dispatch
 //! is generic over the trait (the `MemberCompute`/`SlugAliasCompute` precedent).
 //!
-//! `RestaurantAccessRevoked` touches NOTHING here (a NAMED gap, see the table's own `note:` in
-//! `specs/database/tables/projection_tables.yaml#/RestaurantRoster`): a revoked colleague stays
-//! listed until the revoke-removal follow-up lands.
+//! Round 3 (dba BLOCKING): `RestaurantAccessRevoked` DELETEs the row instead — handled OUTSIDE
+//! this mechanical dispatch (`crates/infrastructure/src/projection/worker.rs`'s `RestaurantRoster`
+//! arm, the `ScopeMembership` targeted-revoke precedent), because `RestaurantRosterCompute`'s
+//! generated dispatch only ever returns a row to upsert and has no DELETE shape to hand a
+//! `Compute` trait a hook into.
 
 use crate::projections::RestaurantRosterCompute;
 

@@ -680,7 +680,7 @@ screens:
     actions_used: [invite_restaurant_member, revoke_restaurant_invitation, open_bottom_sheet]
     gaps:
       - "The per-row Revoke control on the invitation list dispatches `revokeRestaurantInvitation` DIRECTLY off the row, with no confirmation step — `open_bottom_sheet` only toggles a sheet's `hidden` flag and carries no per-row context into it (the SAME #870-class limitation `member_sign_in_confirmation_sheet`'s own `gaps:` line already documents: a `text`/action-variable binding resolves from the SCREEN's own resolver data, never from a DIFFERENT item's row context passed at open time). A confirmation sheet is the card's suggested shape; it cannot correctly bind `invitationId` today without a renderer change this round did not build."
-      - "No display name/email column on the roster (`RestaurantRoster`'s own `note:`, YAGNI): a row shows `memberId` and `authority` only, never a human name — a real gap for a MANAGER trying to recognise a colleague, named rather than painted with a fabricated column."
+      - "No display name/email column on the roster (`RestaurantRoster`'s own `note:`, YAGNI): a row shows `memberId` and `authority` only, never a human name — a real gap for a MANAGER trying to recognise a colleague, named rather than painted with a fabricated column. Round 3 (dba/young): this list is DISPLAY-ONLY — nothing derives authority from it; the `AuthorityGuard` resolves from the acting member's own `RestaurantMembership` stream fold, never this projection, and the table's own `RestaurantAccessRevoked` delete arm keeps it in step with the live roster."
     components:
       - { component: staff_topbar }
       - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.title' } }
@@ -723,18 +723,26 @@ screens:
           - { type: info_row, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.invitations.expires' }, value: "{{ item.expiresAt }}", visible_when: "item.status == 'PENDING'" }
           # No "Renvoyer" (resend) control: a re-mint is a new invitation, never an action on an
           # existing row (the card's own instruction) -- omitted rather than rendered dead.
-          # `visible_when` has no compound (`&&`) grammar (`crates/web/src/condition.rs`'s parser:
-          # one comparison, a quoted literal/null/integer right-hand side) -- gated on
-          # `viewerAuthority` alone; the SERVER already refuses `revokeRestaurantInvitation` on a
-          # non-PENDING invitation (`RestaurantInvitationAlreadyRevoked`/terminal-state checks), so
-          # a stale-status click is refused there, not a security gap, only a UX rough edge on a
-          # terminal row this round did not also hide.
-          - type: button
-            id: revoke_invitation_row_btn
-            label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.revoke.confirm' }
-            variant: destructive
-            visible_when: "roster.viewerAuthority == 'MANAGER'"
-            action: { type: revoke_restaurant_invitation, variables: { invitationId: "{{ item.invitationId }}" } }
+          # Round 3 (ux BLOCKING): `visible_when` has no compound (`&&`) grammar
+          # (`crates/web/src/condition.rs`'s parser: one comparison, a quoted literal/null/integer
+          # right-hand side) -- NESTING is the corpus's conjunction (`specs/screens/rider.yaml`
+          # `:~449,463`'s conditional_section-in-conditional_section), so "PENDING and MANAGER"
+          # nests a `conditional_section` around the `visible_when`-gated button instead of
+          # rendering it (and doing nothing) on every terminal row. Before this round the button
+          # rendered on ACCEPTED/ACCEPTED_PENDING_ACCESS/REVOKED/EXPIRED rows too -- the server
+          # already refused a non-PENDING `revokeRestaurantInvitation`
+          # (`RestaurantInvitationAlreadyRevoked`/terminal-state checks), so it was never a
+          # security gap, only a control that renders and does nothing (#888's class).
+          - type: conditional_section
+            id: revoke_invitation_row_gate
+            condition: "item.status == 'PENDING'"
+            if_true:
+              - type: button
+                id: revoke_invitation_row_btn
+                label: { $ref: 'restaurant_backoffice.translations.yaml#/back.team.revoke.confirm' }
+                variant: destructive
+                visible_when: "roster.viewerAuthority == 'MANAGER'"
+                action: { type: revoke_restaurant_invitation, variables: { invitationId: "{{ item.invitationId }}" } }
       - { component: staff_nav }
 
   # SCREEN — Restaurant profile: the editable LOCATION fields behind UpdateRestaurant.
@@ -968,6 +976,7 @@ screens:
       - "No consent PREVIEW (restaurant name / invited email / authority) before dispatching: `invitationPreview`, the query the card's R2-C section proposed for this, was not built this round (STOPped and reported: it needs a resolver combining live identity-provider verification with a read-model lookup, a shape with no precedent in this codebase's mechanical query-emission pipeline). The page dispatches straight from the URL's token, exactly like `sign_in_return` does for the sign-in door."
       - "No REFUSE control: there is nothing to decline before either command runs (no preview to refuse FROM), and once accepted the invitation is spent regardless — a `/sign-in` link is offered on every terminal state instead, the `sign_in_return`/`not_linked` precedent."
       - "Terminal states collapse to ONE generic refusal (\"this invitation link is no longer valid\") for every server-side non-acceptable cause (unknown invitationId, wrong verified email, already accepted BY SOMEONE ELSE, revoked, expired) — this is the SERVER's own no-enumeration property (`errors.yaml#/RestaurantInvitationNotAcceptable` is ONE typed refusal for all five), not a missing state machine: the client cannot route differently on a distinction the server itself never reveals. A SEPARATE state exists for leg 2 failing AFTER leg 1 succeeded (the invitation WAS validly accepted) — that state never says \"invalid\"."
+      - "Round 3 R3-2 (legal): this page carries NO Art. 13 notice and NO privacy link (the `sign_in` screen's own gaps at :~905/:~987 name the same absence for its door) — `RESTAURANT-INVITATION-PRECONDITIONS.yaml` names both as flip preconditions, not resolved here."
 
   # SCREEN — The not-yet-linked refusal (#639 part C step 6-ii, PROP-20260831-180622 §8.5): its
   # own screen, not a banner -- no nav, no tabs, no counts, no phone (no voice leg). Reached when

@@ -2329,6 +2329,14 @@ restaurant-invitation:
     # RUN_RESTAURANT_INVITATION enforces its refusal on a request, 0 the moment the composition
     # root boots with the key OFF, registered at BOTH composition roots (the #895 lesson).
     - { name: "restaurant_invitation_door_enforcing", type: gauge, attributes: [] }
+    # Round 3 (obs, the `rider_standing_lag_positions`/`scope_membership_lag_positions` shape): one
+    # gauge per NEW `ProjectorGroup` this slice adds — `RestaurantRoster` and
+    # `RestaurantInvitationList` are their OWN checkpoint groups (round 2), and until now their
+    # replay lag had ZERO emit sites, the exact defect class this contract file exists to catch.
+    # The pending page length at each scan — a lower bound while draining, 0 only on the first scan
+    # that finds nothing (`drain_group`'s own shape, shared verbatim).
+    - { name: "restaurant_roster_lag_positions", type: gauge, attributes: [] }
+    - { name: "restaurant_invitation_list_lag_positions", type: gauge, attributes: [] }
 
   status_rules:
     success:

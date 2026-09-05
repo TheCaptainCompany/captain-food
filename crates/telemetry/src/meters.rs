@@ -1324,6 +1324,32 @@ pub mod restaurant_invitation {
         revoked_counter().add(1, &[]);
     }
 
+    fn roster_lag_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::RESTAURANT_ROSTER_LAG_POSITIONS).build())
+    }
+
+    fn invitation_list_lag_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter().i64_gauge(metric::RESTAURANT_INVITATION_LIST_LAG_POSITIONS).build()
+        })
+    }
+
+    /// `restaurant_roster_lag_positions` — the `RestaurantRoster` projector group's pending page
+    /// length at each scan (the `rider_standing_lag_positions`/`scope_membership_lag_positions`
+    /// shape): a lower bound capped at `batch_size` while draining, re-recorded only when the log
+    /// moves, 0 only on the first scan that finds nothing.
+    pub fn roster_lag(positions: i64) {
+        roster_lag_gauge().record(positions, &[]);
+    }
+
+    /// `restaurant_invitation_list_lag_positions` — same shape, for the `RestaurantInvitationList`
+    /// projector group.
+    pub fn invitation_list_lag(positions: i64) {
+        invitation_list_lag_gauge().record(positions, &[]);
+    }
+
     // The gate-liveness gauge (the `member_sign_in::door_enforcing` inverted dead-man shape,
     // ADR-20260810-231300): `-1` = never declared, `0`/`1` re-asserted on every export cycle.
     static DOOR_ENFORCING: AtomicI64 = AtomicI64::new(-1);

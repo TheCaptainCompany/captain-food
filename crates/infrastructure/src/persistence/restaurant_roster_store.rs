@@ -74,6 +74,25 @@ pub async fn upsert(exec: impl sqlx::PgExecutor<'_>, row: &RestaurantRosterRow) 
         .map_err(db_err)
 }
 
+/// Round 3 (#639 part C step 6-iv, dba BLOCKING): the `RestaurantAccessRevoked` DELETE arm — the
+/// `scope_membership_store::revoke_member` shape. Deliberately a real DELETE, not a soft-status
+/// column: the table's own `rules:` name this ADDITIVE to the mechanical GRANT arm above (`fedBy`
+/// gains a second event), never a replacement of it, and the checkpoint-reset-never-TRUNCATE
+/// rebuild discipline is unaffected — a fresh replay applies the grant, then this delete, in the
+/// SAME global `position` order the live path already folds in.
+pub async fn delete(
+    exec: impl sqlx::PgExecutor<'_>,
+    id: MembershipId,
+) -> Result<u64, DomainError> {
+    let deleted = sqlx::query("DELETE FROM restaurantroster WHERE membership_id = $1")
+        .bind(id.0)
+        .execute(exec)
+        .await
+        .map_err(db_err)?
+        .rows_affected();
+    Ok(deleted)
+}
+
 /// One restaurant's team, `ORDER BY scope_id, member_id` (the `(scope_id, member_id)` index),
 /// paged. `limit`/`offset` are already clamped by the resolver.
 pub async fn by_scope(

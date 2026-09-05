@@ -588,10 +588,16 @@ MemberId:
 
     #639 part C step 6-iv, round 2: a `MemberId` can now be minted at INVITATION time, for a person
     who has typed no address of their own and may never acquire an `AuthSubject` at all (an
-    invitation that is revoked or left to expire). `GrantRestaurantAccessByInvitation` derives it
-    (UUIDv5 of the invitation's own id, never caller-supplied) so the identifier exists before the
-    bridge to an `AuthSubject` does; the bridge is completed only on acceptance, at which point this
-    same id is the one the accepting person's future grants and sign-ins resolve to.
+    invitation that is revoked or left to expire); the bridge to an `AuthSubject` is completed only
+    on acceptance, at which point this same id is the one the accepting person's future grants and
+    sign-ins resolve to.
+
+    Round 3 (evans): `MemberId` is minted by the INVITING caller at invitation time, never the
+    handler -- and at grant, `GrantRestaurantAccessByInvitation` resolves it as the `(MEMBER,
+    authSubject)` reservation HOLDER when the accepting person is already bound to one (a re-hire,
+    or a second restaurant), else reuses the invitation's own caller-minted id. `MembershipId` --
+    NOT `MemberId` -- is the value DERIVED on this path: UUIDv5 of the invitation's own id, never
+    caller-supplied, enforcing one membership per accepted invitation structurally.
 
 PrincipalKind:
   type: string
