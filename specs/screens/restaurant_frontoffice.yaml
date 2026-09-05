@@ -287,16 +287,34 @@ bottom_sheets:
         custom_label: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.custom' }
         action:
           type: tip_order
-          # `recipient: RIDER` is a fixed literal, not a binding — this widget is specifically the
-          # COURIER tip (id `courier_tip`, tip.title/tip.subtitle); `TipRecipient`'s other two
-          # values (RESTAURANT, CAPTAIN) have no control on this screen. `order.totalAmount.currency`
-          # (never a bare `order.currency`, which `Order` does not declare — found by
-          # `screen-sheet-binding-unknown`, #639 part C step 4-iii-A) is the SAME nested-Money path
-          # the refund amount picker uses elsewhere in this file.
+          # Round 2 items 6/13 (beck, reviewer, #639 part C step 4-iii-A) flagged `recipient:
+          # RIDER` as a fixed literal reversing ADR-20260722-181500 ("RIDER, or RESTAURANT for
+          # self-dispatch") and asked for a revert to the previous binding
+          # (`recipient: "{{ order.tipRecipient }}"`) EXACTLY. Verified NOT safely revertable
+          # within this round: `Order` declares no `tipRecipient` field (dead before this PR too —
+          # unreached by any check because `bottom_sheets:` were unwalked until THIS round's own
+          # `screen-sheet-binding-unknown` rule), so reverting literally trips that same rule on
+          # the real corpus (`screen_sheet_bindings_are_checked_and_the_corpus_is_clean` red,
+          # confirmed by running it) — a genuine `[error]`, not a false positive, and gates cannot
+          # be weakened to accept it. No field anywhere reachable from `order` (root type `Order`,
+          # `order.byId`) carries a self-dispatch/dispatch-mode signal to bind instead (the
+          # dispatch-strategy proposal's own §3.3 says the recipient hint was meant to come from
+          # "the existing dispatch/delivery read model", which was never actually wired onto
+          # `Order`). Left AS LANDED (RIDER, the correct value for the common Captain-dispatch
+          # case) rather than choosing unilaterally between "ship a known-broken binding" and
+          # "extend `Order`'s schema" (specs/** edits stay scoped to what a dispatch names, and
+          # this file is the only one this card names) — flagged in the hand-back for the
+          # coordinator's own decision, per item 13's own words. `order.totalAmount.currency`
+          # (never a bare `order.currency`, which `Order` does not declare either) stays fixed —
+          # a separate, in-scope repair needed to keep `screen-sheet-binding-unknown` clean.
           variables: { orderId: "{{ sheet.data.orderId }}", restaurantId: "{{ order.restaurantId }}", tips: [{ recipient: RIDER, amount: { amountCents: "{{ courier_tip.value }}", currency: "{{ order.totalAmount.currency }}" } }] }
           on_success:
             - { type: show_toast, variant: success, message: { $ref: 'restaurant_frontoffice.translations.yaml#/tip.thanks' } }
-      - { type: text_area, id: delivery_reason, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.reason_ph' }, max_length: 300, visible_when: "delivery_timeliness.value == 'TOO_LATE'" }
+      # #639 part C step 4-iii-A round 2 addendum item 12 (`screen-condition-on-form-field`): was
+      # gated on `delivery_timeliness.value == 'TOO_LATE'` — `delivery_timeliness` is this SAME
+      # sheet's chip, a form field, never resolver data, so the reason field could never render for
+      # ANY timeliness verdict. Rendered unconditionally instead.
+      - { type: text_area, id: delivery_reason, placeholder: { $ref: 'restaurant_frontoffice.translations.yaml#/rating.delivery.reason_ph' }, max_length: 300 }
       - type: button
         label: { $ref: 'translations.yaml#/common.action.submit' }
         variant: primary
@@ -558,6 +576,7 @@ screens:
     actions_used: [rate_order, record_delivery_satisfaction, tip_order, reorder]
     gaps:
       - "`reorder` action has no backing op — the client re-adds past lines via add_to_cart."
+      - "`courier_tip`/`tip_order` (rating_sheet) hardcodes `recipient: RIDER`, which ADR-20260722-181500 wants dynamic (RESTAURANT on self-dispatch); `Order` carries no self-dispatch signal to bind instead, and `tip_order()` (crates/web/src/tracking.rs) has no production caller today (this sdui:false page never wires it), so the concern is real but not yet live. #639 part C step 4-iii-A round 2 items 6/13; unresolved pending a coordinator decision on the read-model wiring."
       - "Order status timeline: Order carries no event-history field (only status + statusChangedAt), so the timeline widget bound a field that does not exist; removed (#717). tracking.rs keeps an empty order_timeline slot. Needs a read-model decision (per-order status history)."
       - "Customer → restaurant contact: the api Restaurant type exposes no phone (the projection intent exists — DECISIONS STO-8 — but no api field), so the contact row bound dead fields and tracking.rs never rendered it; removed (#717). The concept: a customer mid-delivery needs to reach the restaurant."
       - "Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code."

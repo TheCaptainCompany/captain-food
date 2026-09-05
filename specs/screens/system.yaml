@@ -72,11 +72,16 @@ bottom_sheets:
     type: bottom_sheet
     title: "{{ rider.displayName }}"
     sections:
+      # Round 2 addendum item 14 (ux): `roster.restrict.holds_job` said "récupérée" (collected)
+      # even while the header ALSO shows for an ASSIGNED job (not yet collected) — stage-honest
+      # now: `rider.heldDelivery.status` is RESOLVER data (`rider.byId`'s own field), so a
+      # `visible_when` here is real, unlike the form-field class item 12 fixed.
       - type: conditional_section
         id: restrict_holds_job
         condition: "rider.heldDelivery != null"
         if_true:
-          - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.holds_job' } }
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.holds_job_assigned' }, visible_when: "rider.heldDelivery.status == 'ASSIGNED'" }
+          - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.holds_job' }, visible_when: "rider.heldDelivery.status in ['PICKED_UP', 'OUT_FOR_DELIVERY']" }
       - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.consequence' } }
       # The closed four (#639 part C step 4-i, ADR-20260904-014136) — NO catch-all chip, NO
       # preselection, NO free text, NO `disabled_when` (ADR §6): an empty ground is the
@@ -90,13 +95,18 @@ bottom_sheets:
           - { value: ELIGIBILITY_DOCUMENT_LAPSED,  label: { $ref: 'system.translations.yaml#/roster.ground.eligibility_document_lapsed' } }
           - { value: IDENTITY_MISMATCH,            label: { $ref: 'system.translations.yaml#/roster.ground.identity_mismatch' } }
           - { value: ACCOUNT_COMPROMISE,           label: { $ref: 'system.translations.yaml#/roster.ground.account_compromise' } }
+      # ADDENDUM item 12 (reviewer, #870 round-2's recurring class, journal W36 ~443-451): this
+      # sentence used to be gated on `ground.value == 'RIDER_REQUESTED'` — `ground` is the CHIP's
+      # OWN id, a FORM FIELD, never resolver data, so `RenderContext::lookup` can never serve it and
+      # `interact.rs` never re-evaluates `condition:`/`visible_when:` after a chip pick: the section
+      # resolved to NEITHER branch on every paint, so the sentence could never render, for ANY
+      # ground, ever. Rendered UNCONDITIONALLY under the chips instead — it costs nothing to show
+      # for the other three grounds (one extra line an admin reads and ignores) and it is the only
+      # shape that can actually reach the DOM. The executable rule that makes this whole CLASS
+      # unspellable going forward is `screen-condition-on-form-field` (validate/screen_bindings.rs).
+      - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.rider_requested_procedure' } }
       - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.effective_now' } }
       - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.notice' } }
-      - type: conditional_section
-        id: restrict_rider_requested_procedure
-        condition: "ground.value == 'RIDER_REQUESTED'"
-        if_true:
-          - { type: text, value: { $ref: 'system.translations.yaml#/roster.restrict.rider_requested_procedure' } }
       - type: button
         id: restrict_rider_confirm_btn
         label: { $ref: 'system.translations.yaml#/roster.restrict.confirm' }
@@ -221,6 +231,7 @@ screens:
     gaps:
       - "The System host is not routed today and no admin door exists — see the `riders` screen's own gap note (ADR-20260904-152807 §9); this screen is DARK for the same reason."
       - "The one-tick window after `$reload` in which the detail may still render \"Restreindre l'acces\" (the two projector checkpoints, `RiderRoster` and the write side, catch up independently) is accepted, not hidden: a second submit in that window is answered by the mutation's own `RiderAlreadyRestricted`, surfaced in `inline_error`, never a second event."
+      - "`restrict_rider_sheet`'s `RIDER_REQUESTED` sentence (\"Conservez le message du rider (procédure).\") points at docs/legal/rider-requested-restriction-procedure.md — the filing procedure for what counts as the rider's message, where it lives, retention and open counsel questions (ADR-20260904-152807 §6)."
     components:
       - { type: page_header, title: { $ref: 'system.translations.yaml#/roster.detail.title' }, subtitle: "{{ rider.displayName }}" }
       # (1) The held job — stage + foodLocation badges + pickup address, only when held.
@@ -235,18 +246,33 @@ screens:
           - { type: badge, text: { $ref: 'system.translations.yaml#/roster.food_location.returned_to_restaurant' }, variant: warning, visible_when: "rider.heldDelivery.foodLocation == 'RETURNED_TO_RESTAURANT'" }
           - { type: badge, text: { $ref: 'system.translations.yaml#/roster.food_location.not_collected' },          variant: warning, visible_when: "rider.heldDelivery.foodLocation == 'NOT_COLLECTED'" }
           - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.pickup_label' }, value: "{{ rider.heldDelivery.pickupAddress | format_address }}" }
-      # (2) Access — standing + ground rows + effective-since.
+      # (2) Access — standing + ground rows + effective-since. Round 2 item 4 (legal): a rider's
+      # `ground`/`effectiveAt` never clear on reinstatement (M1: the tuple STAYS set) so gating the
+      # ground/effective-since rows on the fields' own presence read a RESTORED rider's past ground
+      # in the PRESENT TENSE — the legal act reads as still-in-effect after it no longer is. Both
+      # rows now nest inside a `standing == 'RESTRICTED'` gate (no `&&` in the grammar, ADR §7); a
+      # reinstated (ACTIVE) rider instead gets a distinct "Rétabli le" row from `reinstatedAt`
+      # (already selected by the resolver, rendered nowhere until now).
       - type: section
         id: detail_access
         title: { $ref: 'system.translations.yaml#/roster.access_label' }
         content:
           - { type: badge, text: { $ref: 'system.translations.yaml#/roster.standing.restricted' }, variant: warning, visible_when: "rider.standing == 'RESTRICTED'" }
           - { type: badge, text: { $ref: 'system.translations.yaml#/roster.standing.active' },     variant: outline, visible_when: "rider.standing == 'ACTIVE'" }
-          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.rider_requested' },             visible_when: "rider.ground == 'RIDER_REQUESTED'" }
-          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.eligibility_document_lapsed' }, visible_when: "rider.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'" }
-          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.identity_mismatch' },           visible_when: "rider.ground == 'IDENTITY_MISMATCH'" }
-          - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.account_compromise' },          visible_when: "rider.ground == 'ACCOUNT_COMPROMISE'" }
-          - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.effective_since' }, value: "{{ rider.effectiveAt | format_datetime }}", visible_when: "rider.effectiveAt != null" }
+          - type: conditional_section
+            id: detail_access_restricted_facts
+            visible_when: "rider.standing == 'RESTRICTED'"
+            content:
+              - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.rider_requested' },             visible_when: "rider.ground == 'RIDER_REQUESTED'" }
+              - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.eligibility_document_lapsed' }, visible_when: "rider.ground == 'ELIGIBILITY_DOCUMENT_LAPSED'" }
+              - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.identity_mismatch' },           visible_when: "rider.ground == 'IDENTITY_MISMATCH'" }
+              - { type: text, value: { $ref: 'system.translations.yaml#/roster.ground.account_compromise' },          visible_when: "rider.ground == 'ACCOUNT_COMPROMISE'" }
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.effective_since' }, value: "{{ rider.effectiveAt | format_datetime }}", visible_when: "rider.effectiveAt != null" }
+          - type: conditional_section
+            id: detail_access_reinstated
+            visible_when: "rider.standing == 'ACTIVE'"
+            content:
+              - { type: info_row, label: { $ref: 'system.translations.yaml#/roster.detail.reinstated_at_label' }, value: "{{ rider.reinstatedAt | format_datetime }}", visible_when: "rider.reinstatedAt != null" }
       # (3) Phone — a `phone_call` action (SUPPORT-CONTACT decided the RIDER's route to support;
       #     the register is silent on ops calling a rider — ux/business call it legitimate, legal
       #     notes purpose limitation; ADR §5).
@@ -282,6 +308,10 @@ screens:
             if_true:
               - { type: button, id: rider_restrict_open_btn, label: { $ref: 'system.translations.yaml#/roster.restrict.open' }, variant: primary, full_width: true, action: { type: open_bottom_sheet, sheet_id: restrict_rider_sheet } }
       - { type: button, id: rider_reinstate_btn, label: { $ref: 'system.translations.yaml#/roster.reinstate.action' }, variant: outline, full_width: true, visible_when: "rider.standing == 'RESTRICTED'", action: { type: reinstate_rider, variables: { riderId: "{{ rider.riderId }}" }, on_success: [{ type: navigate, route: "$reload" }] } }
+      # Round 2 item 5 (ux): `ReinstateRider` throws `RiderNotFound`/`RiderNotRestricted` (the
+      # same one-tick-window race §223's `gaps:` note already accepts for `restrict_rider`) — the
+      # control had no rejection surface at all.
+      - { type: inline_error, id: reinstate_rider_error, for_action: reinstate_rider }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PERFORMANCE & ACCESSIBILITY (contracts — ops surface, same floor as customer)

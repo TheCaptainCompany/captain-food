@@ -2,8 +2,10 @@
 
 **Date-stamped 2026-09-04** · Authority: [ADR-20260904-152807](../adr/ADR-20260904-152807-the-admin-s-hands-one-custody-truth-read-at-query-time-a-door-that-refuses-until-the-notice-exists-and-two-slices.md)
 §6, realizing [ADR-20260904-014136](../adr/ADR-20260904-014136-rider-restriction-ships-now-with-the-smallest-closed-set-of-grounds-and-counsel-can-only-add.md).
-Linked from `specs/screens/system.yaml`'s `restrict_rider_sheet` `gaps:` (the sheet's one sentence
-under this ground: *"Conservez le message du rider (procédure)."*).
+Linked from `specs/screens/system.yaml`'s `rider_detail` screen's own `gaps:` (`bottom_sheets:`
+entries carry no `gaps:` field — only screens do) — the sentence itself lives on
+`restrict_rider_sheet`, rendered unconditionally under the ground chips (round 2 addendum item 12):
+*"Conservez le message du rider (procédure)."*
 
 **No lens output on this page is legal advice or clearance** — it maps a procedure this product needs
 so an admin knows what to do today; retention and evidentiary sufficiency are open counsel questions
@@ -16,8 +18,8 @@ access (`scalars.yaml#/RiderRestrictionGround`). Unlike the other three (`ELIGIB
 `IDENTITY_MISMATCH`, `ACCOUNT_COMPROMISE`), which are the PLATFORM's own finding, this one exists
 because the RIDER asked to be restricted — a request the platform is honouring, not a fact the
 platform observed. The sheet carries no free text (ADR §6): the ground alone is what the Art. 11 log
-stores, so the message that actually justifies the restriction has to be filed SOMEWHERE ELSE, and
-this page is that somewhere.
+(Directive (EU) 2024/2831) stores, so the message that actually justifies the restriction has to be
+filed SOMEWHERE ELSE, and this page is that somewhere.
 
 ## What counts as "the rider's message"
 

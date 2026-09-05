@@ -321,8 +321,9 @@ impl QueryRoot {
         let rows = roster.all().await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
         let all_ids: Vec<domain::generated::scalars::RiderId> = rows.iter().map(|r| r.rider_id).collect();
         let held_rows = deliveries.held_by_riders(&all_ids).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        let held_by: std::collections::HashMap<domain::generated::scalars::RiderId, application::queries::DeliveryJobRow> =
-            held_rows.into_iter().filter_map(|j| j.rider_id.map(|r| (r, j))).collect();
+        // Round 2 item 3 (dba): FIRST-WINS over `held_by_riders`'s now-deterministic `requested_at DESC, delivery_job_id DESC` order -- a plain `.collect()` here was LAST-wins, silently keeping the OLDEST held job per rider while `held_by_rider` (the detail's own `LIMIT 1`) picks the NEWEST: the list and the detail could name two different held jobs for the SAME rider.
+        let mut held_by: std::collections::HashMap<domain::generated::scalars::RiderId, application::queries::DeliveryJobRow> = std::collections::HashMap::new();
+        for j in held_rows { if let Some(r) = j.rider_id { held_by.entry(r).or_insert(j); } }
         let mut held_group = Vec::new();
         let mut restricted_group = Vec::new();
         let mut active_group = Vec::new();

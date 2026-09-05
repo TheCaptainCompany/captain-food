@@ -12845,6 +12845,7 @@ _Surface_ **`restaurant_frontoffice.yaml`**
 
 **Gaps**
 - ⚠️ `reorder` action has no backing op — the client re-adds past lines via add_to_cart.
+- ⚠️ `courier_tip`/`tip_order` (rating_sheet) hardcodes `recipient: RIDER`, which ADR-20260722-181500 wants dynamic (RESTAURANT on self-dispatch); `Order` carries no self-dispatch signal to bind instead, and `tip_order()` (crates/web/src/tracking.rs) has no production caller today (this sdui:false page never wires it), so the concern is real but not yet live. #639 part C step 4-iii-A round 2 items 6/13; unresolved pending a coordinator decision on the read-model wiring.
 - ⚠️ Order status timeline: Order carries no event-history field (only status + statusChangedAt), so the timeline widget bound a field that does not exist; removed (#717). tracking.rs keeps an empty order_timeline slot. Needs a read-model decision (per-order status history).
 - ⚠️ Customer → restaurant contact: the api Restaurant type exposes no phone (the projection intent exists — DECISIONS STO-8 — but no api field), so the contact row bound dead fields and tracking.rs never rendered it; removed (#717). The concept: a customer mid-delivery needs to reach the restaurant.
 - ⚠️ Unknown-status client fallback (#167 / PR #586 graphql F3): a STALE WASM bundle served beside a newer server can receive an OrderStatus this build's status_config does not know (e.g. CANCELLED_BY_TIMEOUT before the client deploy lands). The build renders SILENCE with the raw token stamped (tracking.rs — never the not-found hero over a paid order, pinned by test), but the honest content is a neutral 'your order is being updated' line; that copy is customer-facing and founder-approved verbatim, so it is recorded here rather than invented in code.
@@ -13143,6 +13144,7 @@ _Surface_ **`system.yaml`**
 │ section — Availability                   │
 │ conditional_section                      │
 │ button — Lift the restriction            │
+│ inline_error                             │
 └──────────────────────────────────────────┘
 ```
 
@@ -13155,6 +13157,7 @@ _Surface_ **`system.yaml`**
 **Gaps**
 - ⚠️ The System host is not routed today and no admin door exists — see the `riders` screen's own gap note (ADR-20260904-152807 §9); this screen is DARK for the same reason.
 - ⚠️ The one-tick window after `$reload` in which the detail may still render "Restreindre l'acces" (the two projector checkpoints, `RiderRoster` and the write side, catch up independently) is accepted, not hidden: a second submit in that window is answered by the mutation's own `RiderAlreadyRestricted`, surfaced in `inline_error`, never a second event.
+- ⚠️ `restrict_rider_sheet`'s `RIDER_REQUESTED` sentence ("Conservez le message du rider (procédure).") points at docs/legal/rider-requested-restriction-procedure.md — the filing procedure for what counts as the rider's message, where it lives, retention and open counsel questions (ADR-20260904-152807 §6).
 
 <a id="sec-translations"></a>
 ## 🌐 Translations
@@ -13613,9 +13616,11 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-roster-ground-identity_mismatch"></a>`roster.ground.identity_mismatch` | — | Identity mismatch | Identité non concordante |
 | <a id="translation-roster-ground-account_compromise"></a>`roster.ground.account_compromise` | — | Account compromise | Compte compromis |
 | <a id="translation-roster-effective_since"></a>`roster.effective_since` | — | Effective since | Effectif depuis |
+| <a id="translation-roster-detail-reinstated_at_label"></a>`roster.detail.reinstated_at_label` | — | Reinstated on | Rétabli le |
 | <a id="translation-roster-phone_label"></a>`roster.phone_label` | — | Phone | Téléphone |
 | <a id="translation-roster-restrict-open"></a>`roster.restrict.open` | — | Restrict access | Restreindre l'accès |
 | <a id="translation-roster-reinstate-action"></a>`roster.reinstate.action` | — | Lift the restriction | Lever la restriction |
+| <a id="translation-roster-restrict-holds_job_assigned"></a>`roster.restrict.holds_job_assigned` | — | Holds an order — not yet collected. The restriction does not take it away. | Tient une commande — pas encore récupérée. La restriction ne la lui retire pas. |
 | <a id="translation-roster-restrict-holds_job"></a>`roster.restrict.holds_job` | — | Holds an order — collected. The restriction does not take it away. | Tient une commande — récupérée. La restriction ne la lui retire pas. |
 | <a id="translation-roster-restrict-consequence"></a>`roster.restrict.consequence` | — | Will no longer receive runs; keeps access to finish or return the run in progress. | Ne recevra plus de courses ; garde l'accès pour terminer ou rendre la course en cours. |
 | <a id="translation-roster-restrict-ground_label"></a>`roster.restrict.ground_label` | — | Ground | Motif |

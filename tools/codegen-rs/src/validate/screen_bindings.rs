@@ -278,6 +278,126 @@ pub(crate) fn collect_template_bindings(node: &Value, loc: &str, mustache: &rege
     }
 }
 
+// ─── ADDENDUM item 12 (#639 part C step 4-iii-A round 2, reviewer) — screen-condition-on-form-field ──
+//
+// The recurring class (#870 round-2, journal W36 ~443-451; the RIDER_REQUESTED sentence): a
+// `condition:`/`visible_when:` whose dotted-path subject reads a FORM FIELD — a chip pick, a typed
+// value the user has JUST set — instead of resolver data. `RenderContext::lookup` serves resolver
+// data only (screen_binding_roots above is that same boundary), and `interact.rs` evaluates every
+// `condition:`/`visible_when:` exactly ONCE, at SSR/paint time, before the user has touched the
+// field: a chip pick stashes its value in a hidden input for the NEXT mutation dispatch
+// (`interact.rs`'s delegated click listener), it never triggers a re-paint. So a node gated on its
+// OWN sheet's/screen's form field can only ever see that field's initial (normally empty/null)
+// state — the node can never actually appear, silently, exactly like the RIDER_REQUESTED sentence
+// before this round.
+
+/// Component `type`s whose rendered content IS the user's own input (a chip's `.value`, a typed
+/// field's `.value`) — never resolver data. Mirrors `component_registry`'s `inputs`/`checkout`
+/// groups, narrowed to the members that carry a settable VALUE (excludes pure display/action
+/// controls: `button`, `icon_button`, `logo`, `location_pill`, `inline_error`, `countdown`, …).
+pub(crate) const FORM_FIELD_KINDS: &[&str] = &[
+    "chip_multi_select",
+    "text_input",
+    "text_area",
+    "otp_input",
+    "phone_field",
+    "phone_input",
+    "email_input",
+    "star_rating",
+    "tip_amount_selector",
+    "search_input",
+];
+
+/// Every FORM_FIELD_KINDS component's own `id:` declared anywhere in `node`'s subtree.
+fn collect_form_field_ids(node: &Value, out: &mut std::collections::BTreeSet<String>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_form_field_ids(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            if let (Some(ty), Some(id)) = (
+                map.get(Value::String("type".to_string())).and_then(|v| v.as_str()),
+                map.get(Value::String("id".to_string())).and_then(|v| v.as_str()),
+            ) {
+                if FORM_FIELD_KINDS.contains(&ty) {
+                    out.insert(id.to_string());
+                }
+            }
+            for (_, v) in map {
+                collect_form_field_ids(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The leading `[A-Za-z_][A-Za-z0-9_]*` identifier of a `condition:`/`visible_when:` expression —
+/// its dotted-path SUBJECT's root (`ground.value == 'X'` -> `ground`; `!resend_available` ->
+/// `resend_available`; `order.status in [...] and ...` -> `order`). Anything not starting with an
+/// identifier (a literal, a parenthesis) has no root and is left alone — the same honest-boundary
+/// posture `screen_binding_roots` states for the sibling rule.
+fn condition_subject_root(expr: &str) -> Option<String> {
+    let trimmed = expr.trim().trim_start_matches('!').trim_start();
+    let re = regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*").unwrap();
+    re.find(trimmed).map(|m| m.as_str().to_string())
+}
+
+/// Every `condition:`/`visible_when:` string prop in `node`'s subtree, with a location string.
+fn collect_conditions(node: &Value, loc: &str, out: &mut Vec<(String, &'static str, String)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for (i, n) in seq.iter().enumerate() {
+                collect_conditions(n, &format!("{loc}[{i}]"), out);
+            }
+        }
+        Value::Mapping(map) => {
+            for (k, v) in map {
+                let key = k.as_str().unwrap_or("?");
+                if let Some(expr) = v.as_str() {
+                    if key == "condition" || key == "visible_when" {
+                        let prop = if key == "condition" { "condition" } else { "visible_when" };
+                        out.push((loc.to_string(), prop, expr.to_string()));
+                        continue;
+                    }
+                }
+                collect_conditions(v, &format!("{loc}.{key}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The wired rule: `unit_kind`/`unit_id` names the closed subtree to check (a `screens` entry's
+/// OWN component tree, or ONE `bottom_sheets` entry's OWN tree — never merged across the two,
+/// mirroring exactly where the bug lives: a chip and the condition reading it are ALWAYS siblings
+/// inside the SAME sheet or the SAME screen body).
+pub(crate) fn check_condition_on_form_field(issues: &mut Vec<Issue>, sfkey: &str, unit_kind: &str, unit_id: &str, node: &Value) {
+    let mut form_ids = std::collections::BTreeSet::new();
+    collect_form_field_ids(node, &mut form_ids);
+    if form_ids.is_empty() {
+        return;
+    }
+    let mut conditions = Vec::new();
+    collect_conditions(node, "", &mut conditions);
+    for (loc, prop, expr) in conditions {
+        let Some(root) = condition_subject_root(&expr) else { continue };
+        if form_ids.contains(&root) {
+            issues.push(err(
+                "screen-condition-on-form-field",
+                format!("{sfkey}/{unit_kind}/{unit_id}{loc}"),
+                format!(
+                    "{prop} '{expr}' reads '{root}', a form field in this {unit_kind} (a chip pick / typed value) — \
+                     never resolver data. `RenderContext::lookup` serves resolver data only, and the client never \
+                     re-evaluates `condition:`/`visible_when:` after the field changes: this can only ever see the \
+                     field's INITIAL state, so the node can never actually appear (#870-class)."
+                ),
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

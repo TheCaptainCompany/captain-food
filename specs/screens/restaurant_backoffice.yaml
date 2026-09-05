@@ -133,7 +133,11 @@ bottom_sheets:
           - { value: DELIVERED_BY_RESTAURANT, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.delivered_by_restaurant' } }
           - { value: CANCELLED,               label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.cancelled' } }
           - { value: OTHER,                   label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.resolution.other' } }
-      - { type: text_area, id: issue_resolution_note, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.note_prompt' }, max_length: 300, visible_when: "issue_resolution.value == 'OTHER'" }
+      # #639 part C step 4-iii-A round 2 addendum item 12 (`screen-condition-on-form-field`): was
+      # gated on `issue_resolution.value == 'OTHER'` — `issue_resolution` is this SAME sheet's chip,
+      # a form field, never resolver data, so the note could never render regardless of which chip
+      # was picked. Rendered unconditionally instead.
+      - { type: text_area, id: issue_resolution_note, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.note_prompt' }, max_length: 300 }
       - type: button
         id: resolve_issue_btn
         label: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.issue.confirm' }
@@ -525,11 +529,18 @@ screens:
       # Amount picker — for PARTIAL_REFUND (and GOODWILL_CREDIT). Its OWN action confirms the partial
       # refund with a nested Money `refundAmount` (amountCents from the picker, currency EUR), so the
       # partial-refund path is fully wired without conditional variables on the main button.
+      # #639 part C step 4-iii-A round 2 addendum item 12 (`screen-condition-on-form-field`): was
+      # gated on `resolution.value in [...]` — `resolution` is this SAME screen's chip, a form
+      # field, never resolver data, so this picker (a MONEY-PATH control: the partial-refund amount)
+      # could never render, for ANY resolution, ever — a real, pre-existing, previously invisible
+      # defect this round's rule surfaced. Rendered unconditionally instead: it costs one always-
+      # visible optional amount picker beside FULL_REFUND/REPLACEMENT, and it is the ONLY shape that
+      # can reach the DOM; staff who never touch it change nothing (`resolve_btn`'s own action is
+      # unaffected — the two buttons dispatch INDEPENDENTLY).
       - type: tip_amount_selector
         id: refund_amount
         title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.title' }
         subtitle: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.subtitle' }
-        visible_when: "resolution.value in ['PARTIAL_REFUND','GOODWILL_CREDIT']"
         presets_cents: [200, 450, 500, 1000]
         custom_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.amount.custom' }
         action:

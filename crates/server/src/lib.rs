@@ -1053,6 +1053,14 @@ pub async fn router() -> Router {
                         "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
                         config.route_replacement_birth_through_lane,
                     );
+                    // Round 2 item 7 (farley, vernon): the door key's OWN fleet-parity evidence —
+                    // missing at BOTH composition roots before this round (`standalone_deps` gets
+                    // the same call), so a rolling deploy in which half the fleet's `restrictRider`
+                    // dispatches refuse the typed error while the other half accepts was invisible.
+                    telemetry::meters::runtime::declare_flag(
+                        "RUN_RIDER_RESTRICTION_DOOR",
+                        config.run_rider_restriction_door,
+                    );
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a
                     // sweep timer so idle actors leave memory on schedule (not only when

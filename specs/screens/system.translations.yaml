@@ -78,6 +78,10 @@ roster.ground.eligibility_document_lapsed:  { messages: { en: "Eligibility docum
 roster.ground.identity_mismatch:            { messages: { en: "Identity mismatch", fr: "Identité non concordante" } }
 roster.ground.account_compromise:           { messages: { en: "Account compromise", fr: "Compte compromis" } }
 roster.effective_since:                     { messages: { en: "Effective since", fr: "Effectif depuis" } }
+# Round 2 item 4 (legal): a reinstated rider's past ground/effective-since are gated OFF
+# (`standing == 'RESTRICTED'` only); this is the ACTIVE-only counterpart naming the OTHER fact —
+# `reinstatedAt`, already selected by the resolver, rendered nowhere before this round.
+roster.detail.reinstated_at_label:          { messages: { en: "Reinstated on", fr: "Rétabli le" } }
 roster.phone_label:                         { messages: { en: "Phone", fr: "Téléphone" } }
 
 # The two controls.
@@ -85,6 +89,9 @@ roster.restrict.open:      { messages: { en: "Restrict access", fr: "Restreindre
 roster.reinstate.action:   { messages: { en: "Lift the restriction", fr: "Lever la restriction" } }
 
 # The sheet (`restrict_rider_sheet`).
+# Round 2 addendum item 14: stage-honest — ASSIGNED (not yet collected) gets its own sentence,
+# never "récupérée" (collected), which only PICKED_UP/OUT_FOR_DELIVERY have earned.
+roster.restrict.holds_job_assigned: { messages: { en: "Holds an order — not yet collected. The restriction does not take it away.", fr: "Tient une commande — pas encore récupérée. La restriction ne la lui retire pas." } }
 roster.restrict.holds_job:   { messages: { en: "Holds an order — collected. The restriction does not take it away.", fr: "Tient une commande — récupérée. La restriction ne la lui retire pas." } }
 roster.restrict.consequence: { messages: { en: "Will no longer receive runs; keeps access to finish or return the run in progress.", fr: "Ne recevra plus de courses ; garde l'accès pour terminer ou rendre la course en cours." } }
 roster.restrict.ground_label: { messages: { en: "Ground", fr: "Motif" } }

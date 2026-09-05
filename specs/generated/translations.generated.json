@@ -1711,6 +1711,10 @@
     "en": "Availability",
     "fr": "Disponibilité"
   },
+  "roster.detail.reinstated_at_label": {
+    "en": "Reinstated on",
+    "fr": "Rétabli le"
+  },
   "roster.detail.title": {
     "en": "Rider detail",
     "fr": "Détail du livreur"
@@ -1802,6 +1806,10 @@
   "roster.restrict.holds_job": {
     "en": "Holds an order — collected. The restriction does not take it away.",
     "fr": "Tient une commande — récupérée. La restriction ne la lui retire pas."
+  },
+  "roster.restrict.holds_job_assigned": {
+    "en": "Holds an order — not yet collected. The restriction does not take it away.",
+    "fr": "Tient une commande — pas encore récupérée. La restriction ne la lui retire pas."
   },
   "roster.restrict.notice": {
     "en": "The rider is told in the app the next time they open it.",

@@ -16480,6 +16480,131 @@ mod screen_sheet_bindings_gate {
     }
 }
 
+// ─── #639 part C step 4-iii-A round 2 addendum item 12 — screen-condition-on-form-field ─────────
+mod screen_condition_on_form_field_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn hits(m: &Model) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == "screen-condition-on-form-field")
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The named regression class (the RIDER_REQUESTED sentence, round 2 addendum item 12) is
+    /// fixed, and the SAME rule surfaced two more pre-existing instances (`resolution` in
+    /// `restaurant_backoffice.yaml`'s `claim_resolve` screen — a MONEY-PATH control, the
+    /// partial-refund amount picker; `issue_resolution` in that file's `issue_resolution_sheet`),
+    /// all rendered unconditionally in the same change. `screens/rider.yaml` is EXCLUDED from this
+    /// wired rule (`validate/core.rs`'s own comment): this round's dispatch forbids touching that
+    /// file, and it carries ONE pre-existing instance of the class (`issue_kind` in
+    /// `rider_report_sheet`) already documented, in a PRIOR round's own comment, as a
+    /// deliberately-deferred gap — flagged in the hand-back, not silently fixed nor silently left
+    /// to break this test.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let model = real_model();
+        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus (excluding the fenced screens/rider.yaml): {:?}", hits(&model));
+    }
+
+    /// Plant the named mutant class directly: a `condition:` on a bottom-sheet's OWN
+    /// `conditional_section`, reading its SIBLING chip's `.value` — the exact shape the
+    /// RIDER_REQUESTED sentence had before this round's fix.
+    #[test]
+    fn a_condition_reading_its_own_sheets_chip_is_caught() {
+        let mut model = real_model();
+        let sheet = model
+            .defs
+            .get_mut("screens/system.yaml")
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut("restrict_rider_sheet"))
+            .expect("restrict_rider_sheet exists");
+        let mut if_true_item = serde_yaml::Mapping::new();
+        if_true_item.insert(Value::from("type"), Value::from("text"));
+        if_true_item.insert(Value::from("value"), Value::from("mutant"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("conditional_section"));
+        node.insert(Value::from("id"), Value::from("planted_mutant"));
+        node.insert(Value::from("condition"), Value::from("ground.value == 'RIDER_REQUESTED'"));
+        node.insert(Value::from("if_true"), Value::Sequence(vec![Value::Mapping(if_true_item)]));
+        sheet
+            .get_mut("sections")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restrict_rider_sheet has sections")
+            .push(Value::Mapping(node));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "the planted mutant must fire exactly once: {:?}", found);
+        assert!(found[0].contains("'ground'"), "{:?}", found);
+        assert!(found[0].contains("restrict_rider_sheet"), "the location must name the sheet: {:?}", found);
+    }
+
+    /// The `visible_when:` spelling, on a SCREEN's own body this time (never a sheet) — proves
+    /// both syntaxes AND both unit kinds (`screens`/`sheets`) are independently checked.
+    #[test]
+    fn a_visible_when_reading_a_screen_bodys_own_chip_is_caught() {
+        let mut model = real_model();
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_backoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restaurant_backoffice.yaml declares screens");
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("claim_resolve"))
+            .expect("claim_resolve exists");
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from("mutant"));
+        node.insert(Value::from("visible_when"), Value::from("resolution.value == 'FULL_REFUND'"));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("claim_resolve has components")
+            .push(Value::Mapping(node));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "the planted mutant must fire exactly once: {:?}", found);
+        assert!(found[0].contains("'resolution'"), "{:?}", found);
+        assert!(found[0].contains("claim_resolve"), "the location must name the screen: {:?}", found);
+    }
+
+    /// A condition reading genuinely RESOLVER data (never a form field) must never fire — the real
+    /// corpus is FULL of these (`rider.standing == 'RESTRICTED'`, `order.status == 'DELIVERED'`,
+    /// …) and `the_real_corpus_is_clean` above is the corpus-wide proof; this is the narrow,
+    /// same-shape negative twin of the two positive tests above.
+    #[test]
+    fn a_condition_reading_resolver_data_is_not_reported() {
+        let mut model = real_model();
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_backoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restaurant_backoffice.yaml declares screens");
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("claim_resolve"))
+            .expect("claim_resolve exists");
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from("not a mutant"));
+        node.insert(Value::from("visible_when"), Value::from("reclamation.status == 'RESOLVED'"));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("claim_resolve has components")
+            .push(Value::Mapping(node));
+        assert!(hits(&model).is_empty(), "resolver-data conditions must never fire this rule: {:?}", hits(&model));
+    }
+}
+
 // ─── §26 — a screen's transport role (R1) vs the operations it binds (#639 part C 2c-ii) ────────
 mod screen_roles_gate {
     use super::super::*;

@@ -228,6 +228,14 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         "ROUTE_ORDER_BIRTH_THROUGH_LANE",
         deps.route_gates.order_placed_to_order,
     );
+    // Round 2 item 7 (farley, vernon): the FOURTH flag — the write door's own release gate,
+    // resolved above at this SAME composition root, so a fleet split (one process's env differing
+    // from the monolith's `Config`) is visible in `runtime_flag_state` exactly like the other
+    // three.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_RIDER_RESTRICTION_DOOR",
+        deps.run_rider_restriction_door,
+    );
     deps
 }
 

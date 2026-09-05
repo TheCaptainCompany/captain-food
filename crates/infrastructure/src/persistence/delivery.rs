@@ -112,10 +112,16 @@ impl DeliveryReadRepository for PgDeliveryRepository {
     /// one row, `rider_id = $1 AND status IN (ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY)`, never the
     /// `for_rider(..).find(..)` scan over the rider's whole history plus the unassigned PENDING
     /// pool `for_rider` exists to serve `myDeliveries`.
+    ///
+    /// Round 2 item 3 (dba): `requested_at` alone is not a total order (two jobs CAN share it), so
+    /// a `LIMIT 1` on `requested_at DESC` alone can pick a DIFFERENT row than `held_by_riders`
+    /// below picks for the SAME rider, on the SAME data — the list and the detail would then name
+    /// two different held jobs for one rider, breaking ADR-20260904-152807 §2's "one custody
+    /// truth". `delivery_job_id DESC` is the deterministic tie-break BOTH queries now share.
     async fn held_by_rider(&self, rider_id: RiderId) -> Result<Option<DeliveryJobRow>, DomainError> {
         let sql = format!(
             "SELECT {COLUMNS} FROM {VIEW} WHERE rider_id = $1 AND status IN ($2, $3, $4) \
-             ORDER BY requested_at DESC LIMIT 1"
+             ORDER BY requested_at DESC, delivery_job_id DESC LIMIT 1"
         );
         let row = sqlx::query(&sql)
             .bind(rider_id.0)
@@ -132,6 +138,10 @@ impl DeliveryReadRepository for PgDeliveryRepository {
     /// `rider_id = ANY($1) AND status IN (ASSIGNED, PICKED_UP, OUT_FOR_DELIVERY)`, ONE query for
     /// the whole candidate id list, never `held_by_rider` called once per rider (the admin roster's
     /// held-first order needs the held set for every rider before it can page).
+    ///
+    /// Round 2 item 3 (dba): SAME tie-break as `held_by_rider` above — `delivery_job_id DESC`
+    /// after `requested_at DESC` — so whichever row this caller's `HashMap`-by-rider build keeps
+    /// (first-wins over this now-deterministic order) is the SAME row the detail's `LIMIT 1` picks.
     async fn held_by_riders(&self, rider_ids: &[RiderId]) -> Result<Vec<DeliveryJobRow>, DomainError> {
         if rider_ids.is_empty() {
             return Ok(Vec::new());
@@ -139,7 +149,7 @@ impl DeliveryReadRepository for PgDeliveryRepository {
         let ids: Vec<uuid::Uuid> = rider_ids.iter().map(|r| r.0).collect();
         let sql = format!(
             "SELECT {COLUMNS} FROM {VIEW} WHERE rider_id = ANY($1) AND status IN ($2, $3, $4) \
-             ORDER BY requested_at DESC"
+             ORDER BY requested_at DESC, delivery_job_id DESC"
         );
         let rows = sqlx::query(&sql)
             .bind(&ids)

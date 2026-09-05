@@ -161,7 +161,17 @@ fn spawn_mailbox_workers_with_door(pool: &PgPool, bus: actor_client::OperationSt
 }
 
 /// The composition-root wiring (mirrors `graphql_write_path.rs::schema_over`).
-fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> server::graphql_schema::CaptainSchema {
+///
+/// `run_rider_restriction_door_read` (round 2, beck): the READ half of the SAME key, parameterised
+/// independently of the write door parameter `spawn_mailbox_workers_with_door` takes — the two
+/// composition roots resolve the same configuration value, but a test proving "the key never
+/// touches the read guard" (§7) must be able to run the read side with the key OFF too, otherwise
+/// the door-closed leg exercises a schema that never had a chance to consult it.
+fn schema_over(
+    pool: &PgPool,
+    status_bus: actor_client::OperationStatusBus,
+    run_rider_restriction_door_read: bool,
+) -> server::graphql_schema::CaptainSchema {
     let restaurants: Arc<dyn RestaurantReadRepository> = Arc::new(PgRestaurantRepository::new(pool.clone()));
     let prospection: Arc<dyn ProspectionReadRepository> = Arc::new(PgProspectionRepository::new(pool.clone()));
     let pricing_policy: Arc<dyn PricingPolicyReadRepository> = Arc::new(PgPricingPolicyRepository::new(pool.clone()));
@@ -230,9 +240,11 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             // this is the ONE walk that actually reads `myStanding.contestContact` back, so it is
             // the walk that must prove the configured value reaches the wire.
             support_contact: Some(EmailAddress("support@captain.food".to_string())),
-            // #639 part C step 4-iii-A: ON, matching the write door above -- this walk's
-            // `riders`/`rider` assertions exercise `restrictionDoorOpen: true`.
-            run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(true),
+            // #639 part C step 4-iii-A (round 2 item 1): parameterised on the caller, not
+            // hard-coded -- the main walk passes `true` (matching the write door above, so its
+            // `riders`/`rider` assertions exercise `restrictionDoorOpen: true`); the door-closed
+            // leg passes `false` so the read side genuinely has the key OFF too.
+            run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(run_rider_restriction_door_read),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,
@@ -314,7 +326,7 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
 
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone());
-    let schema = schema_over(&pool, status_bus);
+    let schema = schema_over(&pool, status_bus, true);
 
     // 1) A real restaurant, through the real router (the order/job's owner for the read joins).
     let restaurant_id = uuid::Uuid::new_v4();
@@ -632,7 +644,7 @@ async fn the_restrict_door_refuses_while_closed_and_the_read_guard_never_consult
 
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers_with_door(&pool, status_bus.clone(), false);
-    let schema = schema_over(&pool, status_bus);
+    let schema = schema_over(&pool, status_bus, false);
 
     // An ACTIVE rider, seeded directly (no public registration mutation, #639 part C step 2c-i).
     let rider_id = uuid::Uuid::new_v4();
@@ -697,4 +709,138 @@ async fn the_restrict_door_refuses_while_closed_and_the_read_guard_never_consult
     assert_eq!(resp.errors.len(), 1, "expected the synchronous FORBIDDEN even with the restrict door OFF: {:?}", resp.errors);
     let ext = resp.errors[0].extensions.as_ref().expect("extensions");
     assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("FORBIDDEN")), "wrong code: {resp:?}");
+}
+
+/// #639 part C step 4-iii-A round 2 item 3 (dba): TWO ASSIGNED jobs on the SAME rider proves the
+/// list (`riders`, a set-based `held_by_riders` folded FIRST-wins) and the detail (`rider`, a
+/// single `held_by_rider` `LIMIT 1`) name the SAME held job. Before this round's fix the two
+/// queries picked OPPOSITE ends of `requested_at DESC`: a plain `.collect()` on the list was
+/// LAST-wins (the OLDEST held job survives), while the detail's `LIMIT 1 ORDER BY requested_at
+/// DESC` picks the NEWEST — an admin could see one delivery on the triage row and a DIFFERENT one
+/// on the detail page for the identical rider (ADR-20260904-152807 §2, "one custody truth").
+#[tokio::test]
+async fn the_list_and_the_detail_name_the_same_held_job() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("rider_standing_walk_same_held_job") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers(&pool, status_bus.clone());
+    let schema = schema_over(&pool, status_bus, true);
+
+    // A restaurant, through the real router (the jobs' owner for the read joins).
+    let restaurant_id = uuid::Uuid::new_v4();
+    let mutation = format!(
+        r#"mutation {{
+            registerRestaurant(input: {{
+                restaurantId: "{restaurant_id}",
+                displayName: "Chez Deux Courses",
+                address: {{ line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }}
+            }}) {{ messageId operationStatus }}
+        }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(mutation).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "registerRestaurant errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let message_id = data["registerRestaurant"]["messageId"].as_str().unwrap().to_string();
+    let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
+    assert_eq!(op["status"], "SUCCEEDED", "registerRestaurant operation: {op:?}");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restaurant)");
+
+    // The rider's birth fact (no public `registerRider` mutation, #639 part C step 2c-i).
+    let rider_id = uuid::Uuid::new_v4();
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        1,
+        "RiderRegistered",
+        json!({
+            "riderId": rider_id, "authRef": "auth-two-jobs-1", "displayName": "Two Jobs Rider",
+            "phone": "+33611114444", "status": "AVAILABLE"
+        }),
+    )
+    .await;
+
+    // TWO orders + TWO delivery jobs, both ASSIGNED to the SAME rider, seeded a beat apart so
+    // `requested_at` genuinely differs -- the fix's correctness needs a total order, not an exact
+    // tie (a `requested_at` tie is the same failure but harder to force deterministically here).
+    let mut job_ids: Vec<uuid::Uuid> = Vec::new();
+    for i in 0..2u8 {
+        let order_id = uuid::Uuid::new_v4();
+        let job_id = uuid::Uuid::new_v4();
+        job_ids.push(job_id);
+        append_event(
+            &pool,
+            &format!("Order-{order_id}"),
+            1,
+            "OrderPlaced",
+            json!({
+                "orderId": order_id, "restaurantId": restaurant_id, "customerId": uuid::Uuid::new_v4(),
+                "customerContact": { "displayName": "Johnny", "phone": "+33612345678" },
+                "serviceType": "DELIVERY",
+                "deliveryAddress": { "line1": "9 Rue Colbert", "postalCode": "37000", "city": "Tours", "country": "FR" },
+                "items": [{ "offerId": uuid::Uuid::new_v4(), "productId": uuid::Uuid::new_v4(), "name": "Margherita", "offerName": "Default", "quantity": 1, "unitPrice": { "amountCents": 980, "currency": "EUR" }, "lineTotal": { "amountCents": 980, "currency": "EUR" } }],
+                "totalAmount": { "amountCents": 980, "currency": "EUR" },
+                "breakdown": {
+                    "articles": { "amountCents": 980, "currency": "EUR" },
+                    "delivery": { "amountCents": 0, "currency": "EUR" },
+                    "serviceFee": { "amountCents": 0, "currency": "EUR" },
+                    "total": { "amountCents": 980, "currency": "EUR" },
+                    "restaurantContribution": { "amountCents": 0, "currency": "EUR" },
+                    "restaurantPayout": { "amountCents": 980, "currency": "EUR" },
+                    "riderPayout": { "amountCents": 0, "currency": "EUR" },
+                    "captainNet": { "amountCents": 0, "currency": "EUR" }
+                },
+                "paymentIntentId": format!("pi_walk_two_jobs_{i}")
+            }),
+        )
+        .await;
+        append_event(
+            &pool,
+            &format!("DeliveryJob-{job_id}"),
+            1,
+            "DeliveryRequested",
+            json!({
+                "deliveryJobId": job_id, "orderId": order_id, "restaurantId": restaurant_id,
+                "pickup": { "line1": "1 Rue Nationale", "postalCode": "37000", "city": "Tours", "country": "FR" },
+                "dropoff": { "line1": "9 Rue Colbert", "postalCode": "37000", "city": "Tours", "country": "FR" }
+            }),
+        )
+        .await;
+        append_event(
+            &pool,
+            &format!("DeliveryJob-{job_id}"),
+            2,
+            "DeliveryAcceptedByRider",
+            json!({ "deliveryJobId": job_id, "orderId": order_id, "riderId": rider_id }),
+        )
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (two held jobs)");
+
+    let riders_query = "query { riders(input: { limit: 10, offset: 0 }) { riderId heldDelivery { id } } }";
+    let resp = schema.execute(async_graphql::Request::new(riders_query).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "riders errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let list_row = data["riders"]
+        .as_array()
+        .expect("riders array")
+        .iter()
+        .find(|r| r["riderId"] == rider_id.to_string())
+        .expect("the rider appears in the list");
+    let list_held = list_row["heldDelivery"]["id"].as_str().expect("the list names a held job").to_string();
+
+    let rider_query = format!(r#"query {{ rider(input: {{ riderId: "{rider_id}" }}) {{ heldDelivery {{ id }} }} }}"#);
+    let resp = schema.execute(async_graphql::Request::new(rider_query).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "rider errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let detail_held = data["rider"]["heldDelivery"]["id"].as_str().expect("the detail names a held job").to_string();
+
+    assert_eq!(
+        list_held, detail_held,
+        "the list and the detail must name the SAME held job for one rider (ADR-20260904-152807 §2, one custody truth); seeded jobs were {job_ids:?}"
+    );
 }

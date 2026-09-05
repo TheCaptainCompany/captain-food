@@ -2851,6 +2851,30 @@ mod tests {
         assert!(!html.contains("UNRECOGNISED"), "no catch-all chip: {html}");
     }
 
+    /// ADDENDUM item 12 (reviewer): the `RIDER_REQUESTED` procedure sentence used to be gated on
+    /// `ground.value == 'RIDER_REQUESTED'` — a FORM FIELD, never resolver data, so it could NEVER
+    /// render (the #870 round-2 defect class, recurring). It now renders UNCONDITIONALLY under
+    /// the chips, with no chip picked at all — proving it does not depend on any selection.
+    #[test]
+    fn the_rider_requested_procedure_sentence_always_renders() {
+        let screen = system_screen("rider_detail");
+        let mut c = RenderContext::new("fr");
+        c.insert_resolved(
+            "rider.byId",
+            json!({
+                "riderId": "r-1", "displayName": "Alice", "phone": "+33600000001",
+                "status": "AVAILABLE", "standing": "ACTIVE", "ground": null,
+                "decidedAt": null, "effectiveAt": null, "reinstatedAt": null,
+                "heldDelivery": null, "restrictionDoorOpen": true,
+            }),
+        );
+        let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        assert!(
+            html.contains("Conservez le message du rider"),
+            "the RIDER_REQUESTED procedure sentence must render unconditionally, no chip picked: {html}"
+        );
+    }
+
     /// `the_rider_detail_sheet_dispatches_restrict_rider_with_the_chip_value_and_no_free_text` —
     /// the confirm button's `data-vars` names EXACTLY `riderId`/`ground`, "Effectif : maintenant"
     /// and the notice line render, and NO `text_area`/`text_input` exists anywhere on the page
@@ -2871,9 +2895,24 @@ mod tests {
         let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
         assert!(html.contains("data-sheet-id=\"restrict_rider_sheet\""), "{html}");
         assert!(html.contains("data-action=\"restrict_rider\""), "{html}");
+        // Round 2 item 2 (beck, ux): sharpened from a vacuous `contains(A) || contains(B)` (where
+        // the right disjunct is always true, since "riderId" is a substring of the left literal
+        // too) to the RESOLVED `data-vars` payload directly, no `||` — `riderId` must carry the
+        // fixture's own value ("r-1"), and `ground` (no chip picked yet) must ride as `null` in
+        // `data-vars` AND as an unresolved `data-var-bindings` entry naming `ground.value`, the
+        // same idiom `the_held_job_card_and_its_sheet_dispatch_hand_back_delivery` established for
+        // `deliveryJobId`.
         assert!(
-            html.contains("&quot;riderId&quot;:&quot;{{ rider.riderId }}&quot;") || html.contains("riderId"),
-            "riderId must be threaded into data-vars: {html}"
+            html.contains("&quot;riderId&quot;:&quot;r-1&quot;"),
+            "riderId must be RESOLVED to the fixture's own id in data-vars: {html}"
+        );
+        assert!(
+            html.contains("&quot;ground&quot;:null"),
+            "ground has no chip picked yet, so it must travel as null in data-vars: {html}"
+        );
+        assert!(
+            html.contains("data-var-bindings") && html.contains("ground.value"),
+            "ground must be reported as an unresolved binding until a chip is picked: {html}"
         );
         assert!(html.contains("Effectif : maintenant"), "{html}");
         assert!(html.contains("Le rider est informé dans l&#x27;application") || html.contains("informé dans l'application"), "the notice line: {html}");
@@ -2931,6 +2970,11 @@ mod tests {
             }),
         );
         let html = render_screen_html(screen, crate::generated::screens::system::SHEETS, c);
+        // Round 2 item 10 (beck): sharpened from the ABSENCE of an error string (which a totally
+        // different rendering bug could also satisfy) to the POSITIVE assertion — the control
+        // actually dispatches `phone_call` with the resolved number.
+        assert!(html.contains("data-action=\"phone_call\""), "the phone_call control must render its action: {html}");
+        assert!(html.contains("data-number=\"+33600000001\""), "the phone_call control must carry the resolved number: {html}");
         assert!(
             !html.contains("missing its target prop"),
             "the phone_call control must not render disabled: {html}"
