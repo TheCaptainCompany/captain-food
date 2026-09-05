@@ -100,6 +100,31 @@ async fn append_event(pool: &PgPool, stream_name: &str, version: i32, event_type
     .expect("append event");
 }
 
+/// Round 3 (#639 part C step 4-iii-A R3-5, beck + dba): the SAME helper, `occurred_at` pinned to an
+/// EXPLICIT timestamp rather than `now()` — the only way to force a genuine tie on `requested_at`
+/// (a `DeliveryRequested` event's occurrence time, ADR-20260904-152807 §2's read), which is exactly
+/// what exercises the `delivery_job_id DESC` tie-break `persistence/delivery.rs` adds after
+/// `requested_at DESC`. A wall-clock sleep between two `now()`-stamped events (the round-2 test's
+/// approach) can never produce a tie, so it never exercised that second ORDER BY key at all.
+async fn append_event_at(pool: &PgPool, stream_name: &str, version: i32, event_type: &str, payload: serde_json::Value, occurred_at: chrono::DateTime<chrono::Utc>) {
+    sqlx::query(
+        "INSERT INTO domain_events \
+         (id, stream_name, version, user_id, user_type, correlation_id, cause_id, event_type, payload, metadata, occurred_at) \
+         VALUES ($1, $2, $3, $4, 5, $5, NULL, $6, $7, NULL, $8)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(stream_name)
+    .bind(version)
+    .bind(uuid::Uuid::nil())
+    .bind(uuid::Uuid::new_v4())
+    .bind(event_type)
+    .bind(payload)
+    .bind(occurred_at)
+    .execute(pool)
+    .await
+    .expect("append event at explicit occurred_at");
+}
+
 /// The production delivery side (mirrors `graphql_write_path.rs::spawn_mailbox_workers`).
 fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
     spawn_mailbox_workers_with_door(pool, bus, true)
@@ -763,9 +788,13 @@ async fn the_list_and_the_detail_name_the_same_held_job() {
     )
     .await;
 
-    // TWO orders + TWO delivery jobs, both ASSIGNED to the SAME rider, seeded a beat apart so
-    // `requested_at` genuinely differs -- the fix's correctness needs a total order, not an exact
-    // tie (a `requested_at` tie is the same failure but harder to force deterministically here).
+    // TWO orders + TWO delivery jobs, both ASSIGNED to the SAME rider. Round 3 (R3-5): both
+    // `DeliveryRequested` facts share the SAME `occurred_at` (`append_event_at`, not a wall-clock
+    // sleep) -- a genuine `requested_at` TIE, which is the only way to actually exercise the
+    // `delivery_job_id DESC` tie-break `persistence/delivery.rs` adds after `requested_at DESC`.
+    // Round 2's 20ms sleep gave the two jobs DISTINCT timestamps, so `requested_at DESC` alone
+    // always decided the order and the tie-break line was never reached by this test.
+    let same_requested_at = chrono::Utc::now();
     let mut job_ids: Vec<uuid::Uuid> = Vec::new();
     for i in 0..2u8 {
         let order_id = uuid::Uuid::new_v4();
@@ -797,7 +826,7 @@ async fn the_list_and_the_detail_name_the_same_held_job() {
             }),
         )
         .await;
-        append_event(
+        append_event_at(
             &pool,
             &format!("DeliveryJob-{job_id}"),
             1,
@@ -807,6 +836,7 @@ async fn the_list_and_the_detail_name_the_same_held_job() {
                 "pickup": { "line1": "1 Rue Nationale", "postalCode": "37000", "city": "Tours", "country": "FR" },
                 "dropoff": { "line1": "9 Rue Colbert", "postalCode": "37000", "city": "Tours", "country": "FR" }
             }),
+            same_requested_at,
         )
         .await;
         append_event(
@@ -817,7 +847,6 @@ async fn the_list_and_the_detail_name_the_same_held_job() {
             json!({ "deliveryJobId": job_id, "orderId": order_id, "riderId": rider_id }),
         )
         .await;
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (two held jobs)");
 
