@@ -36,6 +36,10 @@ pub enum HandWrittenScreen {
     /// confirm/claim/route sequencing this DSL declares no binding grammar for, the SAME reasons
     /// `Checkout`/`OrderTracking` are hand-written.
     SignInReturn,
+    /// `restaurant_backoffice.yaml#/screens/invitation_accept` (#639 part C step 6-iv round 2,
+    /// ADR-20260905-101349 §2 amendment) — `invitation_accept.rs`. The `SignInReturn` shape,
+    /// doubled: TWO commands sequenced client-side (never a process manager).
+    InvitationAccept,
 }
 
 impl HandWrittenScreen {
@@ -44,6 +48,7 @@ impl HandWrittenScreen {
         HandWrittenScreen::Checkout,
         HandWrittenScreen::OrderTracking,
         HandWrittenScreen::SignInReturn,
+        HandWrittenScreen::InvitationAccept,
     ];
 
     /// The generated `Screen::id` this variant owns.
@@ -52,6 +57,7 @@ impl HandWrittenScreen {
             HandWrittenScreen::Checkout => "checkout",
             HandWrittenScreen::OrderTracking => "order_tracking",
             HandWrittenScreen::SignInReturn => "sign_in_return",
+            HandWrittenScreen::InvitationAccept => "invitation_accept",
         }
     }
 
@@ -193,6 +199,11 @@ impl HandWrittenScreen {
             // "query strings are the caller's to strip"): the shell is a STATIC working message,
             // and the real work happens in the browser (`mount`, below).
             HandWrittenScreen::SignInReturn => crate::sign_in_return::render_sign_in_return_html(locale),
+            // The token/invitationId live in the query string, which SSR never sees: the shell is
+            // a STATIC working message, and the real work happens in the browser (`mount`, below).
+            HandWrittenScreen::InvitationAccept => {
+                crate::invitation_accept::render_invitation_accept_html(locale)
+            }
         }
     }
 }
@@ -257,6 +268,9 @@ pub mod mount {
                 }
                 HandWrittenScreen::SignInReturn => {
                     mount_sign_in_return(transport, origin, session, locale)
+                }
+                HandWrittenScreen::InvitationAccept => {
+                    mount_invitation_accept(transport, origin, session, locale)
                 }
             }
         });
@@ -544,6 +558,101 @@ pub mod mount {
                 }
                 Ok(crate::actions::ActionOutcome::Failed { .. }) | Err(_) => {
                     state.set(SignInReturnState::Failed);
+                }
+            }
+        });
+    }
+
+    /// The invitation acceptance landing (#639 part C step 6-iv round 2, ADR-20260905-101349 §2
+    /// amendment): read `?token=&invitationId=` off the URL the mail client opened, dispatch
+    /// `acceptRestaurantInvitation` (leg 1), then — on its success — `grantRestaurantAccessByInvitation`
+    /// (leg 2, retried up to `GRANT_LEG_MAX_ATTEMPTS` on a technical failure: business requires
+    /// never showing "link no longer valid" to someone who already accepted), claim the parked
+    /// session, then leave the page — a full navigation, the `mount_sign_in_return` shape.
+    fn mount_invitation_accept(transport: HttpTransport, origin: String, session: SessionId, locale: String) {
+        use crate::invitation_accept::{
+            InvitationAcceptScreen, InvitationAcceptScreenProps, InvitationAcceptState, GRANT_LEG_MAX_ATTEMPTS,
+        };
+
+        let state = RwSignal::new(InvitationAcceptState::Working);
+        {
+            let locale = locale.clone();
+            leptos::mount::mount_to_body(move || {
+                let locale = locale.clone();
+                view! {
+                    {move || InvitationAcceptScreen(InvitationAcceptScreenProps { state: state.get(), locale: locale.clone() })}
+                }
+            });
+        }
+
+        let Some((token, invitation_id)) = crate::invitation_accept::params_from_location() else {
+            state.set(InvitationAcceptState::NoToken);
+            return;
+        };
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let accept_input = || {
+                let mut m = serde_json::Map::new();
+                m.insert("invitationId".into(), serde_json::json!(invitation_id));
+                m.insert("token".into(), serde_json::json!(token));
+                m
+            };
+            let leg1 = async {
+                let handle = crate::actions::dispatch(
+                    &transport,
+                    crate::generated::data_layer::ActionKey::AcceptRestaurantInvitation,
+                    accept_input(),
+                )
+                .await?;
+                handle.resolve(&transport).await
+            }
+            .await;
+            match leg1 {
+                Ok(crate::actions::ActionOutcome::Succeeded { .. }) => {}
+                // Leg 1 refused (unknown/wrong-email/already-accepted-by-someone-else/revoked/
+                // expired — the server's own no-enumeration property, ONE typed refusal for all
+                // five) or a technical failure: never worded differently, by design.
+                _ => {
+                    state.set(InvitationAcceptState::Failed);
+                    return;
+                }
+            }
+
+            // Leg 2: the SAME (invitationId, token) proves the caller IS the accepting subject.
+            // Retried on a technical failure — never on a business rejection past the door
+            // (`MemberAccessGrantDoorClosed`/`MemberAuthSubjectAlreadyBound`/
+            // `RestaurantInvitationNotAcceptable`), which will not heal by retrying.
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+                let leg2 = async {
+                    let handle = crate::actions::dispatch(
+                        &transport,
+                        crate::generated::data_layer::ActionKey::GrantRestaurantAccessByInvitation,
+                        accept_input(),
+                    )
+                    .await?;
+                    handle.resolve(&transport).await
+                }
+                .await;
+                match leg2 {
+                    Ok(crate::actions::ActionOutcome::Succeeded { message_id }) => {
+                        crate::auth::claim_session(&origin, message_id, session).await;
+                        crate::invitation_accept::navigate_away(&origin, "/");
+                        return;
+                    }
+                    Ok(crate::actions::ActionOutcome::Rejected { .. }) => {
+                        // A business refusal past the door never heals by retrying.
+                        state.set(InvitationAcceptState::AccessPending);
+                        return;
+                    }
+                    Ok(crate::actions::ActionOutcome::Failed { .. }) | Err(_) => {
+                        if attempt >= GRANT_LEG_MAX_ATTEMPTS {
+                            state.set(InvitationAcceptState::AccessPending);
+                            return;
+                        }
+                        crate::actions::sleep(std::time::Duration::from_secs(1)).await;
+                    }
                 }
             }
         });

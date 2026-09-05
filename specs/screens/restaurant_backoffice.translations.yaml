@@ -209,3 +209,42 @@ back.sign_in_return.working:    { messages: { en: "Please wait, we're checking y
 back.sign_in_return.no_token:   { messages: { en: "This link is incomplete. Please request a new one.", fr: "Ce lien est incomplet. Merci d'en demander un nouveau." } }
 back.sign_in_return.failed:     { messages: { en: "This link is invalid or has expired. Please request a new one.", fr: "Ce lien est invalide ou a expiré. Merci d'en demander un nouveau." } }
 back.sign_in_return.back_to_sign_in: { messages: { en: "Back to sign-in", fr: "Retour à la connexion" } }
+
+# ── the roster and the invitation (#639 part C step 6-iv round 2, ADR-20260905-101349 §2 amendment) ──
+back.team.title:                       { messages: { en: "Team", fr: "Équipe" } }
+back.team.roster_heading:              { messages: { en: "Team members", fr: "Membres de l'équipe" } }
+back.team.invitations_heading:         { messages: { en: "Invitations", fr: "Invitations" } }
+back.team.roster.empty.title:          { messages: { en: "No team members yet", fr: "Aucun membre pour le moment" } }
+back.team.roster.empty.body:           { messages: { en: "Invite a colleague to give them access.", fr: "Invitez un collègue pour lui donner accès." } }
+back.team.roster.member:               { messages: { en: "Member", fr: "Membre" } }
+back.team.roster.since:                { messages: { en: "Since", fr: "Depuis" } }
+back.team.invitations.empty.title:     { messages: { en: "No invitations", fr: "Aucune invitation" } }
+back.team.invitations.empty.body:      { messages: { en: "Invited colleagues appear here.", fr: "Les collègues invités apparaissent ici." } }
+back.team.invitations.email:           { messages: { en: "Email", fr: "E-mail" } }
+back.team.invitations.expires:         { messages: { en: "Expires", fr: "Expire le" } }
+back.team.authority.manager:           { messages: { en: "Manager", fr: "Gérant" } }
+back.team.authority.operator:          { messages: { en: "Operator", fr: "Opérateur" } }
+back.team.status.pending:              { messages: { en: "Pending", fr: "En attente" } }
+back.team.status.accepted_pending_access: { messages: { en: "Access being activated", fr: "Accès en cours d'activation" } }
+back.team.status.accepted:             { messages: { en: "Active", fr: "Actif" } }
+back.team.status.revoked:              { messages: { en: "Withdrawn", fr: "Retirée" } }
+back.team.status.expired:              { messages: { en: "Expired", fr: "Expirée" } }
+back.team.invite.open:                 { messages: { en: "Invite a colleague", fr: "Inviter un collègue" } }
+back.team.invite.title:                { messages: { en: "Invite a colleague", fr: "Inviter un collègue" } }
+back.team.invite.email_label:          { messages: { en: "Colleague's email", fr: "E-mail du collègue" } }
+back.team.invite.email_placeholder:    { messages: { en: "colleague@example.com", fr: "collegue@exemple.fr" } }
+back.team.invite.authority_label:      { messages: { en: "Role", fr: "Rôle" } }
+back.team.invite.confirm:              { messages: { en: "Send invitation", fr: "Envoyer l'invitation" } }
+# The Art. 14 in-context line (legal): a THIRD PARTY's own address, typed by the manager -- what is
+# sent, to whom, by whom, that the colleague may object, and that the manager confirms they may
+# share this address.
+back.team.invite.legal_notice:         { messages: { en: "We'll email this address an invitation to join your team on Captain.Food. Your colleague may object to receiving it (see our privacy notice). By continuing, you confirm you are authorised to share this address for this purpose.", fr: "Nous enverrons à cette adresse un e-mail d'invitation à rejoindre votre équipe sur Captain.Food. Votre collègue peut s'opposer à la réception de cet e-mail (voir notre politique de confidentialité). En continuant, vous confirmez être autorisé·e à partager cette adresse à cette fin." } }
+back.team.revoke.confirm:              { messages: { en: "Withdraw", fr: "Retirer" } }
+
+# ── the invitation acceptance landing (#639 part C step 6-iv round 2, ADR-20260905-101349 §2 amendment) ──
+back.invitation.title:            { messages: { en: "Joining your team", fr: "Rejoindre votre équipe" } }
+back.invitation.working:          { messages: { en: "Please wait, we're confirming your invitation…", fr: "Merci de patienter, nous confirmons votre invitation…" } }
+back.invitation.no_token:         { messages: { en: "This invitation link is incomplete. Please ask for a new one.", fr: "Ce lien d'invitation est incomplet. Merci d'en demander un nouveau." } }
+back.invitation.failed:           { messages: { en: "This invitation link is no longer valid. Please ask for a new one.", fr: "Ce lien d'invitation n'est plus valide. Merci d'en demander un nouveau." } }
+back.invitation.access_pending:   { messages: { en: "Your invitation is confirmed and your access is being set up. Please try this link again in a moment.", fr: "Votre invitation est confirmée et votre accès est en cours de mise en place. Merci de réessayer ce lien dans un instant." } }
+back.invitation.back_to_sign_in:  { messages: { en: "Go to sign-in", fr: "Aller à la connexion" } }

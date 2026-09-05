@@ -214,7 +214,7 @@ pub mod captain_frontoffice {
     ];
 }
 
-/// `specs/screens/restaurant_backoffice.yaml` — 12 screen(s).
+/// `specs/screens/restaurant_backoffice.yaml` — 14 screen(s).
 pub mod restaurant_backoffice {
     use super::*;
 
@@ -452,6 +452,33 @@ pub mod restaurant_backoffice {
         ],
         },
         Screen {
+            id: "team",
+            route: "/team",
+            roles: &["RESTAURANT"],
+            requires_auth: true,
+            sdui: true,
+            data_requirements: &[ResolverKey::RosterMine, ResolverKey::InvitationsMine],
+            skipped_reads: &[],
+            graphql_role: None,
+            unauthenticated_route: Some("/sign-in"),
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("staff_topbar"))], children: &[
+                Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.title"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("acceptance_toggle")), ("label", PropValue::I18n("back.pause_orders")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("change_order_acceptance"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.team.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("invite_member_open_btn")), ("label", PropValue::I18n("back.team.invite.open")), ("variant", PropValue::Text("primary")), ("visible_when", PropValue::Text("roster.viewerAuthority == 'MANAGER'")), ("action.type", PropValue::Text("open_bottom_sheet")), ("action.sheet_id", PropValue::Text("invite_member_sheet"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.team.roster_heading"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("roster_list")), ("items", PropValue::Binding("roster.items")), ("empty_state.title", PropValue::I18n("back.team.roster.empty.title")), ("empty_state.body", PropValue::I18n("back.team.roster.empty.body")), ("item_components.0.type", PropValue::Text("info_row")), ("item_components.0.label", PropValue::I18n("back.team.roster.member")), ("item_components.0.value", PropValue::Binding("item.memberId")), ("item_components.1.type", PropValue::Text("badge")), ("item_components.1.text", PropValue::I18n("back.team.authority.manager")), ("item_components.1.variant", PropValue::Text("info")), ("item_components.1.visible_when", PropValue::Text("item.authority == 'MANAGER'")), ("item_components.2.type", PropValue::Text("badge")), ("item_components.2.text", PropValue::I18n("back.team.authority.operator")), ("item_components.2.variant", PropValue::Text("outline")), ("item_components.2.visible_when", PropValue::Text("item.authority == 'OPERATOR'")), ("item_components.3.type", PropValue::Text("info_row")), ("item_components.3.label", PropValue::I18n("back.team.roster.since")), ("item_components.3.value", PropValue::Binding("item.since"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.team.invitations_heading"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::List, props: &[("id", PropValue::Text("invitations_list")), ("items", PropValue::Binding("invitations")), ("empty_state.title", PropValue::I18n("back.team.invitations.empty.title")), ("empty_state.body", PropValue::I18n("back.team.invitations.empty.body")), ("item_components.0.type", PropValue::Text("info_row")), ("item_components.0.label", PropValue::I18n("back.team.invitations.email")), ("item_components.0.value", PropValue::Binding("item.invitedEmail")), ("item_components.1.type", PropValue::Text("badge")), ("item_components.1.text", PropValue::I18n("back.team.status.pending")), ("item_components.1.variant", PropValue::Text("warning")), ("item_components.1.visible_when", PropValue::Text("item.status == 'PENDING'")), ("item_components.2.type", PropValue::Text("badge")), ("item_components.2.text", PropValue::I18n("back.team.status.accepted_pending_access")), ("item_components.2.variant", PropValue::Text("info")), ("item_components.2.visible_when", PropValue::Text("item.status == 'ACCEPTED_PENDING_ACCESS'")), ("item_components.3.type", PropValue::Text("badge")), ("item_components.3.text", PropValue::I18n("back.team.status.accepted")), ("item_components.3.variant", PropValue::Text("success")), ("item_components.3.visible_when", PropValue::Text("item.status == 'ACCEPTED'")), ("item_components.4.type", PropValue::Text("badge")), ("item_components.4.text", PropValue::I18n("back.team.status.revoked")), ("item_components.4.variant", PropValue::Text("outline")), ("item_components.4.visible_when", PropValue::Text("item.status == 'REVOKED'")), ("item_components.5.type", PropValue::Text("badge")), ("item_components.5.text", PropValue::I18n("back.team.status.expired")), ("item_components.5.variant", PropValue::Text("outline")), ("item_components.5.visible_when", PropValue::Text("item.status == 'EXPIRED'")), ("item_components.6.type", PropValue::Text("info_row")), ("item_components.6.label", PropValue::I18n("back.team.invitations.expires")), ("item_components.6.value", PropValue::Binding("item.expiresAt")), ("item_components.6.visible_when", PropValue::Text("item.status == 'PENDING'")), ("item_components.7.type", PropValue::Text("button")), ("item_components.7.id", PropValue::Text("revoke_invitation_row_btn")), ("item_components.7.label", PropValue::I18n("back.team.revoke.confirm")), ("item_components.7.variant", PropValue::Text("destructive")), ("item_components.7.visible_when", PropValue::Text("roster.viewerAuthority == 'MANAGER'")), ("item_components.7.action.type", PropValue::Text("revoke_restaurant_invitation")), ("item_components.7.action.variables.invitationId", PropValue::Binding("item.invitationId"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("claims")), ("items.3.label", PropValue::I18n("back.nav.claims")), ("items.3.icon", PropValue::Text("life_buoy")), ("items.3.route", PropValue::Text("/claims")), ("items.4.id", PropValue::Text("satisfaction")), ("items.4.label", PropValue::I18n("back.nav.satisfaction")), ("items.4.icon", PropValue::Text("star")), ("items.4.route", PropValue::Text("/satisfaction"))], children: &[], branches: &[] }
+        ],
+        },
+        Screen {
             id: "restaurant_profile",
             route: "/settings/profile",
             roles: &["RESTAURANT_ACCOUNT"],
@@ -561,6 +588,20 @@ pub mod restaurant_backoffice {
             tree: &[],
         },
         Screen {
+            id: "invitation_accept",
+            route: "/invitation",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: false,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[],
+        },
+        Screen {
             id: "not_linked",
             route: "/sign-in/not-linked",
             roles: &["PUBLIC"],
@@ -597,6 +638,14 @@ pub mod restaurant_backoffice {
                 Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.expiry_note"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_resend_link")), ("label", PropValue::I18n("back.sign_in.resend")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_sign_in_confirmation_close")), ("label", PropValue::I18n("back.sign_in.close")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }
+            ], branches: &[] } },
+        Sheet { id: "invite_member_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("invite_member_sheet")), ("title", PropValue::I18n("back.team.invite.title")), ("drag_to_close", PropValue::Text("true"))], children: &[
+                Node { kind: ComponentKind::EmailInput, props: &[("id", PropValue::Text("invite_email")), ("label", PropValue::I18n("back.team.invite.email_label")), ("placeholder", PropValue::I18n("back.team.invite.email_placeholder")), ("autofocus", PropValue::Text("true"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::ChipMultiSelect, props: &[("id", PropValue::Text("invite_authority")), ("label", PropValue::I18n("back.team.invite.authority_label")), ("single_select", PropValue::Text("true")), ("options.0.value", PropValue::Text("MANAGER")), ("options.0.label", PropValue::I18n("back.team.authority.manager")), ("options.1.value", PropValue::Text("OPERATOR")), ("options.1.label", PropValue::I18n("back.team.authority.operator"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("id", PropValue::Text("invite_legal_notice")), ("value", PropValue::I18n("back.team.invite.legal_notice"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("invite_member_btn")), ("label", PropValue::I18n("back.team.invite.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("invite_restaurant_member")), ("action.variables.invitationId", PropValue::Binding("$uuid")), ("action.variables.restaurantId", PropValue::Binding("restaurant.id")), ("action.variables.invitedEmail", PropValue::Binding("invite_email.value")), ("action.variables.authority", PropValue::Binding("invite_authority.value")), ("action.variables.memberId", PropValue::Binding("$uuid")), ("action.on_success.0.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("invite_member_error")), ("for_action", PropValue::Text("invite_restaurant_member"))], children: &[], branches: &[] }
             ], branches: &[] } },
     ];
 }
