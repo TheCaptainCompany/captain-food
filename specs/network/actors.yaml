@@ -216,3 +216,25 @@ RestaurantMembership:
       throws:
         - { $ref: 'errors.yaml#/RestaurantMembershipNotFound' }
         - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }
+    # The member sign-in DOOR (#639 part C step 6-ii, ADR-20260905-101349 §7-§10): two pure effects,
+    # both emitting nothing -- the same "identify-only, IDs on the identity provider" shape as the
+    # rider door's phone-OTP pair (step 2c-i), transposed to email. No `requires: acting` -- an
+    # unauthenticated caller has no credential yet, which IS the door that issues one.
+    - message: { $ref: 'commands.yaml#/RequestMemberSignInLink' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/RateLimited' }
+        - { $ref: 'errors.yaml#/VerificationSendLimitReached' }
+        - { $ref: 'errors.yaml#/VerificationSendCapacityExhausted' }
+        - { $ref: 'errors.yaml#/MemberSignInDoorClosed' }
+      effect: "Delegate to the auth provider: send an email magic link, REFUSING when the email send-abuse wall says so. Never consults the Member bridge (no enumeration oracle). No event."
+    - message: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      emits: []
+      throws:
+        - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+        - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+        - { $ref: 'errors.yaml#/MemberNotLinked' }
+        - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
+        - { $ref: 'errors.yaml#/MemberSignInRequiresSession' }
+        - { $ref: 'errors.yaml#/MemberSignInDoorClosed' }
+      effect: "Verify the magic-link token with the auth provider, look the proved subject up in the Member bridge (auth_subject -> member_id, step 6-i): no member -> MemberNotLinked, nothing stamped, the session still parked so the refusal screen has a real cookie; a member -> stamp { role: MEMBER } on the provider user and park the post-stamp session for POST /auth/session. No event."

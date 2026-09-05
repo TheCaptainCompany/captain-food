@@ -138,9 +138,11 @@ fn spawn_mailbox_workers_with_door(pool: &PgPool, bus: actor_client::OperationSt
     let deps = infrastructure::generated::command_router::CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        members: Arc::new(infrastructure::PgMemberRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door,
         run_member_access_grant: false,
+        run_member_sign_in_door: false,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),

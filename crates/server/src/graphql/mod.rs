@@ -15,6 +15,11 @@ pub mod locale;
 /// The restriction fact terminates the rider's socket (#639 part C step 5,
 /// ADR-20260905-065415): the connection-local standing cell, the watcher task and the gate.
 pub mod rider_socket;
+/// The per-role GraphQL depth/complexity ceiling (#639 part C step 6-ii round 2, R2-E,
+/// ADR-20260905-101349 §9): a `parse_query` extension refusing an over-deep/over-complex document
+/// before any resolver runs, keyed on the request's `ActingRole` — every role's schema, never
+/// `/public` only.
+pub mod query_limits;
 pub mod routes;
 pub mod schema;
 /// The subgraph scope slice (#385 API-tier wiring, D8): a `graphql-{scope}` bin serves the

@@ -161,3 +161,51 @@ back.profile.cuisine.traditional: { messages: { en: "Traditional", fr: "Traditio
 back.profile.cuisine.bistronomic: { messages: { en: "Bistronomic", fr: "Bistronomique" } }
 back.profile.cuisine.food_truck:  { messages: { en: "Food truck", fr: "Food truck" } }
 back.profile.save:              { messages: { en: "Save profile", fr: "Enregistrer le profil" } }
+
+# ── member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10, PROP-20260831-180622 §8.1/§8.5) ──
+back.sign_in.header:            { messages: { en: "Restaurant owners", fr: "Restaurateurs" } }
+back.sign_in.title:             { messages: { en: "Sign in to your restaurant space", fr: "Connectez-vous à votre espace restaurant" } }
+back.sign_in.email_label:       { messages: { en: "Email address", fr: "Adresse e-mail" } }
+back.sign_in.email_placeholder: { messages: { en: "you@your-restaurant.com", fr: "vous@votre-restaurant.fr" } }
+back.sign_in.request_link:      { messages: { en: "Send my sign-in link", fr: "Recevoir mon lien de connexion" } }
+back.sign_in.sending:           { messages: { en: "Sending…", fr: "Envoi en cours…" } }
+# Round 2 R2-U2: the §8.1 mockup's own first line, landed missing -- the mitigation for a magic
+# link opened inside a mail client's in-app browser (the parked session's cookie then lands in a
+# browser the operator never returns to, so the requesting tab never claims it).
+back.sign_in.open_on_device:    { messages: { en: "We'll send you a link. Open it on this device.", fr: "Nous vous envoyons un lien. Ouvrez-le sur cet appareil." } }
+back.sign_in.no_password:       { messages: { en: "No password: the link replaces it.", fr: "Aucun mot de passe : le lien remplace le mot de passe." } }
+# `UNVERIFIED input` (ADR-20260817-105845): the actual SUPPORT_CONTACT value is deployment
+# configuration with no default (`configuration.yaml#/SUPPORT_CONTACT`) -- this STATIC string
+# mirrors the canonical address used elsewhere in this codebase and must be kept in step with the
+# configured key by hand until a `{{ config.* }}` binding exists (see the screen's `gaps:` line).
+back.sign_in.support_lead:      { messages: { en: "A problem? support@captain.food", fr: "Un problème ? support@captain.food" } }
+back.sign_in.confirmation_title: { messages: { en: "Check your email", fr: "Vérifiez vos e-mails" } }
+# Round 3 R3-1 (ux, BLOCKING, #870 class): round 2's "...à :" plus a following bound `text` node
+# echoing `member_email.value` painted an EMPTY paragraph -- a `text` node resolves at PAINT from
+# RESOLVER data, never from a form field's dispatch-time `.value`
+# (`crates/web/src/renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that
+# could carry it across. Restored to the self-contained round-1 sentence (never named the address,
+# so still enumeration-oracle-safe); the address-echo need is the screen's `gaps:` line instead of
+# a text node that paints empty.
+back.sign_in.confirmation_body: { messages: { en: "If this address is registered, a link has just been sent to it.", fr: "Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse." } }
+# `UNVERIFIED input`: the provider's default magic-link expiry (ADR-20260817-105845 -- read the
+# provider's configured default before treating 15 as authoritative).
+back.sign_in.expiry_note:       { messages: { en: "The link expires in 15 minutes.", fr: "Le lien expire dans 15 minutes." } }
+back.sign_in.resend:            { messages: { en: "Resend a link", fr: "Renvoyer un lien" } }
+# Round 2 R2-U1: the confirmation panel was un-dismissable (no close control) over the SAME
+# screen's own form -- trapping a user who typed the wrong address with no way back to correct it.
+back.sign_in.close:             { messages: { en: "Close", fr: "Fermer" } }
+
+back.not_linked.title:          { messages: { en: "Your account is not yet linked to a restaurant.", fr: "Votre compte n'est pas encore relié à un restaurant." } }
+back.not_linked.body:           { messages: { en: "Your address is verified, but no restaurant access is associated with it yet.", fr: "Votre adresse est bien vérifiée, mais aucun accès restaurant n'y est associé pour l'instant." } }
+back.not_linked.write_to_us:    { messages: { en: "Write to us and we will make the link:", fr: "Écrivez-nous et nous ferons le lien :" } }
+back.not_linked.support_contact: { messages: { en: "support@captain.food", fr: "support@captain.food" } }
+back.not_linked.precise:        { messages: { en: "Please specify the name and address of your establishment.", fr: "Précisez le nom et l'adresse de votre établissement." } }
+back.not_linked.sign_out:       { messages: { en: "Sign out", fr: "Se déconnecter" } }
+
+# ── the magic-link RETURN landing (#639 part C step 6-ii round 2, R2-D/R2-R2) ──
+back.sign_in_return.title:      { messages: { en: "Signing you in…", fr: "Connexion en cours…" } }
+back.sign_in_return.working:    { messages: { en: "Please wait, we're checking your link…", fr: "Merci de patienter, nous vérifions votre lien…" } }
+back.sign_in_return.no_token:   { messages: { en: "This link is incomplete. Please request a new one.", fr: "Ce lien est incomplet. Merci d'en demander un nouveau." } }
+back.sign_in_return.failed:     { messages: { en: "This link is invalid or has expired. Please request a new one.", fr: "Ce lien est invalide ou a expiré. Merci d'en demander un nouveau." } }
+back.sign_in_return.back_to_sign_in: { messages: { en: "Back to sign-in", fr: "Retour à la connexion" } }

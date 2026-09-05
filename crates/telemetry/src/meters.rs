@@ -1149,6 +1149,190 @@ pub mod otp_send {
     }
 }
 
+/// The MEMBER seam's own resolution metrics (#639 part C step 6-ii) — the `rider_identity` shape,
+/// its own series so a paging rule keyed on `rider_identity_lookup_failed_total` never goes quiet
+/// because members started failing on a differently-named seam.
+pub mod member_identity {
+    use super::*;
+
+    fn resolve_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| {
+            meter().f64_histogram(metric::MEMBER_IDENTITY_RESOLVE_MS).with_unit("ms").build()
+        })
+    }
+
+    fn not_found_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_IDENTITY_NOT_FOUND_TOTAL).build())
+    }
+
+    fn lookup_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_IDENTITY_LOOKUP_FAILED_TOTAL).build())
+    }
+
+    fn lookup_source_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_IDENTITY_LOOKUP_SOURCE_TOTAL).build())
+    }
+
+    /// `member_identity_resolve_ms{result}` — one MEMBER resolution.
+    pub fn duration(elapsed_ms: f64, result: &str) {
+        resolve_histogram().record(elapsed_ms, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `member_identity_not_found_total` — no `Member` row (or no single restaurant scope). OBSERVE.
+    pub fn not_found() {
+        not_found_counter().add(1, &[]);
+    }
+
+    /// `member_identity_lookup_failed_total{reason}` — the seam could not be asked. PAGE.
+    pub fn lookup_failed(reason: &str) {
+        lookup_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `member_identity_lookup_source_total{source}` (`db` | `request_reuse`).
+    pub fn lookup_source(source: &str) {
+        lookup_source_counter().add(1, &[KeyValue::new("source", source.to_string())]);
+    }
+}
+
+/// `member-sign-in` contract (#639 part C step 6-ii, ADR-20260905-101349 §10) — the
+/// `rider_identity`/`otp_send` shape transposed to the restaurateur's email door. NEVER an
+/// email/token/messageId label anywhere in this module: an `on_roster` label at request time
+/// would CREATE the enumeration oracle the door exists to deny.
+pub mod member_sign_in {
+    use super::*;
+
+    fn link_requested_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_SIGN_IN_LINK_REQUESTED_TOTAL).build())
+    }
+
+    fn confirmed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_SIGN_IN_CONFIRMED_TOTAL).build())
+    }
+
+    fn claim_stamp_failed_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_CLAIM_STAMP_FAILED_TOTAL).build())
+    }
+
+    fn refused_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::MEMBER_SIGN_IN_REFUSED_TOTAL).build())
+    }
+
+    /// `member_sign_in_link_requested_total{result}` — `requestMemberSignInLink`'s outcome.
+    pub fn link_requested(result: &str) {
+        link_requested_counter().add(1, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `member_sign_in_confirmed_total{result}` — `confirmMemberSignIn`'s outcome (linked |
+    /// not_linked | token_invalid | token_expired | lookup_failed).
+    pub fn confirmed(result: &str) {
+        confirmed_counter().add(1, &[KeyValue::new("result", result.to_string())]);
+    }
+
+    /// `member_claim_stamp_failed_total{reason}` — the MEMBER stamp failed. DEFECT counter, never
+    /// ordinary user error (not_configured | claim_conflict | provider_error).
+    pub fn claim_stamp_failed(reason: &str) {
+        claim_stamp_failed_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    /// `member_sign_in_refused_total{reason}` — either mutation refused (the door gate, a send-abuse
+    /// wall reason, or a typed rejection). `reason` is bounded, never an email/token/messageId.
+    pub fn refused(reason: &str) {
+        refused_counter().add(1, &[KeyValue::new("reason", reason.to_string())]);
+    }
+
+    // The gate-liveness gauge (the `otp_send_guard_enforcing` inverted dead-man shape,
+    // ADR-20260810-231300): `-1` = never declared, `0`/`1` re-asserted on every export cycle.
+    static DOOR_ENFORCING: AtomicI64 = AtomicI64::new(-1);
+
+    fn door_enforcing_gauge() -> &'static ObservableGauge<i64> {
+        static G: OnceLock<ObservableGauge<i64>> = OnceLock::new();
+        G.get_or_init(|| {
+            meter()
+                .i64_observable_gauge(metric::MEMBER_SIGN_IN_DOOR_ENFORCING)
+                .with_callback(|observer| {
+                    let state = DOOR_ENFORCING.load(Ordering::Relaxed);
+                    if state >= 0 {
+                        observer.observe(state, &[]);
+                    }
+                })
+                .build()
+        })
+    }
+
+    /// Declare the door's liveness (`member_sign_in_door_enforcing`): 1 while
+    /// `RUN_MEMBER_SIGN_IN_DOOR` enforces its refusal on a request, 0 the moment the composition
+    /// root boots with the key OFF. Call at composition AND wherever the gate is actually
+    /// consulted, so "zero refusals tonight" and "the door has been off since the last deploy"
+    /// stay distinguishable.
+    pub fn door_enforcing(enforcing: bool) {
+        DOOR_ENFORCING.store(i64::from(enforcing), Ordering::Relaxed);
+        let _ = door_enforcing_gauge();
+    }
+}
+
+/// `graphql-limits` contract (#639 part C step 6-ii, ADR-20260905-101349 §9): the per-role
+/// depth/complexity ceiling applied at `parse_query`, on every role's schema.
+pub mod graphql_limits {
+    use super::*;
+
+    fn rejected_counter() -> &'static Counter<u64> {
+        static C: OnceLock<Counter<u64>> = OnceLock::new();
+        C.get_or_init(|| meter().u64_counter(metric::GRAPHQL_REQUEST_REJECTED_TOTAL).build())
+    }
+
+    fn depth_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| meter().f64_histogram(metric::GRAPHQL_QUERY_DEPTH).build())
+    }
+
+    fn complexity_histogram() -> &'static Histogram<f64> {
+        static H: OnceLock<Histogram<f64>> = OnceLock::new();
+        H.get_or_init(|| meter().f64_histogram(metric::GRAPHQL_QUERY_COMPLEXITY).build())
+    }
+
+    fn limit_max_gauge() -> &'static Gauge<i64> {
+        static G: OnceLock<Gauge<i64>> = OnceLock::new();
+        G.get_or_init(|| meter().i64_gauge(metric::GRAPHQL_LIMIT_MAX).build())
+    }
+
+    /// `graphql_request_rejected_total{role, reason}` — refused BEFORE any resolver ran.
+    pub fn rejected(role: &str, reason: &str) {
+        rejected_counter().add(
+            1,
+            &[KeyValue::new("role", role.to_string()), KeyValue::new("reason", reason.to_string())],
+        );
+    }
+
+    /// `graphql_query_depth{role}` — the observed depth of EVERY parsed document, whether or not it
+    /// was refused: zero rejections must not read like "limits not installed".
+    pub fn observed_depth(role: &str, depth: usize) {
+        depth_histogram().record(depth as f64, &[KeyValue::new("role", role.to_string())]);
+    }
+
+    /// `graphql_query_complexity{role}` — the observed complexity of every parsed document.
+    pub fn observed_complexity(role: &str, complexity: usize) {
+        complexity_histogram().record(complexity as f64, &[KeyValue::new("role", role.to_string())]);
+    }
+
+    /// `graphql_limit_max{role, kind}` — the CONFIGURED ceiling this process enforces (`kind` =
+    /// depth | complexity), asserted once at composition so a deploy that silently regenerated a
+    /// lower limit shows up as a moved gauge rather than a mystery refusal spike.
+    pub fn limit_max(role: &str, kind: &str, value: usize) {
+        limit_max_gauge().record(
+            value as i64,
+            &[KeyValue::new("role", role.to_string()), KeyValue::new("kind", kind.to_string())],
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Recording against the global no-op provider (no `init`) must not panic. This is the state of
@@ -1171,5 +1355,18 @@ mod tests {
         super::customer_identification::claim_stamp_failed("not_configured");
         super::cart_price::duration(3.2);
         super::cart_price::unresolvable("offer_gone");
+        super::member_identity::duration(3.1, "resolved");
+        super::member_identity::not_found();
+        super::member_identity::lookup_failed("repository");
+        super::member_identity::lookup_source("db");
+        super::member_sign_in::link_requested("accepted");
+        super::member_sign_in::confirmed("linked");
+        super::member_sign_in::claim_stamp_failed("not_configured");
+        super::member_sign_in::refused("door_closed");
+        super::member_sign_in::door_enforcing(true);
+        super::graphql_limits::rejected("RESTAURANT", "depth");
+        super::graphql_limits::observed_depth("RESTAURANT", 3);
+        super::graphql_limits::observed_complexity("RESTAURANT", 12);
+        super::graphql_limits::limit_max("RESTAURANT", "depth", 8);
     }
 }

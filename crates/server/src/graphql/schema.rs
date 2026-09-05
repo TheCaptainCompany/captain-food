@@ -146,6 +146,15 @@ pub fn build_schema_for_scope(
     if let Some(scope) = scope {
         builder = builder.extension(super::scope_slice::ScopeSlice::new(scope));
     }
+    // #639 part C step 6-ii round 2 (R2-E, ADR-20260905-101349 §9): the per-role depth/complexity
+    // ceiling, on EVERY role's schema — registered here, unconditionally, so both the monolith and
+    // any `graphql-{scope}` subgraph bin (which call this SAME function) enforce it identically,
+    // and so it is asserted regardless of whether `deps`/`writes` are `Some` (a DB-less schema
+    // still parses and must still refuse a pathological document before claiming "no resolvers
+    // wired" is the reason nothing ran).
+    let query_limits = super::query_limits::QueryLimits::from_env();
+    query_limits.assert_limit_gauges();
+    builder = builder.extension(query_limits);
     if let Some(d) = deps {
         // EXHAUSTIVE on purpose — no `..` (#510, the #529 class): `ctx.data` is TypeId-keyed, so
         // a ReadDeps field added without a matching `.data()` registration compiles clean and

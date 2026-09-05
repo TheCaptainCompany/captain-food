@@ -289,6 +289,11 @@ pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
     // read at the WRITE door only — `revokeRestaurantAccess` never consumes it (absent here on
     // purpose, the `RestrictRider`/`ReinstateRider` asymmetry).
     ("GrantRestaurantAccess", "RUN_MEMBER_ACCESS_GRANT", "run_member_access_grant"),
+    // #639 part C step 6-ii (ADR-20260905-101349 §6): the member sign-in door's release gate,
+    // read at BOTH mutation handlers (unlike the grant door's asymmetry) -- OFF refuses before
+    // the identity provider is touched at all.
+    ("RequestMemberSignInLink", "RUN_MEMBER_SIGN_IN_DOOR", "run_member_sign_in_door"),
+    ("ConfirmMemberSignIn", "RUN_MEMBER_SIGN_IN_DOOR", "run_member_sign_in_door"),
 ];
 
 /// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
@@ -376,6 +381,14 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         }
         "ConfirmRiderSignIn" => {
             format!("crate::commands::{}(&bed.store, &bed.identity, &bed.riders, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor()).await", snake)
+        }
+        // The member sign-in door (#639 part C step 6-ii): the email transposition of the rider
+        // pair, plus the door gate both handlers consume (unlike the grant door's asymmetry).
+        "RequestMemberSignInLink" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, cmd, &support::actor(), run_member_sign_in_door).await", snake)
+        }
+        "ConfirmMemberSignIn" => {
+            format!("crate::commands::{}(&bed.store, &bed.identity, &bed.members, &bed.auth_sessions, bed.support_contact.0.as_ref(), cmd, None, &support::actor(), run_member_sign_in_door).await", snake)
         }
         _ => format!("crate::commands::{}(&bed.store, cmd, &support::actor()).await", snake),
     }
@@ -685,6 +698,26 @@ pub(crate) fn emit_behaviour_tests(model: &Model) -> String {
                     call = call.replace(
                         ", None, &support::actor()",
                         ", Some(sc::SessionId(support::uid(\"session-1\"))), &support::actor()",
+                    );
+                }
+            }
+            // The member confirm's session is ENVELOPE data too (#639 part C step 6-ii) -- the
+            // SAME shape as ConfirmRiderSignIn, withheld only for its own missing-session case.
+            if msg == "ConfirmMemberSignIn" {
+                let refuses_without_session = t
+                    .get("thrown")
+                    .and_then(|x| x.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.get("$ref").and_then(|x| x.as_str()))
+                            .filter_map(ref_name)
+                            .any(|name| name == "MemberSignInRequiresSession")
+                    })
+                    .unwrap_or(false);
+                if !refuses_without_session {
+                    call = call.replace(
+                        ", None, &support::actor(), run_member_sign_in_door)",
+                        ", Some(sc::SessionId(support::uid(\"session-1\"))), &support::actor(), run_member_sign_in_door)",
                     );
                 }
             }

@@ -942,6 +942,81 @@ keys:
       equality as its precondition.
 
 
+  # --- The email send-abuse wall (#639 part C step 6-ii, ADR-20260905-101349 §9) -------------------
+  # `identity.send_email_magic_link` is the ONE way anything in this product sends a magic-link
+  # email (RequestEmailVerification AND RequestMemberSignInLink both call it), so the guard lives
+  # AT that seam and protects both callers uniformly -- the same placement choice SMS made
+  # (`send_phone_otp` guards RequestPhoneVerification and RequestRiderSignInCode alike). Platform
+  # key, not scope-owned, for the same reason: two scopes already call the one port it guards.
+  # `UNVERIFIED input` (ADR-20260817-105845): these numbers MIRROR the SMS defaults verbatim --
+  # nobody has costed an email-send abuse ceiling, and email carries no direct per-message price
+  # the way a prepaid SMS credit pack does, so "mirror the phone numbers and say so" is the honest
+  # placeholder rather than a derived figure.
+  EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR:
+    type: int
+    default: 3
+    gates: >
+      UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_NUMBER_PER_HOUR verbatim). Magic-link sends
+      allowed to ONE canonical email address per rolling hour. Exceeding it is
+      `errors.yaml#/RateLimited`.
+
+  EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY:
+    type: int
+    default: 5
+    gates: >
+      UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_NUMBER_PER_DAY verbatim). The daily backstop
+      beside the hourly cap above -- exceeding it is `errors.yaml#/VerificationSendLimitReached`.
+
+  EMAIL_MAX_SENDS_PER_DAY_GLOBAL:
+    type: int
+    default: 200
+    gates: >
+      UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_DAY_GLOBAL verbatim, itself "a deliberately
+      conservative guess, not a costed number"). Total magic-link sends allowed platform-wide per
+      rolling day, across every address and every caller of `send_email_magic_link`. Once spent,
+      every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` --
+      turning real requests away is a correct trade against runaway sending-domain reputation
+      damage, but only because the refusal is loud
+      (`email_send_refused_total{reason=global_ceiling}`, logged at ERROR).
+
+  EMAIL_QUOTA_KEY_HMAC_SECRET:
+    type: string
+    secret: true
+    required: [staging, production]
+    gates: >
+      Round 3 R3-2 (legal, small): round 2's prose CLAIMED this key was "required" in
+      staging/production without declaring it, so nothing enforced it -- `required:` below is what
+      makes that true (`Config::resolve()` reports it MISSING and `must_stop_on_problems()` exits
+      78 before the router binds, `crates/server/src/main.rs:~45`). Art. 5(1)(e) storage
+      limitation: the per-address send-abuse buckets above are enforced against a row keyed by the
+      address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that
+      table a second, unbounded store of personal data with no retention story of its own, so the
+      key is HMAC-SHA256(address) with this secret, never the address itself. Unset in
+      development/test, a fixed DEV-ONLY key is used (`application::email_guard::
+      DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever
+      reaches that table without this key set. Unset in staging/production, boot STOPS instead:
+      the founder's admin-gated provisioning of this secret is the named precondition (PR #899's
+      round-2 note), not resolved by this change -- the manifests' `secretKeyRef` has existed since
+      round 2.
+    deploy:
+      from_secret:
+        production: EMAIL_QUOTA_KEY_HMAC_SECRET
+        staging: EMAIL_QUOTA_KEY_HMAC_SECRET
+
+  GRAPHQL_LIMIT_HEADROOM_PERCENT:
+    type: int
+    default: 50
+    gates: >
+      UNVERIFIED input (ADR-20260905-101349 §9): the per-role GraphQL depth/complexity ceiling is
+      `codegen-emitted max x (100 + this) / 100` -- the emitted max is the deepest/most complex
+      GENERATED client document that role's screens actually bind
+      (`tools/codegen-rs`'s `graphql-limits` emitter over `crates/web/src/generated/data_layer.rs`'s
+      `ResolverKey::selection()`), and this percentage is the safety margin above that observed
+      real traffic before a request is refused. 50% is a round, unresearched starting margin --
+      wide enough that an ordinary screen fragment addition does not immediately trip the ratchet,
+      narrow enough that an order-of-magnitude pathological query still refuses. Never a
+      public-only limit: it applies to the ceiling computed for EVERY role.
+
 retention_windows:
 
   FRENCH_COMMERCIAL_BOOKS_10Y:

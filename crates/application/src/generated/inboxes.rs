@@ -3108,8 +3108,12 @@ impl RestaurantAccountInbox {
 /// green and surfaced as a `FAILED "unroutable command type"` row in production.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RestaurantMembershipInbox {
+    /// COMMAND `ConfirmMemberSignIn`.
+    ConfirmMemberSignIn(domain::generated::commands::ConfirmMemberSignIn),
     /// COMMAND `GrantRestaurantAccess`.
     GrantRestaurantAccess(domain::generated::commands::GrantRestaurantAccess),
+    /// COMMAND `RequestMemberSignInLink`.
+    RequestMemberSignInLink(domain::generated::commands::RequestMemberSignInLink),
     /// COMMAND `RevokeRestaurantAccess`.
     RevokeRestaurantAccess(domain::generated::commands::RevokeRestaurantAccess),
 }
@@ -3121,7 +3125,7 @@ impl RestaurantMembershipInbox {
 
     /// Every message type this actor DECLARES it receives, in emission order — the
     /// operator-facing answer to "is this row's type one we know?" without constructing a value.
-    pub const DECLARED: &'static [&'static str] = &["GrantRestaurantAccess", "RevokeRestaurantAccess"];
+    pub const DECLARED: &'static [&'static str] = &["ConfirmMemberSignIn", "GrantRestaurantAccess", "RequestMemberSignInLink", "RevokeRestaurantAccess"];
 
     /// Parse one wire `(message_type, payload)` pair into this actor's inbox. The ONLY
     /// fallible edge of the typed dispatch path: past it the router matches a closed enum.
@@ -3135,11 +3139,25 @@ impl RestaurantMembershipInbox {
         payload: &serde_json::Value,
     ) -> Result<Self, InboxParseError> {
         match message_type {
+            "ConfirmMemberSignIn" => serde_json::from_value::<domain::generated::commands::ConfirmMemberSignIn>(payload.clone())
+                .map(Self::ConfirmMemberSignIn)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "ConfirmMemberSignIn",
+                    detail: e.to_string(),
+                }),
             "GrantRestaurantAccess" => serde_json::from_value::<domain::generated::commands::GrantRestaurantAccess>(payload.clone())
                 .map(Self::GrantRestaurantAccess)
                 .map_err(|e| InboxParseError::Payload {
                     actor_type: Self::ACTOR_TYPE,
                     message_type: "GrantRestaurantAccess",
+                    detail: e.to_string(),
+                }),
+            "RequestMemberSignInLink" => serde_json::from_value::<domain::generated::commands::RequestMemberSignInLink>(payload.clone())
+                .map(Self::RequestMemberSignInLink)
+                .map_err(|e| InboxParseError::Payload {
+                    actor_type: Self::ACTOR_TYPE,
+                    message_type: "RequestMemberSignInLink",
                     detail: e.to_string(),
                 }),
             "RevokeRestaurantAccess" => serde_json::from_value::<domain::generated::commands::RevokeRestaurantAccess>(payload.clone())
@@ -3159,7 +3177,9 @@ impl RestaurantMembershipInbox {
     /// The wire `message_type` this value came from — a total projection of the variant set.
     pub fn message_type(&self) -> &'static str {
         match self {
+            Self::ConfirmMemberSignIn(_) => "ConfirmMemberSignIn",
             Self::GrantRestaurantAccess(_) => "GrantRestaurantAccess",
+            Self::RequestMemberSignInLink(_) => "RequestMemberSignInLink",
             Self::RevokeRestaurantAccess(_) => "RevokeRestaurantAccess",
         }
     }
@@ -3167,7 +3187,9 @@ impl RestaurantMembershipInbox {
     /// The message kind — a total projection of the variant set.
     pub fn kind(&self) -> InboxKind {
         match self {
+            Self::ConfirmMemberSignIn(_) => InboxKind::Command,
             Self::GrantRestaurantAccess(_) => InboxKind::Command,
+            Self::RequestMemberSignInLink(_) => InboxKind::Command,
             Self::RevokeRestaurantAccess(_) => InboxKind::Command,
         }
     }

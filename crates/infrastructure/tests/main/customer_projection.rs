@@ -10,7 +10,8 @@ use application::generated::services::{
     IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput, IdentityService,
     IdentityVerifyEmailTokenInput, IdentityVerifyEmailTokenOutput, IdentityVerifyPhoneOtpInput,
     IdentityVerifyPhoneOtpOutput, IdentityRefreshSessionInput, IdentityRefreshSessionOutput,
-    IdentityStampCustomerClaimInput, IdentityStampRiderClaimInput, ServiceCallMeta,
+    IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput, IdentityStampRiderClaimInput,
+    ServiceCallMeta,
 };
 use application::ports::Actor;
 use application::queries::CustomerReadRepository;
@@ -89,6 +90,14 @@ impl IdentityService for AlwaysVerifiedAuth {
         _meta: &ServiceCallMeta,
     ) -> Result<IdentityVerifyEmailTokenOutput, DomainError> {
         Err(DomainError::rejected("InvalidVerificationToken", serde_json::json!({})))
+    }
+
+    async fn stamp_member_claim(
+        &self,
+        _input: IdentityStampMemberClaimInput,
+        _meta: &ServiceCallMeta,
+    ) -> Result<(), DomainError> {
+        Ok(())
     }
 }
 

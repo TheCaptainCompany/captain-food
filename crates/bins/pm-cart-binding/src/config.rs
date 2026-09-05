@@ -274,6 +274,16 @@ pub struct Config {
     pub route_credit_grant_through_lane: bool,
     /// DEFAULT `false`. The delivery-completion routing (#807, ADR-20260829-230418 as corrected by ADR-20260831-093000). ON, DeliveryDispatchProcess stops CALLING the MarkOrderDelivered handler in-process and instead stages a COMMAND lane enqueue that the runner's fenced leg transaction turns into an inbound_messages row; the Order's own lane worker then runs the command and appends OrderDelivered. OFF is today's behaviour byte for byte: the saga writes Order-{id} itself, from the delivery scope, with no transaction and no lane. ONE key for BOTH completion legs, and that is not a fused flag. DeliveryStatusUpdated (a partner's terminal DELIVERED report) and DeliveryCompleted (an independent rider's completion) are two TRIGGERS for the SAME route: the same command to the same aggregate from the same process manager. A route's identity is the (message, target) pair -- it is one `Route::MarkOrderDeliveredToOrder` variant and one ROUTED_LANES row -- so two keys here could not be honoured by anything, and the per-route independence ADR-20260829-230418 C3 protects is independence between UNRELATED routes, which these two legs are not. What flipping it CHANGES: (a) the closure gains one lane hop of latency after the completion is reported, so the order shows DELIVERED a beat later; (b) the ENVELOPE changes -- user_id/ user_type and cause_id come from the mailbox row rather than the saga's system actor, and stored rows are NEVER backfilled; (c) the Order's writer is serialized by its own lane, so a completion racing any other Order write no longer resolves by optimistic version conflict; (d) a rejection -- notably the terminal-status rejection that stops a cancelled order being resurrected -- lands a REJECTED verdict on a supervisable row instead of a Skipped outcome. DOUBLE-CLOSE SAFETY IMPROVES: the routed door is keyed on the ROUTE plus the ORDER's id, so if both a partner report and a rider completion arrive for one order the second is absorbed at the door, where today it reaches the aggregate and is refused by the status invariant. (e) A LEGAL-SURFACE CONSEQUENCE, and the reason this key is not a pure plumbing flip: a successful COMMAND-door delivery ARMS THE DECLARED `schedules:`. `actors.yaml` declares MarkOrderDelivered -> OrderExpired, the ORDER RETENTION CLOCK (`ORDER_RETENTION_WINDOW_DAYS`, `reschedule: in-place`, set against FRENCH_COMMERCIAL_BOOKS_10Y), and the delivery glue applies a delivered message's schedules inside the completion transaction for COMMAND rows exactly as for recorded facts. Today the saga's in-process arm creates no mailbox row at all, so it arms nothing: a delivery completed by a PARTNER's DELIVERED report or by an INDEPENDENT RIDER's completion starts NO retention clock, while the same order closed through the `markOrderDelivered` mutation does -- the two paths to the same business fact have different retention behaviour, and only the operator-driven one is covered. Flipping this key ON puts both saga legs on the same footing as the mutation. That is a GDPR-relevant improvement rather than a regression, and it is named here because the flip decision is made from this text: an order whose retention clock was never armed is an order nothing will ever expire. ROLLBACK IS A FLIP, NOT A REDEPLOY. Flipping the default is a SEPARATE recorded decision, after smoke; the legacy arm is deleted in a SEPARATE change again, with golden payload equality as its precondition.
     pub route_order_delivery_completion_through_lane: bool,
+    /// DEFAULT `3`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_NUMBER_PER_HOUR verbatim). Magic-link sends allowed to ONE canonical email address per rolling hour. Exceeding it is `errors.yaml#/RateLimited`.
+    pub email_max_sends_per_address_per_hour: i64,
+    /// DEFAULT `5`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_NUMBER_PER_DAY verbatim). The daily backstop beside the hourly cap above -- exceeding it is `errors.yaml#/VerificationSendLimitReached`.
+    pub email_max_sends_per_address_per_day: i64,
+    /// DEFAULT `200`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_DAY_GLOBAL verbatim, itself "a deliberately conservative guess, not a costed number"). Total magic-link sends allowed platform-wide per rolling day, across every address and every caller of `send_email_magic_link`. Once spent, every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` -- turning real requests away is a correct trade against runaway sending-domain reputation damage, but only because the refusal is loud (`email_send_refused_total{reason=global_ceiling}`, logged at ERROR).
+    pub email_max_sends_per_day_global: i64,
+    /// Round 3 R3-2 (legal, small): round 2's prose CLAIMED this key was "required" in staging/production without declaring it, so nothing enforced it -- `required:` below is what makes that true (`Config::resolve()` reports it MISSING and `must_stop_on_problems()` exits 78 before the router binds, `crates/server/src/main.rs:~45`). Art. 5(1)(e) storage limitation: the per-address send-abuse buckets above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that table a second, unbounded store of personal data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret, never the address itself. Unset in development/test, a fixed DEV-ONLY key is used (`application::email_guard:: DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever reaches that table without this key set. Unset in staging/production, boot STOPS instead: the founder's admin-gated provisioning of this secret is the named precondition (PR #899's round-2 note), not resolved by this change -- the manifests' `secretKeyRef` has existed since round 2.
+    pub email_quota_key_hmac_secret: String,
+    /// DEFAULT `50`. UNVERIFIED input (ADR-20260905-101349 §9): the per-role GraphQL depth/complexity ceiling is `codegen-emitted max x (100 + this) / 100` -- the emitted max is the deepest/most complex GENERATED client document that role's screens actually bind (`tools/codegen-rs`'s `graphql-limits` emitter over `crates/web/src/generated/data_layer.rs`'s `ResolverKey::selection()`), and this percentage is the safety margin above that observed real traffic before a request is refused. 50% is a round, unresearched starting margin -- wide enough that an ordinary screen fragment addition does not immediately trip the ratchet, narrow enough that an order-of-magnitude pathological query still refuses. Never a public-only limit: it applies to the ceiling computed for EVERY role.
+    pub graphql_limit_headroom_percent: i64,
     /// DEFAULT `+33,+32,+41,+44,+49,+34,+39`. Comma-separated `DialingCode` allowlist for OTP delivery — EXACT membership, never a prefix match (a prefix test passes '+337…' and is not an allowlist). A number whose code is absent, or which cannot be parsed at all, is refused with `errors.yaml#/PhoneCountryNotServed` and NOTHING is handed to the sender (fail-closed). WHY THIS SET — A CALLING CODE IS NOT A DESTINATION. V0 serves Tours, so '+33' is the traffic; the rest cover Tours's international students and Loire-valley tourists, a real single-digit share of signups a '+33'-only list would refuse for no additional protection. Before WIDENING this list, the question is what a send to EVERY territory the code reaches pays, because the attacker picks the territory and we pay its rate: '+1' is deliberately ABSENT (#535) since it reaches every NANP territory — twenty-odd Caribbean and Pacific jurisdictions with their own operators and rates, including the premium ranges this allowlist exists to exclude, all billed as if they were a Boston number; '+44' also reaches Guernsey, Jersey and the Isle of Man (separate telecom jurisdictions, own operators, commonly rated apart from the GB mainland); '+41' is a COST line rather than a fraud one, Swiss termination being among Europe's more expensive under a prepaid credit pack; '+33' is clean BECAUSE the French overseas territories carry their own codes ('+262', '+590', '+596', '+594', '+687', '+689', '+508'), so DOM-TOM is already unreachable and would be a separate deliberate addition. Serving North America would be a market decision, and its shape is region resolution via a libphonenumber-class dependency — never a hand-maintained NANP area-code table, which NANPA reassignments stale several times a year (ADR-20260813-021500, amended by #535). Unset, the default above applies. Set it to '+33' alone to harden further; there is no value that disables the check.
     pub sms_allowed_dialing_codes: String,
     /// DEFAULT `3`. OTP sends allowed to ONE canonical phone number per rolling hour. 3 covers the real fumbling customer (one send plus one or two resends); beyond that a further SMS is not what fixes their problem. Exceeding it is `errors.yaml#/RateLimited`, carrying the remaining window so the screen renders the server's countdown rather than guessing one.
@@ -454,6 +464,15 @@ impl Config {
             .or_else(|| baked("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", profile).map(str::to_string))
             .map(|v| parse_bool("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", &v, false))
             .unwrap_or(false);
+        let email_max_sends_per_address_per_hour = raw("EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3);
+        let email_max_sends_per_address_per_day = raw("EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
+        let email_max_sends_per_day_global = raw("EMAIL_MAX_SENDS_PER_DAY_GLOBAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(200);
+        let email_quota_key_hmac_secret = raw("EMAIL_QUOTA_KEY_HMAC_SECRET");
+        if email_quota_key_hmac_secret.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
+            problems.missing.push(MissingKey { name: "EMAIL_QUOTA_KEY_HMAC_SECRET", gates: "Round 3 R3-2 (legal, small): round 2's prose CLAIMED this key was \"required\" in staging/production without declaring it, so nothing enforced it -- `required:` below is what makes that true (`Config::resolve()` reports it MISSING and `must_stop_on_problems()` exits 78 before the router binds, `crates/server/src/main.rs:~45`). Art. 5(1)(e) storage limitation: the per-address send-abuse buckets above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that table a second, unbounded store of personal data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret, never the address itself. Unset in development/test, a fixed DEV-ONLY key is used (`application::email_guard:: DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever reaches that table without this key set. Unset in staging/production, boot STOPS instead: the founder's admin-gated provisioning of this secret is the named precondition (PR #899's round-2 note), not resolved by this change -- the manifests' `secretKeyRef` has existed since round 2." });
+        }
+        let email_quota_key_hmac_secret = email_quota_key_hmac_secret.unwrap_or_default();
+        let graphql_limit_headroom_percent = raw("GRAPHQL_LIMIT_HEADROOM_PERCENT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(50);
         let sms_allowed_dialing_codes = raw("SMS_ALLOWED_DIALING_CODES");
         let sms_allowed_dialing_codes = sms_allowed_dialing_codes.unwrap_or_else(|| "+33,+32,+41,+44,+49,+34,+39".to_string());
         let sms_max_sends_per_number_per_hour = raw("SMS_MAX_SENDS_PER_NUMBER_PER_HOUR").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3);
@@ -574,6 +593,11 @@ impl Config {
                 route_cart_bind_through_lane,
                 route_credit_grant_through_lane,
                 route_order_delivery_completion_through_lane,
+                email_max_sends_per_address_per_hour,
+                email_max_sends_per_address_per_day,
+                email_max_sends_per_day_global,
+                email_quota_key_hmac_secret,
+                graphql_limit_headroom_percent,
                 sms_allowed_dialing_codes,
                 sms_max_sends_per_number_per_hour,
                 sms_max_sends_per_number_per_day,
@@ -658,6 +682,11 @@ impl Config {
         out.push_str(&format!("  ROUTE_CART_BIND_THROUGH_LANE = {}\n", self.route_cart_bind_through_lane));
         out.push_str(&format!("  ROUTE_CREDIT_GRANT_THROUGH_LANE = {}\n", self.route_credit_grant_through_lane));
         out.push_str(&format!("  ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE = {}\n", self.route_order_delivery_completion_through_lane));
+        out.push_str(&format!("  EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR = {}\n", self.email_max_sends_per_address_per_hour));
+        out.push_str(&format!("  EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY = {}\n", self.email_max_sends_per_address_per_day));
+        out.push_str(&format!("  EMAIL_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.email_max_sends_per_day_global));
+        out.push_str(&format!("  EMAIL_QUOTA_KEY_HMAC_SECRET = {}\n", if self.email_quota_key_hmac_secret.is_empty() { "unset" } else { "set" }));
+        out.push_str(&format!("  GRAPHQL_LIMIT_HEADROOM_PERCENT = {}\n", self.graphql_limit_headroom_percent));
         out.push_str(&format!("  SMS_ALLOWED_DIALING_CODES  = {}\n", self.sms_allowed_dialing_codes));
         out.push_str(&format!("  SMS_MAX_SENDS_PER_NUMBER_PER_HOUR = {}\n", self.sms_max_sends_per_number_per_hour));
         out.push_str(&format!("  SMS_MAX_SENDS_PER_NUMBER_PER_DAY = {}\n", self.sms_max_sends_per_number_per_day));
@@ -677,7 +706,7 @@ impl Config {
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 60;
+pub const KEY_COUNT: usize = 65;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -728,6 +757,11 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ROUTE_CART_BIND_THROUGH_LANE",
     "ROUTE_CREDIT_GRANT_THROUGH_LANE",
     "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
+    "EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR",
+    "EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY",
+    "EMAIL_MAX_SENDS_PER_DAY_GLOBAL",
+    "EMAIL_QUOTA_KEY_HMAC_SECRET",
+    "GRAPHQL_LIMIT_HEADROOM_PERCENT",
     "SMS_ALLOWED_DIALING_CODES",
     "SMS_MAX_SENDS_PER_NUMBER_PER_HOUR",
     "SMS_MAX_SENDS_PER_NUMBER_PER_DAY",

@@ -42,9 +42,11 @@ fn deps_over(pool: &PgPool, enforce_acceptance_timeout: bool) -> CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
         // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
+        members: Arc::new(infrastructure::PgMemberRepository::new(pool.clone())),
         support_contact: None,
         run_rider_restriction_door: false,
         run_member_access_grant: false,
+        run_member_sign_in_door: false,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(PgAuthSubjectReservationRepository::new(pool.clone())),

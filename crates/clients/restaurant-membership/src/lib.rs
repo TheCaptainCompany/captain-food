@@ -30,7 +30,9 @@ mod sealed {
     pub trait Sealed {}
 }
 
+impl sealed::Sealed for domain::generated::commands::ConfirmMemberSignIn {}
 impl sealed::Sealed for domain::generated::commands::GrantRestaurantAccess {}
+impl sealed::Sealed for domain::generated::commands::RequestMemberSignInLink {}
 impl sealed::Sealed for domain::generated::commands::RevokeRestaurantAccess {}
 
 /// GENERATED from actors.yaml `RestaurantMembership.receives`: marker for every COMMAND the `RestaurantMembership` actor
@@ -41,8 +43,16 @@ pub trait RestaurantMembershipCommand: sealed::Sealed + serde::Serialize + Send 
     const MESSAGE_TYPE: &'static str;
 }
 
+impl RestaurantMembershipCommand for domain::generated::commands::ConfirmMemberSignIn {
+    const MESSAGE_TYPE: &'static str = "ConfirmMemberSignIn";
+}
+
 impl RestaurantMembershipCommand for domain::generated::commands::GrantRestaurantAccess {
     const MESSAGE_TYPE: &'static str = "GrantRestaurantAccess";
+}
+
+impl RestaurantMembershipCommand for domain::generated::commands::RequestMemberSignInLink {
+    const MESSAGE_TYPE: &'static str = "RequestMemberSignInLink";
 }
 
 impl RestaurantMembershipCommand for domain::generated::commands::RevokeRestaurantAccess {

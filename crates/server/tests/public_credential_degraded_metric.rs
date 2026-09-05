@@ -194,5 +194,6 @@ fn claim_only_sources() -> server::IdentitySources {
     server::IdentitySources {
         customer: server::CustomerIdentitySource::Claim,
         rider: server::RiderIdentitySource::new(std::sync::Arc::new(NoRiderRows)),
+        member: server::MemberIdentitySource::new(std::sync::Arc::new(server::NoDatabaseMemberIdentity)),
     }
 }

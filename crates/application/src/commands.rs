@@ -38,7 +38,7 @@ use domain::generated::commands::{
     UpdateCatalogCategory, UpdateCustomerInfo, UpdateOfferStock, UpdateOptionList, UpdateProduct,
     UpdateRestaurant, UpdateRestaurantAccount, UpdateRestaurantGoogleBusinessProfile, VerifyPhone,
     VerifyGoogleBusinessProfileOrderLink,
-    GrantRestaurantAccess, RevokeRestaurantAccess,
+    GrantRestaurantAccess, RevokeRestaurantAccess, RequestMemberSignInLink, ConfirmMemberSignIn,
 };
 use domain::generated::entities::{CheckoutSnapshot, Money, PaymentBreakdown, Product, Stock};
 use domain::generated::events::{
@@ -152,12 +152,12 @@ use domain::generated::events::{CustomerCreditConsumed, CustomerCreditGranted};
 
 use crate::generated::services::{
     IdentityRefreshSessionInput, IdentitySendEmailMagicLinkInput, IdentitySendPhoneOtpInput,
-    IdentityService, IdentityStampCustomerClaimInput, IdentityStampRiderClaimInput,
-    IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput, PaymentRequestInput,
-    PaymentRequestOutput, PaymentService, ServiceCallMeta,
+    IdentityService, IdentityStampCustomerClaimInput, IdentityStampMemberClaimInput,
+    IdentityStampRiderClaimInput, IdentityVerifyEmailTokenInput, IdentityVerifyPhoneOtpInput,
+    PaymentRequestInput, PaymentRequestOutput, PaymentService, ServiceCallMeta,
 };
 use crate::pm_state::{PaymentProcessRow, PaymentProcessStateStore};
-use crate::queries::{CatalogReadRepository, OfferView};
+use crate::queries::{CatalogReadRepository, MemberIdentityRepository, OfferView};
 use crate::repository::Repository;
 
 // The mechanical "require + guard + append" lifecycle handlers are GENERATED from the specs
@@ -3980,6 +3980,149 @@ pub async fn confirm_rider_sign_in(
         })
         .await?;
     Ok(())
+}
+
+// ─── The member sign-in door (#639 part C step 6-ii, PROP-20260831-180622, ADR-20260905-101349 §7-§10) ─
+// The email-magic-link transposition of the rider door's phone-OTP pair (step 2c-i). IDENTIFY-ONLY,
+// never register: a verified email with no `Member` behind it is REFUSED and creates nothing --
+// which is exactly why `RequestEmailVerification` (register-or-identify shaped for the customer)
+// is not reused with a wider roles list.
+
+/// Handle `commands.yaml#/RequestMemberSignInLink` — a pure EFFECT (actors.yaml: emits nothing):
+/// delegate the email magic-link send to the wrapped auth provider, exactly as
+/// [`request_email_verification`] does. It NEVER consults the `Member` bridge, so the outcome is
+/// identical for a roster address and a stranger's (no enumeration oracle). Gated
+/// (`RUN_MEMBER_SIGN_IN_DOOR`, §F): OFF refuses BEFORE the identity provider is touched at all.
+pub async fn request_member_sign_in_link(
+    _store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    cmd: RequestMemberSignInLink,
+    actor: &Actor,
+    run_member_sign_in_door: bool,
+) -> Result<(), DomainError> {
+    if !run_member_sign_in_door {
+        return Err(reject("MemberSignInDoorClosed", json!({})));
+    }
+    auth.send_email_magic_link(
+        IdentitySendEmailMagicLinkInput { email: cmd.email, locale: cmd.locale },
+        &ServiceCallMeta::new(actor.correlation_id),
+    )
+    .await
+}
+
+/// Handle `commands.yaml#/ConfirmMemberSignIn` — IDENTIFY-ONLY, never register (the whole reason
+/// a `VerifyPhone`-shaped register-or-identify command is not reused, ADR-20260818-101500). The
+/// magic-link token is verified through the identity port; the proved subject is looked up
+/// through the `Member` read model's bridge (`auth_subject -> member_id`, the step-6-i port); no
+/// member -> `MemberNotLinked` naming the support route, NOTHING is stamped, but the session is
+/// STILL parked (so the not-yet-linked refusal screen can offer a real "Se déconnecter"); a
+/// member -> the MEMBER role claim is stamped (`identity.stamp_member_claim`, `{ role: MEMBER }`
+/// and nothing else), the session is rotated so the token carries it, and that POST-STAMP session
+/// is parked for `POST /auth/session` (the credential is never in the GraphQL response). Emits no
+/// event. Gated (`RUN_MEMBER_SIGN_IN_DOOR`, §F): OFF refuses BEFORE the identity provider is
+/// touched at all.
+///
+/// Two refusals come BEFORE the token is spent, so a correct retry still has its link: the door
+/// gate, and no `X-SESSION-ID` on the request (`MemberSignInRequiresSession`, the rider door's
+/// #852 B1 precedent) -- the parked credential is owned by that session, and the store's
+/// both-`None` claim is another channel's contract, so this door never parks without an owner.
+pub async fn confirm_member_sign_in(
+    _store: &dyn EventStore,
+    auth: &dyn IdentityService,
+    members: &dyn MemberIdentityRepository,
+    sessions: &dyn crate::auth_sessions::AuthSessionStore,
+    // `configuration.yaml#/SUPPORT_CONTACT`, resolved ONCE at the composition root (required, no
+    // default). `None` is the development-only unset case.
+    support_contact: Option<&EmailAddress>,
+    cmd: ConfirmMemberSignIn,
+    // Envelope data, not command payload (ADR-0041): the dispatch-layer X-SESSION-ID that owns the
+    // parked session -- `POST /auth/session` claims it only from that same session.
+    session_id: Option<SessionId>,
+    actor: &Actor,
+    run_member_sign_in_door: bool,
+) -> Result<(), DomainError> {
+    if !run_member_sign_in_door {
+        return Err(reject("MemberSignInDoorClosed", json!({})));
+    }
+    // Fail CLOSED before spending the token, again (the #852 review's B1, mirrored here): the
+    // credential is parked for `POST /auth/session` under the OWNING X-SESSION-ID, and a session
+    // parked with no owner could be claimed by ANY header-less caller holding the messageId
+    // (which travels in spans and logs).
+    let Some(session_id) = session_id else {
+        return Err(reject("MemberSignInRequiresSession", json!({})));
+    };
+    // Round 2 R2-R3 (reviewer): moved ABOVE `verify_email_token` -- a misconfiguration must never
+    // burn the single-use link. `support_contact` is needed only for the `MemberNotLinked`
+    // refusal's context below, but checking it before the token is spent means a deploy missing
+    // `SUPPORT_CONTACT` fails the SAME way on every attempt (never "your one link is gone AND the
+    // deploy is broken").
+    let Some(support_contact) = support_contact else {
+        return Err(DomainError::Repository(
+            "SUPPORT_CONTACT unset -- the member sign-in door cannot name a support route, so it \
+             refuses (configuration.yaml#/SUPPORT_CONTACT: required, no default)"
+                .into(),
+        ));
+    };
+    let verified = auth
+        .verify_email_token(
+            IdentityVerifyEmailTokenInput { token: cmd.token.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    let auth_ref = verified.auth_ref.clone();
+
+    // IDENTIFY, through the read model's bridge. A verified email with no member behind it is
+    // refused with `MemberNotLinked` (fail-closed, §8.5's not-yet-linked screen) -- but the
+    // session is STILL parked below, unlike the rider door: an authenticated-but-unlinked person
+    // still needs a real cookie for "Se déconnecter" to mean something.
+    let member_id = members.member_id_by_auth_subject(auth_ref.clone()).await?;
+
+    if member_id.is_some() {
+        // STAMP → rotate → park (the #437 ordering): `{ role: MEMBER }` and nothing else. A
+        // subject already holding another claim object is refused by the stamper itself
+        // (`AuthSubjectHoldsAnotherRole`, fail closed, never an overwrite).
+        auth.stamp_member_claim(
+            IdentityStampMemberClaimInput { auth_ref: auth_ref.clone() },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    }
+
+    // The PRE-rotation tokens are never parked. No refresh token (a provider/mock without
+    // sessions) or no acceptance messageId (a direct handler call) means nothing to park.
+    let (Some(refresh_token), Some(message_id)) = (verified.refresh_token.clone(), actor.cause_id)
+    else {
+        tracing::warn!(
+            auth_ref = %auth_ref.0,
+            "member sign-in verified, but the provider returned no session to rotate -- nothing parked"
+        );
+        return if member_id.is_some() {
+            Ok(())
+        } else {
+            Err(reject("MemberNotLinked", json!({ "email": verified.email, "supportContact": support_contact })))
+        };
+    };
+    let rotated = auth
+        .refresh_session(
+            IdentityRefreshSessionInput { refresh_token },
+            &ServiceCallMeta::new(actor.correlation_id),
+        )
+        .await?;
+    sessions
+        .park(crate::auth_sessions::ParkedAuthSession {
+            message_id,
+            session_id: Some(session_id.0),
+            access_token: rotated.access_token,
+            refresh_token: rotated.refresh_token,
+            expires_in: rotated.expires_in,
+        })
+        .await?;
+
+    if member_id.is_some() {
+        Ok(())
+    } else {
+        Err(reject("MemberNotLinked", json!({ "email": verified.email, "supportContact": support_contact })))
+    }
 }
 
 /// Handle `commands.yaml#/RequestEmailVerification` — a pure EFFECT (emits nothing): reject an email

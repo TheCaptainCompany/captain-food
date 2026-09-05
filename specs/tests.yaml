@@ -798,6 +798,12 @@ fixtures:
   restaurantAccessRevoked:
     type: { $ref: 'events.yaml#/RestaurantAccessRevoked' }
     data: { membershipId: "membership-1", ground: "LEFT_THE_RESTAURANT" }
+  # #639 part C step 6-ii: a member bound to the fake identity's ONE-SUBJECT-ONE-ROLE sentinel
+  # login (behaviour_support::FakeIdentity's FAKE_CUSTOMER_STAMPED_SUBJECT) -- the collision
+  # fixture for ConfirmMemberSignIn, the riderRegisteredOnCustomerLogin precedent.
+  restaurantAccessGrantedOnCustomerLogin:
+    type: { $ref: 'events.yaml#/RestaurantAccessGranted' }
+    data: { membershipId: "membership-3", scopeType: "RESTAURANT", scopeId: "resto-1", principalKind: "MEMBER", memberId: "member-3", authSubject: "auth-supabase-customer", authority: "MANAGER", basis: "CAPTAIN_ONBOARDING" }
 
 # =====================================================================
 # Tests (Given / When / Then) — grouped by the actor under test
@@ -4314,6 +4320,143 @@ tests:
       data: { membershipId: "membership-1", ground: "ACCESS_NO_LONGER_NEEDED" }
     thrown:
       - { $ref: 'errors.yaml#/RestaurantMembershipAlreadyRevoked' }
+
+  # --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) ---------------
+  # The email transposition of the rider door's phone-OTP pair (2c-i). The fake identity's
+  # verify_email_token ALWAYS proves "auth-supabase-1" for any token except "bad-token" and
+  # "sb-magic-token-customer-login" (behaviour_support::FakeIdentity) -- so `restaurantAccessGranted`
+  # (authSubject "auth-supabase-1") is the linked fixture, exactly as `verify_email_token` proves it.
+
+  TestMemberRequestSignInLink:
+    name: "Sends an email magic link to a restaurateur's address; emits nothing"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/RequestMemberSignInLink' }
+      data: { email: "owner@pizzaroma.fr", locale: "fr-FR" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    then: []
+
+  # The enumeration property: a STRANGER's address gets the identical outcome -- the handler
+  # never asks the Member bridge, so nothing about roster membership can leak through this leg.
+  TestMemberRequestSignInLinkForStrangerIsIdentical:
+    name: "Sends an email magic link to an address on no roster, identically; emits nothing"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequestMemberSignInLink' }
+      data: { email: "stranger@example.com" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    then: []
+
+  TestMemberRequestSignInLinkDoorClosed:
+    name: "requestMemberSignInLink is refused by the door key while it is OFF (the production default), before the identity provider is touched"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInGatedBeforeStore' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/RequestMemberSignInLink' }
+      data: { email: "owner@pizzaroma.fr" }
+    thrown:
+      - { $ref: 'errors.yaml#/MemberSignInDoorClosed' }
+
+  # IDENTIFY-ONLY, the test to see red first: a verified email with no member behind it is
+  # refused and creates nothing -- the whole reason `VerifyPhone`-shaped register-or-identify is
+  # not reused (the rider door's `RiderNotRegistered` precedent, mirrored as `MemberNotLinked`).
+  TestMemberConfirmSignInUnknownEmailIsRejected:
+    name: "Refuses member sign-in for a verified email that no member is bound to; creates nothing"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given: []
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      data: { token: "sb-magic-token-unlinked" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    thrown:
+      - { $ref: 'errors.yaml#/MemberNotLinked' }
+
+  # Identify-only means the ACCEPTED outcome appends nothing -- that is all `then: []` proves. The
+  # stamp and the parked session are PORT effects the generated bed cannot assert; the transport
+  # door test in crates/server/tests/member_sign_in_door.rs carries those assertions.
+  TestMemberConfirmSignInIdentifies:
+    name: "Verifying the magic-link token for a bound member is accepted and appends nothing -- identify-only, never register"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      data: { token: "sb-magic-token-abc" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    then: []
+
+  TestMemberConfirmSignInInvalidTokenIsRejected:
+    name: "Rejects member sign-in when the magic-link token is invalid or expired"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      data: { token: "bad-token" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    thrown:
+      - { $ref: 'errors.yaml#/InvalidVerificationToken' }
+      - { $ref: 'errors.yaml#/VerificationCodeExpired' }
+
+  # The one-subject-one-role collision (PROP-20260831-180622 Concern `one-subject-one-role`): the
+  # login behind this token already carries a CUSTOMER claim, and the provider replaces the claim
+  # object wholesale -- so the sign-in is refused rather than the customer claim erased.
+  TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected:
+    name: "Refuses member sign-in when the verified login already holds another role's claim; overwrites nothing"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGrantedOnCustomerLogin' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      data: { token: "sb-magic-token-customer-login" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    thrown:
+      - { $ref: 'errors.yaml#/AuthSubjectHoldsAnotherRole' }
+
+  # The parked credential is owned by the request's X-SESSION-ID (envelope, ADR-0041) -- a KNOWN
+  # member with the RIGHT token, so the missing session is the only reason to refuse (the rider
+  # door's #852 B1 precedent).
+  TestMemberConfirmSignInWithoutSessionIsRejected:
+    name: "Refuses member sign-in when the request carries no session to own the parked credential; spends no token, parks nothing"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInIdentifiesOnly' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      data: { token: "sb-magic-token-abc" }
+      gates:
+        - { $ref: 'configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR' }
+    thrown:
+      - { $ref: 'errors.yaml#/MemberSignInRequiresSession' }
+
+  TestMemberConfirmSignInDoorClosed:
+    name: "confirmMemberSignIn is refused by the door key while it is OFF (the production default), before the identity provider is touched"
+    rules: [{ $ref: 'rules.yaml#/MemberSignInGatedBeforeStore' }]
+    actor: { $ref: 'actors.yaml#/RestaurantMembership' }
+    given:
+      - { $ref: '#/fixtures/restaurantAccessGranted' }
+    when:
+      type: { $ref: 'commands.yaml#/ConfirmMemberSignIn' }
+      data: { token: "sb-magic-token-abc" }
+    thrown:
+      - { $ref: 'errors.yaml#/MemberSignInDoorClosed' }
 
   # ----------------------- PlaceOrderProcess (error guards) ----------
   TestPaymentAuthorizationOrphanIsFlagged:

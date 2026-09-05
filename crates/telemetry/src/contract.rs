@@ -372,6 +372,41 @@ pub mod metric {
     /// `otp_send_guard_enforcing` inverted dead-man precedent. 1 while at least one watcher task is
     /// alive in this process, 0 the instant none is; re-asserted every export cycle.
     pub const RIDER_RESTRICTION_SOCKET_WATCH_LIVE: &str = "rider_restriction_socket_watch_live";
+
+    // --- member-sign-in (#639 part C step 6-ii, ADR-20260905-101349 §10) ------------------------
+
+    /// The MEMBER seam's own resolution histogram -- the `rider_identity_resolve_ms` shape.
+    pub const MEMBER_IDENTITY_RESOLVE_MS: &str = "member_identity_resolve_ms";
+    /// OBSERVE: no `Member` row (or no single restaurant scope) for the verified subject.
+    pub const MEMBER_IDENTITY_NOT_FOUND_TOTAL: &str = "member_identity_not_found_total";
+    /// PAGE: the seam could not be asked. `reason` is the coarse DomainError class.
+    pub const MEMBER_IDENTITY_LOOKUP_FAILED_TOTAL: &str = "member_identity_lookup_failed_total";
+    pub const MEMBER_IDENTITY_LOOKUP_SOURCE_TOTAL: &str = "member_identity_lookup_source_total";
+    /// `requestMemberSignInLink`'s outcome, attribute `result` (accepted | refused).
+    pub const MEMBER_SIGN_IN_LINK_REQUESTED_TOTAL: &str = "member_sign_in_link_requested_total";
+    /// `confirmMemberSignIn`'s outcome, attribute `result` (linked | not_linked | token_invalid |
+    /// token_expired | lookup_failed).
+    pub const MEMBER_SIGN_IN_CONFIRMED_TOTAL: &str = "member_sign_in_confirmed_total";
+    /// The MEMBER claim stamp (`identity.stamp_member_claim`) failed -- the
+    /// `rider_claim_stamp_failed_total` pattern under this contract's own name. Attribute `reason`
+    /// (not_configured | claim_conflict | provider_error).
+    pub const MEMBER_CLAIM_STAMP_FAILED_TOTAL: &str = "member_claim_stamp_failed_total";
+    /// Either mutation refused, attribute `reason` (bounded, never an email/token/messageId).
+    pub const MEMBER_SIGN_IN_REFUSED_TOTAL: &str = "member_sign_in_refused_total";
+    /// GATE LIVENESS (the `otp_send_guard_enforcing` shape): 1 while `RUN_MEMBER_SIGN_IN_DOOR`
+    /// enforces its refusal on a request, 0 the moment the composition root boots with the key OFF.
+    pub const MEMBER_SIGN_IN_DOOR_ENFORCING: &str = "member_sign_in_door_enforcing";
+
+    // --- graphql-limits (#639 part C step 6-ii, ADR-20260905-101349 §9) --------------------------
+
+    /// Refused BEFORE any resolver runs, attributes `role` + `reason` (depth | complexity).
+    pub const GRAPHQL_REQUEST_REJECTED_TOTAL: &str = "graphql_request_rejected_total";
+    /// The observed depth of every parsed document, attribute `role`.
+    pub const GRAPHQL_QUERY_DEPTH: &str = "graphql_query_depth";
+    /// The observed complexity (total selected field count) of every parsed document, attribute `role`.
+    pub const GRAPHQL_QUERY_COMPLEXITY: &str = "graphql_query_complexity";
+    /// The CONFIGURED ceiling this process enforces, attributes `role` + `kind` (depth | complexity).
+    pub const GRAPHQL_LIMIT_MAX: &str = "graphql_limit_max";
 }
 
 /// Values for `business.journal_status` — the contract comments them as

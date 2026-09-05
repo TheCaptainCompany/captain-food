@@ -1,0 +1,49 @@
+key: MEMBER-SIGN-IN-DOOR-PRECONDITIONS
+status: open
+question: 'What must exist before the member sign-in door (`requestMemberSignInLink` /
+  `confirmMemberSignIn`) is opened in production, now that step 6-ii lands the PUBLIC email
+  sign-in pair behind `RUN_MEMBER_SIGN_IN_DOOR`? Preconditions named (ADR-20260905-101349 §6/§13):
+  6-i merged (done -- the `RestaurantMembership` bridge and grant); the `/sign-in/return`
+  landing route binding `confirmMemberSignIn(token)` then `POST /auth/session` (LANDED round 2 of
+  6-ii -- without it the link opened from the mail client had no destination at all, ux: every
+  other precondition below could be met and the link would still land nowhere); a silent
+  `/auth/refresh` retry plus `?next=` return-to-screen in the web client BEFORE any
+  `unauthenticated:` bounce (#894-class, own issue -- the access cookie is one hour, and an
+  operator who 401s at 19:40 and waits on a fifteen-minute email link is the
+  paid-order-nobody-is-told-about failure in an auth costume); ADR-20260905-101349 §13''s "step 0"
+  GAP(journey) -- how a hand-provisioned restaurateur first learns the sign-in URL, unresolved and
+  named, not a code gap but a launch-communications one; email deliverability proven by a
+  hand-dispatched drill to a founder-held address (SPF/DKIM/DMARC on captain.food); the Supabase
+  DPA and region (founder''s, external); the legal/privacy page the not-yet-linked refusal screen
+  links (owner: the FOUNDER''s, external -- LCEN 6-III + Art. 13, publishing a legal/privacy page
+  is an external/legal act, no page exists yet, the SAME "founder''s, external" attribution as the
+  DPA/region and the SPF/DKIM/DMARC DNS items above -- round 2 R2-L1 corrected this row, which
+  previously named no owner at all); round 2 R2-L1 also names two Art. 13/Art. 30 items the row
+  omitted: Art. 13 information is owed AT COLLECTION, i.e. on the `sign_in` FORM itself (a
+  `gaps:` line on `back.yaml#/screens/sign_in`, not only on `not_linked`, since collection happens
+  the moment an address is typed and submitted, whether or not it turns out to be a roster
+  address); and an Art. 30 processing-register entry for the magic-link SEND naming its true
+  subject category -- "anyone who types an address" (member or not, since the no-enumeration-oracle
+  design sends a link before knowing), distinct from 6-i''s "staff access management" entry, which
+  covers only the bound Member population -- both grade (b), counsel to confirm which register
+  entry receives the send and whether a new one is needed; and
+  `MEMBER-ACCESS-GRANT-PRECONDITIONS` flipped FIRST (a sign-in door with no grant path behind it
+  is a refusal machine -- nobody a Tours restaurateur signs in AS exists until that row closes).
+  Flipping `RUN_MEMBER_SIGN_IN_DOOR` to true in production is the decision that closes this row.'
+owner: team
+opened: '2026-09-05'
+capacity: team
+register: docs/adr/ADR-20260905-101349-step-6-lands-in-four-slices-the-bridge-and-the-grant-first-the-door-second-and-the-accept-is-two-commands-in-two-lanes.md
+evidence: 'The RIDER-RESTRICTION-PRECONDITIONS / MEMBER-ACCESS-GRANT-PRECONDITIONS shape: a key
+  alone is not enough, prose and the deploy value can disagree unreconciled (the RUN_SIRENE_WORKER
+  lesson) -- so this row names the key AND the preconditions, and the codegen rule
+  `decision-row-open-key-must-be-off` refuses any production value other than "false" while the
+  row is open. Production is suspended (ADR-20260817-105844) -- this slice is "walkable end to end
+  on ONE database" (ADR-20260905-101349 §13), not reachable by a person in Tours, until that
+  decision is re-taken.'
+note: 'The key is consumed at BOTH mutation handlers: OFF refuses `requestMemberSignInLink` and
+  `confirmMemberSignIn` BEFORE the identity provider is touched, with the typed
+  `MemberSignInDoorClosed`. The public-graph limits (E, ADR-20260905-101349 §9) ride the SAME PR
+  but are NOT gated by this key -- they are a bound applied to every role''s schema, not a door,
+  and they discharge PROP-20260831-180622''s `public-graph-limits` Concern independently of this
+  row''s status.'

@@ -24,6 +24,7 @@ pub mod ports;
 pub mod queries;
 pub mod reminders;
 pub mod repository;
+pub mod email_guard;
 pub mod sms_guard;
 pub mod staging;
 

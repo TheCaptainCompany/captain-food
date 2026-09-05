@@ -85,6 +85,17 @@ actions:
   # PARTIAL_REFUND carries a nested Money `refundAmount` (built like the tip_order amount, #62).
   resolve_reclamation: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/resolveReclamation' } }
   reject_reclamation:  { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/rejectReclamation' } }
+  # The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) -- the ONE action
+  # on this surface that speaks to `/public/graphql` (`graphql_role: PUBLIC` on the `sign_in`
+  # screen that binds it).
+  request_member_sign_in_link: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/requestMemberSignInLink' } }
+  # Round 2 R2-D/R2-R2: bound here so codegen mints the `ActionKey` a hand-written screen can
+  # `actions::dispatch` directly -- `confirmMemberSignIn` is never rendered by an SDUI control
+  # (this DSL declares no `{{ query.* }}`/query-string binding grammar to extract the mail
+  # client's `?token=`), so `sign_in_return` (`sdui: false`, `crates/web/src/sign_in_return.rs`)
+  # calls it from Rust, the SAME `checkout.rs`/`HandWrittenScreen` shape.
+  confirm_member_sign_in: { kind: mutation, mutation: { $ref: 'api.yaml#/mutations/confirmMemberSignIn' } }
+  sign_out: { kind: auth, note: "Supabase Auth sign-out (out of domain, #94, unwired -- kind: auth renders ActionPlan::Disabled). Round 2 R2-U3: the not-yet-linked refusal's exit control uses `navigate` to `/sign-in` instead until #94 lands; this declaration is kept as the named target for that follow-up." }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GLOBAL CHROME — the staff top bar (shared across the four screens).
@@ -149,6 +160,37 @@ bottom_sheets:
           on_success: [{ type: close_sheet }]
       - { type: inline_error, id: resolve_issue_error, for_action: resolve_delivery_issue }
 
+  # The member sign-in door's confirmation panel (#639 part C step 6-ii, PROP-20260831-180622
+  # §8.1): opened on ACCEPTED (`request_member_sign_in_link`'s `on_success`), never a spinner and
+  # never `operationStatus` -- the handler emits nothing, so there is no event-sourced state to
+  # poll. Says the SAME thing whether or not the address is on the roster (no enumeration oracle).
+  member_sign_in_confirmation_sheet:
+    id: member_sign_in_confirmation_sheet
+    type: bottom_sheet
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.confirmation_title' }
+    # Round 2 R2-U1: was `drag_to_close: false` with no `close_sheet` control -- un-dismissable
+    # over the SAME screen's own form, so a typo'd address trapped the user with no way back to
+    # correct it. `drag_to_close: true` plus the explicit button below (belt-and-braces: a sheet
+    # opened by a mutation's `on_success` has no swipe affordance on every client).
+    drag_to_close: true
+    sections:
+      # Round 3 R3-1 (ux, BLOCKING; #870 class, `crates/web/src/renderer.rs:~1751`): round 2's
+      # comment above claimed the `{{ member_email.value }}` text node "echoes EXACTLY what
+      # `member_email` held when the mutation fired" -- false. A `text` node resolves at PAINT
+      # from RESOLVER data (`renderer.rs` `text_of` -> `RenderContext::lookup`); a form field's
+      # `.value` exists only at DISPATCH, for ACTION variables (`interact.rs:~251-272`), and
+      # `open_bottom_sheet` only toggles `hidden` -- there is no repaint that carries the typed
+      # value into this sheet's resolver context. The panel rendered the sentence followed by an
+      # EMPTY paragraph. `confirmation_body` is restored to the self-contained sentence ux
+      # accepted in round 1 (it never needed the address); the address node is removed rather than
+      # left to paint empty. See `gaps:` below on the `sign_in` screen for the real fix.
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.confirmation_body' } }
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.expiry_note' } }
+      # The 60s-delayed re-enable is the declared `gaps:` line on the `sign_in` screen (no timer
+      # primitive exists in this DSL); this control is always active.
+      - { type: text_button, id: member_resend_link, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.resend' }, action: { type: request_member_sign_in_link, variables: { email: "{{ member_email.value }}" }, loading_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.sending' } } }
+      - { type: text_button, id: member_sign_in_confirmation_close, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.close' }, action: { type: close_sheet } }
+
 # ──────────────────────────────────────────────────────────────────────────────
 # SCREENS
 # ──────────────────────────────────────────────────────────────────────────────
@@ -161,6 +203,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.orders.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [orders.byRestaurant]
     actions_used: [accept_order, reject_order, start_preparation, mark_order_ready, cancel_order_by_restaurant, change_order_acceptance]
     components:
@@ -209,6 +252,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.deliveries.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [deliveries.byRestaurant]
     # §25b (#745): `restaurantDeliveries` requires `restaurantId!` — the staff surface's own
     # tenant identity, an auth-context fact the paint loop has no source for (no param, no pin).
@@ -277,6 +321,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.refunds.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [refunds.pending]
     actions_used: [approve_refund, deny_refund]
     components:
@@ -300,6 +345,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.satisfaction.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [satisfaction.byRestaurant]
     # §25b (#745): same verdict as the deliveries board — `restaurantDeliverySatisfaction`
     # requires `restaurantId!`, an identity fact with no paint-time source on this route.
@@ -335,6 +381,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.chat.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [conversation.byOrder, internal_notes.byOrder]
     actions_used: [post_message, escalate_to_admin, mute_participant]
     components:
@@ -454,6 +501,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [reclamations.queue]
     components:
       - { component: staff_topbar }
@@ -500,6 +548,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.claims.resolve.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [reclamation.byId]
     actions_used: [resolve_reclamation, reject_reclamation]
     gaps:
@@ -582,6 +631,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.profile.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [restaurant.locations]
     # §25b (#745): `restaurantLocationsByAccount` requires `accountId!` — the signed-in account's
     # own identity, with no paint-time source on this route (an identity-context fact, and — per
@@ -661,6 +711,7 @@ screens:
     title: { $ref: 'restaurant_backoffice.translations.yaml#/back.storefront.title' }
     sdui: true
     requires_auth: true
+    unauthenticated: { type: navigate, route: "/sign-in" }
     data_requirements: [restaurant.locations]
     # §25b (#745): same verdict as the profile screen — `restaurantLocationsByAccount` requires
     # `accountId!` with no paint-time source (see that screen's declaration and the #618 note).
@@ -709,3 +760,95 @@ screens:
             restaurantId: "{{ restaurant.id }}"
             slug: "{{ slug_input.value }}"
       - { component: staff_nav }
+
+  # SCREEN — The member sign-in door (#639 part C step 6-ii; PROP-20260831-180622 §5 FORK 3 = R1,
+  # §8.1). The ONE screen on this surface that speaks to `/public/graphql` (`graphql_role: PUBLIC`):
+  # the one mutation it binds admits PUBLIC and nothing else, and the validator refuses the
+  # declaration if any bound operation would refuse that role
+  # (`screen-graphql-role-refused-operation`). Deliberately NOT `staff_topbar`/`staff_nav`: their
+  # controls (pause orders, the nav tabs) are RESTAURANT mutations/reads this screen's transport
+  # could never carry. The confirmation panel is a bottom sheet (the rider `sign_in` door's
+  # `on_success: open_bottom_sheet` shape) rather than a section "swap" -- the same rendered
+  # effect (the screen changes to the confirmation) through an established primitive.
+  - id: sign_in
+    roles: [PUBLIC]
+    route: "/sign-in"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.title' }
+    sdui: true
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [request_member_sign_in_link]
+    gaps:
+      - "The link-expiry countdown and the 60s-delayed 'Renvoyer un lien' re-enable (PROP-20260831-180622 §8.1) need a client-side timer/countdown primitive this DSL does not declare anywhere yet -- the resend control below is always active (calling the SAME identify-only action again is harmless: the wall is server-side, ADR-20260905-101349 §9) rather than a fake-disabled control that renders and does nothing."
+      - "Round 2 R2-L1 (legal, grade (b), counsel to confirm): Art. 13 information is owed AT COLLECTION -- the moment an address is typed and this form's mutation fires, whether or not it turns out to be a roster address (the no-enumeration-oracle design means Captain has already processed a non-member's address by the time any refusal could show it a notice). This screen carries no Art. 13 notice/link yet; MEMBER-SIGN-IN-DOOR-PRECONDITIONS names it as a precondition of the flip, not resolved here."
+      - "Round 3 R3-1 (ux, #870 class): the confirmation panel does not echo the typed address back to the operator -- the SDUI `text` node type has no binding to FORM-FIELD state (only to resolver data, `renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that could carry `member_email`'s dispatch-time value into the sheet's render context. A form-state-to-text binding is the shape of the fix (not built by this slice); the confirmation sentence stays self-contained (`back.sign_in.confirmation_body`) instead of ending in an empty paragraph."
+    components:
+      - type: sticky_header
+        id: member_sign_in_topbar
+        slots:
+          left: [{ type: logo, asset: "/assets/logo.svg", link: "/sign-in" }]
+          center: [{ type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.header' } }]
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.title' } }
+      - type: section
+        id: member_sign_in_form
+        content:
+          - { type: email_input, id: member_email, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.email_label' }, placeholder: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.email_placeholder' }, autofocus: true }
+          # Acceptance opens the confirmation panel (never before the response, the #529 rule). The
+          # request answers the same way for a roster address and a stranger's (no enumeration
+          # oracle, ADR-20260905-101349 §9), so the panel opens for both.
+          - { type: button, id: member_request_link, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.request_link' }, variant: primary, full_width: true, action: { type: request_member_sign_in_link, variables: { email: "{{ member_email.value }}" }, loading_label: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.sending' }, on_success: { type: open_bottom_sheet, sheet_id: member_sign_in_confirmation_sheet } } }
+          - { type: inline_error, id: member_request_error, for_action: request_member_sign_in_link }
+          # Round 2 R2-U2: the §8.1 mockup's first line was landed missing -- "Ouvrez-le sur cet
+          # appareil." is the mitigation for the top magic-link failure mode (opened in a mail
+          # client's in-app browser, so the parked session's cookie lands in a browser the
+          # operator never returns to): telling them up front to expect and open the link on THIS
+          # device.
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.open_on_device' } }
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.no_password' } }
+          - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in.support_lead' } }
+
+  # SCREEN — The magic-link RETURN landing (#639 part C step 6-ii round 2, R2-D/R2-R2; NOT SDUI --
+  # the `checkout`/`order_tracking` precedent): the page the restaurateur's mail client opens.
+  # Extracting `?token=` from the opened URL and sequencing confirm -> claim -> route is client
+  # logic this DSL declares no query-string-to-variable grammar for (`crates/web/src/router.rs`:
+  # "query strings are the caller's to strip"), and `confirmMemberSignIn`'s acceptance-first
+  # outcome needs the dispatch+poll sequencing (`crates/web/src/actions.rs`) no SDUI binding
+  # expresses either -- both reasons `checkout`/`order_tracking` are hand-written too.
+  - id: sign_in_return
+    roles: [PUBLIC]
+    route: "/sign-in/return"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.sign_in_return.title' }
+    sdui: false
+    sdui_reason: "Query-string token extraction + acceptance-first confirm/claim/route sequencing -- a hand-written page, the checkout/order_tracking precedent."
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [confirm_member_sign_in]
+    gaps:
+      - "`?next=` return-to-screen (ADR-20260905-101349 §13) is a NAMED DEPENDENCY of flipping RUN_MEMBER_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the orders queue), never back to whatever page the 401 originated from. MEMBER-SIGN-IN-DOOR-PRECONDITIONS names the follow-up."
+
+  # SCREEN — The not-yet-linked refusal (#639 part C step 6-ii, PROP-20260831-180622 §8.5): its
+  # own screen, not a banner -- no nav, no tabs, no counts, no phone (no voice leg). Reached when
+  # `confirmMemberSignIn` answers the typed `MemberNotLinked` rejection.
+  - id: not_linked
+    roles: [PUBLIC]
+    route: "/sign-in/not-linked"
+    title: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.title' }
+    sdui: true
+    requires_auth: false
+    graphql_role: PUBLIC
+    data_requirements: []
+    actions_used: [navigate]
+    gaps:
+      - "Printing the VERIFIED address (ux, ADR-20260905-101349 §10): `MemberNotLinked`'s context carries `email`, but no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, and no screen anywhere binds one (the rider door's inline_error pattern renders a MESSAGE, not a structured context field, and only inline to the ORIGINATING screen, never a navigated-to one). The body text below is the static two sentences of the §8.5 mockup; the address is not interpolated until a cross-screen error-context binding exists."
+      - "SUPPORT_CONTACT is a resolved DEPLOYMENT configuration value (`configuration.yaml`), never a translation string, and no screen anywhere in this DSL binds a config key as `{{ }}` resolver data -- inventing that grammar here is out of this card's scope, so the support address is named by the STATIC translation string below (which a deploy must keep in step with the configured key by hand until such a binding exists) rather than a dynamic `{{ config.* }}` placeholder."
+      - "The legal/privacy link (LCEN 6-III + Art. 13, legal): no legal/privacy page exists on this surface yet, so the target is this line rather than a dead route."
+      - "Round 2 R2-U3: `sign_out` (`kind: auth`) has no client wiring yet (#94) -- `crates/web/src/executor.rs` renders any `kind: auth` action as `ActionPlan::Disabled`, so this screen's ONLY control was previously dead (a control that renders and does nothing, #888). The exit is a plain `navigate → /sign-in` instead (`ActionKind::Client`, live today): it does not clear the parked/rotated session, only leaves the refusal screen -- the real sign-out wiring (#94) is the named follow-up, not built here."
+    components:
+      - { type: page_header, title: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.title' } }
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.body' } }
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.write_to_us' } }
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.support_contact' } }
+      - { type: text, value: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.precise' } }
+      - { type: button, id: not_linked_sign_out, label: { $ref: 'restaurant_backoffice.translations.yaml#/back.not_linked.sign_out' }, variant: outline, action: { type: navigate, route: "/sign-in" } }

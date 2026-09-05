@@ -214,7 +214,7 @@ pub mod captain_frontoffice {
     ];
 }
 
-/// `specs/screens/restaurant_backoffice.yaml` — 9 screen(s).
+/// `specs/screens/restaurant_backoffice.yaml` — 12 screen(s).
 pub mod restaurant_backoffice {
     use super::*;
 
@@ -228,7 +228,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::OrdersByRestaurant],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -260,7 +260,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::DeliveriesByRestaurant],
             skipped_reads: &[ResolverKey::DeliveriesByRestaurant],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -304,7 +304,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::RefundsPending],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -331,7 +331,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::SatisfactionByRestaurant],
             skipped_reads: &[ResolverKey::SatisfactionByRestaurant],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -355,7 +355,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::ConversationByOrder, ResolverKey::InternalNotesByOrder],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -401,7 +401,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::ReclamationsQueue],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -426,7 +426,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::ReclamationById],
             skipped_reads: &[],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -460,7 +460,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::RestaurantLocations],
             skipped_reads: &[ResolverKey::RestaurantLocations],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -494,7 +494,7 @@ pub mod restaurant_backoffice {
             data_requirements: &[ResolverKey::RestaurantLocations],
             skipped_reads: &[ResolverKey::RestaurantLocations],
             graphql_role: None,
-            unauthenticated_route: None,
+            unauthenticated_route: Some("/sign-in"),
             restricted_route: None,
             while_restricted: false,
             tree: &[
@@ -518,6 +518,69 @@ pub mod restaurant_backoffice {
             Node { kind: ComponentKind::BottomNavigation, props: &[("id", PropValue::Text("staff_nav")), ("items.0.id", PropValue::Text("orders")), ("items.0.label", PropValue::I18n("back.nav.orders")), ("items.0.icon", PropValue::Text("receipt")), ("items.0.route", PropValue::Text("/")), ("items.1.id", PropValue::Text("deliveries")), ("items.1.label", PropValue::I18n("back.nav.deliveries")), ("items.1.icon", PropValue::Text("truck")), ("items.1.route", PropValue::Text("/deliveries")), ("items.2.id", PropValue::Text("refunds")), ("items.2.label", PropValue::I18n("back.nav.refunds")), ("items.2.icon", PropValue::Text("coin")), ("items.2.route", PropValue::Text("/refunds")), ("items.3.id", PropValue::Text("claims")), ("items.3.label", PropValue::I18n("back.nav.claims")), ("items.3.icon", PropValue::Text("life_buoy")), ("items.3.route", PropValue::Text("/claims")), ("items.4.id", PropValue::Text("satisfaction")), ("items.4.label", PropValue::I18n("back.nav.satisfaction")), ("items.4.icon", PropValue::Text("star")), ("items.4.route", PropValue::Text("/satisfaction"))], children: &[], branches: &[] }
         ],
         },
+        Screen {
+            id: "sign_in",
+            route: "/sign-in",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::StickyHeader, props: &[("id", PropValue::Text("member_sign_in_topbar"))], children: &[
+                Node { kind: ComponentKind::Logo, props: &[("asset", PropValue::Text("/assets/logo.svg")), ("link", PropValue::Text("/sign-in"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.header"))], children: &[], branches: &[] }
+            ], branches: &[] },
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.sign_in.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Section, props: &[("id", PropValue::Text("member_sign_in_form"))], children: &[
+                Node { kind: ComponentKind::EmailInput, props: &[("id", PropValue::Text("member_email")), ("label", PropValue::I18n("back.sign_in.email_label")), ("placeholder", PropValue::I18n("back.sign_in.email_placeholder")), ("autofocus", PropValue::Text("true"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("member_request_link")), ("label", PropValue::I18n("back.sign_in.request_link")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending")), ("action.on_success.type", PropValue::Text("open_bottom_sheet")), ("action.on_success.sheet_id", PropValue::Text("member_sign_in_confirmation_sheet"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("member_request_error")), ("for_action", PropValue::Text("request_member_sign_in_link"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.open_on_device"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.no_password"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.support_lead"))], children: &[], branches: &[] }
+            ], branches: &[] }
+        ],
+        },
+        Screen {
+            id: "sign_in_return",
+            route: "/sign-in/return",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: false,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[],
+        },
+        Screen {
+            id: "not_linked",
+            route: "/sign-in/not-linked",
+            roles: &["PUBLIC"],
+            requires_auth: false,
+            sdui: true,
+            data_requirements: &[],
+            skipped_reads: &[],
+            graphql_role: Some("PUBLIC"),
+            unauthenticated_route: None,
+            restricted_route: None,
+            while_restricted: false,
+            tree: &[
+            Node { kind: ComponentKind::PageHeader, props: &[("title", PropValue::I18n("back.not_linked.title"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.body"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.write_to_us"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.support_contact"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.not_linked.precise"))], children: &[], branches: &[] },
+            Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("not_linked_sign_out")), ("label", PropValue::I18n("back.not_linked.sign_out")), ("variant", PropValue::Text("outline")), ("action.type", PropValue::Text("navigate")), ("action.route", PropValue::Text("/sign-in"))], children: &[], branches: &[] }
+        ],
+        },
     ];
 
     pub const SHEETS: &[Sheet] = &[
@@ -527,6 +590,13 @@ pub mod restaurant_backoffice {
                 Node { kind: ComponentKind::TextArea, props: &[("id", PropValue::Text("issue_resolution_note")), ("placeholder", PropValue::I18n("back.deliveries.issue.note_prompt")), ("max_length", PropValue::Text("300"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::Button, props: &[("id", PropValue::Text("resolve_issue_btn")), ("label", PropValue::I18n("back.deliveries.issue.confirm")), ("variant", PropValue::Text("primary")), ("full_width", PropValue::Text("true")), ("action.type", PropValue::Text("resolve_delivery_issue")), ("action.variables.deliveryJobId", PropValue::Binding("delivery.id")), ("action.variables.resolution", PropValue::Binding("issue_resolution.value")), ("action.variables.note", PropValue::Binding("issue_resolution_note.value")), ("action.on_success.0.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] },
                 Node { kind: ComponentKind::InlineError, props: &[("id", PropValue::Text("resolve_issue_error")), ("for_action", PropValue::Text("resolve_delivery_issue"))], children: &[], branches: &[] }
+            ], branches: &[] } },
+        Sheet { id: "member_sign_in_confirmation_sheet", node:
+            Node { kind: ComponentKind::BottomSheet, props: &[("id", PropValue::Text("member_sign_in_confirmation_sheet")), ("title", PropValue::I18n("back.sign_in.confirmation_title")), ("drag_to_close", PropValue::Text("true"))], children: &[
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.confirmation_body"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::Text, props: &[("value", PropValue::I18n("back.sign_in.expiry_note"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_resend_link")), ("label", PropValue::I18n("back.sign_in.resend")), ("action.type", PropValue::Text("request_member_sign_in_link")), ("action.variables.email", PropValue::Binding("member_email.value")), ("action.loading_label", PropValue::I18n("back.sign_in.sending"))], children: &[], branches: &[] },
+                Node { kind: ComponentKind::TextButton, props: &[("id", PropValue::Text("member_sign_in_confirmation_close")), ("label", PropValue::I18n("back.sign_in.close")), ("action.type", PropValue::Text("close_sheet"))], children: &[], branches: &[] }
             ], branches: &[] } },
     ];
 }

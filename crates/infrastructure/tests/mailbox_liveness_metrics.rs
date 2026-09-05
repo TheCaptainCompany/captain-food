@@ -524,6 +524,10 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             // #639 part C step 6-i (ADR-20260905-101349 §6, the #882 fleet-parity lesson, the
             // SAME shape as the door above): the staff access grant door's own release gate.
             ("RUN_MEMBER_ACCESS_GRANT", deps.run_member_access_grant),
+            // #639 part C step 6-ii (ADR-20260905-101349 SS9): the member sign-in door's own
+            // release gate -- the SAME fleet-parity lesson, pinned again so a future regression
+            // that drops the `declare_flag` call ships green.
+            ("RUN_MEMBER_SIGN_IN_DOOR", deps.run_member_sign_in_door),
         ],
     );
 

@@ -7,3 +7,4 @@ pub mod query;
 pub mod mutation;
 pub mod subscription;
 pub mod operation_scopes;
+pub mod limits;

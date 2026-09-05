@@ -27,6 +27,10 @@ uuid = { workspace = true, features = ["v5", "v7"] }
 # Canonical command payload hash (journal duplicate-vs-conflict discriminator, ADR-20260720-015300).
 sha2 = "0.10"
 hex = "0.4"
+# HMAC-hashing the email address before it becomes a `sms_send_quota` key (round 2 R2-V1, legal
+# Art. 5(1)(e) storage limitation): `crates/infrastructure` already depends on the same RustCrypto
+# family for AUTH_SESSION_KEY, so this adds no new build weight to the workspace.
+hmac = "0.12"
 # base64url for behaviour_support's FakeIdentity (#437): the double mints an unsigned but DECODABLE
 # JWT whose payload reflects what was stamped, so tests assert the PARKED token's claims by
 # behaviour (decode) rather than by call log. A pure encoding utility, same class as `hex`.

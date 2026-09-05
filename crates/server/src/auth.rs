@@ -146,6 +146,16 @@ enum Identity {
     /// was minted at the verifier, and a bare `role: RIDER` token acted RIDER while reading
     /// `Public`).
     Rider { sub: String },
+    /// A MEMBER the request seam RESOLVED — the SAME shape as [`Identity::Rider`] (#639 part C
+    /// step 6-ii, ADR-20260905-101349 §C): the `Member` bridge answered a row for this subject
+    /// AND `ScopeMembership` answered exactly one restaurant scope for it. The SUBJECT and nothing
+    /// else, by construction — the resolved `RestaurantId` is carried by the `ReadScope` the same
+    /// resolution returned, never by a claim. **The only producer is the seam**
+    /// ([`resolve_member_scope`]; [`Principal::member_binding`] mints one for tests) — the token
+    /// verifier ([`Principal::role_path`]) yields [`Identity::Unbound { role: Restaurant }`] for
+    /// every MEMBER token, because a token cannot prove a binding it never carries (§7: the
+    /// stamped claim carries no `member_id`).
+    Member { sub: String },
     /// Verified on a ROLE path, with no domain binding. For CUSTOMER / RESTAURANT /
     /// RESTAURANT_ACCOUNT: the token carries no usable `captain_*` claim for that role (absent, or
     /// malformed — indistinguishable by design). For RIDER: EVERY verified token, until the seam
@@ -223,7 +233,8 @@ mod acting_role {
                 | Identity::Customer { .. }
                 | Identity::Restaurant { .. }
                 | Identity::RestaurantAccount { .. }
-                | Identity::Rider { .. } => ActingRole(path_role),
+                | Identity::Rider { .. }
+                | Identity::Member { .. } => ActingRole(path_role),
             }
         }
 
@@ -330,6 +341,7 @@ impl Principal {
             | Identity::Restaurant { sub, .. }
             | Identity::RestaurantAccount { sub, .. }
             | Identity::Rider { sub, .. }
+            | Identity::Member { sub, .. }
             | Identity::Unbound { sub, .. } => Some(sub),
         }
     }
@@ -384,6 +396,11 @@ impl Principal {
             Identity::Restaurant { .. } => RequestRole::Restaurant,
             Identity::RestaurantAccount { .. } => RequestRole::RestaurantAccount,
             Identity::Rider { .. } => RequestRole::Rider,
+            // #639 part C step 6-ii: a MEMBER acts on the `/restaurant/graphql` path (there is no
+            // dedicated MEMBER UserType/path, by design -- CLAUDE.md's PrincipalKind-vs-UserType
+            // split) — records RESTAURANT, exactly the recorded-role choice `Identity::Restaurant`
+            // already makes on this same path.
+            Identity::Member { .. } => RequestRole::Restaurant,
             Identity::Unbound { .. } => RequestRole::Public,
         }
     }
@@ -419,7 +436,8 @@ impl Principal {
             Identity::Customer { .. }
             | Identity::Restaurant { .. }
             | Identity::RestaurantAccount { .. }
-            | Identity::Rider { .. } => {
+            | Identity::Rider { .. }
+            | Identity::Member { .. } => {
                 !matches!(scope, application::queries::ReadScope::Public)
             }
             // No binding was presented at all: nothing could have resolved.
@@ -467,6 +485,21 @@ impl Principal {
             | RequestRole::Rider => ProductClaims::default(),
         };
         Self::role_path(role, sub, &claims)
+    }
+
+    /// Build a verified MEMBER principal for tests, or the unbound caller a guard must refuse —
+    /// the [`Self::role_binding`] Rider special-case, standalone: MEMBER has no [`RequestRole`] of
+    /// its own (it rides `RequestRole::Restaurant`, CLAUDE.md's PrincipalKind-vs-UserType split),
+    /// so it cannot share that function's `role` dispatch without colliding with the RESTAURANT
+    /// owner arm. `Some(_)` is the identity the seam ([`resolve_member_scope`]) returns for a
+    /// resolved restaurant scope; `None` is the unbound caller.
+    pub fn member_binding(sub: String, bound: bool) -> Self {
+        let identity = if bound {
+            Identity::Member { sub }
+        } else {
+            Identity::Unbound { sub, role: RequestRole::Restaurant }
+        };
+        Self { identity }
     }
 }
 
@@ -1107,6 +1140,13 @@ fn parse_role(s: &str) -> Option<RequestRole> {
         "ADMIN" => RequestRole::Admin,
         "CUSTOMER" => RequestRole::Customer,
         "RESTAURANT" => RequestRole::Restaurant,
+        // #639 part C step 6-ii (ADR-20260905-101349 §7, CLAUDE.md's PrincipalKind-vs-UserType
+        // split): MEMBER is a PERSON kind, not an eighth `UserType`/role path -- it rides the SAME
+        // `/restaurant/graphql` path RESTAURANT does. `role_path`'s Restaurant arm never sees a
+        // `restaurant_id` claim for a MEMBER token (the stamper writes none, §7), so it falls
+        // through to `Identity::Unbound { role: Restaurant }` exactly like a claimless RESTAURANT
+        // token would -- and the seam (`resolve_member_scope`) is what upgrades it.
+        "MEMBER" => RequestRole::Restaurant,
         "RESTAURANT_ACCOUNT" => RequestRole::RestaurantAccount,
         "RIDER" => RequestRole::Rider,
         "EXTERNAL" => RequestRole::External,
@@ -2359,6 +2399,84 @@ impl ResolveRiderIdentity for NoDatabaseRiderIdentity {
     }
 }
 
+// =====================================================================================
+// The MEMBER seam (#639 part C step 6-ii, ADR-20260905-101349 §C) — the RIDER shape, transposed.
+// UNGATED like the rider seam: there is no legacy MEMBER claim behaviour an OFF state could
+// preserve (the sole stamper writes `{ role: MEMBER }` with no id, ADR §7).
+// =====================================================================================
+
+/// The request-seam TRANSLATION from the verified auth subject to this product's MEMBER domain
+/// identity: the `Member` bridge (`auth_subject -> member_id`, step 6-i) resolves the person, then
+/// `ScopeMembership` resolves the restaurant scope they hold. Decider/scope logic receives the
+/// [`MemberIdentityResolution`] RESULT; only implementations of this trait perform I/O.
+#[async_trait::async_trait]
+pub trait ResolveMemberIdentity: Send + Sync {
+    /// `auth_subject` is the verified Supabase `sub` — already authenticated by
+    /// [`AuthContext::authorize`], never attacker-controlled at this point.
+    async fn resolve(&self, auth_subject: &str) -> MemberIdentityResolution;
+}
+
+/// The MEMBER seam's outcome: the SINGLE restaurant scope the member holds. V0 supports exactly
+/// one grant per member (6-i's `CAPTAIN_ONBOARDING` basis); a member with zero or more than one
+/// restaurant scope resolves to [`IdentityResolution::NoMapping`] here — fail closed, never a row
+/// picked by order (the `Rider.auth_ref UNIQUE` precedent, generalised: an ambiguous population is
+/// not a resolved one).
+pub type MemberIdentityResolution = IdentityResolution<domain::generated::scalars::RestaurantId>;
+
+/// The Postgres implementation: `Member.auth_subject -> member_id`
+/// ([`application::queries::MemberIdentityRepository`]) then the restaurant scope(s) that member
+/// holds ([`application::queries::MemberRestaurantScopeRepository`]) — two PROJECTION probes,
+/// never a fold of a `RestaurantMembership-{id}` stream per request.
+pub struct PgMemberIdentity {
+    members: Arc<dyn application::queries::MemberIdentityRepository>,
+    scopes: Arc<dyn application::queries::MemberRestaurantScopeRepository>,
+}
+
+impl PgMemberIdentity {
+    pub fn new(
+        members: Arc<dyn application::queries::MemberIdentityRepository>,
+        scopes: Arc<dyn application::queries::MemberRestaurantScopeRepository>,
+    ) -> Self {
+        Self { members, scopes }
+    }
+}
+
+#[async_trait::async_trait]
+impl ResolveMemberIdentity for PgMemberIdentity {
+    async fn resolve(&self, auth_subject: &str) -> MemberIdentityResolution {
+        let member_id = match self
+            .members
+            .member_id_by_auth_subject(domain::generated::scalars::AuthSubject(auth_subject.to_string()))
+            .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => return MemberIdentityResolution::NoMapping,
+            Err(e) => return MemberIdentityResolution::LookupFailed(LookupFailureReason::from_domain_error(&e)),
+        };
+        match self.scopes.restaurant_ids_for_member(member_id).await {
+            Ok(ids) if ids.len() == 1 => {
+                MemberIdentityResolution::Resolved(ids.into_iter().next().expect("len checked"))
+            }
+            // Zero or ambiguous (more than one) — fail closed, never a row picked by order.
+            Ok(_) => MemberIdentityResolution::NoMapping,
+            Err(e) => MemberIdentityResolution::LookupFailed(LookupFailureReason::from_domain_error(&e)),
+        }
+    }
+}
+
+/// The member seam of a process booted WITHOUT a database — the `NoDatabaseRiderIdentity`
+/// precedent: every resolution is [`IdentityResolution::LookupFailed`], the PAGE-class outage
+/// signal, never a `NoMapping` stand-in (which would report a missing database as an ordinary
+/// provisioning gap).
+pub struct NoDatabaseMemberIdentity;
+
+#[async_trait::async_trait]
+impl ResolveMemberIdentity for NoDatabaseMemberIdentity {
+    async fn resolve(&self, _auth_subject: &str) -> MemberIdentityResolution {
+        MemberIdentityResolution::LookupFailed(LookupFailureReason::Repository)
+    }
+}
+
 /// Where a RIDER's domain identity comes from: **Postgres, always** — there is deliberately no
 /// `Claim` variant and no OFF state. `CustomerIdentitySource::Claim` is a real gate because OFF
 /// reproduces working customer behaviour byte for byte; for RIDER no token has ever carried a
@@ -2378,13 +2496,26 @@ impl RiderIdentitySource {
     }
 }
 
+/// A struct with a private field rather than a bare `Arc` — the [`RiderIdentitySource`] shape:
+/// the only way to hold one is [`MemberIdentitySource::new`], so a composition root cannot leave
+/// the member seam unset and have the request path silently fall back to anything.
+#[derive(Clone)]
+pub struct MemberIdentitySource(Arc<dyn ResolveMemberIdentity>);
+
+impl MemberIdentitySource {
+    pub fn new(resolver: Arc<dyn ResolveMemberIdentity>) -> Self {
+        Self(resolver)
+    }
+}
+
 /// The identity seams a request resolves through, selected ONCE at startup/config-load and cloned
-/// into every request's `GraphqlState` (`crate::graphql::routes`). One value rather than two
-/// parameters so a transport cannot wire the customer seam and forget the rider one.
+/// into every request's `GraphqlState` (`crate::graphql::routes`). One value rather than three
+/// parameters so a transport cannot wire the customer seam and forget the rider/member ones.
 #[derive(Clone)]
 pub struct IdentitySources {
     pub customer: CustomerIdentitySource,
     pub rider: RiderIdentitySource,
+    pub member: MemberIdentitySource,
 }
 
 /// Resolve a verified [`Principal`] into the application's [`application::queries::ReadScope`] —
@@ -2418,6 +2549,10 @@ pub fn read_scope(principal: &Principal) -> application::queries::ReadScope {
         // minted, and never reaches this arm). Reached directly — a test-built principal — the
         // identity carries no id to derive it from, and the only honest answer is fail-closed.
         Identity::Rider { .. } => ReadScope::Public,
+        // A member's scope is likewise NEVER a function of the claims (#639 part C step 6-ii,
+        // §7: the stamped claim carries no `member_id`) -- it exists only as the seam's outcome
+        // (`resolve_member_scope`), and never reaches this arm.
+        Identity::Member { .. } => ReadScope::Public,
         Identity::Anonymous | Identity::External { .. } => ReadScope::Public,
         // The one arm that can be a DEFECT rather than a decision: an authenticated caller on a
         // role path with no domain binding. The claim/role pair cannot disagree here — the identity
@@ -2476,6 +2611,14 @@ async fn resolve_identity_scope(
         (Identity::Unbound { sub, role: RequestRole::Rider } | Identity::Rider { sub }, _) => {
             let sub = sub.clone();
             return resolve_rider_scope(sub, correlation_id, &sources.rider).await;
+        }
+        // MEMBER (#639 part C step 6-ii): the SAME shape as RIDER, ungated (there is no legacy
+        // RESTAURANT-owner claim behaviour to preserve on this path today — no stamper writes
+        // `restaurant_id`, so every Unbound{role: Restaurant} the seam sees today came from a
+        // MEMBER-role token or an absent claim, and both cases fail closed identically here).
+        (Identity::Unbound { sub, role: RequestRole::Restaurant } | Identity::Member { sub }, _) => {
+            let sub = sub.clone();
+            return resolve_member_scope(sub, correlation_id, &sources.member).await;
         }
         // Every other combination — the remaining roles, an Unbound/Anonymous caller, or
         // CustomerIdentitySource::Claim (the default) — is the unchanged pure claims function,
@@ -2569,6 +2712,44 @@ async fn resolve_rider_scope(
     // uses — no second mechanism, no cache. `request_reuse` is declared for the same reason as on
     // the customer contract: so a later in-request reuse can never hide an outage.
     telemetry::meters::rider_identity::lookup_source("db");
+    (Principal { identity }, scope)
+}
+
+/// The MEMBER half of [`resolve_identity_scope`], the `resolve_rider_scope` shape transposed:
+/// `NoMapping` and `LookupFailed` both fail closed to `Public`; only telemetry tells them apart.
+///
+/// **The one producer of [`Identity::Member`] on the request path.** A resolved single restaurant
+/// scope makes an `Identity::Member` (acts RESTAURANT, records RESTAURANT, reads that restaurant);
+/// anything else is `Identity::Unbound { role: Restaurant }` (acts PUBLIC, reads `Public`).
+async fn resolve_member_scope(
+    sub: String,
+    correlation_id: crate::graphql::session::RequestCorrelationId,
+    source: &MemberIdentitySource,
+) -> (Principal, application::queries::ReadScope) {
+    use application::queries::ReadScope;
+
+    let span = telemetry::spans::member_identity_resolve(&correlation_id.0.to_string());
+    let started = std::time::Instant::now();
+    let outcome = source.0.resolve(&sub).instrument(span.clone()).await;
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    let unbound = || Identity::Unbound { sub: sub.clone(), role: RequestRole::Restaurant };
+    let (identity, scope, result, reason) = match &outcome {
+        MemberIdentityResolution::Resolved(restaurant_id) => {
+            (Identity::Member { sub: sub.clone() }, ReadScope::Restaurant(*restaurant_id), "resolved", None)
+        }
+        MemberIdentityResolution::NoMapping => {
+            telemetry::meters::member_identity::not_found();
+            (unbound(), ReadScope::Public, "not_found", None)
+        }
+        MemberIdentityResolution::LookupFailed(reason) => {
+            telemetry::meters::member_identity::lookup_failed(reason.label());
+            (unbound(), ReadScope::Public, "lookup_failed", Some(reason.label()))
+        }
+    };
+    telemetry::spans::record_member_identity_resolve_result(&span, result, reason);
+    telemetry::meters::member_identity::duration(elapsed_ms, result);
+    telemetry::meters::member_identity::lookup_source("db");
     (Principal { identity }, scope)
 }
 
@@ -2864,6 +3045,7 @@ mod read_scope_tests {
             rider: RiderIdentitySource::new(Arc::new(ScriptedRiderTable(
                 rows.iter().map(|(sub, id)| (sub.to_string(), *id)).collect(),
             ))),
+            member: MemberIdentitySource::new(Arc::new(NoDatabaseMemberIdentity)),
         }
     }
 

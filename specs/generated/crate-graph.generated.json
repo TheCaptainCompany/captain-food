@@ -38,7 +38,8 @@
       "scope": "network",
       "path": "crates/domains/network",
       "deps": [
-        "domain-common"
+        "domain-common",
+        "domain-customer"
       ]
     },
     "domain-ordering": {
@@ -183,6 +184,7 @@
       "actor": "RestaurantMembership",
       "kind": "aggregate",
       "domain_crates": [
+        "domain-common",
         "domain-network"
       ],
       "path": "crates/bins/actor-restaurant-membership"

@@ -99,6 +99,11 @@ spec:
                 secretKeyRef:
                   name: captain-secrets
                   key: OVH_SMS_SERVICE_NAME
+            - name: EMAIL_QUOTA_KEY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: captain-secrets
+                  key: EMAIL_QUOTA_KEY_HMAC_SECRET
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:

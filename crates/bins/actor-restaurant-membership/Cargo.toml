@@ -29,6 +29,7 @@ publish = false
 description = "Captain.Food `actor-restaurant-membership` deployable: mailbox worker realizing the `RestaurantMembership` aggregate -- drains ONLY its own lanes (the LANES const it hands the shared fleet, not a link fact) (ADR-20260807-183024)."
 
 [dependencies]
+domain-common = { path = "../../domains/common" }
 domain-network = { path = "../../domains/network" }
 # The business runtime (#385): the shared composition kit -- probe server, telemetry,
 # declared-size pool, and the family spawn helpers over application/infrastructure.

@@ -128,3 +128,10 @@ MemberAccessGrantGatedBeforeStore:
 
 RestaurantAccessBasisAcceptedSetIsNarrower:
   description: "AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three with the typed AccessBasisNotYetAccepted (#639 part C step 6-i, ADR-20260905-101349 §3)."
+
+
+MemberSignInIdentifiesOnly:
+  description: "Member sign-in is identify-only, never register: a verified email whose login is bound to a member stamps { role: MEMBER } (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified email with no member behind it is refused with MemberNotLinked but the session is STILL parked (so the not-yet-linked refusal screen has a real cookie) and nothing is stamped; a login already carrying another role's claim is refused rather than overwritten; a confirmation that carries no session to own the parked credential is refused with MemberSignInRequiresSession BEFORE the token is spent; and the link REQUEST never reveals whether the address is on the roster (#639 part C step 6-ii, ADR-20260905-101349 §7-§10)."
+
+MemberSignInGatedBeforeStore:
+  description: "requestMemberSignInLink and confirmMemberSignIn both refuse with the typed MemberSignInDoorClosed BEFORE the identity provider is touched while configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR is off (#639 part C step 6-ii, ADR-20260905-101349 §6)."

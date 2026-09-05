@@ -503,3 +503,44 @@ RevokeRestaurantAccess:
     ground:
       $ref: 'scalars.yaml#/AccessRevocationGround'
   required: [membershipId, ground]
+
+
+# --- The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §7-§10) -----------------
+# The email-magic-link transposition of the rider door's phone-OTP pair (step 2c-i). IDENTIFY-ONLY,
+# never register: a verified email with no `Member` behind it is refused (the not-yet-linked
+# refusal, §8.5), never created -- `RestaurantAccessGranted` (6-i) is the only birth.
+
+RequestMemberSignInLink:
+  description: >
+    Ask the auth provider to send an email magic link (the same `send_email_magic_link` port
+    RequestEmailVerification uses, and the same email send-abuse wall shape as the rider door's SMS
+    guard -- ADR-20260905-101349 §9). Emits no event, and MUST NOT reveal whether the address is on
+    the restaurateur roster: the handler never consults the `Member` bridge, so the outcome is
+    identical for a roster address and a stranger's (no enumeration oracle).
+  type: object
+  properties:
+    email:
+      $ref: 'scalars.yaml#/EmailAddress'
+    locale:
+      $ref: 'scalars.yaml#/Locale'
+      nullable: true
+      description: "The email's language; no stored locale exists pre-identification, so this is caller-supplied."
+  required: [email]
+
+
+ConfirmMemberSignIn:
+  description: >
+    Verify the magic-link token with the auth provider, then IDENTIFY the member: the proved auth
+    subject is looked up in the `Member` bridge (`auth_subject -> member_id`, the step-6-i
+    projection); no member -> the session is still parked (so "Se déconnecter" is meaningful on the
+    not-yet-linked refusal screen, §8.5) but NOTHING is stamped and `MemberNotLinked` is thrown
+    (the rider door's `RiderNotRegistered` precedent, step 2c-i); a member -> the MEMBER role claim
+    is stamped (`identity.stamp_member_claim`, `{ role: MEMBER }` and nothing else) and the
+    post-stamp provider session is parked for cookie pickup via POST /auth/session -- the
+    credential is never in the GraphQL response. Emits no event. The beneficiary is the OUTPUT of
+    `verify_email_token` (the proven email), never a payload field.
+  type: object
+  properties:
+    token:
+      $ref: 'scalars.yaml#/EmailVerificationToken'
+  required: [token]

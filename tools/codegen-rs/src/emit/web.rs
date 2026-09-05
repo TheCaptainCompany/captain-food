@@ -565,6 +565,167 @@ pub(crate) fn collect_web_data_layer(model: &Model) -> (Vec<ResolverDef>, Vec<Ac
     (resolvers, actions)
 }
 
+// ─── crates/server/src/graphql/generated/limits.rs (#639 part C step 6-ii round 2, R2-E) ────────
+
+/// Every `UserType` role a GraphQL request may act as (`scalars.yaml#/UserType`), in the SAME
+/// order `crates/server/src/graphql/acl.rs::RequestRole` declares them — one closed set, walked
+/// here to guarantee every role gets an emitted ceiling even if no resolver names it.
+pub(crate) const GRAPHQL_ROLES: &[&str] =
+    &["PUBLIC", "CUSTOMER", "RESTAURANT_ACCOUNT", "RESTAURANT", "RIDER", "ADMIN", "EXTERNAL"];
+
+/// The absolute floor for a role no GENERATED client document names at all (`roles: [ADMIN]` on a
+/// query no screen's `resolvers:` block binds, say): one field, depth 1 — the smallest document
+/// that can exist, never zero (a zero ceiling would refuse `{ __typename }`-shaped introspection
+/// probes and every future first resolver alike, which is a worse failure than a generous floor).
+pub(crate) const GRAPHQL_LIMIT_FLOOR: usize = 1;
+
+/// Depth/complexity of one GraphQL selection-set STRING as `selection_fields` emits it (`{ a b c {
+/// d } }` — bare identifiers, nested braces, no arguments/aliases/fragments: the only grammar this
+/// generator ever produces). The FIELD-COUNT rule: complexity = the total number of field name
+/// tokens at every level (mirrors async-graphql's own `ComplexityCalculate` default fallback —
+/// `1 + children` per field, telescoping to "one point per field node" — for a schema with no
+/// `#[graphql(complexity = …)]` annotations, which this one has none of, so the two rules coincide
+/// exactly here); depth = the deepest brace nesting, matching `DepthCalculate`'s field-nesting
+/// count field-for-field (each `{` opens exactly where a field's own children begin). `None`
+/// (a scalar-returning query) is a leaf with no children of its own: `(0, 0)`.
+pub(crate) fn selection_depth_and_complexity(selection: Option<&str>) -> (usize, usize) {
+    let Some(s) = selection else { return (0, 0) };
+    let mut depth = 0usize;
+    let mut max_depth = 0usize;
+    let mut complexity = 0usize;
+    for tok in s.split_whitespace() {
+        match tok {
+            "{" => {
+                depth += 1;
+                max_depth = max_depth.max(depth);
+            }
+            "}" => depth = depth.saturating_sub(1),
+            _ => complexity += 1,
+        }
+    }
+    (max_depth, complexity)
+}
+
+/// One role's emitted ceiling, plus the antecedent that produced it (ADR-20260817-105845: no bare
+/// number without one) — `None` means the floor applied (no resolver names this role). Depth and
+/// complexity are tracked SEPARATELY: the resolver that maximises one need not be the resolver
+/// that maximises the other, so each ceiling cites its OWN true antecedent, never its sibling's.
+pub(crate) struct RoleLimit {
+    pub(crate) role: &'static str,
+    pub(crate) max_depth: usize,
+    pub(crate) depth_witness: Option<String>,
+    pub(crate) max_complexity: usize,
+    pub(crate) complexity_witness: Option<String>,
+}
+
+/// Per-role max depth/complexity over EVERY resolver a screen's `resolvers:` block actually binds
+/// (`collect_web_data_layer` — the SAME set `crates/web/src/generated/data_layer.rs`'s
+/// `ResolverKey` enumerates, i.e. "GENERATED client documents", never the full unfiltered
+/// api.yaml catalog): a resolver contributes `1 + selection_depth_and_complexity(...)` (the root
+/// operation field itself, e.g. `orders(input: …)`, plus its selection) to every role its bound
+/// query's `roles:` admits — EMPTY `roles:` admits every role (the RoleGuard convention: an
+/// operation open to every role carries no guard at all), so it contributes to all seven. A `gap:`
+/// binding (no live query) contributes nothing — it can never reach the wire.
+pub(crate) fn compute_graphql_role_limits(model: &Model) -> Vec<RoleLimit> {
+    let api = parse_api(model);
+    let roles_of: std::collections::HashMap<&str, &Vec<String>> =
+        api.queries.iter().map(|q| (q.name.as_str(), &q.roles)).collect();
+    let (resolvers, _actions) = collect_web_data_layer(model);
+
+    let mut max_depth: std::collections::HashMap<&'static str, usize> = GRAPHQL_ROLES.iter().map(|r| (*r, 0)).collect();
+    let mut max_complexity: std::collections::HashMap<&'static str, usize> = GRAPHQL_ROLES.iter().map(|r| (*r, 0)).collect();
+    let mut depth_witness: std::collections::HashMap<&'static str, String> = std::collections::HashMap::new();
+    let mut complexity_witness: std::collections::HashMap<&'static str, String> = std::collections::HashMap::new();
+
+    for def in &resolvers {
+        let Some(query) = &def.query else { continue }; // gap: binding — no document exists
+        let (sel_depth, sel_complexity) = selection_depth_and_complexity(def.selection.as_deref());
+        let depth = 1 + sel_depth;
+        let complexity = 1 + sel_complexity;
+        let admitted: Vec<&'static str> = match roles_of.get(query.as_str()) {
+            Some(roles) if !roles.is_empty() => {
+                GRAPHQL_ROLES.iter().copied().filter(|r| roles.iter().any(|x| x == r)).collect()
+            }
+            _ => GRAPHQL_ROLES.to_vec(), // omitted/empty roles: admits every role
+        };
+        for role in admitted {
+            let slot = max_depth.entry(role).or_insert(0);
+            if depth > *slot {
+                *slot = depth;
+                depth_witness.insert(role, format!("{} (via resolver key '{}')", query, def.key));
+            }
+            let slot = max_complexity.entry(role).or_insert(0);
+            if complexity > *slot {
+                *slot = complexity;
+                complexity_witness.insert(role, format!("{} (via resolver key '{}')", query, def.key));
+            }
+        }
+    }
+
+    GRAPHQL_ROLES
+        .iter()
+        .map(|role| RoleLimit {
+            role,
+            max_depth: (*max_depth.get(role).unwrap_or(&0)).max(GRAPHQL_LIMIT_FLOOR),
+            depth_witness: depth_witness.get(role).cloned(),
+            max_complexity: (*max_complexity.get(role).unwrap_or(&0)).max(GRAPHQL_LIMIT_FLOOR),
+            complexity_witness: complexity_witness.get(role).cloned(),
+        })
+        .collect()
+}
+
+/// Emit `crates/server/src/graphql/generated/limits.rs` (round 2 R2-E, ADR-20260905-101349 §9):
+/// `MAX_DEPTH_<ROLE>` / `MAX_COMPLEXITY_<ROLE>` per role — the RAW observed maxima, codegen-derived
+/// from the generated client documents above; each carries its antecedent as a doc comment
+/// (ADR-20260817-105845). The runtime extension (`crates/server/src/graphql/query_limits.rs`)
+/// applies the configured headroom on top of these at the composition root — headroom is a
+/// deploy-time value (`GRAPHQL_LIMIT_HEADROOM_PERCENT`), never baked into a generated constant.
+pub(crate) fn emit_server_graphql_limits(model: &Model) -> String {
+    let limits = compute_graphql_role_limits(model);
+    let mut consts = String::new();
+    let mut depth_arms = String::new();
+    let mut complexity_arms = String::new();
+    let antecedent_of = |w: &Option<String>| -> String {
+        w.as_deref()
+            .map(|w| format!("the deepest generated client document for this role: {w}"))
+            .unwrap_or_else(|| {
+                "no generated client document names this role — the declared floor applies".to_string()
+            })
+    };
+    for l in &limits {
+        consts.push_str(&format!(
+            "/// {role}: {depth_antecedent}.\npub const MAX_DEPTH_{role}: usize = {depth};\n/// {role}: {complexity_antecedent}.\npub const MAX_COMPLEXITY_{role}: usize = {complexity};\n\n",
+            role = l.role,
+            depth = l.max_depth,
+            complexity = l.max_complexity,
+            depth_antecedent = antecedent_of(&l.depth_witness),
+            complexity_antecedent = antecedent_of(&l.complexity_witness),
+        ));
+        depth_arms.push_str(&format!("        \"{role}\" => MAX_DEPTH_{role},\n", role = l.role));
+        complexity_arms.push_str(&format!("        \"{role}\" => MAX_COMPLEXITY_{role},\n", role = l.role));
+    }
+    let roles_array =
+        GRAPHQL_ROLES.iter().map(|r| format!("\"{r}\"")).collect::<Vec<_>>().join(", ");
+    format!(
+        "// GENERATED by the Captain.Food codegen (#639 part C step 6-ii round 2, R2-E) — do not \
+edit by hand. Per-role GraphQL depth/complexity ceilings, the max observed over every GENERATED \
+client document (`crates/web/src/generated/data_layer.rs`'s `ResolverKey`s) that role's declared \
+`roles:` admits (ADR-20260905-101349 §9). The floor ({floor}) applies to a role no resolver names. \
+Headroom is NOT applied here — see `crates/server/src/graphql/query_limits.rs`.\n\n\
+/// Every role this table carries a ceiling for (`scalars.yaml#/UserType`) — the set the\n\
+/// composition root's startup gauge assertion iterates.\n\
+pub const GRAPHQL_ROLES: &[&str] = &[{roles_array}];\n\n\
+{consts}\
+/// The raw (pre-headroom) max depth for `role` (`scalars.yaml#/UserType`), or the floor for an\n\
+/// unrecognised role string (fail-closed: an unknown role is treated as the most restrictive).\n\
+pub fn max_depth_for_role(role: &str) -> usize {{\n    match role {{\n{depth_arms}        _ => {floor},\n    }}\n}}\n\n\
+/// The raw (pre-headroom) max complexity for `role`, the same fail-closed default.\n\
+pub fn max_complexity_for_role(role: &str) -> usize {{\n    match role {{\n{complexity_arms}        _ => {floor},\n    }}\n}}\n",
+        floor = GRAPHQL_LIMIT_FLOOR,
+        roles_array = roles_array,
+    )
+}
+
 /// Emit `crates/web/src/generated/data_layer.rs` — the GENERATED SDUI **data layer**: the resolver
 /// (read) and action (write) allowlists from `screens/*.yaml#/resolvers` + `#/actions`, each carrying
 /// the `api.yaml` operation it binds — and, for resolvers, the SELECTION SET expanded from that

@@ -274,12 +274,24 @@ pub struct Config {
     pub route_credit_grant_through_lane: bool,
     /// DEFAULT `false`. The delivery-completion routing (#807, ADR-20260829-230418 as corrected by ADR-20260831-093000). ON, DeliveryDispatchProcess stops CALLING the MarkOrderDelivered handler in-process and instead stages a COMMAND lane enqueue that the runner's fenced leg transaction turns into an inbound_messages row; the Order's own lane worker then runs the command and appends OrderDelivered. OFF is today's behaviour byte for byte: the saga writes Order-{id} itself, from the delivery scope, with no transaction and no lane. ONE key for BOTH completion legs, and that is not a fused flag. DeliveryStatusUpdated (a partner's terminal DELIVERED report) and DeliveryCompleted (an independent rider's completion) are two TRIGGERS for the SAME route: the same command to the same aggregate from the same process manager. A route's identity is the (message, target) pair -- it is one `Route::MarkOrderDeliveredToOrder` variant and one ROUTED_LANES row -- so two keys here could not be honoured by anything, and the per-route independence ADR-20260829-230418 C3 protects is independence between UNRELATED routes, which these two legs are not. What flipping it CHANGES: (a) the closure gains one lane hop of latency after the completion is reported, so the order shows DELIVERED a beat later; (b) the ENVELOPE changes -- user_id/ user_type and cause_id come from the mailbox row rather than the saga's system actor, and stored rows are NEVER backfilled; (c) the Order's writer is serialized by its own lane, so a completion racing any other Order write no longer resolves by optimistic version conflict; (d) a rejection -- notably the terminal-status rejection that stops a cancelled order being resurrected -- lands a REJECTED verdict on a supervisable row instead of a Skipped outcome. DOUBLE-CLOSE SAFETY IMPROVES: the routed door is keyed on the ROUTE plus the ORDER's id, so if both a partner report and a rider completion arrive for one order the second is absorbed at the door, where today it reaches the aggregate and is refused by the status invariant. (e) A LEGAL-SURFACE CONSEQUENCE, and the reason this key is not a pure plumbing flip: a successful COMMAND-door delivery ARMS THE DECLARED `schedules:`. `actors.yaml` declares MarkOrderDelivered -> OrderExpired, the ORDER RETENTION CLOCK (`ORDER_RETENTION_WINDOW_DAYS`, `reschedule: in-place`, set against FRENCH_COMMERCIAL_BOOKS_10Y), and the delivery glue applies a delivered message's schedules inside the completion transaction for COMMAND rows exactly as for recorded facts. Today the saga's in-process arm creates no mailbox row at all, so it arms nothing: a delivery completed by a PARTNER's DELIVERED report or by an INDEPENDENT RIDER's completion starts NO retention clock, while the same order closed through the `markOrderDelivered` mutation does -- the two paths to the same business fact have different retention behaviour, and only the operator-driven one is covered. Flipping this key ON puts both saga legs on the same footing as the mutation. That is a GDPR-relevant improvement rather than a regression, and it is named here because the flip decision is made from this text: an order whose retention clock was never armed is an order nothing will ever expire. ROLLBACK IS A FLIP, NOT A REDEPLOY. Flipping the default is a SEPARATE recorded decision, after smoke; the legacy arm is deleted in a SEPARATE change again, with golden payload equality as its precondition.
     pub route_order_delivery_completion_through_lane: bool,
+    /// DEFAULT `3`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_NUMBER_PER_HOUR verbatim). Magic-link sends allowed to ONE canonical email address per rolling hour. Exceeding it is `errors.yaml#/RateLimited`.
+    pub email_max_sends_per_address_per_hour: i64,
+    /// DEFAULT `5`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_NUMBER_PER_DAY verbatim). The daily backstop beside the hourly cap above -- exceeding it is `errors.yaml#/VerificationSendLimitReached`.
+    pub email_max_sends_per_address_per_day: i64,
+    /// DEFAULT `200`. UNVERIFIED input (mirrors SMS_MAX_SENDS_PER_DAY_GLOBAL verbatim, itself "a deliberately conservative guess, not a costed number"). Total magic-link sends allowed platform-wide per rolling day, across every address and every caller of `send_email_magic_link`. Once spent, every further send is refused with `errors.yaml#/VerificationSendCapacityExhausted` -- turning real requests away is a correct trade against runaway sending-domain reputation damage, but only because the refusal is loud (`email_send_refused_total{reason=global_ceiling}`, logged at ERROR).
+    pub email_max_sends_per_day_global: i64,
+    /// Round 3 R3-2 (legal, small): round 2's prose CLAIMED this key was "required" in staging/production without declaring it, so nothing enforced it -- `required:` below is what makes that true (`Config::resolve()` reports it MISSING and `must_stop_on_problems()` exits 78 before the router binds, `crates/server/src/main.rs:~45`). Art. 5(1)(e) storage limitation: the per-address send-abuse buckets above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that table a second, unbounded store of personal data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret, never the address itself. Unset in development/test, a fixed DEV-ONLY key is used (`application::email_guard:: DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever reaches that table without this key set. Unset in staging/production, boot STOPS instead: the founder's admin-gated provisioning of this secret is the named precondition (PR #899's round-2 note), not resolved by this change -- the manifests' `secretKeyRef` has existed since round 2.
+    pub email_quota_key_hmac_secret: String,
+    /// DEFAULT `50`. UNVERIFIED input (ADR-20260905-101349 §9): the per-role GraphQL depth/complexity ceiling is `codegen-emitted max x (100 + this) / 100` -- the emitted max is the deepest/most complex GENERATED client document that role's screens actually bind (`tools/codegen-rs`'s `graphql-limits` emitter over `crates/web/src/generated/data_layer.rs`'s `ResolverKey::selection()`), and this percentage is the safety margin above that observed real traffic before a request is refused. 50% is a round, unresearched starting margin -- wide enough that an ordinary screen fragment addition does not immediately trip the ratchet, narrow enough that an order-of-magnitude pathological query still refuses. Never a public-only limit: it applies to the ceiling computed for EVERY role.
+    pub graphql_limit_headroom_percent: i64,
     /// DEFAULT `900`. The Restaurant.serviceWindow.validUntil horizon (RSO-1, DECISIONS §43 sub-question iii): validUntil = min(next window transition, evaluatedAt + this horizon), and under HOURS_UNDECLARED — where no transition exists to wait for — it is evaluatedAt + horizon alone. Exists so no cache can treat a verdict as immortal: without it a restaurant declaring its hours at 18:50 on a Friday would keep rendering a blank badge in every warm cache at the hour it matters. Seconds; the 900 default trades staleness against re-evaluation load at Friday-peak list fan-out.
     pub service_window_validity_horizon_seconds: i64,
     /// DEFAULT `false`. SIRENE staging drain (ADR-0045): translates `external_sirene_restaurants` rows through the ACL and releases their payloads. OFF, staged rows stay PENDING indefinitely and registry-driven prospect creation does not happen. Readiness at GET /sirene. STOPPED since 2026-07-28, and the reason this text used to give ("PAUSED with the CI sweep, issue #220") is STALE: #220 closed the same day, as did the other named bottleneck #218, so the chain has been off for over a month behind a blocker that no longer exists and nobody has re-taken the restart decision. Restarting is NOT a flag flip -- an owner-declared restaurant carries no SIRET, which is the crawl's idempotency key, so un-pausing before that door shares the key manufactures duplicate restaurants; and a self-declared listing currently enters the prospect funnel. Both guards, and the decision itself, are issue #800.
     pub run_sirene_worker: bool,
     /// DEFAULT `false`. The staff access grant door (#639 part C step 6-i, ADR-20260905-101349 §6). ON, `grantRestaurantAccess` appends `RestaurantAccessGranted` as normal (subject to the accepted- basis check, `AccessBasisNotYetAccepted`). OFF, the handler refuses BEFORE touching the store with the typed `MemberAccessGrantDoorClosed` rejection -- a supervisable row, never a silent no-op. `revokeRestaurantAccess` is NEVER gated by this key: releasing access is always safe to allow. Preconditions gating the flip are named in `docs/decisions/MEMBER-ACCESS-GRANT-PRECONDITIONS.yaml` (open): the Art. 14 notice to the provisioned person, an Art. 30 entry "staff access management", the lifetime reservation written down with its future path, the Supabase DPA/region and Art. 26 items (founder's, external), and 6-ii merged (a grant with no door is a binding nobody can use).
     pub run_member_access_grant: bool,
+    /// DEFAULT `false`. The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §6). ON, both `requestMemberSignInLink` and `confirmMemberSignIn` run their identify/stamp/park flow as designed. OFF, BOTH refuse BEFORE touching the identity provider with the typed `MemberSignInDoorClosed` rejection -- a supervisable row, never a silent no-op. Preconditions gating the flip are named in `docs/decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` (open): 6-i merged (done), the silent `/auth/refresh` retry + `?next=` in the client (#894-class, own issue), email deliverability proven by a hand-dispatched drill (SPF/DKIM/DMARC, founder's), the Supabase DPA/region (founder's), the legal/privacy page the refusal screen links (owner named), and `MEMBER-ACCESS-GRANT-PRECONDITIONS` flipped first (a door with no grant path is a refusal machine).
+    pub run_member_sign_in_door: bool,
 }
 
 impl Config {
@@ -432,6 +444,15 @@ impl Config {
             .or_else(|| baked("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", profile).map(str::to_string))
             .map(|v| parse_bool("ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE", &v, false))
             .unwrap_or(false);
+        let email_max_sends_per_address_per_hour = raw("EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR").and_then(|v| v.parse::<i64>().ok()).unwrap_or(3);
+        let email_max_sends_per_address_per_day = raw("EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY").and_then(|v| v.parse::<i64>().ok()).unwrap_or(5);
+        let email_max_sends_per_day_global = raw("EMAIL_MAX_SENDS_PER_DAY_GLOBAL").and_then(|v| v.parse::<i64>().ok()).unwrap_or(200);
+        let email_quota_key_hmac_secret = raw("EMAIL_QUOTA_KEY_HMAC_SECRET");
+        if email_quota_key_hmac_secret.is_none() && matches!(profile, Profile::Staging | Profile::Production) {
+            problems.missing.push(MissingKey { name: "EMAIL_QUOTA_KEY_HMAC_SECRET", gates: "Round 3 R3-2 (legal, small): round 2's prose CLAIMED this key was \"required\" in staging/production without declaring it, so nothing enforced it -- `required:` below is what makes that true (`Config::resolve()` reports it MISSING and `must_stop_on_problems()` exits 78 before the router binds, `crates/server/src/main.rs:~45`). Art. 5(1)(e) storage limitation: the per-address send-abuse buckets above are enforced against a row keyed by the address in the SHARED `sms_send_quota` table -- storing the RAW address there would make that table a second, unbounded store of personal data with no retention story of its own, so the key is HMAC-SHA256(address) with this secret, never the address itself. Unset in development/test, a fixed DEV-ONLY key is used (`application::email_guard:: DEV_ONLY_HMAC_KEY`) -- acceptable only because nothing but hermetic test/dev data ever reaches that table without this key set. Unset in staging/production, boot STOPS instead: the founder's admin-gated provisioning of this secret is the named precondition (PR #899's round-2 note), not resolved by this change -- the manifests' `secretKeyRef` has existed since round 2." });
+        }
+        let email_quota_key_hmac_secret = email_quota_key_hmac_secret.unwrap_or_default();
+        let graphql_limit_headroom_percent = raw("GRAPHQL_LIMIT_HEADROOM_PERCENT").and_then(|v| v.parse::<i64>().ok()).unwrap_or(50);
         let service_window_validity_horizon_seconds = raw("SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS").and_then(|v| v.parse::<i64>().ok()).unwrap_or(900);
         let run_sirene_worker = raw("RUN_SIRENE_WORKER")
             .or_else(|| baked("RUN_SIRENE_WORKER", profile).map(str::to_string))
@@ -440,6 +461,10 @@ impl Config {
         let run_member_access_grant = raw("RUN_MEMBER_ACCESS_GRANT")
             .or_else(|| baked("RUN_MEMBER_ACCESS_GRANT", profile).map(str::to_string))
             .map(|v| parse_bool("RUN_MEMBER_ACCESS_GRANT", &v, false))
+            .unwrap_or(false);
+        let run_member_sign_in_door = raw("RUN_MEMBER_SIGN_IN_DOOR")
+            .or_else(|| baked("RUN_MEMBER_SIGN_IN_DOOR", profile).map(str::to_string))
+            .map(|v| parse_bool("RUN_MEMBER_SIGN_IN_DOOR", &v, false))
             .unwrap_or(false);
         if let Some(v) = Some(database_url.as_str()) {
             if !v.is_empty() && !matches_pattern("^postgres(ql)?://", v) {
@@ -530,9 +555,15 @@ impl Config {
                 route_cart_bind_through_lane,
                 route_credit_grant_through_lane,
                 route_order_delivery_completion_through_lane,
+                email_max_sends_per_address_per_hour,
+                email_max_sends_per_address_per_day,
+                email_max_sends_per_day_global,
+                email_quota_key_hmac_secret,
+                graphql_limit_headroom_percent,
                 service_window_validity_horizon_seconds,
                 run_sirene_worker,
                 run_member_access_grant,
+                run_member_sign_in_door,
             },
             problems,
         )
@@ -600,15 +631,21 @@ impl Config {
         out.push_str(&format!("  ROUTE_CART_BIND_THROUGH_LANE = {}\n", self.route_cart_bind_through_lane));
         out.push_str(&format!("  ROUTE_CREDIT_GRANT_THROUGH_LANE = {}\n", self.route_credit_grant_through_lane));
         out.push_str(&format!("  ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE = {}\n", self.route_order_delivery_completion_through_lane));
+        out.push_str(&format!("  EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR = {}\n", self.email_max_sends_per_address_per_hour));
+        out.push_str(&format!("  EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY = {}\n", self.email_max_sends_per_address_per_day));
+        out.push_str(&format!("  EMAIL_MAX_SENDS_PER_DAY_GLOBAL = {}\n", self.email_max_sends_per_day_global));
+        out.push_str(&format!("  EMAIL_QUOTA_KEY_HMAC_SECRET = {}\n", if self.email_quota_key_hmac_secret.is_empty() { "unset" } else { "set" }));
+        out.push_str(&format!("  GRAPHQL_LIMIT_HEADROOM_PERCENT = {}\n", self.graphql_limit_headroom_percent));
         out.push_str(&format!("  SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS = {}\n", self.service_window_validity_horizon_seconds));
         out.push_str(&format!("  RUN_SIRENE_WORKER          = {}\n", self.run_sirene_worker));
         out.push_str(&format!("  RUN_MEMBER_ACCESS_GRANT    = {}\n", self.run_member_access_grant));
+        out.push_str(&format!("  RUN_MEMBER_SIGN_IN_DOOR    = {}\n", self.run_member_sign_in_door));
         out
     }
 }
 
 /// How many keys the spec declares (excluding the profile selector).
-pub const KEY_COUNT: usize = 49;
+pub const KEY_COUNT: usize = 55;
 
 /// Every declared key name — the drift test asserts each `env::var` call site is one of these.
 pub const DECLARED_KEYS: &[&str] = &[
@@ -659,9 +696,15 @@ pub const DECLARED_KEYS: &[&str] = &[
     "ROUTE_CART_BIND_THROUGH_LANE",
     "ROUTE_CREDIT_GRANT_THROUGH_LANE",
     "ROUTE_ORDER_DELIVERY_COMPLETION_THROUGH_LANE",
+    "EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR",
+    "EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY",
+    "EMAIL_MAX_SENDS_PER_DAY_GLOBAL",
+    "EMAIL_QUOTA_KEY_HMAC_SECRET",
+    "GRAPHQL_LIMIT_HEADROOM_PERCENT",
     "SERVICE_WINDOW_VALIDITY_HORIZON_SECONDS",
     "RUN_SIRENE_WORKER",
     "RUN_MEMBER_ACCESS_GRANT",
+    "RUN_MEMBER_SIGN_IN_DOOR",
 ];
 
 /// `(key, profile, value)` — the declared non-secret configuration, baked in. Reviewed in a PR
@@ -698,4 +741,6 @@ const BAKED: &[(&str, &str, &str)] = &[
     ("RUN_SIRENE_WORKER", "production", "true"),
     ("RUN_SIRENE_WORKER", "staging", "true"),
     ("RUN_MEMBER_ACCESS_GRANT", "production", "false"),
+    ("RUN_MEMBER_SIGN_IN_DOOR", "production", "false"),
+    ("RUN_MEMBER_SIGN_IN_DOOR", "staging", "false"),
 ];

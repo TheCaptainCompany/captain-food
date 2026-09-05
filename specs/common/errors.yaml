@@ -206,3 +206,31 @@ VerificationCodeExpired:
   messages:
     en: "The verification code has expired. Please request a new one."
     fr: "Le code de vérification a expiré. Veuillez en demander un nouveau."
+
+
+# Promoted from customer/errors.yaml (#639 part C step 6-ii, ADR-20260905-101349): now thrown by
+# BOTH customer's ConfirmEmailVerification and network's ConfirmMemberSignIn -- a cross-scope
+# thrower promotes the error to the kernel (`scope-placement-error`).
+InvalidVerificationToken:
+  description: "The email magic-link token failed server-side verification with Supabase Auth."
+  context: {}
+  messages:
+    en: "This email verification link is invalid or has already been used."
+    fr: "Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé."
+
+
+# Promoted from delivery/errors.yaml (#639 part C step 6-ii): now thrown by BOTH the rider door's
+# ConfirmRiderSignIn and network's ConfirmMemberSignIn -- a cross-scope thrower promotes the error
+# to the kernel. Wording generalised (it named "rider" before this promotion; ADR-20260818-101500's
+# one-stamper-per-role shape is common to both doors).
+AuthSubjectHoldsAnotherRole:
+  description: >
+    The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a
+    restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object
+    wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern
+    of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).
+  context:
+    authRef: { $ref: 'scalars.yaml#/AuthSubject' }
+  messages:
+    en: "This login is already used for another kind of Captain.Food account and cannot sign in here yet."
+    fr: "Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici."

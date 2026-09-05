@@ -191,6 +191,7 @@ name = "actor-restaurant-membership"
 version = "0.1.0"
 dependencies = [
  "bin_runtime",
+ "domain-common",
  "domain-network",
  "regex",
  "serde_json",
@@ -414,6 +415,7 @@ dependencies = [
  "chrono",
  "domain",
  "hex",
+ "hmac",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1775,6 +1777,7 @@ name = "domain-network"
 version = "0.1.0"
 dependencies = [
  "domain-common",
+ "domain-customer",
  "serde",
  "uuid",
 ]

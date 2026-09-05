@@ -36,6 +36,8 @@ A visitor browsing Captain.Food without being logged in.
 |  | VerifyPhone | [✏️ `verifyPhone`](#mutation-verifyphone) |
 | 🧭 **SignInAsRider** | RequestRiderSignInCode | [✏️ `requestRiderSignInCode`](#mutation-requestridersignincode) |
 |  | ConfirmRiderSignIn | [✏️ `confirmRiderSignIn`](#mutation-confirmridersignin) |
+| 🧭 **SignInAsRestaurantManager** | RequestMemberSignInLink | [✏️ `requestMemberSignInLink`](#mutation-requestmembersigninlink) |
+|  | ConfirmMemberSignIn | [✏️ `confirmMemberSignIn`](#mutation-confirmmembersignin) |
 
 <a id="story-customer"></a>
 ### 🎬 `customer` · 🙋 `CUSTOMER` · 🗣️ `fr-FR`
@@ -253,7 +255,7 @@ A delivery partner (already integrated: a known catalog channel) acting as an EX
 
 _Restaurant provider domain: accounts, locations, lifecycle, order-acceptance mode (incl. catalog & order-fulfilment operations performed by restaurant staff)._
 
-### 🧰 API operations _(30)_
+### 🧰 API operations _(32)_
 
 <a id="query-restaurantdeliveries"></a>
 #### 🔎 Query: `restaurantDeliveries`
@@ -486,6 +488,20 @@ The refund queue (RefundProcess): refunds opened for decision, with their lifecy
 - **Roles**: ADMIN · **slice** V0
 - **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
 
+<a id="mutation-requestmembersigninlink"></a>
+#### ✏️ Mutation: `requestMemberSignInLink`
+
+- **Command**: [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) → handled by [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Roles**: PUBLIC · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
+<a id="mutation-confirmmembersignin"></a>
+#### ✏️ Mutation: `confirmMemberSignIn`
+
+- **Command**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) → handled by [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Roles**: PUBLIC · **slice** V0
+- **Returns**: [🧩 `MutationAcceptance`](#type-mutationacceptance) (acceptance-first — outcome via [🔎 `operationStatus`](#query-operationstatus))
+
 ### 🧩 Output types _(2)_
 
 <a id="type-restaurant"></a>
@@ -615,6 +631,8 @@ _🧩 aggregate_ — The bridge and the grant (#639 part C step 6-i, ADR-2026090
 | --- | --- | --- |
 | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) | [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted) | [⛔ `MemberAccessGrantDoorClosed`](#error-memberaccessgrantdoorclosed), [⛔ `AccessBasisNotYetAccepted`](#error-accessbasisnotyetaccepted), [⛔ `MemberAuthSubjectAlreadyBound`](#error-memberauthsubjectalreadybound) |
 | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) | [⚡ `RestaurantAccessRevoked`](#event-restaurantaccessrevoked) | [⛔ `RestaurantMembershipNotFound`](#error-restaurantmembershipnotfound), [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked) |
+| [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) | _Delegate to the auth provider: send an email magic link, REFUSING when the email send-abuse wall says so. Never consults the Member bridge (no enumeration oracle). No event._ | [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted), [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed) |
+| [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) | _Verify the magic-link token with the auth provider, look the proved subject up in the Member bridge (auth_subject -> member_id, step 6-i): no member -> MemberNotLinked, nothing stamped, the session still parked so the refusal screen has a real cookie; a member -> stamp { role: MEMBER } on the provider user and park the post-stamp session for POST /auth/session. No event._ | [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `MemberNotLinked`](#error-membernotlinked), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `MemberSignInRequiresSession`](#error-membersigninrequiressession), [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed) |
 
 ### 🗄️ Views (read models) _(4)_
 
@@ -705,7 +723,7 @@ _🧩 aggregate_ — The bridge and the grant (#639 part C step 6-i, ADR-2026090
 | `created_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 | `updated_at` | `timestamptz` | ⚠️ _(none)_ | — | technical — stamped from event.occurred_at (implicit on every read model) |
 
-### 📩 Commands _(22)_
+### 📩 Commands _(24)_
 
 <a id="command-registerrestaurantaccount"></a>
 #### 📩 Command: `RegisterRestaurantAccount`
@@ -1061,6 +1079,33 @@ End one `RestaurantMembership` (ADR-20260905-101349 §2/§11). Revocation of ACC
 | --- | --- | --- | --- |
 | <a id="command-revokerestaurantaccess--membershipid"></a>`membershipId` | [🔤 `MembershipId`](#scalar-membershipid) | ✅ |  |
 | <a id="command-revokerestaurantaccess--ground"></a>`ground` | [🔤 `AccessRevocationGround`](#scalar-accessrevocationground) | ✅ |  |
+
+<a id="command-requestmembersigninlink"></a>
+#### 📩 Command: `RequestMemberSignInLink`
+
+Ask the auth provider to send an email magic link (the same `send_email_magic_link` port RequestEmailVerification uses, and the same email send-abuse wall shape as the rider door's SMS guard -- ADR-20260905-101349 §9). Emits no event, and MUST NOT reveal whether the address is on the restaurateur roster: the handler never consults the `Member` bridge, so the outcome is identical for a roster address and a stranger's (no enumeration oracle).
+
+- **Dispatched by**: [✏️ `requestMemberSignInLink`](#mutation-requestmembersigninlink) · **handled by** [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Emits**: —
+- **Throws**: [⛔ `RateLimited`](#error-ratelimited), [⛔ `VerificationSendLimitReached`](#error-verificationsendlimitreached), [⛔ `VerificationSendCapacityExhausted`](#error-verificationsendcapacityexhausted), [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-requestmembersigninlink--email"></a>`email` | [🔤 `EmailAddress`](#scalar-emailaddress) | ✅ |  |
+| <a id="command-requestmembersigninlink--locale"></a>`locale` | [🔤 `Locale`](#scalar-locale) | ⬜ | The email's language; no stored locale exists pre-identification, so this is caller-supplied. |
+
+<a id="command-confirmmembersignin"></a>
+#### 📩 Command: `ConfirmMemberSignIn`
+
+Verify the magic-link token with the auth provider, then IDENTIFY the member: the proved auth subject is looked up in the `Member` bridge (`auth_subject -> member_id`, the step-6-i projection); no member -> the session is still parked (so "Se déconnecter" is meaningful on the not-yet-linked refusal screen, §8.5) but NOTHING is stamped and `MemberNotLinked` is thrown (the rider door's `RiderNotRegistered` precedent, step 2c-i); a member -> the MEMBER role claim is stamped (`identity.stamp_member_claim`, `{ role: MEMBER }` and nothing else) and the post-stamp provider session is parked for cookie pickup via POST /auth/session -- the credential is never in the GraphQL response. Emits no event. The beneficiary is the OUTPUT of `verify_email_token` (the proven email), never a payload field.
+
+- **Dispatched by**: [✏️ `confirmMemberSignIn`](#mutation-confirmmembersignin) · **handled by** [🎭 `RestaurantMembership`](#actor-restaurantmembership)
+- **Emits**: —
+- **Throws**: [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired), [⛔ `MemberNotLinked`](#error-membernotlinked), [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole), [⛔ `MemberSignInRequiresSession`](#error-membersigninrequiressession), [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <a id="command-confirmmembersignin--token"></a>`token` | [🔤 `EmailVerificationToken`](#scalar-emailverificationtoken) | ✅ |  |
 
 ### ⚡ Events _(23)_
 
@@ -1573,7 +1618,7 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="scalar-accessbasis"></a>🔤 `AccessBasis` | enum (CAPTAIN_ONBOARDING \| GOOGLE_BUSINESS_PROFILE \| OWNER_DECLARATION \| MEMBER_INVITATION) | WHY a `RestaurantAccessGranted` fact was recorded -- the closed set of four doors (ADR-20260905-101349 §3): Captain provisions by hand (`CAPTAIN_ONBOARDING`), an owner proves ownership through the Google Business Profile link (`GOOGLE_BUSINESS_PROFILE`), an owner declares without external proof (`OWNER_DECLARATION`), or an existing member invites a colleague who accepts (`MEMBER_INVITATION`). Renamed from the proposal's `AccessEvidence`: only the Google leg is actual evidence Captain holds, so naming the whole set "evidence" would overstate the other three. **Step 6-i's `GrantRestaurantAccess` handler ACCEPTS only `CAPTAIN_ONBOARDING`** -- the other three are declared (so the vocabulary does not need a second widening the day 6-iv builds the invitation accept, PROP §6.4 FORK 1) and REFUSED with the typed error `errors.yaml#/AccessBasisNotYetAccepted`. Not fixed here: the day `MEMBER_INVITATION` is accepted, it arrives as the second command of 6-iv's two-lane accept (`AcceptRestaurantInvitation` then `GrantRestaurantAccess`), never a process manager (ADR-20260905-101349 §2).  |
 | <a id="scalar-accessrevocationground"></a>🔤 `AccessRevocationGround` | enum (LEFT_THE_RESTAURANT \| ACCESS_NO_LONGER_NEEDED) | WHY a `RestaurantAccessRevoked` fact was recorded -- the smallest closed set naming no work-performance ground (the ADR-20260904-014136 precedent, legal-graded: a stored decline/performance-keyed reason is the strongest requalification exhibit a labour tribunal could ask for, so none is offered). `LEFT_THE_RESTAURANT` (the member's own departure -- resignation, end of contract) and `ACCESS_NO_LONGER_NEEDED` (the restaurant's own operational call -- a role changed, a device was reassigned) are the two ordinary paths. `UNRECOGNISED` is the read-only catch-all (`#[serde(other)]`, unspellable at the command door -- the same shape `RiderRestrictionGround` carries): without it a future stored value fails the whole stream load on decode. No free text rides beside either value -- no `note` field exists on `RevokeRestaurantAccess`. Counsel review at the checkpoint (ADR-20260905-101349 §11); additive- only if it ever grows, same discipline as `RiderRestrictionGround` (counsel can only add).  |
 
-### ⛔ Errors _(19)_
+### ⛔ Errors _(22)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -1596,8 +1641,11 @@ A single restaurant location (HubRise: location); belongs to a RestaurantAccount
 | <a id="error-memberauthsubjectalreadybound"></a>⛔ `MemberAuthSubjectAlreadyBound` | The login credential (`authSubject`) is already bound to ANOTHER member id: the write-side reservation `(MEMBER, authSubject)` in `database/tables/reservations.yaml#/ auth_subject_reservations` lost its insert to a row held by a different principal (#639 part C step 6-i, ADR-20260905-101349 §4). The binding is never released by a revoke, so the remedy is to grant the EXISTING member id, never a new one.  | 🇬🇧 This login is already linked to a restaurant member. Grant the existing member instead. | 🇫🇷 Cette identité de connexion est déjà liée à un membre. Accordez l'accès au membre existant. | [📩 `GrantRestaurantAccess`](#command-grantrestaurantaccess) |
 | <a id="error-restaurantmembershipnotfound"></a>⛔ `RestaurantMembershipNotFound` | No `RestaurantMembership` exists for this `membershipId` (#639 part C step 6-i). | 🇬🇧 This restaurant membership was not found. | 🇫🇷 Cette adhésion restaurant est introuvable. | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) |
 | <a id="error-restaurantmembershipalreadyrevoked"></a>⛔ `RestaurantMembershipAlreadyRevoked` | The `RestaurantMembership` was already revoked (#639 part C step 6-i) -- revocation is a fact that happens once; a second `RevokeRestaurantAccess` on the same `membershipId` is rejected rather than silently re-recorded (the Art. 11-log style: the log is never overwritten).  | 🇬🇧 This restaurant membership was already revoked. | 🇫🇷 Cette adhésion restaurant a déjà été révoquée. | [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess) |
+| <a id="error-membernotlinked"></a>⛔ `MemberNotLinked` | The magic-link token verified (the email is genuinely proven), but no `Member` row exists for this auth subject in `Member.auth_subject` (the step-6-i bridge) -- the not-yet-linked refusal (PROP-20260831-180622 §8.5, the rider door's `RiderNotRegistered` precedent). NOTHING is stamped and NOTHING is created; the session is still parked so the refusal screen can offer "Se déconnecter" against a real cookie. `email` carries the VERIFIED address (the token's output, never client input) so the refusal screen can print it.  | 🇬🇧 Your account is not yet linked to a restaurant. Write to {supportContact}. | 🇫🇷 Votre compte n'est pas encore relié à un restaurant. Écrivez-nous à {supportContact}. | [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
+| <a id="error-membersigninrequiressession"></a>⛔ `MemberSignInRequiresSession` | The sign-in confirmation arrived with no `X-SESSION-ID` (the rider door's #852 B1 precedent). The credential it would mint is parked for `POST /auth/session` under the OWNING anonymous session (envelope data, ADR-0041), and a session parked with no owner could be claimed by any header-less caller holding the acceptance messageId. So the door refuses BEFORE the token is spent (the link stays usable for a correct retry) and nothing is verified, stamped or parked. Carries nothing: the remedy is the client's (the SDUI client always sends the header, so a restaurateur never sees this).  | 🇬🇧 Sign-in needs a browser session. Reload the page and try again. | 🇫🇷 La connexion nécessite une session de navigation. Rechargez la page et réessayez. | [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
+| <a id="error-membersignindoorclosed"></a>⛔ `MemberSignInDoorClosed` | `RUN_MEMBER_SIGN_IN_DOOR` is OFF (`configuration.yaml`, default false) -- the member sign-in door refuses BEFORE touching the identity provider (ADR-20260905-101349 §6/§F): the writer key flips only after the preconditions in `decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` are met.  | 🇬🇧 Restaurant sign-in is not yet available. | 🇫🇷 La connexion restaurateur n'est pas encore disponible. | [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 
-### 📐 Business rules _(30)_
+### 📐 Business rules _(32)_
 
 <a id="rule-accountregistrationvalidcurrencyuniqueref"></a>
 #### 📐 Rule: `AccountRegistrationValidCurrencyUniqueRef`
@@ -1808,6 +1856,20 @@ _GrantRestaurantAccess refuses with the typed MemberAccessGrantDoorClosed BEFORE
 _AccessBasis declares four values; GrantRestaurantAccess's handler accepts only CAPTAIN_ONBOARDING and refuses the other three with the typed AccessBasisNotYetAccepted (#639 part C step 6-i, ADR-20260905-101349 §3)._
 
 - **Verified by**: [🧪 `TestRestaurantAccessGranted`](#test-testrestaurantaccessgranted), [🧪 `TestGrantRestaurantAccessBasisNotYetAccepted`](#test-testgrantrestaurantaccessbasisnotyetaccepted)
+
+<a id="rule-membersigninidentifiesonly"></a>
+#### 📐 Rule: `MemberSignInIdentifiesOnly`
+
+_Member sign-in is identify-only, never register: a verified email whose login is bound to a member stamps { role: MEMBER } (and nothing else -- no id) on the provider user and parks the post-stamp session; a verified email with no member behind it is refused with MemberNotLinked but the session is STILL parked (so the not-yet-linked refusal screen has a real cookie) and nothing is stamped; a login already carrying another role's claim is refused rather than overwritten; a confirmation that carries no session to own the parked credential is refused with MemberSignInRequiresSession BEFORE the token is spent; and the link REQUEST never reveals whether the address is on the roster (#639 part C step 6-ii, ADR-20260905-101349 §7-§10)._
+
+- **Verified by**: [🧪 `TestMemberRequestSignInLink`](#test-testmemberrequestsigninlink), [🧪 `TestMemberRequestSignInLinkForStrangerIsIdentical`](#test-testmemberrequestsigninlinkforstrangerisidentical), [🧪 `TestMemberConfirmSignInUnknownEmailIsRejected`](#test-testmemberconfirmsigninunknownemailisrejected), [🧪 `TestMemberConfirmSignInIdentifies`](#test-testmemberconfirmsigninidentifies), [🧪 `TestMemberConfirmSignInInvalidTokenIsRejected`](#test-testmemberconfirmsignininvalidtokenisrejected), [🧪 `TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected`](#test-testmemberconfirmsigninsubjectholdinganotherroleisrejected), [🧪 `TestMemberConfirmSignInWithoutSessionIsRejected`](#test-testmemberconfirmsigninwithoutsessionisrejected)
+
+<a id="rule-membersigningatedbeforestore"></a>
+#### 📐 Rule: `MemberSignInGatedBeforeStore`
+
+_requestMemberSignInLink and confirmMemberSignIn both refuse with the typed MemberSignInDoorClosed BEFORE the identity provider is touched while configuration.yaml#/keys/RUN_MEMBER_SIGN_IN_DOOR is off (#639 part C step 6-ii, ADR-20260905-101349 §6)._
+
+- **Verified by**: [🧪 `TestMemberRequestSignInLinkDoorClosed`](#test-testmemberrequestsigninlinkdoorclosed), [🧪 `TestMemberConfirmSignInDoorClosed`](#test-testmemberconfirmsignindoorclosed)
 
 ### 🧪 Tests _(4)_
 
@@ -2298,6 +2360,96 @@ _Revoking an already-revoked membership is rejected — the Art. 11-log style lo
 - **When**: [📩 `RevokeRestaurantAccess`](#command-revokerestaurantaccess)
 - **Thrown**: [⛔ `RestaurantMembershipAlreadyRevoked`](#error-restaurantmembershipalreadyrevoked)
 - **Verifies**: [📐 `RestaurantMembershipRevocationIsFinal`](#rule-restaurantmembershiprevocationisfinal)
+
+<a id="test-testmemberrequestsigninlink"></a>
+#### 🧪 Test: `TestMemberRequestSignInLink`
+
+_Sends an email magic link to a restaurateur's address; emits nothing_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberrequestsigninlinkforstrangerisidentical"></a>
+#### 🧪 Test: `TestMemberRequestSignInLinkForStrangerIsIdentical`
+
+_Sends an email magic link to an address on no roster, identically; emits nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberrequestsigninlinkdoorclosed"></a>
+#### 🧪 Test: `TestMemberRequestSignInLinkDoorClosed`
+
+_requestMemberSignInLink is refused by the door key while it is OFF (the production default), before the identity provider is touched_
+
+- **Given**: _(none)_
+- **When**: [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink)
+- **Thrown**: [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed)
+- **Verifies**: [📐 `MemberSignInGatedBeforeStore`](#rule-membersigningatedbeforestore)
+
+<a id="test-testmemberconfirmsigninunknownemailisrejected"></a>
+#### 🧪 Test: `TestMemberConfirmSignInUnknownEmailIsRejected`
+
+_Refuses member sign-in for a verified email that no member is bound to; creates nothing_
+
+- **Given**: _(none)_
+- **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
+- **Thrown**: [⛔ `MemberNotLinked`](#error-membernotlinked)
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberconfirmsigninidentifies"></a>
+#### 🧪 Test: `TestMemberConfirmSignInIdentifies`
+
+_Verifying the magic-link token for a bound member is accepted and appends nothing -- identify-only, never register_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
+- **Then**: ∅ _no event (idempotent no-op)_
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberconfirmsignininvalidtokenisrejected"></a>
+#### 🧪 Test: `TestMemberConfirmSignInInvalidTokenIsRejected`
+
+_Rejects member sign-in when the magic-link token is invalid or expired_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
+- **Thrown**: [⛔ `InvalidVerificationToken`](#error-invalidverificationtoken), [⛔ `VerificationCodeExpired`](#error-verificationcodeexpired)
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberconfirmsigninsubjectholdinganotherroleisrejected"></a>
+#### 🧪 Test: `TestMemberConfirmSignInSubjectHoldingAnotherRoleIsRejected`
+
+_Refuses member sign-in when the verified login already holds another role's claim; overwrites nothing_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
+- **Thrown**: [⛔ `AuthSubjectHoldsAnotherRole`](#error-authsubjectholdsanotherrole)
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberconfirmsigninwithoutsessionisrejected"></a>
+#### 🧪 Test: `TestMemberConfirmSignInWithoutSessionIsRejected`
+
+_Refuses member sign-in when the request carries no session to own the parked credential; spends no token, parks nothing_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
+- **Thrown**: [⛔ `MemberSignInRequiresSession`](#error-membersigninrequiressession)
+- **Verifies**: [📐 `MemberSignInIdentifiesOnly`](#rule-membersigninidentifiesonly)
+
+<a id="test-testmemberconfirmsignindoorclosed"></a>
+#### 🧪 Test: `TestMemberConfirmSignInDoorClosed`
+
+_confirmMemberSignIn is refused by the door key while it is OFF (the production default), before the identity provider is touched_
+
+- **Given**: [⚡ `RestaurantAccessGranted`](#event-restaurantaccessgranted)
+- **When**: [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin)
+- **Thrown**: [⛔ `MemberSignInDoorClosed`](#error-membersignindoorclosed)
+- **Verifies**: [📐 `MemberSignInGatedBeforeStore`](#rule-membersigningatedbeforestore)
 
 ### 📡 Observability _(1)_
 
@@ -9038,23 +9190,21 @@ INBOUND INTEGRATION FACT, recorded through the identity ACL with NO command (ADR
 | <a id="event-customeridentityunlinked--customerid"></a>`customerId` | [🔤 `CustomerId`](#scalar-customerid) | ✅ |  |
 | <a id="event-customeridentityunlinked--erasurerequestid"></a>`erasureRequestId` | [🔤 `ErasureRequestId`](#scalar-erasurerequestid) | ✅ |  |
 
-### 🔤 Scalars _(7)_
+### 🔤 Scalars _(6)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
 | <a id="scalar-addressid"></a>🔤 `AddressId` | string _uuid_ | Identifies a saved address in a customer's address book. |
 | <a id="scalar-paymentmethodid"></a>🔤 `PaymentMethodId` | string | Stripe PaymentMethod id (provider reference). Example: 'pm_1Nabc...'. |
-| <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-erasurerequestid"></a>🔤 `ErasureRequestId` | string _uuid_ | Identifies ONE erasure journey, from the request through to the receipt. It is the customer's reference for a right they exercised, so it must outlive the customer: after stream deletion this id is the only handle joining the surviving tombstone, the `CustomerErased` receipt and the subject's own "is it done?" question. Pseudonymous by construction — it identifies a REQUEST, never a person. A second request while one is pending returns the SAME id (acceptance-first absorbs the duplicate; a typed rejection would punish a double-tap for no gain); a fresh request after a cancel gets a fresh one.  |
 | <a id="scalar-erasureconfirmationtoken"></a>🔤 `ErasureConfirmationToken` | string | The one-shot token proving the SECOND round-trip of an irreversible act — deliberately its own scalar and NOT `EmailVerificationToken`, because these are different secrets with different lifetimes and blast radii, and one name means one thing. It expires (the confirm window) so an unconfirmed request LAPSES VISIBLY on the status view instead of silently eating the subject's Art. 12(3) month: the confirmation step is OUR safeguard, so it may not consume their clock.  |
 | <a id="scalar-erasurestatus"></a>🔤 `ErasureStatus` | enum (REQUESTED \| CONFIRMED \| EXECUTING \| ERASED) | The CUSTOMER-VISIBLE chain of an erasure request — what the data subject is told, and nothing else. `PARKED` is deliberately ABSENT: parking is an internal scheduling fact about OUR execution (an in-flight paid order of the subject's own defers the destructive legs), it is row state on the erasure process (landing with the orchestrator), and it is never an event. Leaking it here would make the subject read an operational excuse as a decision about their rights, and would put a member in a stored, promised enum for a concept the ledger has no fact for.  |
 | <a id="scalar-hasopenorders"></a>🔤 `HasOpenOrders` | enum (NONE \| PRESENT) | The open-order verdict for one customer, as an ENUM rather than a boolean or a count — because a process-manager `guard.that` admits only `{ const: <ENUM_MEMBER> }` (specs/common/processmanager.yaml). Expressing the re-check as a declared enum column keeps the erasure re-check inside the LIVE lane grammar instead of forcing a grammar extension for one saga (vernon). The read side derives it; nothing stores it.  |
 
-### ⛔ Errors _(7)_
+### ⛔ Errors _(6)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
-| <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification) |
 | <a id="error-emailalreadyinuse"></a>⛔ `EmailAlreadyInUse` | The email is already linked to another customer. | 🇬🇧 The email '{email}' is already in use by another account. | 🇫🇷 L'e-mail '{email}' est déjà utilisé par un autre compte. | [📩 `RequestEmailVerification`](#command-requestemailverification) |
 | <a id="error-phonealreadyinuse"></a>⛔ `PhoneAlreadyInUse` | The phone number is already linked to another customer (on change). | 🇬🇧 The phone number '{phone}' is already in use by another account. | 🇫🇷 Le numéro '{phone}' est déjà utilisé par un autre compte. | [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `ConfirmPhoneChange`](#command-confirmphonechange) |
 | <a id="error-erasureblockedbyopenorder"></a>⛔ `ErasureBlockedByOpenOrder` | The customer asked to be erased while an order of theirs is still in flight (or money is still settling). A set-based precondition the write side checks, which is exactly why erasure begins as a rejectable COMMAND and not an event: an event cannot be refused, a command can. NOT a refusal of the right — a refusal of the TIMING, and the message must say so, because a person exercising Art. 17 who reads "no" will not ask twice. The same precondition re-runs at promotion, where failing it PARKS the journey rather than rejecting it (the request already stands by then; only execution waits).  | 🇬🇧 You have an order in progress. You can request deletion once it is complete — your request has not been recorded. | 🇫🇷 Vous avez une commande en cours. Vous pourrez demander la suppression une fois celle-ci terminée — votre demande n'a pas été enregistrée. | [📩 `RequestCustomerErasure`](#command-requestcustomererasure) |
@@ -10768,7 +10918,7 @@ A previously restricted rider was reinstated by an admin (#639 part C step 4-i, 
 | <a id="scalar-deliverypartnername"></a>🔤 `DeliveryPartnerName` | string | The delivery partner's display/legal name as stated on self-registration (#61). |
 | <a id="scalar-cityavailabilitystatus"></a>🔤 `CityAvailabilityStatus` | enum (PENDING \| APPROVED \| REVOKED) | Review state of a delivery partner's declared availability to serve a city (#61): PENDING until an admin approves, APPROVED = live for dispatch consideration, REVOKED = withdrawn/disabled. |
 
-### ⛔ Errors _(18)_
+### ⛔ Errors _(17)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -10789,7 +10939,6 @@ A previously restricted rider was reinstated by an admin (#639 part C step 4-i, 
 | <a id="error-rideraccessrestricted"></a>⛔ `RiderAccessRestricted` | The rider's access is restricted (#639 part C step 4-i, ADR-20260904-081527 §6) — a restricted rider cannot go AVAILABLE; the aggregate's own belt over ChangeRiderStatus. | 🇬🇧 Your access is restricted, so you cannot go available for deliveries. | 🇫🇷 Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons. | [📩 `ChangeRiderStatus`](#command-changeriderstatus) |
 | <a id="error-riderrestrictiondoorclosed"></a>⛔ `RiderRestrictionDoorClosed` | The restrict door is closed by RUN_RIDER_RESTRICTION_DOOR (#639 part C step 4-iii-A, ADR-20260904-152807 §7) — a declared, supervisable refusal while the release preconditions (docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml) are still open, never a silent no-op. | 🇬🇧 Restricting riders is not yet enabled in this environment. | 🇫🇷 La restriction des livreurs n'est pas encore activée dans cet environnement. | [📩 `RestrictRider`](#command-restrictrider) |
 | <a id="error-riderrestrictiongroundunrecognised"></a>⛔ `RiderRestrictionGroundUnrecognised` | restrictRider's `ground` decoded as the read-only catch-all (#639 part C step 4-i round 2, item 5 -- ADR-20260904-081527 §3) — unspellable at the GraphQL door already (RiderRestrictionGround excludes UNRECOGNISED on write, ADR-20260803-234035), so this is the HANDLER's own belt against a caller that bypasses the door entirely (a hypothetical future direct command-bus caller, never a real GraphQL client). No `tests.yaml` fixture can spell it — the same unspellable shape as ChangeRiderStatus/SUSPENDED — so this is pinned by a Rust unit test constructing the raw command from JSON, not a behaviour-test case. | 🇬🇧 That restriction ground is not recognised. | 🇫🇷 Ce motif de restriction n'est pas reconnu. | [📩 `RestrictRider`](#command-restrictrider) |
-| <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping RIDER would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in as a rider yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter comme livreur. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
 
 ### 📐 Business rules _(27)_
 
@@ -12167,7 +12316,7 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="entity-commandfailureattribution--reason"></a>`reason` | [🔤 `CommandFailureReason`](#scalar-commandfailurereason) | ✅ | Why it failed, in the coarsest vocabulary that changes the operational response. |
 | <a id="entity-commandfailureattribution--gatewaystatus"></a>`gatewayStatus` | [🔤 `GatewayStatusCode`](#scalar-gatewaystatuscode) | ⬜ | The gateway's HTTP status, present ONLY at the PAYMENT_GATEWAY seam. Its ABSENCE on every other seam is meaningful and is asserted: a status on a payload-decode failure would mean the classifier had guessed.  |
 
-### 🔤 Scalars _(64)_
+### 🔤 Scalars _(65)_
 
 | Scalar | Type | Description |
 | --- | --- | --- |
@@ -12234,9 +12383,10 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="scalar-dialingcode"></a>🔤 `DialingCode` | string `^\+[0-9]{1,4}$` | Country dialing/calling code in '+NN' form (e.g. '+33', '+1'). This is what the phone-country picker emits and what the auth commands receive — NOT the ISO country code.  |
 | <a id="scalar-nationalphonenumber"></a>🔤 `NationalPhoneNumber` | string | National (subscriber) part of a phone number, without the dialing code. E.g. '0612345678' or '612345678'. |
 | <a id="scalar-otpcode"></a>🔤 `OtpCode` | string `^[0-9]{4,8}$` | One-time SMS code from Supabase Auth (sent via the OVHcloud SMS hook; a mock provider in dev). |
+| <a id="scalar-emailverificationtoken"></a>🔤 `EmailVerificationToken` | string | Opaque Supabase token from an email magic link; verified server-side (never trusted as a bare client claim). |
 | <a id="scalar-erasureparkreason"></a>🔤 `ErasureParkReason` | enum (OPEN_ORDER \| FUNDS_IN_FLIGHT) | Why a due erasure was PARKED instead of executing — a CLOSED set precisely because it is the grouping key of `erasure_request_parked_total` (a metric label needs a declared bounded population, ADR-20260811-014129). Both members mean the same thing to the customer: destroying the subject key mid-delivery would make an in-flight order's encrypted address unreadable while the food is moving and the money has already left — the erasure analogue of a paid order nobody is told about.  |
 
-### ⛔ Errors _(18)_
+### ⛔ Errors _(20)_
 
 | Error | Description | Message (en) | Message (fr) | Thrown by |
 | --- | --- | --- | --- | --- |
@@ -12246,20 +12396,22 @@ THE ONLY SHAPE a non-catalogued command failure may write into `inbound_messages
 | <a id="error-forbidden"></a>⛔ `Forbidden` | Authenticated, but not allowed to act on this resource (e.g. not the owner). | 🇬🇧 You are not allowed to perform this action. | 🇫🇷 Vous n'êtes pas autorisé à effectuer cette action. | — |
 | <a id="error-validationerror"></a>⛔ `ValidationError` | Input failed schema validation (type, format, required, bounds). | 🇬🇧 The field '{field}' is invalid. | 🇫🇷 Le champ '{field}' est invalide. | — |
 | <a id="error-conflict"></a>⛔ `Conflict` | Concurrent modification (optimistic-concurrency version clash); retry. | 🇬🇧 This item was modified meanwhile. Please retry. | 🇫🇷 Cet élément a été modifié entre-temps. Veuillez réessayer. | — |
-| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
+| <a id="error-ratelimited"></a>⛔ `RateLimited` | Too many requests on this path, and the caller may succeed later — a WAIT, not a refusal. Carries the server's own remaining backoff so the screen renders a real countdown rather than guessing (#516: the SMS-OTP send is the first path to throw it, where a wrong countdown costs a resend and a resend costs money). A ceiling with no useful countdown is a DIFFERENT error, not this one with a null field.  | 🇬🇧 Too many requests. Please wait {retryAfterSeconds}s and try again. | 🇫🇷 Trop de requêtes. Veuillez patienter {retryAfterSeconds}s avant de réessayer. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
 | <a id="error-internal"></a>⛔ `Internal` | Unexpected server error. | 🇬🇧 Something went wrong on our side. | 🇫🇷 Une erreur est survenue de notre côté. | — |
 | <a id="error-restaurantnotfound"></a>⛔ `RestaurantNotFound` | No restaurant with this id. | 🇬🇧 Restaurant not found. | 🇫🇷 Restaurant introuvable. | [📩 `CreateCatalog`](#command-createcatalog), [📩 `MarkRestaurantAsFavorite`](#command-markrestaurantasfavorite), [📩 `ConfigureRestaurantSlug`](#command-configurerestaurantslug), [📩 `ActivateRestaurant`](#command-activaterestaurant), [📩 `UpdateRestaurant`](#command-updaterestaurant), [📩 `DeactivateRestaurant`](#command-deactivaterestaurant), [📩 `ChangeOrderAcceptanceMode`](#command-changeorderacceptancemode), [📩 `RemoveRestaurant`](#command-removerestaurant), [📩 `UpdateRestaurantGoogleBusinessProfile`](#command-updaterestaurantgooglebusinessprofile), [📩 `MarkRestaurantClosed`](#command-markrestaurantclosed), [📩 `ClaimRestaurantListing`](#command-claimrestaurantlisting), [📩 `OptOutRestaurantListing`](#command-optoutrestaurantlisting), [📩 `ChangeRestaurantListingStatus`](#command-changerestaurantlistingstatus), [📩 `ConfigureGoogleBusinessProfileOrderLink`](#command-configuregooglebusinessprofileorderlink), [📩 `VerifyGoogleBusinessProfileOrderLink`](#command-verifygooglebusinessprofileorderlink), [📩 `PlaceOrder`](#command-placeorder) |
 | <a id="error-noeditablefieldprovided"></a>⛔ `NoEditableFieldProvided` | Update command carried no editable field. | 🇬🇧 Provide at least one field to update. | 🇫🇷 Indiquez au moins un champ à modifier. | [📩 `UpdateCustomerInfo`](#command-updatecustomerinfo), [📩 `UpdateRiderInfo`](#command-updateriderinfo), [📩 `UpdateRestaurantAccount`](#command-updaterestaurantaccount), [📩 `UpdateRestaurant`](#command-updaterestaurant) |
 | <a id="error-offernotfound"></a>⛔ `OfferNotFound` | No offer with this id in the catalog. | 🇬🇧 Product offer not found. | 🇫🇷 Offere de produit introuvable. | [📩 `UpdateOfferStock`](#command-updateofferstock), [📩 `AddCartLine`](#command-addcartline) |
 | <a id="error-paymenteventorphaned"></a>⛔ `PaymentEventOrphaned` | A Stripe payment outcome (capture or failure) references a PaymentIntent that matches no known checkout run. The inbound fact stays recorded on the Payment, but the process manager aborts and surfaces this error for ops attention (money may have been taken with no order to materialize) — an anomaly is never silently skipped.  | 🇬🇧 Payment event received for an unknown checkout. | 🇫🇷 Événement de paiement reçu pour un checkout inconnu. | — |
 | <a id="error-phonecountrynotserved"></a>⛔ `PhoneCountryNotServed` | The phone's dialing code is outside the served set (`SMS_ALLOWED_DIALING_CODES`). NOT a validation error and NOT an accusation: it lands on a real person whose number is simply somewhere we do not deliver yet, so the message NAMES the country code and points at an exit. The allowlist is the served-country decision plus cost containment — a calling code is not a destination, and a code we do not serve can reach territories rated far above what we budgeted (the global ceiling, not this list, is the economic control against pumping) — which is why the refusal is fail-closed: an unparseable number lands here too, never on a send.  | 🇬🇧 We can't send a code to {dialingCode} numbers yet — we deliver in Tours. Please use a French mobile number, or contact us. | 🇫🇷 Nous ne pouvons pas encore envoyer de code vers les numéros {dialingCode} — nous livrons à Tours. Utilisez un numéro de mobile français ou contactez-nous. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
-| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
-| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode) |
+| <a id="error-verificationsendlimitreached"></a>⛔ `VerificationSendLimitReached` | This phone number has used up its allowance of OTP sends for the day. Deliberately NOT a `RateLimited`: there is no countdown worth rendering (tomorrow is not a countdown), so the screen must offer help instead of a timer. A customer who genuinely burned five sends has a delivery problem no sixth SMS will fix.  | 🇬🇧 You've requested too many codes today. Please try again tomorrow, or contact us and we'll help you sign in. | 🇫🇷 Vous avez demandé trop de codes aujourd'hui. Réessayez demain ou contactez-nous, nous vous aiderons à vous connecter. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
+| <a id="error-verificationsendcapacityexhausted"></a>⛔ `VerificationSendCapacityExhausted` | The GLOBAL daily SMS ceiling is spent, so NO further OTP is sent to anyone until it is raised (#516). This is the one refusal that turns legitimate sign-ups away ON PURPOSE: per-number caps limit an individual, and an attacker rotates numbers, so only a total ceiling bounds the bill. It must be LOUD — if this fires, either the ceiling is too low for real traffic or an attack is under way, and both need a human tonight.  | 🇬🇧 We can't send verification codes right now. Please contact us — we'll get you signed in. | 🇫🇷 Nous ne pouvons pas envoyer de code de vérification pour le moment. Contactez-nous, nous vous connecterons. | [📩 `RequestPhoneVerification`](#command-requestphoneverification), [📩 `RequestPhoneChange`](#command-requestphonechange), [📩 `RequestRiderSignInCode`](#command-requestridersignincode), [📩 `RequestMemberSignInLink`](#command-requestmembersigninlink) |
 | <a id="error-invalidverificationcode"></a>⛔ `InvalidVerificationCode` | The SMS OTP code does not match (rejected by Supabase Auth). | 🇬🇧 The verification code is incorrect. Please try again. | 🇫🇷 Le code de vérification est incorrect. Veuillez réessayer. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
-| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin) |
+| <a id="error-verificationcodeexpired"></a>⛔ `VerificationCodeExpired` | The SMS OTP (or email link) has expired; request a new one. | 🇬🇧 The verification code has expired. Please request a new one. | 🇫🇷 Le code de vérification a expiré. Veuillez en demander un nouveau. | [📩 `VerifyPhone`](#command-verifyphone), [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmPhoneChange`](#command-confirmphonechange), [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
+| <a id="error-invalidverificationtoken"></a>⛔ `InvalidVerificationToken` | The email magic-link token failed server-side verification with Supabase Auth. | 🇬🇧 This email verification link is invalid or has already been used. | 🇫🇷 Ce lien de vérification d'e-mail est invalide ou a déjà été utilisé. | [📩 `ConfirmEmailVerification`](#command-confirmemailverification), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
+| <a id="error-authsubjectholdsanotherrole"></a>⛔ `AuthSubjectHoldsAnotherRole` | The verified login already carries a claim for ANOTHER role (a customer's `customer_id`, a restaurant's `restaurant_id`, ...), and the provider replaces the `captain_food` claim object wholesale -- stamping this door's role would erase it. Until the `one-subject-one-role` Concern of PROP-20260831-180622 is decided, the sign-in is REFUSED rather than overwriting (fail closed).  | 🇬🇧 This login is already used for another kind of Captain.Food account and cannot sign in here yet. | 🇫🇷 Cette identité de connexion est déjà utilisée pour un autre type de compte Captain.Food et ne peut pas encore se connecter ici. | [📩 `ConfirmRiderSignIn`](#command-confirmridersignin), [📩 `ConfirmMemberSignIn`](#command-confirmmembersignin) |
 | <a id="error-refundexceedscaptured"></a>⛔ `RefundExceedsCaptured` | A reclamation resolved as PARTIAL_REFUND asked to refund more than the order's captured total; the ReclamationProcess refund arm never refunds more than was captured, so the over-total resolution is rejected before any Stripe refund is driven (rules.yaml#/RefundResolutionCappedAtCaptured) (#207).  | 🇬🇧 The refund amount exceeds the order's captured total. | 🇫🇷 Le montant du remboursement dépasse le total encaissé de la commande. | — |
 
-### 📡 Observability _(14)_
+### 📡 Observability _(16)_
 
 <a id="obs-command-acceptance"></a>
 #### 📡 Contract: `command-acceptance`
@@ -12655,6 +12807,59 @@ _criticality: **high**_
 - **Status rules**: success ⇐ spans [`message.deliver`]
 - **SLOs**: p95 ≤ 250ms · p99 ≤ 1000ms · error rate ≤ 1%
 
+<a id="obs-member-sign-in"></a>
+#### 📡 Contract: `member-sign-in`
+
+_criticality: **high**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `member.identity.resolve` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`*, `business.failure_reason` |
+| `member.signin.link_request` | `INTERNAL` | ⬜ | — | `business.correlation_id`* |
+| `member.signin.confirm` | `INTERNAL` | ⬜ | — | `business.result`*, `business.correlation_id`* |
+| `claims.stamp` | `CLIENT` | ⬜ | — | — |
+
+- **Metrics**: `member_identity_resolve_ms` _(histogram)_, `member_identity_not_found_total` _(counter)_, `member_identity_lookup_failed_total` _(counter)_, `member_identity_lookup_source_total` _(counter)_, `member_sign_in_link_requested_total` _(counter)_, `member_sign_in_confirmed_total` _(counter)_, `member_claim_stamp_failed_total` _(counter)_, `member_sign_in_refused_total` _(counter)_, `member_sign_in_door_enforcing` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 400ms · p99 ≤ 1200ms · error rate ≤ 1%
+
+<a id="obs-graphql-limits"></a>
+#### 📡 Contract: `graphql-limits`
+
+_criticality: **medium**_
+
+- **Workflow**: surface `graphql` (dispatch pipeline)
+- **Emits**: — · **Inbound**: —
+
+**Run identity**
+
+| Id | Source | Req. | Business key |
+| --- | --- | --- | --- |
+| `correlation_id` | `request.correlation_id` | ✅ | — |
+| `trace_id` | `otel.trace_id` | ✅ | — |
+
+**Spans** (`*` = required attribute)
+
+| Span | Kind | Req. | Multiplicity | Attributes |
+| --- | --- | --- | --- | --- |
+| `graphql.limits.refused` | `INTERNAL` | ⬜ | — | `business.role`*, `business.reason`*, `business.correlation_id`* |
+
+- **Metrics**: `graphql_request_rejected_total` _(counter)_, `graphql_query_depth` _(histogram)_, `graphql_query_complexity` _(histogram)_, `graphql_limit_max` _(gauge)_ · **Business metrics**: —
+- **Status rules**: success ⇐ spans []
+- **SLOs**: p95 ≤ 5ms · p99 ≤ 20ms · error rate ≤ 5%
+
 <a id="sec-screens"></a>
 ## 📱 Front-office screens (SDUI)
 
@@ -12970,6 +13175,69 @@ _Surface_ **`restaurant_backoffice.yaml`**
 - ⚠️ Availability is not checked as the owner types: there is no `restaurantSlugAvailable` query, so the only feedback is the SlugAlreadyTaken rejection on submit. Deliberate -- an availability query is a public existence oracle over the tenant namespace and wants its own decision. The write side is authoritative either way.
 - ⚠️ No `restaurantById` query exists: the only single-restaurant read (`restaurant`) is keyed by SLUG, which is circular here -- a restaurant with no storefront address cannot be fetched by the thing it lacks. This screen therefore reads `restaurantLocationsByAccount` and binds the selected location. A by-id query is the real fix and is a deliberate API-surface decision, not something to slip in under a screen.
 - ⚠️ `Previous addresses` has no resolver: SlugAlias is server-internal (it serves the 301 in hosts.rs) and no api.yaml query exposes it. Listing them needs a read model decision, so the section renders from nothing today and is marked here rather than shipped as a live-looking widget bound to no data.
+
+<a id="screen-sign_in"></a>
+### 📱 `sign_in` · `/sign-in` · 📱 SDUI · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Sign in to your restaurant space         │
+├──────────────────────────────────────────┤
+│ sticky_header                            │
+│ page_header — Sign in to your restauran… │
+│ section                                  │
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `request_member_sign_in_link` | [✏️ `requestMemberSignInLink`](#mutation-requestmembersigninlink) |
+
+**Gaps**
+- ⚠️ The link-expiry countdown and the 60s-delayed 'Renvoyer un lien' re-enable (PROP-20260831-180622 §8.1) need a client-side timer/countdown primitive this DSL does not declare anywhere yet -- the resend control below is always active (calling the SAME identify-only action again is harmless: the wall is server-side, ADR-20260905-101349 §9) rather than a fake-disabled control that renders and does nothing.
+- ⚠️ Round 2 R2-L1 (legal, grade (b), counsel to confirm): Art. 13 information is owed AT COLLECTION -- the moment an address is typed and this form's mutation fires, whether or not it turns out to be a roster address (the no-enumeration-oracle design means Captain has already processed a non-member's address by the time any refusal could show it a notice). This screen carries no Art. 13 notice/link yet; MEMBER-SIGN-IN-DOOR-PRECONDITIONS names it as a precondition of the flip, not resolved here.
+- ⚠️ Round 3 R3-1 (ux, #870 class): the confirmation panel does not echo the typed address back to the operator -- the SDUI `text` node type has no binding to FORM-FIELD state (only to resolver data, `renderer.rs:~1751`'s class), and `open_bottom_sheet` performs no repaint that could carry `member_email`'s dispatch-time value into the sheet's render context. A form-state-to-text binding is the shape of the fix (not built by this slice); the confirmation sentence stays self-contained (`back.sign_in.confirmation_body`) instead of ending in an empty paragraph.
+
+<a id="screen-sign_in_return"></a>
+### 📱 `sign_in_return` · `/sign-in/return` · 🚫 not SDUI — Query-string token extraction + acceptance-first confirm/claim/route sequencing -- a hand-written page, the checkout/order_tracking precedent. · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Signing you in…                          │
+├──────────────────────────────────────────┤
+└──────────────────────────────────────────┘
+```
+
+| Kind | UI need | GraphQL operation |
+| --- | --- | --- |
+| write | `confirm_member_sign_in` | [✏️ `confirmMemberSignIn`](#mutation-confirmmembersignin) |
+
+**Gaps**
+- ⚠️ `?next=` return-to-screen (ADR-20260905-101349 §13) is a NAMED DEPENDENCY of flipping RUN_MEMBER_SIGN_IN_DOOR, not of this landing page existing -- on success this page always routes to `/` (the orders queue), never back to whatever page the 401 originated from. MEMBER-SIGN-IN-DOOR-PRECONDITIONS names the follow-up.
+
+<a id="screen-not_linked"></a>
+### 📱 `not_linked` · `/sign-in/not-linked` · 📱 SDUI · ⇄ /public/graphql
+
+```
+┌──────────────────────────────────────────┐
+│ Your account is not yet linked to a res… │
+├──────────────────────────────────────────┤
+│ page_header — Your account is not yet l… │
+│ text                                     │
+│ text                                     │
+│ text                                     │
+│ text                                     │
+│ button — Sign out                        │
+└──────────────────────────────────────────┘
+```
+
+
+
+**Gaps**
+- ⚠️ Printing the VERIFIED address (ux, ADR-20260905-101349 §10): `MemberNotLinked`'s context carries `email`, but no query on this PUBLIC screen's role reads back a just-rejected mutation's error context as resolver data, and no screen anywhere binds one (the rider door's inline_error pattern renders a MESSAGE, not a structured context field, and only inline to the ORIGINATING screen, never a navigated-to one). The body text below is the static two sentences of the §8.5 mockup; the address is not interpolated until a cross-screen error-context binding exists.
+- ⚠️ SUPPORT_CONTACT is a resolved DEPLOYMENT configuration value (`configuration.yaml`), never a translation string, and no screen anywhere in this DSL binds a config key as `{{ }}` resolver data -- inventing that grammar here is out of this card's scope, so the support address is named by the STATIC translation string below (which a deploy must keep in step with the configured key by hand until such a binding exists) rather than a dynamic `{{ config.* }}` placeholder.
+- ⚠️ The legal/privacy link (LCEN 6-III + Art. 13, legal): no legal/privacy page exists on this surface yet, so the target is this line rather than a dead route.
+- ⚠️ Round 2 R2-U3: `sign_out` (`kind: auth`) has no client wiring yet (#94) -- `crates/web/src/executor.rs` renders any `kind: auth` action as `ActionPlan::Disabled`, so this screen's ONLY control was previously dead (a control that renders and does nothing, #888). The exit is a plain `navigate → /sign-in` instead (`ActionKind::Client`, live today): it does not clear the parked/rotated session, only leaves the refusal screen -- the real sign-out wiring (#94) is the named follow-up, not built here.
 
 _Surface_ **`restaurant_frontoffice.yaml`**
 
@@ -13571,6 +13839,31 @@ generated to a single `translations.generated.json`. `{param}` tokens are valida
 | <a id="translation-back-profile-cuisine-bistronomic"></a>`back.profile.cuisine.bistronomic` | — | Bistronomic | Bistronomique |
 | <a id="translation-back-profile-cuisine-food_truck"></a>`back.profile.cuisine.food_truck` | — | Food truck | Food truck |
 | <a id="translation-back-profile-save"></a>`back.profile.save` | — | Save profile | Enregistrer le profil |
+| <a id="translation-back-sign_in-header"></a>`back.sign_in.header` | — | Restaurant owners | Restaurateurs |
+| <a id="translation-back-sign_in-title"></a>`back.sign_in.title` | — | Sign in to your restaurant space | Connectez-vous à votre espace restaurant |
+| <a id="translation-back-sign_in-email_label"></a>`back.sign_in.email_label` | — | Email address | Adresse e-mail |
+| <a id="translation-back-sign_in-email_placeholder"></a>`back.sign_in.email_placeholder` | — | you@your-restaurant.com | vous@votre-restaurant.fr |
+| <a id="translation-back-sign_in-request_link"></a>`back.sign_in.request_link` | — | Send my sign-in link | Recevoir mon lien de connexion |
+| <a id="translation-back-sign_in-sending"></a>`back.sign_in.sending` | — | Sending… | Envoi en cours… |
+| <a id="translation-back-sign_in-open_on_device"></a>`back.sign_in.open_on_device` | — | We'll send you a link. Open it on this device. | Nous vous envoyons un lien. Ouvrez-le sur cet appareil. |
+| <a id="translation-back-sign_in-no_password"></a>`back.sign_in.no_password` | — | No password: the link replaces it. | Aucun mot de passe : le lien remplace le mot de passe. |
+| <a id="translation-back-sign_in-support_lead"></a>`back.sign_in.support_lead` | — | A problem? support@captain.food | Un problème ? support@captain.food |
+| <a id="translation-back-sign_in-confirmation_title"></a>`back.sign_in.confirmation_title` | — | Check your email | Vérifiez vos e-mails |
+| <a id="translation-back-sign_in-confirmation_body"></a>`back.sign_in.confirmation_body` | — | If this address is registered, a link has just been sent to it. | Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse. |
+| <a id="translation-back-sign_in-expiry_note"></a>`back.sign_in.expiry_note` | — | The link expires in 15 minutes. | Le lien expire dans 15 minutes. |
+| <a id="translation-back-sign_in-resend"></a>`back.sign_in.resend` | — | Resend a link | Renvoyer un lien |
+| <a id="translation-back-sign_in-close"></a>`back.sign_in.close` | — | Close | Fermer |
+| <a id="translation-back-not_linked-title"></a>`back.not_linked.title` | — | Your account is not yet linked to a restaurant. | Votre compte n'est pas encore relié à un restaurant. |
+| <a id="translation-back-not_linked-body"></a>`back.not_linked.body` | — | Your address is verified, but no restaurant access is associated with it yet. | Votre adresse est bien vérifiée, mais aucun accès restaurant n'y est associé pour l'instant. |
+| <a id="translation-back-not_linked-write_to_us"></a>`back.not_linked.write_to_us` | — | Write to us and we will make the link: | Écrivez-nous et nous ferons le lien : |
+| <a id="translation-back-not_linked-support_contact"></a>`back.not_linked.support_contact` | — | support@captain.food | support@captain.food |
+| <a id="translation-back-not_linked-precise"></a>`back.not_linked.precise` | — | Please specify the name and address of your establishment. | Précisez le nom et l'adresse de votre établissement. |
+| <a id="translation-back-not_linked-sign_out"></a>`back.not_linked.sign_out` | — | Sign out | Se déconnecter |
+| <a id="translation-back-sign_in_return-title"></a>`back.sign_in_return.title` | — | Signing you in… | Connexion en cours… |
+| <a id="translation-back-sign_in_return-working"></a>`back.sign_in_return.working` | — | Please wait, we're checking your link… | Merci de patienter, nous vérifions votre lien… |
+| <a id="translation-back-sign_in_return-no_token"></a>`back.sign_in_return.no_token` | — | This link is incomplete. Please request a new one. | Ce lien est incomplet. Merci d'en demander un nouveau. |
+| <a id="translation-back-sign_in_return-failed"></a>`back.sign_in_return.failed` | — | This link is invalid or has expired. Please request a new one. | Ce lien est invalide ou a expiré. Merci d'en demander un nouveau. |
+| <a id="translation-back-sign_in_return-back_to_sign_in"></a>`back.sign_in_return.back_to_sign_in` | — | Back to sign-in | Retour à la connexion |
 | <a id="translation-location-title"></a>`location.title` | — | Delivery address | Adresse de livraison |
 | <a id="translation-location-search_placeholder"></a>`location.search_placeholder` | — | Search for an address… | Rechercher une adresse… |
 | <a id="translation-location-recent"></a>`location.recent` | — | Recent | Récentes |

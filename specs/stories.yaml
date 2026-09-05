@@ -36,6 +36,11 @@ public_user:
       steps:
         RequestRiderSignInCode: { $ref: 'api.yaml#/mutations/requestRiderSignInCode' }   # identical outcome whether or not the phone is a rider's
         ConfirmRiderSignIn: { $ref: 'api.yaml#/mutations/confirmRiderSignIn' }   # identify-only; the session then arrives via POST /auth/session, never in the response
+    SignInAsRestaurantManager:
+      description: As a visitor on the restaurant back-office surface, I sign in with my email -- the platform identifies me as a MEMBER (it never registers me here) and issues the MEMBER credential (#639 part C step 6-ii, ADR-20260905-101349 §7-§10). Held by the anonymous persona (the `SignInAsRider` shape) because the door is walked WITHOUT a credential (op roles [PUBLIC]) -- a RESTAURANT persona cannot call a PUBLIC-only operation. Walked from `restos.captain.food/sign-in` (`specs/screens/restaurant_backoffice.yaml`, transport role PUBLIC via `graphql_role` -- R1), then the not-yet-linked refusal screen when the address is verified but no `Member` row exists.
+      steps:
+        RequestMemberSignInLink: { $ref: 'api.yaml#/mutations/requestMemberSignInLink' }   # identical outcome whether or not the address is on the roster
+        ConfirmMemberSignIn: { $ref: 'api.yaml#/mutations/confirmMemberSignIn' }   # identify-only; the session then arrives via POST /auth/session, never in the response
 
 customer:
   description: An authenticated person who orders food via Captain.Food.

@@ -74,6 +74,36 @@ keys:
       production: "false"
 
 
+  # #639 part C step 6-ii (ADR-20260905-101349 §6/§10): the door as a MECHANISM, mirroring
+  # RUN_MEMBER_ACCESS_GRANT's shape exactly. Consumed at BOTH mutation handlers
+  # (`request_member_sign_in_link`, `confirm_member_sign_in`): OFF refuses BEFORE the identity
+  # provider is touched at all, with the typed `MemberSignInDoorClosed`. `decisionRow` binds this
+  # key to `docs/decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` explicitly, so
+  # `decision-row-open-key-must-be-off` refuses any `deploy.production` value other than `"false"`
+  # while that row stays open. The public-graph limits (E) are NOT behind this key -- they are a
+  # bound applied to every role's schema, not a door.
+  RUN_MEMBER_SIGN_IN_DOOR:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: MEMBER-SIGN-IN-DOOR-PRECONDITIONS
+    gates: >
+      The member sign-in door (#639 part C step 6-ii, ADR-20260905-101349 §6). ON, both
+      `requestMemberSignInLink` and `confirmMemberSignIn` run their identify/stamp/park flow as
+      designed. OFF, BOTH refuse BEFORE touching the identity provider with the typed
+      `MemberSignInDoorClosed` rejection -- a supervisable row, never a silent no-op. Preconditions
+      gating the flip are named in `docs/decisions/MEMBER-SIGN-IN-DOOR-PRECONDITIONS.yaml` (open):
+      6-i merged (done), the silent `/auth/refresh` retry + `?next=` in the client (#894-class, own
+      issue), email deliverability proven by a hand-dispatched drill (SPF/DKIM/DMARC, founder's),
+      the Supabase DPA/region (founder's), the legal/privacy page the refusal screen links (owner
+      named), and `MEMBER-ACCESS-GRANT-PRECONDITIONS` flipped first (a door with no grant path is a
+      refusal machine).
+    deploy:
+      production: "false"
+      staging: "false"
+
+
   # ===================================================================
   # CI ingestion job (`sirene_ingest`) — a SEPARATE deployable (ADR-0045)
   #

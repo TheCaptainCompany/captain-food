@@ -100,7 +100,24 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
     let auth: Arc<dyn IdentityService> = match crate::SupabaseIdentityService::from_env() {
         Some(adapter) => {
             tracing::info!(binding = "identity", impl_ = "SupabaseIdentityService", "standalone deps: identity service wired (SUPABASE_URL set)");
-            Arc::new(adapter)
+            // Round 2 R2-V1: this composition root has a REAL `pool`, so it upgrades the
+            // constructor's default in-memory email guard to the durable, shared-counter one --
+            // the `email_send_guard` shape in `crates/server/src/lib.rs`, transposed (this crate
+            // cannot read the generated `Config`, hence ENV-GATED, same posture as every other
+            // key in this function). Never `None`/unguarded either way (compiler-first): before
+            // this round, this call site built NO guard at all, so this ACTOR-RUNTIME worker sent
+            // magic-link email through the SAME port the monolith guards, entirely unguarded.
+            let policy = application::email_guard::EmailSendPolicy::from_config(
+                std::env::var("EMAIL_MAX_SENDS_PER_ADDRESS_PER_HOUR").ok().and_then(|v| v.parse().ok()),
+                std::env::var("EMAIL_MAX_SENDS_PER_ADDRESS_PER_DAY").ok().and_then(|v| v.parse().ok()),
+                std::env::var("EMAIL_MAX_SENDS_PER_DAY_GLOBAL").ok().and_then(|v| v.parse().ok()),
+                std::env::var("EMAIL_QUOTA_KEY_HMAC_SECRET").ok().as_deref(),
+            );
+            let guard = Arc::new(crate::email_authorization::EmailSendAuthorizer::new(
+                policy,
+                Box::new(crate::persistence::PgSmsQuotaStore::new(pool.clone())),
+            ));
+            Arc::new(adapter.with_email_guard(guard))
         }
         None => {
             tracing::warn!(binding = "identity", impl_ = "FailClosedIdentityService", "standalone deps: SUPABASE_URL/PUBLISHABLE_KEY unset -- identity-dependent deliveries decline");
@@ -141,6 +158,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // as the gates below (this crate cannot read the generated Config); empty is unset, and
         // unset makes the door fail closed, loudly.
         riders: Arc::new(crate::PgRiderRepository::new(pool.clone())),
+        // #639 part C step 6-ii: the member sign-in door's identity bridge (the `member` table
+        // the request seam reads too) -- the `riders` port's precedent, above.
+        members: Arc::new(crate::PgMemberRepository::new(pool.clone())),
         support_contact: std::env::var("SUPPORT_CONTACT")
             .ok()
             .map(|v| v.trim().to_string())
@@ -214,6 +234,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         // #639 part C step 6-i (ADR-20260905-101349 §6, the recorded §8 carve-out: one field plus
         // its threading): the staff access grant door, same ENV-GATED posture, same default (OFF).
         run_member_access_grant: env_flag("RUN_MEMBER_ACCESS_GRANT", false),
+        // #639 part C step 6-ii (ADR-20260905-101349 §6): the member sign-in door, same
+        // ENV-GATED posture, same default (OFF).
+        run_member_sign_in_door: env_flag("RUN_MEMBER_SIGN_IN_DOOR", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -246,6 +269,14 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
         "RUN_MEMBER_ACCESS_GRANT",
         deps.run_member_access_grant,
     );
+    // #639 part C step 6-ii (ADR-20260905-101349 §6), the same fleet-parity shape.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_MEMBER_SIGN_IN_DOOR",
+        deps.run_member_sign_in_door,
+    );
+    // The gate-liveness gauge (the #895 lesson): registered at the composition root so "zero
+    // refusals" and "the door has been off since boot" are distinguishable from the start.
+    telemetry::meters::member_sign_in::door_enforcing(deps.run_member_sign_in_door);
     deps
 }
 

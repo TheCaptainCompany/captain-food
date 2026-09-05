@@ -411,6 +411,30 @@
     "en": "Satisfaction",
     "fr": "Satisfaction"
   },
+  "back.not_linked.body": {
+    "en": "Your address is verified, but no restaurant access is associated with it yet.",
+    "fr": "Votre adresse est bien vérifiée, mais aucun accès restaurant n'y est associé pour l'instant."
+  },
+  "back.not_linked.precise": {
+    "en": "Please specify the name and address of your establishment.",
+    "fr": "Précisez le nom et l'adresse de votre établissement."
+  },
+  "back.not_linked.sign_out": {
+    "en": "Sign out",
+    "fr": "Se déconnecter"
+  },
+  "back.not_linked.support_contact": {
+    "en": "support@captain.food",
+    "fr": "support@captain.food"
+  },
+  "back.not_linked.title": {
+    "en": "Your account is not yet linked to a restaurant.",
+    "fr": "Votre compte n'est pas encore relié à un restaurant."
+  },
+  "back.not_linked.write_to_us": {
+    "en": "Write to us and we will make the link:",
+    "fr": "Écrivez-nous et nous ferons le lien :"
+  },
   "back.orders.accept": {
     "en": "Accept",
     "fr": "Accepter"
@@ -574,6 +598,82 @@
   "back.satisfaction.title": {
     "en": "Delivery satisfaction",
     "fr": "Satisfaction livraison"
+  },
+  "back.sign_in.close": {
+    "en": "Close",
+    "fr": "Fermer"
+  },
+  "back.sign_in.confirmation_body": {
+    "en": "If this address is registered, a link has just been sent to it.",
+    "fr": "Si cette adresse est enregistrée, un lien vient d'être envoyé à cette adresse."
+  },
+  "back.sign_in.confirmation_title": {
+    "en": "Check your email",
+    "fr": "Vérifiez vos e-mails"
+  },
+  "back.sign_in.email_label": {
+    "en": "Email address",
+    "fr": "Adresse e-mail"
+  },
+  "back.sign_in.email_placeholder": {
+    "en": "you@your-restaurant.com",
+    "fr": "vous@votre-restaurant.fr"
+  },
+  "back.sign_in.expiry_note": {
+    "en": "The link expires in 15 minutes.",
+    "fr": "Le lien expire dans 15 minutes."
+  },
+  "back.sign_in.header": {
+    "en": "Restaurant owners",
+    "fr": "Restaurateurs"
+  },
+  "back.sign_in.no_password": {
+    "en": "No password: the link replaces it.",
+    "fr": "Aucun mot de passe : le lien remplace le mot de passe."
+  },
+  "back.sign_in.open_on_device": {
+    "en": "We'll send you a link. Open it on this device.",
+    "fr": "Nous vous envoyons un lien. Ouvrez-le sur cet appareil."
+  },
+  "back.sign_in.request_link": {
+    "en": "Send my sign-in link",
+    "fr": "Recevoir mon lien de connexion"
+  },
+  "back.sign_in.resend": {
+    "en": "Resend a link",
+    "fr": "Renvoyer un lien"
+  },
+  "back.sign_in.sending": {
+    "en": "Sending…",
+    "fr": "Envoi en cours…"
+  },
+  "back.sign_in.support_lead": {
+    "en": "A problem? support@captain.food",
+    "fr": "Un problème ? support@captain.food"
+  },
+  "back.sign_in.title": {
+    "en": "Sign in to your restaurant space",
+    "fr": "Connectez-vous à votre espace restaurant"
+  },
+  "back.sign_in_return.back_to_sign_in": {
+    "en": "Back to sign-in",
+    "fr": "Retour à la connexion"
+  },
+  "back.sign_in_return.failed": {
+    "en": "This link is invalid or has expired. Please request a new one.",
+    "fr": "Ce lien est invalide ou a expiré. Merci d'en demander un nouveau."
+  },
+  "back.sign_in_return.no_token": {
+    "en": "This link is incomplete. Please request a new one.",
+    "fr": "Ce lien est incomplet. Merci d'en demander un nouveau."
+  },
+  "back.sign_in_return.title": {
+    "en": "Signing you in…",
+    "fr": "Connexion en cours…"
+  },
+  "back.sign_in_return.working": {
+    "en": "Please wait, we're checking your link…",
+    "fr": "Merci de patienter, nous vérifions votre lien…"
   },
   "back.storefront.consequences.redirect": {
     "en": "Your old address redirects here, so printed menus and QR codes keep working.",

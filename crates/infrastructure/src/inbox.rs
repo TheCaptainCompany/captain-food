@@ -120,6 +120,16 @@ pub struct CommandDeps {
     /// shape as `run_rider_restriction_door` above. OFF (the default) refuses `grantRestaurantAccess`
     /// with the typed `MemberAccessGrantDoorClosed`; `revokeRestaurantAccess` never consults it.
     pub run_member_access_grant: bool,
+    /// The `Member` read model's identity bridge (`auth_subject -> member_id`, #639 part C step
+    /// 6-ii) the member sign-in door identifies through -- the `riders` port's precedent, a
+    /// projection read because sign-in is a query-shaped decision, never an irreversible act.
+    pub members: Arc<dyn application::queries::MemberIdentityRepository>,
+    /// #639 part C step 6-ii (ADR-20260905-101349 §6): `configuration.yaml#/RUN_MEMBER_SIGN_IN_DOOR`
+    /// -- the member sign-in door's release gate, resolved ONCE at the composition root exactly
+    /// like `run_rider_restriction_door` above. OFF (the default) refuses BOTH
+    /// `requestMemberSignInLink` and `confirmMemberSignIn` with the typed
+    /// `MemberSignInDoorClosed` BEFORE the identity provider is touched at all.
+    pub run_member_sign_in_door: bool,
 }
 
 
@@ -526,6 +536,12 @@ async fn restaurant_account(
     }
 }
 
+// The `member_sign_in_reason`/`member_sign_in_confirm_result` bounded-label helpers live in
+// `crate::member_sign_in_reasons`, OUT of this file: their `code.as_str()` match can never be
+// exhaustive without a catch-all, and this file's own rule (see the module doc above) forbids one
+// anywhere here.
+use crate::member_sign_in_reasons::{member_sign_in_confirm_result, member_sign_in_reason};
+
 /// The `RestaurantMembership` lane (#639 part C step 6-i, ADR-20260905-101349): the bridge and
 /// the grant. `grantRestaurantAccess` is gated by `RUN_MEMBER_ACCESS_GRANT`, checked FIRST inside
 /// the handler; `revokeRestaurantAccess` never is (releasing access is always safe).
@@ -539,6 +555,44 @@ async fn restaurant_membership(
     match message {
         RestaurantMembershipInbox::GrantRestaurantAccess(cmd) => run(async { application::commands::grant_restaurant_access(deps.store.as_ref(), deps.auth_subjects.as_ref(), cmd, actor, deps.run_member_access_grant).await.map(|_| ()) }).await,
         RestaurantMembershipInbox::RevokeRestaurantAccess(cmd) => run(async { application::commands::revoke_restaurant_access(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
+        // The member sign-in door (#639 part C step 6-ii, `member-sign-in` contract): gated at
+        // BOTH handlers, unlike the grant/revoke asymmetry above. The gate-liveness gauge is
+        // RE-ASSERTED here, at the dispatch seam where the gate is actually decided (the #895
+        // lesson: a boot-time value never refreshed proves the process once started, not that the
+        // gate is live). The two spans and their `business.result` are opened HERE, at the
+        // infrastructure dispatch seam, never inside `application::commands` (telemetry-SDK-free
+        // by construction, ADR-0035).
+        RestaurantMembershipInbox::RequestMemberSignInLink(cmd) => {
+            use tracing::Instrument as _;
+            telemetry::meters::member_sign_in::door_enforcing(deps.run_member_sign_in_door);
+            let span = telemetry::spans::member_signin_link_request(&actor.correlation_id.to_string());
+            let outcome = run(async { application::commands::request_member_sign_in_link(deps.store.as_ref(), deps.auth.as_ref(), cmd, actor, deps.run_member_sign_in_door).await }).instrument(span).await;
+            if let InboxOutcome::Handled(Err(e)) = &outcome {
+                telemetry::meters::member_sign_in::refused(member_sign_in_reason(e));
+            }
+            outcome
+        }
+        RestaurantMembershipInbox::ConfirmMemberSignIn(cmd) => {
+            use tracing::Instrument as _;
+            telemetry::meters::member_sign_in::door_enforcing(deps.run_member_sign_in_door);
+            let span = telemetry::spans::member_signin_confirm(&actor.correlation_id.to_string());
+            let span_clone = span.clone();
+            let outcome = run(async { application::commands::confirm_member_sign_in(deps.store.as_ref(), deps.auth.as_ref(), deps.members.as_ref(), deps.sessions.as_ref(), deps.support_contact.as_ref(), cmd, env.session_id.map(domain::generated::scalars::SessionId), actor, deps.run_member_sign_in_door).await }).instrument(span).await;
+            let result = match &outcome {
+                InboxOutcome::Handled(Ok(())) => "linked",
+                InboxOutcome::Handled(Err(e)) => member_sign_in_confirm_result(e),
+                // `run(async { confirm_member_sign_in(..) })` only ever produces `Handled`; the
+                // other three `InboxOutcome` variants are unreachable here, but named rather than
+                // absorbed by a wildcard per this file's own no-catch-all rule.
+                InboxOutcome::RecordFact | InboxOutcome::ProcessManagerLeg | InboxOutcome::Deferred => "lookup_failed",
+            };
+            telemetry::spans::record_member_signin_confirm_result(&span_clone, result);
+            telemetry::meters::member_sign_in::confirmed(result);
+            if result != "linked" && result != "not_linked" {
+                telemetry::meters::member_sign_in::refused(result);
+            }
+            outcome
+        }
     }
 }
 
