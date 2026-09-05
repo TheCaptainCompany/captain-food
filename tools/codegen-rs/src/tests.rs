@@ -9023,6 +9023,7 @@ fn app_index_reports_a_key_the_pod_needs_and_does_not_hold() {
         } else {
             BTreeMap::new()
         },
+        decision_row: None,
     };
     let keys = vec![
         key("NEEDED_TOKEN", true, "example_ingest", false), // hosted consumer, no deploy source
@@ -10971,6 +10972,98 @@ mod decisions_register {
             .map(|i| format!("{} at {}: {}", i.rule, i.location, i.message))
             .collect();
         assert!(errors.is_empty(), "decision rows must be 0-error on the committed corpus:\n{}", errors.join("\n"));
+    }
+}
+
+// ─── #639 part C step 4-iii-A (ADR-20260904-152807 §7) — decision-row-open-key-must-be-off ──────
+mod decision_row_gated_config_keys {
+    use crate::*;
+
+    fn config_model(key_yaml: &str) -> Model {
+        let spec = format!("keys:\n  TEST_KEY:\n{key_yaml}");
+        Model {
+            defs: BTreeMap::from([(
+                "configuration.yaml".to_string(),
+                serde_yaml::from_str::<Value>(&spec).expect("parses"),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    fn row(status: &str) -> Vec<DecisionRow> {
+        let content = format!(
+            "key: \"TEST-ROW\"\nstatus: \"{status}\"\nquestion: \"Q?\"\nowner: \"team\"\nopened: \"2026-09-04\"\nregister: \"DECISIONS.md\"\nevidence: \"quoted\"\n"
+        );
+        let mut issues = Vec::new();
+        parse_decision_rows(&[("docs/decisions/TEST-ROW.yaml".to_string(), content)], &mut issues)
+    }
+
+    fn hits(model: &Model, rows: &[DecisionRow]) -> Vec<Issue> {
+        let mut issues = Vec::new();
+        validate_decision_row_gated_config_keys(model, rows, &mut issues);
+        issues
+    }
+
+    /// The named mutant (M8): a `decisionRow`-gated key's `deploy.production` set to `"true"`
+    /// while the row is still `open` — refused, the `RUN_SIRENE_WORKER` lesson made executable.
+    #[test]
+    fn an_open_row_with_a_true_production_value_is_rejected() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model, &row("open"));
+        assert_eq!(found.len(), 1, "expected exactly one finding: {:?}", found.iter().map(|i| i.rule).collect::<Vec<_>>());
+        assert_eq!(found[0].rule, "decision-row-open-key-must-be-off");
+    }
+
+    /// The complement: `deploy.production: "false"` while the row is `open` is silent — this is
+    /// the SPEC's own current, correct state for `RUN_RIDER_RESTRICTION_DOOR`.
+    #[test]
+    fn an_open_row_with_a_false_production_value_is_silent() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"test\"\n    deploy:\n      production: \"false\"\n",
+        );
+        assert!(hits(&model, &row("open")).is_empty());
+    }
+
+    /// A DECIDED row (any closed status) is silent even with production `"true"` — flipping the
+    /// value IS the recorded decision that closes the row.
+    #[test]
+    fn a_decided_row_permits_any_production_value() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: TEST-ROW\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n",
+        );
+        assert!(hits(&model, &row("decided")).is_empty());
+    }
+
+    /// A `decisionRow:` naming no declared row is its own finding — a key cannot gate on a row
+    /// that does not exist.
+    #[test]
+    fn a_decision_row_naming_no_declared_row_is_rejected() {
+        let model = config_model(
+            "    type: bool\n    default: false\n    decisionRow: NO-SUCH-ROW\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n",
+        );
+        let found = hits(&model, &row("open"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].rule, "decision-row-open-key-must-be-off");
+    }
+
+    /// A key with no `decisionRow:` at all is never touched by this rule.
+    #[test]
+    fn a_key_with_no_decision_row_is_untouched() {
+        let model = config_model("    type: bool\n    default: false\n    gates: \"test\"\n    deploy:\n      production: \"true\"\n");
+        assert!(hits(&model, &row("open")).is_empty());
+    }
+
+    /// The real corpus: `RUN_RIDER_RESTRICTION_DOOR` is the ONLY `decisionRow:`-bearing key today
+    /// and it is clean.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let model = load_model(&root.join("specs")).expect("load real specs");
+        let dec_rows = parse_decision_rows(&load_decision_files(&root), &mut Vec::new());
+        let found = hits(&model, &dec_rows);
+        assert!(found.is_empty(), "the real corpus must be clean: {:?}", found.iter().map(|i| format!("{}: {}", i.rule, i.message)).collect::<Vec<_>>());
     }
 }
 
@@ -16296,6 +16389,321 @@ mod screen_binding_gate {
             .expect("DeliveryJob declares properties")
             .insert(Value::from("riderNickname"), Value::from("placeholder"));
         assert!(!fires(&model), "declaring the property must clear the finding");
+    }
+}
+
+// ─── #639 part C step 4-iii-A (ADR-20260904-152807 §6) — screen-sheet-binding-unknown ───────────
+mod screen_sheet_bindings_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    /// Push `{{ binding }}` as a new `text` node into ONE named bottom sheet's `sections:` list —
+    /// the sheet-subtree twin of `screen_bindings_gate::plant_typo`.
+    fn plant_typo_in_sheet(model: &mut Model, screens_file: &str, sheet_id: &str, binding: &str) {
+        let sheet = model
+            .defs
+            .get_mut(screens_file)
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut(sheet_id))
+            .unwrap_or_else(|| panic!("{screens_file} declares bottom_sheets.{sheet_id}"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from(format!("{{{{ {binding} }}}}")));
+        sheet
+            .get_mut("sections")
+            .and_then(|v| v.as_sequence_mut())
+            .unwrap_or_else(|| panic!("bottom_sheets.{sheet_id} has sections"))
+            .push(Value::Mapping(node));
+    }
+
+    /// The rule is WIRED and the real corpus is CLEAN, then a planted `{{ rider.riderld }}` typo
+    /// (the card's own named mutant, #639 part C step 4-iii-A) inside `restrict_rider_sheet` is
+    /// caught — before this rule, this exact typo passed `make validate` and would have dispatched
+    /// the Art. 11 act with an empty id (`screen_bindings.rs`'s own module doc).
+    #[test]
+    fn screen_sheet_bindings_are_checked_and_the_corpus_is_clean() {
+        let model = real_model();
+        let hits = |m: &Model| -> Vec<String> {
+            validate(m)
+                .issues
+                .iter()
+                .filter(|i| i.rule == "screen-sheet-binding-unknown")
+                .map(|i| format!("{}: {}", i.location, i.message))
+                .collect()
+        };
+        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus: {:?}", hits(&model));
+
+        let mut mutant = real_model();
+        plant_typo_in_sheet(&mut mutant, "screens/system.yaml", "restrict_rider_sheet", "rider.riderld");
+        let found = hits(&mutant);
+        assert_eq!(found.len(), 1, "the planted typo must fire exactly once: {:?}", found);
+        assert!(found[0].contains("riderld"), "{:?}", found);
+        assert!(found[0].contains("restrict_rider_sheet"), "the location must name the sheet: {:?}", found);
+    }
+
+    /// A typo on the SCREEN's own body (never inside a sheet) must NOT be reported by the sheet
+    /// rule — the two codes are distinct locations of the SAME underlying walk, not aliases.
+    #[test]
+    fn a_screen_body_typo_is_not_reported_as_a_sheet_finding() {
+        let mut model = real_model();
+        let screens = model
+            .defs
+            .get_mut("screens/system.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("system.yaml declares screens");
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("rider_detail"))
+            .expect("rider_detail exists");
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from("{{ rider.riderld }}"));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("rider_detail has components")
+            .push(Value::Mapping(node));
+        let issues = validate(&model).issues;
+        assert!(
+            issues.iter().any(|i| i.rule == "screen-binding-unknown-field" && i.message.contains("riderld")),
+            "a screen-body typo must fire the SCREEN rule"
+        );
+        assert!(
+            !issues.iter().any(|i| i.rule == "screen-sheet-binding-unknown"),
+            "a screen-body typo must never fire the SHEET rule"
+        );
+    }
+}
+
+// ─── #639 part C step 4-iii-A round 2 addendum item 12 — screen-condition-on-form-field ─────────
+mod screen_condition_on_form_field_gate {
+    use super::super::*;
+
+    fn real_model() -> Model {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        load_model(&root.join("specs")).expect("load real specs")
+    }
+
+    fn hits(m: &Model) -> Vec<String> {
+        validate(m)
+            .issues
+            .iter()
+            .filter(|i| i.rule == "screen-condition-on-form-field")
+            .map(|i| format!("{}: {}", i.location, i.message))
+            .collect()
+    }
+
+    /// The named regression class (the RIDER_REQUESTED sentence, round 2 addendum item 12) is
+    /// fixed, and the SAME rule surfaced two more pre-existing instances (`resolution` in
+    /// `restaurant_backoffice.yaml`'s `claim_resolve` screen — a MONEY-PATH control, the
+    /// partial-refund amount picker; `issue_resolution` in that file's `issue_resolution_sheet`),
+    /// all rendered unconditionally in the same change. Round 3 (#639 part C step 4-iii-A,
+    /// CLAUDE.md "never weaken a gate") removed the round-2 `screens/rider.yaml` exclusion after
+    /// fixing that file's one live instance (`issue_kind` in `rider_report_sheet`'s `issue_note`,
+    /// DELETED — `text_area` has no renderer arm, #888) — the corpus-wide gate now covers every
+    /// screens/sheets file with no filename carve-out.
+    #[test]
+    fn the_real_corpus_is_clean() {
+        let model = real_model();
+        assert!(hits(&model).is_empty(), "the wired gate must be clean on the real corpus: {:?}", hits(&model));
+    }
+
+    /// Plant the named mutant class directly: a `condition:` on a bottom-sheet's OWN
+    /// `conditional_section`, reading its SIBLING chip's `.value` — the exact shape the
+    /// RIDER_REQUESTED sentence had before this round's fix.
+    #[test]
+    fn a_condition_reading_its_own_sheets_chip_is_caught() {
+        let mut model = real_model();
+        let sheet = model
+            .defs
+            .get_mut("screens/system.yaml")
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut("restrict_rider_sheet"))
+            .expect("restrict_rider_sheet exists");
+        let mut if_true_item = serde_yaml::Mapping::new();
+        if_true_item.insert(Value::from("type"), Value::from("text"));
+        if_true_item.insert(Value::from("value"), Value::from("mutant"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("conditional_section"));
+        node.insert(Value::from("id"), Value::from("planted_mutant"));
+        node.insert(Value::from("condition"), Value::from("ground.value == 'RIDER_REQUESTED'"));
+        node.insert(Value::from("if_true"), Value::Sequence(vec![Value::Mapping(if_true_item)]));
+        sheet
+            .get_mut("sections")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restrict_rider_sheet has sections")
+            .push(Value::Mapping(node));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "the planted mutant must fire exactly once: {:?}", found);
+        assert!(found[0].contains("'ground'"), "{:?}", found);
+        assert!(found[0].contains("restrict_rider_sheet"), "the location must name the sheet: {:?}", found);
+    }
+
+    /// The `visible_when:` spelling, on a SCREEN's own body this time (never a sheet) — proves
+    /// both syntaxes AND both unit kinds (`screens`/`sheets`) are independently checked.
+    #[test]
+    fn a_visible_when_reading_a_screen_bodys_own_chip_is_caught() {
+        let mut model = real_model();
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_backoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restaurant_backoffice.yaml declares screens");
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("claim_resolve"))
+            .expect("claim_resolve exists");
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from("mutant"));
+        node.insert(Value::from("visible_when"), Value::from("resolution.value == 'FULL_REFUND'"));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("claim_resolve has components")
+            .push(Value::Mapping(node));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "the planted mutant must fire exactly once: {:?}", found);
+        assert!(found[0].contains("'resolution'"), "{:?}", found);
+        assert!(found[0].contains("claim_resolve"), "the location must name the screen: {:?}", found);
+    }
+
+    /// Round 3 BECK tightening (#639 part C step 4-iii-A): a form field on the RIGHT operand of a
+    /// comparison must be caught too — the round-2 rule read only the LEADING identifier
+    /// (`condition_subject_root`, singular), so `rider.standing == ground.value` would have evaded
+    /// it entirely (`rider` is resolver data; `ground` is the sheet's own chip). Plants the exact
+    /// shape on the RIGHT operand this time.
+    #[test]
+    fn a_condition_reading_its_own_sheets_chip_on_the_right_operand_is_caught() {
+        let mut model = real_model();
+        let sheet = model
+            .defs
+            .get_mut("screens/system.yaml")
+            .and_then(|v| v.get_mut("bottom_sheets"))
+            .and_then(|v| v.get_mut("restrict_rider_sheet"))
+            .expect("restrict_rider_sheet exists");
+        let mut if_true_item = serde_yaml::Mapping::new();
+        if_true_item.insert(Value::from("type"), Value::from("text"));
+        if_true_item.insert(Value::from("value"), Value::from("mutant"));
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("conditional_section"));
+        node.insert(Value::from("id"), Value::from("planted_mutant_rhs"));
+        node.insert(Value::from("condition"), Value::from("rider.standing == ground.value"));
+        node.insert(Value::from("if_true"), Value::Sequence(vec![Value::Mapping(if_true_item)]));
+        sheet
+            .get_mut("sections")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restrict_rider_sheet has sections")
+            .push(Value::Mapping(node));
+        let found = hits(&model);
+        assert_eq!(found.len(), 1, "the planted mutant on the RIGHT operand must fire exactly once: {:?}", found);
+        assert!(found[0].contains("'ground'"), "must name the RIGHT-operand form field root, not 'rider': {:?}", found);
+        assert!(found[0].contains("restrict_rider_sheet"), "the location must name the sheet: {:?}", found);
+    }
+
+    /// A condition reading genuinely RESOLVER data (never a form field) must never fire — the real
+    /// corpus is FULL of these (`rider.standing == 'RESTRICTED'`, `order.status == 'DELIVERED'`,
+    /// …) and `the_real_corpus_is_clean` above is the corpus-wide proof; this is the narrow,
+    /// same-shape negative twin of the two positive tests above.
+    #[test]
+    fn a_condition_reading_resolver_data_is_not_reported() {
+        let mut model = real_model();
+        let screens = model
+            .defs
+            .get_mut("screens/restaurant_backoffice.yaml")
+            .and_then(|v| v.get_mut("screens"))
+            .and_then(|v| v.as_sequence_mut())
+            .expect("restaurant_backoffice.yaml declares screens");
+        let screen = screens
+            .iter_mut()
+            .find(|s| s.get("id").and_then(|x| x.as_str()) == Some("claim_resolve"))
+            .expect("claim_resolve exists");
+        let mut node = serde_yaml::Mapping::new();
+        node.insert(Value::from("type"), Value::from("text"));
+        node.insert(Value::from("value"), Value::from("not a mutant"));
+        node.insert(Value::from("visible_when"), Value::from("reclamation.status == 'RESOLVED'"));
+        screen
+            .get_mut("components")
+            .and_then(|v| v.as_sequence_mut())
+            .expect("claim_resolve has components")
+            .push(Value::Mapping(node));
+        assert!(hits(&model).is_empty(), "resolver-data conditions must never fire this rule: {:?}", hits(&model));
+    }
+}
+
+// ─── #639 part C step 4-iii-A round 3 R3-2 (dba) — schema.generated.sql index naming ────────────
+// Compiler-first form declined for size (types cannot reach a generated-artifact string, and
+// `migrations/**` legitimately carries 61 applied unnamed indexes this must NOT gate — the R3-1
+// antipattern): this is the codegen-side fallback the card names. Every index in the GENERATED
+// output must be named + idempotent; `migrations/**` (the applied, historical shape) is untouched.
+mod schema_sql_index_naming_gate {
+    use super::super::*;
+
+    fn real_schema_sql() -> String {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let specs = root.join("specs");
+        let model = load_model(&specs).expect("load real specs");
+        emit_schema_sql(&model, &specs)
+    }
+
+    /// The named defect (R3-2): every `CREATE INDEX` in the generated schema must be BOTH named and
+    /// `IF NOT EXISTS` — a bare `CREATE INDEX ON` is exactly the shape that silently duplicates on a
+    /// migration re-run instead of erroring or no-op'ing.
+    #[test]
+    fn every_generated_index_is_named_and_idempotent() {
+        let sql = real_schema_sql();
+        assert!(
+            !sql.contains("CREATE INDEX ON "),
+            "every generated index must be named (never a bare `CREATE INDEX ON`): {:?}",
+            sql.lines().filter(|l| l.contains("CREATE INDEX ON ")).collect::<Vec<_>>()
+        );
+        let create_index_lines: Vec<&str> = sql.lines().filter(|l| l.trim_start().starts_with("CREATE INDEX")).collect();
+        assert!(!create_index_lines.is_empty(), "sanity: the corpus must actually declare indexes");
+        let mut names: Vec<&str> = Vec::new();
+        for line in &create_index_lines {
+            assert!(line.contains("IF NOT EXISTS"), "every CREATE INDEX must carry IF NOT EXISTS: {line}");
+            // dba (correction pass): `IF NOT EXISTS` matches on NAME only, so two DIFFERENT
+            // indexes sharing one generated name would silently yield a MISSING index (the second
+            // `CREATE INDEX IF NOT EXISTS` becomes a silent no-op against the FIRST index, never
+            // creating the second one at all) — a `uniq -d`-style corpus-wide check, not just a
+            // per-table one, since `pg_index_name` is a pure function of (table, cols) and two
+            // DIFFERENT tables could theoretically collide.
+            let name = line.trim_start().trim_start_matches("CREATE INDEX IF NOT EXISTS ").split_whitespace().next().unwrap_or("");
+            names.push(name);
+        }
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        let mut dupes: Vec<&str> = Vec::new();
+        for w in sorted.windows(2) {
+            if w[0] == w[1] && !dupes.contains(&w[0]) {
+                dupes.push(w[0]);
+            }
+        }
+        assert!(dupes.is_empty(), "every emitted index NAME must be unique corpus-wide (IF NOT EXISTS matches on name only, so a collision silently drops the second index): {dupes:?}");
+    }
+
+    /// `pg_index_name` reproduces Postgres's OWN default naming exactly — the property that makes
+    /// naming an already-applied (unnamed) index idempotently consistent with an `IF NOT EXISTS`
+    /// re-run: same inputs, same name Postgres itself would have chosen.
+    #[test]
+    fn pg_index_name_matches_postgres_default_shape_lowercased() {
+        assert_eq!(pg_index_name("rider_roster", &["display_name", "rider_id"]), "rider_roster_display_name_rider_id_idx");
+        assert_eq!(pg_index_name("rider_roster", &["standing"]), "rider_roster_standing_idx");
+        assert_eq!(pg_index_name("RiderRoster", &["standing"]), "riderroster_standing_idx", "lowercased, matching Postgres's own unquoted-identifier fold");
+    }
+
+    /// The panic path: an emitted name past NAMEDATALEN (63 bytes) must fail LOUDLY at generation
+    /// time, never truncate silently (a truncated name that collides is a worse failure).
+    #[test]
+    #[should_panic(expected = "NAMEDATALEN")]
+    fn pg_index_name_panics_rather_than_truncates_past_namedatalen() {
+        let _ = pg_index_name("a_table_name_chosen_to_be_deliberately_far_too_long_for_postgres", &["a_very_long_column_name_indeed"]);
     }
 }
 

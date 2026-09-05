@@ -201,7 +201,7 @@ pub fn wire() -> HealthDto {
 /// (`order_tracking_store::upsert`'s full 39-column list), so a build without the column would fail
 /// every Order-group projection with `column "delivery_handed_back" does not exist` (42703) — the
 /// whole customer tracking read model would stop updating, not just the handback banner.
-pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904110000;
+pub const REQUIRED_SCHEMA_VERSION: i64 = 20260904160000;
 
 /// The precise build identity, for diagnostics (ADR-20260721-175411). CI bakes `CAPTAIN_BUILD_VERSION`
 /// (the short 7-char git commit SHA the image was built from, e.g. `829f4ad`) into the deployed image — see
@@ -425,6 +425,10 @@ pub fn build_graphql_di(
     // caller (the SAME parse the rider sign-in door already does) — a parameter, like
     // `service_window_horizon`, so every bin passes its own configured value.
     support_contact: Option<domain::generated::scalars::EmailAddress>,
+    // #639 part C step 4-iii-A (ADR-20260904-152807 §7): `RUN_RIDER_RESTRICTION_DOOR`, resolved
+    // ONCE by the caller — a parameter, like `support_contact`, so every bin passes its own
+    // configured value onto `riders`/`rider`'s `restrictionDoorOpen`.
+    run_rider_restriction_door: bool,
 ) -> GraphqlDi {
     let pool = pool.clone();
     // Read-model repositories injected into GraphQL resolvers.
@@ -456,6 +460,8 @@ pub fn build_graphql_di(
         Arc::new(PgDeliveryRepository::new(pool.clone()));
     let rider_restrictions: Arc<dyn application::queries::RiderRestrictionReadRepository> =
         Arc::new(infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()));
+    let rider_roster: Arc<dyn application::queries::RiderRosterReadRepository> =
+        Arc::new(infrastructure::persistence::rider_roster_store::PgRiderRosterRepository::new(pool.clone()));
     let refunds: Arc<dyn RefundReadRepository> =
         Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
@@ -484,6 +490,7 @@ pub fn build_graphql_di(
         customers,
         deliveries,
         rider_restrictions,
+        rider_roster,
         refunds,
         delivery_satisfaction,
         delivery_partner_availabilities,
@@ -492,6 +499,7 @@ pub fn build_graphql_di(
         mailbox_lanes,
         service_window_horizon,
         support_contact,
+        run_rider_restriction_door: graphql::schema::RunRiderRestrictionDoor(run_rider_restriction_door),
     };
 
     // Write side (CQRS commands): the event store behind the mutation resolvers, plus the
@@ -694,6 +702,7 @@ pub async fn router() -> Router {
                         config.service_window_validity_horizon_seconds,
                     ),
                     support_contact.clone(),
+                    config.run_rider_restriction_door,
                 );
                 // IDENT-1 Phase A (#641): gate-then-stabilize, selected ONCE here from the
                 // resolved Config -- ON wraps the SAME `customers` repository `ReadDeps` already
@@ -1013,6 +1022,10 @@ pub async fn router() -> Router {
                             mark_order_delivered_to_order: config
                                 .route_order_delivery_completion_through_lane,
                         },
+                        // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's
+                        // release gate, resolved ONCE here at the composition root — the handler
+                        // takes it as a parameter, exactly like `enforce_service_hours_guard`.
+                        run_rider_restriction_door: config.run_rider_restriction_door,
                     };
                     // Deploy-time fleet-parity EVIDENCE (#598): the monolith re-asserts its
                     // resolved value for the same three gates the standalone fleets declare
@@ -1039,6 +1052,14 @@ pub async fn router() -> Router {
                     telemetry::meters::runtime::declare_flag(
                         "ROUTE_REPLACEMENT_BIRTH_THROUGH_LANE",
                         config.route_replacement_birth_through_lane,
+                    );
+                    // Round 2 item 7 (farley, vernon): the door key's OWN fleet-parity evidence —
+                    // missing at BOTH composition roots before this round (`standalone_deps` gets
+                    // the same call), so a rolling deploy in which half the fleet's `restrictRider`
+                    // dispatches refuse the typed error while the other half accepts was invisible.
+                    telemetry::meters::runtime::declare_flag(
+                        "RUN_RIDER_RESTRICTION_DOOR",
+                        config.run_rider_restriction_door,
                     );
                     // ACTIVATIONS (#272 D3, gated ACTOR_ACTIVATIONS default false): the shared
                     // held-state cache, its per-actor policy from the GENERATED table, and a

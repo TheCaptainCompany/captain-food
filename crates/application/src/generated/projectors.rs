@@ -247,6 +247,42 @@ pub fn project_rider_restriction<C: RiderRestrictionCompute>(c: &C, state: Optio
     })
 }
 
+/// Hand-written business logic for `RiderRoster`'s computed / cross-stream / accumulate columns
+/// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
+pub trait RiderRosterCompute {
+    fn decided_at(&self, prev: Option<&RiderRosterRow>, env: &Envelope) -> Option<chrono::DateTime<chrono::Utc>>;
+    fn effective_at(&self, prev: Option<&RiderRosterRow>, env: &Envelope) -> Option<chrono::DateTime<chrono::Utc>>;
+}
+
+pub fn project_rider_roster<C: RiderRosterCompute>(c: &C, state: Option<RiderRosterRow>, env: &Envelope) -> Option<RiderRosterRow> {
+    let created = state.as_ref().map(|r| r.created_at);
+    let next = match &env.event {
+        DomainEvent::RiderRegistered(e) => Some(RiderRosterRow {
+            rider_id: e.rider_id.clone(),
+            display_name: e.display_name.clone(),
+            phone: e.phone.clone(),
+            status: e.status.clone(),
+            standing: RiderStanding::ACTIVE,
+            ground: None,
+            decided_at: c.decided_at(state.as_ref(), env),
+            effective_at: c.effective_at(state.as_ref(), env),
+            reinstated_at: None,
+            created_at: env.occurred_at,
+            updated_at: env.occurred_at,
+        }),
+        DomainEvent::RiderInfoUpdated(e) => { let mut row = state?; if let Some(v) = &e.display_name { row.display_name = v.clone(); } if let Some(v) = &e.phone { row.phone = v.clone(); } Some(row) },
+        DomainEvent::RiderStatusChanged(e) => { let mut row = state?; row.status = e.status.clone(); Some(row) },
+        DomainEvent::RiderRestricted(e) => { let mut row = state?; row.standing = RiderStanding::RESTRICTED; row.ground = Some(e.ground.clone()); let v = c.decided_at(Some(&row), env); row.decided_at = v; let v = c.effective_at(Some(&row), env); row.effective_at = v; Some(row) },
+        DomainEvent::RiderReinstated(_) => { let mut row = state?; row.standing = RiderStanding::ACTIVE; row.reinstated_at = Some(env.occurred_at); Some(row) },
+        _ => return state,
+    };
+    next.map(|mut row| {
+        row.created_at = created.unwrap_or(env.occurred_at);
+        row.updated_at = env.occurred_at;
+        row
+    })
+}
+
 /// Hand-written business logic for `Catalog`'s computed / cross-stream / accumulate columns
 /// (`env.event` is the typed, declared event). Mechanical columns are mapped by the generator.
 pub trait CatalogCompute {

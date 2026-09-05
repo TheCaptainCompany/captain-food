@@ -188,6 +188,7 @@ async fn deliver_once(pool: &PgPool) -> u64 {
         // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
+        run_rider_restriction_door: false,
         store: Arc::new(PgEventStore::new(pool.clone())),
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(PgSlugReservationRepository::new(pool.clone())),

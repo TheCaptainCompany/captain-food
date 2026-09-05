@@ -1,0 +1,7 @@
+{
+  "week": "2026-W36",
+  "seconds": 3600,
+  "recordedAt": "2026-09-05T04:31:54.224Z",
+  "branch": "639-staff-auth-admin-roster",
+  "note": "round 2 of #639 part C step 4-iii-A (PR #885): fixed items 1-14 of the dispatch card, incl. M6 live-plant, held-job tie-break fix, the new screen-condition-on-form-field validator rule and its 3 corpus-wide findings, docs/records"
+}

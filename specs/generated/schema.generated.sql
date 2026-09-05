@@ -16,9 +16,9 @@ CREATE TABLE domain_events (
   expired_at TIMESTAMPTZ NULL,
   UNIQUE (stream_name, version)
 );
-CREATE INDEX ON domain_events (stream_name, version);
-CREATE INDEX ON domain_events (event_type);
-CREATE INDEX ON domain_events (occurred_at);
+CREATE INDEX IF NOT EXISTS domain_events_stream_name_version_idx ON domain_events (stream_name, version);
+CREATE INDEX IF NOT EXISTS domain_events_event_type_idx ON domain_events (event_type);
+CREATE INDEX IF NOT EXISTS domain_events_occurred_at_idx ON domain_events (occurred_at);
 
 CREATE TABLE domain_stream (
   stream_name TEXT PRIMARY KEY,
@@ -34,8 +34,8 @@ CREATE TABLE auth_sessions (
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON auth_sessions (session_id);
-CREATE INDEX ON auth_sessions (expires_at);
+CREATE INDEX IF NOT EXISTS auth_sessions_session_id_idx ON auth_sessions (session_id);
+CREATE INDEX IF NOT EXISTS auth_sessions_expires_at_idx ON auth_sessions (expires_at);
 
 CREATE TABLE sms_send_quota (
   quota_key TEXT PRIMARY KEY,
@@ -59,7 +59,7 @@ CREATE TABLE hubrise_connection_locations (
   restaurant_id UUID NOT NULL,
   last_connected_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON hubrise_connection_locations (restaurant_account_id);
+CREATE INDEX IF NOT EXISTS hubrise_connection_locations_restaurant_account_id_idx ON hubrise_connection_locations (restaurant_account_id);
 
 CREATE TABLE external_sirene_restaurants (
   siret TEXT PRIMARY KEY,
@@ -77,12 +77,12 @@ CREATE TABLE external_sirene_restaurants (
   last_attempt_sync_at TIMESTAMPTZ NULL,
   attempt_sync_retry_count INTEGER NOT NULL
 );
-CREATE INDEX ON external_sirene_restaurants (etat);
-CREATE INDEX ON external_sirene_restaurants (naf);
-CREATE INDEX ON external_sirene_restaurants (department);
-CREATE INDEX ON external_sirene_restaurants (last_seen_at);
-CREATE INDEX ON external_sirene_restaurants (payload_hash);
-CREATE INDEX ON external_sirene_restaurants (status);
+CREATE INDEX IF NOT EXISTS external_sirene_restaurants_etat_idx ON external_sirene_restaurants (etat);
+CREATE INDEX IF NOT EXISTS external_sirene_restaurants_naf_idx ON external_sirene_restaurants (naf);
+CREATE INDEX IF NOT EXISTS external_sirene_restaurants_department_idx ON external_sirene_restaurants (department);
+CREATE INDEX IF NOT EXISTS external_sirene_restaurants_last_seen_at_idx ON external_sirene_restaurants (last_seen_at);
+CREATE INDEX IF NOT EXISTS external_sirene_restaurants_payload_hash_idx ON external_sirene_restaurants (payload_hash);
+CREATE INDEX IF NOT EXISTS external_sirene_restaurants_status_idx ON external_sirene_restaurants (status);
 
 CREATE TABLE external_stripe_events (
   stripe_event_id TEXT PRIMARY KEY,
@@ -91,9 +91,9 @@ CREATE TABLE external_stripe_events (
   received_at TIMESTAMPTZ NOT NULL,
   processed_at TIMESTAMPTZ NULL
 );
-CREATE INDEX ON external_stripe_events (event_type);
-CREATE INDEX ON external_stripe_events (received_at);
-CREATE INDEX ON external_stripe_events (processed_at);
+CREATE INDEX IF NOT EXISTS external_stripe_events_event_type_idx ON external_stripe_events (event_type);
+CREATE INDEX IF NOT EXISTS external_stripe_events_received_at_idx ON external_stripe_events (received_at);
+CREATE INDEX IF NOT EXISTS external_stripe_events_processed_at_idx ON external_stripe_events (processed_at);
 
 CREATE TABLE external_avelo37_events (
   avelo37_event_id TEXT PRIMARY KEY,
@@ -102,9 +102,9 @@ CREATE TABLE external_avelo37_events (
   received_at TIMESTAMPTZ NOT NULL,
   processed_at TIMESTAMPTZ NULL
 );
-CREATE INDEX ON external_avelo37_events (event_type);
-CREATE INDEX ON external_avelo37_events (received_at);
-CREATE INDEX ON external_avelo37_events (processed_at);
+CREATE INDEX IF NOT EXISTS external_avelo37_events_event_type_idx ON external_avelo37_events (event_type);
+CREATE INDEX IF NOT EXISTS external_avelo37_events_received_at_idx ON external_avelo37_events (received_at);
+CREATE INDEX IF NOT EXISTS external_avelo37_events_processed_at_idx ON external_avelo37_events (processed_at);
 
 CREATE TABLE external_coopcycle_events (
   coopcycle_event_id TEXT PRIMARY KEY,
@@ -114,10 +114,10 @@ CREATE TABLE external_coopcycle_events (
   received_at TIMESTAMPTZ NOT NULL,
   processed_at TIMESTAMPTZ NULL
 );
-CREATE INDEX ON external_coopcycle_events (instance_id);
-CREATE INDEX ON external_coopcycle_events (event_type);
-CREATE INDEX ON external_coopcycle_events (received_at);
-CREATE INDEX ON external_coopcycle_events (processed_at);
+CREATE INDEX IF NOT EXISTS external_coopcycle_events_instance_id_idx ON external_coopcycle_events (instance_id);
+CREATE INDEX IF NOT EXISTS external_coopcycle_events_event_type_idx ON external_coopcycle_events (event_type);
+CREATE INDEX IF NOT EXISTS external_coopcycle_events_received_at_idx ON external_coopcycle_events (received_at);
+CREATE INDEX IF NOT EXISTS external_coopcycle_events_processed_at_idx ON external_coopcycle_events (processed_at);
 
 CREATE TABLE external_uber_direct_events (
   uber_event_id TEXT PRIMARY KEY,
@@ -126,9 +126,9 @@ CREATE TABLE external_uber_direct_events (
   received_at TIMESTAMPTZ NOT NULL,
   processed_at TIMESTAMPTZ NULL
 );
-CREATE INDEX ON external_uber_direct_events (event_type);
-CREATE INDEX ON external_uber_direct_events (received_at);
-CREATE INDEX ON external_uber_direct_events (processed_at);
+CREATE INDEX IF NOT EXISTS external_uber_direct_events_event_type_idx ON external_uber_direct_events (event_type);
+CREATE INDEX IF NOT EXISTS external_uber_direct_events_received_at_idx ON external_uber_direct_events (received_at);
+CREATE INDEX IF NOT EXISTS external_uber_direct_events_processed_at_idx ON external_uber_direct_events (processed_at);
 
 CREATE TABLE external_hubrise_callbacks (
   callback_id TEXT PRIMARY KEY,
@@ -139,10 +139,10 @@ CREATE TABLE external_hubrise_callbacks (
   received_at TIMESTAMPTZ NOT NULL,
   processed_at TIMESTAMPTZ NULL
 );
-CREATE INDEX ON external_hubrise_callbacks (resource_type);
-CREATE INDEX ON external_hubrise_callbacks (location_id);
-CREATE INDEX ON external_hubrise_callbacks (received_at);
-CREATE INDEX ON external_hubrise_callbacks (processed_at);
+CREATE INDEX IF NOT EXISTS external_hubrise_callbacks_resource_type_idx ON external_hubrise_callbacks (resource_type);
+CREATE INDEX IF NOT EXISTS external_hubrise_callbacks_location_id_idx ON external_hubrise_callbacks (location_id);
+CREATE INDEX IF NOT EXISTS external_hubrise_callbacks_received_at_idx ON external_hubrise_callbacks (received_at);
+CREATE INDEX IF NOT EXISTS external_hubrise_callbacks_processed_at_idx ON external_hubrise_callbacks (processed_at);
 
 CREATE TABLE inbound_messages (
   message_id UUID PRIMARY KEY,
@@ -173,18 +173,18 @@ CREATE TABLE inbound_messages (
   completed_at TIMESTAMPTZ NULL,
   UNIQUE (source, external_id)
 );
-CREATE INDEX ON inbound_messages (actor_type);
-CREATE INDEX ON inbound_messages (actor_id);
-CREATE INDEX ON inbound_messages (user_id);
-CREATE INDEX ON inbound_messages (correlation_id);
-CREATE INDEX ON inbound_messages (session_id);
-CREATE INDEX ON inbound_messages (source);
-CREATE INDEX ON inbound_messages (status);
-CREATE INDEX ON inbound_messages (received_at);
-CREATE INDEX ON inbound_messages (actor_type, partition, position);
-CREATE INDEX ON inbound_messages (actor_type, partition);
-CREATE INDEX ON inbound_messages (actor_id, position);
-CREATE INDEX ON inbound_messages (scheduled_at);
+CREATE INDEX IF NOT EXISTS inbound_messages_actor_type_idx ON inbound_messages (actor_type);
+CREATE INDEX IF NOT EXISTS inbound_messages_actor_id_idx ON inbound_messages (actor_id);
+CREATE INDEX IF NOT EXISTS inbound_messages_user_id_idx ON inbound_messages (user_id);
+CREATE INDEX IF NOT EXISTS inbound_messages_correlation_id_idx ON inbound_messages (correlation_id);
+CREATE INDEX IF NOT EXISTS inbound_messages_session_id_idx ON inbound_messages (session_id);
+CREATE INDEX IF NOT EXISTS inbound_messages_source_idx ON inbound_messages (source);
+CREATE INDEX IF NOT EXISTS inbound_messages_status_idx ON inbound_messages (status);
+CREATE INDEX IF NOT EXISTS inbound_messages_received_at_idx ON inbound_messages (received_at);
+CREATE INDEX IF NOT EXISTS inbound_messages_actor_type_partition_position_idx ON inbound_messages (actor_type, partition, position);
+CREATE INDEX IF NOT EXISTS inbound_messages_actor_type_partition_idx ON inbound_messages (actor_type, partition);
+CREATE INDEX IF NOT EXISTS inbound_messages_actor_id_position_idx ON inbound_messages (actor_id, position);
+CREATE INDEX IF NOT EXISTS inbound_messages_scheduled_at_idx ON inbound_messages (scheduled_at);
 
 CREATE TABLE mailbox_partitions (
   actor_type TEXT NOT NULL,
@@ -283,7 +283,7 @@ CREATE TABLE CityDeliveryRanking (
   ttl_override_seconds INTEGER NULL,
   effective_from TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON CityDeliveryRanking (city_id);
+CREATE INDEX IF NOT EXISTS citydeliveryranking_city_id_idx ON CityDeliveryRanking (city_id);
 
 CREATE TABLE RestaurantDispatchConfig (
   restaurant_id UUID PRIMARY KEY,
@@ -292,7 +292,7 @@ CREATE TABLE RestaurantDispatchConfig (
   self_dispatch_ttl_seconds INTEGER NULL,
   effective_from TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON RestaurantDispatchConfig (city_id);
+CREATE INDEX IF NOT EXISTS restaurantdispatchconfig_city_id_idx ON RestaurantDispatchConfig (city_id);
 
 CREATE TABLE RuntimePosture (
   posture TEXT PRIMARY KEY,
@@ -306,7 +306,7 @@ CREATE TABLE slug_reservations (
   reserved_at TIMESTAMPTZ NOT NULL,
   released_at TIMESTAMPTZ NULL
 );
-CREATE INDEX ON slug_reservations (restaurant_id);
+CREATE INDEX IF NOT EXISTS slug_reservations_restaurant_id_idx ON slug_reservations (restaurant_id);
 
 CREATE TABLE auth_subject_reservations (
   principal_kind TEXT NOT NULL,
@@ -315,7 +315,7 @@ CREATE TABLE auth_subject_reservations (
   reserved_at TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (principal_kind, auth_subject)
 );
-CREATE INDEX ON auth_subject_reservations (principal_id);
+CREATE INDEX IF NOT EXISTS auth_subject_reservations_principal_id_idx ON auth_subject_reservations (principal_id);
 
 CREATE TABLE Restaurant (
   restaurant_id UUID PRIMARY KEY,
@@ -346,8 +346,8 @@ CREATE TABLE Restaurant (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON Restaurant (restaurant_account_id);
-CREATE INDEX ON Restaurant (listing_status);
+CREATE INDEX IF NOT EXISTS restaurant_restaurant_account_id_idx ON Restaurant (restaurant_account_id);
+CREATE INDEX IF NOT EXISTS restaurant_listing_status_idx ON Restaurant (listing_status);
 
 CREATE TABLE SlugAlias (
   previous_slug TEXT PRIMARY KEY,
@@ -356,7 +356,7 @@ CREATE TABLE SlugAlias (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON SlugAlias (restaurant_id);
+CREATE INDEX IF NOT EXISTS slugalias_restaurant_id_idx ON SlugAlias (restaurant_id);
 
 CREATE TABLE ProspectionPipeline (
   restaurant_id UUID PRIMARY KEY,
@@ -368,8 +368,8 @@ CREATE TABLE ProspectionPipeline (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON ProspectionPipeline (score);
-CREATE INDEX ON ProspectionPipeline (pipeline_status);
+CREATE INDEX IF NOT EXISTS prospectionpipeline_score_idx ON ProspectionPipeline (score);
+CREATE INDEX IF NOT EXISTS prospectionpipeline_pipeline_status_idx ON ProspectionPipeline (pipeline_status);
 
 CREATE TABLE Customer (
   customer_id UUID PRIMARY KEY,
@@ -388,7 +388,7 @@ CREATE TABLE Customer (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON Customer (auth_ref);
+CREATE INDEX IF NOT EXISTS customer_auth_ref_idx ON Customer (auth_ref);
 
 CREATE TABLE Rider (
   rider_id UUID PRIMARY KEY,
@@ -412,6 +412,22 @@ CREATE TABLE RiderRestriction (
   updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE RiderRoster (
+  rider_id UUID PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  status TEXT NOT NULL,
+  standing TEXT NOT NULL,
+  ground TEXT,
+  decided_at TIMESTAMPTZ,
+  effective_at TIMESTAMPTZ,
+  reinstated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS riderroster_display_name_rider_id_idx ON RiderRoster (display_name, rider_id);
+CREATE INDEX IF NOT EXISTS riderroster_standing_idx ON RiderRoster (standing);
+
 CREATE TABLE Catalog (
   catalog_id UUID PRIMARY KEY,
   restaurant_id UUID NOT NULL,
@@ -421,7 +437,7 @@ CREATE TABLE Catalog (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON Catalog (restaurant_id);
+CREATE INDEX IF NOT EXISTS catalog_restaurant_id_idx ON Catalog (restaurant_id);
 
 CREATE TABLE Cart (
   cart_id UUID PRIMARY KEY,
@@ -433,8 +449,8 @@ CREATE TABLE Cart (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON Cart (session_id);
-CREATE INDEX ON Cart (customer_id, updated_at);
+CREATE INDEX IF NOT EXISTS cart_session_id_idx ON Cart (session_id);
+CREATE INDEX IF NOT EXISTS cart_customer_id_updated_at_idx ON Cart (customer_id, updated_at);
 
 CREATE TABLE OrderTracking (
   order_id UUID PRIMARY KEY,
@@ -478,8 +494,8 @@ CREATE TABLE OrderTracking (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON OrderTracking (customer_id);
-CREATE INDEX ON OrderTracking (restaurant_id, status, placed_at);
+CREATE INDEX IF NOT EXISTS ordertracking_customer_id_idx ON OrderTracking (customer_id);
+CREATE INDEX IF NOT EXISTS ordertracking_restaurant_id_status_placed_at_idx ON OrderTracking (restaurant_id, status, placed_at);
 
 CREATE TABLE OrderConversation (
   order_id UUID PRIMARY KEY,
@@ -496,7 +512,7 @@ CREATE TABLE OrderConversation (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON OrderConversation (restaurant_id);
+CREATE INDEX IF NOT EXISTS orderconversation_restaurant_id_idx ON OrderConversation (restaurant_id);
 
 CREATE TABLE CustomerCreditBalance (
   customer_id UUID PRIMARY KEY,
@@ -516,8 +532,8 @@ CREATE TABLE ScopeMembership (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX ON ScopeMembership (member_type, member_id, scope_type);
-CREATE INDEX ON ScopeMembership (scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS scopemembership_member_type_member_id_scope_type_idx ON ScopeMembership (member_type, member_id, scope_type);
+CREATE INDEX IF NOT EXISTS scopemembership_scope_type_scope_id_idx ON ScopeMembership (scope_type, scope_id);
 
 -- all_events(): the entire log in global order — the SQL equivalent of EventStoreDB's $all stream.
 -- Inspection/replay only (projections track a checkpoint on position); never a read path.

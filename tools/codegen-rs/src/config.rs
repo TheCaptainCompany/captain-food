@@ -28,6 +28,13 @@ pub(crate) struct ConfigKey {
     /// Secret sources, SYNCED by CI from GitHub repo secrets: profile -> repo-secret name. Never baked
     /// — the GHCR package is public, so a baked ENV would be world-readable.
     pub(crate) from_secret: BTreeMap<String, String>,
+    /// `decisionRow:` (#639 part C step 4-iii-A, ADR-20260904-152807 §7) — the `docs/decisions/<KEY>.yaml`
+    /// stem this key's release is gated on, EXPLICITLY bound rather than left to prose (the
+    /// `RUN_SIRENE_WORKER` lesson: prose said STOPPED while `deploy.production` said `true`,
+    /// unreconciled). Read by the codegen rule `decision-row-open-key-must-be-off`
+    /// (`validate/decisions.rs`): while the named row's `status` is `open`, this key's
+    /// `deploy.production` value must be exactly `"false"`.
+    pub(crate) decision_row: Option<String>,
 }
 
 /// The profiles a key may be required in — also the `APP_PROFILE` enum.
@@ -109,6 +116,7 @@ pub(crate) fn parse_config_keys(model: &Model) -> Vec<ConfigKey> {
                     .and_then(|p| p.as_str())
                     .map(str::to_string)
             }),
+            decision_row: str_at("decisionRow"),
         });
     }
     out

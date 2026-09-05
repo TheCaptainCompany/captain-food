@@ -185,6 +185,15 @@ pub(crate) fn simple_path_regex() -> regex::Regex {
 /// whose root a `data_requirements` resolver actually feeds, must resolve on the api type that
 /// resolver's query returns. Anything outside that shape (loop variables, UI/form state, bare
 /// roots, expressions) is left unchecked — the declared honest boundary in the module doc.
+///
+/// `doc` (the whole screens FILE, #639 part C step 4-iii-A) extends the SAME walk to every bottom
+/// sheet reachable from this screen (`screen_roles::reachable_sheets`, the SAME reachability
+/// `screen_roles.rs`'s §26 walk already derives): a sheet opened from a detail route reads that
+/// route's own resolver roots (`restrict_rider_sheet` reads `rider.*`, exactly like the screen that
+/// opens it), so the roots computed above apply unchanged — only the SUBTREE walked grows. Issues
+/// found inside a sheet report as `screen-sheet-binding-unknown` (a distinct code from the
+/// screen-body `screen-binding-unknown-field`, #468) — before this rule a `{{ rider.riderld }}`
+/// typo in a sheet passed `make validate` and would dispatch the Art. 11 act with an empty id.
 pub(crate) fn check_screen_bindings(
     model: &Model,
     issues: &mut Vec<Issue>,
@@ -193,6 +202,7 @@ pub(crate) fn check_screen_bindings(
     screen: &Value,
     resolvers: Option<&serde_yaml::Mapping>,
     nav: &HashMap<String, Vec<NavField>>,
+    doc: Option<&Value>,
 ) {
     let data_requirements: Vec<String> = screen
         .get("data_requirements")
@@ -205,28 +215,41 @@ pub(crate) fn check_screen_bindings(
     }
     let mustache = regex::Regex::new(r"\{\{([^{}]+)\}\}").unwrap();
     let simple = simple_path_regex();
-    let mut bindings: Vec<(String, String)> = Vec::new();
-    collect_template_bindings(screen, "", &mustache, &mut bindings);
-    for (loc, expr) in bindings {
-        let path = expr.split('|').next().unwrap_or("").trim();
-        if !simple.is_match(path) {
-            continue;
+
+    let check = |issues: &mut Vec<Issue>, node: &Value, loc_prefix: &str, rule: &'static str| {
+        let mut bindings: Vec<(String, String)> = Vec::new();
+        collect_template_bindings(node, "", &mustache, &mut bindings);
+        for (loc, expr) in bindings {
+            let path = expr.split('|').next().unwrap_or("").trim();
+            if !simple.is_match(path) {
+                continue;
+            }
+            let mut segs = path.split('.');
+            let root = segs.next().unwrap_or("");
+            let Some((type_name, _query)) = roots.get(root) else { continue };
+            let rest: Vec<&str> = segs.collect();
+            if let Some((unknown, at_type)) = first_unknown_segment(model, nav, type_name, "api.yaml", &rest) {
+                issues.push(err(
+                    rule,
+                    format!("{}/screens/{}{}{}", sfkey, sid, loc_prefix, loc),
+                    format!(
+                        "binding '{{{{ {} }}}}' walks '{}', which type '{}' (root '{}': {}) declares neither \
+                         as a property nor as an FK-derived navigation field — the widget renders empty \
+                         while the spec reads as though it were bound (#468).",
+                        path, unknown, at_type, root, type_name
+                    ),
+                ));
+            }
         }
-        let mut segs = path.split('.');
-        let root = segs.next().unwrap_or("");
-        let Some((type_name, _query)) = roots.get(root) else { continue };
-        let rest: Vec<&str> = segs.collect();
-        if let Some((unknown, at_type)) = first_unknown_segment(model, nav, type_name, "api.yaml", &rest) {
-            issues.push(err(
-                "screen-binding-unknown-field",
-                format!("{}/screens/{}{}", sfkey, sid, loc),
-                format!(
-                    "binding '{{{{ {} }}}}' walks '{}', which type '{}' (root '{}': {}) declares neither \
-                     as a property nor as an FK-derived navigation field — the widget renders empty \
-                     while the spec reads as though it were bound (#468).",
-                    path, unknown, at_type, root, type_name
-                ),
-            ));
+    };
+
+    check(issues, screen, "", "screen-binding-unknown-field");
+
+    if let Some(doc) = doc {
+        let sheets_map = doc.get("bottom_sheets").and_then(|v| v.as_mapping());
+        for sheet_id in super::screen_roles::reachable_sheets(doc, screen) {
+            let Some(def) = sheets_map.and_then(|m| m.get(Value::String(sheet_id.clone()))) else { continue };
+            check(issues, def, &format!("/sheets/{sheet_id}"), "screen-sheet-binding-unknown");
         }
     }
 }
@@ -252,6 +275,145 @@ pub(crate) fn collect_template_bindings(node: &Value, loc: &str, mustache: &rege
             }
         }
         _ => {}
+    }
+}
+
+// ─── ADDENDUM item 12 (#639 part C step 4-iii-A round 2, reviewer) — screen-condition-on-form-field ──
+//
+// The recurring class (#870 round-2, journal W36 ~443-451; the RIDER_REQUESTED sentence): a
+// `condition:`/`visible_when:` whose dotted-path subject reads a FORM FIELD — a chip pick, a typed
+// value the user has JUST set — instead of resolver data. `RenderContext::lookup` serves resolver
+// data only (screen_binding_roots above is that same boundary), and `interact.rs` evaluates every
+// `condition:`/`visible_when:` exactly ONCE, at SSR/paint time, before the user has touched the
+// field: a chip pick stashes its value in a hidden input for the NEXT mutation dispatch
+// (`interact.rs`'s delegated click listener), it never triggers a re-paint. So a node gated on its
+// OWN sheet's/screen's form field can only ever see that field's initial (normally empty/null)
+// state — the node can never actually appear, silently, exactly like the RIDER_REQUESTED sentence
+// before this round.
+
+/// Component `type`s whose rendered content IS the user's own input (a chip's `.value`, a typed
+/// field's `.value`) — never resolver data. Mirrors `component_registry`'s `inputs`/`checkout`
+/// groups, narrowed to the members that carry a settable VALUE (excludes pure display/action
+/// controls: `button`, `icon_button`, `logo`, `location_pill`, `inline_error`, `countdown`, …).
+pub(crate) const FORM_FIELD_KINDS: &[&str] = &[
+    "chip_multi_select",
+    "text_input",
+    "text_area",
+    "otp_input",
+    "phone_field",
+    "phone_input",
+    "email_input",
+    "star_rating",
+    "tip_amount_selector",
+    "search_input",
+];
+
+/// Every FORM_FIELD_KINDS component's own `id:` declared anywhere in `node`'s subtree.
+fn collect_form_field_ids(node: &Value, out: &mut std::collections::BTreeSet<String>) {
+    match node {
+        Value::Sequence(seq) => {
+            for n in seq {
+                collect_form_field_ids(n, out);
+            }
+        }
+        Value::Mapping(map) => {
+            if let (Some(ty), Some(id)) = (
+                map.get(Value::String("type".to_string())).and_then(|v| v.as_str()),
+                map.get(Value::String("id".to_string())).and_then(|v| v.as_str()),
+            ) {
+                if FORM_FIELD_KINDS.contains(&ty) {
+                    out.insert(id.to_string());
+                }
+            }
+            for (_, v) in map {
+                collect_form_field_ids(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every dotted-path identifier ROOT in a `condition:`/`visible_when:` expression
+/// (`ground.value == 'X'` -> `["ground"]`; `!resend_available` -> `["resend_available"]`;
+/// `rider.standing == ground.value` -> `["rider", "ground"]`). Round 3 tightening (#639 part C
+/// step 4-iii-A, BECK): the round-2 version read only the LEADING identifier, so a form field on
+/// the RIGHT operand of a comparison evaded the rule entirely. The corpus grammar
+/// (`crates/web/src/condition.rs`) has NO conjunction (`and`/`or`) and today never puts a path on
+/// the RHS of a compare/`in` — so a single-root expression is the common case — but the validator
+/// must not assume that stays true, hence scanning every identifier root rather than trusting
+/// position. String literals (`'RIDER_REQUESTED'`, the grammar's one string spelling) are stripped
+/// before scanning so a quoted value is never mistaken for a path; the closed words `in`/`true`/
+/// `false`/`null` are excluded as they are grammar keywords, never form-field ids.
+fn condition_subject_roots(expr: &str) -> Vec<String> {
+    let mut stripped = String::with_capacity(expr.len());
+    let mut in_quote = false;
+    for c in expr.chars() {
+        match c {
+            '\'' => in_quote = !in_quote,
+            _ if in_quote => {}
+            _ => stripped.push(c),
+        }
+    }
+    const CLOSED_WORDS: &[&str] = &["in", "true", "false", "null"];
+    let re = regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*").unwrap();
+    re.find_iter(&stripped)
+        .filter_map(|m| {
+            let root = m.as_str().split('.').next().unwrap_or(m.as_str());
+            (!CLOSED_WORDS.contains(&root)).then(|| root.to_string())
+        })
+        .collect()
+}
+
+/// Every `condition:`/`visible_when:` string prop in `node`'s subtree, with a location string.
+fn collect_conditions(node: &Value, loc: &str, out: &mut Vec<(String, &'static str, String)>) {
+    match node {
+        Value::Sequence(seq) => {
+            for (i, n) in seq.iter().enumerate() {
+                collect_conditions(n, &format!("{loc}[{i}]"), out);
+            }
+        }
+        Value::Mapping(map) => {
+            for (k, v) in map {
+                let key = k.as_str().unwrap_or("?");
+                if let Some(expr) = v.as_str() {
+                    if key == "condition" || key == "visible_when" {
+                        let prop = if key == "condition" { "condition" } else { "visible_when" };
+                        out.push((loc.to_string(), prop, expr.to_string()));
+                        continue;
+                    }
+                }
+                collect_conditions(v, &format!("{loc}.{key}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The wired rule: `unit_kind`/`unit_id` names the closed subtree to check (a `screens` entry's
+/// OWN component tree, or ONE `bottom_sheets` entry's OWN tree — never merged across the two,
+/// mirroring exactly where the bug lives: a chip and the condition reading it are ALWAYS siblings
+/// inside the SAME sheet or the SAME screen body).
+pub(crate) fn check_condition_on_form_field(issues: &mut Vec<Issue>, sfkey: &str, unit_kind: &str, unit_id: &str, node: &Value) {
+    let mut form_ids = std::collections::BTreeSet::new();
+    collect_form_field_ids(node, &mut form_ids);
+    if form_ids.is_empty() {
+        return;
+    }
+    let mut conditions = Vec::new();
+    collect_conditions(node, "", &mut conditions);
+    for (loc, prop, expr) in conditions {
+        let roots = condition_subject_roots(&expr);
+        let Some(root) = roots.iter().find(|r| form_ids.contains(*r)) else { continue };
+        issues.push(err(
+            "screen-condition-on-form-field",
+            format!("{sfkey}/{unit_kind}/{unit_id}{loc}"),
+            format!(
+                "{prop} '{expr}' reads '{root}', a form field in this {unit_kind} (a chip pick / typed value) — \
+                 never resolver data. `RenderContext::lookup` serves resolver data only, and the client never \
+                 re-evaluates `condition:`/`visible_when:` after the field changes: this can only ever see the \
+                 field's INITIAL state, so the node can never actually appear (#870-class)."
+            ),
+        ));
     }
 }
 

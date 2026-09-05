@@ -170,6 +170,25 @@ RiderAccessRestricted:
     fr: "Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons."
 
 
+# #639 part C step 4-iii-A (ADR-20260904-152807 §7): the release gate as a mechanism, not prose.
+# Thrown by `RestrictRider` at the WRITE door, before the store is touched, when
+# `configuration.yaml#/keys/RUN_RIDER_RESTRICTION_DOOR` is OFF. A behaviour-test fixture needs a
+# way to set the key, which `tests.yaml`'s harness has no injection for today (`config injection`
+# is not a fixture primitive) — `error-exemption-unjustified` refuses `noTestFixturePossible: true`
+# here because the cause is a REAL production posture, never a catch-all scalar, so this error is
+# NOT exempted and is instead pinned by a Rust integration test at the write-door seam
+# (`crates/server/tests/rider_standing_walk.rs`, the "key OFF" leg) that sets `CommandDeps
+# { run_rider_restriction_door: false, .. }` directly — the composition-root parameter the
+# handler takes, never an env var the test would have to race.
+RiderRestrictionDoorClosed:
+  description: "The restrict door is closed by RUN_RIDER_RESTRICTION_DOOR (#639 part C step 4-iii-A, ADR-20260904-152807 §7) — a declared, supervisable refusal while the release preconditions (docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml) are still open, never a silent no-op."
+  context:
+    riderId: { $ref: 'scalars.yaml#/RiderId' }
+  messages:
+    en: "Restricting riders is not yet enabled in this environment."
+    fr: "La restriction des livreurs n'est pas encore activée dans cet environnement."
+
+
 RiderRestrictionGroundUnrecognised:
   description: "restrictRider's `ground` decoded as the read-only catch-all (#639 part C step 4-i round 2, item 5 -- ADR-20260904-081527 §3) — unspellable at the GraphQL door already (RiderRestrictionGround excludes UNRECOGNISED on write, ADR-20260803-234035), so this is the HANDLER's own belt against a caller that bypasses the door entirely (a hypothetical future direct command-bus caller, never a real GraphQL client). No `tests.yaml` fixture can spell it — the same unspellable shape as ChangeRiderStatus/SUSPENDED — so this is pinned by a Rust unit test constructing the raw command from JSON, not a behaviour-test case."
   # A readOnlyCatchAll value is excluded from the scalar's `enum:` list by construction

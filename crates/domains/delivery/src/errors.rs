@@ -123,6 +123,14 @@ pub const RIDER_ACCESS_RESTRICTED: ErrorDef = ErrorDef {
     message_fr: "Votre accès est restreint : vous ne pouvez pas passer disponible pour des livraisons.",
 };
 
+/// The restrict door is closed by RUN_RIDER_RESTRICTION_DOOR (#639 part C step 4-iii-A, ADR-20260904-152807 §7) — a declared, supervisable refusal while the release preconditions (docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml) are still open, never a silent no-op.
+/// Context: `riderId`.
+pub const RIDER_RESTRICTION_DOOR_CLOSED: ErrorDef = ErrorDef {
+    code: "RiderRestrictionDoorClosed",
+    message_en: "Restricting riders is not yet enabled in this environment.",
+    message_fr: "La restriction des livreurs n'est pas encore activée dans cet environnement.",
+};
+
 /// restrictRider's `ground` decoded as the read-only catch-all (#639 part C step 4-i round 2, item 5 -- ADR-20260904-081527 §3) — unspellable at the GraphQL door already (RiderRestrictionGround excludes UNRECOGNISED on write, ADR-20260803-234035), so this is the HANDLER's own belt against a caller that bypasses the door entirely (a hypothetical future direct command-bus caller, never a real GraphQL client). No `tests.yaml` fixture can spell it — the same unspellable shape as ChangeRiderStatus/SUSPENDED — so this is pinned by a Rust unit test constructing the raw command from JSON, not a behaviour-test case.
 /// Context: `riderId`.
 pub const RIDER_RESTRICTION_GROUND_UNRECOGNISED: ErrorDef = ErrorDef {

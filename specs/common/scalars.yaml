@@ -237,6 +237,17 @@ PageLimit:
     query's default page size.
 
 
+# Promoted from `specs/network/scalars.yaml` (#639 part C step 4-iii-A, ADR-20260904-152807 §3):
+# `riders(limit, offset)` (delivery scope) needs the SAME paging scalar `restaurants` already uses,
+# and a delivery -> network `$ref` for a paging primitive is the wrong DAG edge (kernel purity) — the
+# kernel is where a scalar with more than one scope-owning reader belongs, beside `PageLimit`. $refs
+# are kind-logical (`scalars.yaml#/PageOffset`), so this move rewrites no reference anywhere.
+PageOffset:
+  type: integer
+  minimum: 0
+  description: "Rows to skip before the page for a paginated list query (#113). Absent = 0."
+
+
 TaxRatePercent:
   type: number
   minimum: 0

@@ -23,7 +23,8 @@ use std::time::Duration;
 use application::projections::{
     project_cart, project_catalog, project_customer, project_customer_credit_balance,
     project_order_conversation, project_order_tracking, project_prospection_pipeline,
-    project_restaurant, project_rider, project_rider_restriction, project_slug_alias, Envelope,
+    project_restaurant, project_rider, project_rider_restriction, project_rider_roster,
+    project_slug_alias, Envelope,
 };
 use application::projectors::cart::CartProjector;
 use application::projectors::catalog::CatalogProjector;
@@ -35,6 +36,7 @@ use application::projectors::prospection_pipeline::ProspectionPipelineProjector;
 use application::projectors::restaurant::RestaurantProjector;
 use application::projectors::rider::RiderProjector;
 use application::projectors::rider_restriction::RiderRestrictionProjector;
+use application::projectors::rider_roster::RiderRosterProjector;
 use application::projectors::slug_alias::SlugAliasProjector;
 use chrono::Utc;
 use domain::generated::events::DomainEvent;
@@ -49,7 +51,8 @@ use crate::persistence::enum_sql::EnumText as _;
 use crate::persistence::{
     cart_store, catalog_store, customer_credit_balance_store, customer_store, db_err,
     order_conversation_store, order_tracking_store, prospection_store, restaurant_store,
-    rider_restriction_store, rider_store, scope_membership_store, slug_alias_store,
+    rider_restriction_store, rider_roster_store, rider_store, scope_membership_store,
+    slug_alias_store,
 };
 use crate::projection::ProjectionStatus;
 
@@ -148,6 +151,11 @@ enum ReadModelProjector {
     /// ground/decidedAt/effectiveAt/reinstatedAt, the source of `myStanding`. Same stream (`Rider-`)
     /// as [`Self::Rider`], same checkpoint — the Restaurant/ProspectionPipeline precedent.
     RiderRestriction,
+    /// The admin roster read model (#639 part C step 4-iii-A, ADR-20260904-152807 §1): name,
+    /// phone, availability and the platform grant for EVERY rider -- `riders`/`rider`'s source.
+    /// Its OWN checkpoint group (see the registry below), never a prefix under `Rider` or
+    /// `RiderRestriction`.
+    RiderRoster,
     /// Keyed by the SUPERSEDED slug from the event payload, not by an aggregate id — one row per
     /// rename, so a restaurant renamed N times leaves N rows on the same stream.
     SlugAlias,
@@ -230,6 +238,13 @@ impl ReadModelProjector {
                     rider_restriction_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
                 if let Some(next) = project_rider_restriction(&RiderRestrictionProjector, state, env) {
                     rider_restriction_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
+                }
+            }
+            Self::RiderRoster => {
+                let id = RiderId(aggregate_uuid_of(env, "Rider-", "riderId")?);
+                let state = rider_roster_store::load(&mut *conn, id).await.map_err(FoldFault::Database)?;
+                if let Some(next) = project_rider_roster(&RiderRosterProjector, state, env) {
+                    rider_roster_store::upsert(&mut *conn, &next).await.map_err(FoldFault::Database)?;
                 }
             }
             Self::Catalog => {
@@ -476,6 +491,19 @@ const REGISTRY: &[ProjectorGroup] = &[
         checkpoint: "RiderRestriction",
         stream_prefixes: &["Rider-"],
         projectors: &[ReadModelProjector::RiderRestriction],
+        scope: "delivery",
+    },
+    // The admin roster (#639 part C step 4-iii-A, ADR-20260904-152807 §1/§3): its OWN checkpoint,
+    // its OWN group, starting at 0 — the SAME #424 lesson `RiderRestriction`'s own comment states,
+    // generalised a second time: a table born after the log is backfilled by replay, never a
+    // migration-time copy. Rebuild by resetting the `RiderRoster` checkpoint (this group's own
+    // rebuild discipline is TRUNCATE-together, unlike `Rider`/`RiderRestriction` — see the table's
+    // own `rules:` in projection_tables.yaml for why the mechanical `derive:` on `standing` is
+    // safe here and would not be on those two).
+    ProjectorGroup {
+        checkpoint: "RiderRoster",
+        stream_prefixes: &["Rider-"],
+        projectors: &[ReadModelProjector::RiderRoster],
         scope: "delivery",
     },
     ProjectorGroup {

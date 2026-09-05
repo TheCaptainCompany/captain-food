@@ -156,6 +156,9 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
             rider_restrictions: Arc::new(
                 infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
             ),
+            rider_roster: Arc::new(
+                infrastructure::persistence::rider_roster_store::PgRiderRosterRepository::new(pool.clone()),
+            ),
             refunds: Arc::new(PgRefundQueueRepository::new(pool.clone())),
             delivery_satisfaction: Arc::new(PgDeliverySatisfactionRepository::new(pool.clone())),
             delivery_partner_availabilities: Arc::new(PgDeliveryPartnerAvailabilityRepository::new(
@@ -167,6 +170,7 @@ fn schema_over(pool: &PgPool) -> server::graphql_schema::CaptainSchema {
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
         support_contact: None,
+        run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         }),
         None,
         None,

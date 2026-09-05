@@ -497,3 +497,161 @@ async fn a_rider_predating_the_restriction_group_still_gets_backfilled_by_its_ow
          already-advanced checkpoint would be silently dropped here"
     );
 }
+
+// ─── #639 part C step 4-iii-A (ADR-20260904-152807 §1/§3) — the admin roster fold ────────────────
+// Own checkpoint group `"RiderRoster"`, `derive:`-mechanical `standing` (never a hand-written
+// hook, unlike `Rider`/`RiderRestriction` above — the table's own `rules:` explain why the
+// simplification is safe here: this group's rebuild is TRUNCATE-together, never checkpoint-only).
+
+async fn roster_row(pool: &PgPool, rider_id: uuid::Uuid) -> Option<(String, String, Option<String>)> {
+    sqlx::query("SELECT display_name, standing, ground FROM rider_roster WHERE rider_id = $1")
+        .bind(rider_id)
+        .fetch_optional(pool)
+        .await
+        .expect("query rider_roster")
+        .map(|row| {
+            (
+                row.get::<String, _>("display_name"),
+                row.get::<String, _>("standing"),
+                row.get::<Option<String>, _>("ground"),
+            )
+        })
+}
+
+/// (9) The row is born by `RiderRegistered` and carries NO `auth_ref` column at all — a rule line
+/// in the spec, pinned here as a STRUCTURE-sensitive assertion: `SELECT auth_ref FROM rider_roster`
+/// must ERROR (undefined column), never merely return NULL/empty, because this table answers WHO to
+/// show an admin and never WHO a session resolves to (that stays exclusively on `Rider`).
+#[tokio::test]
+async fn the_roster_row_is_born_by_registration_and_has_no_auth_ref_column() {
+    let Some(db) = crate::common::TestDb::acquire("rider_roster_no_auth_ref").await else { return };
+    let pool = db.pool();
+    let rider_id = uuid::Uuid::new_v4();
+    registered(&pool, rider_id, "auth-supabase-roster-1").await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (roster birth)");
+
+    let (display_name, standing, ground) =
+        roster_row(&pool, rider_id).await.expect("the roster row exists after RiderRegistered");
+    assert_eq!(display_name, "Léa");
+    assert_eq!(standing, "ACTIVE");
+    assert_eq!(ground, None);
+
+    let err = sqlx::query("SELECT auth_ref FROM rider_roster WHERE rider_id = $1")
+        .bind(rider_id)
+        .fetch_optional(&pool)
+        .await
+        .expect_err("rider_roster must declare no auth_ref column at all — a structural guarantee, not a value check");
+    assert!(
+        format!("{err}").to_lowercase().contains("auth_ref") || format!("{err}").to_lowercase().contains("column"),
+        "expected an undefined-column error naming auth_ref, got: {err}"
+    );
+}
+
+/// (10) A restriction fact writes `standing` + `ground`; a reinstatement fact returns `standing` to
+/// ACTIVE and leaves `ground` untouched (the Art. 11 history stays for admin/counsel — the SAME
+/// `RiderRestriction` discipline, mirrored one table further).
+#[tokio::test]
+async fn a_restricted_fact_writes_standing_and_ground_and_reinstate_returns_active() {
+    let Some(db) = crate::common::TestDb::acquire("rider_roster_restrict_reinstate").await else { return };
+    let pool = db.pool();
+    let rider_id = uuid::Uuid::new_v4();
+    registered(&pool, rider_id, "auth-supabase-roster-2").await;
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        2,
+        "RiderRestricted",
+        serde_json::json!({
+            "riderId": rider_id, "ground": "ELIGIBILITY_DOCUMENT_LAPSED",
+            "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z"
+        }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (roster restricted)");
+    let (_, standing, ground) = roster_row(&pool, rider_id).await.expect("roster row");
+    assert_eq!(standing, "RESTRICTED");
+    assert_eq!(ground, Some("ELIGIBILITY_DOCUMENT_LAPSED".to_string()));
+
+    append_event(&pool, &format!("Rider-{rider_id}"), 3, "RiderReinstated", serde_json::json!({ "riderId": rider_id }))
+        .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (roster reinstated)");
+    let (_, standing, ground) = roster_row(&pool, rider_id).await.expect("roster row");
+    assert_eq!(standing, "ACTIVE");
+    assert_eq!(
+        ground,
+        Some("ELIGIBILITY_DOCUMENT_LAPSED".to_string()),
+        "the attribution stays for admin/counsel history until the NEXT RiderRestricted overwrites it"
+    );
+}
+
+/// (11) A from-zero replay (TRUNCATE + checkpoint reset, this group's OWN rebuild discipline —
+/// see the table's `rules:`) reproduces the byte-identical row: register, restrict, reinstate,
+/// replayed from position 0, yields the SAME (display_name, standing, ground) tuple the live drain
+/// already produced.
+#[tokio::test]
+async fn a_from_zero_replay_yields_the_same_roster_rows() {
+    let Some(db) = crate::common::TestDb::acquire("rider_roster_from_zero_replay").await else { return };
+    let pool = db.pool();
+    let rider_id = uuid::Uuid::new_v4();
+    registered(&pool, rider_id, "auth-supabase-roster-3").await;
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        2,
+        "RiderRestricted",
+        serde_json::json!({
+            "riderId": rider_id, "ground": "ACCOUNT_COMPROMISE",
+            "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z"
+        }),
+    )
+    .await;
+    append_event(&pool, &format!("Rider-{rider_id}"), 3, "RiderReinstated", serde_json::json!({ "riderId": rider_id }))
+        .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (live drain)");
+    let live = roster_row(&pool, rider_id).await.expect("roster row (live)");
+
+    // TRUNCATE + checkpoint reset — this group's OWN rebuild discipline (unlike Rider/RiderRestriction,
+    // which forbid TRUNCATE): the mechanical `derive:` standing replays correctly ONLY because the
+    // table is empty again, not merely because the checkpoint rewound.
+    sqlx::query("TRUNCATE rider_roster").execute(&pool).await.expect("truncate rider_roster");
+    sqlx::query("DELETE FROM projection_checkpoint WHERE projector = 'RiderRoster'")
+        .execute(&pool)
+        .await
+        .expect("reset the RiderRoster checkpoint to 0 (no row = starts at 0)");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (from-zero replay)");
+    let replayed = roster_row(&pool, rider_id).await.expect("roster row (replayed)");
+
+    assert_eq!(live, replayed, "a from-zero replay must reproduce the byte-identical roster row");
+    assert_eq!(replayed.1, "ACTIVE");
+    assert_eq!(replayed.2, Some("ACCOUNT_COMPROMISE".to_string()));
+}
+
+/// (12) A legacy `RiderStatusChanged { SUSPENDED }` folds `status` (availability) to SUSPENDED but
+/// `standing` (the platform's grant) stays ACTIVE — the SAME two-vocabulary guarantee `Rider`/
+/// `RiderRestriction` already give, mirrored on the admin's OWN read model (never conflate the
+/// legacy availability value with an access restriction, ADR-20260904-014136 §4/§6).
+#[tokio::test]
+async fn a_legacy_suspended_row_folds_to_availability_suspended_and_standing_active() {
+    let Some(db) = crate::common::TestDb::acquire("rider_roster_legacy_suspended").await else { return };
+    let pool = db.pool();
+    let rider_id = uuid::Uuid::new_v4();
+    registered(&pool, rider_id, "auth-supabase-roster-4").await;
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        2,
+        "RiderStatusChanged",
+        serde_json::json!({ "riderId": rider_id, "status": "SUSPENDED" }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (roster legacy suspended)");
+
+    let status: String = sqlx::query_scalar("SELECT status FROM rider_roster WHERE rider_id = $1")
+        .bind(rider_id)
+        .fetch_one(&pool)
+        .await
+        .expect("roster row (status)");
+    assert_eq!(status, "SUSPENDED", "the legacy availability value folds through unchanged");
+    let (_, standing, _) = roster_row(&pool, rider_id).await.expect("roster row");
+    assert_eq!(standing, "ACTIVE", "a legacy SUSPENDED status must never be read as a grant on the roster either");
+}

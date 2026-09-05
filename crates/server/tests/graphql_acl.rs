@@ -768,6 +768,54 @@ async fn the_standing_doors_admit_exactly_admin() {
     assert!(!rider_m.contains(&"reinstateRider".into()), "reinstateRider leaked to RIDER");
 }
 
+/// #639 part C step 4-iii-A (ADR-20260904-152807 §4): the admin roster reads (`riders`/`rider`)
+/// admit EXACTLY ADMIN — the six non-ADMIN role paths, including RIDER (a rider must never read
+/// its OWN roster row through this door — `myStanding` is the rider's own answer), are FORBIDDEN;
+/// introspection lists neither field for a RIDER-scoped view.
+#[tokio::test]
+async fn the_roster_reads_admit_exactly_admin() {
+    let schema = schema();
+    const RIDERS: &str = "query { riders { riderId } }";
+    const RIDER: &str = r#"query { rider(input: { riderId: "00000000-0000-0000-0000-00000000000d" }) { riderId } }"#;
+
+    let forbidden = |name: &'static str, query: &'static str, roles: Vec<RequestRole>| {
+        let schema = schema.clone();
+        async move {
+            for role in roles {
+                let resp = execute_as(&schema, role, query).await;
+                assert_eq!(resp.errors.len(), 1, "{name}: expected one error for {role:?}: {:?}", resp.errors);
+                assert!(is_forbidden(&resp.errors[0]), "{name} must be FORBIDDEN for {role:?}: {:?}", resp.errors[0]);
+            }
+        }
+    };
+
+    let non_admin = vec![
+        RequestRole::Public,
+        RequestRole::Customer,
+        RequestRole::Restaurant,
+        RequestRole::RestaurantAccount,
+        RequestRole::Rider,
+        RequestRole::External,
+    ];
+    forbidden("riders", RIDERS, non_admin.clone()).await;
+    forbidden("rider", RIDER, non_admin).await;
+
+    // ADMIN passes the guard (a real resolver error past it — no wired repository in this
+    // no-DB schema — is expected and is NOT a FORBIDDEN, exactly the `admitted` idiom above).
+    for (name, query) in [("riders", RIDERS), ("rider", RIDER)] {
+        let resp = execute_as(&schema, RequestRole::Admin, query).await;
+        assert!(!resp.errors.is_empty(), "{name}: expected an error past the guard for ADMIN (no wired repo)");
+        assert!(!is_forbidden(&resp.errors[0]), "{name} must pass the guard for ADMIN: {:?}", resp.errors[0]);
+    }
+
+    let (admin_q, _m) = introspected_fields(&schema, RequestRole::Admin).await;
+    assert!(admin_q.contains(&"riders".into()), "riders missing for ADMIN: {admin_q:?}");
+    assert!(admin_q.contains(&"rider".into()), "rider missing for ADMIN: {admin_q:?}");
+    let (rider_q, _m) = introspected_fields(&schema, RequestRole::Rider).await;
+    assert!(!rider_q.contains(&"riders".into()), "riders leaked to RIDER introspection");
+    assert!(!rider_q.contains(&"rider".into()), "rider leaked to RIDER introspection");
+}
+
 /// #639 part C step 4-ii (ADR-20260904-124600 §1): the `RoleGuard` rejection carries NO `reason`
 /// extension — only `StandingGuard`'s does (`rider_restricted_is_refused_on_the_write_half.rs`
 /// asserts the positive half through the real seam). This schema (`build_schema(None, None, None)`)

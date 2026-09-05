@@ -56,7 +56,6 @@ rider.issue.kind.restaurant_not_ready: { messages: { en: "Order not ready", fr: 
 rider.issue.kind.food_damaged:         { messages: { en: "Food damaged", fr: "Commande abîmée" } }
 rider.issue.kind.vehicle_or_injury:    { messages: { en: "Vehicle or injury", fr: "Véhicule ou blessure" } }
 rider.issue.kind.other:                { messages: { en: "Other", fr: "Autre" } }
-rider.issue.note_prompt:   { messages: { en: "The facts, without describing anyone", fr: "Les faits, sans décrire des personnes" } }
 rider.issue.confirm:       { messages: { en: "Tell the restaurant", fr: "Prévenir le restaurant" } }
 rider.issue.pending:       { messages: { en: "Reported ✓ — the restaurant is being told…", fr: "Signalé ✓ — le restaurant est prévenu…" } }
 

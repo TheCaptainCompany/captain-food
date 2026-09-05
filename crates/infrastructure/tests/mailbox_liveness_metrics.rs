@@ -516,6 +516,11 @@ async fn promotion_watch_emits_both_liveness_series_for_every_declared_lane_zero
             ("ENFORCE_ACCEPTANCE_TIMEOUT", deps.enforce_acceptance_timeout),
             ("ENFORCE_SERVICE_HOURS_GUARD", deps.enforce_service_hours_guard),
             ("ROUTE_ORDER_BIRTH_THROUGH_LANE", deps.route_gates.order_placed_to_order),
+            // Round 2 item 7 (farley, vernon): the FOURTH flag — `standalone_deps` now declares
+            // the restrict door's own release gate too (missing at both composition roots before
+            // this round), so this pin must see it or a regression that drops the call again
+            // ships green, exactly the #598 mutation this whole block exists to catch.
+            ("RUN_RIDER_RESTRICTION_DOOR", deps.run_rider_restriction_door),
         ],
     );
 

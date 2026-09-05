@@ -20,7 +20,7 @@ use application::queries::{
     DeliveryReadRepository, OrderConversationReadRepository, OrderReadRepository,
     PricingPolicyReadRepository, ProspectionReadRepository, ReclamationReadRepository,
     RefundReadRepository, RestaurantReadRepository, RiderRestrictionReadRepository,
-    UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
+    RiderRosterReadRepository, UberEstimationPolicyReadRepository, UberSplitPolicyReadRepository,
 };
 
 use actor_client::OperationStatusBus;
@@ -48,6 +48,8 @@ pub struct ReadDeps {
     pub deliveries: Arc<dyn DeliveryReadRepository>,
     /// #639 part C step 4-i (ADR-20260904-081527 §4): the `myStanding` source.
     pub rider_restrictions: Arc<dyn RiderRestrictionReadRepository>,
+    /// #639 part C step 4-iii-A (ADR-20260904-152807 §1/§4): the `riders`/`rider` source.
+    pub rider_roster: Arc<dyn RiderRosterReadRepository>,
     pub refunds: Arc<dyn RefundReadRepository>,
     pub delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository>,
     pub delivery_partner_availabilities: Arc<dyn DeliveryPartnerAvailabilityReadRepository>,
@@ -69,7 +71,17 @@ pub struct ReadDeps {
     /// deployment fact, not a repository, mirroring `service_window_horizon`'s own precedent.
     /// `None` = unset (development only).
     pub support_contact: Option<domain::generated::scalars::EmailAddress>,
+    /// `configuration.yaml#/RUN_RIDER_RESTRICTION_DOOR` (#639 part C step 4-iii-A,
+    /// ADR-20260904-152807 §7): resolved ONCE at the composition root and bound onto
+    /// `riders`/`rider`'s `restrictionDoorOpen` — the `support_contact`/`service_window_horizon`
+    /// threading precedent, a deployment fact rather than a repository.
+    pub run_rider_restriction_door: RunRiderRestrictionDoor,
 }
+
+/// A dedicated newtype (#639 part C step 4-iii-A) rather than a bare `bool` in `ctx.data`, so the
+/// door-key value cannot collide with any other boolean context value keyed by TypeId.
+#[derive(Debug, Clone, Copy)]
+pub struct RunRiderRestrictionDoor(pub bool);
 
 /// Write-side ports injected into the mutation resolvers' context (ADR-0035 composition root): the
 /// event store the command handlers append to, plus the Google seams the listing commands need
@@ -153,6 +165,7 @@ pub fn build_schema_for_scope(
             customers,
             deliveries,
             rider_restrictions,
+            rider_roster,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -161,6 +174,7 @@ pub fn build_schema_for_scope(
             mailbox_lanes,
             service_window_horizon,
             support_contact,
+            run_rider_restriction_door,
         } = d;
         builder = builder.data(restaurants);
         builder = builder.data(prospection);
@@ -174,6 +188,7 @@ pub fn build_schema_for_scope(
         builder = builder.data(customers);
         builder = builder.data(deliveries);
         builder = builder.data(rider_restrictions);
+        builder = builder.data(rider_roster);
         builder = builder.data(refunds);
         builder = builder.data(delivery_satisfaction);
         builder = builder.data(delivery_partner_availabilities);
@@ -182,6 +197,7 @@ pub fn build_schema_for_scope(
         builder = builder.data(mailbox_lanes);
         builder = builder.data(service_window_horizon);
         builder = builder.data(support_contact);
+        builder = builder.data(run_rider_restriction_door);
     }
     if let Some(w) = writes {
         builder = builder.data(w.event_store);

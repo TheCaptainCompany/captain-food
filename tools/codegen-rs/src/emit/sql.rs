@@ -631,6 +631,30 @@ pub(crate) fn emit_views_sql(model: &Model) -> String {
     )
 }
 
+/// Postgres's OWN default index name for an unnamed `CREATE INDEX ON table (cols)` — the exact
+/// shape the server auto-assigns (`<table>_<col1>_<col2>_..._idx`), lowercased. Round 3 (#639 part
+/// C step 4-iii-A R3-2, dba): every emitted index used to be UNNAMED, so a re-run of an already-
+/// applied migration silently created a SECOND, redundant index (double write amplification on
+/// every projection update) instead of erroring or no-op'ing — the migration header said the
+/// opposite. Naming it with THIS exact shape means an already-applied schema (whose index got
+/// Postgres's auto-name) is idempotently consistent with an `IF NOT EXISTS` re-run: same name,
+/// same index, true no-op. Panics past NAMEDATALEN (63 bytes, Postgres's identifier limit) rather
+/// than silently truncating — a truncated name that collides with another table's index is a worse
+/// failure than a loud one at generation time, and truncation is not this fix's call to make.
+pub(crate) fn pg_index_name(table: &str, cols: &[&str]) -> String {
+    let name = format!("{}_{}_idx", table, cols.join("_")).to_lowercase();
+    assert!(
+        name.len() <= 63,
+        "emitted index name '{}' ({} bytes) exceeds Postgres's NAMEDATALEN (63) for {}({}) — this \
+         needs a hand-chosen short name, not truncation; stop and report rather than assume",
+        name,
+        name.len(),
+        table,
+        cols.join(", ")
+    );
+    name
+}
+
 /// CREATE TABLE DDL (+ indexes) for a materialized read-model table, column types resolved from the
 /// per-column `from` lineage (unlike referential tables, whose columns carry an explicit `type`).
 pub(crate) fn view_table_ddl(v: &SqlView, model: &Model) -> String {
@@ -651,12 +675,15 @@ pub(crate) fn view_table_ddl(v: &SqlView, model: &Model) -> String {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for c in &v.columns {
         if c.index && !c.pk && seen.insert(c.name.clone()) {
-            idx.push(format!("CREATE INDEX ON {} ({});", v.name, c.name));
+            let idx_name = pg_index_name(&v.name, &[c.name.as_str()]);
+            idx.push(format!("CREATE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, v.name, c.name));
         }
     }
     for ix in &v.indexes {
         if seen.insert(ix.join(",")) {
-            idx.push(format!("CREATE INDEX ON {} ({});", v.name, ix.join(", ")));
+            let cols: Vec<&str> = ix.iter().map(|s| s.as_str()).collect();
+            let idx_name = pg_index_name(&v.name, &cols);
+            idx.push(format!("CREATE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, v.name, ix.join(", ")));
         }
     }
     if idx.is_empty() { ddl } else { format!("{}\n{}", ddl, idx.join("\n")) }
@@ -794,7 +821,8 @@ pub(crate) fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String 
                 if let Some(cn) = ck.as_str() {
                     let f = |x: &str| cv.get(x).and_then(|b| b.as_bool()) == Some(true);
                     if f("index") && !f("pk") {
-                        block.push_str(&format!("\nCREATE INDEX ON {} ({});", name, cn));
+                        let idx_name = pg_index_name(name, &[cn]);
+                        block.push_str(&format!("\nCREATE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, name, cn));
                     }
                 }
             }
@@ -802,7 +830,8 @@ pub(crate) fn emit_schema_sql(model: &Model, specs: &std::path::Path) -> String 
                 for ix in seq {
                     if let Some(cols) = ix.as_sequence() {
                         let cols: Vec<&str> = cols.iter().filter_map(|v| v.as_str()).collect();
-                        block.push_str(&format!("\nCREATE INDEX ON {} ({});", name, cols.join(", ")));
+                        let idx_name = pg_index_name(name, &cols);
+                        block.push_str(&format!("\nCREATE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, name, cols.join(", ")));
                     }
                 }
             }

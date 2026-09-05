@@ -119,9 +119,6 @@ back.claims.resolution.full_refund:     { messages: { en: "Full refund", fr: "Re
 back.claims.resolution.partial_refund:  { messages: { en: "Partial refund", fr: "Remboursement partiel" } }
 back.claims.resolution.replacement:     { messages: { en: "Replacement", fr: "Remplacement" } }
 back.claims.resolution.goodwill_credit: { messages: { en: "Goodwill credit", fr: "Geste commercial" } }
-back.claims.amount.title:    { messages: { en: "Amount", fr: "Montant" } }
-back.claims.amount.subtitle: { messages: { en: "Choose the amount to refund or credit.", fr: "Choisissez le montant à rembourser ou à créditer." } }
-back.claims.amount.custom:   { messages: { en: "Other amount", fr: "Autre montant" } }
 back.claims.reject.label:     { messages: { en: "Reject", fr: "Rejeter" } }
 back.claims.reject.reason_ph: { messages: { en: "Reason (required)", fr: "Motif (obligatoire)" } }
 # First-response SLA (#160): the overdue filter toggle + the per-claim overdue marker.

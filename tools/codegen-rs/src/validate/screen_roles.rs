@@ -145,6 +145,32 @@ fn walk(node: &Value, globals: Option<&serde_yaml::Mapping>, actions: &mut Vec<S
     }
 }
 
+/// Every bottom-sheet id reachable from ONE screen's own subtree, transitively (a sheet may open
+/// another). Shared by §26's `bound_operations` (below) and §25's sheet-binding walk
+/// (`screen_bindings.rs`, `screen-sheet-binding-unknown`, #639 part C step 4-iii-A): the ONE
+/// reachability derivation, so a new way to open a sheet is seen by both checks identically.
+pub(crate) fn reachable_sheets(doc: &Value, screen: &Value) -> Vec<String> {
+    let globals = doc.get("global_components").and_then(|v| v.as_mapping());
+    let sheets_map = doc.get("bottom_sheets").and_then(|v| v.as_mapping());
+    let mut action_types: Vec<String> = Vec::new();
+    let mut to_visit: Vec<String> = Vec::new();
+    if let Some(cs) = screen.get("components") {
+        walk(cs, globals, &mut action_types, &mut to_visit);
+    }
+    let mut visited: BTreeSet<String> = BTreeSet::new();
+    let mut out: Vec<String> = Vec::new();
+    while let Some(sheet_id) = to_visit.pop() {
+        if !visited.insert(sheet_id.clone()) {
+            continue;
+        }
+        out.push(sheet_id.clone());
+        if let Some(def) = sheets_map.and_then(|m| m.get(Value::String(sheet_id))) {
+            walk(def, globals, &mut action_types, &mut to_visit);
+        }
+    }
+    out
+}
+
 /// Everything one screen binds (see the module docs for the definition).
 fn bound_operations(model: &Model, doc: &Value, screen: &Value) -> Bound {
     let globals = doc.get("global_components").and_then(|v| v.as_mapping());

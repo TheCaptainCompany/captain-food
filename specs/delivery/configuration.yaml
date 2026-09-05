@@ -25,6 +25,42 @@ keys:
       Everything a repo secret would have given, minus the opacity.
 
 
+  # #639 part C step 4-iii-A (ADR-20260904-152807 §7): the release gate as a MECHANISM, not prose —
+  # "no production RestrictRider before #874" was prose until this key, its decision row and its
+  # codegen test existed together. Consumed at the WRITE door only (`restrict_rider`'s handler):
+  # OFF returns the typed refusal `RiderRestrictionDoorClosed`; `reinstateRider` is never gated; the
+  # READ guard (`StandingGuard`) never touches this key, so a restricted rider stays refused with
+  # the key OFF (a test, the named mutant). `decisionRow` binds this key to
+  # `docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml` explicitly — the `RUN_SIRENE_WORKER`
+  # lesson (`PUBLISH-PRECONDITIONS`) is precisely a key and a row that disagreed unreconciled: this
+  # field is what the codegen rule `decision-row-open-key-must-be-off` reads, so nothing here can
+  # drift from the row silently again.
+  RUN_RIDER_RESTRICTION_DOOR:
+    type: bool
+    scalar:
+      $ref: 'scalars.yaml#/ConfigBoolean'
+    default: false
+    decisionRow: RIDER-RESTRICTION-PRECONDITIONS
+    gates: >
+      The restrict door (#639 part C step 4-iii-A, ADR-20260904-152807 §7). ON, `restrictRider`
+      appends `RiderRestricted` as normal. OFF, the handler refuses BEFORE touching
+      the store with the typed `RiderRestrictionDoorClosed` rejection — a supervisable row, never a
+      silent no-op. `reinstateRider` is NEVER gated by this key: releasing a restriction is always
+      safe to allow. The key never reaches the read side — `StandingGuard` keeps refusing an
+      already-RESTRICTED rider's write-side doors with the key OFF, because turning the release gate
+      off must never re-open doors a standing restriction already closed. Three preconditions gate
+      the flip, named in `docs/decisions/RIDER-RESTRICTION-PRECONDITIONS.yaml` (open): an ADMIN can
+      reach `/system/riders` from a browser (step 6's magic-link door + System host routing), the
+      SMS notice to the restricted rider (#874) and an alert route named for the dead-man gauge
+      `rider_restricted_holding_job_age_seconds` (slice B). While that row is `open`, a codegen test
+      refuses any `deploy.production` value other than `"false"` (`decision-row-open-key-must-be-off`)
+      — the `RUN_SIRENE_WORKER` lesson (prose said STOPPED while the deploy value said `true`,
+      unreconciled) made executable. Flipping the default is a SEPARATE recorded decision that
+      closes the row (gate-then-stabilize, ADR-20260808-144738).
+    deploy:
+      production: "false"
+
+
   RUN_DELIVERY_OFFER_TIMEOUT:
     type: bool
     scalar:

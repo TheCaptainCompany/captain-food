@@ -208,6 +208,9 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
                 false,
             ),
         },
+        // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's release gate —
+        // same ENV-GATED posture as the rest of this fn, same default (OFF) as the spec.
+        run_rider_restriction_door: env_flag("RUN_RIDER_RESTRICTION_DOOR", false),
     };
     // Deploy-time fleet-parity EVIDENCE (#598): re-assert this process's resolved value for every
     // gate whose split across a fleet has a consequence. Declared HERE, at the standalone
@@ -224,6 +227,14 @@ pub fn standalone_deps(pool: &PgPool, payments: Arc<dyn PaymentService>) -> Comm
     telemetry::meters::runtime::declare_flag(
         "ROUTE_ORDER_BIRTH_THROUGH_LANE",
         deps.route_gates.order_placed_to_order,
+    );
+    // Round 2 item 7 (farley, vernon): the FOURTH flag — the write door's own release gate,
+    // resolved above at this SAME composition root, so a fleet split (one process's env differing
+    // from the monolith's `Config`) is visible in `runtime_flag_state` exactly like the other
+    // three.
+    telemetry::meters::runtime::declare_flag(
+        "RUN_RIDER_RESTRICTION_DOOR",
+        deps.run_rider_restriction_door,
     );
     deps
 }

@@ -72,12 +72,6 @@ RestaurantDescription:
     (one name = one scalar), so the two can diverge without a migration.
 
 
-PageOffset:
-  type: integer
-  minimum: 0
-  description: "Rows to skip before the page for a paginated list query (#113). Absent = 0."
-
-
 MarginPercent:
   type: number
   minimum: 0

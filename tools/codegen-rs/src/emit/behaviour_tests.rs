@@ -278,8 +278,13 @@ pub(crate) const BT_DEFAULT_WHEN_AT: &str = "2026-01-06T12:00:00Z";
 /// `when.gates` names the key, else the key's spec default — and a gate named on any OTHER
 /// command (or an unknown key) is an emitter panic, never a silent no-op (the #413 "silently
 /// invisible" defect class, the same posture as `when.at`).
-pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] =
-    &[("PlaceOrder", "ENFORCE_SERVICE_HOURS_GUARD", "enforce_service_hours_guard")];
+pub(crate) const BT_GATE_CONSUMING: &[(&str, &str, &str)] = &[
+    ("PlaceOrder", "ENFORCE_SERVICE_HOURS_GUARD", "enforce_service_hours_guard"),
+    // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the restrict door's release gate, read
+    // at the WRITE door only — `reinstateRider` never consumes it (ReinstateRider is absent here
+    // on purpose).
+    ("RestrictRider", "RUN_RIDER_RESTRICTION_DOOR", "run_rider_restriction_door"),
+];
 
 /// EVENT receives whose application recorder takes a boolean CONFIGURATION GATE as a parameter
 /// (#167 — the acceptance-timeout ACTION gate, read at delivery time): same contract as
@@ -301,7 +306,7 @@ pub(crate) fn bt_command_call(cmd: &str) -> String {
         "PlaceOrder" => "crate::commands::place_order(&bed.store, &bed.catalogs, &bed.payments, &bed.payment_pm, cmd, None, &support::actor(), when_at, enforce_service_hours_guard).await".to_string(),
         // The Art. 11 log's decidedAt/effectiveAt are BOTH server-set (ADR-20260904-081527 §5) —
         // "now is a parameter" (RSO-1), never a system-clock read inside the handler.
-        "RestrictRider" => "crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await".to_string(),
+        "RestrictRider" => "crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at, run_rider_restriction_door).await".to_string(),
         "ApproveRefund" => "crate::process_managers::refund::approve_refund(&bed.store, &bed.refund_pm, &bed.payments, cmd, &support::actor()).await".to_string(),
         "DenyRefund" => "crate::process_managers::refund::deny_refund(&bed.store, &bed.refund_pm, cmd, &support::actor()).await".to_string(),
         "RegisterRestaurant" | "CreateCatalog" | "AddProduct" | "UpdateProduct" | "MarkRestaurantAsFavorite" => {

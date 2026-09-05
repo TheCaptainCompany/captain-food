@@ -1872,7 +1872,20 @@ pub async fn restrict_rider(
     cmd: RestrictRider,
     actor: &Actor,
     now: chrono::DateTime<chrono::Utc>,
+    // #639 part C step 4-iii-A (ADR-20260904-152807 §7): the release gate as a mechanism, resolved
+    // ONCE at the composition root (the `enforce_service_hours_guard` "when_at" style) -- never a
+    // global/env read inside the handler. Checked FIRST, before the store is even touched: OFF
+    // refuses with the typed `RiderRestrictionDoorClosed` before `require_rider` runs, so an
+    // unknown riderId behind a closed door still answers the door's own refusal, never
+    // `RiderNotFound` (the door is a property of the OPERATION, not of the target rider). Never
+    // consulted by `reinstate_rider` -- releasing a restriction is always safe to allow, and the
+    // key never reaches the READ guard (`StandingGuard`): a restricted rider stays refused with
+    // the key OFF.
+    run_rider_restriction_door: bool,
 ) -> Result<(), DomainError> {
+    if !run_rider_restriction_door {
+        return Err(reject("RiderRestrictionDoorClosed", json!({ "riderId": cmd.rider_id })));
+    }
     // Round-2 item 5 handler belt: `UNRECOGNISED` is unspellable at the GraphQL door already
     // (RiderRestrictionGround excludes it on write), but this is the LAST line of defense against
     // a caller that bypasses the door entirely -- no `tests.yaml` fixture can spell it, pinned by
@@ -1935,7 +1948,8 @@ mod restrict_rider_unrecognised_ground_tests {
         assert_eq!(cmd.ground, RiderRestrictionGround::UNRECOGNISED, "the catch-all absorbed the unknown string");
 
         let store = MemStore::default(); // never queried -- the belt fires first.
-        let err = restrict_rider(&store, cmd, &actor(), chrono::Utc::now()).await.unwrap_err();
+        // Door OPEN: this test asserts the GROUND belt specifically, not the door's own refusal.
+        let err = restrict_rider(&store, cmd, &actor(), chrono::Utc::now(), true).await.unwrap_err();
         assert_eq!(rejection_code(&err), Some("RiderRestrictionGroundUnrecognised"));
 
         // Round 3 item 7 (beck): the rejection carries the SAME `riderId` context every other

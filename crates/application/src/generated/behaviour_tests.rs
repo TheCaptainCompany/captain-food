@@ -4585,11 +4585,28 @@ async fn test_rider_restricted() {
     let before = bed.snapshot();
     let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-1")), ground: sc::RiderRestrictionGround::IDENTITY_MISMATCH };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
-    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await;
+    let run_rider_restriction_door: bool = true;
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at, run_rider_restriction_door).await;
     let _ = result.expect("TestRiderRestricted: the spec expects acceptance");
     bed.assert_appended("TestRiderRestricted", &before, &[
         (format!("Rider-{}", support::uid("rider-1")), fx_rider_restricted()),
     ]);
+}
+
+/// tests.yaml#/tests/TestRestrictRiderDoorClosed — "restrictRider is refused by the door key while it is OFF (the production default), before the store is even read"
+/// rules: RiderRestrictionLifecycle
+#[tokio::test]
+async fn test_restrict_rider_door_closed() {
+    let bed = TestBed::new();
+    spec_baseline(&bed).await;
+    let before = bed.snapshot();
+    let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-1")), ground: sc::RiderRestrictionGround::IDENTITY_MISMATCH };
+    let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
+    let run_rider_restriction_door: bool = false;
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at, run_rider_restriction_door).await;
+    let err = result.expect_err("TestRestrictRiderDoorClosed: the spec expects a typed rejection");
+    support::assert_thrown("TestRestrictRiderDoorClosed", &err, &["RiderRestrictionDoorClosed"]);
+    bed.assert_appended("TestRestrictRiderDoorClosed", &before, &[]);
 }
 
 /// tests.yaml#/tests/TestRiderReinstated — "An admin reinstates a previously restricted rider"
@@ -4618,7 +4635,8 @@ async fn test_restrict_already_restricted_rider_is_rejected() {
     let before = bed.snapshot();
     let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-1")), ground: sc::RiderRestrictionGround::ACCOUNT_COMPROMISE };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
-    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await;
+    let run_rider_restriction_door: bool = true;
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at, run_rider_restriction_door).await;
     let err = result.expect_err("TestRestrictAlreadyRestrictedRiderIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRestrictAlreadyRestrictedRiderIsRejected", &err, &["RiderAlreadyRestricted"]);
     bed.assert_appended("TestRestrictAlreadyRestrictedRiderIsRejected", &before, &[]);
@@ -4648,7 +4666,8 @@ async fn test_restrict_unknown_rider_is_rejected() {
     let before = bed.snapshot();
     let cmd = cmds::RestrictRider { rider_id: sc::RiderId(support::uid("rider-404")), ground: sc::RiderRestrictionGround::IDENTITY_MISMATCH };
     let when_at: chrono::DateTime<chrono::Utc> = "2026-01-06T12:00:00Z".parse().expect("when.at: RFC3339 instant");
-    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at).await;
+    let run_rider_restriction_door: bool = true;
+    let result = crate::commands::restrict_rider(&bed.store, cmd, &support::actor(), when_at, run_rider_restriction_door).await;
     let err = result.expect_err("TestRestrictUnknownRiderIsRejected: the spec expects a typed rejection");
     support::assert_thrown("TestRestrictUnknownRiderIsRejected", &err, &["RiderNotFound"]);
     bed.assert_appended("TestRestrictUnknownRiderIsRejected", &before, &[]);

@@ -33,6 +33,7 @@ pub mod restaurant;
 pub mod restaurant_store;
 pub mod rider;
 pub mod rider_restriction_store;
+pub mod rider_roster_store;
 pub mod rider_store;
 pub mod scope_membership_store;
 pub mod runtime_posture;

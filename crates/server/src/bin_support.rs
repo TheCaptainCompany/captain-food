@@ -71,6 +71,7 @@ pub async fn subgraph_app(pool: PgPool, settings: SubgraphSettings) -> Router {
             config.service_window_validity_horizon_seconds,
         ),
         support_contact,
+        config.run_rider_restriction_door,
     );
     // IDENT-1 Phase A (#641, ADR-20260818-004646): the SAME gate-then-stabilize choice the
     // monolith makes, over the SAME `customers` repository -- a subgraph bin serves the identical

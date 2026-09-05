@@ -63,6 +63,7 @@
         "Restaurant",
         "Rider",
         "RiderRestriction",
+        "RiderRoster",
         "ScopeMembership",
         "SlugAlias",
         "UberEstimationPolicy",
@@ -228,6 +229,13 @@
       ]
     },
     "RiderRestriction": {
+      "kind": "projection table",
+      "placement": "declared",
+      "databases": [
+        "read_common"
+      ]
+    },
+    "RiderRoster": {
       "kind": "projection table",
       "placement": "declared",
       "databases": [

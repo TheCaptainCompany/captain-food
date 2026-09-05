@@ -106,6 +106,12 @@ pub struct CommandDeps {
     /// unset case, on which the rider sign-in door fails CLOSED with a loud unconfigured error
     /// rather than printing an empty route.
     pub support_contact: Option<domain::generated::scalars::EmailAddress>,
+    /// #639 part C step 4-iii-A (ADR-20260904-152807 §7): `configuration.yaml#/RUN_RIDER_RESTRICTION_DOOR`
+    /// -- the restrict door's release gate, resolved ONCE at the composition root exactly like
+    /// `enforce_service_hours_guard` above (the "when_at" style: the handler takes it as a
+    /// parameter, never reads config itself). OFF (the default) refuses `restrictRider` with the
+    /// typed `RiderRestrictionDoorClosed`; `reinstateRider` never consults it.
+    pub run_rider_restriction_door: bool,
 }
 
 
@@ -529,7 +535,7 @@ async fn rider(
         RiderInbox::UpdateRiderInfo(cmd) => run(async { application::commands::update_rider_info(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
         // #639 part C step 4-i (ADR-20260904-081527 §8): the two human-only doors — additive arms
         // only, no routing/fencing/catch-all machinery touched.
-        RiderInbox::RestrictRider(cmd) => run(async { application::commands::restrict_rider(deps.store.as_ref(), cmd, actor, chrono::Utc::now()).await.map(|_| ()) }).await,
+        RiderInbox::RestrictRider(cmd) => run(async { application::commands::restrict_rider(deps.store.as_ref(), cmd, actor, chrono::Utc::now(), deps.run_rider_restriction_door).await.map(|_| ()) }).await,
         RiderInbox::ReinstateRider(cmd) => run(async { application::commands::reinstate_rider(deps.store.as_ref(), cmd, actor).await.map(|_| ()) }).await,
     }
 }

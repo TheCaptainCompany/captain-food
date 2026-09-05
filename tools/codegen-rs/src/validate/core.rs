@@ -2053,7 +2053,19 @@ pub(crate) fn validate(model: &Model) -> Report {
                     // model, wired full-strength by #717 after the corpus was cleaned): every simple
                     // dotted binding whose root a data_requirement feeds must name real fields on
                     // the api type that resolver's query returns.
-                    check_screen_bindings(model, &mut issues, sfkey, &sid, s, resolvers, &nav);
+                    check_screen_bindings(model, &mut issues, sfkey, &sid, s, resolvers, &nav, cs);
+                    // ADDENDUM item 12 (#639 part C step 4-iii-A round 2, tightened round 3): a
+                    // `condition:`/`visible_when:` reading a form field DECLARED ON THIS SAME
+                    // SCREEN can never see anything but that field's initial (empty) state —
+                    // screen_bindings.rs's own module doc explains why. Round 2 scoped this off
+                    // `screens/rider.yaml` to respect a concurrent-session merge fence around its
+                    // one live instance; round 3 (CLAUDE.md "never weaken a gate" — a rule excluded
+                    // by filename is a weakened gate) removed that exclusion after fixing the live
+                    // instance in-file (`rider_report_sheet`'s `issue_note`, deleted rather than
+                    // un-conditioned — #888).
+                    if let Some(components) = s.get("components") {
+                        check_condition_on_form_field(&mut issues, sfkey, "screens", &sid, components);
+                    }
                     // Read fulfillability + `skipped_reads` declarations (§25b, #745): a required
                     // arg with no paint-time source is a read that fails on EVERY paint — it must
                     // be declared (and the runtime skips it before network), and a declaration a
@@ -2145,6 +2157,17 @@ pub(crate) fn validate(model: &Model) -> Report {
                                 ));
                             }
                         }
+                    }
+                }
+            }
+            // ADDENDUM item 12: the SAME check, per bottom sheet (a sheet is its own closed
+            // subtree — a chip and the condition reading it are always siblings inside ONE sheet,
+            // never split across two). Round 3 removed the `screens/rider.yaml` exclusion — see
+            // the screens-side comment above.
+            if let Some(sheets) = cs.and_then(|v| v.get("bottom_sheets")).and_then(|v| v.as_mapping()) {
+                for (sheet_key, sheet_def) in sheets {
+                    if let Some(sheet_id) = sheet_key.as_str() {
+                        check_condition_on_form_field(&mut issues, sfkey, "sheets", sheet_id, sheet_def);
                     }
                 }
             }

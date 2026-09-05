@@ -137,6 +137,7 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
         // #639 part C step 2c-i: the rider sign-in door's bridge + support route (not exercised here).
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
+        run_rider_restriction_door: false,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
@@ -209,6 +210,9 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
     let rider_restrictions: Arc<dyn application::queries::RiderRestrictionReadRepository> = Arc::new(
         infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
     );
+    let rider_roster: Arc<dyn application::queries::RiderRosterReadRepository> = Arc::new(
+        infrastructure::persistence::rider_roster_store::PgRiderRosterRepository::new(pool.clone()),
+    );
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
         Arc::new(PgDeliverySatisfactionRepository::new(pool.clone()));
@@ -248,6 +252,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             customers,
             deliveries,
             rider_restrictions,
+            rider_roster,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -257,6 +262,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
         // RSO-1: the spec-default horizon (900 s) -- tests assert behaviour, not config.
         service_window_horizon: Default::default(),
         support_contact: None,
+        run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(false),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,

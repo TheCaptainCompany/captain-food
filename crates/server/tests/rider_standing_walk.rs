@@ -100,12 +100,46 @@ async fn append_event(pool: &PgPool, stream_name: &str, version: i32, event_type
     .expect("append event");
 }
 
+/// Round 3 (#639 part C step 4-iii-A R3-5, beck + dba): the SAME helper, `occurred_at` pinned to an
+/// EXPLICIT timestamp rather than `now()` — the only way to force a genuine tie on `requested_at`
+/// (a `DeliveryRequested` event's occurrence time, ADR-20260904-152807 §2's read), which is exactly
+/// what exercises the `delivery_job_id DESC` tie-break `persistence/delivery.rs` adds after
+/// `requested_at DESC`. A wall-clock sleep between two `now()`-stamped events (the round-2 test's
+/// approach) can never produce a tie, so it never exercised that second ORDER BY key at all.
+async fn append_event_at(pool: &PgPool, stream_name: &str, version: i32, event_type: &str, payload: serde_json::Value, occurred_at: chrono::DateTime<chrono::Utc>) {
+    sqlx::query(
+        "INSERT INTO domain_events \
+         (id, stream_name, version, user_id, user_type, correlation_id, cause_id, event_type, payload, metadata, occurred_at) \
+         VALUES ($1, $2, $3, $4, 5, $5, NULL, $6, $7, NULL, $8)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(stream_name)
+    .bind(version)
+    .bind(uuid::Uuid::nil())
+    .bind(uuid::Uuid::new_v4())
+    .bind(event_type)
+    .bind(payload)
+    .bind(occurred_at)
+    .execute(pool)
+    .await
+    .expect("append event at explicit occurred_at");
+}
+
 /// The production delivery side (mirrors `graphql_write_path.rs::spawn_mailbox_workers`).
 fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
+    spawn_mailbox_workers_with_door(pool, bus, true)
+}
+
+/// #639 part C step 4-iii-A (ADR-20260904-152807 §7): the SAME composition, parameterised on the
+/// restrict door's release gate — the walk's main leg runs it ON (door open, `restrictRider`
+/// reaches the store); a second, independent worker fleet built with the key OFF proves the typed
+/// refusal end to end, through the real router, never a unit-test shortcut.
+fn spawn_mailbox_workers_with_door(pool: &PgPool, bus: actor_client::OperationStatusBus, run_rider_restriction_door: bool) {
     let deps = infrastructure::generated::command_router::CommandDeps {
         store: Arc::new(PgEventStore::new(pool.clone())),
         riders: Arc::new(infrastructure::PgRiderRepository::new(pool.clone())),
         support_contact: None,
+        run_rider_restriction_door,
         restaurants: Arc::new(PgRestaurantRepository::new(pool.clone())),
         slugs: Arc::new(infrastructure::PgSlugReservationRepository::new(pool.clone())),
         auth_subjects: Arc::new(infrastructure::PgAuthSubjectReservationRepository::new(pool.clone())),
@@ -152,7 +186,17 @@ fn spawn_mailbox_workers(pool: &PgPool, bus: actor_client::OperationStatusBus) {
 }
 
 /// The composition-root wiring (mirrors `graphql_write_path.rs::schema_over`).
-fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> server::graphql_schema::CaptainSchema {
+///
+/// `run_rider_restriction_door_read` (round 2, beck): the READ half of the SAME key, parameterised
+/// independently of the write door parameter `spawn_mailbox_workers_with_door` takes — the two
+/// composition roots resolve the same configuration value, but a test proving "the key never
+/// touches the read guard" (§7) must be able to run the read side with the key OFF too, otherwise
+/// the door-closed leg exercises a schema that never had a chance to consult it.
+fn schema_over(
+    pool: &PgPool,
+    status_bus: actor_client::OperationStatusBus,
+    run_rider_restriction_door_read: bool,
+) -> server::graphql_schema::CaptainSchema {
     let restaurants: Arc<dyn RestaurantReadRepository> = Arc::new(PgRestaurantRepository::new(pool.clone()));
     let prospection: Arc<dyn ProspectionReadRepository> = Arc::new(PgProspectionRepository::new(pool.clone()));
     let pricing_policy: Arc<dyn PricingPolicyReadRepository> = Arc::new(PgPricingPolicyRepository::new(pool.clone()));
@@ -167,6 +211,9 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
     let deliveries: Arc<dyn DeliveryReadRepository> = Arc::new(PgDeliveryRepository::new(pool.clone()));
     let rider_restrictions: Arc<dyn application::queries::RiderRestrictionReadRepository> = Arc::new(
         infrastructure::persistence::rider_restriction_store::PgRiderRestrictionRepository::new(pool.clone()),
+    );
+    let rider_roster: Arc<dyn application::queries::RiderRosterReadRepository> = Arc::new(
+        infrastructure::persistence::rider_roster_store::PgRiderRosterRepository::new(pool.clone()),
     );
     let refunds: Arc<dyn RefundReadRepository> = Arc::new(PgRefundQueueRepository::new(pool.clone()));
     let delivery_satisfaction: Arc<dyn DeliverySatisfactionReadRepository> =
@@ -206,6 +253,7 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             customers,
             deliveries,
             rider_restrictions,
+            rider_roster,
             refunds,
             delivery_satisfaction,
             delivery_partner_availabilities,
@@ -217,6 +265,11 @@ fn schema_over(pool: &PgPool, status_bus: actor_client::OperationStatusBus) -> s
             // this is the ONE walk that actually reads `myStanding.contestContact` back, so it is
             // the walk that must prove the configured value reaches the wire.
             support_contact: Some(EmailAddress("support@captain.food".to_string())),
+            // #639 part C step 4-iii-A (round 2 item 1): parameterised on the caller, not
+            // hard-coded -- the main walk passes `true` (matching the write door above, so its
+            // `riders`/`rider` assertions exercise `restrictionDoorOpen: true`); the door-closed
+            // leg passes `false` so the read side genuinely has the key OFF too.
+            run_rider_restriction_door: server::graphql_schema::RunRiderRestrictionDoor(run_rider_restriction_door_read),
         }),
         Some(server::graphql_schema::WriteDeps {
             event_store,
@@ -298,7 +351,7 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
 
     let status_bus = actor_client::OperationStatusBus::default();
     spawn_mailbox_workers(&pool, status_bus.clone());
-    let schema = schema_over(&pool, status_bus);
+    let schema = schema_over(&pool, status_bus, true);
 
     // 1) A real restaurant, through the real router (the order/job's owner for the read joins).
     let restaurant_id = uuid::Uuid::new_v4();
@@ -467,6 +520,40 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     // `myStanding.contestContact` at all.
     assert_eq!(data["myStanding"]["contestContact"], "support@captain.food", "the configured SUPPORT_CONTACT must reach the wire: {data:?}");
 
+    // 9b) rider(riderId) as ADMIN (#639 part C step 4-iii-A): reads RESTRICTED + ground +
+    //     heldDelivery { id status }, the admin detail's own composition.
+    let rider_detail = format!(
+        r#"query {{ rider(input: {{ riderId: "{rider_id}" }}) {{ riderId standing ground heldDelivery {{ id status }} restrictionDoorOpen }} }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(rider_detail.clone()).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "rider (ADMIN) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["rider"]["standing"], "RESTRICTED");
+    assert_eq!(data["rider"]["ground"], "RIDER_REQUESTED");
+    assert_eq!(data["rider"]["heldDelivery"]["id"], job_id.to_string());
+    assert_eq!(data["rider"]["heldDelivery"]["status"], "ASSIGNED");
+    assert_eq!(data["rider"]["restrictionDoorOpen"], true, "the walk's ReadDeps carries the door ON");
+
+    // 9c) riders as ADMIN (#639 part C step 4-iii-A, ADR-20260904-152807 §2/§4): the ONE rider this
+    //     walk registered is held AND restricted, so it lands in the FIRST (held) group regardless
+    //     of standing — the contract order's own precedence.
+    let riders_q = "query { riders { riderId standing heldDelivery { id } } }";
+    let resp = schema.execute(async_graphql::Request::new(riders_q).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "riders (ADMIN) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let list = data["riders"].as_array().expect("riders array");
+    assert_eq!(list[0]["riderId"], rider_id.to_string(), "the held rider must lead the list: {list:?}");
+    assert_eq!(list[0]["standing"], "RESTRICTED");
+    assert_eq!(list[0]["heldDelivery"]["id"], job_id.to_string());
+
+    // 9d) riders as RIDER: FORBIDDEN, synchronously — the ACL door admits ADMIN only.
+    let resp = schema
+        .execute(async_graphql::Request::new(riders_q).data(acting(RequestRole::Rider)).data(restricted.clone()))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected FORBIDDEN on riders as RIDER: {:?}", resp.errors);
+    let ext = resp.errors[0].extensions.as_ref().expect("extensions");
+    assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("FORBIDDEN")), "wrong code: {resp:?}");
+
     // 10) reinstateRider as ADMIN.
     let reinstate = format!(r#"mutation {{ reinstateRider(input: {{ riderId: "{rider_id}" }}) {{ messageId operationStatus }} }}"#);
     let resp = schema.execute(async_graphql::Request::new(reinstate).data(acting(RequestRole::Admin))).await;
@@ -491,6 +578,15 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
     let data = resp.data.into_json().expect("json");
     assert_eq!(data["myStanding"]["standing"], "ACTIVE");
     assert_eq!(data["myStanding"]["restriction"], serde_json::Value::Null, "a reinstated rider's own standing answer must carry no restriction attribution: {data:?}");
+
+    // 10c) rider(riderId) as ADMIN after reinstatement: ACTIVE, but `heldDelivery` STAYS present —
+    //      reinstatement releases the ACCESS restriction, never the CUSTODY the rider still holds
+    //      (ADR-20260904-152807 §2: one custody truth, read at query time, never a folded column).
+    let resp = schema.execute(async_graphql::Request::new(rider_detail).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "rider (ADMIN, post-reinstate) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["rider"]["standing"], "ACTIVE");
+    assert_eq!(data["rider"]["heldDelivery"]["id"], job_id.to_string(), "custody is not released by reinstatement: {data:?}");
 
     // 11) acceptDelivery as the reinstated (ACTIVE) rider: the GUARD reopens — the mutation reaches
     //     the business layer again (PENDING, never a synchronous FORBIDDEN); the eventual REJECTED
@@ -553,5 +649,238 @@ async fn the_restriction_walk_forbids_and_reopens_the_real_doors() {
         data["myStanding"]["heldDelivery"],
         serde_json::Value::Null,
         "held_by_rider must narrow to nothing once handed back: {data:?}"
+    );
+}
+
+/// #639 part C step 4-iii-A (ADR-20260904-152807 §7): the door-OFF leg, through the REAL router —
+/// a SEPARATE fleet (its own registered rider) rather than a second worker racing the main walk's
+/// lanes, so the two never contend over the same mailbox rows. Two assertions in one pass: (1) the
+/// write door refuses `restrictRider` with the typed `RiderRestrictionDoorClosed` while OFF, before
+/// the store is even touched; (2) the named mutant — a rider ALREADY RESTRICTED (seeded by a raw
+/// fact, never through the closed door) is STILL refused by `StandingGuard` with the key OFF: the
+/// key never reaches the read side.
+#[tokio::test]
+async fn the_restrict_door_refuses_while_closed_and_the_read_guard_never_consults_it() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("rider_standing_walk_door_closed") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers_with_door(&pool, status_bus.clone(), false);
+    let schema = schema_over(&pool, status_bus, false);
+
+    // An ACTIVE rider, seeded directly (no public registration mutation, #639 part C step 2c-i).
+    let rider_id = uuid::Uuid::new_v4();
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        1,
+        "RiderRegistered",
+        json!({
+            "riderId": rider_id, "authRef": "auth-door-closed-1", "displayName": "Door Closed Rider",
+            "phone": "+33611113333", "status": "OFFLINE"
+        }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (rider birth)");
+
+    // (1) restrictRider with the door OFF: REJECTED, typed, before any RiderRestricted exists.
+    let restrict = format!(
+        r#"mutation {{ restrictRider(input: {{ riderId: "{rider_id}", ground: RIDER_REQUESTED }}) {{ messageId operationStatus }} }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(restrict).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "restrictRider (door OFF) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let message_id = data["restrictRider"]["messageId"].as_str().unwrap().to_string();
+    let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
+    assert_eq!(op["status"], "REJECTED", "restrictRider (door OFF) operation: {op:?}");
+    assert_eq!(op["errorCode"], "RiderRestrictionDoorClosed", "the typed refusal: {op:?}");
+
+    // (2) the named mutant: seed RiderRestricted as a raw fact (bypassing the closed door
+    //     entirely, exactly as a from-zero replay or a direct store append would), fold it, and
+    //     prove the READ guard still refuses — the key never touches `StandingGuard`.
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        2,
+        "RiderRestricted",
+        json!({
+            "riderId": rider_id, "ground": "IDENTITY_MISMATCH",
+            "decidedAt": "2026-01-06T12:00:00Z", "effectiveAt": "2026-01-06T12:00:00Z"
+        }),
+    )
+    .await;
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restricted fact)");
+
+    let restricted = ReadScope::Rider { id: RiderId(rider_id), standing: RiderStanding::RESTRICTED };
+    let my_standing = "query { myStanding { standing } }";
+    let resp = schema
+        .execute(async_graphql::Request::new(my_standing).data(acting(RequestRole::Rider)).data(restricted.clone()))
+        .await;
+    assert!(resp.errors.is_empty(), "myStanding (door OFF, restricted) errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    assert_eq!(data["myStanding"]["standing"], "RESTRICTED", "the read side folded the fact regardless of the write door: {data:?}");
+
+    // A door-gated door key must never widen a READ-side guard: `myDeliveries` (a whileRestricted
+    // carve-out door) stays reachable, but an UN-carved write door (`changeRiderStatus` ->
+    // AVAILABLE) must still be refused for this restricted rider -- the guard's OWN authority,
+    // never delegated to the write door's release key.
+    let change_status = r#"mutation { changeRiderStatus(input: { status: AVAILABLE }) { messageId operationStatus } }"#;
+    let resp = schema
+        .execute(async_graphql::Request::new(change_status).data(acting(RequestRole::Rider)).data(restricted))
+        .await;
+    assert_eq!(resp.errors.len(), 1, "expected the synchronous FORBIDDEN even with the restrict door OFF: {:?}", resp.errors);
+    let ext = resp.errors[0].extensions.as_ref().expect("extensions");
+    assert_eq!(ext.get("code"), Some(&async_graphql::Value::from("FORBIDDEN")), "wrong code: {resp:?}");
+}
+
+/// #639 part C step 4-iii-A round 2 item 3 (dba): TWO ASSIGNED jobs on the SAME rider proves the
+/// list (`riders`, a set-based `held_by_riders` folded FIRST-wins) and the detail (`rider`, a
+/// single `held_by_rider` `LIMIT 1`) name the SAME held job. Before this round's fix the two
+/// queries picked OPPOSITE ends of `requested_at DESC`: a plain `.collect()` on the list was
+/// LAST-wins (the OLDEST held job survives), while the detail's `LIMIT 1 ORDER BY requested_at
+/// DESC` picks the NEWEST — an admin could see one delivery on the triage row and a DIFFERENT one
+/// on the detail page for the identical rider (ADR-20260904-152807 §2, "one custody truth").
+#[tokio::test]
+async fn the_list_and_the_detail_name_the_same_held_job() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    let Some(url) = db_test_gate::database_url("rider_standing_walk_same_held_job") else { return };
+    let _guard = DB_LOCK.lock().await;
+    let pool = PgPool::connect(&url).await.expect("connect Postgres");
+    apply_all_migrations(&pool).await;
+
+    let status_bus = actor_client::OperationStatusBus::default();
+    spawn_mailbox_workers(&pool, status_bus.clone());
+    let schema = schema_over(&pool, status_bus, true);
+
+    // A restaurant, through the real router (the jobs' owner for the read joins).
+    let restaurant_id = uuid::Uuid::new_v4();
+    let mutation = format!(
+        r#"mutation {{
+            registerRestaurant(input: {{
+                restaurantId: "{restaurant_id}",
+                displayName: "Chez Deux Courses",
+                address: {{ line1: "1 Rue Nationale", postalCode: "37000", city: "Tours", country: "FR" }}
+            }}) {{ messageId operationStatus }}
+        }}"#
+    );
+    let resp = schema.execute(async_graphql::Request::new(mutation).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "registerRestaurant errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let message_id = data["registerRestaurant"]["messageId"].as_str().unwrap().to_string();
+    let op = poll_operation(&schema, &message_id, RequestRole::Admin, None).await;
+    assert_eq!(op["status"], "SUCCEEDED", "registerRestaurant operation: {op:?}");
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (restaurant)");
+
+    // The rider's birth fact (no public `registerRider` mutation, #639 part C step 2c-i).
+    let rider_id = uuid::Uuid::new_v4();
+    append_event(
+        &pool,
+        &format!("Rider-{rider_id}"),
+        1,
+        "RiderRegistered",
+        json!({
+            "riderId": rider_id, "authRef": "auth-two-jobs-1", "displayName": "Two Jobs Rider",
+            "phone": "+33611114444", "status": "AVAILABLE"
+        }),
+    )
+    .await;
+
+    // TWO orders + TWO delivery jobs, both ASSIGNED to the SAME rider. Round 3 (R3-5): both
+    // `DeliveryRequested` facts share the SAME `occurred_at` (`append_event_at`, not a wall-clock
+    // sleep) -- a genuine `requested_at` TIE, which is the only way to actually exercise the
+    // `delivery_job_id DESC` tie-break `persistence/delivery.rs` adds after `requested_at DESC`.
+    // Round 2's 20ms sleep gave the two jobs DISTINCT timestamps, so `requested_at DESC` alone
+    // always decided the order and the tie-break line was never reached by this test.
+    let same_requested_at = chrono::Utc::now();
+    let mut job_ids: Vec<uuid::Uuid> = Vec::new();
+    for i in 0..2u8 {
+        let order_id = uuid::Uuid::new_v4();
+        let job_id = uuid::Uuid::new_v4();
+        job_ids.push(job_id);
+        append_event(
+            &pool,
+            &format!("Order-{order_id}"),
+            1,
+            "OrderPlaced",
+            json!({
+                "orderId": order_id, "restaurantId": restaurant_id, "customerId": uuid::Uuid::new_v4(),
+                "customerContact": { "displayName": "Johnny", "phone": "+33612345678" },
+                "serviceType": "DELIVERY",
+                "deliveryAddress": { "line1": "9 Rue Colbert", "postalCode": "37000", "city": "Tours", "country": "FR" },
+                "items": [{ "offerId": uuid::Uuid::new_v4(), "productId": uuid::Uuid::new_v4(), "name": "Margherita", "offerName": "Default", "quantity": 1, "unitPrice": { "amountCents": 980, "currency": "EUR" }, "lineTotal": { "amountCents": 980, "currency": "EUR" } }],
+                "totalAmount": { "amountCents": 980, "currency": "EUR" },
+                "breakdown": {
+                    "articles": { "amountCents": 980, "currency": "EUR" },
+                    "delivery": { "amountCents": 0, "currency": "EUR" },
+                    "serviceFee": { "amountCents": 0, "currency": "EUR" },
+                    "total": { "amountCents": 980, "currency": "EUR" },
+                    "restaurantContribution": { "amountCents": 0, "currency": "EUR" },
+                    "restaurantPayout": { "amountCents": 980, "currency": "EUR" },
+                    "riderPayout": { "amountCents": 0, "currency": "EUR" },
+                    "captainNet": { "amountCents": 0, "currency": "EUR" }
+                },
+                "paymentIntentId": format!("pi_walk_two_jobs_{i}")
+            }),
+        )
+        .await;
+        append_event_at(
+            &pool,
+            &format!("DeliveryJob-{job_id}"),
+            1,
+            "DeliveryRequested",
+            json!({
+                "deliveryJobId": job_id, "orderId": order_id, "restaurantId": restaurant_id,
+                "pickup": { "line1": "1 Rue Nationale", "postalCode": "37000", "city": "Tours", "country": "FR" },
+                "dropoff": { "line1": "9 Rue Colbert", "postalCode": "37000", "city": "Tours", "country": "FR" }
+            }),
+            same_requested_at,
+        )
+        .await;
+        append_event(
+            &pool,
+            &format!("DeliveryJob-{job_id}"),
+            2,
+            "DeliveryAcceptedByRider",
+            json!({ "deliveryJobId": job_id, "orderId": order_id, "riderId": rider_id }),
+        )
+        .await;
+    }
+    ProjectionWorker::new(pool.clone()).run_once().await.expect("run_once (two held jobs)");
+
+    let riders_query = "query { riders(input: { limit: 10, offset: 0 }) { riderId heldDelivery { id } } }";
+    let resp = schema.execute(async_graphql::Request::new(riders_query).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "riders errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let list_row = data["riders"]
+        .as_array()
+        .expect("riders array")
+        .iter()
+        .find(|r| r["riderId"] == rider_id.to_string())
+        .expect("the rider appears in the list");
+    let list_held = list_row["heldDelivery"]["id"].as_str().expect("the list names a held job").to_string();
+
+    let rider_query = format!(r#"query {{ rider(input: {{ riderId: "{rider_id}" }}) {{ heldDelivery {{ id }} }} }}"#);
+    let resp = schema.execute(async_graphql::Request::new(rider_query).data(acting(RequestRole::Admin))).await;
+    assert!(resp.errors.is_empty(), "rider errored: {:?}", resp.errors);
+    let data = resp.data.into_json().expect("json");
+    let detail_held = data["rider"]["heldDelivery"]["id"].as_str().expect("the detail names a held job").to_string();
+
+    assert_eq!(
+        list_held, detail_held,
+        "the list and the detail must name the SAME held job for one rider (ADR-20260904-152807 §2, one custody truth); seeded jobs were {job_ids:?}"
+    );
+    // dba (correction pass): pin the DOCUMENTED tie-break itself, not just "list == detail" — the
+    // two queries could still agree by planner happenstance (observed in this environment even
+    // with the tie-break removed) without either one actually implementing
+    // `ORDER BY requested_at DESC, delivery_job_id DESC`. With a genuine `requested_at` tie, the
+    // contract says the GREATER `delivery_job_id` wins; asserting that exact value makes the
+    // guard falsifiable regardless of what the planner happens to do.
+    let expected_winner = job_ids.iter().max().expect("two seeded jobs").to_string();
+    assert_eq!(
+        list_held, expected_winner,
+        "the tie-break contract (`requested_at DESC, delivery_job_id DESC`) says the GREATER delivery_job_id wins; seeded jobs were {job_ids:?}"
     );
 }
