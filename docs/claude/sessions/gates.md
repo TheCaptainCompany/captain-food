@@ -1083,3 +1083,11 @@ is itself the argument: **a list that grows has no business stating its own leng
 - **The card must list `loop-budget.sh start`** as step one, or the ledger ends with an integrity
   refusal and a hand-entered elapsed time; the executor protocol's precondition is not inherited by an
   ad-hoc round card.
+- **A pre-code card read by the declared-concern lenses pays for itself** (4-iii-B, 2026-09-05): three
+  lenses read the card before dispatch, all three returned STOP-with-fixes (a grammar fact the executor
+  would have had to guess, a predicate the fold made non-obvious, a test structure the spy meter forces),
+  and the PR then passed its presentation round first time — the first part-C slice to do so. Contrast
+  4-iii-A, where the same kinds of fact were found in review rounds 2 and 3.
+- **The claim/branch/draft-PR sequence must be the literal first commands on the card**, after the budget
+  timer: the 4-iii-B executor implemented first and claimed after (caught before any push). A protocol the
+  agent definition carries is not inherited by an ad-hoc card unless the card repeats it in order.
