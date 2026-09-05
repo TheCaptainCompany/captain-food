@@ -1110,7 +1110,7 @@ is itself the argument: **a list that grows has no business stating its own leng
   body says `Refs #NN` and contains no `Closes`/`Fixes`/`Resolves` before `#NN` anywhere — the coordinator greps the
   body before the ready flip; the closing PR says `Closes` on purpose and only once.
 
-### 19d. A stash pop that CONFLICTS leaves markers that `git add -A` will happily commit (2026-09-05)
+## 19g. A stash pop that CONFLICTS leaves markers that `git add -A` will happily commit (2026-09-05)
 
 **Cost**: conflict markers on `main` for about a minute in `docs/STATUS.md` and a PROP row, pushed with the
 `--bypass` the docs-only flow enjoys — no CI stands between a docs push and `main`. The sequence was
