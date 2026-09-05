@@ -1119,3 +1119,13 @@ chained with `&&` — but `git stash pop` exits **0 on a conflict** when the ind
 so the chain continued and committed `<<<<<<< Updated upstream`. **Rule**: after any stash pop / merge / rebase in a
 docs worktree, gate the commit on `! git grep -qE '^(<<<<<<<|>>>>>>>)' -- docs specs` (the same negative-grep shape
 as §19c), and prefer re-applying record edits by script onto a fresh `origin/main` over stashing them across a fetch.
+
+### 19h. `docs/proposals/DECISIONS.md`'s row table is a GENERATED region — never hand-add a row (2026-09-05)
+
+**Cost**: `main` red on `decision-index-stale` for ~15 minutes after a docs-only push (the docs lane bypasses CI, so the
+validator was the first to see it). The register rows live in `docs/decisions/<KEY>.yaml`; the table in `DECISIONS.md` is
+the projection of those files inside a `GENERATED:decisions` region. Adding a row file is the change; the table follows
+from `make generate` (the whole emitter run, ~1 min warm) and the regenerated region is committed in the SAME change.
+**Rule**: any change under `docs/decisions/` runs `make generate` + `make validate` before the push, even when the diff
+looks docs-only — the register is validated surface (`decision-index-stale`, the closed row schema, `reconsiders:` chain
+heads), and the docs lane has no CI in front of `main`.
